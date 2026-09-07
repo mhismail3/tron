@@ -14,10 +14,11 @@ struct TronDocumentSheet<Content: View>: View {
                 // UIKit text readers otherwise stop above the home-indicator
                 // safe area, leaving a hard empty strip unlike SwiftUI documents.
                 .ignoresSafeArea(.container, edges: .bottom)
-                .background(Color.tronBackground)
+                // Let the native sheet material show through, matching standard
+                // sheets in both appearances instead of painting an opaque page.
                 .navigationTitle("")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+                .toolbarBackgroundVisibility(.hidden, for: .navigationBar, .bottomBar)
                 .toolbar(.hidden, for: .bottomBar)
                 .toolbar {
                     ToolbarItem(placement: .principal) {

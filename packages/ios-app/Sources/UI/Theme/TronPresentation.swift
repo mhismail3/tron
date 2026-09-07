@@ -135,7 +135,7 @@ private struct TronScrollEdgeChromeModifier: ViewModifier {
             // an opaque cutoff on physical iOS 27 hardware instead of Tron's
             // established translucent blur into navigation chrome.
             .scrollEdgeEffectStyle(.soft, for: .all)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar, .bottomBar)
             .overlay(alignment: .top) {
                 if let topBlurStyle {
                     TronTopBlurOverlay(style: topBlurStyle)

@@ -39,7 +39,6 @@ struct TerminalSheet: View {
                     TronLoadingState(label: "Connecting terminal…")
                 }
             }
-            .background(Color.tronBackground)
             .tronTopBlurSurface()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)

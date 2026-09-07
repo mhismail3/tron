@@ -57,7 +57,6 @@ struct ExtensionFormSheet: View {
                         .padding(20)
                 }
             }
-            .background(Color.tronBackground)
             .tronTopBlurSurface()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)

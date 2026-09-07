@@ -135,9 +135,11 @@ private struct TronTopBlurSurfaceModifier: ViewModifier {
     @Environment(\.tronTopBlurStyle) private var style
 
     func body(content: Content) -> some View {
-        content.overlay(alignment: .top) {
-            if let style { TronTopBlurOverlay(style: style) }
-        }
+        content
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar, .bottomBar)
+            .overlay(alignment: .top) {
+                if let style { TronTopBlurOverlay(style: style) }
+            }
     }
 }
 

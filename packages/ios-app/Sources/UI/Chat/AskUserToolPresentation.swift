@@ -245,7 +245,6 @@ struct AskUserCompletedFormView: View {
             .tabViewStyle(.page(indexDisplayMode: .never))
             .animation(.snappy(duration: 0.24), value: currentQuestionIndex)
         }
-        .background(Color.tronBackground)
         .tronTopBlurSurface()
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
     }

@@ -201,8 +201,9 @@ private struct QueueEditingUnavailableSheet: View {
             }
             .padding(24)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.tronBackground)
+            .tronTopBlurSurface()
             .accessibilityElement(children: .combine)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar, .bottomBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     TronSheetTitle(title: "Queued Message", accent: .tronAmber)

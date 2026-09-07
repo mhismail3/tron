@@ -336,7 +336,9 @@ struct AttachmentPDFView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> PDFView {
         let view = PDFView()
-        view.backgroundColor = UIColor(Color.tronBackground)
+        // PDF pages own their paper color; the surrounding viewport belongs
+        // to the native sheet material, just like text and Markdown previews.
+        view.backgroundColor = .clear
         view.autoScales = true
         view.displayMode = .singlePageContinuous
         view.displayDirection = .vertical

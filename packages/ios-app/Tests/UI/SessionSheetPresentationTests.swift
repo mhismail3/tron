@@ -137,6 +137,53 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testDocumentBackgroundMatchesNativeSheetMaterial() async throws {
+        for scheme: ColorScheme in [.light, .dark] {
+            var native: [UInt8] = []
+            try await withSheet(NavigationStack {
+                Color.clear
+            }.presentationDetents([.large]).preferredColorScheme(scheme)) { controller in
+                native = self.centerPixel(in: controller)
+            }
+            try await withSheet(TronDocumentSheet(title: "Document") {
+                Color.clear
+            }.preferredColorScheme(scheme)) { controller in
+                let document = self.centerPixel(in: controller)
+                for channel in 0..<3 {
+                    XCTAssertEqual(Double(document[channel]), Double(native[channel]), accuracy: 3,
+                                   "Document content must reveal the native sheet material in \(scheme)")
+                }
+            }
+            // Negative control: the removed opaque page must differ from the
+            // material, otherwise this probe cannot detect the reported defect.
+            if scheme == .dark {
+                try await withSheet(NavigationStack {
+                    Color.tronBackground
+                }.presentationDetents([.large]).preferredColorScheme(scheme)) { controller in
+                    let opaque = self.centerPixel(in: controller)
+                    XCTAssertGreaterThan((0..<3).reduce(0) { $0 + abs(Int(opaque[$1]) - Int(native[$1])) }, 9)
+                }
+            }
+        }
+    }
+
+    private func centerPixel(in controller: UIViewController) -> [UInt8] {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1), format: format).image { context in
+            context.cgContext.translateBy(x: -controller.view.bounds.midX, y: -controller.view.bounds.midY)
+            controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
+        }
+        var pixel = [UInt8](repeating: 0, count: 4)
+        pixel.withUnsafeMutableBytes { bytes in
+            let context = CGContext(data: bytes.baseAddress, width: 1, height: 1, bitsPerComponent: 8,
+                                    bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            context.draw(image.cgImage!, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        }
+        return pixel
+    }
+
     func testInstructionsOpenAsALargeDocumentWithCustomBlurAndNoBottomToolbar() async throws {
         try await withModel { model in
             try await self.withSheet(AgentInstructionsSheet(sessionID: "document-fixture").environment(model)) { controller in
@@ -162,6 +209,7 @@ final class SessionSheetPresentationTests: XCTestCase {
                     XCTAssertTrue(reader.isSelectable)
                     XCTAssertTrue(reader.isScrollEnabled)
                     XCTAssertFalse(reader.isEditable)
+                    XCTAssertEqual(reader.backgroundColor, .clear)
                     let readerFrame = reader.convert(reader.bounds, to: controller.view)
                     // Both edges belong to the viewport, not empty safe-area
                     // strips. Internal scroll insets protect the first/last lines.
