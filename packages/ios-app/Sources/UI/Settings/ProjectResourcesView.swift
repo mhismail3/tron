@@ -54,6 +54,21 @@ struct ProjectResourceSelection: Identifiable {
     let kind: ProjectResourceKind
     let title: String
     let value: JSONValue
+
+    var promptCommand: CommandInfo? {
+        guard kind == .prompts,
+              let object = value.objectValue,
+              let name = object["name"]?.stringValue, !name.isEmpty else { return nil }
+        return CommandInfo(
+            name: name,
+            description: object["description"]?.stringValue,
+            argumentHint: object["argumentHint"]?.stringValue,
+            source: .prompt,
+            sourcePath: object["path"]?.stringValue,
+            resourceSource: object["source"]?.stringValue,
+            resourceScope: object["scope"]?.stringValue.flatMap(CommandInfo.ResourceScope.init(rawValue:))
+        )
+    }
 }
 
 private struct ProjectResourceOverviewRow: Identifiable, Equatable, Sendable {
@@ -250,7 +265,7 @@ struct ProjectResourcesView: View {
                 item: $selected,
                 identity: { _ in "settings.project-resource-detail" }
             ) { selection in
-                ProjectResourceDetailSheet(selection: selection) {
+                ProjectResourceDetailSheet(sessionID: sessionID, selection: selection) {
                     selected = nil
                 }
             }
@@ -382,8 +397,13 @@ struct ProjectResourcesView: View {
 }
 
 private struct ProjectResourceDetailSheet: View {
+    let sessionID: String
     let selection: ProjectResourceSelection
     let onDone: () -> Void
+    @Environment(AppModel.self) private var model
+    @State private var promptDetail: CommandResourceDetail?
+    @State private var promptLoadError: String?
+    @State private var loadRevision = 0
 
     private var presentation: ProjectResourceDetailPresentation {
         ProjectResourceDetailPresentation(kind: selection.kind, value: selection.value)
@@ -398,6 +418,10 @@ private struct ProjectResourceDetailSheet: View {
                         text: presentation.purpose,
                         accent: selection.kind.accent
                     )
+
+                    if selection.kind == .prompts {
+                        promptContent
+                    }
 
                     if presentation.invocation != nil
                         || presentation.availability != nil
@@ -496,6 +520,57 @@ private struct ProjectResourceDetailSheet: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
+        .task(id: "\(selection.id):\(model.sessionResourceRevision(for: sessionID)):\(loadRevision)") {
+            await loadPromptContent()
+        }
+    }
+
+    private var promptContent: some View {
+        VStack(alignment: .leading, spacing: TronSpacing.sm) {
+            TronTechnicalSectionLabel("Content")
+            Group {
+                if let promptDetail {
+                    ProjectResourcePromptContent(detail: promptDetail)
+                } else if let promptLoadError {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(promptLoadError)
+                            .font(TronTypography.bodySM)
+                            .foregroundStyle(Color.tronTextSecondary)
+                        Button("Try Again", systemImage: "arrow.clockwise") { loadRevision &+= 1 }
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(selection.kind.accent)
+                    }
+                } else {
+                    TronLoadingState(label: "Loading prompt content…", accent: selection.kind.accent)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .tronScrollSurface(accent: selection.kind.accent, cornerRadius: 16, tintOpacity: 0.06)
+        }
+    }
+
+    private func loadPromptContent() async {
+        guard selection.kind == .prompts else { return }
+        promptDetail = nil
+        promptLoadError = nil
+        guard let command = selection.promptCommand else {
+            promptLoadError = "This prompt has no available content identity. Reload Project Resources and try again."
+            return
+        }
+        do {
+            // The resource catalog intentionally contains metadata only. Read
+            // the loaded template on demand, never an arbitrary Mac file path.
+            let detail = try await model.commandDetail(sessionID: sessionID, command: command)
+            guard !Task.isCancelled else { return }
+            promptDetail = detail
+        } catch is CancellationError {
+            guard !Task.isCancelled else { return }
+            promptLoadError = "Prompt content is unavailable while the session is disconnected or busy. Try again when it is ready."
+        } catch {
+            guard !Task.isCancelled else { return }
+            promptLoadError = error.localizedDescription
+        }
     }
 
     private func capabilityCollection(

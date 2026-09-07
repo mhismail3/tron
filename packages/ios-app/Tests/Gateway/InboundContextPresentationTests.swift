@@ -42,6 +42,81 @@ struct InboundContextPresentationTests {
         #expect(InboundContextCompactPresentationPolicy.status(details: nil) == "Received")
     }
 
+    @Test("subagent supervisor progress and attention use friendly message categories without inventing provenance")
+    func subagentSupervisorCategories() {
+        let unknown = ChatOrigin(kind: .unknown, confidence: .unknown)
+        for (reason, expected) in [
+            ("progress_update", "Progress Update"),
+            ("need_decision", "Needs Attention"),
+            ("interview_request", "Needs Attention"),
+        ] {
+            let presentation = InboundContextMessagePresentation(
+                origin: unknown,
+                customType: "subagent_supervisor_request",
+                details: .object([
+                    "id": .string("request-1"), "reason": .string(reason),
+                    "expectsReply": .bool(reason != "progress_update"),
+                    "runId": .string("run-1"), "agent": .string("worker"), "childIndex": .number(0),
+                ])
+            )
+            #expect(presentation.title == "Subagent")
+            #expect(presentation.status == expected)
+            #expect(presentation.tone == .purple)
+            #expect(presentation.detailsTitle == "Subagent update")
+            #expect(InboundProducerPresentationPolicy.title(for: unknown) == "Unknown source")
+            #expect(unknown.confidence == .unknown)
+        }
+    }
+
+    @Test("control notices use the event type, not their message or a nested execution status")
+    func subagentControlCategories() {
+        let presentation = InboundContextMessagePresentation(
+            origin: ChatOrigin(kind: .subagent, title: "Pi Subagents", confidence: .receipt),
+            customType: "subagent_control_notice",
+            details: .object(["event": .object([
+                "type": .string("needs_attention"), "state": .string("running"),
+                "message": .string("Private progress description"),
+            ])])
+        )
+        #expect(presentation.title == "Subagent")
+        #expect(presentation.status == "Needs Attention")
+        #expect(presentation.tone == .purple)
+        #expect(InboundContextMessagePresentation(origin: nil, customType: "subagent_control_notice", details: .object([
+            "event": .object(["type": .string("active_long_running")]),
+        ])).status == "Still Working")
+    }
+
+    @Test("completion notices identify a received result without claiming successful completion")
+    func subagentResultsAreNotSuccessClaims() {
+        let presentation = InboundContextMessagePresentation(origin: nil, customType: "subagent-notify", details: nil)
+        #expect(presentation.title == "Subagent")
+        #expect(presentation.status == "Result Received")
+        #expect(presentation.status != "Completed")
+    }
+
+    @Test("unknown and malformed message details cannot invent attention or leak arbitrary payloads")
+    func subagentCategoryAdmission() {
+        for customType in ["other-extension", "subagent_supervisor_request_spoof", "subagent-notify-extra"] {
+            let presentation = InboundContextMessagePresentation(origin: nil, customType: customType, details: .object([
+                "reason": .string("progress_update"),
+                "event": .object(["type": .string("needs_attention")]),
+            ]))
+            #expect(presentation.title == "Context")
+            #expect(presentation.status == "Received")
+            #expect(presentation.tone == .neutral)
+        }
+        for details: JSONValue? in [nil, .string("needs_attention"), .object(["reason": .string("Private arbitrary text")])] {
+            let presentation = InboundContextMessagePresentation(origin: nil, customType: "subagent_supervisor_request", details: details)
+            #expect(presentation.status == "Update")
+        }
+        let goal = InboundContextMessagePresentation(
+            origin: ChatOrigin(kind: .extension, title: "Goal", confidence: .receipt),
+            customType: "goal", details: .object(["goal": .object(["status": .string("active")])])
+        )
+        #expect(goal.title == "Goal · Context")
+        #expect(goal.status == "Active")
+    }
+
     @Test("unrelated dynamic details do not manufacture a goal")
     func unrelatedDetails() {
         #expect(InboundContextGoalPresentation.project(.object([

@@ -228,6 +228,27 @@ struct ChatCompactPillTests {
         )
     }
 
+    @Test("Project prompts resolve content by exact loaded-template identity, not their display title or file path")
+    func projectPromptContentIdentity() {
+        let value: JSONValue = .object([
+            "name": .string("test-suite-audit"),
+            "description": .string("Review the tests."),
+            "argumentHint": .string("[scope]"),
+            "path": .string("/project/prompts/test-suite-audit.md"),
+            "scope": .string("project"),
+            "source": .string("auto"),
+        ])
+        let selection = ProjectResourceSelection(kind: .prompts, title: "Test Suite Audit", value: value)
+        #expect(selection.promptCommand?.name == "test-suite-audit")
+        #expect(selection.promptCommand?.source == .prompt)
+        #expect(selection.promptCommand?.resourceScope == .project)
+        #expect(selection.promptCommand?.argumentHint == "[scope]")
+        #expect(ProjectResourceSelection(kind: .tools, title: "Test", value: value).promptCommand == nil)
+        #expect(ProjectResourceSelection(kind: .prompts, title: "Test", value: .object([
+            "path": .string("/project/prompts/test.md"),
+        ])).promptCommand == nil)
+    }
+
     @Test("Project resource details foreground kind-specific user guidance")
     func projectResourceDetails() {
         let extensionDetail = ProjectResourceDetailPresentation(kind: .extensions, value: .object([

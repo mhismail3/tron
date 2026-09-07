@@ -180,28 +180,72 @@ enum InboundContextCompactPresentationPolicy {
     }
 }
 
+/// Message category is not producer attribution. Exact subagent message types
+/// can have useful labels even when their canonical origin remains unknown.
+struct InboundContextMessagePresentation: Equatable {
+    let title: String
+    let status: String
+    let tone: ChatNotificationTone
+    let icon: String
+    let detailsTitle: String
+
+    init(origin: ChatOrigin?, customType: String?, details: JSONValue?) {
+        if let status = Self.subagentStatus(customType: customType, details: details) {
+            title = "Subagent"
+            self.status = status
+            tone = .purple
+            icon = "person.2.fill"
+            detailsTitle = "Subagent update"
+        } else {
+            title = InboundProducerPresentationPolicy.compactTitle(for: origin)
+            status = InboundContextCompactPresentationPolicy.status(details: details)
+            tone = InboundProducerPresentationPolicy.tone(for: origin?.kind)
+            icon = "arrow.down.message.fill"
+            detailsTitle = "Context details"
+        }
+    }
+
+    private static func subagentStatus(customType: String?, details: JSONValue?) -> String? {
+        let object = details?.objectValue
+        switch customType {
+        case "subagent_supervisor_request":
+            switch object?["reason"]?.stringValue {
+            case "progress_update": return "Progress Update"
+            case "need_decision", "interview_request": return "Needs Attention"
+            default: return "Update"
+            }
+        case "subagent_control_notice":
+            switch object?["event"]?.objectValue?["type"]?.stringValue {
+            case "needs_attention": return "Needs Attention"
+            case "active_long_running": return "Still Working"
+            default: return "Update"
+            }
+        case "subagent-notify":
+            // This emitter omits structured status and can report successful,
+            // failed, paused, or grouped results. Never infer success from prose.
+            return "Result Received"
+        default:
+            return nil
+        }
+    }
+}
+
 /// A producer-authored message delivered into the mounted session's agent
-/// context. Inbound context is always trailing; provenance changes its tone and
-/// label but never changes direction.
+/// context. Inbound context is always trailing; provenance and message category
+/// change its tone and label but never change direction.
 struct InboundProducerMessageView: View {
     let item: TranscriptItem
     @State private var showingDetails = false
 
-    private var originTitle: String {
-        InboundProducerPresentationPolicy.title(for: item.semantic?.origin)
-    }
-
-    private var status: String {
-        InboundContextCompactPresentationPolicy.status(details: item.details)
+    private var presentation: InboundContextMessagePresentation {
+        InboundContextMessagePresentation(origin: item.semantic?.origin, customType: item.customType, details: item.details)
     }
 
     private var durationMilliseconds: Int? {
         InboundContextCompactPresentationPolicy.durationMilliseconds(details: item.details)
     }
 
-    private var tone: ChatNotificationTone {
-        InboundProducerPresentationPolicy.tone(for: item.semantic?.origin.kind)
-    }
+    private var tone: ChatNotificationTone { presentation.tone }
 
     var body: some View {
         Button { showingDetails = true } label: {
@@ -212,9 +256,9 @@ struct InboundProducerMessageView: View {
                 cornerRadiusOverride: ChatToolChipShapePolicy.cornerRadius
             ) {
                 ChatCompactPillLabel(
-                    icon: "arrow.down.message.fill",
-                    title: InboundProducerPresentationPolicy.compactTitle(for: item.semantic?.origin),
-                    detail: status,
+                    icon: presentation.icon,
+                    title: presentation.title,
+                    detail: presentation.status,
                     tone: tone,
                     iconSize: ChatCompactPillLayoutPolicy.toolIconSize,
                     titleWeight: .bold
@@ -228,7 +272,7 @@ struct InboundProducerMessageView: View {
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(originTitle) context, \(status)")
+        .accessibilityLabel("\(presentation.title), \(presentation.status)")
         .accessibilityHint("Shows the full message and technical details")
         .tronManagedSheet(
             isPresented: $showingDetails,
@@ -244,9 +288,11 @@ private struct InboundContextDetailsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var detent: PresentationDetent = .medium
 
-    private var accent: Color {
-        InboundProducerPresentationPolicy.tone(for: item.semantic?.origin.kind).surfaceColor
+    private var presentation: InboundContextMessagePresentation {
+        InboundContextMessagePresentation(origin: item.semantic?.origin, customType: item.customType, details: item.details)
     }
+
+    private var accent: Color { presentation.tone.surfaceColor }
 
     private var originTitle: String {
         InboundProducerPresentationPolicy.title(for: item.semantic?.origin)
@@ -331,13 +377,13 @@ private struct InboundContextDetailsSheet: View {
             .tronToolDetailNavigationChrome()
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: "Context details", accent: accent)
+                    TronSheetTitle(title: presentation.detailsTitle, accent: accent)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .foregroundStyle(accent)
                     }
                     .accessibilityLabel("Done")
                 }

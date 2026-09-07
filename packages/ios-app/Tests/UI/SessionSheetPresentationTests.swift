@@ -67,6 +67,96 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testDisplayRouteKeepsDocumentChromeWhenMediaIsUnavailable() async throws {
+        try await withModel { model in
+            let display = DisplayProjection(
+                displayId: "display-fixture", title: "Working Plan", altText: "A Markdown plan",
+                kind: .markdown, presentation: .init(requestedSurface: .sheet, inlineTapAction: .sheet),
+                eligibleSurfaces: [.sheet], fallbackText: "Document is unavailable.",
+                artifact: .init(id: "6ab02a1a-fd63-4196-a2e1-5fe9ebd6bc3b", name: "plan.md", mimeType: "text/markdown", size: 50, kind: .markdown)
+            )
+            try await self.withSheet(DisplaySheet(route: DisplayRoute(sessionID: "missing-session", display: display)).environment(model)) { controller in
+                XCTAssertEqual(controller.sheetPresentationController?.detents.map(\.identifier), [.large])
+                XCTAssertEqual(self.views(of: VariableBackdropBlurView.self, in: controller.view).count, 1)
+                XCTAssertTrue(self.views(of: UIToolbar.self, in: controller.view).allSatisfy(\.isHidden))
+            }
+        }
+    }
+
+    func testDisplayDocumentReaderUsesCustomBlurAndPreservesAuthoredTitle() async throws {
+        let text = (0..<40).map { "## Section \($0)\n\nRead the whole document, including the final section.\n" }.joined(separator: "\n")
+        try await withModel { model in
+            for scheme: ColorScheme in [.light, .dark] {
+                try await self.withSheet(AttachmentFilePreviewSheet(
+                    name: "report.md", mimeType: "text/markdown",
+                    source: .local(id: "display-document", data: Data(text.utf8)), title: "Working Plan"
+                ).environment(model).preferredColorScheme(scheme)) { controller in
+                    XCTAssertEqual(controller.sheetPresentationController?.detents.map(\.identifier), [.large])
+                    XCTAssertEqual(self.views(of: VariableBackdropBlurView.self, in: controller.view).count, 1)
+                    let scroll = try XCTUnwrap(self.views(of: UIScrollView.self, in: controller.view).first)
+                    XCTAssertGreaterThan(scroll.contentSize.height, scroll.bounds.height)
+                    scroll.setContentOffset(CGPoint(x: 0, y: 240), animated: false)
+                    controller.view.layoutIfNeeded()
+                    let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
+                    self.assertToolbarPaint(.tronBlue, bar: bar, leading: false, controller: controller)
+                    self.capture(controller, name: "display-markdown-scrolled-\(scheme)")
+                }
+            }
+        }
+    }
+
+    func testProjectPromptBodyIncludesContentBeyondComposerPreviewLimit() async throws {
+        let content = (0..<40).map { "## Instruction \($0)\n\nComplete this step before continuing.\n" }.joined(separator: "\n") + "\nFINAL PROMPT INSTRUCTION"
+        let detail = CommandResourceDetail(
+            name: "review", description: nil, argumentHint: nil, source: .prompt,
+            sourcePath: nil, resourceSource: nil, resourceScope: nil, resourceOrigin: nil,
+            content: content, contentBytes: content.utf8.count, contentTruncated: false
+        )
+        try await withSheet(TronDocumentSheet(title: "Prompt") {
+            ScrollView {
+                ProjectResourcePromptContent(detail: detail).padding(18)
+            }.tronScrollEdgeChrome()
+        }) { controller in
+            let scroll = try XCTUnwrap(self.views(of: UIScrollView.self, in: controller.view).first)
+            XCTAssertGreaterThan(scroll.contentSize.height, 2_000, "Full prompt instructions must not use the 480-character composer preview")
+            scroll.setContentOffset(CGPoint(x: 0, y: scroll.contentSize.height - scroll.bounds.height), animated: false)
+            controller.view.layoutIfNeeded()
+            self.capture(controller, name: "project-prompt-final-instructions")
+        }
+    }
+
+    func testPackageSourceFieldUsesSettingsBlueRatherThanGreen() async throws {
+        for scheme: ColorScheme in [.light, .dark] {
+            try await withSheet(TronDocumentSheet(title: "Install Package") {
+                PackageSourceField(source: .constant(""))
+                    .padding(20)
+                    .frame(maxHeight: .infinity, alignment: .top)
+            }.tronSettingsVisualTheme(accent: .tronBlue).preferredColorScheme(scheme)) { controller in
+                let field = try XCTUnwrap(self.views(of: UITextField.self, in: controller.view).first)
+                let fieldFrame = field.convert(field.bounds, to: controller.view)
+                // Sample the painted container beside the text field. Glass
+                // and border both used to hard-code emerald despite a blue title.
+                let region = CGRect(x: 22, y: fieldFrame.midY - 10, width: 8, height: 20)
+                let image = UIGraphicsImageRenderer(size: controller.view.bounds.size).image { _ in
+                    controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
+                }
+                let crop = try XCTUnwrap(image.cgImage?.cropping(to: CGRect(
+                    x: region.minX * image.scale, y: region.minY * image.scale,
+                    width: region.width * image.scale, height: region.height * image.scale
+                )))
+                var pixel = [UInt8](repeating: 0, count: 4)
+                pixel.withUnsafeMutableBytes { buffer in
+                    let context = CGContext(data: buffer.baseAddress, width: 1, height: 1, bitsPerComponent: 8,
+                        bytesPerRow: 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                    context.draw(crop, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+                }
+                XCTAssertGreaterThan(pixel[2], pixel[1], "Source container must be blue, not green (RGBA: \(pixel))")
+                self.capture(controller, name: "package-source-\(scheme)")
+            }
+        }
+    }
+
     func testSubagentListsStartAtMediumOnEachPresentation() async throws {
         try await withModel { model in
             for _ in 0..<2 {

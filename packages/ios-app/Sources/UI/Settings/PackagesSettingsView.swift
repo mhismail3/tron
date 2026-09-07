@@ -471,16 +471,7 @@ struct PackagesSettingsView: View {
                         "Source",
                         detail: "Use an npm package, Git URL, or local path."
                     )
-                    TextField("Package source", text: $source)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .tronField(
-                            monospaced: true,
-                            compact: true,
-                            dense: true,
-                            surfaceTint: Color.tronEmerald.opacity(0.14),
-                            border: Color.tronEmerald.opacity(0.42)
-                        )
+                    PackageSourceField(source: $source)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {

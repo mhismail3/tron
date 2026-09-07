@@ -193,6 +193,8 @@ struct AttachmentFilePreviewSheet: View {
     let name: String
     let mimeType: String
     let source: AttachmentFilePreviewSource
+    var title: String? = nil
+    var fallbackText: String? = nil
 
     @Environment(AppModel.self) private var model
     @State private var phase: Phase = .loading
@@ -204,7 +206,7 @@ struct AttachmentFilePreviewSheet: View {
     }
 
     var body: some View {
-        TronDocumentSheet(title: name) { content }
+        TronDocumentSheet(title: title ?? name) { content }
         .task(id: source.loadID) { await load() }
         .onDisappear { cancelRemoteLoad() }
     }
@@ -216,7 +218,7 @@ struct AttachmentFilePreviewSheet: View {
             TronLoadingState(label: "Preparing file preview…", accent: .tronBlue)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .unavailable(let message):
-            TronInfoCard(icon: "doc.text.magnifyingglass", text: message, accent: .tronBlue)
+            TronInfoCard(icon: "doc.text.magnifyingglass", text: fallbackText ?? message, accent: .tronBlue)
                 .padding(TronSpacing.xlarge)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         case .prepared(let preview):

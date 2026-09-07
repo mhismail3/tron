@@ -1058,7 +1058,6 @@ private struct DisplayUnavailableView: View {
 struct DisplaySheet: View {
     let route: DisplayRoute
     @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
     @State private var imageLeaseID = UUID()
     @State private var documentLeaseID = UUID()
 
@@ -1082,36 +1081,22 @@ struct DisplaySheet: View {
                 accessibilityLabel: route.display.altText
             )
         } else if let artifact = route.display.artifact,
-                  route.display.kind == .pdf || route.display.kind == .document,
+                  [.markdown, .text, .code, .pdf, .document].contains(route.display.kind),
                   let identity = model.chatMediaIdentity(blobID: artifact.id, sessionID: route.sessionID) {
             AttachmentFilePreviewSheet(
                 name: artifact.name,
                 mimeType: artifact.mimeType,
-                source: .remote(identity: identity, leaseID: documentLeaseID)
+                source: .remote(identity: identity, leaseID: documentLeaseID),
+                title: route.display.title,
+                fallbackText: route.display.fallbackText
             )
+            .accessibilityLabel(route.display.altText)
         } else {
-            NavigationStack {
+            TronDocumentSheet(title: route.display.title) {
                 DisplayArtifactContent(sessionID: route.sessionID, display: route.display, context: .sheet)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.tronBackground)
-                    .toolbar {
-                        ToolbarItem(placement: .principal) {
-                            TronSheetTitle(title: route.display.title, accent: .tronBlue)
-                        }
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button { dismiss() } label: {
-                                Image(systemName: "checkmark")
-                                    .font(TronTypography.buttonSM)
-                                    .foregroundStyle(Color.tronBlue)
-                            }
-                            .accessibilityLabel("Done")
-                        }
-                    }
+                    .tronTopBlurSurface()
             }
-            .tronTopBlur(.sheet)
-            .presentationDetents([.large])
-            .presentationDragIndicator(.hidden)
-            .tronPresentation()
         }
     }
 }
