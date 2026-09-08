@@ -70,6 +70,7 @@ struct ChatComposerView: View {
                     HStack(alignment: .bottom, spacing: 8) {
                         SessionProcessButton(
                             overview: processOverview,
+                            processActivities: processActivities,
                             hasAdmittedActivity: processActivities?.contains(where: {
                                 $0.kind == .subagent && SessionProcessAdmissionPolicy.admits($0)
                             }) == true,

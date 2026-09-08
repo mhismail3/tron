@@ -348,6 +348,18 @@ private struct ProviderConfigurationSheet: View {
     }
 }
 
+enum ModelPickerSearchPolicy {
+    static func filtered(_ models: [ModelSummary], query: String) -> [ModelSummary] {
+        query.isEmpty
+            ? models
+            : models.filter { "\($0.provider) \($0.id) \($0.name)".localizedCaseInsensitiveContains(query) }
+    }
+
+    static func shouldClose(showingSearch: Bool, query: String) -> Bool {
+        showingSearch || !query.isEmpty
+    }
+}
+
 struct ModelPicker: View {
     @Binding var selection: ModelRef?
     let models: [ModelSummary]
@@ -395,42 +407,40 @@ struct ModelPicker: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
-            .padding(.bottom, 72)
+            .padding(.bottom, showingSearch ? 72 : 12)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            Group {
-                if showingSearch {
-                    TronSearchBar(
-                        text: $search,
-                        prompt: "Search models",
-                        focusOnAppear: true,
-                        onClose: closeSearch
-                    )
-                } else {
-                    Button {
-                        withAnimation(.snappy(duration: 0.18)) { showingSearch = true }
-                    } label: {
-                        Label("Search models", systemImage: "magnifyingglass")
-                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                            .tronSettingsButtonForeground(settingsTheme?.accent ?? .tronEmerald)
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            .padding(.horizontal, TronSpacing.inputHorizontal)
-                            .contentShape(Capsule())
-                            .glassEffect(
-                                .regular.tint((settingsTheme?.accent ?? .tronEmerald).opacity(0.16)).interactive(),
-                                in: .capsule
-                            )
+            if showingSearch {
+                TronSearchBar(
+                    text: $search,
+                    prompt: "Search models",
+                    focusOnAppear: true,
+                    onClose: closeSearch,
+                    onFocusChange: { focused in
+                        if !focused { closeSearch() }
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Search models")
-                }
+                )
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.clear)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(Color.clear)
         }
         .scrollDismissesKeyboard(.interactively)
         .tronScrollEdgeChrome()
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                if !showingSearch {
+                    Button {
+                        withAnimation(.snappy(duration: 0.18)) { showingSearch = true }
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
+                            .foregroundStyle(settingsTheme?.accent ?? .tronEmerald)
+                    }
+                    .accessibilityLabel("Search models")
+                }
+            }
+        }
         .interactiveDismissDisabled(showingSearch)
         .task(id: closingSearch) {
             guard closingSearch else { return }
@@ -444,12 +454,12 @@ struct ModelPicker: View {
     }
 
     private func closeSearch() {
-        guard showingSearch, !closingSearch else { return }
+        guard ModelPickerSearchPolicy.shouldClose(showingSearch: showingSearch, query: search), !closingSearch else { return }
         search = ""
         closingSearch = true
     }
 
     private var filtered: [ModelSummary] {
-        search.isEmpty ? models : models.filter { "\($0.provider) \($0.id) \($0.name)".localizedCaseInsensitiveContains(search) }
+        ModelPickerSearchPolicy.filtered(models, query: search)
     }
 }

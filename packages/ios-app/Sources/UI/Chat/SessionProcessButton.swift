@@ -4,11 +4,34 @@ enum SessionProcessButtonPolicy {
     static func isVisible(
         overview: SessionProcessOverview?,
         hasAdmittedActivity: Bool,
-        localRecentExpired: Bool
+        localRecentExpired: Bool,
+        recentFinishedRetentionMinutes: Int = 5
     ) -> Bool {
         guard let overview, hasAdmittedActivity else { return false }
         return overview.visibility != .hidden
-            && !(overview.visibility == .recent && localRecentExpired)
+            && !(overview.visibility == .recent && (recentFinishedRetentionMinutes <= 0 || localRecentExpired))
+    }
+
+    static func preferredRecentExpiry(
+        overview: SessionProcessOverview?,
+        activities: [SessionProcessActivity]?,
+        retentionMinutes: Int
+    ) -> String? {
+        guard overview?.visibility == .recent else { return nil }
+        guard retentionMinutes > 0 else { return nil }
+        let interval = TimeInterval(retentionMinutes * 60)
+        let mountedExpiries = (activities ?? [])
+            .filter { $0.kind == .subagent && $0.visibility == .recent && SessionProcessAdmissionPolicy.admits($0) }
+            .compactMap { activity -> Date? in
+                guard let terminalAt = activity.lifecycle.terminalAt,
+                      let terminal = GatewayTimestamp.parse(terminalAt) else { return nil }
+                return terminal.addingTimeInterval(interval)
+            }
+        // The overview expiry remains the authoritative fallback when Gateway
+        // omitted rows from the bounded mounted subset.
+        let gatewayExpiry = overview?.nearestExpiry.flatMap(GatewayTimestamp.parse)
+        guard let expiry = (mountedExpiries + [gatewayExpiry].compactMap { $0 }).min() else { return nil }
+        return GatewayTimestamp.preciseString(from: expiry)
     }
 
     static func isLocallyExpired(
@@ -25,12 +48,14 @@ enum SessionProcessButtonPolicy {
 /// Gateway removal, projection loss, or the local recent deadline hides the orb.
 struct SessionProcessButton: View {
     let overview: SessionProcessOverview?
+    let processActivities: [SessionProcessActivity]?
     let hasAdmittedActivity: Bool
     let glassNamespace: Namespace.ID
     let reduceMotion: Bool
     let onTap: () -> Void
 
     @State private var locallyExpiredRecentExpiry: String?
+    @State private var appBehaviorSettings = AppLocalBehaviorSettings.shared
 
     var body: some View {
         Group {
@@ -89,13 +114,17 @@ struct SessionProcessButton: View {
             localRecentExpired: SessionProcessButtonPolicy.isLocallyExpired(
                 recentExpiry: recentExpiryIdentity,
                 expiredRecentExpiry: locallyExpiredRecentExpiry
-            )
+            ),
+            recentFinishedRetentionMinutes: appBehaviorSettings.subagentRecentFinishedRetentionMinutes
         )
     }
 
     private var recentExpiryIdentity: String? {
-        guard overview?.visibility == .recent else { return nil }
-        return overview?.nearestExpiry
+        SessionProcessButtonPolicy.preferredRecentExpiry(
+            overview: overview,
+            activities: processActivities,
+            retentionMinutes: appBehaviorSettings.subagentRecentFinishedRetentionMinutes
+        )
     }
 
     private func accessibilityValue(overview: SessionProcessOverview) -> String {

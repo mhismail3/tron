@@ -473,6 +473,38 @@ struct SessionProcessModelsTests {
         ))
     }
 
+    @Test("app retention uses terminal timestamps without changing Gateway expiry")
+    func appRetentionWindow() {
+        let overview = SessionProcessOverview(
+            revision: 1, asOf: "2026-01-01T00:00:00Z",
+            activeCount: 0, recentCount: 1, problemCount: 0,
+            visibility: .recent, nearestExpiry: "2026-01-01T00:05:00Z"
+        )
+        let activity = makeProcess(
+            state: .completed,
+            visibility: .recent,
+            terminalAt: "2026-01-01T00:00:00Z",
+            recentUntil: "2026-01-01T00:05:00Z"
+        )
+        #expect(SessionProcessButtonPolicy.preferredRecentExpiry(
+            overview: overview, activities: [activity], retentionMinutes: 5
+        ) == "2026-01-01T00:05:00.000Z")
+        #expect(SessionProcessButtonPolicy.preferredRecentExpiry(
+            overview: overview, activities: [activity], retentionMinutes: 1
+        ) == "2026-01-01T00:01:00.000Z")
+        #expect(SessionProcessButtonPolicy.preferredRecentExpiry(
+            overview: overview, activities: [activity], retentionMinutes: 0
+        ) == nil)
+        #expect(SessionProcessButtonPolicy.isVisible(
+            overview: overview, hasAdmittedActivity: true, localRecentExpired: false,
+            recentFinishedRetentionMinutes: 0
+        ) == false)
+        #expect(SessionProcessButtonPolicy.isVisible(
+            overview: overview, hasAdmittedActivity: true, localRecentExpired: true,
+            recentFinishedRetentionMinutes: 5
+        ) == false)
+    }
+
     @Test("visual recent deadline cannot extend server expiry")
     func visualDeadline() {
         let monotonicNow = ContinuousClock.Instant.now
