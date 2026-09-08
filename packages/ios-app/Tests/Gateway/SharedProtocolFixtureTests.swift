@@ -97,6 +97,99 @@ struct SharedProtocolFixtureTests {
         #expect(activeSnapshot.activeToolSegmentId == "tool-segment:fixture-turn")
         #expect(SessionSnapshotTranscriptAdmissionPolicy.admit(activeSnapshot))
     }
+    @Test("provider-bound browser results survive session.open and retain the floating tap route")
+    func browserSessionOpenFixture() throws {
+        let wire = try browserResultWire()
+        for toolName in ["agent_browser", "display"] {
+            for isError in [false, true] {
+                var result = wire
+                result["toolName"] = toolName
+                result["isError"] = isError
+                let response = try decodeBrowserSessionOpen(result)
+                let item = try #require(response.session.transcript.first)
+                let display = try #require(item.display)
+                #expect(item.toolName == toolName)
+                #expect(display.liveView?.viewId == "fixture-browser-view")
+                let candidate = ChatTranscriptProjectionKernel.cold(snapshot: response.session)
+                let tools = candidate.timeline.items.flatMap { item -> [ChatToolDescriptor] in
+                    if case .toolRun(let run) = item { return run.tools }
+                    return []
+                }
+                let tool = try #require(tools.first)
+                #expect(tool.id == "browser-call")
+                #expect(ToolDisplayActivation.command(for: tool, sessionID: response.session.sessionId)
+                    == .showFloating(DisplayRoute(sessionID: response.session.sessionId, display: display)))
+                let roundTrip = try JSONDecoder.gateway.decode(SessionSnapshot.self,
+                    from: JSONEncoder.gateway.encode(response.session))
+                #expect(roundTrip == response.session)
+            }
+        }
+    }
+
+    @Test("browser display admission still rejects unrelated tools, roles, kinds and malformed sources")
+    func browserSessionOpenRejections() throws {
+        let wire = try browserResultWire()
+        for toolName in [nil, "read", "other-tool"] as [String?] {
+            var result = wire
+            result["toolName"] = toolName
+            #expect(throws: DecodingError.self) { try decodeBrowserSessionOpen(result) }
+        }
+        for toolName in ["agent_browser", "display"] {
+            for role in ["user", "assistant"] {
+                var result = wire
+                result["role"] = role
+                result["toolName"] = toolName
+                #expect(throws: DecodingError.self) { try decodeBrowserSessionOpen(result) }
+            }
+        }
+        var result = wire
+        // A valid public webpage is still not an agent_browser live-view grant.
+        result["display"] = [
+            "schema": "tron.display.v1", "displayId": "web", "revision": 1,
+            "title": "Web", "altText": "Web", "kind": "webpage",
+            "presentation": ["requestedSurface": "sheet", "inlineTapAction": "sheet"],
+            "eligibleSurfaces": ["sheet"], "fallbackText": "Web", "remoteURL": "https://example.com/",
+        ]
+        #expect(throws: DecodingError.self) { try decodeBrowserSessionOpen(result) }
+        result["toolName"] = "display"
+        #expect(try decodeBrowserSessionOpen(result).session.transcript.first?.display?.kind == .webpage)
+
+        result = wire
+        var display = try #require(wire["display"] as? [String: Any])
+        var liveView = try #require(display["liveView"] as? [String: Any])
+        liveView["generation"] = ""
+        display["liveView"] = liveView
+        result["display"] = display
+        #expect(throws: DecodingError.self) { try decodeBrowserSessionOpen(result) }
+
+        // Diagnostics alone do not become a renderer on either entrypoint.
+        for toolName in ["agent_browser", "display"] {
+            result = wire
+            result["toolName"] = toolName
+            result["display"] = nil
+            result["details"] = ["display": wire["display"]!]
+            #expect(try decodeBrowserSessionOpen(result).session.transcript.first?.display == nil)
+        }
+    }
+
+    private func browserResultWire() throws -> [String: Any] {
+        let bundle = Bundle(for: FixtureBundleMarker.self)
+        let url = try #require(bundle.url(forResource: "browser-tool-result-v4", withExtension: "json")
+            ?? bundle.url(forResource: "browser-tool-result-v4", withExtension: "json", subdirectory: "protocol-fixtures"))
+        return try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+    }
+
+    private func decodeBrowserSessionOpen(_ result: [String: Any]) throws -> GatewaySessionOpenResponse {
+        let snapshot = try SessionScenarioBuilder(seed: 8_175).openingTail(targetEncodedBytes: 4_096)
+        var wire = try #require(JSONSerialization.jsonObject(with: JSONEncoder.gateway.encode(snapshot)) as? [String: Any])
+        wire["transcript"] = [result]
+        wire["transcriptStart"] = 0
+        wire["transcriptTotal"] = 1
+        wire["leafEntryId"] = "browser-result"
+        let envelope: [String: Any] = ["session": wire, "syncToken": "fixture-sync", "subscriptionToken": "fixture-subscription"]
+        return try JSONDecoder.gateway.decode(GatewaySessionOpenResponse.self,
+            from: JSONSerialization.data(withJSONObject: envelope))
+    }
 }
 
 private extension TranscriptItem.Kind {

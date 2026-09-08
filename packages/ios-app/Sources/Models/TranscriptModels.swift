@@ -422,12 +422,17 @@ struct MessageTranscriptItem: TranscriptPayload {
         isError = try values.decodeIfPresent(Bool.self, forKey: .isError)
         details = try values.decodeIfPresent(JSONValue.self, forKey: .details)
         display = try values.decodeIfPresent(DisplayProjection.self, forKey: .display)
-        if display != nil, role != .toolResult || toolName != "display" {
-            throw DecodingError.dataCorruptedError(
-                forKey: .display,
-                in: values,
-                debugDescription: "Only the reserved display tool result may carry display metadata"
-            )
+        if let display {
+            // Gateway admits provider-bound browser results before projection;
+            // raw extension details are never native display authority.
+            guard role == .toolResult,
+                  toolName == "display" || (toolName == "agent_browser" && display.kind == .browserLive) else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .display,
+                    in: values,
+                    debugDescription: "Display metadata requires a display result or a live-browser agent_browser result"
+                )
+            }
         }
         usage = try values.decodeIfPresent(JSONValue.self, forKey: .usage)
         startedAt = try values.decodeIfPresent(String.self, forKey: .startedAt)

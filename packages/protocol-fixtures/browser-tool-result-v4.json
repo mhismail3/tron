@@ -1,0 +1,43 @@
+{
+  "id": "browser-result",
+  "parentId": null,
+  "timestamp": "2026-01-01T00:00:00Z",
+  "kind": "message",
+  "role": "toolResult",
+  "presentationId": "browser-result",
+  "content": [
+    { "id": "browser-result:0", "ordinal": 0, "type": "text", "text": "Clicked link" }
+  ],
+  "toolCallId": "browser-call",
+  "toolName": "agent_browser",
+  "isError": false,
+  "display": {
+    "schema": "tron.display.v1",
+    "displayId": "fixture-browser-view",
+    "revision": 1,
+    "title": "Browser view",
+    "altText": "Read-only live browser",
+    "kind": "browser_live",
+    "presentation": { "requestedSurface": "floating", "inlineTapAction": "sheet" },
+    "eligibleSurfaces": ["sheet", "floating"],
+    "fallbackText": "The original browser is no longer available.",
+    "liveView": {
+      "schema": "tron.browser-live-view.v1",
+      "viewId": "fixture-browser-view",
+      "generation": "fixture-runtime:fixture-browser",
+      "title": "Browser view",
+      "fallbackText": "The original browser is no longer available."
+    }
+  },
+  "semantic": {
+    "version": 1,
+    "direction": "agentInvocation",
+    "contextEffect": "toolResult",
+    "delivery": "toolResult",
+    "visibility": "visible",
+    "kind": "tool",
+    "origin": { "kind": "assistant", "confidence": "boundary" },
+    "sequence": 0
+  },
+  "completedAt": "2026-01-01T00:00:00Z"
+}

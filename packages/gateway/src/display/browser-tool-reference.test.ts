@@ -1,4 +1,8 @@
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
+import { BlobStore } from "../sessions/blob-store.js";
+import { projectMessage } from "../sessions/projection.js";
+import { sealBrowserToolReference } from "./browser-tool-reference.js";
 import { BrowserLiveViewRegistry } from "./browser-live-view.js";
 import { observeTrustedAgentBrowserResult } from "./browser-live-view-adapter.js";
 import { admitToolDisplayProjection } from "./display-contract.js";
@@ -20,6 +24,21 @@ function fixture() {
 }
 
 describe("canonical browser action references", () => {
+  it("projects the shared Swift session-open browser result fixture", () => {
+    const expected = JSON.parse(readFileSync(new URL("../../../protocol-fixtures/browser-tool-result-v4.json", import.meta.url), "utf8"));
+    const projected = projectMessage(expected.id, expected.parentId, expected.timestamp, {
+      role: "toolResult", toolCallId: "browser-call", toolName: "agent_browser", isError: false, timestamp: 0,
+      content: [{ type: "text", text: "Clicked link" }],
+      details: { tronBrowserReference: sealBrowserToolReference("fixture-session", "browser-call", expected.display.liveView, true) },
+    }, new BlobStore(), undefined, undefined, undefined, undefined, undefined, undefined, undefined, "fixture-session");
+    expect(projected?.kind).toBe("message");
+    if (projected?.kind !== "message") throw new Error("Expected a browser tool result");
+    // The ephemeral provider seal stays Gateway-owned; Swift consumes the
+    // admitted wire projection, never raw extension details as view authority.
+    const { details: _receipt, ...wire } = projected;
+    expect(wire).toEqual(expected);
+  });
+
   it("routes successful and failed actions to one exact floating browser without observation", () => {
     const action = fixture();
     const first = admitToolDisplayProjection("agent_browser", action("open").details, "open", "session")!;
