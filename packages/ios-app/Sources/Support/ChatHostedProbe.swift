@@ -153,6 +153,7 @@ final class ChatHostedProbe {
     private var catchUpControl: ((Bool) -> Void)?
     private var semanticResponseControl: (() -> Void)?
     private var submitPromptControl: (() -> Void)?
+    private var displayControl: ((DisplayPresentationCommand) -> Void)?
     private var frameControl: (() async throws -> Void)?
     private var stateControl: (() -> ChatHostedScrollState)?
     private var prependControl: (() -> Bool)?
@@ -442,6 +443,7 @@ final class ChatHostedProbe {
         catchUp: @escaping (Bool) -> Void,
         semanticResponse: @escaping () -> Void,
         submitPrompt: @escaping () -> Void,
+        presentDisplay: @escaping (DisplayPresentationCommand) -> Void,
         frame: @escaping () async throws -> Void,
         state: @escaping () -> ChatHostedScrollState,
         prepend: @escaping () -> Bool,
@@ -456,6 +458,7 @@ final class ChatHostedProbe {
         catchUpControl = catchUp
         semanticResponseControl = semanticResponse
         submitPromptControl = submitPrompt
+        displayControl = presentDisplay
         frameControl = frame
         stateControl = state
         prependControl = prepend
@@ -465,6 +468,8 @@ final class ChatHostedProbe {
         cancelPresentationControl = cancelPresentation
         refreshControlledState()
     }
+
+    func presentDisplay(_ command: DisplayPresentationCommand) { displayControl?(command) }
 
     func driveGeometry(
         previous: ChatTranscriptGeometry,

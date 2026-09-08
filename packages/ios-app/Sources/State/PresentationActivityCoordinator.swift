@@ -110,6 +110,13 @@ final class PresentationActivityCoordinator {
         return .covered
     }
 
+    /// Binding intent may already be nil during native dismissal. Visual
+    /// handoffs follow this owner's retained topology until dismissal completes.
+    func hasMountedDescendant(id: String, of parent: PresentationSurfaceToken?) -> Bool {
+        guard let parent, surfaces[parent] != nil else { return false }
+        return order.contains { $0.id == id && isDescendant($0, of: parent) }
+    }
+
     var mountedSurfaceCount: Int { order.count }
 
     private func rememberRetired(_ token: PresentationSurfaceToken) {

@@ -42,6 +42,28 @@ struct PresentationActivityCoordinatorTests {
         try await waitForSurfaceCount(1, coordinator: coordinator)
     }
 
+    @Test("exact descendant visuals survive dismissal intent but not completed retirement or other branches")
+    func descendantVisualOwnership() throws {
+        let coordinator = PresentationActivityCoordinator()
+        let root = PresentationSurfaceToken(id: "chat", generation: UUID())
+        let other = PresentationSurfaceToken(id: "other", generation: UUID())
+        coordinator.register(root, parent: nil)
+        coordinator.register(other, parent: nil)
+        var lease = PresentationDismissalLease()
+        let registered = lease.register(identity: "browser-sheet")
+        let sheet = try #require(registered)
+        coordinator.register(sheet, parent: root)
+        #expect(coordinator.hasMountedDescendant(id: "browser-sheet", of: root))
+        #expect(!coordinator.hasMountedDescendant(id: "browser-sheet", of: other))
+        #expect(!coordinator.hasMountedDescendant(id: "different-browser", of: root))
+        lease.beginDismissal()
+        #expect(coordinator.hasMountedDescendant(id: "browser-sheet", of: root))
+        let transition = lease.completeDismissal(nextIdentity: nil)
+        coordinator.retire(try #require(transition.retired))
+        #expect(!coordinator.hasMountedDescendant(id: "browser-sheet", of: root))
+        #expect(!coordinator.hasMountedDescendant(id: "browser-sheet", of: nil))
+    }
+
     @Test("the topmost surface owns motion while its ancestors keep descendant data live")
     func activeLineageSeparatesPublicationFromMotion() {
         let coordinator = PresentationActivityCoordinator()

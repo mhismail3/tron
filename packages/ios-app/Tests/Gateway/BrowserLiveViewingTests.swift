@@ -522,7 +522,7 @@ struct BrowserLiveMountedViewingTests {
     @Test("floating expansion retires the covered lease and restores only the original browser")
     func floatingExpansionAndReopen() async throws {
         let probe = BrowserLiveTransportProbe(echoDescriptor: true, frames: [Self.jpeg(.green)])
-        try await Self.withMountedHost(probe: probe, profile: Self.profile("floating"), floating: true) { _, state, _, host in
+        try await Self.withMountedHost(probe: probe, profile: Self.profile("floating"), floating: true) { _, state, coordinator, host in
             try await Self.waitForRequests(1, probe: probe) {
                 $0.request.httpMethod == "GET" && $0.request.value(forHTTPHeaderField: "X-Tron-Live-After") == "1"
             }
@@ -543,7 +543,20 @@ struct BrowserLiveMountedViewingTests {
             let afterCoverage = await probe.requests
             let originalLeaseQuiescent = afterCoverage.dropFirst(cut).allSatisfy { $0.request.value(forHTTPHeaderField: "X-Tron-Live-Lease") != first }
             #expect(originalLeaseQuiescent)
+            let poppedOut = try #require(host.marker("floating-popped-out"))
+            let panel = try #require(host.floatingPanel)
+            let iconFrame = poppedOut.convert(poppedOut.bounds, to: panel)
+            #expect(abs(iconFrame.midX - panel.bounds.midX) <= 2)
+            #expect(abs(iconFrame.midY - panel.bounds.midY) <= 2)
             state.sheetRoute = nil
+            var observedDismissal = false
+            for _ in 0..<180 {
+                try await DisplayFrameScheduler.displayLink.nextFrame()
+                if coordinator.activity(for: state.surface).allowsPresentationPublication { break }
+                observedDismissal = true
+                #expect(host.marker("floating-popped-out") != nil, "Keep the icon while the native sheet is still dismissing")
+            }
+            #expect(observedDismissal)
             try await Self.waitForRequests(3, probe: probe) { $0.request.httpMethod == "POST" }
             #expect(state.floatingRoute == original)
             let opens = await probe.requests.filter { $0.request.httpMethod == "POST" }
@@ -552,6 +565,71 @@ struct BrowserLiveMountedViewingTests {
             let originalGenerationOnly = opens.allSatisfy { String(data: $0.request.httpBody ?? Data(), encoding: .utf8)?.contains("generation-a") == true }
             #expect(originalViewOnly)
             #expect(originalGenerationOnly)
+            #expect(host.marker("floating-popped-out") == nil)
+        }
+    }
+
+    @Test("nonzero layout changes keep the painted browser on one lease")
+    func floatingResizePreservesViewing() async throws {
+        let probe = BrowserLiveTransportProbe(echoDescriptor: true, frames: [Self.jpeg(.green)])
+        try await Self.withMountedHost(probe: probe, profile: Self.profile("resizing"), floating: true) { _, state, _, host in
+            try await Self.waitForRequests(1, probe: probe) {
+                $0.request.httpMethod == "GET" && $0.request.value(forHTTPHeaderField: "X-Tron-Live-After") == "1"
+            }
+            let panel = try #require(host.floatingPanel)
+            for height in [CGFloat(180), 100, 320] {
+                state.floatingHeight = height
+                try await Task.sleep(for: .milliseconds(350))
+                #expect(host.floatingPanel === panel)
+                #expect(Self.greenPixelCount(in: host.window) > 20)
+            }
+            let requests = await probe.requests
+            #expect(requests.filter { $0.request.httpMethod == "POST" }.count == 1)
+            #expect(!requests.contains { $0.request.httpMethod == "DELETE" })
+        }
+    }
+
+    @Test("replacement windows retire old placement callbacks rather than moving their successor")
+    func floatingReplacementRetiresPlacement() async throws {
+        let probe = BrowserLiveTransportProbe(echoDescriptor: true)
+        try await Self.withMountedHost(probe: probe, profile: Self.profile("replacement"), floating: true) { _, state, _, host in
+            try await Self.waitForRequests(1, probe: probe) { $0.request.httpMethod == "GET" }
+            let original = try #require(host.floatingPanel)
+            let delayedMove = original.move
+            state.floatingRoute = DisplayRoute(sessionID: "session-mounted", display: Self.display(viewID: "view-b", generation: "generation-b"))
+            try await Self.waitForRequests(2, probe: probe) { $0.request.httpMethod == "POST" }
+            // New transport admission precedes the outgoing native window's
+            // animated retirement. Select the successor only after that exact
+            // marker is detached, not after an assumed animation duration.
+            for _ in 0..<180 where original.window != nil || original.move != nil {
+                try await DisplayFrameScheduler.displayLink.nextFrame()
+            }
+            #expect(original.window == nil)
+            let replacement = try #require(host.floatingPanel)
+            #expect(replacement !== original)
+            #expect(original.move == nil)
+            let frame = replacement.convert(replacement.bounds, to: host.window)
+            delayedMove?(.bottomLeading)
+            try await Task.sleep(for: .milliseconds(350))
+            #expect(replacement.convert(replacement.bounds, to: host.window) == frame)
+            #expect(state.floatingRoute?.display.liveView?.viewId == "view-b")
+        }
+    }
+
+    @Test("unavailable browser text sits directly at the floating window center")
+    func centeredFloatingFallback() async throws {
+        let probe = BrowserLiveTransportProbe(echoDescriptor: true, frames: [Data("invalid JPEG".utf8)])
+        try await Self.withMountedHost(probe: probe, profile: Self.profile("floating-unavailable"), floating: true) { _, _, _, host in
+            try await Self.waitForRequests(1, probe: probe) { $0.request.httpMethod == "DELETE" }
+            for _ in 0..<120 where host.marker("floating-unavailable") == nil {
+                try await DisplayFrameScheduler.displayLink.nextFrame()
+            }
+            let text = try #require(host.marker("floating-unavailable"))
+            let panel = try #require(host.floatingPanel)
+            let frame = text.convert(text.bounds, to: panel)
+            #expect(abs(frame.midX - panel.bounds.midX) <= 2)
+            #expect(abs(frame.midY - panel.bounds.midY) <= 2)
+            #expect(frame.width <= panel.bounds.width - 39)
         }
     }
 
@@ -703,10 +781,10 @@ private struct BrowserLiveMountedRoot: View {
             onMount: { state.surface = $0 }
         ) {
             if state.mounted, state.floatingMode {
-                ChatFloatingDisplayHost(route: $state.floatingRoute, bottomExclusion: 0, onOpenSheet: { state.sheetRoute = $0 })
+                ChatFloatingDisplayHost(route: $state.floatingRoute, onOpenSheet: { state.sheetRoute = $0 })
                     .frame(height: state.floatingHeight)
                     .environment(model)
-                    .tronManagedSheet(item: $state.sheetRoute, identity: { $0.id }) { route in
+                    .tronManagedSheet(item: $state.sheetRoute, identity: { $0.sheetPresentationID }) { route in
                         DisplaySheet(route: route).environment(model)
                     }
             } else if state.mounted {
@@ -730,6 +808,17 @@ private final class BrowserLiveMountedHost {
 
     init(window: UIWindow, previous: UIWindow?) {
         self.window = window; self.previous = previous
+    }
+
+    private var nativeViews: [UIView] {
+        func descendants(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap(descendants) }
+        guard let root = window.rootViewController?.view else { return [] }
+        return descendants(root)
+    }
+
+    var floatingPanel: FloatingDisplayHostedMarker? { nativeViews.compactMap { $0 as? FloatingDisplayHostedMarker }.first }
+    func marker(_ id: String) -> ChatHostedNativeRowMarker? {
+        nativeViews.compactMap { $0 as? ChatHostedNativeRowMarker }.first { $0.physicalID == id }
     }
 
     func dismissAndTearDown() {

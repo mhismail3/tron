@@ -2209,6 +2209,44 @@ final class ChatViewScrollHarness {
         hostingController.view.layoutIfNeeded()
     }
 
+    struct FloatingLayout {
+        let marker: FloatingDisplayHostedMarker
+        let frame: CGRect
+        let composer: CGRect
+        let toolbarBottom: CGFloat
+    }
+
+    func floatingLayout() -> FloatingLayout? {
+        func descendants(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap(descendants) }
+        let views = descendants(hostingController.view)
+        guard let marker = views.compactMap({ $0 as? FloatingDisplayHostedMarker }).first,
+              let composer = views.compactMap({ $0 as? ChatHostedNativeRowMarker })
+                .first(where: { $0.physicalID == ChatHostedNativeRowProbe.composerID }),
+              let toolbar = views.compactMap({ $0 as? UINavigationBar }).first else { return nil }
+        return FloatingLayout(marker: marker, frame: marker.convert(marker.bounds, to: window),
+                              composer: composer.convert(composer.bounds, to: window),
+                              toolbarBottom: toolbar.convert(toolbar.bounds, to: window).maxY)
+    }
+
+    func setComposerAccessories(_ enabled: Bool) throws {
+        guard let target = model.mountedPresentationTarget,
+              let scope = model.composerDrafts.scope(for: target) else { throw HarnessError.missingComposer }
+        if enabled {
+            model.composerDrafts.selectResource(CommandInfo(name: "skill:layout", description: "Layout fixture",
+                argumentHint: nil, source: .skill, sourcePath: "/fixture/skills/layout"), for: scope)
+            model.composerDrafts.installHostedAttachment(PendingAttachment(id: "layout-photo", name: "Photo",
+                mimeType: "image/jpeg", size: 1, previewData: nil), target: target)
+        } else {
+            model.composerDrafts.removeSelectedResource(for: scope)
+            model.composerDrafts.removeAttachment("layout-photo", target: target)
+        }
+    }
+
+    func focusComposer(_ focused: Bool) throws {
+        guard let textView = Self.textViews(in: hostingController.view).first else { throw HarnessError.missingComposer }
+        if focused { textView.becomeFirstResponder() } else { textView.resignFirstResponder() }
+    }
+
     func setComposerText(_ text: String) throws {
         guard let textView = Self.textViews(in: hostingController.view).first else {
             throw HarnessError.missingComposer

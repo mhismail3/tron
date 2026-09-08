@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import TronMobile
 
@@ -328,18 +329,12 @@ struct DisplayPresentationTests {
         ) == .none)
     }
 
-    @Test("floating panel spans toolbar-to-composer space and snaps horizontally")
+    @Test("floating panel uses the native usable proposal and snaps horizontally")
     func floatingPanelGeometry() {
-        let size = DisplayFloatingLayoutPolicy.panelSize(in: CGSize(width: 390, height: 800))
-        let safe = DisplayFloatingLayoutPolicy.safeCenterRect(
-            container: CGSize(width: 390, height: 800),
-            safeTop: 20,
-            safeBottom: 10,
-            bottomExclusion: 90,
-            panelSize: size
-        )
-        #expect(safe.minY == 20 + size.height / 2 + 8)
-        #expect(safe.maxY == 800 - 10 - 90 - size.height / 2 - 8)
+        let size = DisplayFloatingLayoutPolicy.panelSize(in: CGSize(width: 390, height: 680))
+        let safe = DisplayFloatingLayoutPolicy.safeCenterRect(container: CGSize(width: 390, height: 680), panelSize: size)
+        #expect(safe.minY == size.height / 2 + 8)
+        #expect(safe.maxY == 680 - size.height / 2 - 8)
         let snapped = DisplayFloatingLayoutPolicy.snappedToNearestHorizontalEdge(
             CGPoint(x: safe.midX - 1, y: safe.midY),
             in: safe
@@ -347,6 +342,22 @@ struct DisplayPresentationTests {
         #expect(snapped.x == safe.minX)
         #expect(snapped.y == safe.midY)
         #expect(DisplayFloatingLayoutPolicy.controlTouchTarget >= 44)
+    }
+
+    @Test("squeezed placement preserves its dock preference and all content fits")
+    func squeezedPanelPlacement() {
+        for browser in [false, true] {
+            for container in [CGSize(width: 390, height: 80), CGSize(width: 180, height: 120), .zero] {
+                let panel = DisplayFloatingLayoutPolicy.panelSize(in: container, browserLive: browser)
+                #expect(panel.width <= container.width)
+                #expect(panel.height <= container.height)
+                let centers = DisplayFloatingLayoutPolicy.safeCenterRect(container: container, panelSize: panel)
+                let preferred = UnitPoint.bottomTrailing
+                let center = DisplayFloatingLayoutPolicy.center(for: preferred, in: centers)
+                let restored = DisplayFloatingLayoutPolicy.anchor(for: center, in: centers, retaining: preferred)
+                #expect(restored == preferred)
+            }
+        }
     }
 
     @Test("running display invocation preserves requested pill destination")

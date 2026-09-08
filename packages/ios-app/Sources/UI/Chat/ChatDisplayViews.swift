@@ -10,6 +10,7 @@ struct DisplayRoute: Identifiable, Hashable, Sendable {
     let display: DisplayProjection
 
     var id: String { "\(sessionID):\(display.presentationIdentity)" }
+    var sheetPresentationID: String { "chat.display.\(id)" }
 }
 
 enum DisplayPresentationCommand: Hashable, Sendable {
@@ -649,6 +650,17 @@ enum DisplayRenderContext: Sendable {
     case floating
 }
 
+private struct DisplayRenderContextKey: EnvironmentKey {
+    static let defaultValue: DisplayRenderContext = .sheet
+}
+
+private extension EnvironmentValues {
+    var displayRenderContext: DisplayRenderContext {
+        get { self[DisplayRenderContextKey.self] }
+        set { self[DisplayRenderContextKey.self] = newValue }
+    }
+}
+
 struct DisplayArtifactContent: View {
     let sessionID: String?
     let display: DisplayProjection
@@ -676,6 +688,7 @@ struct DisplayArtifactContent: View {
                 DisplayRemoteWebView(display: display)
             }
         }
+        .environment(\.displayRenderContext, context)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(display.altText)
     }
@@ -1064,10 +1077,26 @@ private struct SafariDisplayView: UIViewControllerRepresentable {
 
 private struct DisplayUnavailableView: View {
     let text: String
+    @Environment(\.displayRenderContext) private var context
+
     var body: some View {
-        TronInfoCard(icon: "rectangle.slash", text: text, accent: .tronBlue)
-            .padding(20)
-            .frame(maxWidth: .infinity, minHeight: 160)
+        if context == .floating {
+            // The floating window already owns its glass surface. A nested
+            // info card adds a second container and overflows small windows.
+            Text(text)
+                .font(TronTypography.secondaryDescription)
+                .foregroundStyle(Color.tronTextSecondary)
+                .multilineTextAlignment(.center)
+                #if HOSTED_TEST
+                .background(ChatHostedNativeRowProbe(physicalID: "floating-unavailable", semanticID: "floating-unavailable", identity: UUID()))
+                #endif
+                .padding(20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            TronInfoCard(icon: "rectangle.slash", text: text, accent: .tronBlue)
+                .padding(20)
+                .frame(maxWidth: .infinity, minHeight: 160)
+        }
     }
 }
 

@@ -153,7 +153,7 @@ struct ChatRoutes: ViewModifier {
             )
             .tronManagedSheet(
                 item: $displaySheet,
-                identity: { "chat.display.\($0.id)" }
+                identity: { $0.sheetPresentationID }
             ) { route in
                 DisplaySheet(route: route)
             }

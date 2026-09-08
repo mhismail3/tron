@@ -107,6 +107,16 @@ struct ChatView: View {
 
     private var contentSurface: some View {
         transcript
+            .overlay(alignment: .top) { topBlur }
+            .overlay {
+                // The inset and native navigation/keyboard layout propose the
+                // same usable region to this overlay as to the transcript.
+                // Do not subtract safe-area insets or mirror composer height.
+                ChatFloatingDisplayHost(
+                    route: $sessionPresentation.floatingDisplay,
+                    onOpenSheet: { sessionPresentation.presentDisplay(.showSheet($0)) }
+                )
+            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 // The complete composer is the sole structural inset owner, so
                 // the keyboard, multiline text, and attachment chips push the
@@ -121,14 +131,6 @@ struct ChatView: View {
                         )
                     }
                     #endif
-            }
-            .overlay(alignment: .top) { topBlur }
-            .overlay {
-                ChatFloatingDisplayHost(
-                    route: $sessionPresentation.floatingDisplay,
-                    bottomExclusion: composerHeightLedger.current,
-                    onOpenSheet: { sessionPresentation.presentDisplay(.showSheet($0)) }
-                )
             }
         .onGeometryChange(for: CGFloat.self) { geometry in
             geometry.size.width
@@ -2125,6 +2127,7 @@ struct ChatView: View {
             submitPrompt: {
                 send()
             },
+            presentDisplay: { sessionPresentation.presentDisplay($0) },
             frame: {
                 try await displayFrameScheduler.nextFrame()
             },
