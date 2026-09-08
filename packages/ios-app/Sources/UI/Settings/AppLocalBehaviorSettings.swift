@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// Preferences owned by the iOS app presentation, never by a Gateway session.
 @MainActor

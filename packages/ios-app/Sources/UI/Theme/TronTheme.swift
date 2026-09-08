@@ -27,7 +27,7 @@ extension Color {
     static let tronIndigo = Color(lightHex: "#6366F1", darkHex: "#818CF8")
     /// Adaptive accent for the Manage Session workspace/resource group and its
     /// progressive descendants. Keep this separate from Settings' blue group.
-    static let tronSessionTeal = Color(lightHex: "#0F766E", darkHex: "#2DD4BF")
+    static let tronSessionTeal = Color(lightHex: "#0E7490", darkHex: "#67E8F9")
     static let tronTeal = Color(lightHex: "#0D9488", darkHex: "#2DD4BF")
     static let tronCoral = Color(lightHex: "#C06545", darkHex: "#D97757")
     static let tronAutomation = Color(lightHex: "#31889A", darkHex: "#74CBDC")

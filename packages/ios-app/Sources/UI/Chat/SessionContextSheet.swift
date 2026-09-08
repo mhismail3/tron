@@ -205,7 +205,6 @@ struct SessionContextSheet: View {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     if let snapshot = displayedPresentation {
                         SessionContextUsageCard(snapshot: snapshot)
-                            .environment(\.tronSettingsVisualTheme, nil)
                         modelSummaryCard(snapshot)
                         sessionSection(snapshot)
                         exportSection
@@ -276,24 +275,29 @@ struct SessionContextSheet: View {
                 identity: { "session.\(sessionID).manage.\($0.id)" },
                 onDismiss: completeForkNavigationAfterHistoryDismissal
             ) { route in
-                switch route {
-                case .agentInstructions:
-                    AgentInstructionsSheet(sessionID: sessionID)
-                case .projectResources:
-                    ProjectResourcesView(sessionID: sessionID)
-                case .history:
-                    SessionTreeSheet(
-                        sessionID: sessionID,
-                        onForkCreated: handleForkCreated,
-                        onNavigated: handleNavigation
-                    )
-                case .processHistory:
-                    ProcessHistorySheet(sessionID: sessionID)
-                case .terminal:
-                    TerminalSheet(sessionID: sessionID)
-                case .workspace:
-                    WorkspaceInspectorSheet(sessionID: sessionID)
+                Group {
+                    switch route {
+                    case .agentInstructions:
+                        AgentInstructionsSheet(sessionID: sessionID)
+                    case .projectResources:
+                        ProjectResourcesView(sessionID: sessionID)
+                    case .history:
+                        SessionTreeSheet(
+                            sessionID: sessionID,
+                            onForkCreated: handleForkCreated,
+                            onNavigated: handleNavigation
+                        )
+                    case .processHistory:
+                        ProcessHistorySheet(sessionID: sessionID)
+                    case .terminal:
+                        TerminalSheet(sessionID: sessionID)
+                    case .workspace:
+                        WorkspaceInspectorSheet(sessionID: sessionID)
+                    }
                 }
+                // Only Session destinations inherit teal; the management
+                // shell, usage, model, and export keep their own identities.
+                .tronSettingsVisualTheme(accent: sessionRowAccent)
             }
             .tronTextEntryAlert(
                 "Rename Session",
@@ -312,15 +316,10 @@ struct SessionContextSheet: View {
                 identity: "manage-session.rename"
             )
         }
-        // The Session group owns one adaptive accent. Sheet content presented
-        // below this boundary inherits it through SwiftUI's presentation
-        // environment, while usage/model/export cards explicitly keep their own
-        // identities.
-        .tronSettingsVisualTheme(accent: sessionRowAccent)
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(sessionRowAccent)
+        .tint(Color.tronEmerald)
         .onAppear {
             if capturedNoticeScope == nil {
                 capturedNoticeScope = model.presentationTarget(for: sessionID).map {
@@ -592,8 +591,6 @@ struct SessionContextSheet: View {
 
     private var exportSection: some View {
         TronGlassCard(accent: exportRowAccent) {
-            // Export is intentionally neutral and must not inherit Session's
-            // teal navigation/group accent.
             VStack(spacing: 0) {
                 exportRow(
                     format: "html",
@@ -614,7 +611,6 @@ struct SessionContextSheet: View {
                 }
             }
         }
-        .environment(\.tronSettingsVisualTheme, nil)
     }
 
     private var gitRow: some View {

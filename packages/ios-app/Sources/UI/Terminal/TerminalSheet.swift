@@ -11,7 +11,7 @@ struct TerminalSheet: View {
     @State private var keyboard = TerminalKeyboardController()
     @State private var confirmQuit = false
 
-    private var terminalAccent: Color { settingsTheme?.accent ?? .tronEmerald }
+    private var terminalAccent: SwiftUI.Color { settingsTheme?.accent ?? .tronEmerald }
 
     var body: some View {
         NavigationStack {

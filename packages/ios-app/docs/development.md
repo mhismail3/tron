@@ -51,6 +51,22 @@ ordinary session; Run Details offers Open Session only through the owning profil
 Do not add recurrence calculation, workspace mirrors, prompt/notification text to caches, or local
 automation journals in iOS.
 
+## App Settings and model search
+
+Settings → App Settings owns iPhone-local behavior, separate from Mac/runtime configuration.
+**Show finished subagents** persists a 0–5 minute choice (default 5); **Only active** hides the
+composer orb as soon as all subagents finish. The orb and its recent list use admitted canonical
+terminal timestamps, never sheet-open time. The last eligible completion owns orb expiry;
+expired rows are filtered even on first mount. Subagent History remains unchanged and available
+through Manage Session. `AppLocalBehaviorSettingsTests` and `SessionProcessModelsTests` cover
+persistence, bounds, staggered completion, immediate expiry, and running-only presentation.
+
+Every shared model picker starts with an icon-only search action in the top-leading toolbar,
+not a persistent bottom control. Tapping reveals the shared bottom search field and focuses it;
+close/focus loss retains the existing keyboard-settlement and sheet-dismissal guards. Native
+`SessionSheetPresentationTests` verifies the leading toolbar paint in light/dark appearances
+and absence of an initially mounted field; `ModelPickerSearchTests` covers filtering.
+
 ## UI motion and loading surfaces
 
 Compact in-progress UI uses `TronPulseLoadingIndicator`, an in-house SwiftUI
@@ -263,7 +279,7 @@ transitions. Session History uses the same compact settings-row typography, icon
 rhythm as the surrounding management sheets; long canonical previews wrap without increasing the base row scale. Widget/status state remains canonical, but both native presentations are temporarily gated off.
 Conversation-turn rendering and lifecycle-safe media chips remain in `TranscriptRow.swift`; transcript event
 controls and tool-run/detail routing live in dedicated owners without widening their private helper state. Tool
-run detail lists order newest invocation first from producer `startedAt` values, with stable source ties and
+run detail lists order newest invocation first from producer `startedAt` values, with reverse invocation-source ties and
 locale-aware invocation copy; progress/result/completion timestamps never reorder or relabel a call. The primary
 tool sheet, diff destination, technical-payload destination, and shared navigation chrome also have separate
 presentation owners; only their directly shared layout/diff primitives use module-internal access.
@@ -798,7 +814,10 @@ material churn. Open a large instructions/JSON document and verify immediate nat
 scrolling. Manage Session checkpoints verify a compact emerald usage card and purple model card matching
 Settings' Agent group, then the adaptive teal Session order (Current Branch, Agent Instructions, Project Resources,
 Session History, Subagent History) and headerless gray Export as HTML / Export as JSON actions. The same teal accent
-must flow into those destinations' generic titles, controls, icons, and ordinary containers in both appearances. Usage counts and percentage share
+must flow into those destinations' generic titles, controls, icons, and ordinary containers in both appearances.
+The cyan/teal accent uses a darker readable light-mode value and a lifted dark-mode value; the
+management shell stays emerald, model settings stay purple, and export stays neutral. Transcript
+and tool semantic colors do not inherit navigation teal. Usage counts and percentage share
 one metadata line above the progress-as-divider; automatic compaction appears only in the
 model card beside Compact Now. The model name matches the remaining-token headline scale;
 the serif provider line sits closely beneath it and the action reads Switch Model. Thinking,

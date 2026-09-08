@@ -11,7 +11,6 @@ struct AppLocalBehaviorSettingsView: View {
                         icon: "circle.dotted",
                         title: "Show finished subagents",
                         detail: "Keep the subagent button visible after work finishes",
-                        value: retentionLabel,
                         accent: .tronEmerald
                     ) {
                         Picker("Show finished subagents", selection: $settings.subagentRecentFinishedRetentionMinutes) {
@@ -39,8 +38,4 @@ struct AppLocalBehaviorSettingsView: View {
         .tronNavigationTitle("App Settings")
     }
 
-    private var retentionLabel: String {
-        let minutes = settings.subagentRecentFinishedRetentionMinutes
-        return minutes == 0 ? "Only active" : "\(minutes) min"
-    }
 }

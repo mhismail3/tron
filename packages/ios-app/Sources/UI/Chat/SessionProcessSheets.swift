@@ -791,6 +791,8 @@ struct ReadOnlySubagentSessionSheet: View {
                             preparedText: store.preparedText.slice(for: item),
                             toolPayloads: store.presentation.toolPayloads
                         )
+                        // Transcript/tool semantics are not navigation chrome.
+                        .environment(\.tronSettingsVisualTheme, nil)
                         .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
                         .id(item.id)
                     }
