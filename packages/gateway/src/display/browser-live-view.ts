@@ -29,7 +29,7 @@ export interface BrowserLiveViewRegistration {
   loadToken: string;
   cdpUrl: string;
 }
-interface Viewer { leaseId: string; viewerId: string; lastSeenAt: number }
+interface Viewer { leaseId: string; viewerId: string; lastSeenAt: number; delivery?: { cancel: () => void } }
 interface View {
   registration: BrowserLiveViewRegistration;
   viewers: Map<string, Viewer>;
@@ -114,7 +114,9 @@ export class BrowserLiveViewRegistry {
     }
     return { leaseId, descriptor: this.descriptor(view) };
   }
-  frame(sessionId: string, viewId: string, generation: string, leaseId: string, viewerId: string, after = 0): BrowserLiveViewFrameResult {
+  /** A viewer owns at most one unfinished response, including backpressure.
+   * Retirement cancels that write; completed reads release without closing it. */
+  acquireFrame(sessionId: string, viewId: string, generation: string, leaseId: string, viewerId: string, cancel: () => void, after = 0): { frame: BrowserLiveViewFrameResult; release: () => void } {
     if (!Number.isSafeInteger(after) || after < 0) throw new GatewayError("invalid_request", "Frame sequence is invalid");
     const view = this.requireView(sessionId, viewId, generation);
     const viewer = view.viewers.get(leaseId);
@@ -125,9 +127,14 @@ export class BrowserLiveViewRegistry {
       this.close(leaseId);
       throw new GatewayError("not_found", "Browser viewing has ended");
     }
+    if (viewer.delivery) throw new GatewayError("busy", "This viewer already has an outstanding frame response", true);
     viewer.lastSeenAt = Date.now();
-    if (!view.latest) return { status: "waiting" };
-    return view.latest.sequence <= after ? { status: "unchanged" } : view.latest;
+    const delivery = { cancel };
+    viewer.delivery = delivery;
+    return {
+      frame: !view.latest ? { status: "waiting" } : view.latest.sequence <= after ? { status: "unchanged" } : view.latest,
+      release: () => { if (viewer.delivery === delivery) delete viewer.delivery; },
+    };
   }
   close(leaseId: string, viewerId?: string, expected?: ViewIdentity): boolean {
     const view = this.leases.get(leaseId);
@@ -138,6 +145,10 @@ export class BrowserLiveViewRegistry {
       || registration.generation !== expected.generation)) return false;
     this.leases.delete(leaseId);
     view.viewers.delete(leaseId);
+    const delivery = viewer.delivery;
+    delete viewer.delivery;
+    // A failed transport cancellation must not retain other viewers or capture.
+    try { delivery?.cancel(); } catch { /* the lease has already been fenced */ }
     if (view.viewers.size === 0) this.stop(view);
     if (this.leases.size === 0 && this.expiryTimer) {
       clearInterval(this.expiryTimer);

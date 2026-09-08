@@ -14,7 +14,11 @@ function fixture() {
   const loadToken = registry.beginSessionLoad(registration.sessionId);
   registry.register({ ...registration, loadToken });
   const open = (device = "device-a") => registry.open(registration.sessionId, registration.viewId, registration.generation, device);
-  const frame = (leaseId: string, after = 0) => registry.frame(registration.sessionId, registration.viewId, registration.generation, leaseId, "device-a", after);
+  const frame = (leaseId: string, after = 0) => {
+    const delivery = registry.acquireFrame(registration.sessionId, registration.viewId, registration.generation, leaseId, "device-a", () => {}, after);
+    delivery.release();
+    return delivery.frame;
+  };
   return { registry, sockets, loadToken, open, frame };
 }
 
@@ -89,16 +93,36 @@ describe("browser live observation", () => {
     }
   });
 
-  it("retires expiry/revocation/generation replacement and rejects late load registration", async () => {
-    const f = fixture(); const lease = f.open();
-    await vi.advanceTimersByTimeAsync(15_001);
-    expect(() => f.frame(lease.leaseId)).toThrow();
-    expect(vi.getTimerCount()).toBe(0);
+  it("retires revocation/generation replacement and rejects late load registration", () => {
+    const f = fixture();
     const revoked = f.open(); f.registry.closeViewerIdentity("device-a");
     expect(() => f.frame(revoked.leaseId)).toThrow();
     const replaced = f.open(); f.registry.beginSessionLoad(registration.sessionId);
     expect(() => f.frame(replaced.leaseId)).toThrow();
     expect(() => f.registry.register({ ...registration, loadToken: f.loadToken })).toThrow("no longer active");
+  });
+
+  it.each(["close", "expiry", "observer", "reload", "dispose"])("retires an outstanding write on %s without letting an old release free a successor", async (reason) => {
+    const f = fixture(); const lease = f.open(); const socket = f.sockets[0]!;
+    socket.open(); await vi.advanceTimersByTimeAsync(1);
+    const firstCancelled = vi.fn(), secondCancelled = vi.fn();
+    const acquire = (cancel: () => void) => f.registry.acquireFrame(registration.sessionId, registration.viewId,
+      registration.generation, lease.leaseId, "device-a", cancel);
+    const first = acquire(firstCancelled);
+    first.release();
+    const second = acquire(secondCancelled);
+    first.release();
+    expect(() => acquire(() => {})).toThrow("outstanding frame");
+    if (reason === "close") f.registry.close(lease.leaseId);
+    if (reason === "expiry") await vi.advanceTimersByTimeAsync(16_001);
+    if (reason === "observer") { socket.terminate(); await vi.advanceTimersByTimeAsync(1); }
+    if (reason === "reload") f.registry.beginSessionLoad(registration.sessionId);
+    if (reason === "dispose") f.registry.dispose();
+    expect(firstCancelled).not.toHaveBeenCalled();
+    expect(secondCancelled).toHaveBeenCalledOnce();
+    second.release();
+    expect(() => acquire(() => {})).toThrow();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("does not retain a timer when connect throws", () => {

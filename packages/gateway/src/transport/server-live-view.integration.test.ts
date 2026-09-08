@@ -1,4 +1,4 @@
-import { request, type ClientRequest } from "node:http";
+import { request, ServerResponse, type ClientRequest } from "node:http";
 import type { AddressInfo } from "node:net";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -63,7 +63,11 @@ describe("authenticated disposable browser-view HTTP", () => {
     const socket = f.sockets[0]!; socket.open();
     await vi.waitFor(() => expect(socket.commands.some((command) => command.method === "Page.startScreencast")).toBe(true));
     socket.frame(7);
-    await vi.waitFor(() => expect(f.views.frame(registration.sessionId, registration.viewId, registration.generation, leaseId, f.device.deviceId)).toHaveProperty("data"));
+    await vi.waitFor(() => {
+      const delivery = f.views.acquireFrame(registration.sessionId, registration.viewId, registration.generation, leaseId, f.device.deviceId, () => {});
+      delivery.release();
+      expect(delivery.frame).toHaveProperty("data");
+    });
     const frame = await send(f.port, f.device.token, "GET", `${route}/frame`, headers(leaseId)).result;
     expect(frame.status).toBe(200); expect(frame.data).toEqual(jpeg);
     expect(frame.headers["content-type"]).toBe("image/jpeg");
@@ -76,6 +80,33 @@ describe("authenticated disposable browser-view HTTP", () => {
     expect(socket.readyState).toBe(3);
     expect(socket.commands.some((command) => command.method === "Browser.close")).toBe(false);
     expect((await send(f.port, f.device.token, "GET", `${route}/frame`, headers(leaseId)).result).status).toBe(404);
+  });
+
+  it("bounds outstanding frame writes per viewer and aborts them on revocation", async () => {
+    const f = await fixture();
+    const opened = await send(f.port, f.device.token, "POST").result;
+    const { leaseId } = JSON.parse(opened.data.toString());
+    const socket = f.sockets[0]!; socket.open();
+    await vi.waitFor(() => expect(socket.commands.some((command) => command.method === "Page.startScreencast")).toBe(true));
+    socket.frame(1);
+    await vi.waitFor(async () => expect((await send(f.port, f.device.token, "GET", `${route}/frame`, headers(leaseId)).result).status).toBe(200));
+    let held!: ServerResponse;
+    let reached!: () => void;
+    const writing = new Promise<void>((resolve) => { reached = resolve; });
+    const end = ServerResponse.prototype.end;
+    // Hold a real response at the write boundary, independently of the viewer
+    // registry, to model transport backpressure without timing/socket-size bets.
+    vi.spyOn(ServerResponse.prototype, "end").mockImplementation(function (this: ServerResponse, ...args) {
+      if (this.req.url?.endsWith("/frame") && !held) { held = this; reached(); return this; }
+      return end.apply(this, args);
+    });
+    const pending = send(f.port, f.device.token, "GET", `${route}/frame`, headers(leaseId)).result.catch((error: Error) => error);
+    await writing;
+    const duplicate = await send(f.port, f.device.token, "GET", `${route}/frame`, headers(leaseId)).result;
+    expect(duplicate.status).toBe(503);
+    await f.devices.revoke(f.device.deviceId, () => f.server.disconnectDevice(f.device.deviceId));
+    expect(held.destroyed).toBe(true);
+    expect(await pending).toBeInstanceOf(Error);
   });
 
   it("cannot admit a viewer after revocation while the POST body is pending", async () => {

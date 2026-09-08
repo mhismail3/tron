@@ -720,22 +720,31 @@ export class GatewayServer {
         if (afterHeader !== undefined && (typeof afterHeader !== "string" || !/^\d{1,16}$/.test(afterHeader))) {
           throw new GatewayError("invalid_request", "Frame sequence is invalid");
         }
-        const frame = this.options.liveViews.frame(sessionId, viewId, generation, leaseId, viewerId, Number(afterHeader ?? 0));
-        if ("status" in frame) {
-          response.writeHead(204, { "cache-control": "no-store", "x-tron-live-state": frame.status });
-          response.end();
-          return;
-        }
-        response.writeHead(200, {
-          "content-type": frame.mimeType,
-          "content-length": frame.data.length,
-          "cache-control": "no-store",
-          "x-content-type-options": "nosniff",
-          "x-tron-live-width": String(frame.width),
-          "x-tron-live-height": String(frame.height),
-          "x-tron-live-sequence": String(frame.sequence),
-        });
-        response.end(frame.data);
+        const delivery = this.options.liveViews.acquireFrame(sessionId, viewId, generation, leaseId, viewerId,
+          () => { response.destroy(); }, Number(afterHeader ?? 0));
+        const release = (): void => {
+          response.off("finish", release); response.off("close", release); response.off("error", release);
+          delivery.release();
+        };
+        response.once("finish", release); response.once("close", release); response.once("error", release);
+        try {
+          const frame = delivery.frame;
+          if ("status" in frame) {
+            response.writeHead(204, { "cache-control": "no-store", "x-tron-live-state": frame.status });
+            response.end();
+          } else {
+            response.writeHead(200, {
+              "content-type": frame.mimeType,
+              "content-length": frame.data.length,
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-tron-live-width": String(frame.width),
+              "x-tron-live-height": String(frame.height),
+              "x-tron-live-sequence": String(frame.sequence),
+            });
+            response.end(frame.data);
+          }
+        } catch (error) { release(); throw error; }
         return;
       }
     }
