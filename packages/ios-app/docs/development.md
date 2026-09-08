@@ -796,8 +796,9 @@ Agent Instructions, Project Resources, Session History, Runtime Behavior, Provid
 and model selection; dense rows must retain static tinted geometry without visible
 material churn. Open a large instructions/JSON document and verify immediate native
 scrolling. Manage Session checkpoints verify a compact emerald usage card and purple model card matching
-Settings' Agent group, then the blue Session order (Current Branch, Agent Instructions, Project Resources,
-Session History, Subagent History) and headerless gray Export as HTML / Export as JSON actions. Usage counts and percentage share
+Settings' Agent group, then the adaptive teal Session order (Current Branch, Agent Instructions, Project Resources,
+Session History, Subagent History) and headerless gray Export as HTML / Export as JSON actions. The same teal accent
+must flow into those destinations' generic titles, controls, icons, and ordinary containers in both appearances. Usage counts and percentage share
 one metadata line above the progress-as-divider; automatic compaction appears only in the
 model card beside Compact Now. The model name matches the remaining-token headline scale;
 the serif provider line sits closely beneath it and the action reads Switch Model. Thinking,
@@ -826,12 +827,13 @@ pending model selection and narrow authoritative projection. `SessionSettingPres
 covers immediate pending choices, reset semantics, exact-request rollback, scope replacement,
 and shared Extra High labels without rewriting authored content. Project Resources must omit Context Files
 and `AGENTS.md` rows. Agent Instructions opens the full document directly with no summary
-or capabilities screen, using the same large-only blue document chrome as workspace file
-previews: custom top blur, icon-only Done, and no opaque bottom bar. Project Resources,
-Session History, and Subagent History titles and toolbar actions must be blue. Resource
+or capabilities screen, using the same large-only adaptive teal document chrome as the workspace sheet:
+custom top blur, icon-only Done, and no opaque bottom bar. Project Resources, Session History, and
+Subagent History titles and toolbar actions must use the inherited teal accent. Resource
 detail titles and Done actions match their category. Verify package/inline extension names
 instead of index filenames, friendly skill/prompt/tool titles, and unchanged raw invocations.
-`ProjectResourceTitlePresentationTests` pins those naming boundaries. `SessionSheetPresentationTests`
+`ProjectResourceTitlePresentationTests` pins those naming boundaries. `ManageSessionThemeTests` pins the
+adaptive light/dark teal values, contrast, and destination theme routing. `SessionSheetPresentationTests`
 presents actual native sheets, verifies large document detents, the custom blur and hidden
 bottom toolbar, full selectable instructions, and medium-first subagent lists on repeated
 presentations. The populated Agent Instructions sheet is rendered in light and dark mode:

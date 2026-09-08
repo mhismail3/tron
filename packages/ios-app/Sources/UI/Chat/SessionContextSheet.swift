@@ -205,6 +205,7 @@ struct SessionContextSheet: View {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     if let snapshot = displayedPresentation {
                         SessionContextUsageCard(snapshot: snapshot)
+                            .environment(\.tronSettingsVisualTheme, nil)
                         modelSummaryCard(snapshot)
                         sessionSection(snapshot)
                         exportSection
@@ -311,10 +312,15 @@ struct SessionContextSheet: View {
                 identity: "manage-session.rename"
             )
         }
+        // The Session group owns one adaptive accent. Sheet content presented
+        // below this boundary inherits it through SwiftUI's presentation
+        // environment, while usage/model/export cards explicitly keep their own
+        // identities.
+        .tronSettingsVisualTheme(accent: sessionRowAccent)
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(Color.tronEmerald)
+        .tint(sessionRowAccent)
         .onAppear {
             if capturedNoticeScope == nil {
                 capturedNoticeScope = model.presentationTarget(for: sessionID).map {
@@ -376,7 +382,7 @@ struct SessionContextSheet: View {
     }
 
     private var configurationRowAccent: Color { .tronPurple }
-    private var sessionRowAccent: Color { .tronBlue }
+    private var sessionRowAccent: Color { .tronSessionTeal }
     private var exportRowAccent: Color { .tronSlate }
 
     private func processHistoryRow(_ snapshot: SessionContextPresentation) -> some View {
@@ -545,7 +551,7 @@ struct SessionContextSheet: View {
     }
 
     private func sessionSection(_ snapshot: SessionContextPresentation) -> some View {
-        TronGlassCard(accent: .tronCyan) {
+        TronGlassCard(accent: sessionRowAccent) {
             VStack(spacing: 0) {
                 gitRow
                 divider()
@@ -586,6 +592,8 @@ struct SessionContextSheet: View {
 
     private var exportSection: some View {
         TronGlassCard(accent: exportRowAccent) {
+            // Export is intentionally neutral and must not inherit Session's
+            // teal navigation/group accent.
             VStack(spacing: 0) {
                 exportRow(
                     format: "html",
@@ -606,6 +614,7 @@ struct SessionContextSheet: View {
                 }
             }
         }
+        .environment(\.tronSettingsVisualTheme, nil)
     }
 
     private var gitRow: some View {
@@ -617,7 +626,7 @@ struct SessionContextSheet: View {
     }
 
     private func divider() -> some View {
-        TronSettingsDivider(accent: .tronCyan)
+        TronSettingsDivider(accent: sessionRowAccent)
     }
 
     private func manageRow(

@@ -112,9 +112,9 @@ struct ProcessHistorySheet: View {
                 if let store { history(store) }
                 else { TronLoadingState(label: "Preparing subagent history…") }
             }
-            .tronNavigationTitle("Subagent History", accent: .tronBlue)
+            .tronNavigationTitle("Subagent History", accent: .tronSessionTeal)
             .toolbar { doneToolbar }
-            .tint(Color.tronBlue)
+            .tint(Color.tronSessionTeal)
         }
         .tronManagedSheet(
             item: $selectedProcess,
@@ -139,6 +139,7 @@ struct ProcessHistorySheet: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.hidden)
+        .tronSettingsVisualTheme(accent: .tronSessionTeal)
         .tronPresentation()
         .accessibilityIdentifier("process-history-sheet")
     }
@@ -149,7 +150,7 @@ struct ProcessHistorySheet: View {
             Button { dismiss() } label: {
                 Image(systemName: "checkmark")
                     .font(TronTypography.buttonSM)
-                    .foregroundStyle(Color.tronBlue)
+                    .foregroundStyle(Color.tronSessionTeal)
             }
             .accessibilityLabel("Done")
         }
@@ -626,12 +627,13 @@ struct ReadOnlySubagentSessionSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .foregroundStyle(Color.tronSessionTeal)
                     }
                     .accessibilityLabel("Done")
                 }
             }
         }
+        .tronSettingsVisualTheme(accent: .tronSessionTeal)
         .task(id: openIdentity) {
             guard model.connectionState == .connected,
                   let target = model.presentationTarget(for: parentSessionID) else { return }
