@@ -19,27 +19,41 @@ enum SessionProcessButtonPolicy {
     ) -> String? {
         guard overview?.visibility == .recent else { return nil }
         guard retentionMinutes > 0 else { return nil }
-        let interval = TimeInterval(retentionMinutes * 60)
-        let mountedExpiries = (activities ?? [])
-            .filter { $0.kind == .subagent && $0.visibility == .recent && SessionProcessAdmissionPolicy.admits($0) }
-            .compactMap { activity -> Date? in
-                guard let terminalAt = activity.lifecycle.terminalAt,
-                      let terminal = GatewayTimestamp.parse(terminalAt) else { return nil }
-                return terminal.addingTimeInterval(interval)
-            }
-        // The overview expiry remains the authoritative fallback when Gateway
-        // omitted rows from the bounded mounted subset.
-        let gatewayExpiry = overview?.nearestExpiry.flatMap(GatewayTimestamp.parse)
-        guard let expiry = (mountedExpiries + [gatewayExpiry].compactMap { $0 }).min() else { return nil }
+        // The button outlives the last eligible row, not the first one. The
+        // overview's nearestExpiry is a refresh boundary, not an all-done date.
+        guard let expiry = (activities ?? [])
+            .compactMap({ recentExpiry(for: $0, retentionMinutes: retentionMinutes) }).max() else { return nil }
         return GatewayTimestamp.preciseString(from: expiry)
+    }
+
+    static func recentExpiry(for activity: SessionProcessActivity, retentionMinutes: Int) -> Date? {
+        guard retentionMinutes > 0, activity.kind == .subagent,
+              activity.visibility == .recent, SessionProcessAdmissionPolicy.admits(activity),
+              let terminal = activity.lifecycle.terminalAt.flatMap(GatewayTimestamp.parse) else { return nil }
+        let preferred = terminal.addingTimeInterval(TimeInterval(min(retentionMinutes, 5) * 60))
+        return activity.lifecycle.recentUntil.flatMap(GatewayTimestamp.parse).map { min($0, preferred) } ?? preferred
+    }
+
+    static func visibleActivities(
+        _ activities: [SessionProcessActivity], retentionMinutes: Int, now: Date
+    ) -> [SessionProcessActivity] {
+        activities.filter { activity in
+            guard activity.kind == .subagent, SessionProcessAdmissionPolicy.admits(activity) else { return false }
+            if activity.visibility == .active { return true }
+            return recentExpiry(for: activity, retentionMinutes: retentionMinutes).map { $0 > now } == true
+        }
     }
 
     static func isLocallyExpired(
         recentExpiry: String?,
-        expiredRecentExpiry: String?
+        expiredRecentExpiry: String?,
+        now: Date? = nil
     ) -> Bool {
         guard let recentExpiry else { return false }
         return expiredRecentExpiry == recentExpiry
+            || now.map { reference in
+                GatewayTimestamp.parse(recentExpiry).map { $0 <= reference } == true
+            } == true
     }
 }
 
@@ -110,10 +124,11 @@ struct SessionProcessButton: View {
     private var isVisible: Bool {
         SessionProcessButtonPolicy.isVisible(
             overview: overview,
-            hasAdmittedActivity: hasAdmittedActivity,
+            hasAdmittedActivity: hasAdmittedActivity && !visibleActivities.isEmpty,
             localRecentExpired: SessionProcessButtonPolicy.isLocallyExpired(
                 recentExpiry: recentExpiryIdentity,
-                expiredRecentExpiry: locallyExpiredRecentExpiry
+                expiredRecentExpiry: locallyExpiredRecentExpiry,
+                now: .now
             ),
             recentFinishedRetentionMinutes: appBehaviorSettings.subagentRecentFinishedRetentionMinutes
         )
@@ -127,16 +142,28 @@ struct SessionProcessButton: View {
         )
     }
 
+    private var visibleActivities: [SessionProcessActivity] {
+        SessionProcessButtonPolicy.visibleActivities(
+            processActivities ?? [],
+            retentionMinutes: appBehaviorSettings.subagentRecentFinishedRetentionMinutes,
+            now: .now
+        )
+    }
+
     private func accessibilityValue(overview: SessionProcessOverview) -> String {
+        let activities = visibleActivities
+        let active = activities.filter { $0.visibility == .active }.count
+        let recent = activities.filter { $0.visibility == .recent }.count
+        let problems = activities.filter { $0.lifecycle.state.isProblem }.count
         var parts: [String] = []
-        if overview.activeCount > 0 {
-            parts.append("\(overview.activeCount) active")
+        if active > 0 {
+            parts.append("\(active) active")
         }
-        if overview.recentCount > 0 {
-            parts.append("\(overview.recentCount) recently finished")
+        if recent > 0 {
+            parts.append("\(recent) recently finished")
         }
-        if overview.problemCount > 0 {
-            parts.append("\(overview.problemCount) with problems")
+        if problems > 0 {
+            parts.append("\(problems) with problems")
         }
         return parts.joined(separator: ", ")
     }

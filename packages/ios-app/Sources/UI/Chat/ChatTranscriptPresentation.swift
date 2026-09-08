@@ -1645,10 +1645,6 @@ enum ChatToolInvocationOrdering {
         ordered(tools, startedAt: \.startedAt)
     }
 
-    static func newestInvocationTimestamp(in tools: [ChatToolDescriptor]) -> String? {
-        ordered(tools, startedAt: \.startedAt).first(where: { ToolInvocationTimestamp.date($0.startedAt) != nil })?.startedAt
-    }
-
     private static func ordered<Value>(
         _ values: [Value],
         startedAt: (Value) -> String?
@@ -1664,9 +1660,10 @@ enum ChatToolInvocationOrdering {
             case (nil, _?):
                 return false
             default:
-                // No timestamp is evidence of recency. Keep source order for
-                // both missing values and equal parsed instants.
-                return left.offset < right.offset
+                // Calls in one message commonly share a timestamp. Their
+                // canonical/group invocation order is the remaining evidence,
+                // so later source calls come first, never completion order.
+                return left.offset > right.offset
             }
         }.map(\.element)
     }
@@ -1695,9 +1692,6 @@ struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
         ChatToolInvocationOrdering.reverseChronological(tools)
     }
 
-    var newestInvocationTimestamp: String? {
-        ChatToolInvocationOrdering.newestInvocationTimestamp(in: tools)
-    }
     var groupIDs: [String] {
         var seen = Set<String>()
         return tools.compactMap(\.groupId).filter { seen.insert($0).inserted }

@@ -14,10 +14,9 @@ final class AppLocalBehaviorSettings {
 
     var subagentRecentFinishedRetentionMinutes: Int {
         didSet {
-            let bounded = Self.subagentRecentFinishedRetentionRange.clamp(newValue)
-            if bounded != newValue {
+            let bounded = Self.subagentRecentFinishedRetentionRange.clamp(subagentRecentFinishedRetentionMinutes)
+            if bounded != subagentRecentFinishedRetentionMinutes {
                 subagentRecentFinishedRetentionMinutes = bounded
-                return
             }
             defaults.set(bounded, forKey: Self.subagentRecentFinishedRetentionKey)
         }

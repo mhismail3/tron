@@ -7,17 +7,22 @@ struct SessionProcessesSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var selectedProcess: SessionProcessActivity?
     @State private var detent: PresentationDetent = .medium
+    @State private var appSettings = AppLocalBehaviorSettings.shared
 
     var body: some View {
         NavigationStack {
-            Group {
-                let sections = SessionProcessProjection.sections(activities)
-                if !sections.active.isEmpty || !sections.recent.isEmpty {
-                    processList(activities: activities)
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let visible = SessionProcessButtonPolicy.visibleActivities(
+                    activities,
+                    retentionMinutes: appSettings.subagentRecentFinishedRetentionMinutes,
+                    now: context.date
+                )
+                if !visible.isEmpty {
+                    processList(activities: visible)
                 } else {
                     SessionProcessPlaceholder(
                         title: "No active subagents",
-                        detail: "Active and recently finished subagents appear here.",
+                        detail: "Finished subagents remain available in Manage Session’s Subagent History.",
                         icon: "person.2"
                     )
                     .padding(18)
@@ -356,14 +361,6 @@ private struct SessionProcessRow: View {
                 }
             }
 
-            if let invocation = ToolInvocationTimestamp.text(for: process.startedAt) {
-                Text("Invoked \(invocation)")
-                    .font(TronTypography.secondaryCodeDescription)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .monospacedDigit()
-                    .accessibilityLabel(ToolInvocationTimestamp.accessibilityText(for: process.startedAt) ?? "")
-            }
-
             ToolChipFlowLayout(spacing: 5) {
                 if !process.executionMode.displayName.isEmpty {
                     SessionProcessPill(
@@ -446,7 +443,6 @@ private struct SessionProcessRow: View {
             statusText,
             process.executionMode.displayName.isEmpty ? nil : process.executionMode.displayName,
             process.durationMs.map { ToolTiming.format(milliseconds: $0) },
-            ToolInvocationTimestamp.accessibilityText(for: process.startedAt),
             latestAction,
             process.toolCount.map { SessionProcessRowPresentation.countLabel($0, singular: "tool") },
             process.turnCount.map { SessionProcessRowPresentation.countLabel($0, singular: "turn") },

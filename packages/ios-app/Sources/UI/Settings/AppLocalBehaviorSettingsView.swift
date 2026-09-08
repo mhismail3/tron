@@ -9,12 +9,12 @@ struct AppLocalBehaviorSettingsView: View {
                 TronSettingsGroup("Subagent Activity", accent: .tronEmerald, surfaceStyle: .scrollOptimized) {
                     TronValueRow(
                         icon: "circle.dotted",
-                        title: "Recently finished retention",
-                        detail: "Show completed subagents after they finish",
+                        title: "Show finished subagents",
+                        detail: "Keep the subagent button visible after work finishes",
                         value: retentionLabel,
                         accent: .tronEmerald
                     ) {
-                        Picker("Recently finished retention", selection: $settings.subagentRecentFinishedRetentionMinutes) {
+                        Picker("Show finished subagents", selection: $settings.subagentRecentFinishedRetentionMinutes) {
                             ForEach(Array(AppLocalBehaviorSettings.subagentRecentFinishedRetentionRange), id: \.self) { minutes in
                                 Text(minutes == 0 ? "Only active" : "\(minutes) minute\(minutes == 1 ? "" : "s")")
                                     .tag(minutes)
@@ -23,12 +23,12 @@ struct AppLocalBehaviorSettingsView: View {
                         .labelsHidden()
                         .pickerStyle(.menu)
                         .tint(.tronEmerald)
-                        .accessibilityLabel("Recently finished retention")
+                        .accessibilityLabel("Show finished subagents")
                     }
                 }
                 TronInfoCard(
                     icon: "info.circle",
-                    text: "This local preference changes only the composer orb and recent subagent presentation. Gateway history and completed process facts are unchanged.",
+                    text: "Only active hides the button as soon as all subagents finish. This applies to every session on this iPhone. Finished subagents are always available in Manage Session’s Subagent History.",
                     accent: .tronSlate
                 )
             }

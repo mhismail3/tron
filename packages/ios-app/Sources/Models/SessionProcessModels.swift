@@ -456,21 +456,17 @@ enum SessionProcessProjection {
         let lhsProblem = lhs.lifecycle.attention == .needsAttention || lhs.lifecycle.state.isProblem
         let rhsProblem = rhs.lifecycle.attention == .needsAttention || rhs.lifecycle.state.isProblem
         if lhsProblem != rhsProblem { return lhsProblem }
-        // Progress and terminal timestamps describe observation, not
-        // invocation order. Missing starts remain older/less certain than a
-        // parsed invocation and never acquire a fabricated current time.
-        let lhsTime = lhs.startedAt.flatMap(GatewayTimestamp.parse)
-        let rhsTime = rhs.startedAt.flatMap(GatewayTimestamp.parse)
-        switch (lhsTime, rhsTime) {
-        case let (lhsTime?, rhsTime?) where lhsTime != rhsTime:
-            return lhsTime > rhsTime
-        case (_?, nil):
-            return true
-        case (nil, _?):
-            return false
-        default:
-            return lhs.processId < rhs.processId
-        }
+        // Active observation timestamps advance with progress heartbeats and
+        // are not ordering authority. Hold rows at their run-start boundary;
+        // terminal history may continue using its fixed completion boundary.
+        let lhsTime = lhs.visibility == .active
+            ? (lhs.startedAt ?? "")
+            : (lhs.lifecycle.terminalAt ?? lhs.lifecycle.observedAt)
+        let rhsTime = rhs.visibility == .active
+            ? (rhs.startedAt ?? "")
+            : (rhs.lifecycle.terminalAt ?? rhs.lifecycle.observedAt)
+        if lhsTime != rhsTime { return lhsTime > rhsTime }
+        return lhs.processId < rhs.processId
     }
 }
 

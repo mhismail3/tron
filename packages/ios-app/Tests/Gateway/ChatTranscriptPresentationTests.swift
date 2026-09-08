@@ -1500,8 +1500,10 @@ struct ChatTranscriptPresentationTests {
             toolPresentation("tied", startedAt: "2026-01-01T00:00:03Z").descriptor,
         ])
 
-        #expect(run.reverseChronologicalTools.map(\.id) == ["newer", "tied", "older", "missing"])
-        #expect(run.newestInvocationTimestamp == "2026-01-01T00:00:03+00:00")
+        #expect(run.reverseChronologicalTools.map(\.id) == ["tied", "newer", "older", "missing"])
+        #expect(ChatToolInvocationOrdering.reverseChronological([
+            toolPresentation("first"), toolPresentation("second"),
+        ]).map(\.id) == ["second", "first"])
         #expect(ChatToolInvocationOrdering.reverseChronological([
             toolPresentation("old", startedAt: "2026-01-01T00:00:01Z"),
             toolPresentation("new", startedAt: "2026-01-01T00:00:03Z"),

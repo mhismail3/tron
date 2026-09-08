@@ -84,18 +84,9 @@ struct ToolCard: View {
                 iconSize: ChatCompactPillLayoutPolicy.toolIconSize,
                 progressOffsetX: ChatCompactPillLayoutPolicy.runningToolPulseOffsetX
             ) {
-                HStack(spacing: 4) {
-                    if let invocation = ToolInvocationTimestamp.text(for: timing?.startedAt) {
-                        Text("Invoked \(invocation)")
-                            .font(TronTypography.secondaryCodeDescription)
-                            .monospacedDigit()
-                            .lineLimit(1)
-                    }
-                    if let timing {
-                        ToolElapsedText(tool: timing, color: tone.secondaryColor)
-                    }
+                if let timing {
+                    ToolElapsedText(tool: timing, color: tone.secondaryColor)
                 }
-                .accessibilityElement(children: .combine)
             }
         }
         .contentShape(RoundedRectangle(
@@ -156,9 +147,8 @@ struct ToolCard: View {
     }
 
     private var accessibilityLabel: String {
-        let invocation = ToolInvocationTimestamp.accessibilityText(for: timing?.startedAt)
         let duration = timing?.elapsedMilliseconds().map(ToolTiming.format(milliseconds:))
-        return [displayTitle, subtitle, invocation, duration].compactMap { $0 }.joined(separator: ", ")
+        return [displayTitle, subtitle, duration].compactMap { $0 }.joined(separator: ", ")
     }
     private var isRunning: Bool {
         subtitle == "Running" || subtitle == "Invocation"
@@ -420,16 +410,7 @@ private struct ToolActivityChip: View {
                 iconSize: ChatCompactPillLayoutPolicy.toolIconSize,
                 progressOffsetX: ChatCompactPillLayoutPolicy.runningToolPulseOffsetX
             ) {
-                HStack(spacing: 4) {
-                    if let invocation = ToolInvocationTimestamp.text(for: run.newestInvocationTimestamp) {
-                        Text("Invoked \(invocation)")
-                            .font(TronTypography.secondaryCodeDescription)
-                            .monospacedDigit()
-                            .lineLimit(1)
-                    }
-                    ToolRunElapsedText(run: run, color: visual.tone.secondaryColor)
-                }
-                .accessibilityElement(children: .combine)
+                ToolRunElapsedText(run: run, color: visual.tone.secondaryColor)
             }
             .contentTransition(reduceMotion ? .opacity : .interpolate)
         }
@@ -493,9 +474,8 @@ private struct ToolActivityChip: View {
     }
 
     private func accessibilityLabel(_ visual: ChatCompactPillVisualState) -> String {
-        let invocation = ToolInvocationTimestamp.accessibilityText(for: run.newestInvocationTimestamp)
         let duration = run.elapsedMilliseconds().map(ToolTiming.format(milliseconds:))
-        return [visual.title, visual.detail, invocation, duration].compactMap { $0 }.joined(separator: ", ")
+        return [visual.title, visual.detail, duration].compactMap { $0 }.joined(separator: ", ")
     }
 }
 
@@ -746,17 +726,20 @@ private struct ToolRunSummaryRow: View {
                         .foregroundStyle(Color.tronTextPrimary)
                         .lineLimit(2)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    HStack(spacing: 4) {
-                        if let invocation = ToolInvocationTimestamp.text(for: tool.startedAt) {
-                            Text("Invoked \(invocation)")
+                    VStack(alignment: .trailing, spacing: 3) {
+                        HStack(spacing: 4) {
+                            Text(presentation.status)
                                 .font(TronTypography.secondaryCodeDescription)
+                            if presentation.elapsedMilliseconds != nil {
+                                Text("·")
+                                    .font(TronTypography.secondaryCodeDescription)
+                                ToolElapsedText(tool: tool.descriptor, color: accent)
+                            }
                         }
-                        Text(presentation.status)
-                            .font(TronTypography.secondaryCodeDescription)
-                        if presentation.elapsedMilliseconds != nil {
-                            Text("·")
+                        if let invocation = ToolInvocationTimestamp.text(for: tool.startedAt) {
+                            Text(invocation)
                                 .font(TronTypography.secondaryCodeDescription)
-                            ToolElapsedText(tool: tool.descriptor, color: accent)
+                                .foregroundStyle(Color.tronTextSecondary)
                         }
                     }
                     .foregroundStyle(accent)
