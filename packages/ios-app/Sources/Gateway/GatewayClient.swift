@@ -526,6 +526,7 @@ actor GatewayClient {
     private let uuidSource: UUIDSource
     private let frameDecoder: GatewayFrameDecoder
     private let boundedHTTPDataTransport: BoundedHTTPDataTransport
+    private let browserLiveTransport: BoundedHTTPDataTransport
     private let boundedHTTPUploadTransport: BoundedHTTPUploadTransport
     private let boundedHTTPFileTransport: BoundedHTTPFileTransport
     private let performanceSignposts: any PerformanceSignposting
@@ -617,6 +618,7 @@ actor GatewayClient {
         uuidSource: UUIDSource = .random,
         frameDecoder: GatewayFrameDecoder = .gateway,
         boundedHTTPDataTransport: BoundedHTTPDataTransport = .urlSession,
+        browserLiveTransport: BoundedHTTPDataTransport = .noRedirects,
         boundedHTTPUploadTransport: BoundedHTTPUploadTransport = .urlSession,
         boundedHTTPFileTransport: BoundedHTTPFileTransport = .urlSession,
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
@@ -629,6 +631,7 @@ actor GatewayClient {
         self.uuidSource = uuidSource
         self.frameDecoder = frameDecoder
         self.boundedHTTPDataTransport = boundedHTTPDataTransport
+        self.browserLiveTransport = browserLiveTransport
         self.boundedHTTPUploadTransport = boundedHTTPUploadTransport
         self.boundedHTTPFileTransport = boundedHTTPFileTransport
         self.performanceSignposts = performanceSignposts
@@ -1172,6 +1175,36 @@ actor GatewayClient {
         return value
     }
 
+    func openBrowserLiveView(
+        viewId: String,
+        generation: String,
+        sessionID: String,
+        profileID: String
+    ) async throws -> BrowserLiveLease {
+        guard info?.capabilities.contains("browser-live-view.v1") == true else { throw BrowserLiveError.ended }
+        guard let profile, profile.id == profileID, let token,
+              let url = Self.liveViewPath(viewId: viewId, sessionID: sessionID).flatMap({ profile.httpURL(path: $0) }) else { throw CancellationError() }
+        try Task.checkCancellation()
+        let connectionID = connection?.id
+        var request = URLRequest(url: url, timeoutInterval: 10)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let body = try JSONEncoder.gateway.encode(["generation": generation])
+        request.httpBody = body
+        request.setValue(String(body.count), forHTTPHeaderField: "Content-Length")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let (data, http) = try await browserLiveTransport.data(for: request, maximumBytes: 64 * 1_024)
+        guard http.statusCode == 200, http.url == url else { throw BrowserLiveError.ended }
+        let wire = try JSONDecoder.gateway.decode(BrowserLiveLease.Wire.self, from: data)
+        guard wire.descriptor.viewId == viewId, wire.descriptor.generation == generation else { throw BrowserLiveError.invalidResponse }
+        let lease = try BrowserLiveLease(wire: wire, request: request, transport: browserLiveTransport)
+        guard !Task.isCancelled, self.profile?.id == profileID, connection?.id == connectionID else {
+            await lease.close()
+            throw CancellationError()
+        }
+        return lease
+    }
+
     func displayArtifactFile(
         id: String,
         sessionID: String,
@@ -1280,6 +1313,15 @@ actor GatewayClient {
 
     private func mediaURL(id: String, sessionID: String? = nil, profile: GatewayProfile) -> URL? {
         Self.mediaPath(id: id, sessionID: sessionID).flatMap { profile.httpURL(path: $0) }
+    }
+
+    nonisolated static func liveViewPath(viewId: String, sessionID: String) -> String? {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+        guard !viewId.isEmpty, viewId.utf8.count <= 200, !sessionID.isEmpty, sessionID.utf8.count <= 200,
+              let encodedView = viewId.addingPercentEncoding(withAllowedCharacters: allowed),
+              let encodedSession = sessionID.addingPercentEncoding(withAllowedCharacters: allowed) else { return nil }
+        guard ![".", ".."].contains(viewId), ![".", ".."].contains(sessionID) else { return nil }
+        return "/v1/sessions/\(encodedSession)/live-views/\(encodedView)"
     }
 
     nonisolated static func mediaPath(id: String, sessionID: String? = nil) -> String? {

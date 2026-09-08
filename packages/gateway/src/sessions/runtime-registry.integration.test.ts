@@ -5650,6 +5650,32 @@ export default function (pi) {
     await lease.release();
   });
 
+  it("authorizes live views only from admitted display results on the exact canonical branch", async () => {
+    const fixture = await coldFixture("active-browser-display-branch");
+    fixture.manager.appendMessage({ role: "user", content: "root", timestamp: Date.now() });
+    const root = fixture.manager.getEntries().at(-1)!;
+    const result = (viewId: string, toolName = "display") => ({
+      role: "toolResult" as const, toolCallId: viewId, toolName, isError: false, timestamp: Date.now(),
+      content: [{ type: "text" as const, text: "Displayed" }],
+      details: { display: { schema: "tron.display.v1", displayId: viewId, revision: 1,
+        title: "Browser", altText: "Browser", kind: "browser_live",
+        presentation: { requestedSurface: "sheet", inlineTapAction: "sheet" },
+        eligibleSurfaces: ["sheet", "floating"], fallbackText: "Unavailable",
+        liveView: { schema: "tron.browser-live-view.v1", viewId, generation: "generation",
+          title: "Browser", fallbackText: "Unavailable" } } },
+    });
+    fixture.manager.appendMessage(result("abandoned"));
+    fixture.manager.branch(root.id);
+    fixture.manager.appendMessage(result("spoof", "other-tool"));
+    fixture.manager.appendMessage(result("active"));
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    expect(slot.referencesBrowserLiveView("abandoned", "generation")).toBe(false);
+    expect(slot.referencesBrowserLiveView("spoof", "generation")).toBe(false);
+    expect(slot.referencesBrowserLiveView("active", "wrong-generation")).toBe(false);
+    expect(slot.referencesBrowserLiveView("active", "generation")).toBe(true);
+    expect(fixture.registry.authorizeBrowserLiveView(fixture.manager.getSessionId(), "active", "generation")).toBe(true);
+  });
+
   it("exports the complete canonical JSONL tree including abandoned branches", async () => {
     const fixture = await coldFixture("complete-jsonl-export");
     await fixture.registry.initializeBlobStorage();

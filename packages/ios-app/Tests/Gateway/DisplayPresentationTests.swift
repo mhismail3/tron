@@ -42,6 +42,37 @@ struct DisplayPresentationTests {
         #expect(DisplayPresentationPolicy.effectiveSurface(for: webpage) == .sheet)
     }
 
+    @Test("browser live displays remain opaque and are sheet/floating only")
+    func browserLiveDisplay() throws {
+        let data = Data(#"""
+        {
+          "schema":"tron.display.v1", "displayId":"live-1", "revision":1,
+          "title":"Browser", "altText":"Live browser viewport", "kind":"browser_live",
+          "presentation":{"requestedSurface":"floating","inlineTapAction":"sheet"},
+          "eligibleSurfaces":["sheet","floating"], "fallbackText":"Unavailable",
+          "liveView":{"schema":"tron.browser-live-view.v1","viewId":"view-1","generation":"runtime-1:browser-1","title":"Browser view","fallbackText":"Unavailable"}
+        }
+        """#.utf8)
+        let display = try JSONDecoder.gateway.decode(DisplayProjection.self, from: data)
+        #expect(display.liveView?.viewId == "view-1")
+        #expect(DisplayPresentationPolicy.effectiveSurface(for: display) == .floating)
+        #expect(DisplayPresentationPolicy.eligibleSurfaces(for: .browserLive) == [.sheet, .floating])
+
+        // Keep the image's valid surface list so this specifically detects the
+        // wrong-kind/live-source defect rather than failing an unrelated guard.
+        var wrongKind = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        wrongKind["kind"] = "image"
+        wrongKind["eligibleSurfaces"] = ["sheet", "inline", "floating"]
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder.gateway.decode(DisplayProjection.self, from: JSONSerialization.data(withJSONObject: wrongKind))
+        }
+        var dualSource = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        dualSource["remoteURL"] = "https://example.com"
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder.gateway.decode(DisplayProjection.self, from: JSONSerialization.data(withJSONObject: dualSource))
+        }
+    }
+
     @Test("malformed display descriptors fail closed")
     func malformedWire() {
         let unsafe = Data(#"""

@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { GatewayError, publicError } from "../errors.js";
 import type { JsonValue } from "../protocol/types.js";
-import type { DeviceStore } from "../security/device-store.js";
+import type { DeviceIdentity, DeviceStore } from "../security/device-store.js";
 import { RateLimiter } from "../security/rate-limiter.js";
 import type { UploadStore } from "../machine/upload-store.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
@@ -15,6 +15,7 @@ import type { GatewayLogger } from "./logger.js";
 import { GatewayService, type ClientContext } from "./gateway-service.js";
 import { MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import { SessionSyncBarrier, type BufferedSessionEvent } from "./session-sync.js";
+import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 
 // Retain only recent former IDs while an active subscription is rekeyed. Older
 // IDs are stale control paths and may safely require a fresh session.open.
@@ -381,6 +382,9 @@ export class GatewayServer {
       auth: AuthBroker;
       service: GatewayService;
       logger: GatewayLogger;
+      liveViews?: BrowserLiveViewRegistry;
+      /** Synchronous canonical-branch admission inside the device credential cut. */
+      authorizeBrowserLiveView?: (sessionId: string, viewId: string, generation: string) => boolean;
     },
   ) {
     this.server = createServer((request, response) => void this.handleHttp(request, response));
@@ -553,6 +557,7 @@ export class GatewayServer {
     // admission and observer ownership synchronously, while accepted RPCs are
     // allowed to finish independently of the socket's physical close.
     this.options.auth.cancelOwner(deviceId);
+    this.options.liveViews?.closeViewerIdentity(deviceId);
     for (const client of this.clients.values()) {
       if (client.isLocal || client.identity !== deviceId) continue;
       client.revoked = true;
@@ -608,7 +613,7 @@ export class GatewayServer {
       }
 
       const admitted = await this.options.devices.authenticateAndAdmit(bearer(request), (authenticated) => {
-        void this.handleAuthenticatedHttp(request, response, url).catch((error) => this.handleHttpError(request, response, error));
+        void this.handleAuthenticatedHttp(request, response, url, authenticated).catch((error) => this.handleHttpError(request, response, error));
         return true;
       });
       if (admitted === null) return sendJson(response, 401, { error: { code: "unauthenticated", message: "Pairing token is invalid" } });
@@ -639,7 +644,12 @@ export class GatewayServer {
     sendJson(response, status, { error: failure });
   }
 
-  private async handleAuthenticatedHttp(request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> {
+  private async handleAuthenticatedHttp(
+    request: IncomingMessage,
+    response: ServerResponse,
+    url: URL,
+    authenticated: { kind: "local" } | DeviceIdentity,
+  ): Promise<void> {
     if (request.method === "POST" && url.pathname === "/v1/uploads") {
       await this.options.uploads.withBodyAdmission(async () => {
         const name = url.searchParams.get("name") ?? "attachment";
@@ -657,6 +667,77 @@ export class GatewayServer {
       response.writeHead(204, { "cache-control": "no-store" });
       response.end();
       return;
+    }
+    const liveRoute = /^\/v1\/sessions\/([^/]+)\/live-views\/([^/]+)(?:\/(frame))?$/.exec(url.pathname);
+    if (liveRoute && this.options.liveViews) {
+      const sessionId = decodeURIComponent(liveRoute[1]!);
+      const viewId = decodeURIComponent(liveRoute[2]!);
+      const viewerId = authenticated.kind === "local" ? "local-wrapper" : authenticated.deviceId;
+      if (request.method === "POST" && liveRoute[3] === undefined) {
+        const bytes = await readBoundedBody(request, 4_096);
+        let body: unknown;
+        try { body = JSON.parse(bytes.toString("utf8")); } catch { throw new GatewayError("invalid_request", "Live view body must be JSON"); }
+        const generation = body && typeof body === "object" && !Array.isArray(body)
+          ? (body as Record<string, unknown>).generation : undefined;
+        if (typeof generation !== "string" || generation.length > 200) throw new GatewayError("invalid_request", "Live view generation is required");
+        const openAndRespond = (): boolean => {
+          if (request.readableAborted || request.socket.destroyed || response.destroyed) return true;
+          if (this.options.authorizeBrowserLiveView?.(sessionId, viewId, generation) !== true) {
+            throw new GatewayError("not_found", "Browser view is not on the active session branch");
+          }
+          const lease = this.options.liveViews!.open(sessionId, viewId, generation, viewerId);
+          const close = (): void => { this.options.liveViews!.close(lease.leaseId, viewerId, { sessionId, viewId, generation }); };
+          response.once("close", () => { if (!response.writableFinished) close(); });
+          try { sendJson(response, 200, lease); } catch (error) { close(); throw error; }
+          return true;
+        };
+        // Body consumption yielded after initial authentication. Re-enter the
+        // existing credential mutex, then authorize/create/publish synchronously.
+        const admitted = authenticated.kind === "local" ? openAndRespond()
+          : await this.options.devices.admitDevice(authenticated.deviceId, openAndRespond);
+        if (admitted === undefined) sendJson(response, 401, { error: { code: "unauthenticated", message: "Device was revoked" } });
+        return;
+      }
+      const leaseId = request.headers["x-tron-live-lease"];
+      if (typeof leaseId !== "string" || leaseId.length > 200) throw new GatewayError("unauthenticated", "Live view lease is required");
+      const generation = request.headers["x-tron-live-generation"];
+      if (typeof generation !== "string" || generation.length > 200) throw new GatewayError("invalid_request", "Live view generation is required");
+      if (request.method === "DELETE" && liveRoute[3] === undefined) {
+        if (!this.options.liveViews.close(leaseId, viewerId, { sessionId, viewId, generation })) throw new GatewayError("unauthenticated", "Live view lease is invalid");
+        response.writeHead(204, { "cache-control": "no-store" });
+        response.end();
+        return;
+      }
+      if (request.method === "GET" && liveRoute[3] === "frame") {
+        // No await on this path: initial authentication, branch check, lease
+        // admission and publication share the same synchronous authority cut.
+        if (request.readableAborted || request.socket.destroyed || response.destroyed) return;
+        if (this.options.authorizeBrowserLiveView?.(sessionId, viewId, generation) !== true) {
+          this.options.liveViews.retireView(sessionId, viewId, generation);
+          throw new GatewayError("not_found", "Browser view is not on the active session branch");
+        }
+        const afterHeader = request.headers["x-tron-live-after"];
+        if (afterHeader !== undefined && (typeof afterHeader !== "string" || !/^\d{1,16}$/.test(afterHeader))) {
+          throw new GatewayError("invalid_request", "Frame sequence is invalid");
+        }
+        const frame = this.options.liveViews.frame(sessionId, viewId, generation, leaseId, viewerId, Number(afterHeader ?? 0));
+        if ("status" in frame) {
+          response.writeHead(204, { "cache-control": "no-store", "x-tron-live-state": frame.status });
+          response.end();
+          return;
+        }
+        response.writeHead(200, {
+          "content-type": frame.mimeType,
+          "content-length": frame.data.length,
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+          "x-tron-live-width": String(frame.width),
+          "x-tron-live-height": String(frame.height),
+          "x-tron-live-sequence": String(frame.sequence),
+        });
+        response.end(frame.data);
+        return;
+      }
     }
     if (request.method === "GET" && url.pathname.startsWith("/v1/uploads/")) {
       const id = decodeURIComponent(url.pathname.slice("/v1/uploads/".length));
@@ -1447,6 +1528,7 @@ export class GatewayServer {
   async close(): Promise<void> {
     if (this.shuttingDown) return;
     this.shuttingDown = true;
+    this.options.liveViews?.dispose();
     this.options.logger.log("info", "Closing Gateway transport", { event: "gateway.transport-closing", source: "transport" });
     this.ready = false;
     clearInterval(this.heartbeat);

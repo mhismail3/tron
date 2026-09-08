@@ -28,6 +28,7 @@ const entry = (classification: HostClassification, capability: string, limitatio
 
 export const extensionToolAdapterCompatibility = {
   tronDisplay: entry("native-semantic", "display-artifacts.v1", "Reserved first-party tool; durable project artifacts use typed sheet, inline, or floating native presentation, while public URLs remain gesture-gated."),
+  tronBrowserLive: entry("native-semantic", "browser-live-view.v1", "Disposable read-only observation of an exact provider browser generation; only active native sheet/floating viewers hold capture leases. No browser launch, control relay, or durable frame storage."),
   zhushanwenAskUserForm: entry("native-semantic", "form.v1", "Exact npm:@zhushanwen/pi-ask-user@7.0.15 marker contract; one bounded atomic form with no primitive fallback."),
 } as const;
 

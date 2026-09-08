@@ -4,6 +4,7 @@ import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { DISPLAY_SCHEMA, eligibleDisplaySurfaces, normalizePublicDisplayURL, type DisplayInlineTapAction, type DisplayKind, type DisplayProjection, type DisplaySurface } from "./display-contract.js";
 import type { DisplayArtifactStore } from "./display-artifact-store.js";
 import { GatewayError } from "../errors.js";
+import type { BrowserLiveViewRegistry } from "./browser-live-view.js";
 
 const presentationSchema = Type.Object({
   surface: Type.Union([Type.Literal("sheet"), Type.Literal("inline"), Type.Literal("floating")]),
@@ -29,6 +30,11 @@ const parameters = Type.Object({
       url: Type.String({ minLength: 1, maxLength: 8_192 }),
       media: Type.Union([Type.Literal("webpage"), Type.Literal("hls")]),
     }, { additionalProperties: false }),
+    Type.Object({
+      kind: Type.Literal("browser_live"),
+      viewId: Type.String({ minLength: 1, maxLength: 200 }),
+      generation: Type.String({ minLength: 1, maxLength: 200 }),
+    }, { additionalProperties: false }),
   ]),
   presentation: Type.Optional(presentationSchema),
 }, { additionalProperties: false });
@@ -38,7 +44,7 @@ type Parameters = {
   caption?: string;
   altText: string;
   fallbackText?: string;
-  source: { kind: "path"; path: string } | { kind: "internal_file"; path: string } | { kind: "public_url"; url: string; media: "webpage" | "hls" };
+  source: { kind: "path"; path: string } | { kind: "internal_file"; path: string } | { kind: "public_url"; url: string; media: "webpage" | "hls" } | { kind: "browser_live"; viewId: string; generation: string };
   presentation?: { surface: DisplaySurface; inlineTapAction?: DisplayInlineTapAction };
 };
 
@@ -66,19 +72,21 @@ export function createTronDisplayExtension(input: {
   sessionId: () => string;
   cwd: () => string;
   artifacts: DisplayArtifactStore;
+  liveViews?: BrowserLiveViewRegistry;
   internalFilesRoot?: () => Promise<string>;
 }): ExtensionFactory {
   return (pi) => {
     pi.registerTool({
       name: "display",
       label: "Display",
-      description: "Present an artifact or public HTTPS webpage in Tron chat. Sheet is the default; inline and floating apply only to compatible content. source.kind=path uses a path relative to the session directory; internal_file uses a path relative to Tron's internal workspace files/ directory. Neither accepts absolute paths.",
+      description: "Present an artifact, public HTTPS webpage, or read-only live browser view in Tron chat. Sheet is the default; inline and floating apply only to compatible content. source.kind=path uses a path relative to the session directory; internal_file uses a path relative to Tron's internal workspace files/ directory. Neither accepts absolute paths.",
       promptSnippet: "Display visual or document content in Tron chat when it materially improves the response.",
       promptGuidelines: [
         "Use display at your discretion when visual, document, media, or webpage content materially improves the app experience.",
         "Always provide concise alt text and never include secrets or credential-bearing URLs.",
         "Prefer the default sheet surface; use inline for bounded content that belongs in transcript flow and floating for content worth keeping visible while chatting.",
         "Write generated HTML or media to a session file or an internal workspace files/ document before calling display; do not pass inline bytes or base64.",
+        "For live browser viewing, use source.kind=browser_live with the opaque viewId and generation returned by agent_browser get cdp-url. Never invent a handle, supply a browser endpoint, or launch a browser from a historical display.",
       ],
       parameters,
       executionMode: "sequential",
@@ -95,6 +103,8 @@ export function createTronDisplayExtension(input: {
         let kind: DisplayKind;
         let artifact: DisplayProjection["artifact"];
         let remoteURL: string | undefined;
+        let liveView: DisplayProjection["liveView"];
+        const fallbackText = params.fallbackText ?? params.altText;
         if (params.source.kind === "path" || params.source.kind === "internal_file") {
           if (params.source.kind === "internal_file" && !input.internalFilesRoot) {
             throw new GatewayError("conflict", "Tron internal workspace is unavailable");
@@ -107,11 +117,14 @@ export function createTronDisplayExtension(input: {
             throw new Error("Display operation aborted");
           }
           kind = artifact.kind;
+        } else if (params.source.kind === "browser_live") {
+          if (!input.liveViews) throw new GatewayError("conflict", "Browser live viewing is unavailable");
+          liveView = input.liveViews.describe(sessionID, params.source.viewId, params.source.generation);
+          kind = "browser_live";
         } else {
           remoteURL = publicURL(params.source.url);
           kind = params.source.media;
         }
-        const fallbackText = params.fallbackText ?? params.altText;
         const display: DisplayProjection = {
           schema: DISPLAY_SCHEMA,
           displayId: displayID,
@@ -125,6 +138,7 @@ export function createTronDisplayExtension(input: {
           fallbackText,
           ...(artifact ? { artifact } : {}),
           ...(remoteURL ? { remoteURL } : {}),
+          ...(liveView ? { liveView } : {}),
         };
         return {
           content: [{ type: "text", text: `Displayed “${params.title}”. ${fallbackText}` }],

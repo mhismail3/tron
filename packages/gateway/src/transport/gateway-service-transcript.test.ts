@@ -178,6 +178,8 @@ describe("session transcript paging", () => {
       "process-transcript-abort.v1",
       "uploads-status.v2",
       "session-export.v2",
+      "display-artifacts.v1",
+      "browser-live-view.v1",
     ]));
     expect(capabilities).not.toContain("uploads-status.v1");
   });

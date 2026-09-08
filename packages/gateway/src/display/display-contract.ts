@@ -4,6 +4,8 @@ import {
   type DisplayArtifactDescriptor,
   type DisplayArtifactKind,
 } from "./display-artifact-store.js";
+import type { BrowserLiveViewDescriptor } from "./browser-live-view.js";
+export { BROWSER_LIVE_VIEW_CAPABILITY as DISPLAY_LIVE_VIEW_CAPABILITY } from "./browser-live-view.js";
 
 export const DISPLAY_SCHEMA = "tron.display.v1";
 export const DISPLAY_CAPABILITY = "display-artifacts.v1";
@@ -14,7 +16,7 @@ const DISPLAY_ARTIFACT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-
 
 export type DisplaySurface = "sheet" | "inline" | "floating";
 export type DisplayInlineTapAction = "sheet" | "none";
-export type DisplayKind = DisplayArtifactKind | "webpage" | "hls";
+export type DisplayKind = DisplayArtifactKind | "webpage" | "hls" | "browser_live";
 
 export interface DisplayPresentationPreference {
   requestedSurface: DisplaySurface;
@@ -34,6 +36,7 @@ export interface DisplayProjection {
   fallbackText: string;
   artifact?: DisplayArtifactDescriptor;
   remoteURL?: string;
+  liveView?: BrowserLiveViewDescriptor;
 }
 
 function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
@@ -100,7 +103,7 @@ function surface(value: unknown): value is DisplaySurface {
 }
 
 function displayKind(value: unknown): value is DisplayKind {
-  return ["image", "markdown", "text", "code", "pdf", "html", "video", "audio", "document", "webpage", "hls"].includes(String(value));
+  return ["image", "markdown", "text", "code", "pdf", "html", "video", "audio", "document", "webpage", "hls", "browser_live"].includes(String(value));
 }
 
 function artifactKind(value: unknown): value is DisplayArtifactKind {
@@ -117,6 +120,7 @@ export function eligibleDisplaySurfaces(kind: DisplayKind, artifactSize?: number
     case "markdown": case "text": case "code": case "pdf": return ["sheet", "inline"];
     case "html": return ["sheet", "floating"];
     case "document": case "webpage": case "hls": return ["sheet"];
+    case "browser_live": return ["sheet", "floating"];
   }
 }
 
@@ -132,7 +136,7 @@ export function admitDisplayProjection(toolName: string | undefined, value: unkn
   const item = candidate as Record<string, unknown>;
   if (!hasOnlyKeys(item, [
     "schema", "displayId", "revision", "title", "caption", "altText", "kind",
-    "presentation", "eligibleSurfaces", "fallbackText", "artifact", "remoteURL",
+    "presentation", "eligibleSurfaces", "fallbackText", "artifact", "remoteURL", "liveView",
   ])) return undefined;
   if (item.schema !== DISPLAY_SCHEMA || !boundedString(item.displayId, 1, 200)
     || item.revision !== 1 || !boundedString(item.title, 1, 256)
@@ -169,15 +173,36 @@ export function admitDisplayProjection(toolName: string | undefined, value: unkn
     };
   }
 
+  let liveView: BrowserLiveViewDescriptor | undefined;
+  if (item.liveView !== undefined) {
+    if (!item.liveView || typeof item.liveView !== "object") return undefined;
+    const source = item.liveView as Record<string, unknown>;
+    if (!hasOnlyKeys(source, ["schema", "viewId", "generation", "title", "fallbackText"])
+      || source.schema !== "tron.browser-live-view.v1"
+      || !boundedString(source.viewId, 1, 200)
+      || !boundedString(source.generation, 1, 200)
+      || !boundedString(source.title, 1, 256)
+      || !boundedString(source.fallbackText, 1, 4_096)) return undefined;
+    liveView = {
+      schema: "tron.browser-live-view.v1",
+      viewId: source.viewId,
+      generation: source.generation,
+      title: source.title,
+      fallbackText: source.fallbackText,
+    };
+  }
+
   let remoteURL: string | undefined;
   if (item.remoteURL !== undefined) {
     if (!boundedString(item.remoteURL, 1, 8_192)) return undefined;
     remoteURL = normalizePublicDisplayURL(item.remoteURL);
     if (!remoteURL) return undefined;
   }
-  if ((artifact === undefined) === (remoteURL === undefined)) return undefined;
-  if (artifact && (item.kind === "webpage" || item.kind === "hls")) return undefined;
+  const sources = [artifact !== undefined, remoteURL !== undefined, liveView !== undefined].filter(Boolean).length;
+  if (sources !== 1) return undefined;
+  if (artifact && (item.kind === "webpage" || item.kind === "hls" || item.kind === "browser_live")) return undefined;
   if (remoteURL && item.kind !== "webpage" && item.kind !== "hls") return undefined;
+  if (liveView && item.kind !== "browser_live") return undefined;
 
   const projectedEligibleSurfaces = item.eligibleSurfaces as DisplaySurface[];
   const eligible = eligibleDisplaySurfaces(item.kind, artifact?.size);
@@ -200,6 +225,7 @@ export function admitDisplayProjection(toolName: string | undefined, value: unkn
     fallbackText: item.fallbackText,
     ...(artifact ? { artifact } : {}),
     ...(remoteURL ? { remoteURL } : {}),
+    ...(liveView ? { liveView } : {}),
   };
 }
 

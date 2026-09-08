@@ -54,6 +54,7 @@ import { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
 import type { ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
+import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { isAutomationId, runIdFromAutomationOperationId } from "../automations/automation-contract.js";
 import {
   INVOCATION_RECEIPT_TYPE,
@@ -484,6 +485,7 @@ export class RuntimeRegistry {
       stageTiming?: (stage: string, durationMs: number, outcome: "success" | "failure") => void;
       machineId?: string;
       notifications?: NotificationService;
+      browserLiveViews?: BrowserLiveViewRegistry;
       workRegistry?: GatewayWorkRegistry;
       extensionArtifactWarning?: (warning: { reason: import("./extension-run-projection.js").ExtensionArtifactRejectionReason; owner: string }) => void;
       scheduleToolOperations?: ScheduleToolOperations;
@@ -908,6 +910,7 @@ export class RuntimeRegistry {
       blobs: this.blobs,
       exports: this.exports,
       displayArtifacts: this.displayArtifacts,
+      ...(this.options.browserLiveViews ? { browserLiveViews: this.options.browserLiveViews } : {}),
       workspace: this.workspace,
       markers: this.markers,
       extensionActivityRecency: this.extensionActivityRecency,
@@ -3570,6 +3573,12 @@ export class RuntimeRegistry {
     if (!this.displayArtifacts.hasOwner(artifactID, sessionID)) return false;
     const slot = await this.acquire(sessionID);
     return slot.referencesDisplayArtifact(artifactID);
+  }
+
+  authorizeBrowserLiveView(sessionID: string, viewId: string, generation: string): boolean {
+    if (this.deletingSessionIds.has(sessionID)) return false;
+    const slot = this.slots.get(sessionID);
+    return slot !== undefined && !slot.isDisposed && slot.referencesBrowserLiveView(viewId, generation);
   }
 
   async acquireDisplayArtifact(

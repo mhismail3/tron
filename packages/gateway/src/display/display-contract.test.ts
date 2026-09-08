@@ -43,6 +43,26 @@ describe("display contract", () => {
     expect(eligibleDisplaySurfaces("video", DISPLAY_EMBEDDED_MEDIA_MAXIMUM_BYTES + 1)).toEqual(["sheet"]);
   });
 
+  it("admits only an opaque browser live source with its exact generation", () => {
+    const admitted = admitDisplayProjection("display", details({
+      kind: "browser_live",
+      eligibleSurfaces: ["sheet", "floating"],
+      artifact: undefined,
+      liveView: {
+        schema: "tron.browser-live-view.v1",
+        viewId: "view-a",
+        generation: "runtime-a:browser-a",
+        title: "Browser view",
+        fallbackText: "Unavailable",
+      },
+    }));
+    expect(admitted?.liveView?.generation).toBe("runtime-a:browser-a");
+    expect(admitDisplayProjection("display", details({
+      kind: "browser_live", eligibleSurfaces: ["sheet", "floating"], artifact: undefined,
+      liveView: { schema: "tron.browser-live-view.v1", viewId: "view-a", generation: "runtime-a:browser-a", title: "Browser view", fallbackText: "Unavailable", cdpUrl: "ws://127.0.0.1:1/devtools/browser/x" },
+    }))).toBeUndefined();
+  });
+
   it("fails closed for spoofed tools, mismatched kinds, and unsafe URLs", () => {
     expect(admitDisplayProjection("other", details())).toBeUndefined();
     expect(admitDisplayProjection("display", { ...details(), extra: true })).toBeUndefined();

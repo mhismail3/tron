@@ -108,7 +108,8 @@ import { createTronScheduleExtension, type ScheduleToolOperations } from "../aut
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { createTronCoreExtension } from "../workspace/tron-core-extension.js";
-import { displayArtifactIDs } from "../display/display-contract.js";
+import { admitDisplayProjection, displayArtifactIDs } from "../display/display-contract.js";
+import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
 
 export type SessionBroadcast = (sessionId: string, topic: string, payload: JsonValue) => void;
@@ -286,6 +287,8 @@ export interface RuntimeSlotDependencies {
   blobs: BlobStore;
   exports: BlobStore;
   displayArtifacts: DisplayArtifactStore;
+  /** Disposable observer registrations; browser state remains provider-owned. */
+  browserLiveViews?: BrowserLiveViewRegistry;
   workspace: TronWorkspace;
   markers: RunMarkerStore;
   extensionActivityRecency: ExtensionActivityRecency;
@@ -343,6 +346,7 @@ export class RuntimeSlot {
   private revision = 0;
   private displayArtifactReferenceKey: string | undefined;
   private displayArtifactReferences: string[] = [];
+  private browserLiveReferences = new Set<string>();
   private eventSequence = 0;
   private phase: SessionPhase;
   private disposed = false;
@@ -1113,20 +1117,38 @@ export class RuntimeSlot {
     return path && existsSync(path) ? path : undefined;
   }
 
-  displayArtifactIDs(): string[] {
+  private refreshDisplayReferences(): void {
     const manager = this.runtime.session.sessionManager;
     const leafID = manager.getLeafId();
     const key = `${manager.getSessionId()}\0${leafID ?? "root"}`;
     if (this.displayArtifactReferenceKey !== key) {
-      this.displayArtifactReferences = displayArtifactIDs(leafID ? manager.getBranch(leafID) : []);
+      const branch = leafID ? manager.getBranch(leafID) : [];
+      this.displayArtifactReferences = displayArtifactIDs(branch);
+      this.browserLiveReferences.clear();
+      for (const entry of branch) {
+        if (entry.type !== "message" || entry.message.role !== "toolResult") continue;
+        const display = admitDisplayProjection(entry.message.toolName, entry.message.details);
+        if (display?.liveView) this.browserLiveReferences.add(`${display.liveView.viewId}\0${display.liveView.generation}`);
+      }
       this.displayArtifactReferenceKey = key;
     }
+  }
+
+  displayArtifactIDs(): string[] {
+    this.refreshDisplayReferences();
     return [...this.displayArtifactReferences];
   }
 
   referencesDisplayArtifact(artifactID: string): boolean {
-    this.displayArtifactIDs();
+    this.refreshDisplayReferences();
     return this.displayArtifactReferences.includes(artifactID);
+  }
+
+  referencesBrowserLiveView(viewId: string, generation: string): boolean {
+    // Cache only admitted canonical display references for this exact leaf;
+    // arbitrary tool details cannot grant live-view access.
+    this.refreshDisplayReferences();
+    return this.browserLiveReferences.has(`${viewId}\0${generation}`);
   }
 
   sessionEnvironment(): Record<string, string> {
@@ -1183,6 +1205,7 @@ export class RuntimeSlot {
                 sessionId: () => this.id,
                 cwd: () => this.cwd,
                 artifacts: this.dependencies.displayArtifacts,
+                ...(this.dependencies.browserLiveViews ? { liveViews: this.dependencies.browserLiveViews } : {}),
                 internalFilesRoot: () => this.dependencies.workspace.filesRoot(),
               }),
             },
@@ -1203,7 +1226,11 @@ export class RuntimeSlot {
               }),
             }] : []),
           ],
-          extensionsOverride: (base) => attributeExtensions(base),
+          extensionsOverride: (base) => attributeExtensions(base, this.dependencies.browserLiveViews ? {
+            views: this.dependencies.browserLiveViews,
+            sessionId: sessionManager.getSessionId(),
+            runtimeGeneration: this.runtimeGeneration,
+          } : undefined),
         },
         resourceLoaderReloadOptions: this.resourceReloadOptions,
       });
@@ -1239,6 +1266,7 @@ export class RuntimeSlot {
       sessionManager: this.sessionManager,
       sessionStartEvent: { type: "session_start", reason: "resume" },
     });
+    this.runtime.setBeforeSessionInvalidate(() => this.dependencies.browserLiveViews?.retireSession(this.id));
     this.runtime.setRebindSession(async () => this.bindSession());
     await this.bindSession();
   }
@@ -1411,6 +1439,7 @@ export class RuntimeSlot {
       sessionManager: previousManager,
       sessionStartEvent: { type: "session_start", reason: "resume" },
     });
+    this.runtime.setBeforeSessionInvalidate(() => this.dependencies.browserLiveViews?.retireSession(this.id));
     this.runtime.setRebindSession(async () => this.bindSession());
     await this.bindSession();
   }
@@ -7144,6 +7173,7 @@ export class RuntimeSlot {
   }
 
   private async disposeRuntime(): Promise<void> {
+    this.dependencies.browserLiveViews?.retireSession(this.id);
     this.unregisterExtensionExpiry();
     this.unregisterProcessExpiry();
     for (const activity of this.extensionActivities.values()) {

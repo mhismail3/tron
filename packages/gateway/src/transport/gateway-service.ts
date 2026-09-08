@@ -26,7 +26,7 @@ import {
 } from "../machine/workspace-inspection-service.js";
 import { GitWorktreeService, type SessionSourceControlRequest } from "../machine/git-worktree-service.js";
 import type { UploadStore } from "../machine/upload-store.js";
-import { DISPLAY_CAPABILITY } from "../display/display-contract.js";
+import { DISPLAY_CAPABILITY, DISPLAY_LIVE_VIEW_CAPABILITY } from "../display/display-contract.js";
 import type { TerminalService } from "../machine/terminal-service.js";
 import type { TrustService } from "../admin/trust-service.js";
 import type { SettingsService } from "../admin/settings-service.js";
@@ -260,6 +260,7 @@ export class GatewayService {
         "uploads.v1",
         "uploads-status.v2",
         DISPLAY_CAPABILITY,
+        DISPLAY_LIVE_VIEW_CAPABILITY,
         "terminal.v1",
         "extension-presentation.v1",
         EXTENSION_ACTIVITY_HISTORY_CAPABILITY,

@@ -15,8 +15,8 @@ struct BoundedHTTPDataTransport: Sendable {
         try await BoundedURLSessionDataLoader.load(request, maximumBytes: maximumBytes)
     }
 
-    /// Product-service requests enforce a no-redirect capability boundary.
-    static let pushService = BoundedHTTPDataTransport { request, maximumBytes in
+    /// Credential-bearing capability requests never follow redirects.
+    static let noRedirects = BoundedHTTPDataTransport { request, maximumBytes in
         try await BoundedURLSessionDataLoader.load(
             request,
             maximumBytes: maximumBytes,

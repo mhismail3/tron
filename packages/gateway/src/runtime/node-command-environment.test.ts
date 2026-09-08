@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
-import { configureSupervisedNodeCommandEnvironment } from "./node-command-environment.js";
+import { configureAgentBinEnvironment, configureSupervisedNodeCommandEnvironment } from "./node-command-environment.js";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -156,6 +156,18 @@ describe("supervised Gateway Node command environment", () => {
       environment: environment(wrongPi.root, "stable", "/usr/bin"), architecture: "arm64",
       execPath: wrongPi.runtime, entryPoint: wrongPi.entryPoint,
     })).toThrow(/Pi alias has the wrong target/);
+  });
+
+  it("adds only the canonical executable agent-bin after the payload command path", () => {
+    const root = mkdtempSync(join(tmpdir(), "tron-agent-bin-"));
+    roots.push(root);
+    mkdirSync(join(root, "bin"), { recursive: true });
+    executable(join(root, "bin", "agent-browser"), "browser");
+    const environment = { PATH: "/payload/bin:/usr/bin" };
+    configureAgentBinEnvironment(root, environment);
+    expect(environment.PATH).toBe(`/payload/bin:${root}/bin:/usr/bin`);
+    configureAgentBinEnvironment(root, environment);
+    expect(environment.PATH).toBe(`/payload/bin:${root}/bin:/usr/bin`);
   });
 
   it("rejects a runtime that differs from the running executable and oversized PATH", () => {

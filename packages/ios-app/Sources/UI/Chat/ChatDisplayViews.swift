@@ -1,5 +1,6 @@
 import AVFoundation
 import AVKit
+import ImageIO
 import SafariServices
 import SwiftUI
 import WebKit
@@ -304,6 +305,7 @@ struct DisplayToolView: View {
         case .pdf, .document: "doc.richtext"
         case .html, .webpage: "safari"
         case .hls: "dot.radiowaves.left.and.right"
+        case .browserLive: "rectangle.inset.filled.and.person.filled"
         case .markdown, .text, .code: "text.page"
         case nil: "rectangle.on.rectangle"
         }
@@ -397,7 +399,7 @@ enum DisplayInlineLayoutPolicy {
     static func openingViewportHeight(for kind: DisplayKind) -> CGFloat {
         switch kind {
         case .image, .video, .audio, .pdf: 220
-        case .markdown, .text, .code, .html, .document, .webpage, .hls: 180
+        case .markdown, .text, .code, .html, .document, .webpage, .hls, .browserLive: 180
         }
     }
 }
@@ -653,6 +655,8 @@ struct DisplayArtifactContent: View {
                 DisplayHTMLArtifactView(sessionID: sessionID, display: display)
             case .video, .audio:
                 DisplayVideoArtifactView(sessionID: sessionID, display: display)
+            case .browserLive:
+                BrowserLiveDisplayView(sessionID: sessionID, display: display)
             case .webpage, .hls:
                 // Public remote content stays in Safari's isolated, explicit-
                 // gesture browser boundary. Gateway credentials are never
@@ -1055,15 +1059,129 @@ private struct DisplayUnavailableView: View {
     }
 }
 
+private struct BrowserLiveDisplayView: View {
+    private struct Source: Hashable {
+        let sessionID: String?
+        let profileID: String?
+        let display: DisplayProjection
+        let surface: PresentationSurfaceToken?
+    }
+    let sessionID: String?
+    let display: DisplayProjection
+    @Environment(AppModel.self) private var model
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.tronPresentationActivityCoordinator) private var activityCoordinator
+    @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
+    @State private var image: UIImage?
+    @State private var failed = false
+    @State private var requestID = UUID()
+
+    var body: some View {
+        let source = Source(sessionID: sessionID, profileID: model.selectedGatewayProfileID(), display: display, surface: surfaceToken)
+        let active = scenePhase == .active && presentationActivity.allowsPresentationPublication
+            && surfaceToken != nil && activityCoordinator != nil
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black)
+            } else if failed {
+                DisplayUnavailableView(text: display.fallbackText)
+            } else {
+                TronLoadingState(label: "Connecting to browser…", accent: .tronBlue)
+            }
+        }
+        .accessibilityLabel(display.altText)
+        .task(id: PresentationActivityTaskID(source: source, presentationActive: active)) {
+            let request = UUID()
+            requestID = request
+            image = nil
+            failed = false
+            guard active else { return }
+            await receiveFrames(source: source, request: request)
+        }
+    }
+
+    private func receiveFrames(source: Source, request: UUID) async {
+        guard let sessionID = source.sessionID, let liveView = source.display.liveView,
+              let profileID = source.profileID else { failed = true; return }
+        func current() -> Bool {
+            // Read the mutable presentation owner after each await, not the
+            // captured Environment activity or SwiftUI cancellation timing.
+            guard let activityCoordinator, let surface = source.surface else { return false }
+            let activity = activityCoordinator.activity(for: surface)
+            return !Task.isCancelled && requestID == request && model.selectedGatewayProfileID() == profileID
+                && UIApplication.shared.applicationState == .active
+                && activity.allowsPresentationPublication
+        }
+        guard current() else { return }
+        let lease: GatewayClient.BrowserLiveLease
+        do {
+            lease = try await model.openBrowserLiveView(viewId: liveView.viewId, generation: liveView.generation, sessionID: sessionID, profileID: profileID)
+        } catch {
+            if current() { failed = true }
+            return
+        }
+        await withTaskCancellationHandler {
+            do {
+                var lastSequence = 0
+                while current() {
+                    let update = try await lease.frame(after: lastSequence)
+                    guard current() else { break }
+                    switch update {
+                    case .waiting: image = nil
+                    case .unchanged: break
+                    case let .frame(frame):
+                        if frame.sequence > lastSequence {
+                            let decoded = try await frame.decode()
+                            guard current() else { break }
+                            if let decoded {
+                                lastSequence = frame.sequence
+                                image = decoded
+                            }
+                        }
+                    }
+                    try await Task.sleep(for: .milliseconds(200))
+                }
+            } catch {
+                if current() { image = nil; failed = true }
+            }
+            if requestID == request { image = nil }
+            await lease.close()
+        } onCancel: {
+            // Stop remote capture without waiting for synchronous ImageIO to
+            // drain. The original lease owns one cleanup task, joined above.
+            Task { await lease.close() }
+        }
+    }
+}
+
 struct DisplaySheet: View {
     let route: DisplayRoute
     @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
     @State private var imageLeaseID = UUID()
     @State private var documentLeaseID = UUID()
 
     @ViewBuilder
     var body: some View {
-        if (route.display.kind == .webpage || route.display.kind == .hls),
+        if route.display.kind == .browserLive {
+            NavigationStack {
+                BrowserLiveDisplayView(sessionID: route.sessionID, display: route.display)
+                    .navigationTitle(route.display.title)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Close", systemImage: "xmark") { dismiss() }
+                        }
+                    }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        } else if (route.display.kind == .webpage || route.display.kind == .hls),
            let value = route.display.remoteURL,
            let url = URL(string: value) {
             SafariDisplayView(url: url)

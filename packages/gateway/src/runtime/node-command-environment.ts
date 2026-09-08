@@ -176,6 +176,28 @@ function configureValidatedNodeCommandEnvironment(
   return { managed: true, runtimeAliasDirectory: aliasDirectory, piCommandPath: piAliasPath, path };
 }
 
+/** Adds the canonical Pi agent-bin projection for extension subprocesses. The
+ * SDK's shell helper only affects bash; browser extensions spawn directly from
+ * process.env, so this must be established before resource discovery. */
+export function configureAgentBinEnvironment(agentDir: string, environment: NodeJS.ProcessEnv = process.env): void {
+  const binDirectory = join(agentDir, "bin");
+  const browserBinary = join(binDirectory, "agent-browser");
+  try {
+    const directoryInfo = lstatSync(binDirectory);
+    const binaryInfo = lstatSync(browserBinary);
+    if (!directoryInfo.isDirectory() || directoryInfo.isSymbolicLink()
+      || !binaryInfo.isFile() || binaryInfo.isSymbolicLink() || !executable(browserBinary)) return;
+  } catch {
+    return;
+  }
+  const existing = (environment.PATH ?? "").split(":").filter(Boolean);
+  if (existing.some((component) => pathIdentity(component) === pathIdentity(binDirectory))) return;
+  // Keep the supervised payload's first PATH component authoritative for node/pi;
+  // the agent-bin projection is inserted immediately after it.
+  const ordered = existing.length > 0 ? [existing[0]!, binDirectory, ...existing.slice(1)] : [binDirectory];
+  environment.PATH = ordered.join(":");
+}
+
 export function configureSupervisedNodeCommandEnvironment(
   options: NodeCommandEnvironmentOptions = {},
 ): NodeCommandEnvironmentResult {

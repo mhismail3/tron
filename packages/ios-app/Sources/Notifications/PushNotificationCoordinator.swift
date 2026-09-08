@@ -277,7 +277,7 @@ struct PushWorkerClient: Sendable {
 
     var relayOrigin: String { configuration.origin.absoluteString }
 
-    init(configuration: PushProductConfiguration, transport: BoundedHTTPDataTransport = .pushService) {
+    init(configuration: PushProductConfiguration, transport: BoundedHTTPDataTransport = .noRedirects) {
         self.configuration = configuration
         self.transport = transport
     }
@@ -409,7 +409,7 @@ final class PushNotificationCoordinator {
         notifications: PushNotificationSystem,
         appAttest: PushAppAttestClient,
         configuration: PushProductConfiguration?,
-        transport: BoundedHTTPDataTransport = .pushService,
+        transport: BoundedHTTPDataTransport = .noRedirects,
         uuid: @escaping @Sendable () -> UUID = UUID.init,
         clock: MonotonicClock = .continuous
     ) {

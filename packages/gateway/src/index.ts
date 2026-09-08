@@ -24,12 +24,13 @@ import { NotificationGrantStore } from "./notifications/grant-store.js";
 import { PushRelayClient } from "./notifications/relay-client.js";
 import { NotificationService } from "./notifications/notification-service.js";
 import { handledSignalExitCode, SUPERVISOR_RELAUNCH_EXIT_CODE } from "./lifecycle/supervisor-exit-policy.js";
-import { configureSupervisedNodeCommandEnvironment } from "./runtime/node-command-environment.js";
+import { configureAgentBinEnvironment, configureSupervisedNodeCommandEnvironment } from "./runtime/node-command-environment.js";
 import { AutomationStore } from "./automations/automation-store.js";
 import { AutomationScheduler } from "./automations/automation-scheduler.js";
 import { AutomationService } from "./automations/automation-service.js";
 import { GatewayAutomationExecutor } from "./automations/automation-executor.js";
 import { GatewayScheduleToolOperations } from "./automations/automation-tool-operations.js";
+import { BrowserLiveViewRegistry } from "./display/browser-live-view.js";
 
 const config = await loadConfig();
 const configuredSessionDir = SettingsManager.create(process.cwd(), config.agentDir, { projectTrusted: false }).getSessionDir();
@@ -37,6 +38,7 @@ const configuredSessionDir = SettingsManager.create(process.cwd(), config.agentD
 // the supervised immutable command contract afterward, before extension or
 // model discovery, so that mutable projection cannot precede bundled commands.
 configureSupervisedNodeCommandEnvironment();
+configureAgentBinEnvironment(config.agentDir);
 const releaseAgentRuntimeLock = await acquireAgentRuntimeLocks([
   config.agentDir,
   ...(configuredSessionDir ? [configuredSessionDir] : []),
@@ -95,6 +97,7 @@ for (const diagnostic of administrationServices.diagnostics) {
 const trust = new TrustService(config.agentDir);
 const filesystem = new FilesystemService();
 const uploads = new UploadStore(config.tronHome, config.maxUploadBytes);
+const browserLiveViews = new BrowserLiveViewRegistry();
 const settings = new SettingsService(config.agentDir, modelRuntime, false);
 const modelConfig = new ModelConfigService(config.agentDir);
 const receipts = new CommandReceiptStore(config.tronHome);
@@ -118,6 +121,7 @@ const sessions = new RuntimeRegistry({
   sessionClosed: (sessionId) => transport?.revokeSessionTerminals(sessionId),
   machineId: config.machineId,
   notifications,
+  browserLiveViews,
   workRegistry,
   scheduleToolOperations: {
     execute: (sessionId, toolCallId, request) => automationToolOperations.execute(sessionId, toolCallId, request),
@@ -311,9 +315,11 @@ transport = new GatewayServer({
   devices,
   uploads,
   sessions,
+  liveViews: browserLiveViews,
   auth,
   service,
   logger,
+  authorizeBrowserLiveView: (sessionId, viewId, generation) => sessions.authorizeBrowserLiveView(sessionId, viewId, generation),
 });
 
 const supervised = process.env.TRON_GATEWAY_SUPERVISED === "1";

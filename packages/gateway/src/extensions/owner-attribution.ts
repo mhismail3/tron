@@ -5,6 +5,8 @@ import type { Extension, LoadExtensionsResult, RegisteredCommand, RegisteredTool
 import { adaptedExtensionEventHandler, adaptedToolDefinition } from "./extension-adapters.js";
 import type { ExtensionOwner } from "../protocol/types.js";
 import { GatewayError } from "../errors.js";
+import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
+import { observeTrustedAgentBrowserResult } from "../display/browser-live-view-adapter.js";
 
 /** The owner is intentionally opaque to extension code and is only readable by
  * the gateway presentation projection. AsyncLocalStorage preserves it across
@@ -62,7 +64,12 @@ function owned<T extends (...args: any[]) => any>(fn: T, owner: ExtensionOwner):
 /** Wrap every callback registered by one loaded extension. The result is safe
  * to apply on every resource reload because each load result is wrapped once
  * and all maps/functions are retained as public Pi objects. */
-export function attributeExtensions(base: LoadExtensionsResult): LoadExtensionsResult {
+export function attributeExtensions(base: LoadExtensionsResult, browserLiveView?: {
+  views: BrowserLiveViewRegistry;
+  sessionId: string;
+  runtimeGeneration: string;
+}): LoadExtensionsResult {
+  const loadToken = browserLiveView?.views.beginSessionLoad(browserLiveView.sessionId);
   const bashOwners = base.extensions.filter((extension) => extension.tools.has("bash"));
   if (bashOwners.length > 0) {
     throw new GatewayError("conflict", "The bash tool name is reserved by Tron");
@@ -88,7 +95,21 @@ export function attributeExtensions(base: LoadExtensionsResult): LoadExtensionsR
     }
     for (const [name, registered] of extension.tools) {
       const definition = adaptedToolDefinition(extension, name, registered.definition);
-      const execute = owned(definition.execute, owner);
+      const execute = owned(async (...args: Parameters<ToolDefinition["execute"]>) => {
+        const result = await definition.execute(...args);
+        if (!browserLiveView) return result;
+        return observeTrustedAgentBrowserResult({
+          // The SDK finalizes public package provenance after extensionsOverride.
+          // Read it at execution, never authorize from the provisional owner.
+          owner: extensionOwnerFor(extension),
+          toolName: name,
+          result,
+          sessionId: browserLiveView.sessionId,
+          runtimeGeneration: browserLiveView.runtimeGeneration,
+          loadToken: loadToken!,
+          views: browserLiveView.views,
+        }) as Awaited<ReturnType<ToolDefinition["execute"]>>;
+      }, owner);
       attributedToolOwners.set(execute, owner);
       extension.tools.set(name, {
         ...registered,

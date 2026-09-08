@@ -23,11 +23,29 @@ enum DisplayKind: String, Codable, Hashable, Sendable {
     case document
     case webpage
     case hls
+    case browserLive = "browser_live"
 }
 
 struct DisplayPresentationPreference: Codable, Hashable, Sendable {
     let requestedSurface: DisplaySurface
     let inlineTapAction: DisplayInlineTapAction
+}
+
+struct BrowserLiveViewDescriptor: Codable, Hashable, Sendable {
+    let schema: String
+    let viewId: String
+    let generation: String
+    let title: String
+    let fallbackText: String
+
+    var isValid: Bool {
+        func bounded(_ value: String, _ maximum: Int) -> Bool {
+            !value.isEmpty && value.utf8.count <= maximum
+                && !value.unicodeScalars.contains { $0.value < 0x20 || $0.value == 0x7f }
+        }
+        return schema == "tron.browser-live-view.v1" && bounded(viewId, 200)
+            && bounded(generation, 200) && bounded(title, 256) && bounded(fallbackText, 4_096)
+    }
 }
 
 struct DisplayArtifactDescriptor: Codable, Hashable, Sendable {
@@ -51,12 +69,13 @@ struct DisplayProjection: Codable, Hashable, Sendable, Identifiable {
     let fallbackText: String
     let artifact: DisplayArtifactDescriptor?
     let remoteURL: String?
+    let liveView: BrowserLiveViewDescriptor?
 
     var id: String { displayId }
 
     private enum CodingKeys: String, CodingKey {
         case schema, displayId, revision, title, caption, altText, kind, presentation,
-             eligibleSurfaces, fallbackText, artifact, remoteURL
+             eligibleSurfaces, fallbackText, artifact, remoteURL, liveView
     }
 
     #if HOSTED_TEST
@@ -72,7 +91,8 @@ struct DisplayProjection: Codable, Hashable, Sendable, Identifiable {
         eligibleSurfaces: [DisplaySurface],
         fallbackText: String,
         artifact: DisplayArtifactDescriptor? = nil,
-        remoteURL: String? = nil
+        remoteURL: String? = nil,
+        liveView: BrowserLiveViewDescriptor? = nil
     ) {
         self.schema = schema
         self.displayId = displayId
@@ -86,6 +106,7 @@ struct DisplayProjection: Codable, Hashable, Sendable, Identifiable {
         self.fallbackText = fallbackText
         self.artifact = artifact
         self.remoteURL = remoteURL
+        self.liveView = liveView
     }
     #endif
 
@@ -103,12 +124,13 @@ struct DisplayProjection: Codable, Hashable, Sendable, Identifiable {
         fallbackText = try values.decode(String.self, forKey: .fallbackText)
         artifact = try values.decodeIfPresent(DisplayArtifactDescriptor.self, forKey: .artifact)
         remoteURL = try values.decodeIfPresent(String.self, forKey: .remoteURL)
+        liveView = try values.decodeIfPresent(BrowserLiveViewDescriptor.self, forKey: .liveView)
 
         let expected = DisplayPresentationPolicy.eligibleSurfaces(
             for: kind,
             artifactSize: artifact?.size
         )
-        let hasOneSource = (artifact != nil) != (remoteURL != nil)
+        let hasOneSource = [artifact != nil, remoteURL != nil, liveView != nil].filter { $0 }.count == 1
         guard schema == "tron.display.v1", revision == 1,
               Self.admits(displayId, minimum: 1, maximum: 200),
               Self.admits(title, minimum: 1, maximum: 256),
@@ -116,7 +138,9 @@ struct DisplayProjection: Codable, Hashable, Sendable, Identifiable {
               Self.admits(altText, minimum: 1, maximum: 2_048),
               Self.admits(fallbackText, minimum: 1, maximum: 4_096),
               eligibleSurfaces == expected,
-              hasOneSource else {
+              hasOneSource,
+              (liveView != nil) == (kind == .browserLive),
+              liveView.map(\.isValid) ?? true else {
             throw DecodingError.dataCorruptedError(
                 forKey: .schema,
                 in: values,
@@ -229,6 +253,8 @@ enum DisplayPresentationPolicy {
             [.sheet, .floating]
         case .document, .webpage, .hls:
             [.sheet]
+        case .browserLive:
+            [.sheet, .floating]
         }
     }
 
