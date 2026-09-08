@@ -9,12 +9,28 @@ struct DisplayRoute: Identifiable, Hashable, Sendable {
     let sessionID: String
     let display: DisplayProjection
 
-    var id: String { "\(sessionID):\(display.displayId)" }
+    var id: String { "\(sessionID):\(display.presentationIdentity)" }
 }
 
-enum DisplayPresentationCommand: Sendable {
+enum DisplayPresentationCommand: Hashable, Sendable {
     case showSheet(DisplayRoute)
     case showFloating(DisplayRoute)
+
+    var route: DisplayRoute {
+        switch self { case .showSheet(let route), .showFloating(let route): route }
+    }
+}
+
+/// Every tool entrypoint uses the same admitted display, never raw result text.
+/// Grouped inline content opens its full viewer; inline disclosure stays row-owned.
+enum ToolDisplayActivation {
+    static func command(for tool: ChatToolDescriptor, sessionID: String?) -> DisplayPresentationCommand? {
+        guard let sessionID, let display = tool.display, !tool.isRunning,
+              !tool.error || display.kind == .browserLive else { return nil }
+        let route = DisplayRoute(sessionID: sessionID, display: display)
+        return DisplayPresentationPolicy.activationSurface(for: display) == .floating
+            ? .showFloating(route) : .showSheet(route)
+    }
 }
 
 typealias DisplayPresentationHandler = @MainActor @Sendable (DisplayPresentationCommand) -> Void
@@ -269,14 +285,10 @@ struct DisplayToolView: View {
             onOpenTechnicalDetails()
             return
         }
-        let route = DisplayRoute(sessionID: sessionID, display: display)
-        switch activationSurface {
-        case .sheet:
-            present?(.showSheet(route))
-        case .inline:
+        if activationSurface == .inline {
             expandInline()
-        case .floating:
-            present?(.showFloating(route))
+        } else if let command = ToolDisplayActivation.command(for: tool, sessionID: sessionID) {
+            present?(command)
         }
     }
 
@@ -1065,6 +1077,7 @@ private struct BrowserLiveDisplayView: View {
         let profileID: String?
         let display: DisplayProjection
         let surface: PresentationSurfaceToken?
+        let activityGeneration: UInt64
     }
     let sessionID: String?
     let display: DisplayProjection
@@ -1076,10 +1089,12 @@ private struct BrowserLiveDisplayView: View {
     @State private var image: UIImage?
     @State private var failed = false
     @State private var requestID = UUID()
+    @State private var viewingActivity = BrowserLiveViewingActivity()
 
     var body: some View {
-        let source = Source(sessionID: sessionID, profileID: model.selectedGatewayProfileID(), display: display, surface: surfaceToken)
-        let active = scenePhase == .active && presentationActivity.allowsPresentationPublication
+        let source = Source(sessionID: sessionID, profileID: model.selectedGatewayProfileID(), display: display,
+                            surface: surfaceToken, activityGeneration: viewingActivity.generation)
+        let active = scenePhase == .active && viewingActivity.allowsViewing && presentationActivity.allowsPresentationPublication
             && surfaceToken != nil && activityCoordinator != nil
         Group {
             if let image {
@@ -1087,7 +1102,6 @@ private struct BrowserLiveDisplayView: View {
                     .resizable()
                     .scaledToFit()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.black)
             } else if failed {
                 DisplayUnavailableView(text: display.fallbackText)
             } else {
@@ -1095,7 +1109,12 @@ private struct BrowserLiveDisplayView: View {
             }
         }
         .accessibilityLabel(display.altText)
+        .background(BrowserLiveActivityHost(activity: viewingActivity).allowsHitTesting(false))
+        .onChange(of: scenePhase, initial: true) { _, phase in viewingActivity.scenePhaseChanged(phase) }
         .task(id: PresentationActivityTaskID(source: source, presentationActive: active)) {
+            // A cancelled task may still enter its body; it cannot supersede
+            // the newer task's request fence or clear its pixels.
+            guard !Task.isCancelled else { return }
             let request = UUID()
             requestID = request
             image = nil
@@ -1114,7 +1133,7 @@ private struct BrowserLiveDisplayView: View {
             guard let activityCoordinator, let surface = source.surface else { return false }
             let activity = activityCoordinator.activity(for: surface)
             return !Task.isCancelled && requestID == request && model.selectedGatewayProfileID() == profileID
-                && UIApplication.shared.applicationState == .active
+                && viewingActivity.generation == source.activityGeneration && viewingActivity.allowsViewing
                 && activity.allowsPresentationPublication
         }
         guard current() else { return }
@@ -1165,22 +1184,36 @@ struct DisplaySheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var imageLeaseID = UUID()
     @State private var documentLeaseID = UUID()
+    @State private var browserDetent: PresentationDetent = .medium
 
     @ViewBuilder
     var body: some View {
         if route.display.kind == .browserLive {
             NavigationStack {
                 BrowserLiveDisplayView(sessionID: route.sessionID, display: route.display)
-                    .navigationTitle(route.display.title)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .tronTopBlurSurface()
+                    .navigationTitle("")
                     .navigationBarTitleDisplayMode(.inline)
+                    .toolbarBackgroundVisibility(.hidden, for: .navigationBar, .bottomBar)
                     .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Close", systemImage: "xmark") { dismiss() }
+                        ToolbarItem(placement: .principal) {
+                            TronSheetTitle(title: route.display.title, accent: .tronBlue)
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button { dismiss() } label: {
+                                Image(systemName: "checkmark")
+                                    .font(TronTypography.buttonSM)
+                                    .foregroundStyle(Color.tronBlue)
+                            }
+                            .accessibilityLabel("Done")
                         }
                     }
             }
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
+            .tronTopBlur(.sheet)
+            .presentationDetents([.medium, .large], selection: $browserDetent)
+            .presentationDragIndicator(.hidden)
+            .tronPresentation()
         } else if (route.display.kind == .webpage || route.display.kind == .hls),
            let value = route.display.remoteURL,
            let url = URL(string: value) {

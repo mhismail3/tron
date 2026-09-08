@@ -73,6 +73,103 @@ struct DisplayPresentationTests {
         }
     }
 
+    @Test("browser tool actions share floating identity, sticky dismissal, and manual reopening")
+    @MainActor
+    func browserToolActivation() throws {
+        let first = browserDisplay(id: "action-1")
+        let later = browserDisplay(id: "action-2")
+        let presentation = ChatSessionPresentation(sessionID: "session")
+        let tool = toolDescriptor(name: "agent_browser", display: first)
+        let command = try #require(ToolDisplayActivation.command(for: tool, sessionID: "session"))
+        #expect(command == .showFloating(DisplayRoute(sessionID: "session", display: first)))
+        presentation.presentDisplay(command)
+        let original = try #require(presentation.floatingDisplay)
+        presentation.presentDisplay(.showFloating(DisplayRoute(sessionID: "session", display: later)))
+        #expect(presentation.floatingDisplay == original)
+        presentation.floatingDisplay = nil
+        #expect(DisplayFloatingAdmissionPolicy.admission(previous: [], current: [later], sceneActive: true,
+            presentationReady: true, allowsPresentation: true, hasFloatingDisplay: false,
+            consumedRevisionIDs: [first.presentationIdentity]) == .none)
+        presentation.presentDisplay(command)
+        #expect(presentation.floatingDisplay == original)
+        #expect(first.presentationIdentity == later.presentationIdentity)
+        #expect(first.presentationIdentity != browserDisplay(id: "action-3", generation: "successor").presentationIdentity)
+        #expect(ToolDisplayActivation.command(for: tool, sessionID: nil) == nil)
+        let ordinary = toolDescriptor(name: "read")
+        #expect(ToolDisplayActivation.command(for: ordinary, sessionID: "session") == nil)
+    }
+
+    @Test("grouped custom displays publish once after dismissal and reject stale owners")
+    func groupedDisplayHandoff() throws {
+        var snapshot = try SessionScenarioBuilder(seed: 7_832).openingTail(targetEncodedBytes: 4_096)
+        let display = imageDisplay(id: "image")
+        snapshot.transcript = [.message(.init(id: "result", parentId: nil, timestamp: "2026-01-01T00:00:00Z",
+            kind: .message, role: .toolResult, presentationId: "result", content: [], toolCallId: "call", display: display))]
+        let source = snapshot
+        let command = DisplayPresentationCommand.showSheet(DisplayRoute(sessionID: snapshot.sessionId, display: display))
+        func staged() -> ToolDisplayHandoff {
+            var handoff = ToolDisplayHandoff()
+            handoff.stage(command, toolID: "call", runtime: snapshot.runtimeGeneration, installation: 1, profile: "profile")
+            return handoff
+        }
+        var handoff = staged()
+        #expect(handoff.consume(source: source, installation: 1, profile: "profile", active: true) == command)
+        #expect(handoff.consume(source: source, installation: 1, profile: "profile", active: true) == nil)
+        for (installation, profile, active) in [(2, "profile", true), (1, "next", true), (1, "profile", false)] {
+            handoff = staged()
+            #expect(handoff.consume(source: source, installation: installation, profile: profile, active: active) == nil)
+            #expect(handoff.consume(source: source, installation: 1, profile: "profile", active: true) == nil)
+        }
+        for change in 0..<4 {
+            handoff = staged()
+            var replaced = snapshot
+            if change == 0 { replaced.runtimeGeneration = "next" }
+            if change == 1 { replaced.transcript = [] } // same-runtime canonical branch replacement
+            if change == 2 { replaced.sessionId = "other-session" }
+            if change == 3 {
+                replaced.transcript = [.message(.init(id: "result", parentId: nil, timestamp: "2026-01-01T00:00:00Z",
+                    kind: .message, role: .toolResult, presentationId: "result", content: [], toolCallId: "call",
+                    display: imageDisplay(id: "image", revision: 2)))]
+            }
+            #expect(handoff.consume(source: replaced, installation: 1, profile: "profile", active: true) == nil)
+        }
+        // Unrelated canonical text/revisions do not invalidate the selected result.
+        handoff = staged()
+        snapshot.revision += 1
+        #expect(handoff.consume(source: snapshot, installation: 1, profile: "profile", active: true) == command)
+        handoff = staged()
+        var paged = snapshot
+        for index in 0..<512 {
+            paged.transcript.append(.message(.init(id: "later-\(index)", parentId: nil, timestamp: "2026-01-01T00:00:00Z",
+                kind: .message, role: .user, presentationId: "later-\(index)", content: [])))
+        }
+        #expect(handoff.consume(source: paged, installation: 1, profile: "profile", active: true) == command)
+    }
+
+    @Test("browser floating content keeps 4:3 within small safe bounds")
+    func browserPanelAspect() {
+        for container in [CGSize(width: 390, height: 800), CGSize(width: 320, height: 160)] {
+            let size = DisplayFloatingLayoutPolicy.panelSize(in: container, browserLive: true)
+            #expect(abs(size.width / size.height - 4.0 / 3.0) < 0.001)
+            #expect(size.width <= container.width)
+            #expect(size.height <= container.height)
+        }
+    }
+
+    private func toolDescriptor(name: String, display: DisplayProjection? = nil) -> ChatToolDescriptor {
+        ChatToolPresentation(id: "call", title: name, toolName: name, subtitle: "Completed",
+            request: nil, response: nil, content: "", fallbackContent: nil, error: false,
+            startedAt: nil, completedAt: nil, durationMs: nil, lastProgressAt: nil, progressSequence: nil,
+            display: display).descriptor
+    }
+
+    private func browserDisplay(id: String, generation: String = "runtime:browser") -> DisplayProjection {
+        DisplayProjection(displayId: id, title: "Browser", altText: "Browser", kind: .browserLive,
+            presentation: .init(requestedSurface: .floating, inlineTapAction: .sheet), eligibleSurfaces: [.sheet, .floating],
+            fallbackText: "Unavailable", liveView: .init(schema: "tron.browser-live-view.v1", viewId: "view", generation: generation,
+                title: "Browser", fallbackText: "Unavailable"))
+    }
+
     @Test("malformed display descriptors fail closed")
     func malformedWire() {
         let unsafe = Data(#"""
@@ -275,9 +372,9 @@ struct DisplayPresentationTests {
         #expect(GatewayClient.mediaPath(id: "not-a-uuid", sessionID: "session-1") == nil)
     }
 
-    private func imageDisplay(id: String) -> DisplayProjection {
+    private func imageDisplay(id: String, revision: Int = 1) -> DisplayProjection {
         DisplayProjection(
-            displayId: id,
+            displayId: id, revision: revision,
             title: "Preview",
             altText: "Preview image.",
             kind: .image,

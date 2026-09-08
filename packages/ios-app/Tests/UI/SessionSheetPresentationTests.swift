@@ -41,6 +41,167 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testMountedGroupedRowsActivateCustomDisplaysInsteadOfGenericDetails() async throws {
+        let snapshot = try SessionScenarioBuilder(seed: 7_829).openingTail(targetEncodedBytes: 4_096)
+        let tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 1)
+        try await withModel { model in
+            for kind: DisplayKind in [.markdown, .browserLive] {
+                let display = self.routingDisplay(kind: kind)
+                let selected = self.routingTool(id: "custom", display: display)
+                let tools = [self.routingTool(id: "ordinary"), selected]
+                var activated: DisplayPresentationCommand?
+                let probe = HostedToolActionProbe()
+                let content = LiveToolRunDetails(initial: ToolRunResolvedState(installationTag: tag,
+                    run: ChatToolRunPresentation(tools: tools), tools: tools), detent: .constant(.medium),
+                    onDisplay: { _, command in activated = command }, onDismiss: {})
+                    .environment(model).environment(\.canonicalResourceSessionID, snapshot.sessionId)
+                    .environment(\.hostedToolActionProbe, probe)
+                try await self.withSheet(content) { controller in
+                    XCTAssertTrue(probe.activate("row:custom"))
+                    let route = DisplayRoute(sessionID: snapshot.sessionId, display: display)
+                    XCTAssertEqual(activated, kind == .browserLive ? .showFloating(route) : .showSheet(route))
+                    XCTAssertNil(controller.presentedViewController, "Custom content must not nest generic tool details")
+                }
+                XCTAssertEqual(probe.count, 0, "Dismissed rows must release their callbacks")
+            }
+        }
+    }
+
+    func testGroupedCustomRouteWaitsForOuterSheetRetirement() async throws {
+        try await checkGroupedHandoff(replacement: .none)
+    }
+
+    func testGroupedHandoffRejectsSameRuntimeBranchReplacement() async throws {
+        try await checkGroupedHandoff(replacement: .source)
+    }
+
+    func testGroupedHandoffRejectsNewInstallationWithUnchangedSelectedResult() async throws {
+        try await checkGroupedHandoff(replacement: .installation)
+    }
+
+    private enum GroupedReplacement { case none, source, installation }
+
+    private func checkGroupedHandoff(replacement: GroupedReplacement) async throws {
+        var snapshot = try SessionScenarioBuilder(seed: 7_831).openingTail(targetEncodedBytes: 4_096)
+        let display = routingDisplay(kind: .browserLive)
+        snapshot.transcript.append(.message(.init(id: "custom-result", parentId: nil, timestamp: "2026-01-01T00:00:00Z",
+            kind: .message, role: .toolResult, presentationId: "custom-result", content: [], toolCallId: "custom", toolName: "agent_browser", display: display)))
+        snapshot.transcriptTotal = (snapshot.transcriptStart ?? 0) + snapshot.transcript.count
+        let tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 1)
+        let tools = [routingTool(id: "ordinary"), routingTool(id: "custom", display: display)]
+        let run = ChatToolRunPresentation(tools: tools)
+        try await withModel { model in
+            model.installHostedAuthoritativeSnapshot(snapshot)
+            let coordinator = PresentationActivityCoordinator()
+            let probe = HostedToolActionProbe()
+            var activated: DisplayPresentationCommand?
+            let content = ToolRunView(run: run, installationTag: tag, resolveDetails: { _, _ in tools }, recordChip: { _ in })
+                .environment(model).environment(\.canonicalResourceSessionID, snapshot.sessionId)
+                .environment(\.displayPresentationHandler, { activated = $0 })
+                .environment(\.hostedToolActionProbe, probe)
+                .environment(\.scenePhase, .active)
+                .tronPresentationSurface(id: "routing-fixture")
+                .environment(\.tronPresentationActivityCoordinator, coordinator)
+            try await self.withSheet(content) { controller in
+                XCTAssertTrue(probe.activate("run:\(run.id)"))
+                try await self.waitForRouting { probe.contains("row:custom") }
+                XCTAssertNotNil(controller.presentedViewController)
+                XCTAssertTrue(probe.activate("row:custom"))
+                XCTAssertNil(activated, "Never publish while the grouped sheet still covers the chat")
+                if replacement == .installation {
+                    model.installHostedAuthoritativeSnapshot(snapshot)
+                    XCTAssertNotEqual(model.presentationGeneration(for: snapshot.sessionId), tag.presentationGeneration)
+                } else if replacement == .source {
+                    var replaced = snapshot
+                    replaced.transcript = []
+                    replaced.transcriptStart = 0
+                    replaced.transcriptTotal = 0
+                    replaced.revision += 1
+                    model.replaceHostedAuthoritativeSnapshot(replaced)
+                    XCTAssertEqual(model.presentationGeneration(for: snapshot.sessionId), tag.presentationGeneration)
+                }
+                try await self.waitForRouting { coordinator.mountedSurfaceCount == 1 }
+                XCTAssertNil(controller.presentedViewController)
+                XCTAssertEqual(activated, replacement == .none ? .showFloating(DisplayRoute(sessionID: snapshot.sessionId, display: display)) : nil)
+            }
+            XCTAssertEqual(probe.count, 0)
+            XCTAssertEqual(coordinator.mountedSurfaceCount, 0)
+        }
+    }
+
+    private func waitForRouting(_ predicate: () -> Bool) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while !predicate(), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(predicate(), "Mounted routing did not settle before its deadline")
+    }
+
+    func testMountedSingleBrowserRunUsesTheSameCustomActivation() async throws {
+        let snapshot = try SessionScenarioBuilder(seed: 7_830).openingTail(targetEncodedBytes: 4_096)
+        let tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 1)
+        let display = routingDisplay(kind: .browserLive)
+        let tool = routingTool(id: "browser", display: display)
+        try await withModel { model in
+            var activated: DisplayPresentationCommand?
+            let probe = HostedToolActionProbe()
+            let run = ChatToolRunPresentation(tools: [tool])
+            let content = VStack {
+                ToolRunView(run: run, installationTag: tag,
+                    resolveDetails: { _, _ in XCTFail("Bound browser chip fell back to generic details"); return nil }, recordChip: { _ in })
+                ToolCard(data: tool)
+            }
+                .environment(model).environment(\.canonicalResourceSessionID, snapshot.sessionId)
+                .environment(\.displayPresentationHandler, { activated = $0 })
+                .environment(\.hostedToolActionProbe, probe)
+            try await self.withSheet(content) { _ in
+                XCTAssertTrue(probe.activate("run:\(run.id)"))
+                XCTAssertEqual(activated, .showFloating(DisplayRoute(sessionID: snapshot.sessionId, display: display)))
+                activated = nil
+                XCTAssertTrue(probe.activate("card:browser"))
+                XCTAssertEqual(activated, .showFloating(DisplayRoute(sessionID: snapshot.sessionId, display: display)))
+            }
+            XCTAssertEqual(probe.count, 0)
+        }
+    }
+
+    private func routingDisplay(kind: DisplayKind) -> DisplayProjection {
+        DisplayProjection(displayId: "route", title: "Browser", altText: "Preview", kind: kind,
+            presentation: .init(requestedSurface: .sheet, inlineTapAction: .sheet),
+            eligibleSurfaces: DisplayPresentationPolicy.eligibleSurfaces(for: kind), fallbackText: "Unavailable",
+            liveView: kind == .browserLive ? .init(schema: "tron.browser-live-view.v1", viewId: "view", generation: "generation",
+                title: "Browser", fallbackText: "Unavailable") : nil)
+    }
+
+    private func routingTool(id: String, display: DisplayProjection? = nil) -> ChatToolPresentation {
+        ChatToolPresentation(id: id, title: display == nil ? "Read" : "Browser", toolName: display?.kind == .browserLive ? "agent_browser" : "display",
+            subtitle: "Completed", request: nil, response: nil, content: "Result", fallbackContent: nil, error: false,
+            startedAt: nil, completedAt: nil, durationMs: nil, lastProgressAt: nil, progressSequence: nil, display: display)
+    }
+
+    func testBrowserExpansionUsesStandardChromeAndReopensAtMedium() async throws {
+        let display = DisplayProjection(displayId: "browser-sheet", title: "Browser", altText: "Browser", kind: .browserLive,
+            presentation: .init(requestedSurface: .floating, inlineTapAction: .sheet), eligibleSurfaces: [.sheet, .floating],
+            fallbackText: "Unavailable", liveView: .init(schema: "tron.browser-live-view.v1", viewId: "view", generation: "generation",
+                title: "Browser", fallbackText: "Unavailable"))
+        try await withModel { model in
+            for scheme: ColorScheme in [.light, .dark] {
+                // No managed viewer owner: this chrome fixture must do no HTTP work.
+                try await self.withSheet(DisplaySheet(route: DisplayRoute(sessionID: "session", display: display))
+                    .environment(model).preferredColorScheme(scheme)) { controller in
+                    let sheet = try XCTUnwrap(controller.sheetPresentationController)
+                    XCTAssertEqual(Set(sheet.detents.map(\.identifier)), [.medium, .large])
+                    XCTAssertEqual(sheet.selectedDetentIdentifier, .medium)
+                    XCTAssertFalse(sheet.prefersGrabberVisible)
+                    let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
+                    self.assertToolbarPaint(.tronBlue, bar: bar, leading: false, controller: controller)
+                    self.capture(controller, name: "browser-medium-\(scheme)")
+                    sheet.selectedDetentIdentifier = .large
+                    controller.presentationController?.containerView?.layoutIfNeeded()
+                    XCTAssertEqual(sheet.selectedDetentIdentifier, .large)
+                }
+            }
+        }
+    }
+
     func testAutomationFilterRetainsItsMediumOnlyPresentation() async throws {
         try await withSheet(TronDashboardFilterSheet(
             title: "View Automations", accent: .tronAutomation, detents: [.medium], onDone: {}
@@ -468,7 +629,7 @@ final class SessionSheetPresentationTests: XCTestCase {
         try await body(model)
     }
 
-    private func withSheet<Sheet: View>(_ sheet: Sheet, inspect: (UIViewController) throws -> Void) async throws {
+    private func withSheet<Sheet: View>(_ sheet: Sheet, inspect: (UIViewController) async throws -> Void) async throws {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let previous = scene.windows.first(where: \.isKeyWindow)
         let appeared = expectation(description: "Sheet appeared")
@@ -495,7 +656,7 @@ final class SessionSheetPresentationTests: XCTestCase {
         presented.view.layoutIfNeeded()
         // Always finish UIKit dismissal, even if the inspection throws.
         var failure: Error?
-        do { try inspect(presented) } catch { failure = error }
+        do { try await inspect(presented) } catch { failure = error }
         await withCheckedContinuation { continuation in
             host.dismiss(animated: false) { continuation.resume() }
         }

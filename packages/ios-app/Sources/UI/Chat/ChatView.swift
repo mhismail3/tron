@@ -127,7 +127,7 @@ struct ChatView: View {
                 ChatFloatingDisplayHost(
                     route: $sessionPresentation.floatingDisplay,
                     bottomExclusion: composerHeightLedger.current,
-                    onOpenSheet: { sessionPresentation.displaySheet = $0 }
+                    onOpenSheet: { sessionPresentation.presentDisplay(.showSheet($0)) }
                 )
             }
         .onGeometryChange(for: CGFloat.self) { geometry in
@@ -259,14 +259,7 @@ struct ChatView: View {
             sessionPresentation.requestInteractionPresentation(interaction)
         }
         .environment(\.displayPresentationHandler) { command in
-            switch command {
-            case .showSheet(let route):
-                guard route.sessionID == sessionID else { return }
-                sessionPresentation.displaySheet = route
-            case .showFloating(let route):
-                guard route.sessionID == sessionID else { return }
-                sessionPresentation.floatingDisplay = route
-            }
+            sessionPresentation.presentDisplay(command)
         }
         .onChange(of: transcriptPresentation.installed?.tag) { _, _ in
             reconcileFloatingDisplayCompletion()
@@ -311,7 +304,7 @@ struct ChatView: View {
                 sessionPresentation.pendingFloatingDisplay = DisplayRoute(sessionID: sessionID, display: display)
             }
         case .present(let display):
-            let key = "\(display.displayId):\(display.revision)"
+            let key = display.presentationIdentity
             sessionPresentation.automaticallyPresentedDisplayIDs.formUnion([key])
             sessionPresentation.floatingDisplay = DisplayRoute(sessionID: sessionID, display: display)
         }
@@ -325,12 +318,12 @@ struct ChatView: View {
             return
         }
         guard completedDisplayPresentations.contains(where: {
-            $0.displayId == route.display.displayId && $0.revision == route.display.revision
+            $0.presentationIdentity == route.display.presentationIdentity
         }) else {
             sessionPresentation.pendingFloatingDisplay = nil
             return
         }
-        let key = "\(route.display.displayId):\(route.display.revision)"
+        let key = route.display.presentationIdentity
         sessionPresentation.pendingFloatingDisplay = nil
         guard !sessionPresentation.automaticallyPresentedDisplayIDs.contains(key) else { return }
         sessionPresentation.automaticallyPresentedDisplayIDs.formUnion([key])

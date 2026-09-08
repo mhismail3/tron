@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { admitBrowserToolReference } from "./browser-tool-reference.js";
 import {
   DISPLAY_MAXIMUM_ARTIFACT_BYTES,
   type DisplayArtifactDescriptor,
@@ -122,6 +123,23 @@ export function eligibleDisplaySurfaces(kind: DisplayKind, artifactSize?: number
     case "document": case "webpage": case "hls": return ["sheet"];
     case "browser_live": return ["sheet", "floating"];
   }
+}
+
+/** Both tool entrypoints consume an admitted projection; browser receipts are
+ * bound to the canonical call, not inferred from neighboring display results. */
+export function admitToolDisplayProjection(
+  toolName: string | undefined, value: unknown, toolCallId: unknown, sessionId?: string,
+): DisplayProjection | undefined {
+  const reference = admitBrowserToolReference(toolName, toolCallId, value, sessionId);
+  if (!reference) return admitDisplayProjection(toolName, value);
+  const liveView = reference.descriptor;
+  return admitDisplayProjection("display", { display: {
+    schema: DISPLAY_SCHEMA, displayId: liveView.viewId, revision: 1,
+    title: liveView.title, altText: "Read-only live browser", kind: "browser_live",
+    presentation: { requestedSurface: reference.automatic ? "floating" : "sheet", inlineTapAction: "sheet" },
+    eligibleSurfaces: eligibleDisplaySurfaces("browser_live"),
+    fallbackText: liveView.fallbackText, liveView,
+  } });
 }
 
 /** Strictly promotes the reserved display tool's canonical details into the

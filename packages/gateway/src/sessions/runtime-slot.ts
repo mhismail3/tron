@@ -108,7 +108,7 @@ import { createTronScheduleExtension, type ScheduleToolOperations } from "../aut
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { createTronCoreExtension } from "../workspace/tron-core-extension.js";
-import { admitDisplayProjection, displayArtifactIDs } from "../display/display-contract.js";
+import { admitToolDisplayProjection, displayArtifactIDs } from "../display/display-contract.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
 
@@ -1127,7 +1127,7 @@ export class RuntimeSlot {
       this.browserLiveReferences.clear();
       for (const entry of branch) {
         if (entry.type !== "message" || entry.message.role !== "toolResult") continue;
-        const display = admitDisplayProjection(entry.message.toolName, entry.message.details);
+        const display = admitToolDisplayProjection(entry.message.toolName, entry.message.details, entry.message.toolCallId, manager.getSessionId());
         if (display?.liveView) this.browserLiveReferences.add(`${display.liveView.viewId}\0${display.liveView.generation}`);
       }
       this.displayArtifactReferenceKey = key;

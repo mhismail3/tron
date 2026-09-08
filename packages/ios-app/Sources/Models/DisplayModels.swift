@@ -73,6 +73,13 @@ struct DisplayProjection: Codable, Hashable, Sendable, Identifiable {
 
     var id: String { displayId }
 
+    /// Tool calls are chat identities; a live browser is a presentation identity.
+    /// Later actions must not reopen a window the user already dismissed.
+    var presentationIdentity: String {
+        if let liveView { return "browser:\(liveView.viewId):\(liveView.generation)" }
+        return "\(displayId):\(revision)"
+    }
+
     private enum CodingKeys: String, CodingKey {
         case schema, displayId, revision, title, caption, altText, kind, presentation,
              eligibleSurfaces, fallbackText, artifact, remoteURL, liveView
@@ -219,9 +226,9 @@ enum DisplayFloatingAdmissionPolicy {
         consumedRevisionIDs: Set<String>
     ) -> DisplayFloatingAdmission {
         guard sceneActive, presentationReady, !hasFloatingDisplay else { return .none }
-        let previousIDs = Set(previous.map { "\($0.displayId):\($0.revision)" })
+        let previousIDs = Set(previous.map(\.presentationIdentity))
         guard let display = current.reversed().first(where: {
-            let revisionID = "\($0.displayId):\($0.revision)"
+            let revisionID = $0.presentationIdentity
             return !previousIDs.contains(revisionID)
                 && !consumedRevisionIDs.contains(revisionID)
                 && DisplayPresentationPolicy.effectiveSurface(for: $0) == .floating
@@ -268,6 +275,9 @@ enum DisplayPresentationPolicy {
     /// presentation, but an explicit tap on a requested floating result is
     /// sufficient user intent to begin bounded file staging in the panel.
     static func activationSurface(for display: DisplayProjection) -> DisplaySurface {
+        // Live tool taps reopen the small window; its expand control owns the
+        // sheet route, including for retained descriptors created as sheets.
+        if display.kind == .browserLive { return .floating }
         if display.presentation.requestedSurface == .floating,
            display.eligibleSurfaces == [.sheet],
            (display.kind == .video || display.kind == .audio) {
@@ -279,7 +289,9 @@ enum DisplayPresentationPolicy {
     static func invocationSurface(toolName: String?, request: JSONValue?) -> DisplaySurface? {
         guard toolName == "display", let object = request?.objectValue else { return nil }
         guard let presentation = object["presentation"]?.objectValue,
-              let raw = presentation["surface"]?.stringValue else { return .sheet }
+              let raw = presentation["surface"]?.stringValue else {
+            return object["source"]?.objectValue?["kind"]?.stringValue == "browser_live" ? .floating : .sheet
+        }
         return DisplaySurface(rawValue: raw) ?? .sheet
     }
 }

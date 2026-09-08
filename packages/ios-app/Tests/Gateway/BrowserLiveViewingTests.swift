@@ -312,6 +312,36 @@ struct BrowserLiveMountedViewingTests {
         }
     }
 
+    @Test("native app and exact scene activity retire and reopen without a SwiftUI scene-phase change")
+    func nativeActivityStopsAndReopens() async throws {
+        for applicationEvent in [true, false] {
+            let probe = BrowserLiveTransportProbe(holdFrame: true)
+            try await Self.withMountedHost(probe: probe, profile: Self.profile("native-activity")) { _, _, _, host in
+                try await Self.waitForRequests(2, probe: probe)
+                let scene = try #require(host.window.windowScene)
+                let object: AnyObject = applicationEvent ? UIApplication.shared : scene
+                let inactive = applicationEvent ? UIApplication.willResignActiveNotification : UIScene.willDeactivateNotification
+                let active = applicationEvent ? UIApplication.didBecomeActiveNotification : UIScene.didActivateNotification
+                // Real mounted notification callbacks, not OS backgrounding. The
+                // injected SwiftUI phase stays active to isolate this boundary.
+                NotificationCenter.default.post(name: inactive, object: object)
+                await probe.releaseFrame()
+                try await Self.waitForRequests(3, probe: probe)
+                let stopped = await probe.requests.map(\.request.httpMethod)
+                #expect(stopped == ["POST", "GET", "DELETE"])
+                try await Task.sleep(for: .milliseconds(350))
+                #expect(await probe.requests.count == 3)
+                NotificationCenter.default.post(name: active, object: object)
+                try await Self.waitForRequests(5, probe: probe)
+                let reopened = await probe.requests
+                let methods = reopened.map(\.request.httpMethod)
+                let originalOnly = reopened.allSatisfy { $0.request.url?.path.contains("view-a") == true }
+                #expect(methods == ["POST", "GET", "DELETE", "POST", "GET"])
+                #expect(originalOnly)
+            }
+        }
+    }
+
     @Test("an active DisplaySheet polls, while a covered retained host performs no work and joins cleanup")
     func coveredRetainedHostStopsPolling() async throws {
         let probe = BrowserLiveTransportProbe(holdFrame: true)
@@ -407,6 +437,52 @@ struct BrowserLiveMountedViewingTests {
         }
     }
 
+    @Test("floating expansion retires the covered lease and restores only the original browser")
+    func floatingExpansionAndReopen() async throws {
+        let probe = BrowserLiveTransportProbe(echoDescriptor: true)
+        try await Self.withMountedHost(probe: probe, profile: Self.profile("floating"), floating: true) { _, state, _, _ in
+            try await Self.waitForRequests(1, probe: probe) { $0.request.httpMethod == "GET" }
+            let firstRequests = await probe.requests
+            let initialLease = firstRequests.first { $0.request.httpMethod == "GET" }?.request.value(forHTTPHeaderField: "X-Tron-Live-Lease")
+            let first = try #require(initialLease)
+            let original = try #require(state.floatingRoute)
+            state.sheetRoute = original
+            try await Self.waitForRequests(1, probe: probe) { $0.request.httpMethod == "DELETE" && $0.request.value(forHTTPHeaderField: "X-Tron-Live-Lease") == first }
+            try await Self.waitForRequests(1, probe: probe) { $0.request.httpMethod == "GET" && $0.request.value(forHTTPHeaderField: "X-Tron-Live-Lease") != first }
+            let cut = await probe.requests.count
+            try await Task.sleep(for: .milliseconds(350))
+            let afterCoverage = await probe.requests
+            let originalLeaseQuiescent = afterCoverage.dropFirst(cut).allSatisfy { $0.request.value(forHTTPHeaderField: "X-Tron-Live-Lease") != first }
+            #expect(originalLeaseQuiescent)
+            state.sheetRoute = nil
+            try await Self.waitForRequests(3, probe: probe) { $0.request.httpMethod == "POST" }
+            #expect(state.floatingRoute == original)
+            let opens = await probe.requests.filter { $0.request.httpMethod == "POST" }
+            #expect(opens.count == 3)
+            let originalViewOnly = opens.allSatisfy { $0.request.url?.path.hasSuffix("/view-a") == true }
+            let originalGenerationOnly = opens.allSatisfy { String(data: $0.request.httpBody ?? Data(), encoding: .utf8)?.contains("generation-a") == true }
+            #expect(originalViewOnly)
+            #expect(originalGenerationOnly)
+        }
+    }
+
+    @Test("a zero-area floating panel keeps its route but does no viewing work")
+    func zeroAreaFloatingRetiresViewing() async throws {
+        let probe = BrowserLiveTransportProbe(echoDescriptor: true)
+        try await Self.withMountedHost(probe: probe, profile: Self.profile("floating-size"), floating: true) { _, state, _, _ in
+            try await Self.waitForRequests(1, probe: probe) { $0.request.httpMethod == "GET" }
+            let original = state.floatingRoute
+            state.floatingHeight = 0
+            try await Self.waitForRequests(1, probe: probe) { $0.request.httpMethod == "DELETE" }
+            let stopped = await probe.requests.count
+            try await Task.sleep(for: .milliseconds(350))
+            #expect(await probe.requests.count == stopped)
+            #expect(state.floatingRoute == original)
+            state.floatingHeight = 320
+            try await Self.waitForRequests(2, probe: probe) { $0.request.httpMethod == "POST" }
+        }
+    }
+
     private static func hello() -> Data {
         Data("""
         {"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["browser-live-view.v1"]}
@@ -421,7 +497,7 @@ struct BrowserLiveMountedViewingTests {
         DisplayProjection(
             displayId: viewID, title: "Browser", altText: "Live browser viewport", kind: .browserLive,
             presentation: .init(requestedSurface: .sheet, inlineTapAction: .sheet),
-            eligibleSurfaces: [.sheet], fallbackText: "Unavailable",
+            eligibleSurfaces: [.sheet, .floating], fallbackText: "Unavailable",
             liveView: .init(schema: "tron.browser-live-view.v1", viewId: viewID, generation: generation, title: "Browser", fallbackText: "Unavailable")
         )
     }
@@ -429,6 +505,7 @@ struct BrowserLiveMountedViewingTests {
     private static func withMountedHost(
         probe: BrowserLiveTransportProbe,
         profile: GatewayProfile,
+        floating: Bool = false,
         sockets: [ScriptedGatewaySocket] = [ScriptedGatewaySocket()],
         operation: (AppModel, BrowserLiveMountedState, PresentationActivityCoordinator, BrowserLiveMountedHost) async throws -> Void
     ) async throws {
@@ -437,7 +514,7 @@ struct BrowserLiveMountedViewingTests {
             browserLiveTransport: BoundedHTTPDataTransport { request, maximum in await probe.respond(request, maximum) }
         )
         let model = AppModel(client: client)
-        let state = BrowserLiveMountedState(display: Self.display(viewID: "view-a", generation: "generation-a"))
+        let state = BrowserLiveMountedState(display: Self.display(viewID: "view-a", generation: "generation-a"), floating: floating)
         let coordinator = PresentationActivityCoordinator()
         var host: BrowserLiveMountedHost?
         func cleanup() async {
@@ -515,8 +592,16 @@ private final class BrowserLiveMountedState {
     var mounted = true
     var sceneActive = true
     var surface: PresentationSurfaceToken?
+    let floatingMode: Bool
+    var floatingHeight: CGFloat = 320
+    var floatingRoute: DisplayRoute?
+    var sheetRoute: DisplayRoute?
 
-    init(display: DisplayProjection) { self.display = display }
+    init(display: DisplayProjection, floating: Bool = false) {
+        self.display = display
+        floatingMode = floating
+        if floating { floatingRoute = DisplayRoute(sessionID: "session-mounted", display: display) }
+    }
 }
 
 private struct BrowserLiveMountedRoot: View {
@@ -528,7 +613,14 @@ private struct BrowserLiveMountedRoot: View {
             id: "mounted.browser-live",
             onMount: { state.surface = $0 }
         ) {
-            if state.mounted {
+            if state.mounted, state.floatingMode {
+                ChatFloatingDisplayHost(route: $state.floatingRoute, bottomExclusion: 0, onOpenSheet: { state.sheetRoute = $0 })
+                    .frame(height: state.floatingHeight)
+                    .environment(model)
+                    .tronManagedSheet(item: $state.sheetRoute, identity: { $0.id }) { route in
+                        DisplaySheet(route: route).environment(model)
+                    }
+            } else if state.mounted {
                 DisplaySheet(route: DisplayRoute(sessionID: "session-mounted", display: state.display))
                     .environment(model)
                     .tronManagedSheet(isPresented: $state.covered, identity: "mounted.cover") {

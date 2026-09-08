@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 
 export const jpeg = readFileSync(new URL("./browser-live.jpg", import.meta.url));
 export const registration = {
-  sessionId: "session-a", viewId: "view-a", generation: "runtime-a:browser-a", browserIdentity: "managed-a",
+  sessionId: "session-a", viewId: "view-a", generation: "runtime-a:browser-a",
   cdpUrl: "ws://127.0.0.1:1234/devtools/browser/12345678-1234-1234-1234-123456789abc",
 };
 type Command = { id: number; method: string; params?: Record<string, unknown>; sessionId?: string };

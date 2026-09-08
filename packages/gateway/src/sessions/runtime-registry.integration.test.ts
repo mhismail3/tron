@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { sealBrowserToolReference } from "../display/browser-tool-reference.js";
 import { existsSync } from "node:fs";
 import { appendFile, copyFile, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -5674,6 +5675,35 @@ export default function (pi) {
     expect(slot.referencesBrowserLiveView("active", "wrong-generation")).toBe(false);
     expect(slot.referencesBrowserLiveView("active", "generation")).toBe(true);
     expect(fixture.registry.authorizeBrowserLiveView(fixture.manager.getSessionId(), "active", "generation")).toBe(true);
+  });
+
+  it("authorizes provider-bound browser actions only on their admitted call and canonical branch", async () => {
+    const fixture = await coldFixture("browser-action-branch");
+    fixture.manager.appendMessage({ role: "user", content: "root", timestamp: Date.now() });
+    const root = fixture.manager.getEntries().at(-1)!;
+    const result = (id: string, sessionId = fixture.manager.getSessionId()) => ({
+      role: "toolResult" as const, toolCallId: id, toolName: "agent_browser", isError: false, timestamp: Date.now(),
+      content: [{ type: "text" as const, text: "clicked" }],
+      details: { tronBrowserReference: sealBrowserToolReference(sessionId, id, {
+        schema: "tron.browser-live-view.v1", viewId: id, generation: "generation", title: "Browser", fallbackText: "Unavailable",
+      }, true) },
+    });
+    fixture.manager.appendMessage(result("abandoned"));
+    fixture.manager.branch(root.id);
+    fixture.manager.appendMessage({ ...result("copied"), toolCallId: "wrong-call" });
+    fixture.manager.appendMessage(result("wrong-session", "other-session"));
+    fixture.manager.appendMessage(result("active"));
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    for (const id of ["abandoned", "copied", "wrong-session"]) {
+      expect(slot.referencesBrowserLiveView(id, "generation")).toBe(false);
+    }
+    expect(slot.referencesBrowserLiveView("active", "generation")).toBe(true);
+    expect(slot.referencesBrowserLiveView("active", "wrong-generation")).toBe(false);
+    const transcript = slot.snapshot().transcript;
+    const projected = (callId: string) => transcript.find(item => item.kind === "message" && item.toolCallId === callId);
+    expect(projected("active")).toHaveProperty("display.kind", "browser_live");
+    expect(projected("wrong-session")).not.toHaveProperty("display");
+    expect(projected("wrong-call")).not.toHaveProperty("display");
   });
 
   it("exports the complete canonical JSONL tree including abandoned branches", async () => {

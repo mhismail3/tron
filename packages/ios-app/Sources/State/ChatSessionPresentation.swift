@@ -126,6 +126,24 @@ final class ChatSessionPresentation {
         open = ChatOpenPresentationState(sessionID: sessionID)
     }
 
+    func presentDisplay(_ command: DisplayPresentationCommand) {
+        let route: DisplayRoute
+        switch command {
+        case .showSheet(let value), .showFloating(let value): route = value
+        }
+        guard route.sessionID == sessionID else { return }
+        automaticallyPresentedDisplayIDs.formUnion([route.display.presentationIdentity])
+        if pendingFloatingDisplay?.id == route.id { pendingFloatingDisplay = nil }
+        switch command {
+        case .showSheet:
+            if displaySheet?.id != route.id { displaySheet = route }
+        case .showFloating:
+            // Selecting another action in this same browser retains its viewer,
+            // drag position and request owner instead of reopening the lease.
+            if floatingDisplay?.id != route.id { floatingDisplay = route }
+        }
+    }
+
     func cancelImports() {
         photoImportTask?.cancel()
         photoImportTask = nil

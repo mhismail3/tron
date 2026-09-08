@@ -137,12 +137,13 @@ describe("browser live observation", () => {
     for (let i = 0; i < 4; i++) f.open();
     expect(() => f.open()).toThrow("capacity");
     for (let i = 1; i < 64; i++) {
-      const next = { ...registration, loadToken: f.loadToken, viewId: `view-${i}`, browserIdentity: `browser-${i}` };
+      const next = { ...registration, loadToken: f.loadToken, viewId: `view-${i}`, generation: `generation-${i}`,
+        cdpUrl: registration.cdpUrl.replace("123456789abc", i.toString(16).padStart(12, "0")) };
       f.registry.register(next);
       if (i < 4) for (let n = 0; n < 4; n++) f.registry.open(next.sessionId, next.viewId, next.generation, "device-a");
     }
-    expect(() => f.registry.open(registration.sessionId, "view-4", registration.generation, "device-a")).toThrow("capacity");
-    expect(() => f.registry.register({ ...registration, loadToken: f.loadToken, viewId: "overflow", browserIdentity: "overflow" })).toThrow("capacity");
+    expect(() => f.registry.open(registration.sessionId, "view-4", "generation-4", "device-a")).toThrow("capacity");
+    expect(() => f.registry.register({ ...registration, loadToken: f.loadToken, viewId: "overflow", generation: "overflow" })).toThrow("capacity");
   });
 
   it("follows a changed visible tab and fences old-target frames without resetting sequences", async () => {
@@ -203,7 +204,7 @@ describe("trusted browser result admission", () => {
   it("uses normalized executed commands, reuses descriptors, and fences every late effect", () => {
     const f = fixture();
     const input = { owner: { id: "extension:browser", title: "Browser", source: "git:github.com/fitchmultz/pi-agent-browser-native" },
-      toolName: "agent_browser", sessionId: registration.sessionId, runtimeGeneration: "runtime-a", loadToken: f.loadToken, views: f.registry,
+      toolName: "agent_browser", toolCallId: "browser-call", sessionId: registration.sessionId, runtimeGeneration: "runtime-a", loadToken: f.loadToken, views: f.registry,
       result: { content: [], isError: false, details: { args: ["--session", "managed-a", "get", "cdp-url"], command: "get", subcommand: "cdp-url",
         resultCategory: "success", exitCode: 0, agentBrowserStarted: true, sessionName: "managed-a", data: { cdpUrl: registration.cdpUrl } } } };
     const adapted = observeTrustedAgentBrowserResult(input) as { details: { browserLiveView: { viewId: string; generation: string } } };
@@ -212,7 +213,7 @@ describe("trusted browser result admission", () => {
     expect(observeTrustedAgentBrowserResult(input)).toEqual(adapted);
     expect(observeTrustedAgentBrowserResult({ ...input, owner: { ...input.owner, source: "local" } })).toBe(input.result);
     const token = f.registry.beginSessionLoad(registration.sessionId);
-    const current = f.registry.register({ ...registration, loadToken: token, browserIdentity: "0:managed-a" });
+    const current = f.registry.register({ ...registration, loadToken: token });
     observeTrustedAgentBrowserResult({ ...input, result: { ...input.result, details: { ...input.result.details, command: "close" } } });
     expect(f.registry.describe(registration.sessionId, current.viewId, current.generation)).toEqual(current);
     expect(observeTrustedAgentBrowserResult(input)).toBe(input.result);

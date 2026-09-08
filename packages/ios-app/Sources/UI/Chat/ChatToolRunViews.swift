@@ -4,6 +4,7 @@ struct ToolCard: View {
     @Environment(AppModel.self) private var model
     @Environment(\.canonicalResourceSessionID) private var sessionID
     @Environment(\.pendingExtensionInteractionPresenter) private var presentPendingInteraction
+    @Environment(\.displayPresentationHandler) private var presentDisplay
     let title: String
     let subtitle: String
     let content: String
@@ -100,6 +101,9 @@ struct ToolCard: View {
             accessibilityValue: title,
             action: openDetails
         )
+        #if HOSTED_TEST
+        .modifier(HostedToolActionProbeModifier(id: "card:\(detailTool.id)", action: openDetails))
+        #endif
         .toolDetailSheet(
             route: $detailPresentation,
             detent: $detailDetent,
@@ -108,7 +112,9 @@ struct ToolCard: View {
     }
 
     private func openDetails() {
-        if let sessionID,
+        if let presentDisplay, let command = ToolDisplayActivation.command(for: detailTool.descriptor, sessionID: sessionID) {
+            presentDisplay(command)
+        } else if let sessionID,
            let presentPendingInteraction,
            let interaction = PendingExtensionInteractionToolPresentation.interaction(
                tools: [detailTool.descriptor],
@@ -142,6 +148,7 @@ struct ToolCard: View {
             lastProgressAt: timing?.lastProgressAt,
             progressSequence: timing?.progressSequence,
             outputTruncated: timing?.outputTruncated ?? outputTruncated,
+            display: timing?.display,
             extensionOrigin: timing?.extensionOrigin
         )
     }
@@ -184,16 +191,42 @@ struct ToolRunResolvedState: Equatable {
     let tools: [ChatToolPresentation]
 }
 
+/// The outer tool sheet owns this deferred user intent until native dismissal.
+/// A replaced connection/surface must never publish it.
+struct ToolDisplayHandoff {
+    private var pending: (command: DisplayPresentationCommand, toolID: String, runtime: String, installation: Int, profile: String?)?
+    mutating func stage(_ command: DisplayPresentationCommand, toolID: String, runtime: String, installation: Int, profile: String?) {
+        pending = (command, toolID, runtime, installation, profile)
+    }
+    mutating func cancel() { pending = nil }
+    mutating func consume(source: SessionSnapshot?, installation: Int, profile: String?, active: Bool) -> DisplayPresentationCommand? {
+        defer { pending = nil }
+        guard let pending, let source, active, pending.runtime == source.runtimeGeneration,
+              pending.installation == installation, pending.profile == profile,
+              pending.command.route.sessionID == source.sessionId,
+              source.transcript.last(where: { $0.role == .toolResult && $0.toolCallId == pending.toolID })?.display
+                == pending.command.route.display else { return nil }
+        // Re-resolve the selected canonical result, not all transcript layout:
+        // unrelated streaming must not cancel a valid user's viewer activation.
+        return pending.command
+    }
+}
+
 struct ToolRunView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.canonicalResourceSessionID) private var sessionID
     @Environment(\.pendingExtensionInteractionPresenter) private var presentPendingInteraction
+    @Environment(\.displayPresentationHandler) private var presentDisplay
+    @Environment(\.tronPresentationActivityCoordinator) private var activityCoordinator
+    @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
     let run: ChatToolRunPresentation
     let installationTag: ChatTranscriptProjectionTag
     let resolveDetails: ([String], ChatTranscriptProjectionTag) -> [ChatToolPresentation]?
     let recordChip: (ToolChipInstrumentationSample) -> Void
     @State private var resolvedState: ToolRunResolvedState?
     @State private var detailDetent: PresentationDetent = .medium
+    @State private var displayHandoff = ToolDisplayHandoff()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
@@ -204,7 +237,7 @@ struct ToolRunView: View {
                     run: run,
                     installationTag: installationTag,
                     recordChip: recordChip,
-                    action: openDetails
+                    action: activateRun
                 )
             }
         }
@@ -213,19 +246,60 @@ struct ToolRunView: View {
                     get: { resolvedState != nil },
                     set: { if !$0 { resolvedState = nil } }
                 ),
-                identity: "chat.tool-run.\(run.id)"
+                identity: "chat.tool-run.\(run.id)",
+                onDismiss: completeDisplayHandoff
             ) {
                 if let resolvedState {
                     LiveToolRunDetails(
                         initial: resolvedState,
                         detent: $detailDetent,
+                        onDisplay: stageDisplayHandoff,
                         onDismiss: { self.resolvedState = nil }
                     )
                 }
             }
-            .onChange(of: installationTag) { _, currentTag in
+            .onChange(of: installationTag) { previousTag, currentTag in
+                if previousTag.presentationGeneration != currentTag.presentationGeneration
+                    || previousTag.runtimeGeneration != currentTag.runtimeGeneration
+                    || previousTag.sessionID != currentTag.sessionID { displayHandoff.cancel() }
                 refreshResolvedDetails(for: currentTag)
             }
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active { displayHandoff.cancel() }
+            }
+            .onChange(of: model.selectedGatewayProfileID()) { _, _ in displayHandoff.cancel() }
+    }
+
+    private func activateRun() {
+        if run.tools.count == 1, let tool = run.tools.first,
+           let presentDisplay, let command = ToolDisplayActivation.command(for: tool, sessionID: sessionID) {
+            presentDisplay(command)
+        } else { openDetails() }
+    }
+
+    private func stageDisplayHandoff(toolID: String, command: DisplayPresentationCommand) {
+        guard let state = resolvedState else { return }
+        displayHandoff.stage(command, toolID: toolID, runtime: state.installationTag.runtimeGeneration,
+                             installation: state.installationTag.presentationGeneration, profile: model.selectedGatewayProfileID())
+        resolvedState = nil
+    }
+
+    private func completeDisplayHandoff() {
+        guard let currentInstallation = model.presentationGeneration(for: installationTag.sessionID) else {
+            displayHandoff.cancel()
+            return
+        }
+        let activity = surfaceToken.flatMap { activityCoordinator?.activity(for: $0) }
+        let active = activity?.allowsPresentationPublication == true
+            && scenePhase == .active && UIApplication.shared.applicationState == .active
+        // The detail source establishes authority; the visible projection also
+        // includes admitted history pages, not just the 512-item gateway tail.
+        let source = model.sessionToolDetailSource(for: installationTag.sessionID)
+            .flatMap { _ in model.transcriptSnapshot(for: installationTag.sessionID) }
+        if let command = displayHandoff.consume(
+            source: source,
+            installation: currentInstallation, profile: model.selectedGatewayProfileID(), active: active
+        ) { presentDisplay?(command) }
     }
 
     private var detailToolIDs: [String] {
@@ -233,6 +307,7 @@ struct ToolRunView: View {
     }
 
     private func openDetails() {
+        displayHandoff.cancel()
         if let sessionID,
            let presentPendingInteraction,
            let interaction = PendingExtensionInteractionToolPresentation.interaction(
@@ -267,6 +342,7 @@ struct ToolRunView: View {
 struct LiveToolRunDetails: View {
     let initial: ToolRunResolvedState
     @Binding var detent: PresentationDetent
+    let onDisplay: (String, DisplayPresentationCommand) -> Void
     let onDismiss: () -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var activity
@@ -301,7 +377,7 @@ struct LiveToolRunDetails: View {
                 .presentationDragIndicator(.hidden)
                 .tronPresentation()
             } else {
-                ToolRunDetailSheet(run: run, tools: tools)
+                ToolRunDetailSheet(run: run, tools: tools, onDisplay: onDisplay)
             }
         }
         .background {
@@ -426,6 +502,9 @@ private struct ToolActivityChip: View {
             accessibilityValue: visual.title,
             action: action
         )
+        #if HOSTED_TEST
+        .modifier(HostedToolActionProbeModifier(id: "run:\(run.id)", action: action))
+        #endif
         .onAppear {
             let token = transitionState.retarget(targetState)
             displayedState = targetState
@@ -479,10 +558,12 @@ private struct ToolActivityChip: View {
     }
 }
 
-private struct ToolRunDetailSheet: View {
+struct ToolRunDetailSheet: View {
     let run: ChatToolRunPresentation
     let tools: [ChatToolPresentation]
+    var onDisplay: ((String, DisplayPresentationCommand) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.canonicalResourceSessionID) private var sessionID
     @State private var selectedToolRoute: ToolDetailRoute?
     @State private var selectedToolPresentation: ChatToolPresentation?
     @State private var detailDetent: PresentationDetent = .medium
@@ -503,9 +584,13 @@ private struct ToolRunDetailSheet: View {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(orderedTools) { tool in
                         ToolRunSummaryRow(tool: tool) {
-                            detailDetent = .medium
-                            selectedToolPresentation = tool
-                            selectedToolRoute = ToolDetailRoute(toolID: tool.id)
+                            if let onDisplay, let command = ToolDisplayActivation.command(for: tool.descriptor, sessionID: sessionID) {
+                                onDisplay(tool.id, command)
+                            } else {
+                                detailDetent = .medium
+                                selectedToolPresentation = tool
+                                selectedToolRoute = ToolDetailRoute(toolID: tool.id)
+                            }
                         }
                     }
                 }
@@ -792,6 +877,9 @@ private struct ToolRunSummaryRow: View {
         .accessibilityLabel(accessibilityLabel(presentation))
         .accessibilityHint("Opens tool details")
         .accessibilityIdentifier("tool-run-summary-\(tool.id)")
+        #if HOSTED_TEST
+        .modifier(HostedToolActionProbeModifier(id: "row:\(tool.id)", action: action))
+        #endif
     }
 
     private var accent: Color {

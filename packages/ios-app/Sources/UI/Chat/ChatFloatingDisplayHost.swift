@@ -6,10 +6,14 @@ enum DisplayFloatingLayoutPolicy {
     static let controlDiameter: CGFloat = 32
     static let controlTouchTarget: CGFloat = 44
 
-    static func panelSize(in container: CGSize) -> CGSize {
+    static func panelSize(in container: CGSize, browserLive: Bool = false) -> CGSize {
         let availableWidth = max(0, container.width - panelEdgeInset * 2)
         let preferredWidth = max(240, container.width * 0.78)
         let width = min(420, min(availableWidth, preferredWidth))
+        if browserLive {
+            let height = min(width * 3 / 4, max(0, container.height - panelEdgeInset * 2))
+            return CGSize(width: height * 4 / 3, height: height)
+        }
         let height = min(320, max(200, min(container.height * 0.32, width * 0.68)))
         return CGSize(width: width, height: height)
     }
@@ -61,7 +65,13 @@ struct ChatFloatingDisplayHost: View {
     var body: some View {
         GeometryReader { geometry in
             if let route {
-                let size = DisplayFloatingLayoutPolicy.panelSize(in: geometry.size)
+                let browserLive = route.display.kind == .browserLive
+                let available = CGSize(
+                    width: geometry.size.width,
+                    height: browserLive ? max(0, geometry.size.height - geometry.safeAreaInsets.top
+                        - geometry.safeAreaInsets.bottom - max(0, bottomExclusion)) : geometry.size.height
+                )
+                let size = DisplayFloatingLayoutPolicy.panelSize(in: available, browserLive: browserLive)
                 let safeRect = DisplayFloatingLayoutPolicy.safeCenterRect(
                     container: geometry.size,
                     safeTop: geometry.safeAreaInsets.top,
@@ -69,6 +79,9 @@ struct ChatFloatingDisplayHost: View {
                     bottomExclusion: bottomExclusion,
                     panelSize: size
                 )
+                // Retain the user's route while unusable layout retires its
+                // renderer. A zero-area panel is not an active viewer.
+                if size.width > 0 && size.height > 0 {
                 floatingPanel(route: route, size: size, safeRect: safeRect)
                     .frame(width: size.width, height: size.height)
                     .position(DisplayFloatingLayoutPolicy.clamped(
@@ -88,6 +101,7 @@ struct ChatFloatingDisplayHost: View {
                         center = defaultCenter(in: safeRect)
                         dragOrigin = nil
                     }
+                }
             }
         }
         .animation(reduceMotion ? .linear(duration: 0.10) : .smooth(duration: 0.22), value: route?.id)

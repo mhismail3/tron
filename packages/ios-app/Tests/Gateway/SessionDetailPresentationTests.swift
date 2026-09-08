@@ -87,7 +87,8 @@ struct SessionDetailPresentationTests {
                 var appeared = false
                 let content = LiveToolRunDetails(
                     initial: ToolRunResolvedState(installationTag: tag, run: ChatToolRunPresentation(tools: tools), tools: tools),
-                    detent: .constant(.medium), onDismiss: { dismissals += 1 }
+                    detent: .constant(.medium), onDisplay: { _, _ in Issue.record("Unexpected display route") },
+                    onDismiss: { dismissals += 1 }
                 ).environment(model).onAppear { appeared = true }
                 let host = UIHostingController(rootView: content)
                 let window = UIWindow(windowScene: scene)

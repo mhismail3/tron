@@ -103,6 +103,7 @@ export function attributeExtensions(base: LoadExtensionsResult, browserLiveView?
           // Read it at execution, never authorize from the provisional owner.
           owner: extensionOwnerFor(extension),
           toolName: name,
+          toolCallId: args[0],
           result,
           sessionId: browserLiveView.sessionId,
           runtimeGeneration: browserLiveView.runtimeGeneration,

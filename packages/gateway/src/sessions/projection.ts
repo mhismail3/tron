@@ -20,7 +20,7 @@ export function canonicalToolResultCallIDs(manager: TranscriptSessionReader): Re
 }
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { GatewayError } from "../errors.js";
-import { admitDisplayProjection } from "../display/display-contract.js";
+import { admitToolDisplayProjection } from "../display/display-contract.js";
 import { trustedExtensionOriginKind } from "../extensions/owner-attribution.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import type { BlobStore } from "./blob-store.js";
@@ -932,6 +932,7 @@ export function projectMessage(
   contextDelivery?: ContextDeliveryMetadata,
   segmentId?: string,
   expectedSkillArguments?: string,
+  ownerSessionId?: string,
 ): TranscriptItem | undefined {
   switch (message.role) {
     case "user":
@@ -965,7 +966,7 @@ export function projectMessage(
         semantic: semanticForMessage("assistant"),
       };
     case "toolResult": {
-      const display = admitDisplayProjection(message.toolName, message.details);
+      const display = admitToolDisplayProjection(message.toolName, message.details, message.toolCallId, ownerSessionId);
       return {
         id,
         parentId,
@@ -1074,6 +1075,7 @@ export function projectEntry(
   segmentId?: string,
   expectedSkillArguments?: string,
   bashMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
+  ownerSessionId?: string,
 ): TranscriptItem | undefined {
   switch (entry.type) {
     case "message":
@@ -1094,6 +1096,7 @@ export function projectEntry(
         contextDelivery,
         segmentId,
         expectedSkillArguments,
+        ownerSessionId,
       );
     case "custom_message":
       if (!entry.display) return undefined;
@@ -1664,6 +1667,7 @@ export function projectTranscript(
       toolSegmentIDs.get(entry.id),
       expectedSkillArguments,
       bashMetadata,
+      manager.getSessionId?.(),
     );
     if (!projected) throw new Error("projectable transcript entry produced no item");
     return withInvocationSemantics(projected, boundInvocation, invocationStates);
@@ -1730,6 +1734,7 @@ export function projectTranscriptPage(
       toolSegmentIDs.get(entry.id),
       expectedSkillArguments,
       bashMetadata,
+      manager.getSessionId?.(),
     );
     if (!item) throw new Error("projectable transcript entry produced no item");
     const enriched = withInvocationSemantics(item, boundInvocation, invocationStates);

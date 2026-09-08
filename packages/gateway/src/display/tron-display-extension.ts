@@ -79,12 +79,12 @@ export function createTronDisplayExtension(input: {
     pi.registerTool({
       name: "display",
       label: "Display",
-      description: "Present an artifact, public HTTPS webpage, or read-only live browser view in Tron chat. Sheet is the default; inline and floating apply only to compatible content. source.kind=path uses a path relative to the session directory; internal_file uses a path relative to Tron's internal workspace files/ directory. Neither accepts absolute paths.",
+      description: "Present an artifact, public HTTPS webpage, or read-only live browser view in Tron chat. Live browsers default to floating; other content defaults to a sheet. Inline and floating apply only to compatible content. source.kind=path uses a path relative to the session directory; internal_file uses a path relative to Tron's internal workspace files/ directory. Neither accepts absolute paths.",
       promptSnippet: "Display visual or document content in Tron chat when it materially improves the response.",
       promptGuidelines: [
         "Use display at your discretion when visual, document, media, or webpage content materially improves the app experience.",
         "Always provide concise alt text and never include secrets or credential-bearing URLs.",
-        "Prefer the default sheet surface; use inline for bounded content that belongs in transcript flow and floating for content worth keeping visible while chatting.",
+        "Live browser views default to floating and expand into a sheet. Other content defaults to a sheet; use inline for bounded transcript content and floating for content worth keeping visible while chatting.",
         "Write generated HTML or media to a session file or an internal workspace files/ document before calling display; do not pass inline bytes or base64.",
         "For live browser viewing, use source.kind=browser_live with the opaque viewId and generation returned by agent_browser get cdp-url. Never invent a handle, supply a browser endpoint, or launch a browser from a historical display.",
       ],
@@ -96,7 +96,7 @@ export function createTronDisplayExtension(input: {
         requireBoundedText(params.altText, "Display alt text", 2_048);
         if (params.caption) requireBoundedText(params.caption, "Display caption", 4_096);
         if (params.fallbackText) requireBoundedText(params.fallbackText, "Display fallback text", 4_096);
-        const requestedSurface = params.presentation?.surface ?? "sheet";
+        const requestedSurface = params.presentation?.surface ?? (params.source.kind === "browser_live" ? "floating" : "sheet");
         const inlineTapAction = params.presentation?.inlineTapAction ?? "sheet";
         const sessionID = input.sessionId();
         const displayID = randomUUID();
