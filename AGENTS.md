@@ -57,6 +57,13 @@
   intended behavior unless a product change is explicitly requested. Protect
   chat identity, scroll continuity, native layout, and composer/keyboard behavior;
   do not trade correctness or interaction quality for fewer lines or a benchmark.
+- **Show useful visual results proactively.** When a screenshot, design preview,
+  comparison, chart, or diagram helps the user understand or judge the result,
+  show it without waiting to be asked. When `display` is available, prefer inline
+  presentation for bounded image previews so they are visible in the conversation
+  and can expand for inspection. Skip decorative or redundant images. Use concise
+  alt text, exclude secrets, and label mockups/simulator captures honestly; a still
+  image does not prove animation, interaction, or device validation.
 - **Leave useful breadcrumbs.** Add concise comments where ownership, an
   invariant, ordering, or a non-obvious tradeoff would otherwise be easy to break.
   Explain why; link the owning contract or focused regression when useful. Do not

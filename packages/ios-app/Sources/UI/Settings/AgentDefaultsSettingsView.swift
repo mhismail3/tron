@@ -168,6 +168,7 @@ struct AgentDefaultsSettingsView: View {
             .padding(.vertical, 18)
         }
         .tronScrollEdgeChrome()
+        .tronContextWindowSliderHost()
         .tronNavigationTitle("Models and Defaults")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {

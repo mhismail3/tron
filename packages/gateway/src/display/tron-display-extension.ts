@@ -80,9 +80,11 @@ export function createTronDisplayExtension(input: {
       name: "display",
       label: "Display",
       description: "Present an artifact, public HTTPS webpage, or read-only live browser view in Tron chat. Live browsers default to floating; other content defaults to a sheet. Inline and floating apply only to compatible content. source.kind=path uses a path relative to the session directory; internal_file uses a path relative to Tron's internal workspace files/ directory. Neither accepts absolute paths.",
-      promptSnippet: "Display visual or document content in Tron chat when it materially improves the response.",
+      promptSnippet: "Proactively display useful visual results in Tron chat; prefer inline image previews when they help the user understand or judge the result.",
       promptGuidelines: [
-        "Use display at your discretion when visual, document, media, or webpage content materially improves the app experience.",
+        "Proactively use display for screenshots, UI/design previews, comparisons, charts, diagrams, or image results when seeing them helps the user understand or judge the result; do not wait to be asked. Prefer presentation.surface=inline for bounded image previews. Skip decorative or redundant images.",
+        "Use actual result artifacts where available, crop to the useful area without hiding relevant context, and label mockups or simulator captures honestly. A still image is not proof of animation, interaction, or device validation.",
+        "Use display for document, media, or webpage content when it materially improves the response.",
         "Always provide concise alt text and never include secrets or credential-bearing URLs.",
         "Live browser views default to floating and expand into a sheet. Other content defaults to a sheet; use inline for bounded transcript content and floating for content worth keeping visible while chatting.",
         "Write generated HTML or media to a session file or an internal workspace files/ document before calling display; do not pass inline bytes or base64.",

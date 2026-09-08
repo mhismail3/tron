@@ -535,10 +535,11 @@ before reporting provider failures or timeout, and
 never mutates the settings draft, saved defaults, or credentials. Models with
 `contextWindowLimits` expose a per-provider/model sparse context-window default;
 project edits carry the captured session ID when available so the Gateway can
-validate project-scoped model settings. The effective value is displayed with
-model-default/inherited, maximum, and custom token choices, without inventing a
-mobile-side maximum. The editor combines catalog capacity with the selected
-settings scope's `contextWindowMinimum`; custom input commits only on Apply.
+validate project-scoped model settings. The effective value opens the shared
+continuous glass slider with model-default/inherited reset, exact bounds, and
+rounded detents, without inventing a mobile-side maximum. The editor combines
+catalog capacity with the selected settings scope's `contextWindowMinimum`;
+dismissing an edited slider updates the local settings draft, not persisted defaults.
 Defaults affect new/cold-resumed sessions or explicit resource reloads, not already
 live sessions. Manage Session exposes the same capability only when the Gateway
 advertises `context-window.v1`; its idle mutation captures provider/model identity,
@@ -1499,8 +1500,14 @@ The model card replaces the Configuration section. Its selected model name uses 
 large bold reading-family heading as remaining tokens, with a serif provider line beneath it; exact
 provider/model identity chooses the catalog display name. Switch Model opens the shared
 model picker. Capability-gated Context Window and Thinking place their current values in
-slim trailing menu capsules, not beneath their titles. Context values retain whole-token
-precision; accessibility also exposes token units, source, bounds, and warnings. All rows
+slim trailing capsules, not beneath their titles. Thinking retains its menu. Context Window
+morphs its capsule into an anchored Liquid Glass slider above the sheet, without relaying out
+the scrolling rows. The continuous thumb gently gravitates toward point-sized detent wells;
+release settles only near a detent. Bounds remain exact, the configured default is a detent,
+and rounded quarters avoid crowding it (million-token windows use familiar 500k/750k stops).
+Context values retain whole-token precision; accessibility exposes token units, source,
+bounds, warnings, adjustable detent steps, reset, Save and close, and escape. Reduce Motion uses a short
+fade instead of the expanding geometry. All rows
 beneath the model header reuse `TronSettingsRow` and `TronSettingsDivider`: standard icons,
 leading insets, title scale, and indented separators match the Session container below.
 Compact rows pad their labels, not the already padded action target, so single-line and
@@ -1518,8 +1525,12 @@ the parent settings destination retains its existing name. The model card scopes
 its inline controls and nested sheets. An in-flight choice appears immediately without replacing canonical authority.
 Context-window model/revision guards, Thinking's available-level list, and compaction
 queue/export/active-operation admission stay owned by the existing session mutations.
-Context and Thinking selections update their capsules as their menu or custom-entry alert
-closes, using one pending choice per control scoped to the exact session/model/runtime.
+The context slider keeps an ephemeral local draft and commits at most once when an outside
+tap or accessibility Save and close/escape collapses it. Opening without editing sends no mutation;
+the default detent clears the override. Model/runtime, limits, effective-value, or presentation
+replacement discards an open draft. The shared Models and Defaults control edits its existing
+settings draft, whose Save remains authoritative. Context and Thinking selections update their
+capsules as their slider or menu closes, using one pending choice per control scoped to the exact session/model/runtime.
 The exact command completion plus matching canonical projection retires that choice;
 failure rolls back only its exact request,
 and model/runtime replacement discards it. Reset-to-default remains distinct from no

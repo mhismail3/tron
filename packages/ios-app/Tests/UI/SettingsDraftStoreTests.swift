@@ -181,14 +181,9 @@ struct SettingsDraftStoreTests {
         ])
     }
 
-    @Test("custom context tokens are committed only as valid whole numbers")
-    func contextWindowInput() {
+    @Test("context window minimum preserves valid default and capacity")
+    func contextWindowMinimum() {
         let limits = ContextWindowLimits(minimum: 37_408, maximum: 1_050_000, default: 272_000, longContextThreshold: 272_000)
-        for text in ["", "1M", "1,000,000", "1.5", "-100000", "100000000000000000000000", "1050001", "37407"] {
-            #expect(ContextWindowInput.tokens(text, limits: limits) == nil)
-        }
-        #expect(ContextWindowInput.tokens(" 1050000 ", limits: limits) == 1_050_000)
-        #expect(ContextWindowInput.tokens("1000000", limits: limits) == 1_000_000)
         #expect(limits.withMinimum(300_000).minimum == 300_000)
         #expect(limits.withMinimum(300_000).default == 300_000)
         #expect(limits.withMinimum(300_000).isValid)

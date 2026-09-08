@@ -320,6 +320,7 @@ struct SessionContextSheet: View {
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(Color.tronEmerald)
+        .tronContextWindowSliderHost()
         .onAppear {
             if capturedNoticeScope == nil {
                 capturedNoticeScope = model.presentationTarget(for: sessionID).map {

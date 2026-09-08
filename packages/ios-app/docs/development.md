@@ -825,9 +825,16 @@ model card beside Compact Now. The model name matches the remaining-token headli
 the serif provider line sits closely beneath it and the action reads Switch Model. Thinking,
 Context Window (when supported), and Automatic Compaction appear in that order, using the
 same icon column, indented dividers, label scale, and padding as the Session rows. Context Window when supported and Thinking
-show their values in trailing menu capsules. Verify default,
-maximum, and custom token choices plus Thinking changes update as the popup closes, revert
-on failure, and cannot carry into another model/runtime. Extra-high labels read Extra High
+show their values in trailing capsules. Tap Context Window to grow an anchored glass slider;
+verify smooth finger tracking, gentle magnetic stops, exact minimum/maximum, and the default
+near 200k/272k plus 500k/750k for million-token models. Other capacities use rounded quarters.
+Outside tap (or VoiceOver Save and close/escape) must shrink back to the original capsule and submit only one edited value;
+opening/closing without adjustment must not create an override. Default clears the override.
+Try narrow sheets, both appearances, large text, VoiceOver adjustment/escape, and Reduce Motion.
+Verify Context Window and Thinking changes revert on failure and cannot carry into another
+model/runtime or overwrite a newer authoritative value. `ContextWindowSliderTests` covers the
+bounded detent/attraction math and draft/reset semantics; hands-on animation/haptic tuning is a
+separate device checkpoint before broader UI hardening. Extra-high labels read Extra High
 across defaults, session controls, transcript notices, and history while raw values remain
 unchanged. Statistic values match their captions' point size. Current Branch places the
 branch name beneath the title and the working-tree status at the trailing edge. Rename and

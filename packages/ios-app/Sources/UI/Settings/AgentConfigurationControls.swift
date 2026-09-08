@@ -24,15 +24,6 @@ struct TronModelSelectionRow: View {
     }
 }
 
-enum ContextWindowInput {
-    static func tokens(_ text: String, limits: ContextWindowLimits) -> Int? {
-        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty, value.allSatisfy({ $0.isASCII && $0.isNumber }),
-              let tokens = Int(value), limits.admits(tokens) else { return nil }
-        return tokens
-    }
-}
-
 struct ContextWindowSelectionRow: View {
     @Binding var selection: Int?
     let limits: ContextWindowLimits
@@ -42,9 +33,14 @@ struct ContextWindowSelectionRow: View {
     var warning: String? = nil
     var source: String? = nil
     var accent: Color = .tronTeal
-    @State private var customText = ""
-    @State private var editingCustom = false
+    @State private var editorID: UUID?
     @Environment(\.controlSize) private var controlSize
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+
+    private var currentValue: Int { effectiveValue ?? selection ?? inheritedValue ?? limits.default }
+    private var defaultValue: Int { min(limits.maximum, max(limits.minimum, inheritedValue ?? limits.default)) }
 
     private var displayValue: String {
         if let effectiveValue {
@@ -75,35 +71,40 @@ struct ContextWindowSelectionRow: View {
             value: displayValue,
             accent: accent
         ) {
-            TronInlineMenu(controlSize == .small
-                ? (effectiveValue ?? selection ?? inheritedValue ?? limits.default).formatted()
-                : "Change", accent: accent) {
-                Button(resetLabel) { selection = nil }
-                Button("Maximum (\(limits.maximum.formatted()))") { selection = limits.maximum }
-                Button("Custom token limit…") {
-                    customText = String(selection ?? effectiveValue ?? inheritedValue ?? limits.default)
-                    editingCustom = true
-                }
+            Button { editorID = UUID() } label: {
+                TronInlineActionLabel(currentValue.formatted(), accent: accent)
             }
+            .buttonStyle(.plain)
+            .opacity(editorID == nil ? 1 : 0)
             .accessibilityLabel("Context Window")
             .accessibilityValue(displayValue)
-        }
-        .alert("Context Window", isPresented: $editingCustom) {
-            TextField("Whole number of tokens", text: $customText)
-                .keyboardType(.numberPad)
-            Button("Cancel", role: .cancel) {}
-            Button("Apply") {
-                if let tokens = ContextWindowInput.tokens(customText, limits: limits) { selection = tokens }
+            .accessibilityIdentifier("context-window-control")
+            .anchorPreference(key: ContextWindowSliderPreference.self, value: .bounds) { anchor in
+                guard let editorID, isEnabled, presentationActivity.allowsPresentationPublication else { return nil }
+                return ContextWindowSliderRequest(
+                    id: editorID, anchor: anchor, sourceVerticalInset: controlSize == .small ? 8 : 0,
+                    scale: ContextWindowSliderScale(limits: limits, defaultValue: defaultValue),
+                    value: currentValue, selection: selection, title: currentValue.formatted(),
+                    resetLabel: resetLabel, detail: detail,
+                    accent: settingsTheme?.accent ?? accent
+                ) { draft in
+                    guard self.editorID == editorID, isEnabled,
+                          presentationActivity.allowsPresentationPublication else { return }
+                    self.editorID = nil
+                    if draft.changed, draft.selection != selection { selection = draft.selection }
+                }
             }
-            .disabled(ContextWindowInput.tokens(customText, limits: limits) == nil)
-        } message: {
-            Text("Enter \(limits.minimum.formatted())–\(limits.maximum.formatted()) tokens. Larger windows may increase cost or allowance usage and do not restore previously compacted history.")
         }
-        .tronManagedSystemPresentation(
-            isPresented: $editingCustom,
-            identity: "settings.context-window-input"
-        )
-        .accessibilityHint("\(detail) Choose the default, maximum, or explicitly apply a supported custom token limit.")
+        .onChange(of: isEnabled) { _, enabled in if !enabled { editorID = nil } }
+        .onChange(of: limits) { _, _ in editorID = nil }
+        .onChange(of: currentValue) { _, _ in editorID = nil }
+        .onChange(of: selection) { _, _ in editorID = nil }
+        .onChange(of: defaultValue) { _, _ in editorID = nil }
+        .onChange(of: presentationActivity) { _, activity in
+            if !activity.allowsPresentationPublication { editorID = nil }
+        }
+        .onDisappear { editorID = nil }
+        .accessibilityHint("\(detail) Opens a continuous slider with gentle detents. Dismiss to save.")
     }
 }
 
@@ -132,7 +133,7 @@ struct TronThinkingSelectionRow: View {
 }
 
 /// The same mutation controls fit either ordinary settings rows or a compact
-/// model summary. Only presentation changes; validation and menus stay shared.
+/// model summary. Only presentation changes; validation and controls stay shared.
 private struct AgentConfigurationValueRow<Control: View>: View {
     let icon: String
     let title: String
