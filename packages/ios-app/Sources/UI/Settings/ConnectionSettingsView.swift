@@ -495,6 +495,21 @@ struct GatewayConnectionDetailView: View {
                         ) {
                             GatewayConnectionStatusBadge(state: status)
                         }
+                        if status == .offline || status == .identityMismatch {
+                            TronSettingsDivider(accent: statusColor)
+                            Button {
+                                model.retryGatewayConnection(for: currentProfile)
+                                Task { await loadInfo() }
+                            } label: {
+                                TronValueRow(
+                                    icon: "arrow.clockwise",
+                                    title: "Retry Connection",
+                                    detail: "Start a new bounded recovery attempt",
+                                    accent: statusColor
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
                         if let updateStatus {
                             TronSettingsDivider(accent: statusColor)
                             gatewayUpdateStatusRow(updateStatus)

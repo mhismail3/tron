@@ -469,6 +469,49 @@ struct DashboardStateOwnerTests {
         }
     }
 
+    @MainActor
+    @Test("secondary failed initial connections cannot reset recovery by recreating the pool entry")
+    func secondaryRecoverySurvivesEntryReplacement() async throws {
+        try await withTestWatchdog { @MainActor in
+            let remote = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            let clock = ManualClock()
+            let sockets = (0..<4).map { _ in ScriptedGatewaySocket() }
+            let factory = ScriptedGatewaySocketFactory(sockets: sockets)
+            let pool = DashboardGatewayConnectionPool(
+                clientFactory: { GatewayClient(socketFactory: factory.factory, clock: clock.clock) },
+                clock: clock.clock
+            )
+            defer { pool.retire() }
+            for index in 0..<3 {
+                await sockets[index].failNextSend(GatewayFailure(
+                    code: "timeout", message: "synthetic handshake timeout", retryable: true, details: nil
+                ))
+                pool.reconcile(profiles: [remote], selectedProfileID: nil, token: { _ in "token" })
+                try await sockets[index].waitUntilClosed()
+                if index < 2 {
+                    try await clock.waitUntilSleeping(count: 1)
+                    pool.retire()
+                    await pool.waitForRetirement()
+                }
+            }
+            try await Self.waitUntil { pool.state(for: remote.id) == .offline }
+            #expect(factory.requests.count == 3)
+            pool.retire()
+            await pool.waitForRetirement()
+            pool.reconcile(profiles: [remote], selectedProfileID: nil, token: { _ in "token" })
+            #expect(pool.state(for: remote.id) == .offline)
+            #expect(factory.requests.count == 3)
+            pool.retry(profileID: remote.id)
+            try await sockets[3].waitUntilSent(count: 1)
+            #expect(factory.requests.count == 4)
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
     @Test("dashboard reconnect backoff advances after an immediate failed attempt")
     func dashboardReconnectBackoff() {
         #expect(DashboardGatewayConnectionPool.nextReconnectDelay(after: .zero) == .seconds(2))

@@ -91,12 +91,9 @@ struct AppModelReconnectTests {
 
             clock.advance(by: .seconds(2))
             try await failHandshake(fixture.sockets[2])
-            try await clock.waitUntilSleeping(count: 1)
-            #expect(clock.recordedSleeps() == [
-                .seconds(1.6),
-                .seconds(2),
-                .seconds(4.08),
-            ])
+            try await fixture.sockets[2].waitUntilClosed()
+            for _ in 0..<20 { await Task.yield() }
+            #expect(clock.recordedSleeps() == [.seconds(1.6), .seconds(2)])
             #expect(fixture.socketFactory.requests.count == 3)
         }
     }
@@ -126,6 +123,85 @@ struct AppModelReconnectTests {
             #expect(fixture.socketFactory.requests.count == 2)
             #expect(fixture.model.connectionState == .reconnecting)
         }
+    }
+
+    @Test("automatic recovery stops after three failed handshakes until explicit retry")
+    func automaticRecoveryStopsUntilExplicitRetry() async throws {
+        let clock = ManualClock()
+        let sockets = (0..<5).map { _ in ScriptedGatewaySocket() }
+        let units = SequenceReconnectUnits([0, 0.5, 1, 0.5])
+        try await withFixture(sockets: sockets, clock: clock, units: units) { fixture in
+            let start = Task { await fixture.model.start() }
+            try await failHandshake(sockets[0])
+            try await clock.waitUntilSleeping(count: 1)
+            await start.value
+
+            clock.advance(by: .seconds(1.6))
+            try await failHandshake(sockets[1])
+            try await clock.waitUntilSleeping(count: 1)
+            clock.advance(by: .seconds(2))
+
+            try await failHandshake(sockets[2])
+            try await sockets[2].waitUntilClosed()
+            for _ in 0..<20 { await Task.yield() }
+            #expect(fixture.socketFactory.requests.count == 3)
+            #expect(fixture.model.connectionState == .offline(GatewayRecoveryBudget.stoppedMessage))
+            fixture.model.enteredBackground()
+            fixture.model.becameActive()
+            for _ in 0..<20 { await Task.yield() }
+            await fixture.model.start()
+            #expect(fixture.socketFactory.requests.count == 3)
+            #expect(fixture.model.connectionState == .offline(GatewayRecoveryBudget.stoppedMessage))
+
+            let profile = GatewayProfile(
+                id: "gateway", label: "Mac", host: "gateway.test", port: 9_847,
+                machineId: "machine", deviceId: "device"
+            )
+            fixture.model.retryGatewayConnection(for: profile)
+            try await sockets[3].waitUntilSent(count: 1)
+        }
+    }
+
+    @Test("ordinary short successful foreground visits do not become an artificial outage")
+    func healthyForegroundVisitsDoNotExhaustRecovery() async throws {
+        let suiteName = "GatewayHealthyForegroundTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let profile = GatewayProfile(id: "gateway", label: "Mac", host: "gateway.test", port: 9_847,
+                                     machineId: "machine", deviceId: "device")
+        defaults.set(try JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
+        defaults.set(profile.id, forKey: "selectedGateway.v1")
+        let sockets = (0..<5).map { _ in ScriptedGatewaySocket() }
+        let factory = ScriptedGatewaySocketFactory(sockets: sockets)
+        let client = GatewayClient(socketFactory: factory.factory)
+        let coordinator = GatewayLifecycleCoordinator(
+            client: client, profiles: GatewayProfileStore(defaults: defaults), clock: .continuous,
+            reconnectDelayPolicy: .standard, uuidSource: .random, pairer: GatewayPairer(),
+            pairingCommit: { _, _ in }, profileTokenLookup: { _ in "token" }
+        )
+        do {
+            try await withTestWatchdog { @MainActor in
+                for index in sockets.indices {
+                    await sockets[index].enqueue(helloFrame())
+                    if index == 0 { await coordinator.start() }
+                    else { await coordinator.becameActive()?.value }
+                    try await sockets[index].waitUntilSent(count: 1)
+                    while coordinator.connectionState != .connected {
+                        try Task.checkCancellation()
+                        await Task.yield()
+                    }
+                    coordinator.enteredBackground()
+                    try await sockets[index].waitUntilClosed()
+                }
+                #expect(factory.requests.count == sockets.count)
+            }
+        } catch {
+            await coordinator.teardown()
+            await client.close()
+            throw error
+        }
+        await coordinator.teardown()
+        await client.close()
     }
 
     @Test("mounted restore failure leaves the responsive replacement transport usable")
@@ -577,8 +653,8 @@ struct AppModelReconnectTests {
             "type": .string("hello"),
             "gatewayVersion": .string("1.0.0"),
             "piVersion": .string("1.0.0"),
-            "protocolVersion": .number(4),
-            "minProtocolVersion": .number(4),
+            "protocolVersion": .number(5),
+            "minProtocolVersion": .number(5),
             "machineId": .string(machineID),
             "machineName": .string("Mac"),
             "capabilities": .array([.string("sessions.v1")]),

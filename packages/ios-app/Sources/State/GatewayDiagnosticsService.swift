@@ -105,9 +105,14 @@ enum GatewayDiagnosticFailure {
     static func code(_ error: Error) -> String {
         if error is CancellationError { return "cancelled" }
         guard let failure = error as? GatewayFailure else { return "transport" }
-        switch failure.code {
+        return normalizedCode(failure.code)
+    }
+
+    static func normalizedCode(_ code: String) -> String {
+        switch code {
         case "timeout", "unauthenticated", "disconnected", "event_overflow", "invalid_response",
-             "protocol_mismatch", "identity_mismatch", "cancelled", "possibly_sent": return failure.code
+             "protocol_mismatch", "identity_mismatch", "invalid_profile", "not_paired", "pong_timeout", "ping_timeout",
+             "cancelled", "possibly_sent": return code
         default: return "transport"
         }
     }

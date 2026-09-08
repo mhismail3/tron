@@ -181,7 +181,7 @@ metadata nor credential failure can leave selected metadata without its owned se
 lifecycle admission. Mutation receipt reconciliation captures generation-only admission so it may
 resolve across a same-profile reconnect, but profile replacement invalidates it before any poll or
 replay. Connection-owned terminal-open results that resolve after a same-lifecycle reconnect must attach
-again on the current connection before replay can publish; a profile-generation change discards them. An established transport loss gets one immediate reconnect attempt so short network transitions do not impose a guaranteed offline interval. Failed handshakes and subsequent attempts retain the nominal 2-second, ×1.7,
+again on the current connection before replay can publish; a profile-generation change discards them. An established transport loss gets one immediate reconnect attempt so short network transitions do not impose a guaranteed offline interval. Each transport owner's automatic recovery is profile-keyed and stops after three unsuccessful or short-lived connection attempts, including initial connects; background retirement and navigation preserve an exhausted budget until explicit Retry Connection re-arms that profile. A successful hello remains provisional until its epoch has stayed connected for 30 seconds, so rapid hello-then-failure cycles do not reset the budget. Protocol and identity mismatches stop without retry. Failed handshakes and subsequent attempts retain the nominal 2-second, ×1.7,
 15-second-cap progression. Each sleep is
 independently sampled within 80–120% of its nominal value with a hard 15-second effective cap; the
 injected unit-interval source and monotonic clock make the exact schedule deterministic in tests.

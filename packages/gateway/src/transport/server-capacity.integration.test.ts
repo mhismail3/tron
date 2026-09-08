@@ -64,6 +64,42 @@ describe("WebSocket connection and outbound capacity", () => {
     expect(writeFailed).not.toHaveBeenCalled();
   });
 
+  it("releases completed payloads with their byte reservations while the writer stays busy", () => {
+    const completions: Array<(error?: Error) => void> = [];
+    const queue = new OrderedOutboundQueue(4_096, (_encoded, done) => { completions.push(done); }, vi.fn(), vi.fn());
+    expect(queue.enqueue("a".repeat(1_024))).toBe(true);
+    expect(queue.enqueue("b".repeat(1_024))).toBe(true);
+    // The independent oracle measures actual retained payloads, not the very
+    // byte counter whose reservation used to be released prematurely.
+    const retained = queue as unknown as { frames: Array<{ encoded: string } | undefined> };
+    for (let index = 0; index < 2_050; index += 1) {
+      completions.shift()!();
+      expect(queue.enqueue(String(index).padEnd(1_024, "x"))).toBe(true);
+      const actualBytes = retained.frames.reduce((sum, frame) => sum + (frame ? Buffer.byteLength(frame.encoded) : 0), 0);
+      expect(actualBytes).toBe(2_048);
+      expect(queue.snapshot().queuedBytes).toBe(actualBytes);
+    }
+    queue.retire();
+    expect(retained.frames).toEqual([]);
+    completions.shift()!(); // A late callback cannot resurrect the retired queue.
+    expect(queue.snapshot().queuedBytes).toBe(0);
+  });
+
+  it("bounds tiny-frame bursts by count as well as encoded bytes", () => {
+    const overflow = vi.fn();
+    const write = vi.fn();
+    const queue = new OrderedOutboundQueue(8 * 1_048_576, write, overflow, vi.fn());
+    for (let index = 0; index < 4_096; index += 1) expect(queue.enqueue("{}")).toBe(true);
+    expect(queue.enqueue("{}")).toBe(false);
+    expect(queue.enqueue("{}")).toBe(false);
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(overflow).toHaveBeenCalledTimes(1);
+    expect(overflow.mock.calls[0]?.[0]).toMatchObject({
+      queuedFrames: 4_096, queuedBytes: 8_192, maximumFrames: 4_096,
+      maximumBytes: 8 * 1_048_576, frameHighWater: 4_096, byteHighWater: 8_192,
+    });
+  });
+
   it("reports an asynchronous write failure once and retires queued frames", () => {
     let completion: ((error?: Error) => void) | undefined;
     const overflow = vi.fn();
@@ -131,6 +167,88 @@ describe("WebSocket connection and outbound capacity", () => {
     expect(socket.readyState).toBe(WebSocket.OPEN);
     expect(logger.log.mock.calls.some((call) => call[2]?.event === "connection.outbound-capacity")).toBe(false);
     socket.close(1000);
+  });
+
+  it("retires an overloaded peer before close completes, without cancelling accepted commands or another peer", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-server-overload-retirement-"));
+    let gateway: GatewayServer | undefined;
+    const peers: WebSocket[] = [];
+    let finishCommand = () => {};
+    const commandGate = new Promise<void>((resolve) => { finishCommand = resolve; });
+    cleanups.push(async () => {
+      finishCommand();
+      for (const peer of peers) if (peer.readyState !== WebSocket.CLOSED) peer.terminate();
+      try { await bounded(gateway?.close() ?? Promise.resolve(), "overload gateway disposal"); }
+      finally { await rm(root, { recursive: true, force: true }); }
+    });
+    const devices = new DeviceStore(root, "machine");
+    await devices.initialize();
+    const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const port = await unusedPort();
+    const logger = { log: vi.fn() };
+    const sessions = { unsubscribeClient: vi.fn(), subscribe: vi.fn() };
+    let acceptedContext: any;
+    let completedCommands = 0;
+    const invoke = vi.fn(async (context: any, method: string) => {
+      if (method === "accepted-command") {
+        acceptedContext = context;
+        await commandGate; // Domain-command lifetime deliberately does not use socket cancellation.
+        completedCommands += 1;
+      }
+      return { method };
+    });
+    gateway = new GatewayServer({
+      host: "127.0.0.1", port, maxFrameBytes: 16_384, maximumOutboundBytes: 8_192,
+      maximumConnections: 2, devices, logger: logger as any, sessions: sessions as any,
+      uploads: {} as any, auth: { detachClient: vi.fn() } as any,
+      service: {
+        info: () => ({ protocolVersion: 5 }), invoke, releaseClient: vi.fn(),
+        terminalBelongsToSession: () => false,
+      } as any,
+    });
+    await gateway.listen();
+    const open = async () => {
+      const peer = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
+      peers.push(peer);
+      const frames: any[] = [];
+      peer.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
+      await bounded(new Promise<void>((resolve, reject) => { peer.once("open", resolve); peer.once("error", reject); }), "overload peer open");
+      peer.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
+      await bounded(waitUntil(() => frames.some((frame) => frame.type === "hello")), "overload peer hello");
+      return { peer, frames };
+    };
+    const target = await open();
+    const healthy = await open();
+    target.peer.send(JSON.stringify({ type: "request", id: "accepted", method: "accepted-command", params: {} }));
+    await bounded(waitUntil(() => acceptedContext !== undefined), "command admission");
+    const connection = (gateway as any).clients.get(acceptedContext.id);
+    // Leave a real socket OPEN but suppress close progress. New messages can
+    // still arrive; the transport admission fence, not ws.readyState, must win.
+    vi.spyOn(connection.socket, "close").mockImplementation(() => {});
+    const closed = new Promise<void>((resolve) => target.peer.once("close", () => resolve()));
+    gateway.emitToClient(connection.id, "test.overflow", { text: "x".repeat(9_000) });
+    expect(connection.closeInitiated).toBe(true);
+    expect(acceptedContext.signal.aborted).toBe(true);
+    expect(sessions.unsubscribeClient).toHaveBeenCalledExactlyOnceWith(connection.id);
+    expect((gateway as any).clients.size).toBe(2); // Retiring sockets still consume admission capacity.
+    expect(() => acceptedContext.beginSynchronization("late-session")).toThrow("Connection is closed");
+    expect(sessions.subscribe).not.toHaveBeenCalled();
+    target.peer.send(JSON.stringify({ type: "request", id: "late", method: "late-command", params: {} }));
+    healthy.peer.send(JSON.stringify({ type: "request", id: "healthy", method: "system.info", params: {} }));
+    await bounded(waitUntil(() => healthy.frames.some((frame) => frame.id === "healthy")), "unrelated peer response");
+    finishCommand();
+    await bounded(waitUntil(() => completedCommands === 1), "accepted command settlement");
+    await bounded(closed, "bounded stalled close");
+    await bounded(waitUntil(() => (gateway as any).clients.size === 1), "overload capacity release");
+    expect(invoke.mock.calls.map((call) => call[1])).toEqual(["accepted-command", "system.info"]);
+    expect(completedCommands).toBe(1);
+    expect(sessions.unsubscribeClient).toHaveBeenCalledExactlyOnceWith(connection.id);
+    expect(healthy.peer.readyState).toBe(WebSocket.OPEN);
+    await open(); // Capacity can be used again without a Gateway restart.
+    const diagnostic = logger.log.mock.calls.find((call) => call[2]?.event === "connection.outbound-capacity")?.[1];
+    expect(diagnostic).toContain("maximumBytes=8192");
+    expect(diagnostic).toMatch(/rssBytes=\d+ heapUsedBytes=\d+ externalBytes=\d+/u);
+    expect(diagnostic).not.toContain("xxxx");
   });
 
   it("queues a paired self-revoke response before closing its socket", async () => {
@@ -467,6 +585,21 @@ describe("WebSocket connection and outbound capacity", () => {
       gateway.broadcast("test.event", { sequence });
     }
     await waitUntil(() => frames.filter((frame) => frame.topic === "test.event").length === 64);
+    expect(first.readyState).toBe(WebSocket.OPEN);
+
+    gateway.broadcast("session.snapshot", { text: "private-producer-content".repeat(1_000) });
+    await waitUntil(() => frames.some((frame) => frame.topic === "transport.resyncRequired"));
+    const oversized = logger.log.mock.calls.find((call) => call[2]?.event === "connection.projection-rejected")?.[1];
+    expect(oversized).toContain("type=event topic=session.snapshot");
+    expect(oversized).toContain("maximumBytes=16384");
+    expect(oversized).not.toContain("private-producer-content");
+    const malformed: any = {};
+    malformed.self = malformed;
+    gateway.broadcast("test.malformed", malformed);
+    expect(logger.log.mock.calls).toContainEqual([
+      "error", "Outbound projection encoding failed",
+      { event: "connection.projection-rejected", source: "transport" },
+    ]);
     expect(first.readyState).toBe(WebSocket.OPEN);
 
     const closed = new Promise<number>((resolve) => first.once("close", (code) => resolve(code)));

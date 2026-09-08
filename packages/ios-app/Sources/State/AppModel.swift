@@ -842,6 +842,18 @@ final class AppModel {
         providerAuth.preferredAvailableModel(for: target)
     }
 
+    /// Explicit user retry re-arms only the selected or secondary profile's
+    /// bounded automatic recovery budget. Accepted domain mutations and their
+    /// receipts never use this transport control.
+    func retryGatewayConnection(for profile: GatewayProfile) {
+        guard profiles.profiles.contains(where: { $0.id == profile.id }) else { return }
+        if profiles.selected?.id == profile.id {
+            lifecycle.retryReconnect()
+        } else {
+            dashboardConnections.retry(profileID: profile.id)
+        }
+    }
+
     func dashboardServerState(for profileID: String) -> DashboardServerConnectionState {
         _ = profileRevision
         guard let profile = profiles.profiles.first(where: { $0.id == profileID }) else { return .stale }
@@ -3292,7 +3304,7 @@ final class AppModel {
         switch event.topic {
         case "transport.disconnected", "system.stopping":
             if event.topic == "system.stopping" { lifecycle.beginRestarting() }
-            lifecycle.noteDisconnected(connectionID: connectionID)
+            lifecycle.noteDisconnected(connectionID: connectionID, reason: event.payload.objectValue?["reason"]?.stringValue ?? "disconnected")
             // Authentication belongs to the paired device identity, not this
             // disposable socket. Retire prompt delivery while retaining the
             // operation ID/target for an exact auth.resume after reconnect.
@@ -3736,7 +3748,7 @@ extension AppModel: CustomModelConfigurationCoordinatorDelegate {
 
 extension AppModel: GatewayLifecycleProjectionDelegate {
     func lifecycleRecordDiagnostic(event: String, message: String) {
-        guard ["scene.foreground", "scene.background", "reconnect.scheduled", "reconnect.attempt", "reconnect.failure", "reconnect.delay", "reconnect.connected", "path.changed", "detail.tap", "detail.preparation"].contains(event) else { return }
+        guard ["scene.foreground", "scene.background", "reconnect.scheduled", "reconnect.attempt", "reconnect.failure", "reconnect.delay", "reconnect.connected", "reconnect.exhausted", "reconnect.stopped", "path.changed", "detail.tap", "detail.preparation"].contains(event) else { return }
         iosClientDiagnostics.recordLifecycle(
             event: "gateway.lifecycle",
             message: "kind=\(event) clientID=\(client.diagnosticOwnerID) \(message)",

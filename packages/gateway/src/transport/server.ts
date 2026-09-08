@@ -127,6 +127,10 @@ export interface OrderedOutboundQueueSnapshot {
   writeActive: boolean;
   acceptedFrames: number;
   completedFrames: number;
+  maximumFrames: number;
+  maximumBytes: number;
+  frameHighWater: number;
+  byteHighWater: number;
 }
 
 interface QueuedOutboundFrame {
@@ -142,13 +146,15 @@ type OutboundWrite = (encoded: string, completion: (error?: Error) => void) => v
  * legitimate same-turn synchronization burst cannot fill ws.bufferedAmount.
  */
 export class OrderedOutboundQueue {
-  private readonly frames: QueuedOutboundFrame[] = [];
+  private readonly frames: Array<QueuedOutboundFrame | undefined> = [];
   private head = 0;
   private queuedBytes = 0;
   private writeActive = false;
   private retired = false;
   private acceptedFrames = 0;
   private completedFrames = 0;
+  private frameHighWater = 0;
+  private byteHighWater = 0;
   private readonly idleWaiters: Array<() => void> = [];
 
   constructor(
@@ -156,12 +162,14 @@ export class OrderedOutboundQueue {
     private readonly write: OutboundWrite,
     private readonly overflow: (snapshot: OrderedOutboundQueueSnapshot, nextBytes: number) => void,
     private readonly writeFailed: (error: Error, snapshot: OrderedOutboundQueueSnapshot) => void,
+    private readonly maximumFrames = 4_096,
   ) {}
 
   enqueue(encoded: string): boolean {
     if (this.retired) return false;
     const bytes = Buffer.byteLength(encoded, "utf8");
-    if (bytes > this.maximumBytes || this.queuedBytes > this.maximumBytes - bytes) {
+    if (this.frames.length - this.head >= this.maximumFrames
+      || bytes > this.maximumBytes || this.queuedBytes > this.maximumBytes - bytes) {
       const snapshot = this.snapshot();
       this.retire();
       this.overflow(snapshot, bytes);
@@ -170,6 +178,8 @@ export class OrderedOutboundQueue {
     this.frames.push({ encoded, bytes });
     this.queuedBytes += bytes;
     this.acceptedFrames += 1;
+    this.frameHighWater = Math.max(this.frameHighWater, this.frames.length - this.head);
+    this.byteHighWater = Math.max(this.byteHighWater, this.queuedBytes);
     this.drain();
     return true;
   }
@@ -181,6 +191,10 @@ export class OrderedOutboundQueue {
       writeActive: this.writeActive,
       acceptedFrames: this.acceptedFrames,
       completedFrames: this.completedFrames,
+      maximumFrames: this.maximumFrames,
+      maximumBytes: this.maximumBytes,
+      frameHighWater: this.frameHighWater,
+      byteHighWater: this.byteHighWater,
     };
   }
 
@@ -212,6 +226,10 @@ export class OrderedOutboundQueue {
       if (completed) return;
       completed = true;
       if (this.retired) return;
+      // Release the payload at the same boundary as its byte reservation.
+      // Waiting for array compaction retained up to 1,023 completed large frames
+      // outside the queue budget on a continuously busy connection.
+      this.frames[this.head] = undefined;
       this.head += 1;
       this.queuedBytes = Math.max(0, this.queuedBytes - frame.bytes);
       this.writeActive = false;
@@ -219,9 +237,7 @@ export class OrderedOutboundQueue {
         this.frames.length = 0;
         this.head = 0;
       } else if (this.head >= 1_024 && this.head * 2 >= this.frames.length) {
-        // A continuously busy connection may never become fully idle. Compact
-        // consumed entries periodically so completed encoded frames cannot stay
-        // retained outside the byte accounting bound.
+        // Payloads are already released; compact only the empty array slots.
         this.frames.splice(0, this.head);
         this.head = 0;
       }
@@ -270,6 +286,8 @@ interface Connection {
   pendingSessionOpens: Map<string, string>;
   outbound: OrderedOutboundQueue;
   closeInitiated: boolean;
+  workRetired: boolean;
+  closeDeadline?: NodeJS.Timeout;
   revoked: boolean;
   revokeResponseRequestId?: string;
   revokeResponseQueued: boolean;
@@ -394,14 +412,14 @@ export class GatewayServer {
       const heartbeatAt = performance.now();
       const timerDelayMs = heartbeatTimerDelay(heartbeatAt - this.lastHeartbeatAt);
       this.lastHeartbeatAt = heartbeatAt;
-      if (timerDelayMs >= 25_000) {
-        this.options.logger.log("warning", `Gateway event loop delayed heartbeat by ${timerDelayMs}ms`, {
+      if (timerDelayMs >= 1_000) {
+        this.options.logger.log("warning", `Gateway event loop delayed heartbeat by ${timerDelayMs}ms (${this.pressureDiagnostic()})`, {
           event: "gateway.event-loop-delay",
           source: "transport",
         });
       }
       for (const connection of this.clients.values()) {
-        if (connection.socket.readyState !== WebSocket.OPEN) continue;
+        if (connection.closeInitiated || connection.socket.readyState !== WebSocket.OPEN) continue;
         // Retire only after three complete ping intervals received no response.
         // One delayed timer or transiently starved callback cannot destroy a
         // healthy epoch; the fourth tick observes and retires the three misses.
@@ -855,7 +873,7 @@ export class GatewayServer {
         const maximumPerIdentity = this.options.maximumConnectionsPerIdentity ?? 4;
         const identityConnections = [...this.clients.values()].filter((client) => client.identity === identity).length;
         if (this.clients.size >= maximumConnections || identityConnections >= maximumPerIdentity) {
-          this.options.logger.log("warning", "Rejected socket upgrade at connection capacity", { event: "connection.capacity", source: "transport" });
+          this.options.logger.log("warning", `Rejected socket upgrade at connection capacity (connections=${this.clients.size} maximumConnections=${maximumConnections} identityConnections=${identityConnections} maximumPerIdentity=${maximumPerIdentity})`, { event: "connection.capacity", source: "transport" });
           socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
           socket.destroy();
           return false;
@@ -886,13 +904,12 @@ export class GatewayServer {
       }),
       (snapshot, nextBytes) => {
         if (connection.closeInitiated) return;
-        connection.closeInitiated = true;
         this.options.logger.log(
           "warning",
-          `Closing client ${connection.id} at outbound queue capacity (${snapshot.queuedFrames} queued frames, ${snapshot.queuedBytes} queued bytes, ${socket.bufferedAmount} ws buffered bytes, ${nextBytes} next bytes)`,
+          `Closing client ${connection.id} at outbound queue capacity (queuedFrames=${snapshot.queuedFrames} queuedBytes=${snapshot.queuedBytes} maximumFrames=${snapshot.maximumFrames} maximumBytes=${snapshot.maximumBytes} frameHighWater=${snapshot.frameHighWater} byteHighWater=${snapshot.byteHighWater} wsBufferedBytes=${socket.bufferedAmount} nextBytes=${nextBytes}; ${this.pressureDiagnostic()})`,
           { event: "connection.outbound-capacity", source: "transport" },
         );
-        socket.close(1013, "client outbound capacity exceeded");
+        this.closeFailedConnection(connection, 1013, "client outbound capacity exceeded");
       },
       (error, snapshot) => {
         if (connection.closeInitiated) return;
@@ -902,6 +919,7 @@ export class GatewayServer {
           `Client ${connection.id} outbound write failed after ${snapshot.completedFrames}/${snapshot.acceptedFrames} frames: ${error.message}`,
           { event: "connection.write-error", source: "transport" },
         );
+        this.retireConnectionWork(connection);
         socket.terminate();
       },
     );
@@ -923,13 +941,14 @@ export class GatewayServer {
       pendingSessionOpens: new Map(),
       outbound,
       closeInitiated: false,
+      workRetired: false,
       revoked: false,
       revokeResponseQueued: false,
       revokeCloseScheduled: false,
       admittedAt: performance.now(),
       lastInboundAt: null,
       lastWriteProgressAt: null,
-      helloTimer: setTimeout(() => socket.close(1008, "hello required"), 5_000),
+      helloTimer: setTimeout(() => this.closeFailedConnection(connection, 1008, "hello required"), 5_000),
     };
     this.clients.set(connection.id, connection);
     this.options.logger.log("info", `Client ${connection.id} connection admitted (${isLocal ? "local" : "paired"})`, { event: "connection.admitted", source: "transport" });
@@ -954,19 +973,23 @@ export class GatewayServer {
   }
 
   private async onMessage(connection: Connection, raw: unknown): Promise<void> {
+    // A close handshake is not an admission lease. In particular, a peer that
+    // overflowed the writer cannot submit more work while close is pending.
+    if (connection.closeInitiated || connection.socket.readyState !== WebSocket.OPEN
+      || !this.clients.has(connection.id)) return;
     let frame: Record<string, unknown>;
     try {
       const text = typeof raw === "string" ? raw : Buffer.from(raw as ArrayBuffer).toString("utf8");
       frame = JSON.parse(text) as Record<string, unknown>;
       if (typeof frame !== "object" || frame === null || Array.isArray(frame)) throw new Error();
     } catch {
-      return connection.socket.close(1007, "invalid JSON");
+      return this.closeFailedConnection(connection, 1007, "invalid JSON");
     }
 
     if (!connection.ready) {
-      if (frame.type !== "hello" || !Number.isSafeInteger(frame.protocolVersion)) return connection.socket.close(1008, "valid hello required");
+      if (frame.type !== "hello" || !Number.isSafeInteger(frame.protocolVersion)) return this.closeFailedConnection(connection, 1008, "valid hello required");
       const protocol = frame.protocolVersion as number;
-      if (protocol < MIN_PROTOCOL_VERSION || protocol > PROTOCOL_VERSION) return connection.socket.close(1008, "protocol version mismatch");
+      if (protocol < MIN_PROTOCOL_VERSION || protocol > PROTOCOL_VERSION) return this.closeFailedConnection(connection, 1008, "protocol version mismatch");
       connection.ready = true;
       connection.presentationOnly = (frame as Record<string, unknown>).clientRole === "mobile";
       this.options.logger.log("info", `Client ${connection.id} handshake accepted (${connection.presentationOnly ? "mobile" : "local"})`, { event: "connection.handshake", source: "transport" });
@@ -1124,6 +1147,7 @@ export class GatewayServer {
         signal: requestController.signal,
         beginSynchronization: (sessionId) => {
           if (connection.revoked) throw new GatewayError("unauthenticated", "This device is no longer authorized");
+          if (connection.workRetired) throw new GatewayError("busy", "Connection is closed", true);
           // Runtime acquire may yield to a fork before this call. Resolve the
           // request's ID before installing the subscription and barrier so
           // ownership is attached to the canonical slot.
@@ -1251,6 +1275,7 @@ export class GatewayServer {
         },
         attachTerminal: (terminalId) => {
           if (connection.revoked) throw new GatewayError("unauthenticated", "This device is no longer authorized");
+          if (connection.workRetired) throw new GatewayError("busy", "Connection is closed", true);
           if (!canAttachTerminal(
             connection.subscriptionTokens,
             terminalId,
@@ -1465,7 +1490,7 @@ export class GatewayServer {
         // ws's longer close timeout. The close handler owns normal cleanup.
         if (connection.socket.readyState !== WebSocket.CLOSED) connection.socket.terminate();
       } else if (connection.socket.readyState === WebSocket.OPEN) {
-        connection.socket.close(1008, "device revoked");
+        this.closeFailedConnection(connection, 1008, "device revoked");
       }
     };
     deadline = setTimeout(() => requestClose(true), 1_000);
@@ -1474,7 +1499,7 @@ export class GatewayServer {
   }
 
   private sendOutcome(connection: Connection, value: unknown): "sent" | "fallback" | "failed" {
-    if (connection.socket.readyState !== WebSocket.OPEN) return "failed";
+    if (connection.closeInitiated || connection.socket.readyState !== WebSocket.OPEN) return "failed";
     if (connection.revoked) {
       const frame = value as { type?: unknown; id?: unknown };
       // Revocation retires events and observer delivery. Already queued frames
@@ -1488,7 +1513,18 @@ export class GatewayServer {
     try {
       const direct = JSON.stringify(value);
       if (direct === undefined) return "failed";
-      const encoded = Buffer.byteLength(direct, "utf8") <= this.options.maxFrameBytes
+      const bytes = Buffer.byteLength(direct, "utf8");
+      if (bytes > this.options.maxFrameBytes) {
+        const frame = value as { type?: unknown; topic?: unknown };
+        const type = frame?.type === "response" ? "response" : frame?.type === "event" ? "event" : "other";
+        const topic = typeof frame?.topic === "string"
+          && ["session.snapshot", "session.rebaseline", "session.progress", "session.summary"].includes(frame.topic)
+          ? frame.topic : "other";
+        this.options.logger.log("warning", `Outbound projection exceeded frame limit (type=${type} topic=${topic} bytes=${bytes} maximumBytes=${this.options.maxFrameBytes}; ${this.pressureDiagnostic()})`, {
+          event: "connection.projection-rejected", source: "transport",
+        });
+      }
+      const encoded = bytes <= this.options.maxFrameBytes
         ? direct
         : encodeOutboundFrame(value, this.options.maxFrameBytes);
       if (!encoded) return "failed";
@@ -1500,8 +1536,12 @@ export class GatewayServer {
       if (!connection.outbound.enqueue(encoded)) return "failed";
       return encoded === direct ? "sent" : "fallback";
     } catch {
-      // Broadcast payloads are supplied by runtime projections. A malformed
-      // value must not escape the broadcast loop or take down the Gateway.
+      // Never log the exception or payload: serialization errors can contain
+      // producer content. Failure must still be observable without killing the
+      // broadcaster or unrelated clients.
+      this.options.logger.log("error", "Outbound projection encoding failed", {
+        event: "connection.projection-rejected", source: "transport",
+      });
       return "failed";
     }
   }
@@ -1516,6 +1556,14 @@ export class GatewayServer {
       `Client ${connection.id} connection closed after ${Math.max(0, Math.round(closedAt - connection.admittedAt))}ms (${detail}; ${outbound.completedFrames}/${outbound.acceptedFrames} outbound frames completed, ${outbound.queuedBytes} queued bytes; lastInboundAgeMs=${progressAge(connection.lastInboundAt, closedAt)} lastWriteProgressAgeMs=${progressAge(connection.lastWriteProgressAt, closedAt)} queuedFrames=${outbound.queuedFrames} queuedBytes=${outbound.queuedBytes} completedFrames=${outbound.completedFrames})`,
       { event: "connection.closed", source: "transport" },
     );
+    clearTimeout(connection.closeDeadline);
+    this.retireConnectionWork(connection);
+  }
+
+  private retireConnectionWork(connection: Connection): void {
+    if (connection.workRetired) return;
+    connection.workRetired = true;
+    connection.ready = false;
     clearTimeout(connection.helloTimer);
     for (const synchronization of connection.synchronizations.values()) {
       clearTimeout(synchronization.timeout);
@@ -1523,6 +1571,9 @@ export class GatewayServer {
     }
     connection.synchronizations.clear();
     connection.subscriptionTokens.clear();
+    connection.terminals.clear();
+    connection.pendingSessionOpens.clear();
+    connection.rekeyedSessionIds.clear();
     // Revoked accepted requests retain their controller until their own
     // completion; ordinary disconnects still abort disposable work.
     if (!connection.revoked) for (const controller of connection.requestControllers.values()) controller.abort();
@@ -1532,6 +1583,31 @@ export class GatewayServer {
     // The authenticated device identity owns provider login. A socket close
     // only detaches event delivery; auth.resume can bind a replacement socket.
     this.options.auth.detachClient(connection.id);
+  }
+
+  private closeFailedConnection(connection: Connection, code: number, reason: string): void {
+    if (connection.closeInitiated) return;
+    connection.closeInitiated = true;
+    connection.outbound.retire();
+    // Disposable observers/read waits retire now, not after a dead peer's close
+    // handshake. Accepted domain commands still settle with their receipt owner.
+    this.retireConnectionWork(connection);
+    connection.closeDeadline = setTimeout(() => {
+      if (connection.socket.readyState !== WebSocket.CLOSED) connection.socket.terminate();
+    }, 1_000);
+    connection.closeDeadline.unref();
+    connection.socket.close(code, reason);
+  }
+
+  private pressureDiagnostic(): string {
+    const memory = process.memoryUsage();
+    let inFlightRequests = 0;
+    let outboundQueuedBytes = 0;
+    for (const connection of this.clients.values()) {
+      inFlightRequests += connection.inFlight.size;
+      outboundQueuedBytes += connection.outbound.snapshot().queuedBytes;
+    }
+    return `connections=${this.clients.size} inFlightRequests=${inFlightRequests} outboundQueuedBytes=${outboundQueuedBytes} rssBytes=${memory.rss} heapUsedBytes=${memory.heapUsed} externalBytes=${memory.external}`;
   }
 
   async close(): Promise<void> {
