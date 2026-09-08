@@ -7,6 +7,9 @@ struct TronDocumentSheet<Content: View>: View {
     let title: String
     @ViewBuilder let content: () -> Content
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+
+    private var resolvedAccent: Color { settingsTheme?.accent ?? .tronBlue }
 
     var body: some View {
         NavigationStack {
@@ -22,18 +25,18 @@ struct TronDocumentSheet<Content: View>: View {
                 .toolbar(.hidden, for: .bottomBar)
                 .toolbar {
                     ToolbarItem(placement: .principal) {
-                        TronSheetTitle(title: title, accent: .tronBlue)
+                        TronSheetTitle(title: title, accent: resolvedAccent)
                     }
                     ToolbarItem(placement: .confirmationAction) {
                         Button { dismiss() } label: {
                             Image(systemName: "checkmark")
                                 .font(TronTypography.buttonSM)
-                                .foregroundStyle(Color.tronBlue)
+                                .foregroundStyle(resolvedAccent)
                         }
                         .accessibilityLabel("Done")
                     }
                 }
-                .tint(Color.tronBlue)
+                .tint(resolvedAccent)
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.large])

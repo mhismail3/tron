@@ -1634,14 +1634,38 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
 }
 
 enum ChatToolInvocationOrdering {
-    /// Detail surfaces reverse canonical/group order only at the final
-    /// presentation boundary. Mutable timestamps never relocate an invocation.
+    /// Detail surfaces order by the producer's invocation boundary only. The
+    /// original index is an intentional tie-breaker so equal or absent times
+    /// never make rows jump as progress/result frames arrive.
     static func reverseChronological(_ tools: [ChatToolDescriptor]) -> [ChatToolDescriptor] {
-        tools.reversed()
+        ordered(tools, startedAt: \.startedAt)
     }
 
     static func reverseChronological(_ tools: [ChatToolPresentation]) -> [ChatToolPresentation] {
-        tools.reversed()
+        ordered(tools, startedAt: \.startedAt)
+    }
+
+    private static func ordered<Value>(
+        _ values: [Value],
+        startedAt: (Value) -> String?
+    ) -> [Value] {
+        values.enumerated().sorted { left, right in
+            let leftDate = ToolInvocationTimestamp.date(startedAt(left.element))
+            let rightDate = ToolInvocationTimestamp.date(startedAt(right.element))
+            switch (leftDate, rightDate) {
+            case let (leftDate?, rightDate?) where leftDate != rightDate:
+                return leftDate > rightDate
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            default:
+                // Calls in one message commonly share a timestamp. Their
+                // canonical/group invocation order is the remaining evidence,
+                // so later source calls come first, never completion order.
+                return left.offset > right.offset
+            }
+        }.map(\.element)
     }
 }
 
@@ -1667,6 +1691,7 @@ struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
     var reverseChronologicalTools: [ChatToolDescriptor] {
         ChatToolInvocationOrdering.reverseChronological(tools)
     }
+
     var groupIDs: [String] {
         var seen = Set<String>()
         return tools.compactMap(\.groupId).filter { seen.insert($0).inserted }

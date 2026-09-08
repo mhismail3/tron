@@ -303,7 +303,7 @@ struct ToolRunView: View {
     }
 
     private var detailToolIDs: [String] {
-        run.tools.reversed().map(\.id)
+        ChatToolInvocationOrdering.reverseChronological(run.tools).map(\.id)
     }
 
     private func openDetails() {
@@ -575,7 +575,8 @@ struct ToolRunDetailSheet: View {
 
     private var orderedTools: [ChatToolPresentation] {
         let byID = Dictionary(uniqueKeysWithValues: tools.map { ($0.id, $0) })
-        return run.tools.reversed().compactMap { byID[$0.id] }
+        return ChatToolInvocationOrdering.reverseChronological(run.tools)
+            .compactMap { byID[$0.id] }
     }
 
     var body: some View {
@@ -810,13 +811,20 @@ private struct ToolRunSummaryRow: View {
                         .foregroundStyle(Color.tronTextPrimary)
                         .lineLimit(2)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    HStack(spacing: 4) {
-                        Text(presentation.status)
-                            .font(TronTypography.secondaryCodeDescription)
-                        if presentation.elapsedMilliseconds != nil {
-                            Text("·")
+                    VStack(alignment: .trailing, spacing: 3) {
+                        HStack(spacing: 4) {
+                            Text(presentation.status)
                                 .font(TronTypography.secondaryCodeDescription)
-                            ToolElapsedText(tool: tool.descriptor, color: accent)
+                            if presentation.elapsedMilliseconds != nil {
+                                Text("·")
+                                    .font(TronTypography.secondaryCodeDescription)
+                                ToolElapsedText(tool: tool.descriptor, color: accent)
+                            }
+                        }
+                        if let invocation = ToolInvocationTimestamp.text(for: tool.startedAt) {
+                            Text(invocation)
+                                .font(TronTypography.secondaryCodeDescription)
+                                .foregroundStyle(Color.tronTextSecondary)
                         }
                     }
                     .foregroundStyle(accent)
@@ -896,6 +904,9 @@ private struct ToolRunSummaryRow: View {
 
     private func accessibilityLabel(_ presentation: ToolRunRowPresentation) -> String {
         var values = [presentation.title, statusText(presentation)]
+        if let invocation = ToolInvocationTimestamp.accessibilityText(for: tool.startedAt) {
+            values.append(invocation)
+        }
         if let preview = presentation.primaryPreview?.text, !preview.isEmpty {
             values.append(accessibilityPreview(preview))
         }

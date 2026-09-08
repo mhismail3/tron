@@ -224,6 +224,8 @@ final class SessionSheetPresentationTests: XCTestCase {
                     .environment(model).preferredColorScheme(scheme)) { controller in
                     let scroll = try XCTUnwrap(self.views(of: UIScrollView.self, in: controller.view).first)
                     XCTAssertGreaterThan(scroll.contentSize.height, scroll.bounds.height)
+                    let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
+                    self.assertToolbarPaint(.tronEmerald, bar: bar, leading: false, controller: controller)
                     self.capture(controller, name: "manage-session-top-\(scheme)")
                     scroll.setContentOffset(CGPoint(x: 0, y: scroll.contentSize.height - scroll.bounds.height), animated: false)
                     controller.view.layoutIfNeeded()
@@ -253,6 +255,9 @@ final class SessionSheetPresentationTests: XCTestCase {
                 .tronPresentation().preferredColorScheme(scheme)) { controller in
                 let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
                 self.assertToolbarPaint(.tronPurple, bar: bar, leading: false, controller: controller)
+                self.assertToolbarPaint(.tronPurple, bar: bar, leading: true, controller: controller)
+                XCTAssertTrue(self.views(of: UITextField.self, in: controller.view).isEmpty,
+                              "Models must not mount a search field before the toolbar action")
                 let scroll = try XCTUnwrap(self.views(of: UIScrollView.self, in: controller.view).first)
                 let region = scroll.convert(CGRect(x: 20, y: 30, width: 3, height: 15), to: controller.view)
                 let image = UIGraphicsImageRenderer(size: controller.view.bounds.size).image { _ in

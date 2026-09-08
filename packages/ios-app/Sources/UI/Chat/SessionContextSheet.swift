@@ -275,24 +275,29 @@ struct SessionContextSheet: View {
                 identity: { "session.\(sessionID).manage.\($0.id)" },
                 onDismiss: completeForkNavigationAfterHistoryDismissal
             ) { route in
-                switch route {
-                case .agentInstructions:
-                    AgentInstructionsSheet(sessionID: sessionID)
-                case .projectResources:
-                    ProjectResourcesView(sessionID: sessionID)
-                case .history:
-                    SessionTreeSheet(
-                        sessionID: sessionID,
-                        onForkCreated: handleForkCreated,
-                        onNavigated: handleNavigation
-                    )
-                case .processHistory:
-                    ProcessHistorySheet(sessionID: sessionID)
-                case .terminal:
-                    TerminalSheet(sessionID: sessionID)
-                case .workspace:
-                    WorkspaceInspectorSheet(sessionID: sessionID)
+                Group {
+                    switch route {
+                    case .agentInstructions:
+                        AgentInstructionsSheet(sessionID: sessionID)
+                    case .projectResources:
+                        ProjectResourcesView(sessionID: sessionID)
+                    case .history:
+                        SessionTreeSheet(
+                            sessionID: sessionID,
+                            onForkCreated: handleForkCreated,
+                            onNavigated: handleNavigation
+                        )
+                    case .processHistory:
+                        ProcessHistorySheet(sessionID: sessionID)
+                    case .terminal:
+                        TerminalSheet(sessionID: sessionID)
+                    case .workspace:
+                        WorkspaceInspectorSheet(sessionID: sessionID)
+                    }
                 }
+                // Only Session destinations inherit teal; the management
+                // shell, usage, model, and export keep their own identities.
+                .tronSettingsVisualTheme(accent: sessionRowAccent)
             }
             .tronTextEntryAlert(
                 "Rename Session",
@@ -376,7 +381,7 @@ struct SessionContextSheet: View {
     }
 
     private var configurationRowAccent: Color { .tronPurple }
-    private var sessionRowAccent: Color { .tronBlue }
+    private var sessionRowAccent: Color { .tronSessionTeal }
     private var exportRowAccent: Color { .tronSlate }
 
     private func processHistoryRow(_ snapshot: SessionContextPresentation) -> some View {
@@ -545,7 +550,7 @@ struct SessionContextSheet: View {
     }
 
     private func sessionSection(_ snapshot: SessionContextPresentation) -> some View {
-        TronGlassCard(accent: .tronCyan) {
+        TronGlassCard(accent: sessionRowAccent) {
             VStack(spacing: 0) {
                 gitRow
                 divider()
@@ -617,7 +622,7 @@ struct SessionContextSheet: View {
     }
 
     private func divider() -> some View {
-        TronSettingsDivider(accent: .tronCyan)
+        TronSettingsDivider(accent: sessionRowAccent)
     }
 
     private func manageRow(

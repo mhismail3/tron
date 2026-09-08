@@ -7,17 +7,22 @@ struct SessionProcessesSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var selectedProcess: SessionProcessActivity?
     @State private var detent: PresentationDetent = .medium
+    @State private var appSettings = AppLocalBehaviorSettings.shared
 
     var body: some View {
         NavigationStack {
-            Group {
-                let sections = SessionProcessProjection.sections(activities)
-                if !sections.active.isEmpty || !sections.recent.isEmpty {
-                    processList(activities: activities)
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let visible = SessionProcessButtonPolicy.visibleActivities(
+                    activities,
+                    retentionMinutes: appSettings.subagentRecentFinishedRetentionMinutes,
+                    now: context.date
+                )
+                if !visible.isEmpty {
+                    processList(activities: visible)
                 } else {
                     SessionProcessPlaceholder(
                         title: "No active subagents",
-                        detail: "Active and recently finished subagents appear here.",
+                        detail: "Finished subagents remain available in Manage Session’s Subagent History.",
                         icon: "person.2"
                     )
                     .padding(18)
@@ -107,9 +112,9 @@ struct ProcessHistorySheet: View {
                 if let store { history(store) }
                 else { TronLoadingState(label: "Preparing subagent history…") }
             }
-            .tronNavigationTitle("Subagent History", accent: .tronBlue)
+            .tronNavigationTitle("Subagent History", accent: .tronSessionTeal)
             .toolbar { doneToolbar }
-            .tint(Color.tronBlue)
+            .tint(Color.tronSessionTeal)
         }
         .tronManagedSheet(
             item: $selectedProcess,
@@ -134,6 +139,7 @@ struct ProcessHistorySheet: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.hidden)
+        .tronSettingsVisualTheme(accent: .tronSessionTeal)
         .tronPresentation()
         .accessibilityIdentifier("process-history-sheet")
     }
@@ -144,7 +150,7 @@ struct ProcessHistorySheet: View {
             Button { dismiss() } label: {
                 Image(systemName: "checkmark")
                     .font(TronTypography.buttonSM)
-                    .foregroundStyle(Color.tronBlue)
+                    .foregroundStyle(Color.tronSessionTeal)
             }
             .accessibilityLabel("Done")
         }
@@ -621,12 +627,13 @@ struct ReadOnlySubagentSessionSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .foregroundStyle(Color.tronSessionTeal)
                     }
                     .accessibilityLabel("Done")
                 }
             }
         }
+        .tronSettingsVisualTheme(accent: .tronSessionTeal)
         .task(id: openIdentity) {
             guard model.connectionState == .connected,
                   let target = model.presentationTarget(for: parentSessionID) else { return }
@@ -784,6 +791,8 @@ struct ReadOnlySubagentSessionSheet: View {
                             preparedText: store.preparedText.slice(for: item),
                             toolPayloads: store.presentation.toolPayloads
                         )
+                        // Transcript/tool semantics are not navigation chrome.
+                        .environment(\.tronSettingsVisualTheme, nil)
                         .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
                         .id(item.id)
                     }

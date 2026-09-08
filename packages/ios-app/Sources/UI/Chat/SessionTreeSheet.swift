@@ -249,16 +249,16 @@ struct SessionTreeSheet: View {
                             systemImage: "arrow.clockwise",
                             isWorking: reloading
                         )
-                        .tronToolbarAction(accent: .tronBlue)
+                        .tronToolbarAction(accent: .tronSessionTeal)
                     }
                     .disabled(reloading)
                 }
-                ToolbarItem(placement: .principal) { TronSheetTitle(title: "Session History", accent: .tronBlue) }
+                ToolbarItem(placement: .principal) { TronSheetTitle(title: "Session History", accent: .tronSessionTeal) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronBlue)
+                            .foregroundStyle(Color.tronSessionTeal)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -313,7 +313,8 @@ struct SessionTreeSheet: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(Color.tronBlue)
+        .tronSettingsVisualTheme(accent: .tronSessionTeal)
+        .tint(Color.tronSessionTeal)
     }
 
     private func runtimeSummary(_ snapshot: SessionHistoryPresentation) -> some View {
@@ -665,9 +666,9 @@ private struct HistoryEntryDetailsSheet: View {
             .tronScrollEdgeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .principal) { TronSheetTitle(title: "Entry Details") }
+                ToolbarItem(placement: .principal) { TronSheetTitle(title: "Entry Details", accent: .tronSessionTeal) }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: { Image(systemName: "checkmark").foregroundStyle(Color.tronEmerald) }
+                    Button { dismiss() } label: { Image(systemName: "checkmark").foregroundStyle(Color.tronSessionTeal) }
                         .accessibilityLabel("Done")
                 }
             }
@@ -775,11 +776,11 @@ private struct NavigationSheet: View {
             .navigationTitle("")
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: SessionHistoryPolicy.navigationTitle(for: node))
+                    TronSheetTitle(title: SessionHistoryPolicy.navigationTitle(for: node), accent: .tronSessionTeal)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
-                        Image(systemName: "checkmark").foregroundStyle(Color.tronEmerald)
+                        Image(systemName: "checkmark").foregroundStyle(Color.tronSessionTeal)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -911,7 +912,7 @@ struct ForkConfirmationSheet: View {
             .toolbar {
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: "Fork Session") }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: { Image(systemName: "xmark").foregroundStyle(Color.tronEmerald) }
+                    Button { dismiss() } label: { Image(systemName: "xmark").foregroundStyle(Color.tronSessionTeal) }
                         .accessibilityLabel("Close")
                         .disabled(working)
                 }

@@ -211,10 +211,11 @@ struct ProjectResourcesView: View {
                                 TronStructuredJSONView(value: diagnostics, title: "Resource Diagnostics", accent: .tronError)
                                     .padding(12)
                             }
+                            .environment(\.tronSettingsVisualTheme, nil)
                         }
                     } else if loading {
-                        TronGlassCard(accent: .tronEmerald) {
-                            TronLoadingState(label: "Loading project resources…")
+                        TronGlassCard(accent: .tronSessionTeal) {
+                            TronLoadingState(label: "Loading project resources…", accent: .tronSessionTeal)
                                 .padding(18)
                                 .frame(maxWidth: .infinity)
                         }
@@ -239,19 +240,19 @@ struct ProjectResourcesView: View {
                             systemImage: "arrow.clockwise",
                             isWorking: loading || reloading
                         )
-                        .tronToolbarAction(accent: .tronBlue)
+                        .tronToolbarAction(accent: .tronSessionTeal)
                     }
                     .disabled(loading || reloading)
                     .accessibilityValue(loading || reloading ? "In progress" : "")
                 }
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: "Project Resources", accent: .tronBlue)
+                    TronSheetTitle(title: "Project Resources", accent: .tronSessionTeal)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronBlue)
+                            .foregroundStyle(Color.tronSessionTeal)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -276,7 +277,8 @@ struct ProjectResourcesView: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(Color.tronBlue)
+        .tronSettingsVisualTheme(accent: .tronSessionTeal)
+        .tint(Color.tronSessionTeal)
     }
 
     private func resourceGroup(_ section: ProjectResourceOverviewSection) -> some View {
@@ -319,6 +321,9 @@ struct ProjectResourcesView: View {
                 }
             }
         }
+        // Resource kinds retain their own accents; the teal theme belongs to
+        // this destination's navigation chrome and generic session surfaces.
+        .environment(\.tronSettingsVisualTheme, nil)
     }
 
     private func resourceDiagnostics(_ root: [String: JSONValue]) -> JSONValue {

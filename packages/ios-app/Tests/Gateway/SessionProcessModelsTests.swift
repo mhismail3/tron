@@ -473,6 +473,71 @@ struct SessionProcessModelsTests {
         ))
     }
 
+    @Test("app retention uses terminal timestamps without changing Gateway expiry")
+    func appRetentionWindow() {
+        let overview = SessionProcessOverview(
+            revision: 1, asOf: "2026-01-01T00:00:00Z",
+            activeCount: 0, recentCount: 1, problemCount: 0,
+            visibility: .recent, nearestExpiry: "2026-01-01T00:05:00Z"
+        )
+        let activity = makeProcess(
+            state: .completed,
+            visibility: .recent,
+            terminalAt: "2026-01-01T00:00:00Z",
+            recentUntil: "2026-01-01T00:05:00Z"
+        )
+        #expect(SessionProcessButtonPolicy.preferredRecentExpiry(
+            overview: overview, activities: [activity], retentionMinutes: 5
+        ) == "2026-01-01T00:05:00.000Z")
+        #expect(SessionProcessButtonPolicy.preferredRecentExpiry(
+            overview: overview, activities: [activity], retentionMinutes: 1
+        ) == "2026-01-01T00:01:00.000Z")
+        #expect(SessionProcessButtonPolicy.preferredRecentExpiry(
+            overview: overview, activities: [activity], retentionMinutes: 0
+        ) == nil)
+        #expect(SessionProcessButtonPolicy.isVisible(
+            overview: overview, hasAdmittedActivity: true, localRecentExpired: false,
+            recentFinishedRetentionMinutes: 0
+        ) == false)
+        #expect(SessionProcessButtonPolicy.isVisible(
+            overview: overview, hasAdmittedActivity: true, localRecentExpired: true,
+            recentFinishedRetentionMinutes: 5
+        ) == false)
+    }
+
+    @Test("the last eligible completion owns orb expiry and zero keeps only active rows")
+    func staggeredAppRetention() throws {
+        let overview = SessionProcessOverview(
+            revision: 1, asOf: "2026-01-01T00:00:00Z",
+            activeCount: 0, recentCount: 2, problemCount: 0,
+            visibility: .recent, nearestExpiry: "2026-01-01T00:05:00Z"
+        )
+        let older = makeProcess(state: .completed, visibility: .recent,
+                                terminalAt: "2026-01-01T00:00:00Z", recentUntil: "2026-01-01T00:05:00Z")
+        let newer = makeProcess(state: .completed, visibility: .recent,
+                                terminalAt: "2026-01-01T00:01:00Z", recentUntil: "2026-01-01T00:06:00Z")
+        let now = try #require(GatewayTimestamp.parse("2026-01-01T00:01:30Z"))
+        #expect(SessionProcessButtonPolicy.preferredRecentExpiry(
+            overview: overview, activities: [older, newer], retentionMinutes: 1
+        ) == "2026-01-01T00:02:00.000Z")
+        #expect(SessionProcessButtonPolicy.preferredRecentExpiry(
+            overview: overview, activities: [older, newer], retentionMinutes: 5
+        ) == "2026-01-01T00:06:00.000Z")
+        #expect(SessionProcessButtonPolicy.visibleActivities(
+            [older, newer], retentionMinutes: 1, now: now
+        ) == [newer])
+        let active = makeProcess()
+        #expect(SessionProcessButtonPolicy.visibleActivities(
+            [older, newer, active], retentionMinutes: 0, now: now
+        ) == [active])
+        #expect(SessionProcessButtonPolicy.visibleActivities(
+            [newer], retentionMinutes: 1, now: now.addingTimeInterval(30)
+        ).isEmpty)
+        #expect(SessionProcessButtonPolicy.isLocallyExpired(
+            recentExpiry: "2026-01-01T00:01:00Z", expiredRecentExpiry: nil, now: now
+        ), "Mounting after expiry must not briefly reveal the orb before its timer runs")
+    }
+
     @Test("visual recent deadline cannot extend server expiry")
     func visualDeadline() {
         let monotonicNow = ContinuousClock.Instant.now

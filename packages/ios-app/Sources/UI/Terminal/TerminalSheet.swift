@@ -6,9 +6,12 @@ struct TerminalSheet: View {
     let sessionID: String
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @State private var controller = TerminalController()
     @State private var keyboard = TerminalKeyboardController()
     @State private var confirmQuit = false
+
+    private var terminalAccent: SwiftUI.Color { settingsTheme?.accent ?? .tronEmerald }
 
     var body: some View {
         NavigationStack {
@@ -50,7 +53,7 @@ struct TerminalSheet: View {
                         Circle().fill(controller.connectionPhase.color).frame(width: 7, height: 7)
                         Text("Terminal")
                             .font(TronTypography.button)
-                            .foregroundStyle(Color.tronEmerald)
+                            .foregroundStyle(terminalAccent)
                     }
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("Terminal")
@@ -60,7 +63,7 @@ struct TerminalSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .foregroundStyle(terminalAccent)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -83,7 +86,7 @@ struct TerminalSheet: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
-        .tint(Color.tronEmerald)
+        .tint(terminalAccent)
         .animation(.easeOut(duration: 0.16), value: keyboard.isKeyboardPresented)
     }
 
@@ -129,7 +132,7 @@ struct TerminalSheet: View {
         } label: {
             Image(systemName: "ellipsis")
                 .font(TronTypography.buttonSM)
-                .foregroundStyle(Color.tronEmerald)
+                .foregroundStyle(terminalAccent)
         }
         .accessibilityLabel("Terminal options")
     }

@@ -42,6 +42,13 @@ struct SettingsView: View {
                         ) { AppearanceSettingsView() }
                         settingsDivider(accent: .tronEmerald)
                         settingsLink(
+                            "App Settings",
+                            summary: "Local presentation and behavior preferences",
+                            icon: "slider.horizontal.2.square",
+                            accent: .tronEmerald
+                        ) { AppLocalBehaviorSettingsView() }
+                        settingsDivider(accent: .tronEmerald)
+                        settingsLink(
                             "Connections",
                             summary: "Pair and manage Mac gateways",
                             icon: "desktopcomputer",

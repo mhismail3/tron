@@ -30,8 +30,10 @@ The orb appears when there is:
 
 - **Solving** while any subagent is queued, running, or paused. Rows distinguish these
   canonical states with `QUEUED`, `LIVE ACTIVITY`, and `PAUSED` headings.
-- **Thinking** while only terminal subagents remain in the five-minute recent window.
+- **Thinking** while only terminal subagents remain in the Gateway's bounded five-minute projection window. App Settings can locally render that recent-finished presentation for 0–5 minutes (default 5), using each admitted row's Gateway `terminalAt`; `0` hides the orb as soon as all subagents finish.
 - Hidden when neither partition contains a subagent.
+
+This app-local choice is presentation-only: it never edits canonical history or caches completed process truth. The Gateway still owns the maximum five-minute expiry and authoritative `nearestExpiry`; iOS derives an earlier local deadline from the producer timestamp rather than starting a timer when a view opens.
 
 Tapping the orb opens **Subagents**, with **Active** and **Recently finished** sections.
 Manage Session owns **Subagent History**, which adds canonical **Earlier** rows. Both sheets

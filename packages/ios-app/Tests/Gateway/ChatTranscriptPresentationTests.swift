@@ -1483,22 +1483,49 @@ struct ChatTranscriptPresentationTests {
         #expect(ordered.id == "tool-run-opaque-z-first")
     }
 
-    @Test("tool detail rows are reverse chronological with stable source fallback")
+    @Test("tool detail rows use invocation time, not completion or progress time")
     func reverseChronologicalToolDetails() {
         let run = ChatToolRunPresentation(tools: [
-            toolPresentation("old", startedAt: "2026-01-01T00:00:01Z").descriptor,
-            toolPresentation("new", startedAt: "2026-01-01T00:00:03Z").descriptor,
-            toolPresentation("latest-without-timestamp").descriptor,
-            toolPresentation("middle", startedAt: "2026-01-01T00:00:02Z").descriptor,
+            toolPresentation(
+                "older", startedAt: "2026-01-01T00:00:01Z",
+                completedAt: "2026-01-01T00:01:00Z", lastProgressAt: "2026-01-01T00:02:00Z",
+                progressSequence: 20
+            ).descriptor,
+            toolPresentation(
+                "newer", startedAt: "2026-01-01T00:00:03+00:00",
+                completedAt: "2026-01-01T00:00:04Z", lastProgressAt: "2026-01-01T00:00:05Z",
+                progressSequence: 1
+            ).descriptor,
+            toolPresentation("missing").descriptor,
+            toolPresentation("tied", startedAt: "2026-01-01T00:00:03Z").descriptor,
         ])
 
-        #expect(run.reverseChronologicalTools.map(\.id) == [
-            "middle", "latest-without-timestamp", "new", "old",
-        ])
+        #expect(run.reverseChronologicalTools.map(\.id) == ["tied", "newer", "older", "missing"])
+        #expect(ChatToolInvocationOrdering.reverseChronological([
+            toolPresentation("first"), toolPresentation("second"),
+        ]).map(\.id) == ["second", "first"])
         #expect(ChatToolInvocationOrdering.reverseChronological([
             toolPresentation("old", startedAt: "2026-01-01T00:00:01Z"),
             toolPresentation("new", startedAt: "2026-01-01T00:00:03Z"),
         ]).map(\.id) == ["new", "old"])
+    }
+
+    @Test("invocation timestamp formatting is localized and does not fabricate missing values")
+    func invocationTimestampFormatting() {
+        let locale = Locale(identifier: "en_US_POSIX")
+        let timeZone = TimeZone(secondsFromGMT: -8 * 60 * 60)!
+        let reference = Date(timeIntervalSince1970: 1_767_355_200) // 2026-01-02 12:00 UTC
+        #expect(ToolInvocationTimestamp.text(
+            for: "2026-01-02T17:05:00Z", relativeTo: reference, locale: locale, timeZone: timeZone
+        ) == "9:05 AM")
+        #expect(ToolInvocationTimestamp.text(
+            for: "2025-12-31T17:05:00Z", relativeTo: reference, locale: locale, timeZone: timeZone
+        ) == "Dec 31, 2025 at 9:05 AM")
+        #expect(ToolInvocationTimestamp.accessibilityText(
+            for: "2026-01-02T17:05:00Z", relativeTo: reference, locale: locale, timeZone: timeZone
+        ) == "Invoked 9:05 AM")
+        #expect(ToolInvocationTimestamp.text(for: nil, relativeTo: reference) == nil)
+        #expect(ToolInvocationTimestamp.text(for: "not-a-timestamp", relativeTo: reference) == nil)
     }
 
     @Test("compaction token counts use compact K shorthand")
@@ -2626,7 +2653,13 @@ struct ChatTranscriptPresentationTests {
         ])
     }
 
-    private func toolPresentation(_ id: String, startedAt: String? = nil) -> ChatToolPresentation {
+    private func toolPresentation(
+        _ id: String,
+        startedAt: String? = nil,
+        completedAt: String? = nil,
+        lastProgressAt: String? = nil,
+        progressSequence: Int? = nil
+    ) -> ChatToolPresentation {
         ChatToolPresentation(
             id: id,
             title: "read",
@@ -2637,10 +2670,10 @@ struct ChatTranscriptPresentationTests {
             fallbackContent: nil,
             error: false,
             startedAt: startedAt,
-            completedAt: nil,
+            completedAt: completedAt,
             durationMs: nil,
-            lastProgressAt: nil,
-            progressSequence: nil
+            lastProgressAt: lastProgressAt,
+            progressSequence: progressSequence
         )
     }
 
