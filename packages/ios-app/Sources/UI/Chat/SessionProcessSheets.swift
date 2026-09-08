@@ -356,6 +356,14 @@ private struct SessionProcessRow: View {
                 }
             }
 
+            if let invocation = ToolInvocationTimestamp.text(for: process.startedAt) {
+                Text("Invoked \(invocation)")
+                    .font(TronTypography.secondaryCodeDescription)
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .monospacedDigit()
+                    .accessibilityLabel(ToolInvocationTimestamp.accessibilityText(for: process.startedAt) ?? "")
+            }
+
             ToolChipFlowLayout(spacing: 5) {
                 if !process.executionMode.displayName.isEmpty {
                     SessionProcessPill(
@@ -438,6 +446,7 @@ private struct SessionProcessRow: View {
             statusText,
             process.executionMode.displayName.isEmpty ? nil : process.executionMode.displayName,
             process.durationMs.map { ToolTiming.format(milliseconds: $0) },
+            ToolInvocationTimestamp.accessibilityText(for: process.startedAt),
             latestAction,
             process.toolCount.map { SessionProcessRowPresentation.countLabel($0, singular: "tool") },
             process.turnCount.map { SessionProcessRowPresentation.countLabel($0, singular: "turn") },

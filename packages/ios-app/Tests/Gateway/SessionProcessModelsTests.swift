@@ -186,6 +186,25 @@ struct SessionProcessModelsTests {
         #expect(SessionProcessProjection.sections([firstHeartbeat, second]).active.map(\.processId) == [second.processId, first.processId])
     }
 
+    @Test("recent process history uses invocation order rather than terminal order")
+    func recentOrderUsesStartBoundary() {
+        let older = makeProcess(
+            state: .completed,
+            visibility: .recent,
+            sequence: 1,
+            terminalAt: "2026-01-01T00:00:30Z",
+            startedAt: "2026-01-01T00:00:01Z"
+        )
+        let newer = makeProcess(
+            state: .completed,
+            visibility: .recent,
+            sequence: 2,
+            terminalAt: "2026-01-01T00:00:10Z",
+            startedAt: "2026-01-01T00:00:03+00:00"
+        )
+        #expect(SessionProcessProjection.sections([older, newer]).recent.map(\.processId) == [newer.processId, older.processId])
+    }
+
     @Test("subagent stop control mounts disabled before exact authority arrives")
     func stopControlVisibility() {
         #expect(ReadOnlySubagentStopControlPolicy.isVisible(

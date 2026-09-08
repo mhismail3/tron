@@ -861,7 +861,7 @@ struct ToolDetailPresentationTests {
         #expect(settledRow.outputPreview?.text == "final")
 
         let ordered = ChatToolRunPresentation(tools: [labeled, tool("read")])
-        #expect(ordered.reverseChronologicalTools.map(\.id) == ["call-read", "labeled-bash"])
+        #expect(ordered.reverseChronologicalTools.map(\.id) == ["labeled-bash", "call-read"])
     }
 
     @Test("output tail policy handles CRLF, blanks, Unicode, and long lines without unbounded output")

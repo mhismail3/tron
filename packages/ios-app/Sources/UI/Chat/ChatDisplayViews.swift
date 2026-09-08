@@ -247,9 +247,18 @@ struct DisplayToolView: View {
                 showsProgress: tool.isRunning,
                 iconSize: ChatCompactPillLayoutPolicy.toolIconSize
             ) {
-                if tool.isRunning {
-                    DisplayToolElapsedText(tool: tool, color: tone.secondaryColor)
+                HStack(spacing: 4) {
+                    if let invocation = ToolInvocationTimestamp.text(for: tool.startedAt) {
+                        Text("Invoked \(invocation)")
+                            .font(TronTypography.secondaryCodeDescription)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                    }
+                    if tool.isRunning {
+                        DisplayToolElapsedText(tool: tool, color: tone.secondaryColor)
+                    }
                 }
+                .accessibilityElement(children: .combine)
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: ChatToolChipShapePolicy.cornerRadius, style: .continuous))
@@ -322,7 +331,8 @@ struct DisplayToolView: View {
         case .inline: disclosure.isCollapsed ? "Expands inline" : "Displayed inline"
         case .floating: "Opens floating window"
         }
-        return [display?.title ?? "Display", detail, action].joined(separator: ", ")
+        let invocation = ToolInvocationTimestamp.accessibilityText(for: tool.startedAt)
+        return [display?.title ?? "Display", detail, invocation, action].compactMap { $0 }.joined(separator: ", ")
     }
 
     private func collapseInline() {
