@@ -990,6 +990,11 @@ uses the shared right-anchored emerald queue-card visual with truthful “Messag
 copy, then hands directly to the
 operation-ID-bound canonical user row and survives navigation without replay. Pending attachment chips enter and leave with bounded composer-owned
 motion; their height changes explicitly arm the sole scroll coordinator's viewport transition.
+The horizontal attachment collection stays mounted across empty/nonempty changes, with no empty
+height or spacing. Every chip—including the first insertion and last removal—owns the same
+centered scale/fade; the full-width scroll container never scales toward the screen center.
+`ChatAttachmentStripTests` samples composited photo/file pixels during those transitions and
+Reduce Motion, rather than treating final layout coordinates as animation evidence.
 Authoritative queued entries render after any explicit runtime detail as right-anchored compact cards
 that use one intrinsic-or-wrapped layout, hug their content, and stop at the same 364-point maximum as a user prompt. They retain stable
 identity, delivery stage, position, text, total attachment count, and optional photo/file counts. The

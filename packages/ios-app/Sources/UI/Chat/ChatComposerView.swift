@@ -62,7 +62,7 @@ struct ChatComposerView: View {
             onHeightChange: onComposerHeight,
             onHeightSettled: onComposerHeightSettled
         ) {
-            VStack(spacing: 10) {
+            VStack(spacing: 0) {
                 attachmentStrip
                 selectedResourceStrip
                 resourcePickerView
@@ -150,6 +150,7 @@ struct ChatComposerView: View {
             .transition(ChatContentTransitionPolicy.composerSurfaceTransition(
                 reduceMotion: reduceMotion
             ))
+            .padding(.bottom, 10)
         }
     }
 
@@ -169,6 +170,7 @@ struct ChatComposerView: View {
             .transition(ChatContentTransitionPolicy.composerSurfaceTransition(
                 reduceMotion: reduceMotion
             ))
+            .padding(.bottom, 10)
         }
     }
 
@@ -288,7 +290,7 @@ struct ChatComposerView: View {
     }
 }
 
-private struct ChatPendingAttachmentStrip: View {
+struct ChatPendingAttachmentStrip: View {
     let attachments: [PendingAttachment]
     let reduceMotion: Bool
     let submissionTransitionActive: Bool
@@ -311,32 +313,26 @@ private struct ChatPendingAttachmentStrip: View {
     }
 
     var body: some View {
-        Group {
-            if !presentedAttachments.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(presentedAttachments) { attachment in
-                            PendingAttachmentChip(attachment: attachment) {
-                                onRemove(attachment.id)
-                            }
-                            .transition(
-                                presentedAttachments.count == 1
-                                    ? .identity
-                                    : ChatContentTransitionPolicy.attachmentTransition(
-                                        reduceMotion: reduceMotion
-                                    )
-                            )
-                        }
+        // Keep the collection mounted across zero ↔ one. Scaling a newly
+        // inserted full-width scroll view pulls its leading chip toward the
+        // screen center; only each chip's own center may own that transform.
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(presentedAttachments) { attachment in
+                    PendingAttachmentChip(attachment: attachment) {
+                        onRemove(attachment.id)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 2)
+                    .transition(ChatContentTransitionPolicy.attachmentTransition(
+                        reduceMotion: reduceMotion
+                    ))
                 }
-                .scrollClipDisabled()
-                .transition(ChatContentTransitionPolicy.attachmentTransition(
-                    reduceMotion: reduceMotion
-                ))
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 2)
         }
+        .scrollClipDisabled()
+        .frame(height: presentedAttachments.isEmpty ? 0 : nil, alignment: .top)
+        .padding(.bottom, presentedAttachments.isEmpty ? 0 : 10)
         .onChange(of: attachments) { _, target in
             reconcile(to: target)
         }
