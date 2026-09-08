@@ -242,6 +242,69 @@ struct GatewayDiagnosticsServiceTests {
         #expect(firstRecord.record.message.contains("platformCode=-1001"))
     }
 
+    @Test("frame decode-limit diagnostics preserve typed bounds and privacy through export")
+    func frameDecodeLimitDiagnosticsAreExportedSafely() async throws {
+        let limits = JSONValueDecodingLimits(
+            maximumDepth: 8,
+            maximumNodes: 3,
+            maximumCollectionMembers: 10,
+            maximumStringBytes: 64,
+            maximumTotalStringBytes: 64
+        )
+        let violation: JSONValueDecodingLimitViolation
+        do {
+            _ = try JSONDecoder.gateway(jsonValueLimits: limits).decode(
+                JSONValue.self,
+                from: Data(#"{"secret-key":{"nested":{"leaf":0}}}"#.utf8)
+            )
+            Issue.record("limit violation unexpectedly decoded")
+            return
+        } catch let decoded as JSONValueDecodingLimitViolation {
+            violation = decoded
+        }
+
+        let timestamp = Date.now.formatted(.iso8601)
+        let diagnostic = GatewayConnectionDiagnostic(
+            sequence: 7,
+            clientID: "client-id",
+            attemptID: "attempt-id",
+            connectionID: 3,
+            timestamp: timestamp,
+            profileID: "stable",
+            profileLabel: "Stable",
+            stage: .transport,
+            outcome: .failure,
+            durationMilliseconds: 9,
+            reason: .decodeLimit,
+            platformCode: nil,
+            overflowCount: nil,
+            frameBytes: 597_822,
+            decodeLimitKind: violation.kind,
+            decodeActual: violation.actual,
+            decodeMaximum: violation.maximum,
+            decodeCodingPath: violation.codingPath
+        )
+        let record = IOSClientDiagnosticBuffer.logRecord(diagnostic)
+        #expect(record.record.event == "gateway.connection")
+        #expect(record.record.message.contains("reason=decode_limit"))
+        #expect(record.record.message.contains("frameBytes=597822"))
+        #expect(record.record.message.contains("decodeLimit=nodes"))
+        #expect(record.record.message.contains("decodeActual=4"))
+        #expect(record.record.message.contains("decodeMaximum=3"))
+        #expect(record.record.message.contains("decodePath=dynamic"))
+        #expect(!record.record.message.contains("secret-key"))
+
+        let suite = "GatewayDecodeLimitDiagnostics.\(UUID().uuidString)"
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        let store = IOSClientDiagnosticStore(defaults: defaults)
+        await store.save([record])
+        let loaded = await store.load()
+        #expect(loaded.count == 1)
+        #expect(loaded[0].record.message == record.record.message)
+        #expect(loaded[0].profileLabel == "iOS client")
+    }
+
     @MainActor
     @Test("offline Logs never sends RPCs into a pending handshake and retains local evidence")
     func offlineLogsDoNotUsePendingHandshake() async throws {

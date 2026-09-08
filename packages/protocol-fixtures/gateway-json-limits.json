@@ -1,0 +1,6 @@
+{
+  "maximumFrameBytes": 1048576,
+  "maximumDynamicJSONNodes": 32768,
+  "transcriptPageNodes": 24000,
+  "snapshotNodes": 30000
+}

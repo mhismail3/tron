@@ -70,6 +70,24 @@ describe("bounded outbound gateway frames", () => {
     });
   });
 
+  it("admits exactly the native node ceiling and returns a correlated error one node above it", () => {
+    const rows = Array.from({ length: 4 }, (_, index) => Array(index === 3 ? 8_189 : 8_190).fill(0));
+    const frame = { type: "response", id: "dense-request", ok: true, result: rows };
+    expect(JSON.parse(encodeOutboundFrame(frame, 1_048_576)!)).toEqual(frame);
+    rows[3]!.push(0);
+    expect(Buffer.byteLength(JSON.stringify(frame))).toBeLessThan(1_048_576);
+    expect(JSON.parse(encodeOutboundFrame(frame, 1_048_576)!)).toMatchObject({
+      type: "response", id: "dense-request", ok: false,
+      error: { code: "response_too_large", retryable: false,
+        details: { nodeCountAtLeast: 32_769, maximumNodes: 32_768 } },
+    });
+    const event = { type: "event", topic: "session.snapshot", sessionId: "session", payload: rows };
+    expect(JSON.parse(encodeOutboundFrame(event, 1_048_576)!)).toMatchObject({
+      type: "event", topic: "transport.resyncRequired", sessionId: "session",
+      payload: { nodeCountAtLeast: 32_769, maximumNodes: 32_768 },
+    });
+  });
+
   it("clears a failed open transaction so the same session can synchronize again immediately", () => {
     const firstTimeout = setTimeout(() => {}, 60_000);
     const otherTimeout = setTimeout(() => {}, 60_000);

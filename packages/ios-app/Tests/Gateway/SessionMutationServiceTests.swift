@@ -504,6 +504,40 @@ struct SessionMutationServiceTests {
         }
     }
 
+    @Test("an oversized mutation or receipt response preserves uncertainty without replay", arguments: [false, true])
+    func projectionRejectionIsNotCommandRejection(duringReceiptResolution: Bool) async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            if duringReceiptResolution {
+                await harness.socket.failNextSend(GatewayFailure(code: "disconnected", message: "synthetic loss", retryable: true, details: nil))
+            }
+            let mutation = Task {
+                try await harness.service.setModel(ModelRef(provider: "provider", id: "model"), sessionID: "session")
+            }
+            defer { mutation.cancel() }
+            if duringReceiptResolution { try await reconnect(harness) }
+            let socket = duringReceiptResolution ? harness.replacement : harness.socket
+            let request = try await request(in: socket, frameIndex: 1)
+            #expect(request.method == (duringReceiptResolution ? "command.status" : "session.setModel"))
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(request.id), "ok": .bool(false),
+                "error": .object([
+                    "code": .string("response_too_large"), "message": .string("Projection exceeds node limit"),
+                    "retryable": .bool(false), "details": .object(["maximumNodes": .number(32_768)]),
+                ]),
+            ])))
+            do {
+                try await valueOfOwnedTask(mutation)
+                Issue.record("projection failure unexpectedly succeeded")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "outcome_unknown")
+                #expect(failure.details?.objectValue?["commandId"] == request.params?["commandId"])
+            }
+            #expect(await socket.sentFrames().count == 2)
+            await harness.client.close()
+        }
+    }
+
     @Test("confirmed missing replays the exact command ID once")
     func stableCommandIDReplay() async throws {
         try await withTestWatchdog {

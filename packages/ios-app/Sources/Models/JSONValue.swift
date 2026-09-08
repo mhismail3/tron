@@ -16,6 +16,28 @@ struct JSONValueDecodingLimits: Sendable, Equatable {
     )
 }
 
+enum JSONValueDecodingLimitKind: String, Sendable, Equatable {
+    case depth
+    case nodes
+    case collectionMembers = "collection_members"
+    case stringBytes = "string_bytes"
+    case totalStringBytes = "total_string_bytes"
+}
+
+/// Typed evidence for a bounded dynamic JSON rejection. The coding path is
+/// reduced to source-owned keys and fixed placeholders before it leaves the
+/// decoder; response-owned dictionary keys never cross this boundary.
+struct JSONValueDecodingLimitViolation: Error, Sendable, Equatable, LocalizedError {
+    let kind: JSONValueDecodingLimitKind
+    let actual: Int
+    let maximum: Int
+    let codingPath: String
+
+    var errorDescription: String? {
+        "Dynamic JSON exceeds its \(kind.rawValue) budget"
+    }
+}
+
 private extension CodingUserInfoKey {
     static let jsonValueDecodingLimits = CodingUserInfoKey(
         rawValue: "com.tron.mobile.json-value-decoding-limits"
@@ -50,10 +72,12 @@ enum JSONValue: Codable, Hashable, Sendable {
     init(from decoder: Decoder) throws {
         let limits = decoder.userInfo[.jsonValueDecodingLimits] as? JSONValueDecodingLimits ?? .gateway
         guard decoder.codingPath.count <= limits.maximumDepth else {
-            throw DecodingError.dataCorrupted(.init(
-                codingPath: decoder.codingPath,
-                debugDescription: "Dynamic JSON exceeds its maximum depth"
-            ))
+            throw Self.limitViolation(
+                kind: .depth,
+                actual: decoder.codingPath.count,
+                maximum: limits.maximumDepth,
+                codingPath: decoder.codingPath
+            )
         }
 
         let single = try decoder.singleValueContainer()
@@ -72,47 +96,57 @@ enum JSONValue: Codable, Hashable, Sendable {
             decoded = .number(value)
         } else if let value = try? single.decode(String.self) {
             guard value.utf8.count <= limits.maximumStringBytes else {
-                throw DecodingError.dataCorruptedError(
-                    in: single,
-                    debugDescription: "Dynamic JSON string exceeds its byte budget"
+                throw Self.limitViolation(
+                    kind: .stringBytes,
+                    actual: value.utf8.count,
+                    maximum: limits.maximumStringBytes,
+                    codingPath: decoder.codingPath
                 )
             }
             decoded = .string(value)
         } else if let keyed = try? decoder.container(keyedBy: DynamicJSONCodingKey.self) {
             let keys = keyed.allKeys
             guard keys.count <= limits.maximumCollectionMembers else {
-                throw DecodingError.dataCorrupted(.init(
-                    codingPath: decoder.codingPath,
-                    debugDescription: "Dynamic JSON object exceeds its member budget"
-                ))
+                throw Self.limitViolation(
+                    kind: .collectionMembers,
+                    actual: keys.count,
+                    maximum: limits.maximumCollectionMembers,
+                    codingPath: decoder.codingPath
+                )
             }
             var result: [String: JSONValue] = [:]
             result.reserveCapacity(keys.count)
             for key in keys {
                 guard key.stringValue.utf8.count <= limits.maximumStringBytes else {
-                    throw DecodingError.dataCorrupted(.init(
-                        codingPath: decoder.codingPath + [key],
-                        debugDescription: "Dynamic JSON object key exceeds its byte budget"
-                    ))
+                    throw Self.limitViolation(
+                        kind: .stringBytes,
+                        actual: key.stringValue.utf8.count,
+                        maximum: limits.maximumStringBytes,
+                        codingPath: decoder.codingPath + [key]
+                    )
                 }
                 result[key.stringValue] = try keyed.decode(JSONValue.self, forKey: key)
             }
             decoded = .object(result)
         } else if var unkeyed = try? decoder.unkeyedContainer() {
             if let count = unkeyed.count, count > limits.maximumCollectionMembers {
-                throw DecodingError.dataCorrupted(.init(
-                    codingPath: decoder.codingPath,
-                    debugDescription: "Dynamic JSON array exceeds its member budget"
-                ))
+                throw Self.limitViolation(
+                    kind: .collectionMembers,
+                    actual: count,
+                    maximum: limits.maximumCollectionMembers,
+                    codingPath: decoder.codingPath
+                )
             }
             var result: [JSONValue] = []
             result.reserveCapacity(min(unkeyed.count ?? 0, limits.maximumCollectionMembers))
             while !unkeyed.isAtEnd {
                 guard result.count < limits.maximumCollectionMembers else {
-                    throw DecodingError.dataCorrupted(.init(
-                        codingPath: decoder.codingPath,
-                        debugDescription: "Dynamic JSON array exceeds its member budget"
-                    ))
+                    throw Self.limitViolation(
+                        kind: .collectionMembers,
+                        actual: result.count + 1,
+                        maximum: limits.maximumCollectionMembers,
+                        codingPath: decoder.codingPath
+                    )
                 }
                 result.append(try unkeyed.decode(JSONValue.self))
             }
@@ -153,48 +187,88 @@ enum JSONValue: Codable, Hashable, Sendable {
         var stringBytes = 0
         while let current = stack.popLast() {
             guard current.depth <= limits.maximumDepth else {
-                throw DecodingError.dataCorrupted(.init(
-                    codingPath: codingPath,
-                    debugDescription: "Dynamic JSON exceeds its maximum depth"
-                ))
+                throw limitViolation(
+                    kind: .depth,
+                    actual: current.depth,
+                    maximum: limits.maximumDepth,
+                    codingPath: codingPath
+                )
             }
             nodes += 1
             guard nodes <= limits.maximumNodes else {
-                throw DecodingError.dataCorrupted(.init(
-                    codingPath: codingPath,
-                    debugDescription: "Dynamic JSON exceeds its node budget"
-                ))
+                throw limitViolation(
+                    kind: .nodes,
+                    actual: nodes,
+                    maximum: limits.maximumNodes,
+                    codingPath: codingPath
+                )
             }
             switch current.value {
             case .string(let value):
                 stringBytes += value.utf8.count
             case .object(let value):
                 guard value.count <= limits.maximumCollectionMembers else {
-                    throw DecodingError.dataCorrupted(.init(
-                        codingPath: codingPath,
-                        debugDescription: "Dynamic JSON object exceeds its member budget"
-                    ))
+                    throw limitViolation(
+                        kind: .collectionMembers,
+                        actual: value.count,
+                        maximum: limits.maximumCollectionMembers,
+                        codingPath: codingPath
+                    )
                 }
                 stringBytes += value.keys.reduce(into: 0) { $0 += $1.utf8.count }
                 stack.append(contentsOf: value.values.map { ($0, current.depth + 1) })
             case .array(let value):
                 guard value.count <= limits.maximumCollectionMembers else {
-                    throw DecodingError.dataCorrupted(.init(
-                        codingPath: codingPath,
-                        debugDescription: "Dynamic JSON array exceeds its member budget"
-                    ))
+                    throw limitViolation(
+                        kind: .collectionMembers,
+                        actual: value.count,
+                        maximum: limits.maximumCollectionMembers,
+                        codingPath: codingPath
+                    )
                 }
                 stack.append(contentsOf: value.map { ($0, current.depth + 1) })
             case .number, .bool, .null:
                 break
             }
             guard stringBytes <= limits.maximumTotalStringBytes else {
-                throw DecodingError.dataCorrupted(.init(
-                    codingPath: codingPath,
-                    debugDescription: "Dynamic JSON exceeds its total string budget"
-                ))
+                throw limitViolation(
+                    kind: .totalStringBytes,
+                    actual: stringBytes,
+                    maximum: limits.maximumTotalStringBytes,
+                    codingPath: codingPath
+                )
             }
         }
+    }
+
+    private static func limitViolation(
+        kind: JSONValueDecodingLimitKind,
+        actual: Int,
+        maximum: Int,
+        codingPath: [any CodingKey]
+    ) -> JSONValueDecodingLimitViolation {
+        let path = codingPath.prefix(32).map { key -> String in
+            if let index = key.intValue { return "[\(index)]" }
+            // DynamicJSONCodingKey is response-owned data. Only synthesized
+            // model keys are retained; all other keys use one fixed marker.
+            guard String(reflecting: type(of: key)).hasSuffix(".CodingKeys") else {
+                return "<dynamic>"
+            }
+            let admitted = key.stringValue.unicodeScalars.map { scalar -> Character in
+                CharacterSet.alphanumerics.contains(scalar) || scalar == "_" || scalar == "-"
+                    ? Character(String(scalar)) : "?"
+            }
+            return String(admitted.prefix(64))
+        }.reduce(into: "") { result, component in
+            if component.hasPrefix("[") { result += component }
+            else { result += result.isEmpty ? component : ".\(component)" }
+        }
+        return JSONValueDecodingLimitViolation(
+            kind: kind,
+            actual: max(0, actual),
+            maximum: max(0, maximum),
+            codingPath: String((path.isEmpty ? "dynamic" : path).prefix(256))
+        )
     }
 
     var objectValue: [String: JSONValue]? {

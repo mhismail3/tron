@@ -12,11 +12,15 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   either limit loses request/subscription admission immediately; a one-second
   forced-close deadline bounds a stalled close handshake. Other peers and
   accepted domain commands continue independently.
-- **Projection:** the wire ceiling remains 1 MiB. An oversized response gets a
-  correlated `response_too_large` error; an oversized event becomes a bounded
-  resynchronization notice. Rejection diagnostics contain sizes/category, not
-  producer content. Limits are not invitations to allocate an unbounded input
-  before projecting it.
+- **Projection:** the wire ceiling remains 1 MiB, with a shared 32,768 JSON-value
+  node ceiling for local and mobile clients. Transcript pages reserve 24,000
+  nodes and snapshots 30,000; dense detail is compacted without editing canonical
+  history. Byte size alone does not establish native decoder admission. Final
+  overflow gets a correlated `response_too_large` error or an event resync notice.
+  Diagnostics include sizes, node-count lower bound and maximum, not content.
+  Rejected mutation/receipt projections remain an unknown command outcome, never
+  proof that execution failed. Limits are not invitations to allocate an
+  unbounded input before projecting it.
 - **Mobile recovery:** each transport owner retains a budget per paired profile.
   Initial connection and reconnect attempts share a three-attempt allowance;
   creating another client or backgrounding does not forgive failures. A hello is
@@ -49,6 +53,7 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
 | --- | --- |
 | `hello-send` timeout with no matching Gateway admission, while local requests remain responsive | Suspect endpoint or phone/network/Tailscale reachability; not evidence of a Gateway memory overflow. |
 | `ping_timeout` with zero event-queue admission/high-water | The local event reducer did not overflow that epoch. Investigate transport/path or an unobserved process stall. |
+| Fast successful `session.open`, no `session.sync`, then client close / `decode_limit` | The client rejected response structure before sync. Compare `frameBytes`, `decodeLimit`, `decodeActual`, `decodeMaximum` and sanitized `decodePath`; a sub-megabyte response can still exceed the node ceiling. This is not proof of path loss. |
 | `event_overflow` with topic, count/byte limit, oldest age and dequeue timing | Mobile consumer pressure. Trace what held the consumer, including synchronization reads; do not merely enlarge the queue. |
 | `connection.outbound-capacity` | Actual server queue count/byte pressure. Inspect high-water marks, `wsBufferedBytes`, next-frame bytes and process memory. |
 | `connection.capacity` | The connection admission limit was reached; inspect total/per-identity counts and retiring peers. |
@@ -69,6 +74,15 @@ unaccounted-retention/admission behavior. The synchronization and revocation
 integration suites protect ordering and accepted-command ownership. iOS recovery
 and dashboard owner tests cover attempt exhaustion, explicit retry and entry
 replacement without silently resetting the budget.
+
+`projection.test.ts` covers dense browser detail and tiny-content-part aggregates,
+including normalized response envelopes. `server-frame.test.ts` and capacity
+integration tests cover exact node limits, read-local fallback, both client roles,
+and rejected-open subscription cleanup. The shared JSON-limit fixture is checked
+against both producer and native constants; the native transport regression drives
+an actual over-node-budget frame through decoding, diagnostic capture and strict
+retirement. Native confirmed-mutation tests ensure an oversized command/status
+response cannot be mistaken for a failed command or authorize replay.
 
 These boundaries are not a certification of unlimited sessions or browser
 processes. Cold SDK session opening still parses complete JSONL synchronously;

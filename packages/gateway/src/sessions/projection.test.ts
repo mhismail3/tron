@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -32,9 +33,90 @@ import {
   SESSION_SNAPSHOT_BYTES,
   TRANSCRIPT_PAGE_BYTES,
   TRANSCRIPT_PAGE_ITEMS,
+  TRANSCRIPT_PAGE_NODES,
+  SESSION_SNAPSHOT_NODES,
   TREE_PROJECTION_BYTES,
   toolSegmentId,
 } from "./projection.js";
+
+function wireNodes(value: unknown): number {
+  if (Array.isArray(value)) return 1 + value.reduce((sum, child) => sum + wireNodes(child), 0);
+  if (value && typeof value === "object") return 1 + Object.values(value).reduce<number>((sum, child) => sum + wireNodes(child), 0);
+  return 1;
+}
+
+describe("aggregate transcript structure", () => {
+  it("compacts dense browser details below native limits without losing rows, text, or canonical data", () => {
+    const manager = SessionManager.inMemory("/tmp/dense-browser-fixture");
+    for (let index = 0; index < 40; index++) {
+      manager.appendMessage({ role: "user", content: [{ type: "text", text: `Message ${index}` }], timestamp: index });
+    }
+    for (let index = 0; index < 8; index++) {
+      manager.appendMessage({
+        role: "toolResult", toolCallId: `browser-${index}`, toolName: "agent_browser",
+        content: [{ type: "text", text: "Browser inspection completed" }],
+        details: { records: Array.from({ length: 1_000 }, () => ({ a: 0, b: 1, c: 2, d: 3 })) },
+        isError: false, timestamp: 100 + index,
+      });
+    }
+    const canonicalBefore = JSON.stringify(manager.getBranch());
+    const blobs = new BlobStore();
+    const raw = projectTranscript(manager, blobs);
+    expect(Buffer.byteLength(JSON.stringify(raw))).toBeLessThan(TRANSCRIPT_PAGE_BYTES);
+    expect(wireNodes(JSON.parse(JSON.stringify(raw)))).toBeGreaterThan(32_768);
+    const page = projectTranscriptPage(manager, blobs);
+    expect(wireNodes(JSON.parse(JSON.stringify(page.items)))).toBeLessThanOrEqual(TRANSCRIPT_PAGE_NODES);
+    expect(page.items.map(item => item.id)).toEqual(raw.map(item => item.id));
+    expect(page.items.map(item => item.kind === "message" ? item.content : null))
+      .toEqual(raw.map(item => item.kind === "message" ? item.content : null));
+    expect(page).toMatchObject({ start: 0, end: raw.length, total: raw.length });
+    const template = JSON.parse(readFileSync(new URL("../../../protocol-fixtures/session-snapshot-v4.json", import.meta.url), "utf8"));
+    const original: SessionSnapshot = { ...template, phase: "idle", transcript: raw, transcriptStart: 0, transcriptTotal: raw.length, toolExecutions: [] };
+    const fitted = fitSessionSnapshot(original);
+    expect(wireNodes(JSON.parse(JSON.stringify(safeJson(fitted))))).toBeLessThanOrEqual(SESSION_SNAPSHOT_NODES);
+    const response = { type: "response", id: "open", ok: true,
+      result: safeJson({ session: fitted, syncToken: "sync", subscriptionToken: "subscription", completionRevision: 0 }) };
+    expect(wireNodes(JSON.parse(JSON.stringify(response)))).toBeLessThanOrEqual(32_768);
+    expect(wireNodes(JSON.parse(JSON.stringify({ type: "response", id: "page", ok: true, result: safeJson(page) })))).toBeLessThanOrEqual(32_768);
+    expect(fitted.transcript.map(item => item.id)).toEqual(raw.map(item => item.id));
+    expect(fitted).toMatchObject({ transcriptStart: 0, transcriptTotal: raw.length, eventSequence: original.eventSequence });
+    expect(fitted.transcript.filter(item => item.kind === "message" && item.role === "toolResult"))
+      .toHaveLength(8);
+    expect(JSON.stringify(manager.getBranch())).toBe(canonicalBefore);
+  });
+
+  it("bounds the full normalized envelope with maximum heterogeneous rows and optional fields", () => {
+    const template = JSON.parse(readFileSync(new URL("../../../protocol-fixtures/session-snapshot-v4.json", import.meta.url), "utf8"));
+    const detail = { records: Array.from({ length: 500 }, () => ({ a: 0, b: 1, c: 2, d: 3 })) };
+    const transcript: TranscriptItem[] = Array.from({ length: TRANSCRIPT_PAGE_ITEMS }, (_, index) => ({
+      id: `row-${index}`, parentId: index ? `row-${index - 1}` : null,
+      timestamp: new Date(index).toISOString(), kind: "message", role: index % 2 ? "toolResult" : "user",
+      content: [{ id: `row-${index}:0`, ordinal: 0, type: "text", text: "Visible text" }],
+      toolCallId: index % 2 ? `call-${index}` : undefined, toolName: index % 2 ? "agent_browser" : undefined,
+      details: index % 2 ? detail : undefined, usage: undefined, presentationId: undefined,
+      model: undefined, provider: undefined,
+    }));
+    const fitted = fitSessionSnapshot({ ...template, transcript, transcriptStart: 0, transcriptTotal: transcript.length });
+    const normalized = safeJson({ type: "response", id: "open", ok: true,
+      result: { session: fitted, syncToken: "sync", subscriptionToken: "subscription", completionRevision: 0 } });
+    expect(wireNodes(JSON.parse(JSON.stringify(normalized)))).toBeLessThanOrEqual(32_768);
+    expect(fitted.transcript.map(item => item.id)).toEqual(transcript.map(item => item.id));
+    expect(fitted.transcript.filter(item => item.kind === "message" && item.role === "toolResult").map(item => item.toolCallId))
+      .toEqual(transcript.filter(item => item.kind === "message" && item.role === "toolResult").map(item => item.toolCallId));
+  });
+
+  it("bounds many tiny content parts and preserves the paged range", () => {
+    const manager = SessionManager.inMemory("/tmp/dense-content-fixture");
+    for (let index = 0; index < 10; index++) {
+      manager.appendMessage({ role: "user", content: Array.from({ length: 1_000 }, () => ({ type: "text" as const, text: "x" })), timestamp: index });
+    }
+    const page = projectTranscriptPage(manager, new BlobStore());
+    expect(wireNodes(JSON.parse(JSON.stringify(page)))).toBeLessThan(32_768);
+    expect(page.items.map(item => item.id)).toEqual(manager.getBranch().slice(page.start, page.end).map(entry => entry.id));
+    expect(page.end - page.start).toBe(page.items.length);
+    expect(page.items.length).toBeGreaterThan(0);
+  });
+});
 
 describe("canonical tool ownership", () => {
   it("recognizes exact tool-result call IDs across the full branch", () => {

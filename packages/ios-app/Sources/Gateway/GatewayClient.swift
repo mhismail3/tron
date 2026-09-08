@@ -561,7 +561,12 @@ actor GatewayClient {
         lastWriteProgressAgeMilliseconds: Int? = nil,
         profileID: String? = nil,
         profileLabel: String? = nil,
-        attemptID: String? = nil
+        attemptID: String? = nil,
+        frameBytes: Int? = nil,
+        decodeLimitKind: JSONValueDecodingLimitKind? = nil,
+        decodeActual: Int? = nil,
+        decodeMaximum: Int? = nil,
+        decodeCodingPath: String? = nil
     ) {
         let components = startedAt.duration(to: clock.now()).components
         let elapsed = max(
@@ -603,7 +608,12 @@ actor GatewayClient {
             dequeueWaitTopic: queueSnapshot?.dequeueWaitTopic,
             dequeueWaitConnectionID: queueSnapshot?.dequeueWaitConnectionID,
             lastInboundAgeMilliseconds: lastInboundAgeMilliseconds,
-            lastWriteProgressAgeMilliseconds: lastWriteProgressAgeMilliseconds
+            lastWriteProgressAgeMilliseconds: lastWriteProgressAgeMilliseconds,
+            frameBytes: frameBytes,
+            decodeLimitKind: decodeLimitKind,
+            decodeActual: decodeActual,
+            decodeMaximum: decodeMaximum,
+            decodeCodingPath: decodeCodingPath
         )
         connectionDiagnostics.insert(diagnostic, at: 0)
         diagnosticStore?.record(IOSClientDiagnosticBuffer.logRecord(diagnostic))
@@ -1455,7 +1465,31 @@ actor GatewayClient {
 
     private func handle(_ data: Data, epochID: Int) async throws {
         try requireEpoch(epochID)
-        let frame = try frameDecoder.decode(data)
+        let frame: GatewayInboundFrame
+        do {
+            frame = try frameDecoder.decode(data)
+        } catch let violation as JSONValueDecodingLimitViolation {
+            // Preserve the bounded decoder cause before strict epoch retirement
+            // replaces it with the generic transport close classification.
+            guard let current = connection, current.id == epochID else { throw violation }
+            recordDiagnostic(
+                stage: .transport,
+                outcome: .failure,
+                startedAt: current.startedAt,
+                reason: .decodeLimit,
+                error: violation,
+                connectionID: epochID,
+                profileID: current.profileID,
+                profileLabel: current.profileLabel,
+                attemptID: current.attemptID,
+                frameBytes: data.count,
+                decodeLimitKind: violation.kind,
+                decodeActual: violation.actual,
+                decodeMaximum: violation.maximum,
+                decodeCodingPath: violation.codingPath
+            )
+            throw violation
+        }
         try requireEpoch(epochID)
         switch frame {
         case .response(let response):

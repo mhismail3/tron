@@ -4,6 +4,22 @@ import Testing
 
 @Suite("Gateway protocol fixtures")
 struct GatewayProtocolContractTests {
+    @Test("shared Gateway JSON limits match native admission constants")
+    func sharedJSONLimitsMatchNativeConstants() throws {
+        struct Fixture: Decodable {
+            let maximumFrameBytes: Int
+            let maximumDynamicJSONNodes: Int
+        }
+        let fixtureURL = try #require(
+            ([Bundle.main] + Bundle.allBundles)
+                .compactMap { $0.url(forResource: "gateway-json-limits", withExtension: "json", subdirectory: "protocol-fixtures") }
+                .first
+        )
+        let fixture = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: fixtureURL))
+        #expect(fixture.maximumFrameBytes == GatewayFramePolicy.maximumInboundBytes)
+        #expect(fixture.maximumDynamicJSONNodes == JSONValueDecodingLimits.gateway.maximumNodes)
+    }
+
     @Test("authoritative session snapshot decodes")
     func snapshotDecodes() throws {
         let data = Data(#"""

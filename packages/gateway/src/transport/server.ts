@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server as HTTPServer, type ServerResponse } from "node:http";
+import { GATEWAY_JSON_MAXIMUM_NODES, jsonNodeCount } from "../protocol/json-budget.js";
 import type { Duplex } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { randomUUID } from "node:crypto";
@@ -319,7 +320,10 @@ function sendJson(response: ServerResponse, status: number, value: unknown): voi
 export function encodeOutboundFrame(value: unknown, maximum: number): string | undefined {
   const encoded = JSON.stringify(value);
   const bytes = Buffer.byteLength(encoded);
-  if (bytes <= maximum) return encoded;
+  const nodes = jsonNodeCount(value);
+  if (bytes <= maximum && nodes <= GATEWAY_JSON_MAXIMUM_NODES) return encoded;
+  const structural = nodes > GATEWAY_JSON_MAXIMUM_NODES
+    ? { nodeCountAtLeast: nodes, maximumNodes: GATEWAY_JSON_MAXIMUM_NODES } : {};
   const frame = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
   const replacement = frame.type === "response" && typeof frame.id === "string"
     ? {
@@ -330,14 +334,14 @@ export function encodeOutboundFrame(value: unknown, maximum: number): string | u
           code: "response_too_large",
           message: "This response is too large for the mobile connection. Refresh and try a narrower view.",
           retryable: false,
-          details: { bytes, maximum },
+          details: { bytes, maximum, ...structural },
         },
       }
     : {
         type: "event",
         topic: "transport.resyncRequired",
         ...(typeof frame.sessionId === "string" ? { sessionId: frame.sessionId } : {}),
-        payload: { reason: "oversized projection", bytes, maximum },
+        payload: { reason: "oversized projection", bytes, maximum, ...structural },
       };
   const fallback = JSON.stringify(replacement);
   return Buffer.byteLength(fallback) <= maximum ? fallback : undefined;
@@ -1514,17 +1518,19 @@ export class GatewayServer {
       const direct = JSON.stringify(value);
       if (direct === undefined) return "failed";
       const bytes = Buffer.byteLength(direct, "utf8");
-      if (bytes > this.options.maxFrameBytes) {
+      const nodes = jsonNodeCount(value);
+      const fits = bytes <= this.options.maxFrameBytes && nodes <= GATEWAY_JSON_MAXIMUM_NODES;
+      if (!fits) {
         const frame = value as { type?: unknown; topic?: unknown };
         const type = frame?.type === "response" ? "response" : frame?.type === "event" ? "event" : "other";
         const topic = typeof frame?.topic === "string"
           && ["session.snapshot", "session.rebaseline", "session.progress", "session.summary"].includes(frame.topic)
           ? frame.topic : "other";
-        this.options.logger.log("warning", `Outbound projection exceeded frame limit (type=${type} topic=${topic} bytes=${bytes} maximumBytes=${this.options.maxFrameBytes}; ${this.pressureDiagnostic()})`, {
+        this.options.logger.log("warning", `Outbound projection exceeded frame limit (type=${type} topic=${topic} bytes=${bytes} maximumBytes=${this.options.maxFrameBytes} nodeCountAtLeast=${nodes} maximumNodes=${GATEWAY_JSON_MAXIMUM_NODES}; ${this.pressureDiagnostic()})`, {
           event: "connection.projection-rejected", source: "transport",
         });
       }
-      const encoded = bytes <= this.options.maxFrameBytes
+      const encoded = fits
         ? direct
         : encodeOutboundFrame(value, this.options.maxFrameBytes);
       if (!encoded) return "failed";

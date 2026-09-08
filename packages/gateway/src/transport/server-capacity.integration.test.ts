@@ -530,6 +530,84 @@ describe("WebSocket connection and outbound capacity", () => {
       .toContain("lastInboundAgeMs=600 lastWriteProgressAgeMs=unknown queuedFrames=0 queuedBytes=0 completedFrames=0");
   });
 
+  it.each([undefined, "mobile"])("rejects a sub-megabyte dense response for role %s without disconnecting or leaking contents", async (clientRole) => {
+    const root = await mkdtemp(join(tmpdir(), "tron-structural-capacity-"));
+    let gateway: GatewayServer | undefined;
+    let socket: WebSocket | undefined;
+    cleanups.push(async () => {
+      if (socket && socket.readyState !== WebSocket.CLOSED) {
+        const closed = new Promise<void>(resolve => socket!.once("close", () => resolve()));
+        socket.terminate();
+        await bounded(closed, "structural socket disposal");
+      }
+      if (gateway) await bounded(gateway.close(), "structural fixture disposal");
+      await rm(root, { recursive: true, force: true });
+    });
+    const devices = new DeviceStore(root, "machine");
+    await devices.initialize();
+    const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const port = await unusedPort();
+    const logger = { log: vi.fn() };
+    const dense = { private: "not-for-logs", rows: Array.from({ length: 8 }, () =>
+      Array.from({ length: 1_000 }, () => ({ a: 0, b: 1, c: 2, d: 3 }))) };
+    expect(Buffer.byteLength(JSON.stringify(dense))).toBeLessThan(1_048_576);
+    const subscriptions = new Set<string>();
+    gateway = new GatewayServer({
+      host: "127.0.0.1", port, maxFrameBytes: 1_048_576,
+      devices, uploads: {} as any,
+      sessions: {
+        subscribe: (_client: string, session: string) => subscriptions.add(session),
+        unsubscribe: (_client: string, session: string) => subscriptions.delete(session),
+        unsubscribeClient: () => subscriptions.clear(),
+      } as any,
+      auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
+      service: {
+        info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 5, minProtocolVersion: 5,
+          machineId: "machine", machineName: "test", capabilities: [] }),
+        terminalBelongsToSession: () => false, releaseClient: vi.fn(),
+        invoke: async (context: any, method: string, params: any) => {
+          if (method === "session.open") {
+            const syncToken = context.beginSynchronization(params.sessionId);
+            context.establishSynchronization(params.sessionId, { runtimeGeneration: "generation", eventSequence: 1 });
+            return { session: params.dense ? dense : { healthy: true }, syncToken, subscriptionToken: syncToken };
+          }
+          return method === "test.dense" ? dense : { healthy: true };
+        },
+      } as any,
+      logger: logger as any,
+    });
+    await gateway.listen();
+    socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
+    const frames: any[] = [];
+    socket.on("message", raw => frames.push(JSON.parse(raw.toString())));
+    await bounded(new Promise<void>(resolve => socket!.once("open", resolve)), "structural socket open");
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 5, clientRole }));
+    await waitUntil(() => frames.some(frame => frame.type === "hello"));
+    socket.send(JSON.stringify({ type: "request", id: "dense", method: "test.dense", params: {} }));
+    await waitUntil(() => frames.some(frame => frame.id === "dense"));
+    expect(frames.find(frame => frame.id === "dense")).toMatchObject({
+      ok: false, error: { code: "response_too_large", details: { maximumNodes: 32_768 } },
+    });
+    socket.send(JSON.stringify({ type: "request", id: "small", method: "test.small", params: {} }));
+    await waitUntil(() => frames.some(frame => frame.id === "small"));
+    expect(frames.find(frame => frame.id === "small")).toMatchObject({ ok: true, result: { healthy: true } });
+    expect(socket.readyState).toBe(WebSocket.OPEN);
+    const rejection = logger.log.mock.calls.find(call => call[2]?.event === "connection.projection-rejected")?.[1];
+    expect(rejection).toContain("maximumNodes=32768");
+    expect(rejection).toContain("nodeCountAtLeast=32769");
+    expect(rejection).not.toContain("not-for-logs");
+
+    socket.send(JSON.stringify({ type: "request", id: "open-dense", method: "session.open", params: { sessionId: "session", dense: true } }));
+    await waitUntil(() => frames.some(frame => frame.id === "open-dense"));
+    expect(frames.find(frame => frame.id === "open-dense")).toMatchObject({ ok: false, error: { code: "response_too_large" } });
+    expect(subscriptions.size).toBe(0);
+    socket.send(JSON.stringify({ type: "request", id: "open-small", method: "session.open", params: { sessionId: "session" } }));
+    await waitUntil(() => frames.some(frame => frame.id === "open-small"));
+    expect(frames.find(frame => frame.id === "open-small")).toMatchObject({ ok: true, result: { session: { healthy: true } } });
+    expect(subscriptions.has("session")).toBe(true);
+    expect(socket.readyState).toBe(WebSocket.OPEN);
+  });
+
   it("admits same-turn ordered bursts, rejects connection overflow, and closes byte-oversized output", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-server-capacity-"));
     let gateway: GatewayServer | undefined;

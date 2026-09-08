@@ -81,6 +81,11 @@ final class ConfirmedMutationExecutor {
                     admission: admission
                 ) else { throw definitelyNotSent.failure }
                 continue
+            } catch let failure as GatewayFailure where failure.code == "response_too_large" {
+                // Projection rejection is not command rejection: execution may
+                // already have settled in its receipt owner. Never restore a
+                // send as definitely failed or replay an unrepresentable result.
+                throw Self.uncertainMutationOutcome(method: method, commandID: commandID, lastFailure: failure)
             } catch let uncertain as GatewayPossiblySentError {
             let original = uncertain.failure
             if Task.isCancelled || !lifecycle.admits(admission) {
@@ -163,6 +168,8 @@ final class ConfirmedMutationExecutor {
                     }
                 } catch let failure as GatewayPossiblySentError {
                     lastFailure = failure.failure
+                } catch let failure as GatewayFailure where failure.code == "response_too_large" {
+                    throw Self.uncertainMutationOutcome(method: method, commandID: commandID, lastFailure: failure)
                 }
                 do { try await clock.sleep(.milliseconds(250)) }
                 catch { break }

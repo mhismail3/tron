@@ -20,6 +20,7 @@ export function canonicalToolResultCallIDs(manager: TranscriptSessionReader): Re
 }
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { GatewayError } from "../errors.js";
+import { jsonNodeCount } from "../protocol/json-budget.js";
 import { admitToolDisplayProjection } from "../display/display-contract.js";
 import { trustedExtensionOriginKind } from "../extensions/owner-attribution.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
@@ -42,6 +43,10 @@ const COMPACT_LIVE_TOOL_JSON_BYTES = 12_000;
 const MAX_LIVE_TOOL_OUTPUT_BYTES = 48_000;
 export const TRANSCRIPT_PAGE_BYTES = 600_000;
 export const TRANSCRIPT_PAGE_ITEMS = 512;
+// Nested dynamic JSON is admitted by iOS before typed snapshot/page decoding.
+// Reserve structural headroom for live metadata and the response/event wrapper.
+export const TRANSCRIPT_PAGE_NODES = 24_000;
+export const SESSION_SNAPSHOT_NODES = 30_000;
 export const MINIMUM_TRANSCRIPT_CONTINUITY_MESSAGES = 24;
 /** Leaves headroom for the response/event envelope under the 1 MiB socket cap. */
 export const SESSION_SNAPSHOT_BYTES = 800_000;
@@ -421,6 +426,19 @@ function frameBytes(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(value));
 }
 
+function fitsSnapshot(value: unknown, maximumBytes: number): boolean {
+  return jsonNodeCount(value, SESSION_SNAPSHOT_NODES, true) <= SESSION_SNAPSHOT_NODES
+    && frameBytes(value) <= maximumBytes;
+}
+
+/** Compact only under aggregate structure pressure; canonical ordinals, row
+ * identities and normal text survive, just as they do under byte pressure. */
+function fitTranscriptStructure(items: TranscriptItem[]): TranscriptItem[] {
+  if (jsonNodeCount(items, TRANSCRIPT_PAGE_NODES, true) <= TRANSCRIPT_PAGE_NODES) return items;
+  const perItemNodes = Math.floor((TRANSCRIPT_PAGE_NODES - 1) / items.length);
+  return items.map(item => compactTranscriptPageItem(item, TRANSCRIPT_PAGE_BYTES, perItemNodes));
+}
+
 function transcriptContinuityMessages(items: TranscriptItem[]): number {
   return items.reduce((count, item) =>
     count + (item.kind === "message" && item.role === "toolResult" ? 0 : 1), 0);
@@ -467,14 +485,12 @@ export function fitSessionSnapshot(
   maximumBytes = SESSION_SNAPSHOT_BYTES,
 ): SessionSnapshot {
   const transcriptOverflow = Math.max(0, snapshot.transcript.length - TRANSCRIPT_PAGE_ITEMS);
-  const countBounded = transcriptOverflow === 0
+  const transcript = fitTranscriptStructure(transcriptOverflow === 0
+    ? snapshot.transcript : snapshot.transcript.slice(transcriptOverflow));
+  const countBounded = transcript === snapshot.transcript
     ? snapshot
-    : {
-      ...snapshot,
-      transcript: snapshot.transcript.slice(transcriptOverflow),
-      transcriptStart: snapshot.transcriptStart + transcriptOverflow,
-    };
-  if (frameBytes(countBounded) <= maximumBytes) return countBounded;
+    : { ...snapshot, transcript, transcriptStart: snapshot.transcriptStart + transcriptOverflow };
+  if (fitsSnapshot(countBounded, maximumBytes)) return countBounded;
 
   let projected: SessionSnapshot = {
     ...countBounded,
@@ -493,7 +509,7 @@ export function fitSessionSnapshot(
       { type: "projection", message: "Large live details were compacted for this mobile snapshot." },
     ],
   };
-  if (frameBytes(projected) <= maximumBytes) return projected;
+  if (fitsSnapshot(projected, maximumBytes)) return projected;
 
   // Completed output is canonical in the transcript. Do not duplicate terminal
   // payloads in the live overlay when the frame is under pressure. Running
@@ -512,7 +528,7 @@ export function fitSessionSnapshot(
       return metadata;
     }),
   };
-  if (frameBytes(projected) <= maximumBytes) return projected;
+  if (fitsSnapshot(projected, maximumBytes)) return projected;
 
   // Process output is a bounded convenience projection. Canonical command
   // results and child transcripts remain available independently, so shed the
@@ -526,7 +542,7 @@ export function fitSessionSnapshot(
       }),
     };
   }
-  if (frameBytes(projected) <= maximumBytes) return projected;
+  if (fitsSnapshot(projected, maximumBytes)) return projected;
 
   // Retain a stable recent continuity floor even under active snapshot pressure.
   // iOS may keep a larger exact loaded prefix, but it must never receive a new
@@ -536,7 +552,7 @@ export function fitSessionSnapshot(
   let fittedContinuityMessages = transcriptContinuityMessages(fittedTranscript);
   while (
     fittedContinuityMessages > MINIMUM_TRANSCRIPT_CONTINUITY_MESSAGES
-      && frameBytes({ ...projected, transcript: fittedTranscript }) > maximumBytes
+      && !fitsSnapshot({ ...projected, transcript: fittedTranscript }, maximumBytes)
   ) {
     const shifted = fittedTranscript.shift();
     if (shifted && !(shifted.kind === "message" && shifted.role === "toolResult")) {
@@ -549,7 +565,7 @@ export function fitSessionSnapshot(
     transcript: fittedTranscript,
     transcriptStart: projected.transcriptStart + removed,
   };
-  if (frameBytes(projected) <= maximumBytes) return projected;
+  if (fitsSnapshot(projected, maximumBytes)) return projected;
 
   // Retain actionable frames first. Omitted identities/revisions remain a
   // bounded delta baseline, so an exact-next full-frame upsert can converge.
@@ -579,7 +595,7 @@ export function fitSessionSnapshot(
         projection: { complete: false, omitted: ["surfaces"], omittedSurfaces: [...omittedSurfaceRevisions] },
       },
     };
-    if (frameBytes(projected) <= maximumBytes) return projected;
+    if (fitsSnapshot(projected, maximumBytes)) return projected;
   }
 
   // Statuses and widgets are disposable chrome. The revisioned editor baseline
@@ -612,13 +628,13 @@ export function fitSessionSnapshot(
       },
     },
   };
-  if (frameBytes(projected) <= maximumBytes) return projected;
+  if (fitsSnapshot(projected, maximumBytes)) return projected;
 
   // A single streaming message can itself be large. It remains canonical and
   // will return through paged transcript projection once settled.
   const { streaming: _streaming, ...withoutStreaming } = projected;
   projected = withoutStreaming;
-  if (frameBytes(projected) <= maximumBytes) return projected;
+  if (fitsSnapshot(projected, maximumBytes)) return projected;
 
   const tools = projected.toolExecutions.slice(-256).map((tool) => {
     const { partialResult: _partialResult, result: _result, ...metadata } = tool;
@@ -635,7 +651,7 @@ export function fitSessionSnapshot(
     toolExecutions: tools,
     diagnostics: [{ type: "projection", message: "Large live detail is available from canonical paged history after the run settles." }],
   };
-  if (frameBytes(projected) <= maximumBytes) return projected;
+  if (fitsSnapshot(projected, maximumBytes)) return projected;
 
   // Output tails are the last disposable component. Preserve every bounded call
   // identity and the transcript continuity floor before dropping live text.
@@ -646,7 +662,7 @@ export function fitSessionSnapshot(
       return metadata;
     }),
   };
-  if (frameBytes(projected) <= maximumBytes) return projected;
+  if (fitsSnapshot(projected, maximumBytes)) return projected;
 
   // All high-cardinality fields above are bounded. Reaching this point means a
   // legal transcript item itself exhausted the remaining envelope. Shrink only
@@ -656,7 +672,7 @@ export function fitSessionSnapshot(
   let strictContinuityMessages = transcriptContinuityMessages(strictTranscript);
   let strictRemoved = 0;
   while (strictContinuityMessages > MINIMUM_TRANSCRIPT_CONTINUITY_MESSAGES
-    && frameBytes({ ...projected, transcript: strictTranscript }) > maximumBytes) {
+    && !fitsSnapshot({ ...projected, transcript: strictTranscript }, maximumBytes)) {
     const shifted = strictTranscript.shift();
     if (shifted && !(shifted.kind === "message" && shifted.role === "toolResult")) {
       strictContinuityMessages -= 1;
@@ -668,7 +684,7 @@ export function fitSessionSnapshot(
     transcript: strictTranscript,
     transcriptStart: projected.transcriptStart + strictRemoved,
   };
-  if (frameBytes(projected) <= maximumBytes) return projected;
+  if (fitsSnapshot(projected, maximumBytes)) return projected;
 
   const envelopeBytes = frameBytes({ ...projected, transcript: [] });
   const perItemBudget = Math.max(
@@ -679,7 +695,7 @@ export function fitSessionSnapshot(
     ...projected,
     transcript: projected.transcript.map((item) => compactTranscriptPageItem(item, perItemBudget)),
   };
-  if (frameBytes(projected) <= maximumBytes) return projected;
+  if (fitsSnapshot(projected, maximumBytes)) return projected;
 
   // The caller may provide a test-only envelope smaller than the legal metadata
   // floor. Preserve strict transport safety and the newest canonical rows when
@@ -687,7 +703,7 @@ export function fitSessionSnapshot(
   const unavoidableTrim = [...projected.transcript];
   let unavoidableRemoved = 0;
   while (unavoidableTrim.length > 0
-    && frameBytes({ ...projected, transcript: unavoidableTrim }) > maximumBytes) {
+    && !fitsSnapshot({ ...projected, transcript: unavoidableTrim }, maximumBytes)) {
     unavoidableTrim.shift();
     unavoidableRemoved += 1;
   }
@@ -1753,7 +1769,7 @@ export function projectTranscriptPage(
     start -= 1;
   }
   return {
-    items: selected,
+    items: fitTranscriptStructure(selected),
     start,
     end,
     total: entries.length,
@@ -1762,7 +1778,7 @@ export function projectTranscriptPage(
   };
 }
 
-function compactTranscriptPageItem(item: TranscriptItem, byteBudget: number): TranscriptItem {
+function compactTranscriptPageItem(item: TranscriptItem, byteBudget: number, nodeBudget = TRANSCRIPT_PAGE_NODES): TranscriptItem {
   let compacted = item;
   if (item.kind === "message") {
     const { details: _details, usage: _usage, ...base } = item;
@@ -1795,7 +1811,8 @@ function compactTranscriptPageItem(item: TranscriptItem, byteBudget: number): Tr
     const { details: _details, usage: _usage, ...base } = item;
     compacted = { ...base, summary: utf8Prefix(item.summary, Math.max(64, byteBudget - 1_024)) };
   }
-  if (Buffer.byteLength(JSON.stringify(compacted)) <= byteBudget) return compacted;
+  if (jsonNodeCount(compacted, nodeBudget, true) <= nodeBudget
+    && Buffer.byteLength(JSON.stringify(compacted)) <= byteBudget) return compacted;
   // Metadata alone is small; this final message-shaped marker retains canonical
   // identity/order while guaranteeing a bounded response for future item shapes.
   return {
@@ -1803,7 +1820,9 @@ function compactTranscriptPageItem(item: TranscriptItem, byteBudget: number): Tr
     parentId: item.parentId,
     timestamp: item.timestamp,
     kind: "message",
-    role: "assistant",
+    role: item.kind === "message" ? item.role : "assistant",
+    ...(item.kind === "message" && item.toolCallId ? { toolCallId: item.toolCallId } : {}),
+    ...(item.kind === "message" && item.toolName ? { toolName: item.toolName } : {}),
     presentationId: item.kind === "message" ? item.presentationId : item.id,
     content: [{ id: `${item.id}:truncated:0`, ordinal: 0, type: "text", text: "… transcript item omitted from this mobile page" }],
   };

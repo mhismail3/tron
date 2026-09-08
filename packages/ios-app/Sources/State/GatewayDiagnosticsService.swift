@@ -137,6 +137,7 @@ enum GatewayConnectionDiagnosticReason: String, Sendable {
     case protocolMismatch
     case identityMismatch
     case invalidProfile
+    case decodeLimit = "decode_limit"
 }
 
 struct GatewayConnectionDiagnostic: Sendable {
@@ -172,6 +173,11 @@ struct GatewayConnectionDiagnostic: Sendable {
     let dequeueWaitConnectionID: Int?
     let lastInboundAgeMilliseconds: Int?
     let lastWriteProgressAgeMilliseconds: Int?
+    let frameBytes: Int?
+    let decodeLimitKind: JSONValueDecodingLimitKind?
+    let decodeActual: Int?
+    let decodeMaximum: Int?
+    let decodeCodingPath: String?
 
     init(
         sequence: Int,
@@ -205,7 +211,12 @@ struct GatewayConnectionDiagnostic: Sendable {
         dequeueWaitTopic: String? = nil,
         dequeueWaitConnectionID: Int? = nil,
         lastInboundAgeMilliseconds: Int? = nil,
-        lastWriteProgressAgeMilliseconds: Int? = nil
+        lastWriteProgressAgeMilliseconds: Int? = nil,
+        frameBytes: Int? = nil,
+        decodeLimitKind: JSONValueDecodingLimitKind? = nil,
+        decodeActual: Int? = nil,
+        decodeMaximum: Int? = nil,
+        decodeCodingPath: String? = nil
     ) {
         self.sequence = sequence
         self.clientID = clientID
@@ -239,6 +250,11 @@ struct GatewayConnectionDiagnostic: Sendable {
         self.dequeueWaitConnectionID = dequeueWaitConnectionID
         self.lastInboundAgeMilliseconds = lastInboundAgeMilliseconds
         self.lastWriteProgressAgeMilliseconds = lastWriteProgressAgeMilliseconds
+        self.frameBytes = frameBytes
+        self.decodeLimitKind = decodeLimitKind
+        self.decodeActual = decodeActual
+        self.decodeMaximum = decodeMaximum
+        self.decodeCodingPath = decodeCodingPath
     }
 }
 
@@ -362,6 +378,13 @@ struct IOSClientDiagnosticBuffer: Sendable {
         if let id = diagnostic.dequeueWaitConnectionID { fields.append("dequeueConnectionID=\(id)") }
         if let age = diagnostic.lastInboundAgeMilliseconds { fields.append("lastInboundAgeMs=\(max(0, age))") }
         if let age = diagnostic.lastWriteProgressAgeMilliseconds { fields.append("lastWriteProgressAgeMs=\(max(0, age))") }
+        if let frameBytes = diagnostic.frameBytes { fields.append("frameBytes=\(max(0, frameBytes))") }
+        if let kind = diagnostic.decodeLimitKind { fields.append("decodeLimit=\(kind.rawValue)") }
+        if let actual = diagnostic.decodeActual { fields.append("decodeActual=\(max(0, actual))") }
+        if let maximum = diagnostic.decodeMaximum { fields.append("decodeMaximum=\(max(0, maximum))") }
+        if let path = diagnostic.decodeCodingPath {
+            fields.append("decodePath=\(Self.boundedUTF8(path, maximumBytes: 256))")
+        }
         return GatewayProfileLogRecord(
             profileID: "\(ownerID):ios-client",
             profileLabel: ownerLabel,

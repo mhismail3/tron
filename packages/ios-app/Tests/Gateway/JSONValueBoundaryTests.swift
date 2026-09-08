@@ -14,8 +14,8 @@ struct JSONValueBoundaryTests {
             maximumTotalStringBytes: 32
         )
         #expect(try decode("[0,1]", limits: limits) == .array([.number(0), .number(1)]))
-        #expect(throws: DecodingError.self) { try decode("[0,1,2]", limits: limits) }
-        #expect(throws: DecodingError.self) { try decode(#"{"a":0,"b":1,"c":2}"#, limits: limits) }
+        #expect(throws: JSONValueDecodingLimitViolation.self) { try decode("[0,1,2]", limits: limits) }
+        #expect(throws: JSONValueDecodingLimitViolation.self) { try decode(#"{"a":0,"b":1,"c":2}"#, limits: limits) }
 
         let shallow = JSONValueDecodingLimits(
             maximumDepth: 1,
@@ -25,7 +25,7 @@ struct JSONValueBoundaryTests {
             maximumTotalStringBytes: 32
         )
         #expect(try decode("[0]", limits: shallow) == .array([.number(0)]))
-        #expect(throws: DecodingError.self) { try decode("[[0]]", limits: shallow) }
+        #expect(throws: JSONValueDecodingLimitViolation.self) { try decode("[[0]]", limits: shallow) }
     }
 
     @Test("individual and aggregate UTF-8 string budgets include object keys")
@@ -38,10 +38,10 @@ struct JSONValueBoundaryTests {
             maximumTotalStringBytes: 6
         )
         #expect(try decode(#""éé""#, limits: limits) == .string("éé"))
-        #expect(throws: DecodingError.self) { try decode(#""ééé""#, limits: limits) }
+        #expect(throws: JSONValueDecodingLimitViolation.self) { try decode(#""ééé""#, limits: limits) }
         #expect(try decode(#"["abc","def"]"#, limits: limits) == .array([.string("abc"), .string("def")]))
-        #expect(throws: DecodingError.self) { try decode(#"["abc","defg"]"#, limits: limits) }
-        #expect(throws: DecodingError.self) { try decode(#"{"long-key":null}"#, limits: limits) }
+        #expect(throws: JSONValueDecodingLimitViolation.self) { try decode(#"["abc","defg"]"#, limits: limits) }
+        #expect(throws: JSONValueDecodingLimitViolation.self) { try decode(#"{"long-key":null}"#, limits: limits) }
     }
 
     @Test("dynamic numbers are finite and exact integers are range safe")
@@ -78,8 +78,29 @@ struct JSONValueBoundaryTests {
     func ordinaryDecoderIsBounded() {
         let child = "[0,0,0,0]"
         let source = "[" + Array(repeating: child, count: 8_192).joined(separator: ",") + "]"
-        #expect(throws: DecodingError.self) {
+        #expect(throws: JSONValueDecodingLimitViolation.self) {
             try JSONDecoder().decode(JSONValue.self, from: Data(source.utf8))
+        }
+    }
+
+    @Test("limit violations retain typed bounded metadata without dynamic keys")
+    func limitViolationMetadata() throws {
+        let limits = JSONValueDecodingLimits(
+            maximumDepth: 8,
+            maximumNodes: 3,
+            maximumCollectionMembers: 10,
+            maximumStringBytes: 16,
+            maximumTotalStringBytes: 32
+        )
+        do {
+            _ = try decode(#"{"secret-key":{"nested":{"leaf":0}}}"#, limits: limits)
+            Issue.record("limit violation unexpectedly decoded")
+        } catch let violation as JSONValueDecodingLimitViolation {
+            #expect(violation.kind == .nodes)
+            #expect(violation.actual == 4)
+            #expect(violation.maximum == 3)
+            #expect(violation.codingPath == "dynamic")
+            #expect(!violation.codingPath.contains("secret-key"))
         }
     }
 

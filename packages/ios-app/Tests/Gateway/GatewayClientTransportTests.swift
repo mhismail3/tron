@@ -408,6 +408,58 @@ struct GatewayClientTransportTests {
         }
     }
 
+    @Test("node-budget frame decode records bounded evidence before strict retirement")
+    func nodeBudgetFrameDecodeDiagnostic() async throws {
+        try await withTestWatchdog {
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+            await socket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "token")
+
+            var events = client.events.makeAsyncIterator()
+            let request = Task { try await client.requestValue("test.large", EmptyParams()) }
+            defer { request.cancel() }
+            try await socket.waitUntilSent(count: 2)
+            let requestValue = try await decodedValue(in: socket, index: 1)
+            let requestID = try #require(requestValue.objectValue?["id"]?.stringValue)
+
+            // Each item has seven scalar members, keeping collection limits below
+            // their cap while the complete result exceeds the node budget.
+            let item = #"{"a":0,"b":0,"c":0,"d":0,"e":0,"f":0,"g":0}"#
+            let result = #"{"session":{"transcript":["#
+                + Array(repeating: item, count: 4_096).joined(separator: ",")
+                + #"]}}"#
+            let frame = Data(("{\"type\":\"response\",\"id\":\"" + requestID + "\",\"ok\":true,\"result\":" + result + "}").utf8)
+            #expect(frame.count < GatewayFramePolicy.maximumInboundBytes)
+            await socket.enqueue(frame)
+
+            do {
+                _ = try await valueOfOwnedTask(request)
+                Issue.record("node-budget response unexpectedly succeeded")
+            } catch let failure as GatewayPossiblySentError {
+                #expect(failure.failure.code == "possibly_sent")
+            } catch {
+                Issue.record("unexpected node-budget response failure: \(error)")
+            }
+            let disconnected = try #require(await events.next())
+            #expect(disconnected.event.topic == "transport.disconnected")
+            #expect(disconnected.event.payload.objectValue?["reason"] == .string("disconnected"))
+
+            let diagnostics = await client.diagnostics()
+            let decode = try #require(diagnostics.first { $0.reason == .decodeLimit })
+            #expect(decode.frameBytes == frame.count)
+            #expect(decode.decodeLimitKind == .nodes)
+            #expect(decode.decodeActual == JSONValueDecodingLimits.gateway.maximumNodes + 1)
+            #expect(decode.decodeMaximum == JSONValueDecodingLimits.gateway.maximumNodes)
+            #expect(decode.decodeCodingPath == "result.<dynamic>.<dynamic>")
+            #expect(decode.clientID != nil)
+            #expect(decode.connectionID != nil)
+            #expect(decode.profileID == profile.id)
+            #expect(diagnostics.contains { $0.reason == .transport })
+            #expect(await socket.closeTransitionCount() == 1)
+        }
+    }
+
     @Test("lifecycle connection activates event delivery only under its returned identity")
     func lifecycleConnectionIdentity() async throws {
         try await withTestWatchdog {
