@@ -71,6 +71,7 @@ export function observeBrowserCDP(input: {
   let frameTimer: NodeJS.Timeout | undefined;
   let lastCreditAt = 0;
   let latestEncoded: string | undefined;
+  let firstFrameDeadline: number | undefined;
   const acknowledgements: number[] = [];
   let complete!: () => void;
   const done = new Promise<void>((resolve) => { complete = resolve; });
@@ -82,6 +83,7 @@ export function observeBrowserCDP(input: {
     if (frameTimer) clearTimeout(frameTimer);
     frameTimer = undefined;
     latestEncoded = undefined;
+    firstFrameDeadline = undefined;
     acknowledgements.length = 0;
     input.onReset();
   }
@@ -146,6 +148,7 @@ export function observeBrowserCDP(input: {
     if (encoded !== undefined) {
       const frame = admitBrowserJPEG(Buffer.from(encoded, "base64"));
       if (!frame) { stop(); return; }
+      firstFrameDeadline = undefined;
       input.onFrame(frame);
     }
     const frameID = acknowledgements.shift();
@@ -255,6 +258,11 @@ export function observeBrowserCDP(input: {
     await ready;
     let lastVisibleAt = Date.now();
     while (!stopped) {
+      // Successful setup is not frame delivery. Bound only the first frame of
+      // each selected target; an already painted static page needs no heartbeat.
+      if (firstFrameDeadline !== undefined && performance.now() >= firstFrameDeadline) {
+        throw new Error("Browser did not produce its first frame");
+      }
       const candidate = await selectVisiblePage();
       const selected = candidate && attached(candidate) ? candidate : undefined;
       if (selected) lastVisibleAt = Date.now();
@@ -266,6 +274,7 @@ export function observeBrowserCDP(input: {
         if (previous) await targetRequest(previous, "Page.stopScreencast");
         if (selected && await targetRequest(selected, "Page.enable") && attached(selected)) {
           activeSession = selected;
+          firstFrameDeadline = performance.now() + COMMAND_TIMEOUT_MS;
           if (!await targetRequest(selected, "Page.startScreencast", { format: "jpeg", quality: 70, maxWidth: 1280, maxHeight: 1280 })) {
             activeSession = undefined;
             resetFrames();

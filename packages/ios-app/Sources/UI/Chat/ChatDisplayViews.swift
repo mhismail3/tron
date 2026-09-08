@@ -1096,7 +1096,10 @@ private struct BrowserLiveDisplayView: View {
                             surface: surfaceToken, activityGeneration: viewingActivity.generation)
         let active = scenePhase == .active && viewingActivity.allowsViewing && presentationActivity.allowsPresentationPublication
             && surfaceToken != nil && activityCoordinator != nil
-        Group {
+        // Keep the native activity host on one structural container. A Group
+        // distributes its background to each conditional branch: the first
+        // image/error would remount the host, restart the task and clear itself.
+        ZStack {
             if let image {
                 Image(uiImage: image)
                     .resizable()

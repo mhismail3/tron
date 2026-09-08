@@ -6,7 +6,7 @@ import { observeTrustedAgentBrowserResult } from "./browser-live-view-adapter.js
 
 const registries: BrowserLiveViewRegistry[] = [];
 beforeEach(() => vi.useFakeTimers());
-afterEach(() => { for (const registry of registries.splice(0)) registry.dispose(); vi.useRealTimers(); });
+afterEach(() => { for (const registry of registries.splice(0)) registry.dispose(); vi.restoreAllMocks(); vi.useRealTimers(); });
 function fixture() {
   const sockets: BrowserSocket[] = [];
   const registry = new BrowserLiveViewRegistry(() => { const socket = new BrowserSocket(); sockets.push(socket); return socket as never; });
@@ -78,6 +78,44 @@ describe("browser live observation", () => {
     expect(() => f.frame(lease.leaseId)).toThrow("ended");
     expect(vi.getTimerCount()).toBe(0);
     expect(() => f.open()).not.toThrow();
+  });
+
+  it.each(["missing", "wrong-target"])("ends successful screencast setup when its first frame is %s", async (failure) => {
+    // Keep real visibility-loop scheduling; move only its monotonic clock.
+    // This tests silent producers, not unanswered commands or idle expiry.
+    vi.useRealTimers();
+    const clock = vi.spyOn(performance, "now").mockReturnValue(0);
+    const f = fixture(); const lease = f.open(); const socket = f.sockets[0]!;
+    socket.open();
+    await vi.waitFor(() => expect(socket.commands.some((command) => command.method === "Page.startScreencast")).toBe(true));
+    if (failure === "wrong-target") socket.frame(1, "two");
+    expect(f.frame(lease.leaseId)).toEqual({ status: "waiting" });
+    clock.mockReturnValue(5_001);
+    await vi.waitFor(() => expect(socket.readyState).toBe(3), { timeout: 1_500 });
+    expect(() => f.frame(lease.leaseId)).toThrow("ended");
+    expect(socket.commands.some((command) => command.method === "Browser.close")).toBe(false);
+  });
+
+  it("keeps a static painted page alive but requires a first frame from a newly selected page", async () => {
+    vi.useRealTimers();
+    const clock = vi.spyOn(performance, "now").mockReturnValue(0);
+    const f = fixture(); const lease = f.open(); const socket = f.sockets[0]!;
+    socket.open();
+    await vi.waitFor(() => expect(socket.commands.some((command) => command.method === "Page.startScreencast")).toBe(true));
+    socket.frame(1);
+    await vi.waitFor(() => expect(f.frame(lease.leaseId)).toMatchObject({ sequence: 1 }));
+    const evaluations = socket.commands.filter((command) => command.method === "Runtime.evaluate").length;
+    clock.mockReturnValue(6_000);
+    await vi.waitFor(() => expect(socket.commands.filter((command) => command.method === "Runtime.evaluate").length).toBeGreaterThan(evaluations));
+    expect(socket.readyState).toBe(1);
+    expect(f.frame(lease.leaseId, 1)).toEqual({ status: "unchanged" });
+    socket.visible.set("one", false); socket.visible.set("two", true);
+    await vi.waitFor(() => expect(socket.commands.some((command) => command.method === "Page.startScreencast" && command.sessionId === "observer:two")).toBe(true));
+    expect(f.frame(lease.leaseId)).toEqual({ status: "waiting" });
+    socket.frame(2, "one"); // The retired page cannot satisfy the new deadline.
+    clock.mockReturnValue(11_001);
+    await vi.waitFor(() => expect(socket.readyState).toBe(3), { timeout: 1_500 });
+    expect(() => f.frame(lease.leaseId)).toThrow("ended");
   });
 
   it("ends on command error, connection failure and malformed input, without refreshing a waiting lease forever", async () => {

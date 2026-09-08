@@ -226,14 +226,16 @@ private actor BrowserLiveTransportProbe {
     private let holdOpen: Bool
     private let holdFrame: Bool
     private let echoDescriptor: Bool
+    private let frames: [Data]
     private var framing = false
     private var frameWaiters: [CheckedContinuation<Void, Never>] = []
     private var heldFrames: [CheckedContinuation<Void, Never>] = []
     private var opening = false
     private var openWaiters: [CheckedContinuation<Void, Never>] = []
     private var heldOpens: [CheckedContinuation<Void, Never>] = []
-    init(holdOpen: Bool = false, holdFrame: Bool = false, echoDescriptor: Bool = false) {
+    init(holdOpen: Bool = false, holdFrame: Bool = false, echoDescriptor: Bool = false, frames: [Data] = []) {
         self.holdOpen = holdOpen; self.holdFrame = holdFrame; self.echoDescriptor = echoDescriptor
+        self.frames = frames
     }
     func waitForFrame() async {
         if framing { return }
@@ -282,6 +284,16 @@ private actor BrowserLiveTransportProbe {
             framing = true
             frameWaiters.forEach { $0.resume() }; frameWaiters.removeAll()
             if holdFrame && !finished { await withCheckedContinuation { heldFrames.append($0) } }
+            if !frames.isEmpty {
+                let after = Int(request.value(forHTTPHeaderField: "X-Tron-Live-After") ?? "0") ?? 0
+                if frames.indices.contains(after) {
+                    return (frames[after], HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                        headerFields: ["Content-Type": "image/jpeg", "X-Tron-Live-Width": "48",
+                                       "X-Tron-Live-Height": "36", "X-Tron-Live-Sequence": String(after + 1)])!)
+                }
+                return (Data(), HTTPURLResponse(url: request.url!, statusCode: 204, httpVersion: nil,
+                    headerFields: ["X-Tron-Live-State": "unchanged"])!)
+            }
         }
         if request.httpMethod == "DELETE", let leaseID = request.value(forHTTPHeaderField: "X-Tron-Live-Lease") {
             outstandingLeases.remove(leaseID)
@@ -297,6 +309,76 @@ private actor BrowserLiveTransportProbe {
 @MainActor
 @Suite("Mounted browser live display", .serialized)
 struct BrowserLiveMountedViewingTests {
+    @Test("decoded frames paint and keep one lease across loading and image transitions")
+    func decodedFramesKeepMountedLease() async throws {
+        for floating in [false, true] {
+            let probe = BrowserLiveTransportProbe(echoDescriptor: true, frames: [Self.jpeg(.red), Self.jpeg(.green)])
+            try await Self.withMountedHost(probe: probe, profile: Self.profile("painted-frames"), floating: floating) { _, state, _, host in
+                // Advancing the public after-sequence proves that the actual
+                // renderer consumed both JPEGs, not merely that GET was called.
+                try await Self.waitForRequests(2, probe: probe) {
+                    $0.request.httpMethod == "GET" && $0.request.value(forHTTPHeaderField: "X-Tron-Live-After") == "2"
+                }
+                let requests = await probe.requests
+                #expect(requests.filter { $0.request.httpMethod == "POST" }.count == 1)
+                #expect(requests.filter { $0.request.httpMethod == "DELETE" }.isEmpty)
+                #expect(Self.greenPixelCount(in: host.window) > 50, "The second JPEG must remain painted in the mounted viewer")
+
+                state.sceneActive = false
+                try await Self.waitForRequests(1, probe: probe) { $0.request.httpMethod == "DELETE" }
+                let stopped = await probe.requests.count
+                try await Task.sleep(for: .milliseconds(350))
+                #expect(await probe.requests.count == stopped)
+                state.sceneActive = true
+                try await Self.waitForRequests(4, probe: probe) {
+                    $0.request.httpMethod == "GET" && $0.request.value(forHTTPHeaderField: "X-Tron-Live-After") == "2"
+                }
+                let reopened = await probe.requests
+                #expect(reopened.filter { $0.request.httpMethod == "POST" }.count == 2)
+                #expect(Self.greenPixelCount(in: host.window) > 50)
+            }
+        }
+    }
+
+    @Test("a terminal decode failure closes once without remounting into an open loop")
+    func failedFrameDoesNotReopen() async throws {
+        let probe = BrowserLiveTransportProbe(echoDescriptor: true, frames: [Data("invalid JPEG".utf8)])
+        try await Self.withMountedHost(probe: probe, profile: Self.profile("failed-frame")) { _, _, _, _ in
+            try await Self.waitForRequests(1, probe: probe) { $0.request.httpMethod == "DELETE" }
+            try await Task.sleep(for: .milliseconds(450))
+            let methods = await probe.requests.map(\.request.httpMethod)
+            #expect(methods == ["POST", "GET", "DELETE"])
+        }
+    }
+
+    private static func jpeg(_ color: UIColor) -> Data {
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        return UIGraphicsImageRenderer(size: CGSize(width: 48, height: 36), format: format)
+            .jpegData(withCompressionQuality: 0.8) { context in
+                color.setFill(); context.fill(CGRect(x: 0, y: 0, width: 48, height: 36))
+            }
+    }
+
+    private static func greenPixelCount(in window: UIWindow) -> Int {
+        window.layoutIfNeeded()
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        let image = UIGraphicsImageRenderer(size: window.bounds.size, format: format).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        guard let cgImage = image.cgImage else { return 0 }
+        let width = 64, height = 128
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        pixels.withUnsafeMutableBytes { bytes in
+            let context = CGContext(data: bytes.baseAddress, width: width, height: height,
+                bitsPerComponent: 8, bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            context?.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        }
+        return stride(from: 0, to: pixels.count, by: 4).filter {
+            pixels[$0] < 60 && pixels[$0 + 1] > 200 && pixels[$0 + 2] < 60 && pixels[$0 + 3] > 230
+        }.count
+    }
+
     @Test("an inactive mounted host stops polling and closes its lease")
     func inactiveHostStopsPolling() async throws {
         let probe = BrowserLiveTransportProbe(holdFrame: true)
@@ -439,16 +521,23 @@ struct BrowserLiveMountedViewingTests {
 
     @Test("floating expansion retires the covered lease and restores only the original browser")
     func floatingExpansionAndReopen() async throws {
-        let probe = BrowserLiveTransportProbe(echoDescriptor: true)
-        try await Self.withMountedHost(probe: probe, profile: Self.profile("floating"), floating: true) { _, state, _, _ in
-            try await Self.waitForRequests(1, probe: probe) { $0.request.httpMethod == "GET" }
+        let probe = BrowserLiveTransportProbe(echoDescriptor: true, frames: [Self.jpeg(.green)])
+        try await Self.withMountedHost(probe: probe, profile: Self.profile("floating"), floating: true) { _, state, _, host in
+            try await Self.waitForRequests(1, probe: probe) {
+                $0.request.httpMethod == "GET" && $0.request.value(forHTTPHeaderField: "X-Tron-Live-After") == "1"
+            }
+            #expect(Self.greenPixelCount(in: host.window) > 50)
             let firstRequests = await probe.requests
             let initialLease = firstRequests.first { $0.request.httpMethod == "GET" }?.request.value(forHTTPHeaderField: "X-Tron-Live-Lease")
             let first = try #require(initialLease)
             let original = try #require(state.floatingRoute)
             state.sheetRoute = original
             try await Self.waitForRequests(1, probe: probe) { $0.request.httpMethod == "DELETE" && $0.request.value(forHTTPHeaderField: "X-Tron-Live-Lease") == first }
-            try await Self.waitForRequests(1, probe: probe) { $0.request.httpMethod == "GET" && $0.request.value(forHTTPHeaderField: "X-Tron-Live-Lease") != first }
+            try await Self.waitForRequests(1, probe: probe) {
+                $0.request.httpMethod == "GET" && $0.request.value(forHTTPHeaderField: "X-Tron-Live-Lease") != first
+                    && $0.request.value(forHTTPHeaderField: "X-Tron-Live-After") == "1"
+            }
+            #expect(Self.greenPixelCount(in: host.window) > 50)
             let cut = await probe.requests.count
             try await Task.sleep(for: .milliseconds(350))
             let afterCoverage = await probe.requests
