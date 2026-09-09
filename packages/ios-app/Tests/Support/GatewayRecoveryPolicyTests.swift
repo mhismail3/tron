@@ -44,7 +44,8 @@ struct GatewayRecoveryPolicyTests {
         #expect(first)
         #expect(second)
         budget.markConnected(at: now)
-        budget.markTransportFailure(code: "disconnected", at: now + GatewayRecoveryBudget.stableEpochDuration)
+        budget.markStableProof(at: now + GatewayRecoveryBudget.stableEpochDuration)
+        budget.markTransportFailure(code: "disconnected", at: now + GatewayRecoveryBudget.stableEpochDuration, stableProof: true)
         #expect(budget.automaticAttempts == 0)
         #expect(!budget.exhausted)
         #expect(budget.firstFailureCode == "disconnected")
@@ -59,7 +60,7 @@ struct GatewayRecoveryPolicyTests {
         let began = budget.beginAutomaticAttempt()
         #expect(began)
         budget.markConnected(at: now)
-        budget.markConnectionRetired(at: now + .seconds(1))
+        budget.markConnectionRetired(at: now + .seconds(1), stableProof: false)
         #expect(budget.automaticAttempts == 0)
         #expect(budget.firstFailureCode == nil)
         #expect(budget.connectedAt == nil)
@@ -76,7 +77,7 @@ struct GatewayRecoveryPolicyTests {
             let admitted = budget.beginAutomaticAttempt()
             #expect(admitted)
             budget.markConnected(at: now)
-            budget.markConnectionRetired(at: now + .seconds(1))
+            budget.markConnectionRetired(at: now + .seconds(1), stableProof: false)
             #expect(budget.automaticAttempts == 1)
             #expect(budget.firstFailureCode == "timeout")
         }
@@ -85,12 +86,124 @@ struct GatewayRecoveryPolicyTests {
             #expect(admitted)
             budget.markConnected(at: now)
             budget.markTransportFailure(code: "ping_timeout", at: now + .seconds(1))
-            budget.markConnectionRetired(at: now + .seconds(2))
+            budget.markConnectionRetired(at: now + .seconds(2), stableProof: false)
         }
         #expect(budget.exhausted)
         let blocked = budget.beginAutomaticAttempt()
         #expect(!blocked)
         #expect(budget.firstFailureCode == "timeout")
+    }
+
+    @MainActor
+    @Test("focused and dashboard owners share one profile allowance")
+    func sharedAllowanceRetainsFailureAcrossRoleHandoff() {
+        let store = GatewayRecoveryAllowanceStore()
+        var budget = store["profile", default: GatewayRecoveryBudget()]
+        let first = budget.beginAutomaticAttempt()
+        #expect(first)
+        budget.markTransportFailure(code: "timeout", at: ContinuousClock().now)
+        store["profile"] = budget
+        #expect(store["profile"]?.firstFailureCode == "timeout")
+        budget = store["profile", default: GatewayRecoveryBudget()]
+        let second = budget.beginAutomaticAttempt()
+        let third = budget.beginAutomaticAttempt()
+        let fourth = budget.beginAutomaticAttempt()
+        #expect(second)
+        #expect(third)
+        #expect(!fourth)
+        store["profile"] = budget
+        #expect(store["profile"]?.exhausted == true)
+    }
+
+    @Test("path return clears a parked profile episode after one fallback")
+    func pathReturnRevivesParkedEpisode() {
+        var budget = GatewayRecoveryBudget()
+        let now = ContinuousClock().now
+        budget.beginRecoveryEpisode(at: now)
+        budget.notePathHint(satisfied: false, at: now)
+        #expect(budget.knownNoUsablePath)
+        let firstFallback = budget.consumeFallbackVerification()
+        let secondFallback = budget.consumeFallbackVerification()
+        #expect(firstFallback)
+        #expect(!secondFallback)
+        #expect(budget.waitingForPath)
+        #expect(!budget.isStopped)
+        budget.notePathHint(satisfied: true, at: now)
+        #expect(!budget.knownNoUsablePath)
+        #expect(!budget.waitingForPath)
+        let resumedFallback = budget.consumeFallbackVerification()
+        #expect(resumedFallback)
+    }
+
+    @MainActor
+    @Test("profile episode state does not poison another profile")
+    func profileEpisodeStateIsolated() {
+        let store = GatewayRecoveryAllowanceStore()
+        var exhausted = GatewayRecoveryBudget()
+        exhausted.stopRecoveryEpisode()
+        store["A"] = exhausted
+        var healthy = store["B", default: GatewayRecoveryBudget()]
+        healthy.beginRecoveryEpisode(at: ContinuousClock().now)
+        #expect(store["A"]?.isStopped == true)
+        #expect(!healthy.isStopped)
+        let admitted = healthy.beginAutomaticAttempt()
+        #expect(admitted)
+    }
+
+    @Test("background and no-path pauses retain active recovery time without charging suspension")
+    func pausedRecoveryRetainsActiveTimeOnly() {
+        var budget = GatewayRecoveryBudget()
+        let now = ContinuousClock().now
+        budget.beginRecoveryEpisode(at: now)
+        budget.pauseRecovery(at: now + .seconds(10))
+        budget.resumeRecovery(at: now + .seconds(70))
+        #expect(budget.activeRecoveryDuration(at: now + .seconds(80)) == .seconds(20))
+        budget.notePathHint(satisfied: false, at: now + .seconds(80))
+        #expect(budget.activeRecoveryDuration(at: now + .seconds(180)) == .seconds(20))
+    }
+
+    @Test("a free maintenance hello cannot refund an earlier ordinary failure")
+    func maintenanceRetirementCannotForgiveFailure() {
+        var budget = GatewayRecoveryBudget()
+        let now = ContinuousClock().now
+        let admitted = budget.beginAutomaticAttempt()
+        #expect(admitted)
+        budget.markTransportFailure(code: "timeout", at: now)
+        budget.markConnected(at: now + .seconds(1), chargedAttempt: false)
+        budget.markConnectionRetired(at: now + .seconds(2), stableProof: false)
+        #expect(budget.automaticAttempts == 1)
+        #expect(budget.firstFailureCode == "timeout")
+    }
+
+    @Test("failure preserves consumed recovery time and path chatter cannot rearm a deadline stop")
+    func recoveryTimeAndTerminalStopRemainOwned() {
+        var budget = GatewayRecoveryBudget()
+        let now = ContinuousClock().now
+        budget.beginRecoveryEpisode(at: now)
+        budget.markTransportFailure(code: "disconnected", at: now + .seconds(7))
+        #expect(budget.activeRecoveryDuration(at: now + .seconds(10)) == .seconds(10))
+        budget.markConnected(at: now + .seconds(11))
+        #expect(budget.activeRecoveryDuration(at: now + .seconds(60)) == .seconds(11))
+        budget.markTransportFailure(code: "disconnected", at: now + .seconds(61))
+        #expect(budget.activeRecoveryDuration(at: now + .seconds(65)) == .seconds(15))
+        budget.stopRecoveryEpisode()
+        budget.notePathHint(satisfied: true, at: now + .seconds(66))
+        budget.admitFreshForegroundVerification()
+        #expect(budget.isStopped)
+        let admitted = budget.beginAutomaticAttempt()
+        #expect(!admitted)
+    }
+
+    @Test("hello does not clear the active recovery episode before stability")
+    func provisionalHelloRetainsEpisodeDeadline() {
+        var budget = GatewayRecoveryBudget()
+        let now = ContinuousClock().now
+        budget.beginRecoveryEpisode(at: now)
+        budget.beginAutomaticAttempt()
+        budget.markConnected(at: now)
+        #expect(budget.recoveryEpisodeStartedAt == now)
+        budget.markTransportFailure(code: "disconnected", at: now + .seconds(1))
+        #expect(budget.recoveryEpisodeStartedAt == now)
     }
 
     @Test("nonretryable failure remains stopped until explicit retry")

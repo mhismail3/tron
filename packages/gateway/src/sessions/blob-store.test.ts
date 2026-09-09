@@ -190,6 +190,34 @@ describe("bounded blob store", () => {
     await store.dispose();
   });
 
+  it.each(["prune", "dispose"])("releases a retired failed file acquisition after %s", async retirement => {
+    let now = 1;
+    const home = await root();
+    const directory = join(home, "blobs");
+    const store = new BlobStore({ maximumItemBytes: 8, maximumItems: 1, maximumTotalBytes: 8 }, () => now, directory);
+    await store.initialize();
+    const source = join(home, "source");
+    await writeFile(source, "content");
+    const id = await store.registerFile(source, "text/plain");
+    const body = (await readdir(directory)).find(name => name.startsWith("blob-"))!;
+    await chmod(join(directory, body), 0o000);
+    // acquire reserves synchronously, then open yields. Retire that exact
+    // reservation before the filesystem returns its transient failure.
+    const pending = store.acquire(id);
+    void pending.catch(() => {});
+    now = 12;
+    if (retirement === "prune") store.prune(10);
+    else await store.dispose();
+    await expect(pending).rejects.toMatchObject({ code: "EACCES" });
+    if (retirement === "prune") {
+      expect(await readdir(directory)).toEqual([]);
+      expect(() => store.registerData(Buffer.from("new"), "text/plain")).not.toThrow();
+    } else {
+      await expect(readdir(directory)).rejects.toMatchObject({ code: "ENOENT" });
+    }
+    await store.dispose();
+  });
+
   it("does not retire a blob for a transient descriptor failure", async () => {
     const home = await root();
     const directory = join(home, "blobs");

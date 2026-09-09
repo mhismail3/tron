@@ -189,7 +189,8 @@ jobs:
 
   pi-sdk-e2e:
     needs: policy
-    if: needs.policy.outputs.pi-sdk-graph-changed == 'true'
+    # Source-level transport and native changes must exercise this boundary,
+    # not only backing-SDK dependency upgrades.
     runs-on: macos-26
     env:
       TRON_IOS_E2E_STATE_DIR: ${{ runner.temp }}/tron-ios-gateway-e2e
@@ -214,7 +215,7 @@ jobs:
         run: scripts/install-ci-tools.sh xcodegen
       - name: Verify canonical iOS E2E toolchain
         run: scripts/verify-ci-toolchain.sh node ios xcodegen
-      - name: Run upgrade-only hosted iOS Gateway boundary
+      - name: Run hosted iOS Gateway resilience boundary
         run: |
           set -euo pipefail
           trap 'scripts/ios-gateway-e2e-test stop || true' EXIT
@@ -228,6 +229,7 @@ jobs:
             ${{ env.TRON_IOS_E2E_STATE_DIR }}/attempts
             ${{ env.TRON_IOS_E2E_STATE_DIR }}/results
             ${{ env.TRON_IOS_E2E_STATE_DIR }}/gateway.log
+            ${{ env.TRON_IOS_E2E_STATE_DIR }}/proxy.log
           if-no-files-found: warn
           retention-days: 14
       - name: Remove only Pi boundary owned state

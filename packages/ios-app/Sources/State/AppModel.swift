@@ -149,6 +149,7 @@ final class AppModel {
     var profiles: GatewayProfileStore { lifecycle.profiles }
     private let cache: SnapshotCache
     private let clock: MonotonicClock
+    private let recoveryDisplayClock: MonotonicClock
     private let uuidSource: UUIDSource
     private let performanceSignposts: any PerformanceSignposting
     private let exportArtifacts: SessionExportArtifactStore
@@ -278,6 +279,8 @@ final class AppModel {
     private var catalogInvalidationGeneration = 0
     private var catalogSatisfiedGeneration = 0
     private var catalogRefreshRetryAttempt = 0
+    private var catalogRefreshFailedAttempts = 0
+    private var catalogFailureOwner: SessionCatalogLoadKey?
     private var catalogDeferredFollowUpKey: SessionCatalogLoadKey?
     private var sceneAllowsCatalogRefresh = true
     private var cacheCheckpointTask: Task<Void, Never>?
@@ -285,12 +288,18 @@ final class AppModel {
     private var cacheCheckpointGeneration = 0
     private var pendingCacheCheckpoint: CacheCheckpoint?
     private var workspaceLoadGeneration = 0
+    private var recoveryDisplayEpisode = 0
+    private var recoveryDisplayProfileID: String?
+    private var recoveryDisplayTask: Task<Void, Never>?
+    private var recoveryDisplayNoticeEpisode: Int?
+    private var optionalReconnectRefreshTask: Task<Void, Never>?
 
     init(
         client: GatewayClient = GatewayClient(),
         profiles: GatewayProfileStore = GatewayProfileStore(),
         cache: SnapshotCache = SnapshotCache(),
         clock: MonotonicClock = .continuous,
+        recoveryDisplayClock: MonotonicClock = .continuous,
         reconnectDelayPolicy: ReconnectDelayPolicy = .standard,
         uuidSource: UUIDSource = .random,
         pairer: GatewayPairer = GatewayPairer(),
@@ -320,9 +329,10 @@ final class AppModel {
             profiles.token(for: profile)
         }
         let noticeCenter = InAppNoticeCenter(clock: clock)
+        let recoveryBudgets = GatewayRecoveryAllowanceStore()
         let dashboardConnections = DashboardGatewayConnectionPool(clientFactory: {
             GatewayClient(diagnosticStore: diagnosticStore)
-        })
+        }, recoveryBudgets: recoveryBudgets)
         let lifecycle = GatewayLifecycleCoordinator(
             client: client,
             profiles: profiles,
@@ -332,7 +342,8 @@ final class AppModel {
             pairer: pairer,
             pairingCommit: resolvedPairingCommit,
             pairingCommitWithoutSelection: resolvedPairingCommitWithoutSelection,
-            profileTokenLookup: resolvedProfileTokenLookup
+            profileTokenLookup: resolvedProfileTokenLookup,
+            recoveryBudgets: recoveryBudgets
         )
         let mutationExecutor = ConfirmedMutationExecutor(
             client: client,
@@ -505,6 +516,7 @@ final class AppModel {
         self.sessionPresentation = sessionPresentation
         self.cache = cache
         self.clock = clock
+        self.recoveryDisplayClock = recoveryDisplayClock
         self.uuidSource = uuidSource
         self.performanceSignposts = performanceSignposts
         self.exportArtifacts = exportArtifacts
@@ -852,6 +864,12 @@ final class AppModel {
     func retryGatewayConnection(for profile: GatewayProfile) {
         guard profiles.profiles.contains(where: { $0.id == profile.id }) else { return }
         if profiles.selected?.id == profile.id {
+            if connectionState == .connected,
+               catalogRefreshFailedAttempts >= DashboardCatalogRetryPolicy.maximumFailedAttempts,
+               let key = currentCatalogLoadKey() {
+                Task { [weak self] in _ = await self?.retryCatalog(ownedBy: key) }
+                return
+            }
             lifecycle.retryReconnect()
         } else {
             dashboardConnections.retry(profileID: profile.id)
@@ -967,6 +985,74 @@ final class AppModel {
         }
     }
 
+    private func beginRecoveryDisplayEpisodeIfNeeded() {
+        guard recoveryDisplayTask == nil,
+              recoveryDisplayNoticeEpisode == nil,
+              let profileID = profiles.selected?.id else { return }
+        recoveryDisplayEpisode &+= 1
+        let episode = recoveryDisplayEpisode
+        recoveryDisplayProfileID = profileID
+        recoveryDisplayTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                if self.recoveryDisplayEpisode == episode,
+                   self.recoveryDisplayProfileID == profileID {
+                    self.recoveryDisplayTask = nil
+                }
+            }
+            do { try await self.recoveryDisplayClock.sleep(.seconds(2)) } catch { return }
+            guard self.recoveryDisplayEpisode == episode,
+                  self.recoveryDisplayProfileID == profileID,
+                  self.profiles.selected?.id == profileID,
+                  (self.connectionState != .connected || self.isReconcilingForeground),
+                  self.connectionState != .unpaired,
+                  self.connectionState != .unauthorized else { return }
+            self.recoveryDisplayNoticeEpisode = episode
+            let retry = InAppNoticeCenter.Action(id: "retry-gateway", title: "Retry", role: .normal)
+            let logs = InAppNoticeCenter.Action(id: "view-gateway-logs", title: "View Logs", role: .normal)
+            self.noticeCenter.post(
+                .init(
+                    id: self.uuidSource.next(),
+                    replacement: InAppNoticeReplacement(key: .gatewayRecovery, scope: .app),
+                    scope: .app,
+                    role: .warning,
+                    priority: .high,
+                    title: "Gateway connection unavailable",
+                    message: "Tron kept your conversation and draft. Retry when the Mac or network is reachable; Send stays disabled until the session is synchronized.",
+                    lifetime: .persistent,
+                    actions: [retry, logs]
+                ),
+                handlers: [
+                    retry.id: { [weak self] in
+                        guard let self,
+                              self.recoveryDisplayNoticeEpisode == episode,
+                              self.recoveryDisplayProfileID == profileID,
+                              self.profiles.selected?.id == profileID else { return }
+                        self.recoveryDisplayNoticeEpisode = nil
+                        self.recoveryDisplayTask?.cancel()
+                        self.recoveryDisplayTask = nil
+                        self.retryGatewayConnection(for: self.profiles.selected!)
+                    },
+                    logs.id: { [weak self] in
+                        guard let self,
+                              self.recoveryDisplayNoticeEpisode == episode,
+                              self.recoveryDisplayProfileID == profileID else { return }
+                        self.logsPresentationRequested = true
+                    }
+                ]
+            )
+        }
+    }
+
+    private func finishRecoveryDisplayEpisode() {
+        recoveryDisplayEpisode &+= 1
+        recoveryDisplayTask?.cancel()
+        recoveryDisplayTask = nil
+        recoveryDisplayProfileID = nil
+        recoveryDisplayNoticeEpisode = nil
+        removeNotice(.gatewayRecovery, scope: .app)
+    }
+
     func presentError(
         _ message: String,
         viewLogs: Bool = false,
@@ -1051,7 +1137,6 @@ final class AppModel {
             // transport and must not wait for full foreground reconciliation.
             if requiresRetirementBarrier, let lifecycleTask { await lifecycleTask.value }
             guard let self else { return }
-            await self.dashboardConnections.waitForRetirement()
             guard self.sceneAllowsCatalogRefresh,
                   self.pushNavigationActivationGeneration == activationGeneration else { return }
             self.pushNavigationActivationReady = true
@@ -1230,12 +1315,50 @@ final class AppModel {
     @discardableResult
     func refreshSessions() async -> SessionCatalogRefreshOutcome {
         guard let key = currentCatalogLoadKey() else { return .retained }
+        prepareCatalogOwner(key)
+        guard catalogRefreshFailedAttempts < DashboardCatalogRetryPolicy.maximumFailedAttempts else { return .retained }
         if let task = catalogRefreshTask, catalogRefreshKey == key {
             return await task.value
         }
         if catalogRefreshTask != nil { cancelCatalogRefresh() }
         catalogInvalidationGeneration &+= 1
         return await startCatalogRefresh(key: key).value
+    }
+
+    func retrySessionCatalog() async -> SessionCatalogRefreshOutcome {
+        guard let key = currentCatalogLoadKey() else { return .retained }
+        return await retryCatalog(ownedBy: key)
+    }
+
+    private func retryCatalog(ownedBy key: SessionCatalogLoadKey) async -> SessionCatalogRefreshOutcome {
+        guard currentCatalogLoadKey() == key else { return .retained }
+        if let task = catalogRefreshTask, catalogRefreshKey == key { return await task.value }
+        catalogRefreshFailedAttempts = 0
+        catalogRefreshRetryAttempt = 0
+        catalogFailureOwner = key
+        removeNotice(.sessionCatalogCatchUp, scope: .app)
+        catalogInvalidationGeneration &+= 1
+        return await startCatalogRefresh(key: key).value
+    }
+
+    private func prepareCatalogOwner(_ key: SessionCatalogLoadKey) {
+        guard catalogFailureOwner != key else { return }
+        cancelCatalogRefresh()
+        catalogFailureOwner = key
+    }
+
+    private func showCatalogFailure(ownedBy key: SessionCatalogLoadKey) {
+        guard currentCatalogLoadKey() == key else { return }
+        sessionCatalog.markLoadUnavailable()
+        let retry = InAppNoticeCenter.Action(id: "retry-session-list", title: "Retry Session List", role: .normal)
+        noticeCenter.post(.init(id: uuidSource.next(),
+            replacement: InAppNoticeReplacement(key: .sessionCatalogCatchUp, scope: .app), scope: .app,
+            role: .warning, priority: .high, title: "Session list unavailable",
+            message: "Showing last-known sessions. Synchronized conversations can remain usable while this list catches up.",
+            lifetime: .persistent, actions: [retry]), handlers: [retry.id: { [weak self] in
+                guard let self, self.currentCatalogLoadKey() == key else { return }
+                Task { [weak self] in _ = await self?.retryCatalog(ownedBy: key) }
+            }])
     }
 
     private func currentCatalogLoadKey() -> SessionCatalogLoadKey? {
@@ -1255,6 +1378,7 @@ final class AppModel {
         key: SessionCatalogLoadKey,
         delay: Duration = .zero
     ) -> Task<SessionCatalogRefreshOutcome, Never> {
+        prepareCatalogOwner(key)
         catalogRefreshRequestGeneration &+= 1
         let requestGeneration = catalogRefreshRequestGeneration
         let task = Task<SessionCatalogRefreshOutcome, Never> { @MainActor [weak self] in
@@ -1269,13 +1393,29 @@ final class AppModel {
                 self.catalogRefreshTask = nil
                 self.catalogRefreshKey = nil
                 if self.currentCatalogLoadKey() == key {
-                    if needsFollowUp {
+                    if needsFollowUp && outcome == .published {
                         _ = self.startCatalogRefresh(key: key)
-                    } else if DashboardCatalogRetryPolicy.shouldRetry(
-                        isDirty: remainsDirty,
-                        isCurrent: true,
-                        transportFailed: outcome == .transportFailure
-                    ) {
+                    } else {
+                        if outcome == .published {
+                            self.catalogRefreshFailedAttempts = 0
+                            self.removeNotice(.sessionCatalogCatchUp, scope: .app)
+                        } else if outcome == .retained {
+                            self.catalogRefreshFailedAttempts = min(
+                                DashboardCatalogRetryPolicy.maximumFailedAttempts,
+                                self.catalogRefreshFailedAttempts + 1
+                            )
+                        }
+                        guard DashboardCatalogRetryPolicy.shouldRetry(
+                            isDirty: remainsDirty,
+                            isCurrent: true,
+                            transportFailed: outcome == .transportFailure,
+                            failedAttempts: self.catalogRefreshFailedAttempts
+                        ) else {
+                            if self.catalogRefreshFailedAttempts >= DashboardCatalogRetryPolicy.maximumFailedAttempts {
+                                self.showCatalogFailure(ownedBy: key)
+                            }
+                            return outcome
+                        }
                         self.catalogRefreshRetryAttempt = min(3, self.catalogRefreshRetryAttempt + 1)
                         _ = self.startCatalogRefresh(
                             key: key,
@@ -1303,6 +1443,7 @@ final class AppModel {
             if outcome == .published {
                 catalogSatisfiedGeneration = max(catalogSatisfiedGeneration, observedInvalidation)
                 catalogRefreshRetryAttempt = 0
+                catalogRefreshFailedAttempts = 0
             }
             if outcome == .transportFailure { return outcome }
             let dirtied = catalogInvalidationGeneration > observedInvalidation
@@ -1432,8 +1573,11 @@ final class AppModel {
     }
 
     private func cancelCatalogRefresh() {
+        catalogFailureOwner = nil
+        removeNotice(.sessionCatalogCatchUp, scope: .app)
         catalogRefreshRequestGeneration &+= 1
         catalogRefreshRetryAttempt = 0
+        catalogRefreshFailedAttempts = 0
         catalogDeferredFollowUpKey = nil
         catalogRefreshTask?.cancel()
         catalogRefreshTask = nil
@@ -3244,7 +3388,7 @@ final class AppModel {
            event.topic != "session.listChanged",
            event.topic != "session.summary",
            event.topic != "session.processTranscript.changed" {
-            await sessionPresentation.admit(event)
+            sessionPresentation.admitSynchronously(event)
             return
         }
         await handleDeliveredEvent(event, connectionID: connectionID)
@@ -3252,6 +3396,16 @@ final class AppModel {
 
     func sessionPresentationStoreMeasuredEventWork(_ phase: GatewayEventConsumerPhase, duration: Duration) {
         recordEventConsumer(category: "session", phase: phase, duration: duration)
+    }
+
+    func lifecycleNotePathHint(satisfied: Bool) {
+        lifecycle.notePathHint(satisfied: satisfied)
+        // Path facts are advisory projections for every admitted secondary;
+        // each pool entry applies its own profile/generation fence.
+        let selectedID = profiles.selected?.id
+        for profile in profiles.profiles where profile.id != selectedID {
+            dashboardConnections.notePathHint(profileID: profile.id, satisfied: satisfied)
+        }
     }
 
     private func scheduleDiagnosticPersistence() {
@@ -3302,8 +3456,16 @@ final class AppModel {
     private func handleDeliveredEvent(_ event: GatewayEvent, connectionID: Int?) async {
         switch event.topic {
         case "transport.disconnected", "system.stopping":
-            if event.topic == "system.stopping" { lifecycle.beginRestarting() }
-            lifecycle.noteDisconnected(connectionID: connectionID, reason: event.payload.objectValue?["reason"]?.stringValue ?? "disconnected")
+            if event.topic == "transport.disconnected" {
+                beginRecoveryDisplayEpisodeIfNeeded()
+            } else {
+                lifecycle.beginRestarting()
+            }
+            await lifecycle.noteDisconnected(
+                connectionID: connectionID,
+                reason: event.payload.objectValue?["reason"]?.stringValue ?? "disconnected",
+                countsAsTransportFailure: event.topic != "system.stopping"
+            )
             // Authentication belongs to the paired device identity, not this
             // disposable socket. Retire prompt delivery while retaining the
             // operation ID/target for an exact auth.resume after reconnect.
@@ -3316,7 +3478,7 @@ final class AppModel {
             lifecycle.requestReconnect(immediate: true, replaceExisting: event.topic == "system.stopping")
             scheduleDiagnosticPersistence()
         case "transport.resyncRequired":
-            await sessionPresentation.handleResyncRequired(sessionID: event.sessionId)
+            sessionPresentation.scheduleResynchronization(sessionID: event.sessionId)
         case "session.summary":
             if case .sessionSummary(let update) = event.preparation { apply(update) }
         case "session.listChanged":
@@ -3326,7 +3488,7 @@ final class AppModel {
         case "auth.event":
             providerAuth.handleEvent(event.payload)
         case "auth.completed":
-            await providerAuth.handleCompletion(event.payload)
+            providerAuth.dispatchCompletion(event.payload)
         case "settings.changed":
             settingsTrust.noteSettingsChanged()
         case "trust.changed":
@@ -3445,9 +3607,11 @@ final class AppModel {
     }
 
     private func scheduleSessionListRefresh() {
+        guard let key = currentCatalogLoadKey() else { return }
+        prepareCatalogOwner(key)
         catalogInvalidationGeneration &+= 1
-        guard catalogRefreshTask == nil,
-              let key = currentCatalogLoadKey() else { return }
+        guard catalogRefreshFailedAttempts < DashboardCatalogRetryPolicy.maximumFailedAttempts,
+              catalogRefreshTask == nil else { return }
         _ = startCatalogRefresh(key: key)
     }
 
@@ -3681,6 +3845,21 @@ extension AppModel: SessionPresentationStoreDelegate {
         role: InAppNoticeCenter.Role,
         scope: InAppNoticeScope?
     ) {
+        if key == .sessionCatchUp, role == .warning,
+           let target = sessionPresentation.mountedTarget, let admission = lifecycle.admission {
+            let retry = InAppNoticeCenter.Action(id: "retry-session-sync", title: "Retry Conversation", role: .normal)
+            let noticeScope = scope ?? .app
+            noticeCenter.post(.init(id: uuidSource.next(), replacement: InAppNoticeReplacement(key: .sessionCatchUp, scope: noticeScope),
+                scope: noticeScope, role: .warning, priority: .high, title: "Conversation could not catch up",
+                message: message, lifetime: .persistent, actions: [retry]), handlers: [retry.id: { [weak self] in
+                    guard let self, self.lifecycle.admits(admission), self.sessionPresentation.mountedTarget == target else { return }
+                    Task { [weak self] in
+                        guard let self, self.lifecycle.admits(admission) else { return }
+                        _ = await self.sessionPresentation.retryMountedSynchronization(target: target)
+                    }
+                }])
+            return
+        }
         let lifetime: InAppNoticeCenter.Lifetime = if key == .sessionCatchUp {
             .automatic(.seconds(12))
         } else if role == .error {
@@ -3747,6 +3926,9 @@ extension AppModel: CustomModelConfigurationCoordinatorDelegate {
 
 extension AppModel: GatewayLifecycleProjectionDelegate {
     func lifecycleRecordDiagnostic(event: String, message: String) {
+        if event == "reconnect.failure" || event == "reconnect.exhausted" || event == "reconnect.stopped" {
+            beginRecoveryDisplayEpisodeIfNeeded()
+        }
         guard ["scene.foreground", "scene.background", "reconnect.scheduled", "reconnect.attempt", "reconnect.failure", "reconnect.delay", "reconnect.connected", "reconnect.exhausted", "reconnect.stopped", "path.changed", "detail.tap", "detail.preparation"].contains(event) else { return }
         iosClientDiagnostics.recordLifecycle(
             event: "gateway.lifecycle",
@@ -3785,23 +3967,37 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         reconciliationAggregateAdmission = nil
         isReconcilingForeground = false
         if succeeded { foregroundReconciliationGeneration &+= 1 }
+        if succeeded || connectionState == .connected {
+            // A responsive transport is not an outage. The mounted owner keeps
+            // failed synchronization fenced and offers Retry Conversation.
+            finishRecoveryDisplayEpisode()
+        } else {
+            beginRecoveryDisplayEpisodeIfNeeded()
+        }
     }
 
     func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {
         guard admitsLifecycle(admission) else { return }
         adoptConnectedGatewayIdentity()
-        async let authResume: Void = providerAuth.resumeAuthIfNeeded()
-        async let sessionLoad = refreshSessions()
-        async let providerLoad = refreshProviders(target: .global)
-        async let settingLoad = refreshSettings(target: .global)
-        async let deviceLoad = refreshDevices()
-        let sessionOutcome = await sessionLoad
-        _ = await (authResume, providerLoad, settingLoad, deviceLoad)
+        let sessionOutcome = await refreshSessions()
         guard admitsLifecycle(admission) else { return }
-        if sessionOutcome == .transportFailure {
+        guard sessionOutcome != .transportFailure else {
             lifecycle.noteProjectionFailure(admission)
             return
         }
+        // Mounted authority and accepted-operation reconciliation must not wait
+        // behind optional settings/provider/device reads. Those reads retain
+        // their existing owner generation fences and are retired with this task.
+        optionalReconnectRefreshTask?.cancel()
+        optionalReconnectRefreshTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            async let authResume: Void = self.providerAuth.resumeAuthIfNeeded()
+            async let providerLoad = self.refreshProviders(target: .global)
+            async let settingLoad = self.refreshSettings(target: .global)
+            async let deviceLoad = self.refreshDevices()
+            _ = await (authResume, providerLoad, settingLoad, deviceLoad)
+        }
+        guard admitsLifecycle(admission) else { return }
         reconcileDashboardConnections()
         removeNotice(.gatewayRestart)
         if let profile = profiles.selected, profile.isEnabled {
@@ -3845,8 +4041,9 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         }
         try await client.ensureResponsive()
         try requireLifecycle(admission)
-        async let authResume: Void = providerAuth.resumeAuthIfNeeded()
-        async let catalog = refreshSessions()
+        let authResume = Task { @MainActor [weak self] in
+            await self?.providerAuth.resumeAuthIfNeeded()
+        }
         let mountedTarget = sessionPresentation.mountedTarget
         let mountedRestored = await sessionPresentation.reconnectMountedPresentation()
         try requireLifecycle(admission)
@@ -3857,33 +4054,31 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         }
         if let mountedTarget, !sessionPresentation.owns(mountedTarget) { return }
         guard mountedRestored else {
-            throw GatewayFailure(
-                code: "projection_unavailable",
-                message: "The mounted conversation could not be reconciled after returning to the foreground.",
-                retryable: true,
-                details: nil
-            )
+            let activeConnectionID = await client.activeConnectionID()
+            try requireLifecycle(admission)
+            if activeConnectionID != admission.connectionID {
+                throw GatewayFailure(code: "disconnected", message: "The Gateway connection ended during synchronization.", retryable: true, details: nil)
+            }
+            return
         }
         await terminal.reattach(admission: admission)
-        _ = await authResume
-        let outcome = await catalog
-        if outcome == .transportFailure {
-            throw GatewayFailure(
-                code: "disconnected",
-                message: "The Mac gateway did not provide a fresh session catalog.",
-                retryable: true,
-                details: nil
-            )
-        }
+        _ = await authResume.value
         reconcileDashboardConnections()
         try requireLifecycle(admission)
+        optionalReconnectRefreshTask?.cancel()
+        optionalReconnectRefreshTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            _ = await self.refreshSessions()
+            guard self.admitsLifecycle(admission) else { return }
+            self.reconcileDashboardConnections()
+        }
         // The inbox coordinator owns this optional read. Reconnect needs fresh
         // demand without an invalidation, but readiness must not await its RPC.
         if let profile = profiles.selected, profile.isEnabled {
             scheduleNotificationInboxRefresh(profile: profile)
         }
-        // Mounted restoration and catalog refresh jointly publish the next
-        // entrance-suppression generation.
+        // Mounted restoration publishes readiness independently of optional
+        // catalog/settings reads; those owners retain their own freshness.
         completed = true
         diagnosticsReadinessGeneration &+= 1
         diagnosticsAreReady = true
@@ -3891,6 +4086,9 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
 
     func lifecycleRetireProjection(final: Bool) async {
         diagnosticsAreReady = false
+        optionalReconnectRefreshTask?.cancel()
+        optionalReconnectRefreshTask = nil
+        finishRecoveryDisplayEpisode()
         let catalog = catalogRefreshTask
         let cacheCheckpoint = cacheCheckpointTask
         let events = final ? eventTask : nil

@@ -1,7 +1,8 @@
 import { createServer, type IncomingMessage, type Server as HTTPServer, type ServerResponse } from "node:http";
 import { GATEWAY_JSON_MAXIMUM_NODES, jsonNodeCount } from "../protocol/json-budget.js";
 import type { Duplex } from "node:stream";
-import { pipeline } from "node:stream/promises";
+import { finished, pipeline } from "node:stream/promises";
+import { abortableRead } from "../util/abortable-read.js";
 import { randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { GatewayError, publicError } from "../errors.js";
@@ -22,6 +23,100 @@ import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 // IDs are stale control paths and may safely require a fresh session.open.
 export const MAXIMUM_REKEYED_SESSION_IDS = 64;
 export const MAXIMUM_UNANSWERED_HEARTBEATS = 3;
+
+// HTTP admission is intentionally independent from route payload limits: it
+// bounds the lifetime of transport requests while UploadStore, BlobStore and
+// live-view leases retain ownership of their own staged bytes/readers/viewers.
+export const HTTP_REQUEST_IDLE_TIMEOUT_MS = 30_000;
+export const HTTP_HEADERS_TIMEOUT_MS = 15_000;
+// Preserve Node's finite five-minute body allowance for large slow uploads;
+// request receipt and transport inactivity are different bounds.
+export const HTTP_REQUEST_TIMEOUT_MS = 300_000;
+export const HTTP_SHUTDOWN_GRACE_MS = 1_000;
+export const HTTP_MAXIMUM_CONNECTIONS = 128;
+export const HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS = 64;
+export const HTTP_MAXIMUM_REQUESTS = 128;
+export const HTTP_MAXIMUM_REQUESTS_PER_IDENTITY = 16;
+export const HTTP_MAXIMUM_REQUESTS_PER_ADDRESS = 32;
+export const HTTP_MAXIMUM_REQUESTS_PER_CONNECTION = 8;
+
+export interface HttpTransportLease {
+  identify(identity: string): void;
+  release(): void;
+}
+
+interface HttpLeaseState {
+  identity?: string;
+  released: boolean;
+}
+
+/** One bounded admission owner for authenticated and pre-auth HTTP requests. */
+export class HttpTransportAdmission {
+  private active = 0;
+  private readonly identities = new Map<string, number>();
+  private readonly addresses = new Map<string, number>();
+  private readonly connections = new Map<object, number>();
+
+  constructor(
+    private readonly maximumRequests = HTTP_MAXIMUM_REQUESTS,
+    private readonly maximumRequestsPerIdentity = HTTP_MAXIMUM_REQUESTS_PER_IDENTITY,
+  ) {
+    if (!Number.isSafeInteger(maximumRequests) || maximumRequests < 1
+      || !Number.isSafeInteger(maximumRequestsPerIdentity) || maximumRequestsPerIdentity < 1) {
+      throw new Error("HTTP admission bounds are invalid");
+    }
+  }
+
+  admit(address: string, connection: object): HttpTransportLease | undefined {
+    if (this.active >= this.maximumRequests
+      || (this.addresses.get(address) ?? 0) >= HTTP_MAXIMUM_REQUESTS_PER_ADDRESS
+      || (this.connections.get(connection) ?? 0) >= HTTP_MAXIMUM_REQUESTS_PER_CONNECTION) return undefined;
+    this.active += 1;
+    this.addresses.set(address, (this.addresses.get(address) ?? 0) + 1);
+    this.connections.set(connection, (this.connections.get(connection) ?? 0) + 1);
+    const state: HttpLeaseState = { released: false };
+    return {
+      identify: (nextIdentity: string): void => {
+        if (state.released) return;
+        if (state.identity === nextIdentity) return;
+        if (state.identity !== undefined) throw new Error("HTTP request identity was already assigned");
+        const count = this.identities.get(nextIdentity) ?? 0;
+        if (count >= this.maximumRequestsPerIdentity) {
+          throw new GatewayError("busy", "HTTP request capacity for this device is full", true);
+        }
+        state.identity = nextIdentity;
+        this.identities.set(nextIdentity, count + 1);
+      },
+      release: (): void => {
+        if (state.released) return;
+        state.released = true;
+        this.active -= 1;
+        this.releaseCount(this.addresses, address);
+        this.releaseCount(this.connections, connection);
+        if (state.identity !== undefined) this.releaseCount(this.identities, state.identity);
+      },
+    };
+  }
+
+  private releaseCount<Key>(counts: Map<Key, number>, key: Key): void {
+    const count = counts.get(key)!;
+    if (count === 1) counts.delete(key);
+    else counts.set(key, count - 1);
+  }
+
+  snapshot(address?: string, connection?: object) {
+    return {
+      activeRequests: this.active,
+      maximumRequests: this.maximumRequests,
+      identities: this.identities.size,
+      maximumRequestsPerIdentity: this.maximumRequestsPerIdentity,
+      addressRequests: address === undefined ? 0 : this.addresses.get(address) ?? 0,
+      maximumRequestsPerAddress: HTTP_MAXIMUM_REQUESTS_PER_ADDRESS,
+      connectionRequests: connection === undefined ? 0 : this.connections.get(connection) ?? 0,
+      maximumRequestsPerConnection: HTTP_MAXIMUM_REQUESTS_PER_CONNECTION,
+    };
+  }
+}
 
 export function shouldTerminateHeartbeat(unansweredHeartbeats: number): boolean {
   return unansweredHeartbeats >= MAXIMUM_UNANSWERED_HEARTBEATS;
@@ -380,11 +475,15 @@ export class GatewayServer {
   private readonly server: HTTPServer;
   private readonly sockets: WebSocketServer;
   private readonly clients = new Map<string, Connection>();
+  private readonly httpSockets = new Set<Duplex>();
+  private readonly httpConnectionsByAddress = new Map<string, number>();
+  private readonly httpAdmission: HttpTransportAdmission;
   private readonly pairingLimiter = new RateLimiter(10, 10 * 60_000);
   private readonly heartbeat: NodeJS.Timeout;
   private lastHeartbeatAt = performance.now();
   private ready = false;
   private shuttingDown = false;
+  private closeTask?: Promise<void>;
   private startupPhase: "starting" | "catalog-warming" | "attention-recovery" | "automation-recovery" | "storage-warming" = "starting";
 
   constructor(
@@ -398,6 +497,9 @@ export class GatewayServer {
       maximumOutboundBytes?: number;
       maximumSynchronizationBytes?: number;
       synchronizationTimeoutMs?: number;
+      maximumHttpConnections?: number;
+      maximumHttpRequests?: number;
+      maximumHttpRequestsPerIdentity?: number;
       devices: DeviceStore;
       uploads: UploadStore;
       sessions: RuntimeRegistry;
@@ -409,7 +511,40 @@ export class GatewayServer {
       authorizeBrowserLiveView?: (sessionId: string, viewId: string, generation: string) => boolean;
     },
   ) {
-    this.server = createServer((request, response) => void this.handleHttp(request, response));
+    const maximumHttpConnections = options.maximumHttpConnections ?? HTTP_MAXIMUM_CONNECTIONS;
+    if (!Number.isSafeInteger(maximumHttpConnections) || maximumHttpConnections < 1) {
+      throw new Error("HTTP connection bounds are invalid");
+    }
+    this.httpAdmission = new HttpTransportAdmission(
+      options.maximumHttpRequests,
+      options.maximumHttpRequestsPerIdentity,
+    );
+    this.server = createServer({
+      headersTimeout: HTTP_HEADERS_TIMEOUT_MS,
+      requestTimeout: HTTP_REQUEST_TIMEOUT_MS,
+      connectionsCheckingInterval: 1_000,
+    }, (request, response) => void this.handleHttp(request, response));
+    this.server.timeout = HTTP_REQUEST_IDLE_TIMEOUT_MS;
+    this.server.on("connection", (socket) => {
+      const address = socket.remoteAddress ?? "unknown";
+      const addressConnections = this.httpConnectionsByAddress.get(address) ?? 0;
+      if (this.httpSockets.size >= maximumHttpConnections
+        || addressConnections >= HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS || this.shuttingDown) {
+        this.options.logger.log("warning", `Rejected HTTP connection at capacity (connections=${this.httpSockets.size} maximumConnections=${maximumHttpConnections} addressConnections=${addressConnections} maximumPerAddress=${HTTP_MAXIMUM_CONNECTIONS_PER_ADDRESS})`, {
+          event: "http.connection-capacity", source: "transport",
+        });
+        socket.destroy();
+        return;
+      }
+      this.httpSockets.add(socket);
+      this.httpConnectionsByAddress.set(address, addressConnections + 1);
+      socket.once("close", () => {
+        this.httpSockets.delete(socket);
+        const count = this.httpConnectionsByAddress.get(address)!;
+        if (count === 1) this.httpConnectionsByAddress.delete(address);
+        else this.httpConnectionsByAddress.set(address, count - 1);
+      });
+    });
     this.sockets = new WebSocketServer({ noServer: true, maxPayload: options.maxFrameBytes, perMessageDeflate: false });
     this.server.on("upgrade", (request, socket, head) => void this.handleUpgrade(request, socket, head));
     this.heartbeat = setInterval(() => {
@@ -451,22 +586,22 @@ export class GatewayServer {
   }
 
   async listen(afterBind: () => Promise<void> = async () => {}): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      this.server.once("error", reject);
-      this.server.listen(this.options.port, this.options.host, () => {
-        this.server.off("error", reject);
-        resolve();
-      });
-    });
-    this.options.logger.log("info", "Gateway listener bound; startup warmup beginning", { event: "gateway.bound", source: "transport" });
     try {
+      await new Promise<void>((resolve, reject) => {
+        this.server.once("error", reject);
+        this.server.listen(this.options.port, this.options.host, () => {
+          this.server.off("error", reject);
+          resolve();
+        });
+      });
+      this.options.logger.log("info", "Gateway listener bound; startup warmup beginning", { event: "gateway.bound", source: "transport" });
       await afterBind();
       // A signal may close the transport while warmup is suspended. Never let
       // that in-flight callback publish readiness after shutdown has begun.
       if (this.shuttingDown) throw new GatewayError("busy", "Gateway shutdown began during startup", true);
       this.ready = true;
     } catch (error) {
-      await new Promise<void>((resolve) => this.server.close(() => resolve()));
+      await this.close();
       throw error;
     }
     this.options.logger.log("info", `Gateway listening on ${this.options.host}:${this.options.port}`, { event: "gateway.listening", source: "transport" });
@@ -608,6 +743,45 @@ export class GatewayServer {
   }
 
   private async handleHttp(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    // Node's server timeout covers idle request/socket time, while this
+    // response timeout also retires a stream stalled after its headers were
+    // written. Route leases still own exact reader/viewer release.
+    const readLifetime = new AbortController();
+    response.setTimeout(HTTP_REQUEST_IDLE_TIMEOUT_MS, () => { readLifetime.abort(); response.destroy(); });
+    const address = request.socket.remoteAddress ?? "unknown";
+    const transportLease = this.httpAdmission.admit(address, request.socket);
+    if (!transportLease) {
+      const capacity = this.httpAdmission.snapshot(address, request.socket);
+      this.options.logger.log("warning", `Rejected HTTP request at capacity (activeRequests=${capacity.activeRequests} maximumRequests=${capacity.maximumRequests} addressRequests=${capacity.addressRequests} maximumRequestsPerAddress=${capacity.maximumRequestsPerAddress} connectionRequests=${capacity.connectionRequests} maximumRequestsPerConnection=${capacity.maximumRequestsPerConnection})`, {
+        event: "http.request-capacity", source: "transport",
+      });
+      if (!request.complete) {
+        response.setHeader("connection", "close");
+        response.once("finish", () => request.destroy());
+      }
+      sendJson(response, 503, { error: { code: "busy", message: "HTTP request capacity is full", retryable: true } });
+      return;
+    }
+    // Auth/read owners bound physical work and remove cancelled queued waits.
+    // Their late values release at that owner, so disposable transport tickets
+    // can retire without freeing unaccounted filesystem work or accepted writes.
+    let workSettled = false;
+    const releaseTransportLease = (): void => {
+      if (workSettled && (response.writableFinished || response.destroyed)) transportLease.release();
+    };
+    const retireAbortedRequest = (): void => {
+      // An aborted request is a disposable stream cancellation. Destroy the
+      // response as well so route pipelines release their reader/staging lease
+      // before this transport capacity is returned.
+      if (!response.destroyed && !response.writableFinished) response.destroy();
+      releaseTransportLease();
+    };
+    const retireRead = (): void => { readLifetime.abort(); releaseTransportLease(); };
+    response.once("finish", retireRead);
+    response.once("close", retireRead);
+    response.once("error", retireRead);
+    request.once("aborted", retireAbortedRequest);
+    request.once("error", retireAbortedRequest);
     try {
       const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
       if (request.method === "GET" && url.pathname === "/health") {
@@ -634,20 +808,39 @@ export class GatewayServer {
         return sendJson(response, 200, { ...result, ...this.options.service.info() as Record<string, JsonValue> });
       }
 
+      let handler: Promise<void> | undefined;
       const admitted = await this.options.devices.authenticateAndAdmit(bearer(request), (authenticated) => {
-        void this.handleAuthenticatedHttp(request, response, url, authenticated).catch((error) => this.handleHttpError(request, response, error));
+        if (response.destroyed || response.writableEnded || request.aborted) return false;
+        if (this.shuttingDown || !this.ready) {
+          throw new GatewayError("busy", "Gateway shutdown began before HTTP admission", true);
+        }
+        const identity = authenticated.kind === "local" ? "local-wrapper" : authenticated.deviceId;
+        // Authentication yielded while the transport lease remained held. The
+        // identity cut is synchronous before route admission. Await route work
+        // outside the credential owner's lock, retaining this transport lease.
+        transportLease.identify(identity);
+        handler = this.handleAuthenticatedHttp(request, response, url, authenticated, readLifetime.signal)
+          .catch((error) => this.handleHttpError(request, response, error));
         return true;
-      });
+      }, readLifetime.signal);
       if (admitted === null) return sendJson(response, 401, { error: { code: "unauthenticated", message: "Pairing token is invalid" } });
-      return;
-
-
+      // GETs, bounded staging bodies and viewer leases are disposable. Accepted
+      // pairing/discard mutations retain their original settlement authority.
+      const disposable = request.method === "GET"
+        || request.method === "POST" && url.pathname === "/v1/uploads"
+        || /^\/v1\/sessions\/[^/]+\/live-views\//.test(url.pathname);
+      if (disposable) await abortableRead(readLifetime.signal, () => handler ?? Promise.resolve());
+      else await handler;
     } catch (error) {
       this.handleHttpError(request, response, error);
+    } finally {
+      workSettled = true;
+      releaseTransportLease();
     }
   }
 
   private handleHttpError(request: IncomingMessage, response: ServerResponse, error: unknown): void {
+    if (response.destroyed || response.writableFinished) return;
     if (response.headersSent) {
       response.destroy(error instanceof Error ? error : undefined);
       return;
@@ -671,6 +864,7 @@ export class GatewayServer {
     response: ServerResponse,
     url: URL,
     authenticated: { kind: "local" } | DeviceIdentity,
+    signal: AbortSignal,
   ): Promise<void> {
     if (request.method === "POST" && url.pathname === "/v1/uploads") {
       await this.options.uploads.withBodyAdmission(async () => {
@@ -679,7 +873,22 @@ export class GatewayServer {
         const rawDeclared = request.headers["content-length"];
         const declaredBytes = rawDeclared === undefined ? undefined : Number(rawDeclared);
         const upload = await this.options.uploads.saveStream(name, mimeType, completeRequestBody(request), declaredBytes);
-        sendJson(response, 201, { upload: { id: upload.id, name: upload.name, mimeType: upload.mimeType, size: upload.size } });
+        try {
+          if (response.destroyed) throw new GatewayError("busy", "Upload response was retired", true);
+          sendJson(response, 201, { upload: { id: upload.id, name: upload.name, mimeType: upload.mimeType, size: upload.size } });
+          await finished(response, { readable: false, cleanup: true });
+        } catch (error) {
+          // Body completion is not receipt publication. Drop only abandoned
+          // staging; discard's serialized claim check protects an attachment
+          // already owned by an accepted prompt, even in a close/claim race.
+          try { await this.options.uploads.discard(upload.id); }
+          catch (cleanupError) {
+            if (!(cleanupError instanceof GatewayError && ["conflict", "not_found"].includes(cleanupError.code))) {
+              this.options.logger.log("warning", "Abandoned upload cleanup failed", { event: "http.upload-cleanup", source: "transport" });
+            }
+          }
+          throw error;
+        }
       });
       return;
     }
@@ -704,6 +913,7 @@ export class GatewayServer {
         if (typeof generation !== "string" || generation.length > 200) throw new GatewayError("invalid_request", "Live view generation is required");
         const openAndRespond = (): boolean => {
           if (request.readableAborted || request.socket.destroyed || response.destroyed) return true;
+          if (this.shuttingDown || !this.ready) throw new GatewayError("busy", "Gateway is retiring browser observers", true);
           if (this.options.authorizeBrowserLiveView?.(sessionId, viewId, generation) !== true) {
             throw new GatewayError("not_found", "Browser view is not on the active session branch");
           }
@@ -716,7 +926,7 @@ export class GatewayServer {
         // Body consumption yielded after initial authentication. Re-enter the
         // existing credential mutex, then authorize/create/publish synchronously.
         const admitted = authenticated.kind === "local" ? openAndRespond()
-          : await this.options.devices.admitDevice(authenticated.deviceId, openAndRespond);
+          : await this.options.devices.admitDevice(authenticated.deviceId, openAndRespond, signal);
         if (admitted === undefined) sendJson(response, 401, { error: { code: "unauthenticated", message: "Device was revoked" } });
         return;
       }
@@ -772,7 +982,7 @@ export class GatewayServer {
     }
     if (request.method === "GET" && url.pathname.startsWith("/v1/uploads/")) {
       const id = decodeURIComponent(url.pathname.slice("/v1/uploads/".length));
-      const lease = await this.options.uploads.acquire(id);
+      const lease = await this.options.uploads.acquire(id, signal);
       try {
         response.writeHead(200, {
           "content-type": lease.mimeType,
@@ -781,6 +991,7 @@ export class GatewayServer {
           "cache-control": "private, max-age=300",
           "x-content-type-options": "nosniff",
         });
+        response.flushHeaders();
         await pipeline(lease.stream, response);
       } finally {
         await lease.release();
@@ -801,7 +1012,7 @@ export class GatewayServer {
       }
       let lease: Awaited<ReturnType<RuntimeRegistry["acquireDisplayArtifact"]>>;
       try {
-        lease = await this.options.sessions.acquireDisplayArtifact(sessionID, artifactID, requestedRange);
+        lease = await this.options.sessions.acquireDisplayArtifact(sessionID, artifactID, requestedRange, signal);
       } catch (error) {
         const details = error instanceof GatewayError && error.details && typeof error.details === "object"
           ? error.details as { rangeUnsatisfiable?: unknown; totalSize?: unknown }
@@ -830,6 +1041,7 @@ export class GatewayServer {
           "cache-control": "private, immutable, max-age=31536000",
           "x-content-type-options": "nosniff",
         });
+        response.flushHeaders();
         await pipeline(lease.stream, response);
       } finally {
         await lease.release();
@@ -839,7 +1051,7 @@ export class GatewayServer {
     if (request.method === "GET" && url.pathname.startsWith("/v1/blobs/")) {
       const id = decodeURIComponent(url.pathname.slice("/v1/blobs/".length));
       const requestedRange = parseBlobByteRange(request.headers.range);
-      const lease = await this.options.sessions.acquireBlob(id, requestedRange);
+      const lease = await this.options.sessions.acquireBlob(id, requestedRange, signal);
       try {
         response.writeHead(requestedRange ? 206 : 200, {
           "content-type": lease.mimeType,
@@ -849,6 +1061,7 @@ export class GatewayServer {
           "cache-control": "private, max-age=300",
           "x-content-type-options": "nosniff",
         });
+        response.flushHeaders();
         await pipeline(lease.stream, response);
       } finally {
         await lease.release();
@@ -859,6 +1072,35 @@ export class GatewayServer {
   }
 
   private async handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
+    // Node relinquishes its HTTP parser on upgrade, before async credentials
+    // return. Own EOF/error and the auth deadline until ws takes the socket;
+    // otherwise a half-closed pre-handshake peer can live indefinitely.
+    const readLifetime = new AbortController();
+    const retirePendingUpgrade = (): void => { readLifetime.abort(); socket.destroy(); };
+    socket.once("end", retirePendingUpgrade);
+    socket.once("error", retirePendingUpgrade);
+    socket.once("close", retirePendingUpgrade);
+    const authenticationDeadline = setTimeout(() => {
+      this.options.logger.log("warning", "Socket upgrade authentication timed out", { event: "http.authentication-timeout", source: "transport" });
+      retirePendingUpgrade();
+    }, HTTP_REQUEST_IDLE_TIMEOUT_MS);
+    authenticationDeadline.unref();
+    const releasePendingUpgrade = (): void => {
+      clearTimeout(authenticationDeadline);
+      socket.off("end", retirePendingUpgrade);
+      socket.off("error", retirePendingUpgrade);
+      socket.off("close", retirePendingUpgrade);
+    };
+    // An upgrade awaiting credentials is still an admitted HTTP operation.
+    // Physical close alone cannot release its pending authentication budget.
+    const transportLease = this.httpAdmission.admit(request.socket.remoteAddress ?? "unknown", socket);
+    if (!transportLease) {
+      this.options.logger.log("warning", "Rejected upgrade at HTTP authentication capacity", { event: "http.request-capacity", source: "transport" });
+      socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+      socket.destroy();
+      releasePendingUpgrade();
+      return;
+    }
     try {
       const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
       if (url.pathname !== "/v1/socket") {
@@ -872,6 +1114,15 @@ export class GatewayServer {
         return;
       }
       const admission = await this.options.devices.authenticateAndAdmit(bearer(request), (authenticated) => {
+        // Authentication can yield while shutdown starts. Recheck the
+        // admission cut after that await so an upgrade cannot become a live
+        // connection after the listener has begun retiring work.
+        if (socket.destroyed) return false;
+        if (this.shuttingDown || !this.ready) {
+          socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+          socket.destroy();
+          return false;
+        }
         const identity = authenticated.kind === "local" ? "local-wrapper" : authenticated.deviceId;
         const maximumConnections = this.options.maximumConnections ?? 32;
         const maximumPerIdentity = this.options.maximumConnectionsPerIdentity ?? 4;
@@ -886,7 +1137,7 @@ export class GatewayServer {
           this.admit(webSocket, identity, authenticated.kind === "local");
         });
         return true;
-      });
+      }, readLifetime.signal);
       if (admission === null) {
         this.options.logger.log("warning", "Rejected unauthenticated socket upgrade", { event: "connection.rejected", source: "transport" });
         socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
@@ -894,6 +1145,9 @@ export class GatewayServer {
       }
     } catch {
       socket.destroy();
+    } finally {
+      releasePendingUpgrade();
+      transportLease.release();
     }
   }
 
@@ -1616,15 +1870,23 @@ export class GatewayServer {
     return `connections=${this.clients.size} inFlightRequests=${inFlightRequests} outboundQueuedBytes=${outboundQueuedBytes} rssBytes=${memory.rss} heapUsedBytes=${memory.heapUsed} externalBytes=${memory.external}`;
   }
 
-  async close(): Promise<void> {
-    if (this.shuttingDown) return;
+  close(): Promise<void> {
+    if (this.closeTask) return this.closeTask;
     this.shuttingDown = true;
+    this.ready = false;
+    // Install the shared receipt before callbacks run: concurrent close and
+    // failed-startup cleanup join the same bounded retirement operation.
+    this.closeTask = Promise.resolve().then(() => this.finishClose());
+    return this.closeTask;
+  }
+
+  private async finishClose(): Promise<void> {
     this.options.liveViews?.dispose();
     this.options.logger.log("info", "Closing Gateway transport", { event: "gateway.transport-closing", source: "transport" });
-    this.ready = false;
     clearInterval(this.heartbeat);
     for (const client of this.clients.values()) {
       const stoppingAccepted = this.send(client, { type: "event", topic: "system.stopping", payload: {} });
+      this.retireConnectionWork(client);
       if (!stoppingAccepted) {
         client.socket.close(1012, "gateway restarting");
         continue;
@@ -1645,7 +1907,25 @@ export class GatewayServer {
         requestClose();
       });
     }
-    await new Promise<void>((resolve) => this.server.close(() => resolve()));
+    // `server.close` waits for active HTTP responses. A stalled body or
+    // response stream is disposable transport work, so destroy tracked HTTP
+    // sockets after the same one-second retirement bound used by WebSocket
+    // close handshakes rather than waiting on Node indefinitely.
+    let httpClosed = false;
+    let forceHttpClose!: NodeJS.Timeout;
+    const httpClosedPromise = new Promise<void>((resolve) => {
+      this.server.close(() => {
+        httpClosed = true;
+        clearTimeout(forceHttpClose);
+        resolve();
+      });
+    });
+    forceHttpClose = setTimeout(() => {
+      for (const socket of this.httpSockets) socket.destroy();
+      if (httpClosed) clearTimeout(forceHttpClose);
+    }, HTTP_SHUTDOWN_GRACE_MS);
+    forceHttpClose.unref();
+    await httpClosedPromise;
     this.sockets.close();
   }
 }

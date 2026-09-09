@@ -118,6 +118,32 @@ describe("aggregate transcript structure", () => {
   });
 });
 
+describe("canonical branch acquisition", () => {
+  it.each(["full", "page"])("uses one SDK ancestry walk for %s projection and preserves filtered rows", (kind) => {
+    const manager = SessionManager.inMemory("/tmp/tron-projection-cut");
+    const userID = manager.appendMessage({ role: "user", content: [{ type: "text", text: "Input" }], timestamp: 1 });
+    manager.appendCustomEntry("fixture-hidden", { value: 1 });
+    const resultID = manager.appendMessage({ role: "toolResult", toolCallId: "call", toolName: "read",
+      content: [{ type: "text", text: "Result" }], isError: false, timestamp: 2 });
+    const original = JSON.stringify(manager.getBranch());
+    let branchReads = 0;
+    const reader = { getBranch: () => { branchReads++; return manager.getBranch(); }, getSessionId: () => manager.getSessionId() };
+    const blobs = new BlobStore();
+    const projection = kind === "full" ? projectTranscript(reader, blobs) : projectTranscriptPage(reader, blobs);
+    const items = Array.isArray(projection) ? projection : projection.items;
+    expect(items.map(item => item.id)).toEqual([userID, resultID]);
+    expect(items.map(item => item.kind === "message" ? item.content : undefined)).toEqual([
+      [{ id: `${userID}:0`, ordinal: 0, type: "text", text: "Input" }],
+      [{ id: `${resultID}:0`, ordinal: 0, type: "text", text: "Result" }],
+    ]);
+    if (!Array.isArray(projection)) expect(projection).toMatchObject({ start: 0, end: 2, total: 2 });
+    expect(JSON.stringify(manager.getBranch())).toBe(original);
+    // Count the real SDK boundary, not an internal projection counter. Both
+    // row filtering and invocation binding must consume the same branch cut.
+    expect(branchReads).toBe(1);
+  });
+});
+
 describe("canonical tool ownership", () => {
   it("recognizes exact tool-result call IDs across the full branch", () => {
     const manager = {

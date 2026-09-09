@@ -489,6 +489,16 @@ enum GatewayResponseDecoding {
     }
 }
 
+struct GatewayLiveEvidence: Sendable, Equatable {
+    let connectionID: Int
+    let consecutiveProofIntervals: Int
+    let lastProofAt: ContinuousClock.Instant?
+
+    var hasStableProof: Bool {
+        consecutiveProofIntervals >= 3
+    }
+}
+
 actor GatewayClient {
     #if HOSTED_TEST
     // A run-local gate exercises the real actor-hop race without production hooks.
@@ -515,6 +525,8 @@ actor GatewayClient {
         var pending: [String: PendingRequest] = [:]
         var lastInboundAt: ContinuousClock.Instant?
         var lastWriteProgressAt: ContinuousClock.Instant?
+        var consecutiveProofIntervals = 0
+        var lastProofAt: ContinuousClock.Instant?
         var overflowResyncSignaled = false
         var info: GatewayInfo?
     }
@@ -531,8 +543,10 @@ actor GatewayClient {
     private let boundedHTTPFileTransport: BoundedHTTPFileTransport
     private let performanceSignposts: any PerformanceSignposting
     private var connection: ConnectionEpoch?
+    private var retiredLiveEvidence: [Int: GatewayLiveEvidence] = [:]
     private var connectionDiagnostics: [GatewayConnectionDiagnostic] = []
     private var diagnosticSequence = 0
+    private var firstDiagnosticSequenceByEpisode: [String: Int] = [:]
     private let diagnosticStore: IOSClientDiagnosticStore?
     nonisolated let diagnosticOwnerID = UUID().uuidString
     private var generation = 0
@@ -543,6 +557,17 @@ actor GatewayClient {
 
     func activeConnectionID() -> Int? { connection?.id }
 
+    func liveEvidence(connectionID: Int) -> GatewayLiveEvidence? {
+        if let epoch = connection, epoch.id == connectionID {
+            return GatewayLiveEvidence(
+                connectionID: epoch.id,
+                consecutiveProofIntervals: epoch.consecutiveProofIntervals,
+                lastProofAt: epoch.lastProofAt
+            )
+        }
+        return retiredLiveEvidence[connectionID]
+    }
+
     func diagnostics() -> [GatewayConnectionDiagnostic] { connectionDiagnostics }
 
     private func recordDiagnostic(
@@ -551,6 +576,9 @@ actor GatewayClient {
         startedAt: ContinuousClock.Instant,
         reason: GatewayConnectionDiagnosticReason? = nil,
         error: Error? = nil,
+        platformCode: Int? = nil,
+        closeCode: Int? = nil,
+        httpStatusCode: Int? = nil,
         connectionID: Int? = nil,
         overflowCount: Int? = nil,
         overflowReason: GatewayEventAdmissionReason? = nil,
@@ -574,7 +602,7 @@ actor GatewayClient {
             components.seconds * 1_000
                 + components.attoseconds / 1_000_000_000_000_000
         )
-        let platformCode = error.flatMap(Self.platformErrorCode)
+        let resolvedPlatformCode = platformCode ?? error.flatMap(Self.platformErrorCode)
         diagnosticSequence &+= 1
         let diagnostic = GatewayConnectionDiagnostic(
             sequence: diagnosticSequence,
@@ -588,7 +616,9 @@ actor GatewayClient {
             outcome: outcome,
             durationMilliseconds: Int(elapsed),
             reason: reason,
-            platformCode: platformCode,
+            platformCode: resolvedPlatformCode,
+            closeCode: closeCode,
+            httpStatusCode: httpStatusCode,
             overflowCount: overflowCount,
             overflowReason: overflowReason,
             rejectedTopic: rejectedTopic,
@@ -616,10 +646,26 @@ actor GatewayClient {
             decodeCodingPath: decodeCodingPath
         )
         connectionDiagnostics.insert(diagnostic, at: 0)
-        diagnosticStore?.record(IOSClientDiagnosticBuffer.logRecord(diagnostic))
-        if connectionDiagnostics.count > 200 {
-            connectionDiagnostics.removeLast(connectionDiagnostics.count - 200)
+        if diagnostic.outcome == .failure {
+            let episode = diagnostic.attemptID ?? diagnostic.connectionID.map(String.init) ?? "client"
+            if firstDiagnosticSequenceByEpisode[episode] == nil {
+                firstDiagnosticSequenceByEpisode[episode] = diagnostic.sequence
+            }
         }
+        while connectionDiagnostics.count > 200 {
+            if let removable = connectionDiagnostics.lastIndex(where: { diagnostic in
+                let episode = diagnostic.attemptID ?? diagnostic.connectionID.map(String.init) ?? "client"
+                return firstDiagnosticSequenceByEpisode[episode] != diagnostic.sequence
+            }) {
+                connectionDiagnostics.remove(at: removable)
+            } else {
+                connectionDiagnostics.removeLast()
+            }
+        }
+        firstDiagnosticSequenceByEpisode = firstDiagnosticSequenceByEpisode.filter { _, sequence in
+            connectionDiagnostics.contains { $0.sequence == sequence }
+        }
+        diagnosticStore?.record(IOSClientDiagnosticBuffer.logRecord(diagnostic))
     }
 
     init(
@@ -768,6 +814,7 @@ actor GatewayClient {
             guard var epoch = connection, epoch.id == epochID else { throw CancellationError() }
             epoch.info = decoded.info
             epoch.lastInboundAt = clock.now()
+            epoch.lastProofAt = epoch.lastInboundAt
             connection = epoch
             if activateEvents { try activateEventDelivery(connectionID: epochID) }
             recordDiagnostic(
@@ -781,19 +828,24 @@ actor GatewayClient {
             )
             return GatewayConnectionIdentity(id: epochID, info: decoded.info)
         } catch {
-            let failure = Self.transportFailure(error)
+            let metadata = await socket.metadata()
+            let upgradeFailure = Self.upgradeFailure(error, metadata: metadata)
+            let failure = upgradeFailure ?? Self.transportFailure(error)
             recordDiagnostic(
                 stage: handshakeStage.get(),
                 outcome: .failure,
                 startedAt: attemptStartedAt,
                 reason: Self.diagnosticReason(for: failure.code),
                 error: error,
+                closeCode: metadata.closeCode,
+                httpStatusCode: metadata.httpStatusCode,
                 connectionID: epochID,
                 profileID: profile.id,
                 profileLabel: profile.label,
                 attemptID: attemptID
             )
             await detachConnection(epochID: epochID, reason: failure)
+            if let upgradeFailure { throw upgradeFailure }
             throw error
         }
     }
@@ -1428,7 +1480,21 @@ actor GatewayClient {
 
     private func notePong(epochID: Int) {
         guard var epoch = connection, epoch.id == epochID else { return }
-        epoch.lastInboundAt = clock.now()
+        let now = clock.now()
+        if epoch.consecutiveProofIntervals < 3 {
+            if let last = epoch.lastProofAt,
+               last.duration(to: now) <= GatewayLivenessPolicy.probeInterval + GatewayLivenessPolicy.pongTimeout {
+                epoch.consecutiveProofIntervals += 1
+            } else {
+                // A proof after suspension starts a new interval; it is not
+                // itself ten seconds of actively observed healthy transport.
+                epoch.consecutiveProofIntervals = 0
+            }
+        }
+        // Once this exact epoch earned a stable interval, preserve that fact
+        // for retirement accounting even if a later outage ends the socket.
+        epoch.lastProofAt = now
+        epoch.lastInboundAt = now
         connection = epoch
     }
 
@@ -1600,6 +1666,14 @@ actor GatewayClient {
     ) async -> Bool {
         guard let epoch = connection,
               epochID == nil || epoch.id == epochID else { return false }
+        retiredLiveEvidence[epoch.id] = GatewayLiveEvidence(
+            connectionID: epoch.id,
+            consecutiveProofIntervals: epoch.consecutiveProofIntervals,
+            lastProofAt: epoch.lastProofAt
+        )
+        while retiredLiveEvidence.count > 8 {
+            retiredLiveEvidence.removeValue(forKey: retiredLiveEvidence.keys.sorted().first!)
+        }
         connection = nil
         let failure = Self.transportFailure(reason)
         let now = clock.now()
@@ -1608,12 +1682,15 @@ actor GatewayClient {
             let components = instant.duration(to: now).components
             return Int(max(0, min(Int64(Int.max), components.seconds * 1_000 + components.attoseconds / 1_000_000_000_000_000)))
         }
+        let metadata = await epoch.socket.metadata()
         recordDiagnostic(
             stage: .transport,
             outcome: .failure,
             startedAt: epoch.startedAt,
             reason: Self.diagnosticReason(for: failure.code),
             error: reason,
+            closeCode: metadata.closeCode,
+            httpStatusCode: metadata.httpStatusCode,
             connectionID: epoch.id,
             queueSnapshot: queueSnapshot,
             lastInboundAgeMilliseconds: ageMilliseconds(epoch.lastInboundAt),
@@ -1698,6 +1775,26 @@ actor GatewayClient {
     private nonisolated static func platformErrorCode(_ error: Error) -> Int? {
         if let urlError = error as? URLError { return urlError.errorCode }
         return (error as? GatewayFailure)?.details?.objectValue?["platformCode"]?.intValue
+    }
+
+    private nonisolated static func upgradeFailure(_ error: Error, metadata: GatewaySocketMetadata) -> GatewayFailure? {
+        // Typed local cancellation/deadline/protocol outcomes already own the
+        // attempt. Only an actual failed HTTP upgrade supplies these meanings;
+        // a WebSocket policy close alone never authorizes re-pairing.
+        guard !Task.isCancelled, !(error is CancellationError), !(error is GatewayFailure),
+              (error as? URLError)?.code != .cancelled,
+              let status = metadata.httpStatusCode else { return nil }
+        let details: JSONValue? = platformErrorCode(error).map { .object(["platformCode": .number(Double($0))]) }
+        switch status {
+        case 401:
+            return GatewayFailure(code: "unauthenticated", message: "The Mac rejected this device's credentials.", retryable: false, details: details)
+        case 403:
+            return GatewayFailure(code: "forbidden", message: "The Mac denied this connection. Check access settings.", retryable: false, details: details)
+        case 503:
+            return GatewayFailure(code: "busy", message: "The Mac gateway is temporarily unavailable or at capacity.", retryable: true, details: details)
+        default:
+            return nil
+        }
     }
 
     private nonisolated static func transportFailure(_ error: Error) -> GatewayFailure {

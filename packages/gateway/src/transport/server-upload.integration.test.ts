@@ -1,9 +1,9 @@
-import { request } from "node:http";
+import { request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { UploadStore } from "../machine/upload-store.js";
 import { GatewayServer } from "./server.js";
 
@@ -55,6 +55,7 @@ async function fixture(maximumBytes = 8): Promise<{
   home: string;
   port: number;
   uploads: ObservableUploadStore;
+  gateway: GatewayServer;
 }> {
   const home = await mkdtemp(join(tmpdir(), "tron-upload-http-"));
   roots.push(home);
@@ -63,7 +64,7 @@ async function fixture(maximumBytes = 8): Promise<{
     host: "127.0.0.1",
     port: 0,
     maxFrameBytes: 64 * 1_024,
-    devices: { authenticateAndAdmit: async (_token: unknown, register: (identity: { id: string }) => unknown) => register({ id: "device" }) } as never,
+    devices: { authenticateAndAdmit: async (_token: unknown, register: (identity: { kind: "device"; deviceId: string }) => unknown) => register({ kind: "device", deviceId: "device" }) } as never,
     uploads,
     sessions: {} as never,
     auth: {} as never,
@@ -74,7 +75,7 @@ async function fixture(maximumBytes = 8): Promise<{
   await gateway.listen();
   const address = (gateway as unknown as { server: { address(): AddressInfo | null } }).server.address();
   if (!address) throw new Error("Gateway did not bind an HTTP address");
-  return { home, port: address.port, uploads };
+  return { home, port: address.port, uploads, gateway };
 }
 
 async function entries(path: string): Promise<string[]> {
@@ -153,6 +154,52 @@ describe("Gateway upload HTTP streaming", () => {
     const id = JSON.parse(response.body).upload.id as string;
     expect(await readFile(join(home, "gateway", "uploads", id, "content.txt"), "utf8")).toBe("12345678");
     expect(await readdir(join(home, "gateway", "upload-bodies"))).toEqual([]);
+  });
+
+  it.each([false, true])("cleans a lost upload receipt without deleting claimed bytes (claimed=%s)", async (claimed) => {
+    const { home, port, uploads, gateway } = await fixture();
+    let published!: () => void;
+    const publish = new Promise<void>(resolve => { published = resolve; });
+    let bodyWritten!: (id: string) => void;
+    const written = new Promise<string>(resolve => { bodyWritten = resolve; });
+    let released!: () => void;
+    const discarded = new Promise<void>(resolve => { released = resolve; });
+    let closed!: () => void;
+    const peerClosed = new Promise<void>(resolve => { closed = resolve; });
+    (gateway as unknown as { server: Server }).server.once("connection", socket => socket.once("close", closed));
+    const save = uploads.saveStream.bind(uploads);
+    const discard = uploads.discard.bind(uploads);
+    vi.spyOn(uploads, "saveStream").mockImplementation(async (...args) => {
+      const uploaded = await save(...args);
+      bodyWritten(uploaded.id);
+      await publish;
+      return uploaded;
+    });
+    vi.spyOn(uploads, "discard").mockImplementation(async id => {
+      try { await discard(id); } finally { released(); }
+    });
+    let outgoing!: ReturnType<typeof request>;
+    const response = uploadRequest(port, 5, request => { outgoing = request; request.end("draft"); });
+    void response.catch(() => {});
+    try {
+      const id = await written;
+      if (claimed) await uploads.materialize([id], "fixture-session");
+      outgoing.destroy();
+      await expect(response).rejects.toBeDefined();
+      await peerClosed;
+      published();
+      let timer!: NodeJS.Timeout;
+      try {
+        await Promise.race([discarded, new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("abandoned staging was not retired")), 2_000);
+        })]);
+      } finally { clearTimeout(timer); }
+      if (claimed) expect(await readFile(join(home, "gateway", "uploads", id, "content.txt"), "utf8")).toBe("draft");
+      else expect(await entries(join(home, "gateway", "uploads"))).not.toContain(id);
+    } finally {
+      published();
+      outgoing.destroy();
+    }
   });
 
   it("discards authenticated unclaimed staging but rejects prompt-owned uploads", async () => {

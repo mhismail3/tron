@@ -23,6 +23,9 @@ test_device_name="${TRON_IOS_TEST_DEVICE_NAME:-Tron iOS Tests}"
 state_file="$run_root/state.env"
 pid_file="$run_root/gateway.pid"
 log_file="$run_root/gateway.log"
+proxy_pid_file="$run_root/proxy.pid"
+proxy_ready="$run_root/proxy-ready.json"
+proxy_script="$repo_root/scripts/ios-gateway-fault-proxy.mjs"
 process_owner="$repo_root/scripts/ios-test-process.py"
 simulator_owner="$repo_root/scripts/ios-test-simulator.py"
 lock_owner="$repo_root/scripts/ios-test-lock.py"
@@ -110,6 +113,28 @@ run_bounded() {
   return 0
 }
 
+proxy_running() {
+  [[ -s "$proxy_pid_file" ]] || return 1
+  local pid command
+  pid="$(<"$proxy_pid_file")"
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+  [[ "$command" == *"node $proxy_script"* ]]
+}
+
+stop_proxy() {
+  if [[ -s "$proxy_pid_file" ]] && kill -0 "$(<"$proxy_pid_file")" 2>/dev/null && ! proxy_running; then
+    die "refusing to signal a non-owned E2E proxy PID"
+  fi
+  if proxy_running; then
+    kill "$(<"$proxy_pid_file")" 2>/dev/null || true
+    for _ in {1..30}; do proxy_running || break; sleep 0.1; done
+    proxy_running && kill -9 "$(<"$proxy_pid_file")" 2>/dev/null || true
+  fi
+  rm -f "$proxy_pid_file" "$proxy_ready"
+}
+
 gateway_running() {
   [[ -s "$pid_file" ]] || return 1
   local pid command
@@ -121,6 +146,7 @@ gateway_running() {
 }
 
 stop_gateway() {
+  stop_proxy
   if [[ -s "$pid_file" ]] && kill -0 "$(<"$pid_file")" 2>/dev/null && ! gateway_running; then
     die "refusing to signal PID $(<"$pid_file"): it is not the owned E2E Gateway"
   fi
@@ -143,9 +169,10 @@ load_state() {
       && "${TRON_E2E_AGENT_DIR:-}" == "$run_root/agent" \
       && "${TRON_E2E_PI_VERSION:-}" == "$(manifest_pi_version)" \
       && "${TRON_E2E_PORT:-}" =~ ^[1-9][0-9]*$ \
-      && -n "${TRON_E2E_CODE:-}" ]] \
+      && -n "${TRON_E2E_CODE:-}" && "${TRON_E2E_PROXY_TOKEN:-}" =~ ^[0-9a-f]{64}$ ]] \
     || die "fixture state does not match the owned E2E paths/identity"
   gateway_running || die "fixture gateway is not running; run '$0 prepare'"
+  proxy_running || die "fixture proxy is not running; run '$0 prepare'"
 }
 
 install_gateway_if_needed() {
@@ -276,18 +303,39 @@ with open(sys.argv[1]) as handle:
 PY
 )"
   pi_version="$(manifest_pi_version)"
+  local proxy_token proxy_pid upstream_port="$port"
+  proxy_token="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
+  TRON_E2E_UPSTREAM_PORT="$upstream_port" TRON_E2E_UPSTREAM_PID="$(<"$pid_file")" TRON_E2E_PROXY_TOKEN="$proxy_token" TRON_E2E_PROXY_READY="$proxy_ready" \
+    nohup node "$proxy_script" >"$run_root/proxy.log" 2>&1 </dev/null &
+  proxy_pid="$!"
+  echo "$proxy_pid" >"$proxy_pid_file"
+  for _ in {1..100}; do
+    [[ -s "$proxy_ready" ]] && break
+    kill -0 "$proxy_pid" 2>/dev/null || { stop_gateway; die "owned fault proxy exited"; }
+    sleep 0.1
+  done
+  [[ -s "$proxy_ready" ]] || { stop_gateway; die "owned fault proxy did not become ready"; }
+  port="$(python3 - "$proxy_ready" "$proxy_pid" <<'PY'
+import json,sys
+with open(sys.argv[1]) as handle: value=json.load(handle)
+assert value['pid']==int(sys.argv[2]) and isinstance(value['port'],int) and 1024<=value['port']<=65535
+print(value['port'])
+PY
+)"
+  proxy_running || { stop_gateway; die "proxy command ownership changed"; }
 
   {
     printf 'TRON_E2E_PORT=%q\n' "$port"
     printf 'TRON_E2E_CODE=%q\n' "$code"
     printf 'TRON_E2E_WORKSPACE=%q\n' "$workspace"
     printf 'TRON_E2E_PI_VERSION=%q\n' "$pi_version"
+    printf 'TRON_E2E_PROXY_TOKEN=%q\n' "$proxy_token"
     printf 'TRON_E2E_GATEWAY_HOME=%q\n' "$gateway_home"
     printf 'TRON_E2E_TRON_HOME=%q\n' "$tron_home"
     printf 'TRON_E2E_AGENT_DIR=%q\n' "$agent_dir"
   } >"$state_file"
   chmod 600 "$state_file"
-  echo "Gateway fixture ready on 127.0.0.1:$port (pid $(<"$pid_file"))"
+  echo "Gateway fixture upstream 127.0.0.1:$upstream_port (pid $(<"$pid_file")); fault proxy 127.0.0.1:$port (pid $proxy_pid)"
 }
 
 find_xctestrun() {
@@ -301,7 +349,7 @@ find_xctestrun() {
 patch_xctestrun() {
   local xctestrun="$1"
   python3 "$repo_root/scripts/patch-ios-gateway-e2e-xctestrun.py" \
-    "$xctestrun" "$TRON_E2E_PORT" "$TRON_E2E_CODE" "$TRON_E2E_WORKSPACE" "$TRON_E2E_PI_VERSION"
+    "$xctestrun" "$TRON_E2E_PORT" "$TRON_E2E_CODE" "$TRON_E2E_WORKSPACE" "$TRON_E2E_PI_VERSION" "$TRON_E2E_PROXY_TOKEN"
   printf '%s\n' "$xctestrun" >"$run_root/xctestrun-path"
 }
 
@@ -367,6 +415,20 @@ run_test() {
     status=$?
   fi
   ln -sfn "$attempt_dir" "$run_root/results/latest"
+  if ((status == 0)); then
+    # A missing fixture must not turn XCTest's conditional skip into a green
+    # cross-layer qualification receipt.
+    if ! xcrun xcresulttool get test-results summary --path "$result_bundle" >"$attempt_dir/summary.json" \
+      || ! python3 - "$attempt_dir/summary.json" <<'PY'
+import json,sys
+with open(sys.argv[1]) as handle: result=json.load(handle)
+assert result.get('passedTests')==1 and result.get('failedTests')==0 and result.get('skippedTests')==0 and result.get('totalTestCount')==1, 'boundary case did not execute and pass exactly once'
+PY
+    then
+      echo "error: isolated boundary test was skipped, missing, or failed" >&2
+      status=65
+    fi
+  fi
   echo "Focused E2E run completed in $((SECONDS - started))s (status $status); artifacts: $attempt_dir"
   if ((status != 0)) && [[ -d "$result_bundle" ]]; then
     xcrun xcresulttool get test-results tests --path "$result_bundle" 2>/dev/null \
@@ -387,6 +449,7 @@ walk(document)' 2>/dev/null || true
 
 show_status() {
   if gateway_running; then echo "Gateway: running (pid $(<"$pid_file"))"; else echo "Gateway: stopped"; fi
+  if proxy_running; then echo "Fault proxy: running (pid $(<"$proxy_pid_file"))"; else echo "Fault proxy: stopped"; fi
   [[ -s "$state_file" ]] && { source "$state_file"; echo "Endpoint: 127.0.0.1:$TRON_E2E_PORT"; echo "Workspace: $TRON_E2E_WORKSPACE"; }
   local xctestrun="$(find_xctestrun)"
   [[ -n "$xctestrun" ]] && echo "Test products: $xctestrun" || echo "Test products: not built"

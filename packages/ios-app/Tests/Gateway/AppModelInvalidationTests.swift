@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import Testing
 @testable import TronMobile
 
@@ -229,8 +230,10 @@ struct AppModelInvalidationTests {
                 let request = try await requestObject(at: index, on: socket)
                 #expect(request["params"]?.objectValue?["sessionId"] == .string("session-a"))
             }
+            let authenticatedPublication = observeProviderPublication(model, target: session)
             try await respondToCatalogRequests(at: 10...11, on: socket, marker: "authenticated")
             await completion.value
+            try await awaitPublication(authenticatedPublication)
             #expect(model.providerCatalog(for: session)?.providers.first?.id == "authenticated")
 
             await model.handle(GatewayEvent(
@@ -271,9 +274,27 @@ struct AppModelInvalidationTests {
                 let request = try await requestObject(at: index, on: socket)
                 #expect(request["params"]?.objectValue?["sessionId"] == .string("session-a"))
             }
+            let completionPublication = observeProviderPublication(model, target: session)
             try await respondToCatalogRequests(at: 14...15, on: socket, marker: "after-failed-cancel")
             await completionAfterFailedCancel.value
+            try await awaitPublication(completionPublication)
             #expect(model.providerCatalog(for: session)?.providers.first?.id == "after-failed-cancel")
+        }
+    }
+
+    private func observeProviderPublication(_ model: AppModel, target: ProviderCatalogTarget) -> AsyncStream<Void> {
+        let signal = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        withObservationTracking { _ = model.providerCatalog(for: target) } onChange: {
+            signal.continuation.yield(())
+            signal.continuation.finish()
+        }
+        return signal.stream
+    }
+
+    private func awaitPublication(_ stream: AsyncStream<Void>) async throws {
+        try await withTestWatchdog {
+            var iterator = stream.makeAsyncIterator()
+            guard await iterator.next() != nil else { throw CancellationError() }
         }
     }
 

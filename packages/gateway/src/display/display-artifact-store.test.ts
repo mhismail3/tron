@@ -1,7 +1,7 @@
-import { chmod, mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { DisplayArtifactStore } from "./display-artifact-store.js";
 
 async function collect(stream: NodeJS.ReadableStream): Promise<Buffer> {
@@ -35,6 +35,72 @@ async function fixture() {
 }
 
 describe("DisplayArtifactStore", () => {
+  it("reserves reader capacity before asynchronous validation and releases failed acquisitions", async () => {
+    const value = await fixture();
+    await writeFile(join(value.workspace, "read.txt"), "fixture");
+    const artifact = await value.store.ingest(value.workspace, "read.txt", "session-a");
+    const io = value.store as unknown as { verify(digest: string, size: number, path: string): Promise<void> };
+    const verify = io.verify.bind(value.store);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const blocked = vi.spyOn(io, "verify").mockImplementation(async (...args) => { await gate; await verify(...args); });
+    const pending = Array.from({ length: 5 }, () => value.store.acquire(artifact.id, "session-a"));
+    for (const result of pending) void result.catch(() => {});
+    try {
+      expect(blocked).toHaveBeenCalledTimes(4);
+      release();
+      const settled = await Promise.allSettled(pending);
+      expect(settled.filter(result => result.status === "fulfilled")).toHaveLength(4);
+      expect(settled[4]).toMatchObject({ status: "rejected", reason: { code: "busy" } });
+      for (const result of settled) if (result.status === "fulfilled") await result.value.release();
+      blocked.mockRejectedValueOnce(new Error("fixture validation failure"));
+      await expect(value.store.acquire(artifact.id, "session-a")).rejects.toThrow("fixture validation failure");
+      const next = await value.store.acquire(artifact.id, "session-a");
+      expect(await collect(next.stream)).toEqual(Buffer.from("fixture"));
+      await next.release();
+    } finally {
+      release();
+      const settled = await Promise.allSettled(pending);
+      for (const result of settled) if (result.status === "fulfilled") await result.value.release();
+      blocked.mockRestore();
+      await rm(value.home, { recursive: true, force: true });
+    }
+  });
+  it.each(["revoke", "reconcile", "remove", "maintain"])("%s revokes future reads while an admitted reader finishes and releases storage", async operation => {
+    const value = await fixture();
+    await writeFile(join(value.workspace, "read.txt"), "fixture");
+    const artifact = await value.store.ingest(value.workspace, "read.txt", "session-a");
+    const io = value.store as unknown as { verify(digest: string, size: number, path: string): Promise<void> };
+    const verify = io.verify.bind(value.store);
+    let resume!: () => void;
+    const gate = new Promise<void>(resolve => { resume = resolve; });
+    const blocked = vi.spyOn(io, "verify").mockImplementation(async (...args) => { await gate; await verify(...args); });
+    const pending = value.store.acquire(artifact.id, "session-a");
+    try {
+      expect(blocked).toHaveBeenCalledOnce();
+      if (operation === "revoke") await value.store.revoke(artifact.id, "session-a");
+      else if (operation === "reconcile") await value.store.reconcileSession("session-a", new Set());
+      else if (operation === "remove") await value.store.removeSession("session-a");
+      else await value.store.maintain(new Set());
+      expect(value.store.hasOwner(artifact.id, "session-a")).toBe(false);
+      await expect(value.store.acquire(artifact.id, "session-a")).rejects.toMatchObject({ code: "not_found" });
+      resume();
+      const lease = await pending;
+      expect(await collect(lease.stream)).toEqual(Buffer.from("fixture"));
+      await lease.release();
+      await lease.release();
+      expect(await readdir(join(value.home, "gateway/display-artifacts/artifacts"))).toEqual([]);
+      // Capacity and durable authorization do not survive the last reader.
+      const restarted = new DisplayArtifactStore(value.home, { minimumFreeBytes: 0 });
+      await restarted.initialize(new Set(["session-a"]));
+      expect(restarted.hasOwner(artifact.id, "session-a")).toBe(false);
+    } finally {
+      resume();
+      await (await pending).release();
+      blocked.mockRestore();
+      await rm(value.home, { recursive: true, force: true });
+    }
+  });
   it("snapshots immutable bytes, authorizes session owners, and serves exact ranges", async () => {
     const value = await fixture();
     const data = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from("payload")]);

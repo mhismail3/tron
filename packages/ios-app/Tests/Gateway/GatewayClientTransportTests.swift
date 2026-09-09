@@ -1200,6 +1200,60 @@ struct GatewayClientTransportTests {
         }
     }
 
+    @Test("late metadata from a retired socket cannot disconnect or relabel its replacement")
+    func staleMetadataIsIsolated() async throws {
+        try await withTestWatchdog {
+            let metadata = TestReadGate()
+            let oldSocket = ScriptedGatewaySocket(metadata: .init(closeCode: 1013, httpStatusCode: 101), metadataGate: metadata)
+            let replacement = ScriptedGatewaySocket()
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: [oldSocket, replacement]).factory)
+            do {
+                await oldSocket.enqueue(helloFrame())
+                _ = try await client.connect(profile: profile, token: "old")
+                let oldID = await client.activeConnectionID()
+                await oldSocket.failPendingReceivers(URLError(.networkConnectionLost))
+                try await metadata.waitForEntry()
+                await replacement.enqueue(helloFrame())
+                _ = try await client.connect(profile: profile, token: "new")
+                let replacementID = await client.activeConnectionID()
+                #expect(replacementID != oldID)
+                await metadata.release()
+                try await oldSocket.waitUntilClosed()
+                var iterator = client.events.makeAsyncIterator()
+                await replacement.enqueue(eventFrame(topic: "current.changed", payload: .number(2)))
+                #expect(await iterator.next()?.event.topic == "current.changed")
+                #expect(await client.activeConnectionID() == replacementID)
+                let diagnostics = await client.diagnostics()
+                #expect(diagnostics.first(where: { $0.closeCode == 1013 })?.connectionID == oldID)
+                await client.close()
+            } catch {
+                await metadata.release()
+                await oldSocket.close()
+                await client.close()
+                throw error
+            }
+        }
+    }
+
+    @Test("actual upgrade status distinguishes authentication, permission and capacity", arguments: [401, 403, 503])
+    func upgradeStatusClassification(status: Int) async throws {
+        try await withTestWatchdog {
+            let socket = ScriptedGatewaySocket(metadata: .init(closeCode: nil, httpStatusCode: status))
+            await socket.failNextSend(URLError(.badServerResponse))
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+            do {
+                _ = try await client.connect(profile: profile, token: "fixture")
+                Issue.record("rejected upgrade unexpectedly connected")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == [401: "unauthenticated", 403: "forbidden", 503: "busy"][status])
+                #expect(failure.retryable == (status == 503))
+            }
+            let diagnostics = await client.diagnostics()
+            #expect(diagnostics.first(where: { $0.httpStatusCode == status })?.platformCode == URLError.badServerResponse.rawValue)
+            await client.close()
+        }
+    }
+
     @Test("late receive failure from a replaced receiver cannot disconnect the replacement")
     func staleDisconnectIsDiscarded() async throws {
         try await withTestWatchdog {
@@ -1383,6 +1437,32 @@ struct GatewayClientTransportTests {
         ]
         if let nextCursor { page["nextCursor"] = .string(nextCursor) }
         return .object(page)
+    }
+
+    @Test("a pong after suspension starts, rather than completes, a healthy proof interval")
+    func suspensionDoesNotInventStableProof() async throws {
+        try await withTestWatchdog {
+            let clock = ManualClock()
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory, clock: clock.clock)
+            do {
+                await socket.enqueue(helloFrame())
+                _ = try await client.connect(profile: profile, token: "fixture")
+                let epoch = try #require(await client.activeConnectionID())
+                try await clock.waitUntilSleeping(count: 1, duration: GatewayLivenessPolicy.probeInterval)
+                clock.advance(by: .seconds(60))
+                try await socket.waitUntilPingInvoked(count: 1)
+                try await clock.waitUntilSleeping(count: 1, duration: GatewayLivenessPolicy.probeInterval)
+                #expect(await client.liveEvidence(connectionID: epoch)?.consecutiveProofIntervals == 0)
+                for count in 2...4 {
+                    clock.advance(by: GatewayLivenessPolicy.probeInterval)
+                    try await socket.waitUntilPingInvoked(count: count)
+                    try await clock.waitUntilSleeping(count: 1, duration: GatewayLivenessPolicy.probeInterval)
+                    #expect(await client.liveEvidence(connectionID: epoch)?.hasStableProof == (count == 4))
+                }
+                await client.close()
+            } catch { await client.close(); throw error }
+        }
     }
 
     @Test("successful pong advances progress without an application request")

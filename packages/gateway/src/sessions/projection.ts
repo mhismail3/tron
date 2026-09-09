@@ -1660,9 +1660,9 @@ export function projectTranscript(
   toolLabels?: ReadonlyMap<string, string>,
   bashMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
 ): TranscriptItem[] {
-  const { entries, contextDelivery, toolSegmentIDs } = projectableTranscriptEntries(manager);
+  const { branch, entries, contextDelivery, toolSegmentIDs } = projectableTranscriptEntries(manager);
   const invocationValues = invocationProjection(invocationReceipts(
-    manager.getBranch(),
+    branch,
     manager.getSessionId?.(),
   ));
   const invocationStates = new Map(invocationValues.map((value) => [value.invocationId, value.lifecycle]));
@@ -1719,8 +1719,10 @@ export function projectTranscriptPage(
     manager,
     presentationIDs,
   );
+  // Reuse this operation's canonical branch cut for receipts as well as rows.
+  // Reacquiring it repeats the pinned SDK's full ancestry walk on every page.
   const invocationValues = invocationProjection(invocationReceipts(
-    manager.getBranch(),
+    branch,
     manager.getSessionId?.(),
   ));
   const invocationStates = new Map(invocationValues.map((value) => [value.invocationId, value.lifecycle]));

@@ -144,6 +144,38 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    @Test("brief recovery preserves rendered Chat identity and native geometry")
+    func briefRecoveryPreservesRenderedChat() async throws {
+        try await withTestWatchdog(timeout: .seconds(20)) {
+            for (seed, encodedBytes) in [(1_240, 10_000), (1_241, 120_000)] {
+                let initial = try SessionScenarioBuilder(seed: seed).openingTail(targetEncodedBytes: encodedBytes)
+                try await withHarness(snapshot: initial) { harness in
+                    let ready = try await harness.recorder.waitUntil {
+                        $0.observation.isReady && !$0.nativeRows.filter(\.isVisible).isEmpty
+                    }
+                    let visibleBefore = ready.nativeRows.filter(\.isVisible)
+                    let baselineIDs = visibleBefore.map { ($0.physicalID, $0.instance) }
+                    let baselineTailError = try harness.nativeTranscriptSignedTailError()
+                    var recovered = initial
+                    recovered.revision += 1
+                    recovered.eventSequence += 1
+                    recovered.phase = .idle
+                    harness.replaceAuthoritativeSnapshot(recovered)
+                    let resumed = try await harness.recorder.waitUntil {
+                        $0.observation.projectionInstallCount > ready.observation.projectionInstallCount
+                    }
+                    for (physicalID, instance) in baselineIDs {
+                        let rows = resumed.nativeRows.filter { $0.isVisible && $0.physicalID == physicalID }
+                        #expect(rows.count == 1)
+                        #expect(rows.first?.instance == instance)
+                    }
+                    #expect(abs(try harness.nativeTranscriptSignedTailError() - baselineTailError) <= 16)
+                    #expect(!resumed.nativeRows.isEmpty)
+                }
+            }
+        }
+    }
+
     @Test("short transcript appends remain above the real composer through overflow")
     func shortTranscriptAppendsClearComposer() async throws {
         try await withTestWatchdog(timeout: .seconds(15)) {

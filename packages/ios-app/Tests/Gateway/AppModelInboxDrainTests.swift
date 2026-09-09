@@ -90,22 +90,22 @@ struct AppModelInboxDrainTests {
                         throw error
                     }
                 }
-                try await replacement.waitUntilSent(count: 2)
-                let replacementFrames = await replacement.sentFrames()
-                let replacementCatalog = try JSONDecoder.gateway.decode(JSONValue.self, from: replacementFrames[1]).objectValue
-                #expect(replacementCatalog?["method"]?.stringValue == "session.list")
+                // Both optional reads may start first; neither is a readiness
+                // barrier, and responses must be correlated by method/ID.
+                guard let replacementResult = await completion.next() else { throw CancellationError() }
+                try replacementResult.get()
+                try await foreground?.value
+                try await replacement.waitUntilSent(count: 3)
+                let replacementRequests = try await replacement.sentFrames().dropFirst().map {
+                    try JSONDecoder.gateway.decode(JSONValue.self, from: $0).objectValue
+                }
+                #expect(Set(replacementRequests.compactMap { $0?["method"]?.stringValue }) == Set(["session.list", "notification.inbox.list"]))
+                let replacementCatalog = try #require(replacementRequests.first { $0?["method"]?.stringValue == "session.list" })
                 let replacementRequestID = try #require(replacementCatalog?["id"]?.stringValue)
                 await replacement.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
                     "type": .string("response"), "id": .string(replacementRequestID), "ok": .bool(true),
                     "result": .object(["sessions": .array([]), "listRevision": .number(2)])
                 ])))
-                guard let replacementResult = await completion.next() else { throw CancellationError() }
-                try replacementResult.get()
-                try await foreground?.value
-                try await replacement.waitUntilSent(count: 3)
-                let replacementRequests = await replacement.sentFrames()
-                let inbox = try JSONDecoder.gateway.decode(JSONValue.self, from: replacementRequests[2]).objectValue
-                #expect(inbox?["method"]?.stringValue == "notification.inbox.list")
                 #expect(model.notificationInbox.isLoading)
                 await model.teardown()
                 await flight?.value

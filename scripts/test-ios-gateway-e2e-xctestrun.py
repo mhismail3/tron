@@ -38,7 +38,7 @@ class XcodeTestRunPatchTests(unittest.TestCase):
             with path.open("wb") as handle:
                 plistlib.dump(value, handle)
             result = subprocess.run(
-                [str(HELPER), str(path), "9848", "code", "/tmp/workspace", "fixture-version"],
+                [str(HELPER), str(path), "9848", "code", "/tmp/workspace", "fixture-version", "fixture-control-token"],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -58,6 +58,7 @@ class XcodeTestRunPatchTests(unittest.TestCase):
             "TRON_E2E_CODE": "code",
             "TRON_E2E_WORKSPACE": "/tmp/workspace",
             "TRON_E2E_PI_VERSION": "fixture-version",
+            "TRON_E2E_PROXY_TOKEN": "fixture-control-token",
         }
         self.assertEqual(patched_unit["EnvironmentVariables"], {"PRESERVED": "host", **expected})
         self.assertEqual(patched_unit["UnrelatedMetadata"], {"preserved": True})

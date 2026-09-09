@@ -191,12 +191,14 @@ final class SettingsLayoutStyleTests: XCTestCase {
                 // Exercise the real successful-foreground boundary on a live
                 // transport; epoch replacement itself is owned by lifecycle tests.
                 let reconciliation = model.becameActive()
-                let catalog = try await request(socket, count: 3)
-                XCTAssertEqual(catalog.method, "session.list")
-                await socket.enqueue(try reply(catalog.id, .object(["sessions": .array([]), "listRevision": .number(1)])))
                 await reconciliation?.value
-                let refreshed = try await request(socket, count: 4)
-                XCTAssertEqual(refreshed.method, "packages.list", "Foreground must re-read the visible page without tapping Retry")
+                // Catalog and visible settings reads have independent owners.
+                // Respond by method, not by their incidental send order.
+                let requests = [try await request(socket, count: 3), try await request(socket, count: 4)]
+                XCTAssertEqual(Set(requests.map(\.method)), Set(["session.list", "packages.list"]))
+                let catalog = try XCTUnwrap(requests.first { $0.method == "session.list" })
+                let refreshed = try XCTUnwrap(requests.first { $0.method == "packages.list" }, "Foreground must re-read the visible page without tapping Retry")
+                await socket.enqueue(try reply(catalog.id, .object(["sessions": .array([]), "listRevision": .number(1)])))
                 await socket.enqueue(try reply(refreshed.id, .object(["packages": .array([]), "resources": .object([
                     "extensions": .array([]), "skills": .array([]), "prompts": .array([]), "themes": .array([])
                 ])])))

@@ -58,6 +58,94 @@ struct GatewayDiagnosticsServiceTests {
         )])
     }
 
+    @Test("persisted diagnostics retain the first fault and redact private transport content")
+    func persistedDiagnosticsRetainFirstFault() async throws {
+        let suite = "GatewayDiagnosticsRetentionTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        let store = IOSClientDiagnosticStore(defaults: defaults)
+        let now = Date.now
+        let records = (0..<120).map { index in
+            let timestamp = GatewayTimestamp.preciseString(from: now.addingTimeInterval(TimeInterval(index - 119)))
+            return GatewayProfileLogRecord(
+                profileID: "profile:ios-client",
+                profileLabel: "private profile label",
+                record: GatewayLogRecord(
+                    timestamp: timestamp,
+                    level: index == 0 ? "warning" : "info",
+                    message: index == 0 ? "first https://private.example/path token=secret" : "routine-\(index)",
+                    event: "gateway.connection",
+                    source: "ios-client"
+                ), incidentID: "client:attempt"
+            )
+        }
+        await store.save(records)
+        let retained = await store.load(now: now.addingTimeInterval(1))
+        #expect(retained.count <= IOSClientDiagnosticStore.maximumRecords)
+        #expect(retained.contains { $0.record.message.contains("first") })
+        #expect(retained.allSatisfy { !$0.record.message.contains("private.example") && !$0.record.message.contains("secret") })
+        #expect(retained.allSatisfy { $0.profileLabel == "iOS client" })
+    }
+
+    @Test("diagnostic reservations stay bounded while the newest success remains retained")
+    func diagnosticReservationsStayBounded() async throws {
+        let suite = "GatewayDiagnosticsReservationTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        let store = IOSClientDiagnosticStore(defaults: defaults)
+        let now = Date.now
+        let records = (0..<140).map { index in
+            let timestamp = GatewayTimestamp.preciseString(from: now.addingTimeInterval(TimeInterval(index - 139)))
+            return GatewayProfileLogRecord(
+                profileID: "profile-\(index % 12):ios-client",
+                profileLabel: "profile",
+                record: GatewayLogRecord(
+                    timestamp: timestamp,
+                    level: index == 139 ? "info" : "warning",
+                    message: index == 139 ? "newest-success" : "fault-\(index)",
+                    event: ["gateway.connection", "gateway.lifecycle", "gateway.client-work"][index % 3],
+                    source: "ios-client"
+                ), incidentID: "attempt-\(index % 12)"
+            )
+        }
+        await store.save(records)
+        let retained = await store.load(now: now.addingTimeInterval(1))
+        #expect(retained.count <= IOSClientDiagnosticStore.maximumRecords)
+        #expect(retained.contains { $0.record.message == "newest-success" })
+        let oldestReservations = retained.filter { record in
+            guard record.record.message.hasPrefix("fault-"),
+                  let index = Int(record.record.message.dropFirst("fault-".count)) else { return false }
+            return index < 50
+        }
+        #expect(oldestReservations.count == 8)
+        #expect(Set(oldestReservations.map(\.record.message)) == Set((0..<8).map { "fault-\($0)" }))
+    }
+
+    @Test("a new incident retains its own first cause through count and byte pressure")
+    func distinctIncidentsRetainFirstCause() async throws {
+        let suite = "GatewayIncidentBoundaryTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let store = IOSClientDiagnosticStore(defaults: defaults)
+        let now = Date.now
+        let records: [GatewayProfileLogRecord] = (0..<250).map { index in
+            let timestamp = GatewayTimestamp.preciseString(from: now.addingTimeInterval(Double(index - 250)))
+            let level = index == 0 || index == 50 ? "warning" : "info"
+            let message: String
+            if index == 0 { message = "old-first" }
+            else if index == 50 { message = "new-first" }
+            else { message = "routine-\(index) " + String(repeating: "x", count: 1_400) }
+            let record = GatewayLogRecord(timestamp: timestamp, level: level, message: message,
+                                          event: "gateway.connection", source: "ios-client")
+            return GatewayProfileLogRecord(profileID: "profile:ios-client", profileLabel: "fixture",
+                record: record, incidentID: index < 50 ? "client:old-attempt" : "client:new-attempt")
+        }
+        await store.save(records, now: now)
+        let result = await store.load(now: now)
+        #expect(result.contains { $0.record.message == "new-first" && $0.incidentID == "client:new-attempt" })
+        #expect(result.contains { $0.record.message == "old-first" })
+        #expect(result.contains { $0.record.message.hasPrefix("routine-249 ") })
+        #expect(try JSONEncoder.gateway.encode(result).count <= IOSClientDiagnosticStore.maximumBytes)
+    }
+
     @Test("profile-qualified logs keep identical records distinct")
     func profileQualifiedLogs() {
         let record = GatewayLogRecord(timestamp: "2026-08-16T00:00:00Z", level: "info", message: "ready")
@@ -240,6 +328,43 @@ struct GatewayDiagnosticsServiceTests {
         #expect(secondRecord.record.message.contains("reason=event_overflow"))
         #expect(secondRecord.record.message.contains("overflowCount=1024"))
         #expect(firstRecord.record.message.contains("platformCode=-1001"))
+    }
+
+    @Test("close and HTTP metadata remain separate numeric fields")
+    func transportMetadataRemainsTypedAndSeparate() {
+        let close = GatewayConnectionDiagnostic(
+            sequence: 21,
+            timestamp: "2026-08-16T01:00:00Z",
+            profileID: "stable",
+            profileLabel: "Stable",
+            stage: .transport,
+            outcome: .failure,
+            durationMilliseconds: 1,
+            reason: .closed,
+            platformCode: nil,
+            closeCode: 1001,
+            httpStatusCode: nil
+        )
+        let http = GatewayConnectionDiagnostic(
+            sequence: 22,
+            timestamp: "2026-08-16T01:00:01Z",
+            profileID: "stable",
+            profileLabel: "Stable",
+            stage: .helloReceive,
+            outcome: .failure,
+            durationMilliseconds: 1,
+            reason: .timeout,
+            platformCode: nil,
+            closeCode: nil,
+            httpStatusCode: 503
+        )
+        let closeMessage = IOSClientDiagnosticBuffer.logRecord(close).record.message
+        let httpMessage = IOSClientDiagnosticBuffer.logRecord(http).record.message
+        #expect(closeMessage.contains("closeCode=1001"))
+        #expect(!closeMessage.contains("httpStatusCode="))
+        #expect(httpMessage.contains("httpStatusCode=503"))
+        #expect(!httpMessage.contains("closeCode="))
+        #expect(!httpMessage.contains("platformCode=503"))
     }
 
     @Test("frame decode-limit diagnostics preserve typed bounds and privacy through export")

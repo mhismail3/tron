@@ -1,12 +1,15 @@
 import Foundation
 
 enum DashboardCatalogRetryPolicy {
+    static let maximumFailedAttempts = 3
+
     nonisolated static func shouldRetry(
         isDirty: Bool,
         isCurrent: Bool,
-        transportFailed: Bool
+        transportFailed: Bool,
+        failedAttempts: Int = 0
     ) -> Bool {
-        isDirty && isCurrent && !transportFailed
+        isDirty && isCurrent && !transportFailed && failedAttempts < maximumFailedAttempts
     }
 }
 
@@ -41,27 +44,34 @@ final class DashboardGatewayConnectionPool {
         var task: Task<Void, Never>?
         var refreshTask: Task<Void, Never>?
         var reconnectTask: Task<Void, Never>?
+        var reconnectWaiting: Bool
+        var maintenanceWatchdog: Task<Void, Never>?
         var generation: Int
         var refreshInvalidationGeneration: Int
         var refreshSatisfiedGeneration: Int
         var refreshRequestGeneration: Int
         var refreshRetryAttempt: Int
+        var refreshFailedAttempts: Int
     }
 
     weak var delegate: (any DashboardGatewayConnectionPoolDelegate)?
     private let clientFactory: @MainActor () -> GatewayClient
     private let clock: MonotonicClock
     private var entries: [String: Entry] = [:]
-    private var recoveryBudgets: [String: GatewayRecoveryBudget] = [:]
+    private let recoveryBudgets: GatewayRecoveryAllowanceStore
     private var generation = 0
-    private var retirementTask: Task<Void, Never>?
+    private var retirementTasks: [String: (generation: Int, task: Task<Void, Never>)] = [:]
+    private var maintenanceDeadlines: [String: ContinuousClock.Instant] = [:]
+    private static let maintenanceRecoveryLimit: Duration = .seconds(90)
 
     init(
         clientFactory: @escaping @MainActor () -> GatewayClient = { GatewayClient() },
-        clock: MonotonicClock = .continuous
+        clock: MonotonicClock = .continuous,
+        recoveryBudgets: GatewayRecoveryAllowanceStore = GatewayRecoveryAllowanceStore()
     ) {
         self.clientFactory = clientFactory
         self.clock = clock
+        self.recoveryBudgets = recoveryBudgets
     }
 
     func reconcile(
@@ -71,7 +81,8 @@ final class DashboardGatewayConnectionPool {
     ) {
         generation &+= 1
         let profileIDs = Set(profiles.map(\.id))
-        recoveryBudgets = recoveryBudgets.filter { profileIDs.contains($0.key) }
+        recoveryBudgets.prune(keeping: profileIDs)
+        maintenanceDeadlines = maintenanceDeadlines.filter { profileIDs.contains($0.key) }
         let selectedProfile = profiles.first(where: { $0.id == selectedProfileID })
         let admittedIDs = Self.admittedProfileIDs(
             profiles,
@@ -104,17 +115,11 @@ final class DashboardGatewayConnectionPool {
 
     func retire() {
         generation &+= 1
-        let clients = Array(entries.values).map(\.client)
-        for profileID in Array(entries.keys) { stop(profileID: profileID, close: false) }
-        let previous = retirementTask
-        retirementTask = Task { @MainActor in
-            await previous?.value
-            for client in clients { await client.close() }
-        }
+        for profileID in Array(entries.keys) { stop(profileID: profileID) }
     }
 
     func waitForRetirement() async {
-        await retirementTask?.value
+        for retirement in Array(retirementTasks.values) { await retirement.task.value }
     }
 
     func state(for profileID: String) -> DashboardServerConnectionState? {
@@ -238,6 +243,7 @@ final class DashboardGatewayConnectionPool {
     private func start(profile: GatewayProfile, token: String?, generation: Int) {
         guard let token else { return }
         let client = clientFactory()
+        let retirementBarrier = retirementTasks[profile.id]?.task
         entries[profile.id] = Entry(
             profile: profile,
             token: token,
@@ -249,19 +255,31 @@ final class DashboardGatewayConnectionPool {
             task: nil,
             refreshTask: nil,
             reconnectTask: nil,
+            reconnectWaiting: false,
+            maintenanceWatchdog: nil,
             generation: generation,
             refreshInvalidationGeneration: 0,
             refreshSatisfiedGeneration: 0,
             refreshRequestGeneration: 0,
-            refreshRetryAttempt: 0
+            refreshRetryAttempt: 0,
+            refreshFailedAttempts: 0
         )
-        guard recoveryBudgets[profile.id, default: GatewayRecoveryBudget()].beginAutomaticAttempt() else {
-            entries[profile.id]?.state = recoveryBudgets[profile.id]?.firstFailureCode == "identity_mismatch" ? .identityMismatch : .offline
+        if recoveryBudgets[profile.id]?.isStopped == true {
+            entries[profile.id]?.state = .offline
             publish(profileID: profile.id)
             return
         }
         publish(profileID: profile.id)
         let task = Task { @MainActor [weak self] in
+            await retirementBarrier?.value
+            guard let self,
+                  !Task.isCancelled,
+                  self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
+            guard self.recoveryBudgets[profile.id, default: GatewayRecoveryBudget()].beginAutomaticAttempt() else {
+                self.entries[profile.id]?.state = self.recoveryBudgets[profile.id]?.firstFailureCode == "identity_mismatch" ? .identityMismatch : .offline
+                self.publish(profileID: profile.id)
+                return
+            }
             do {
                 let info = try await client.connect(profile: profile, token: token)
                 guard Self.admitsIdentity(info, for: profile) else {
@@ -273,7 +291,7 @@ final class DashboardGatewayConnectionPool {
                     )
                 }
                 let connectionID = await client.activeConnectionID()
-                guard let self, let connectionID, !Task.isCancelled,
+                guard let connectionID, !Task.isCancelled,
                       self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
                 self.recoveryBudgets[profile.id]?.markConnected(at: self.clock.now())
                 self.entries[profile.id]?.connectionID = connectionID
@@ -288,7 +306,7 @@ final class DashboardGatewayConnectionPool {
                 for await delivery in client.events {
                     guard !Task.isCancelled,
                           self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
-                    self.handle(delivery, profileID: profile.id, generation: generation)
+                    await self.handle(delivery, profileID: profile.id, generation: generation)
                 }
                 guard !Task.isCancelled,
                       self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
@@ -302,8 +320,7 @@ final class DashboardGatewayConnectionPool {
                 return
             } catch let failure as GatewayFailure where GatewayRecoveryFailurePolicy.isNonRetryable(failure) {
                 await client.close()
-                guard let self,
-                      self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
+                guard self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
                 self.recoveryBudgets[profile.id, default: GatewayRecoveryBudget()].markNonRetryableFailure(
                     code: failure.code
                 )
@@ -311,8 +328,7 @@ final class DashboardGatewayConnectionPool {
                 self.entries[profile.id]?.state = failure.code == "identity_mismatch" ? .identityMismatch : .offline
                 self.publish(profileID: profile.id)
             } catch {
-                guard let self,
-                      !Task.isCancelled,
+                guard !Task.isCancelled,
                       self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
                 self.recoveryBudgets[profile.id, default: GatewayRecoveryBudget()].markTransportFailure(
                     code: GatewayDiagnosticFailure.code(error),
@@ -331,16 +347,42 @@ final class DashboardGatewayConnectionPool {
 
     private func stop(profileID: String, close: Bool = true) {
         guard let entry = entries.removeValue(forKey: profileID) else { return }
-        recoveryBudgets[profileID]?.markConnectionRetired(at: clock.now())
+        maintenanceDeadlines[profileID] = nil
         entry.task?.cancel()
         entry.refreshTask?.cancel()
         entry.reconnectTask?.cancel()
+        entry.maintenanceWatchdog?.cancel()
         delegate?.dashboardPoolDidUpdate(
             profileID: profileID,
             sessions: entry.catalog.sessions,
             state: .offline
         )
-        if close { Task { await entry.client.close() } }
+        if close {
+            let previous = retirementTasks[profileID]?.task
+            let task = Task { @MainActor [weak self] in
+                await previous?.value
+                let evidence: GatewayLiveEvidence?
+                if let connectionID = entry.connectionID {
+                    evidence = await entry.client.liveEvidence(connectionID: connectionID)
+                } else {
+                    evidence = nil
+                }
+                await entry.client.close()
+                guard let self else { return }
+                if entry.connectionID != nil {
+                    self.recoveryBudgets[profileID]?.markConnectionRetired(
+                        at: self.clock.now(),
+                        stableProof: evidence?.hasStableProof == true
+                    )
+                }
+                // A predecessor must not erase the successor that joined it.
+                // Replacement admission observes the tail of this exact chain.
+                if self.retirementTasks[profileID]?.generation == entry.generation {
+                    self.retirementTasks[profileID] = nil
+                }
+            }
+            retirementTasks[profileID] = (entry.generation, task)
+        }
         // Retiring a background transport is not deletion of its bounded
         // dashboard projection. The AppModel keeps the last-known bucket while
         // this profile reconnects, is blocked, or is temporarily unadmitted.
@@ -355,7 +397,7 @@ final class DashboardGatewayConnectionPool {
         _ delivery: GatewayEventDelivery,
         profileID: String,
         generation: Int
-    ) {
+    ) async {
         guard let entry = entries[profileID],
               entry.connectionID == delivery.connectionID,
               isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
@@ -382,13 +424,22 @@ final class DashboardGatewayConnectionPool {
             guard case .automationChanged = event.preparation else { return }
             delegate?.dashboardPoolAutomationChanged(profileID: profileID)
         case "transport.disconnected":
-            recoveryBudgets[profileID, default: GatewayRecoveryBudget()].markTransportFailure(
-                code: GatewayDiagnosticFailure.normalizedCode(event.payload.objectValue?["reason"]?.stringValue ?? "disconnected"),
-                at: clock.now()
-            )
+            let evidence = await entry.client.liveEvidence(connectionID: delivery.connectionID)
+            guard isCurrent(profileID: profileID, client: entry.client, generation: generation),
+                  entries[profileID]?.connectionID == delivery.connectionID else { return }
+            if maintenanceDeadlines[profileID] == nil {
+                var budget = recoveryBudgets[profileID, default: GatewayRecoveryBudget()]
+                budget.markTransportFailure(
+                    code: GatewayDiagnosticFailure.normalizedCode(event.payload.objectValue?["reason"]?.stringValue ?? "disconnected"),
+                    at: clock.now(),
+                    stableProof: evidence?.hasStableProof == true
+                )
+                recoveryBudgets[profileID] = budget
+            }
             retireConnectionEpoch(profileID: profileID, generation: generation, state: .reconnecting)
             scheduleReconnect(profileID: profileID, generation: generation)
         case "system.stopping":
+            beginMaintenance(profileID: profileID, generation: generation)
             retireConnectionEpoch(profileID: profileID, generation: generation, state: .restarting)
             scheduleReconnect(profileID: profileID, generation: generation, immediate: true)
         default:
@@ -396,13 +447,67 @@ final class DashboardGatewayConnectionPool {
         }
     }
 
+    private func clearMaintenance(profileID: String) {
+        maintenanceDeadlines[profileID] = nil
+        entries[profileID]?.maintenanceWatchdog?.cancel()
+        entries[profileID]?.maintenanceWatchdog = nil
+    }
+
+    private func stopMaintenance(profileID: String, generation: Int) {
+        guard entries[profileID]?.generation == generation else { return }
+        clearMaintenance(profileID: profileID)
+        recoveryBudgets[profileID, default: GatewayRecoveryBudget()].stopRecoveryEpisode()
+        entries[profileID]?.reconnectTask?.cancel()
+        entries[profileID]?.reconnectTask = nil
+        entries[profileID]?.reconnectWaiting = false
+        entries[profileID]?.state = .offline
+        publish(profileID: profileID)
+    }
+
+    private func beginMaintenance(profileID: String, generation: Int) {
+        guard maintenanceDeadlines[profileID] == nil else { return }
+        let deadline = clock.now() + Self.maintenanceRecoveryLimit
+        maintenanceDeadlines[profileID] = deadline
+        let clock = self.clock
+        entries[profileID]?.maintenanceWatchdog = Task { @MainActor [weak self] in
+            do { try await clock.sleep(Self.maintenanceRecoveryLimit) } catch { return }
+            guard let self, self.maintenanceDeadlines[profileID] == deadline else { return }
+            self.stopMaintenance(profileID: profileID, generation: generation)
+        }
+    }
+
+    /// Path hints are advisory per profile. A satisfied return hint can revive
+    /// a parked secondary entry even when its previous callback was missed.
+    func notePathHint(profileID: String, satisfied: Bool) {
+        var budget = recoveryBudgets[profileID, default: GatewayRecoveryBudget()]
+        budget.notePathHint(satisfied: satisfied, at: clock.now())
+        recoveryBudgets[profileID] = budget
+        guard satisfied, !budget.isStopped,
+              let entry = entries[profileID], entry.connectionID == nil,
+              entry.state != .connecting else { return }
+        if let task = entry.reconnectTask {
+            guard entry.reconnectWaiting else { return }
+            task.cancel()
+            entries[profileID]?.reconnectTask = nil
+        }
+        scheduleReconnect(profileID: profileID, generation: entry.generation, immediate: true)
+    }
+
     /// Explicit user retry re-arms only this profile's exhausted automatic
     /// recovery budget; background retirement and navigation never do so.
     func retry(profileID: String) {
-        guard let entry = entries[profileID] else { return }
+        guard let entry = entries[profileID], entry.reconnectTask == nil,
+              !(entry.state == .connecting && entry.connectionID == nil) else { return }
         let profile = entry.profile
         let token = entry.token
         let generation = entry.generation
+        if entry.connectionID != nil, entry.refreshFailedAttempts >= DashboardCatalogRetryPolicy.maximumFailedAttempts {
+            entries[profileID]?.refreshFailedAttempts = 0
+            entries[profileID]?.refreshRetryAttempt = 0
+            scheduleRefresh(profileID: profileID, generation: generation, delay: .zero)
+            return
+        }
+        maintenanceDeadlines[profileID] = nil
         recoveryBudgets[profileID, default: GatewayRecoveryBudget()].rearmForExplicitRetry()
         stop(profileID: profileID)
         start(profile: profile, token: token, generation: generation)
@@ -410,26 +515,61 @@ final class DashboardGatewayConnectionPool {
 
     private func scheduleReconnect(profileID: String, generation: Int, immediate: Bool = false) {
         guard let entry = entries[profileID], entry.generation == generation else { return }
-        if let budget = recoveryBudgets[profileID], budget.exhausted || budget.nonRetryableStopped {
+        var episodeBudget = recoveryBudgets[profileID, default: GatewayRecoveryBudget()]
+        episodeBudget.beginRecoveryEpisode(at: clock.now())
+        recoveryBudgets[profileID] = episodeBudget
+        if let budget = recoveryBudgets[profileID], budget.isStopped {
             entries[profileID]?.state = budget.firstFailureCode == "identity_mismatch" ? .identityMismatch : .offline
             publish(profileID: profileID)
             return
         }
         if immediate, let existing = entry.reconnectTask {
+            guard entry.reconnectWaiting else { return }
             existing.cancel()
             entries[profileID]?.reconnectTask = nil
         }
         guard entries[profileID]?.reconnectTask == nil else { return }
+        entries[profileID]?.reconnectWaiting = false
         let clock = self.clock
         let loopID = UUID().uuidString
         let task = Task { @MainActor [weak self, clock] in
             var delay: Duration = immediate ? .zero : .seconds(2)
             while !Task.isCancelled {
-                if delay > .zero { try? await clock.sleep(delay) }
-                guard !Task.isCancelled, let self,
+                guard let self, let waitingEntry = self.entries[profileID], waitingEntry.generation == generation else { return }
+                if delay > .zero {
+                    self.entries[profileID]?.reconnectWaiting = true
+                    try? await clock.sleep(delay)
+                }
+                guard !Task.isCancelled, self.isCurrent(profileID: profileID, client: waitingEntry.client, generation: generation) else { return }
+                self.entries[profileID]?.reconnectWaiting = false
+                let maintenance = self.maintenanceDeadlines[profileID]
+                if let maintenance, clock.now() >= maintenance {
+                    self.stopMaintenance(profileID: profileID, generation: generation)
+                    return
+                }
+                guard maintenance != nil || (self.recoveryBudgets[profileID]?.activeRecoveryDuration(at: clock.now()) ?? .zero) <= GatewayRecoveryBudget.stableEpochDuration else {
+                    var budget = self.recoveryBudgets[profileID, default: GatewayRecoveryBudget()]
+                    budget.stopRecoveryEpisode()
+                    self.recoveryBudgets[profileID] = budget
+                    self.entries[profileID]?.state = .offline
+                    self.entries[profileID]?.reconnectTask = nil
+                    self.publish(profileID: profileID)
+                    return
+                }
+                guard !Task.isCancelled,
                       let entry = self.entries[profileID],
                       entry.generation == generation else { return }
-                guard self.recoveryBudgets[profileID, default: GatewayRecoveryBudget()].beginAutomaticAttempt() else {
+                if maintenance == nil, self.recoveryBudgets[profileID]?.knownNoUsablePath == true {
+                    guard self.recoveryBudgets[profileID, default: GatewayRecoveryBudget()].consumeFallbackVerification() else {
+                        self.entries[profileID]?.state = .offline
+                        self.entries[profileID]?.reconnectTask = nil
+                        self.publish(profileID: profileID)
+                        return
+                    }
+                }
+                if maintenance == nil { self.recoveryBudgets[profileID]?.resumeRecovery(at: clock.now()) }
+                if maintenance == nil,
+                   !self.recoveryBudgets[profileID, default: GatewayRecoveryBudget()].beginAutomaticAttempt() {
                     self.entries[profileID]?.state = .offline
                     self.entries[profileID]?.reconnectTask = nil
                     self.publish(profileID: profileID)
@@ -442,6 +582,11 @@ final class DashboardGatewayConnectionPool {
                     )
                     try Task.checkCancellation()
                     guard self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
+                    if let maintenance, clock.now() >= maintenance {
+                        await entry.client.closeIfCurrent(connectionID: identity.id)
+                        self.stopMaintenance(profileID: profileID, generation: generation)
+                        return
+                    }
                     let info = identity.info
                     guard Self.admitsIdentity(info, for: entry.profile) else {
                         await entry.client.closeIfCurrent(connectionID: identity.id)
@@ -454,7 +599,8 @@ final class DashboardGatewayConnectionPool {
                     }
                     guard self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
                     self.entries[profileID]?.gatewayInfo = info
-                    self.recoveryBudgets[profileID]?.markConnected(at: clock.now())
+                    self.recoveryBudgets[profileID]?.markConnected(at: clock.now(), chargedAttempt: maintenance == nil)
+                    self.clearMaintenance(profileID: profileID)
                     self.entries[profileID]?.state = .connecting
                     self.publish(profileID: profileID)
                     let connectionID = identity.id
@@ -479,11 +625,19 @@ final class DashboardGatewayConnectionPool {
                 } catch {
                     guard !Task.isCancelled,
                           self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
-                    self.recoveryBudgets[profileID, default: GatewayRecoveryBudget()].markTransportFailure(
-                        code: GatewayDiagnosticFailure.code(error),
-                        at: clock.now()
-                    )
-                    if self.recoveryBudgets[profileID]?.isStopped == true {
+                    let evidence = await entry.client.liveEvidence(connectionID: entry.connectionID ?? -1)
+                    guard self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
+                    if self.maintenanceDeadlines[profileID] == nil {
+                        var budget = self.recoveryBudgets[profileID, default: GatewayRecoveryBudget()]
+                        budget.markTransportFailure(
+                            code: GatewayDiagnosticFailure.code(error),
+                            at: clock.now(),
+                            stableProof: evidence?.hasStableProof == true
+                        )
+                        self.recoveryBudgets[profileID] = budget
+                    }
+                    if self.maintenanceDeadlines[profileID] == nil,
+                       self.recoveryBudgets[profileID]?.isStopped == true {
                         self.entries[profileID]?.state = .offline
                         self.entries[profileID]?.reconnectTask = nil
                         self.publish(profileID: profileID)
@@ -522,6 +676,8 @@ final class DashboardGatewayConnectionPool {
         delay: Duration = .milliseconds(250)
     ) {
         guard var entry = entries[profileID], entry.generation == generation else { return }
+        guard entry.refreshFailedAttempts < DashboardCatalogRetryPolicy.maximumFailedAttempts
+                || entry.refreshTask != nil else { return }
         entry.refreshInvalidationGeneration &+= 1
         entry.refreshRetryAttempt = 0
         entries[profileID] = entry
@@ -556,18 +712,35 @@ final class DashboardGatewayConnectionPool {
             current.refreshTask = nil
             self.entries[profileID] = current
             let remainsDirty = current.refreshSatisfiedGeneration < current.refreshInvalidationGeneration
-            if result.needsImmediateFollowUp {
+            if result.needsImmediateFollowUp && result.outcome == .published {
                 self.startRefreshLease(profileID: profileID, generation: generation, delay: .zero)
-            } else if DashboardCatalogRetryPolicy.shouldRetry(
-                isDirty: remainsDirty,
-                isCurrent: true,
-                transportFailed: result.outcome == .transportFailure
-            ) {
+            } else {
+                if result.outcome == .published {
+                    current.refreshFailedAttempts = 0
+                } else if result.outcome == .retryRead || result.outcome == .retained {
+                    current.refreshFailedAttempts = min(
+                        DashboardCatalogRetryPolicy.maximumFailedAttempts,
+                        current.refreshFailedAttempts + 1
+                    )
+                }
+                guard DashboardCatalogRetryPolicy.shouldRetry(
+                    isDirty: remainsDirty,
+                    isCurrent: true,
+                    transportFailed: result.outcome == .transportFailure,
+                    failedAttempts: current.refreshFailedAttempts
+                ) else {
+                    if current.refreshFailedAttempts >= DashboardCatalogRetryPolicy.maximumFailedAttempts {
+                        current.catalog.markLoadUnavailable()
+                        current.state = .stale
+                    }
+                    self.entries[profileID] = current
+                    self.publish(profileID: profileID)
+                    return
+                }
                 current.refreshRetryAttempt = min(3, current.refreshRetryAttempt + 1)
                 self.entries[profileID] = current
                 self.startRefreshLease(
-                    profileID: profileID,
-                    generation: generation,
+                    profileID: profileID, generation: generation,
                     delay: Self.refreshRetryDelay(attempt: current.refreshRetryAttempt)
                 )
             }
@@ -700,6 +873,7 @@ final class DashboardGatewayConnectionPool {
                       published.catalog.publishAuthoritative(all, admission: admission) else { return .retained }
                 published.state = .connected
                 published.refreshRetryAttempt = 0
+                published.refreshFailedAttempts = 0
                 entries[profileID] = published
                 publish(profileID: profileID)
                 return .published
@@ -793,6 +967,7 @@ final class DashboardGatewayConnectionPool {
         entry.refreshTask = nil
         entry.refreshRequestGeneration &+= 1
         entry.refreshRetryAttempt = 0
+        entry.refreshFailedAttempts = 0
         entry.connectionID = nil
         entry.state = state
         entry.catalog.markDisconnected()

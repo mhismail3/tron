@@ -77,7 +77,7 @@ function isMetadata(value: unknown, expectedID: string, maximumItemBytes: number
     && Number.isSafeInteger(item.size) && (item.size as number) > 0 && (item.size as number) <= maximumItemBytes
     && ["image", "markdown", "text", "code", "pdf", "html", "video", "audio", "document"].includes(String(item.kind))
     && typeof item.digest === "string" && DIGEST_PATTERN.test(item.digest)
-    && Array.isArray(item.owners) && item.owners.length > 0 && item.owners.length <= 512
+    && Array.isArray(item.owners) && item.owners.length <= 512
     && new Set(item.owners).size === item.owners.length && item.owners.every(validIdentity)
     && typeof item.createdAt === "string" && Number.isFinite(Date.parse(item.createdAt))
     && new Date(item.createdAt).toISOString() === item.createdAt;
@@ -447,17 +447,31 @@ export class DisplayArtifactStore {
       );
     }
     const path = join(this.artifactDirectory, id, "content");
-    await this.verify(metadata.digest, metadata.size, path);
-    const handle = await open(path, "r");
+    // Reserve before validation/open yields; otherwise concurrent acquisitions
+    // all pass the same cap and revocation can remove a file being admitted.
+    this.activeReaders += 1;
+    this.activeReaderCounts.set(id, (this.activeReaderCounts.get(id) ?? 0) + 1);
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
+    let released = false;
+    const release = async (): Promise<void> => {
+      if (released) return;
+      released = true;
+      await handle?.close().catch(() => {});
+      this.activeReaders -= 1;
+      const count = this.activeReaderCounts.get(id)! - 1;
+      if (count === 0) {
+        this.activeReaderCounts.delete(id);
+        await this.serialize(() => this.removeUnowned(id));
+      } else this.activeReaderCounts.set(id, count);
+    };
     try {
+      await this.verify(metadata.digest, metadata.size, path);
+      handle = await open(path, "r");
       const info = await handle.stat();
       if (!info.isFile() || info.size !== metadata.size) throw new GatewayError("not_found", "Display artifact is unavailable");
-      this.activeReaders += 1;
-      this.activeReaderCounts.set(id, (this.activeReaderCounts.get(id) ?? 0) + 1);
       // Share FileHandle's close ownership, including unread conditional GETs.
       // A raw numeric fd lets stream.destroy() race handle.close() with EBADF.
       const stream: ReadStream = handle.createReadStream({ autoClose: false, start, end });
-      let released = false;
       return {
         mimeType: metadata.mimeType,
         size: end - start + 1,
@@ -466,17 +480,12 @@ export class DisplayArtifactStore {
         rangeEnd: end,
         stream,
         release: async () => {
-          if (released) return;
-          released = true;
           stream.destroy();
-          await handle.close().catch(() => {});
-          this.activeReaders = Math.max(0, this.activeReaders - 1);
-          const count = Math.max(0, (this.activeReaderCounts.get(id) ?? 1) - 1);
-          if (count === 0) this.activeReaderCounts.delete(id); else this.activeReaderCounts.set(id, count);
+          await release();
         },
       };
     } catch (error) {
-      await handle.close().catch(() => {});
+      await release();
       throw error;
     }
   }
@@ -511,13 +520,18 @@ export class DisplayArtifactStore {
     const metadata = this.index.get(id);
     if (!metadata?.owners.includes(sessionID)) return;
     const owners = metadata.owners.filter((owner) => owner !== sessionID);
-    if (owners.length > 0) {
-      const next = { ...metadata, owners };
-      await this.writeMetadata(join(this.artifactDirectory, id, "metadata.json"), next);
-      this.index.set(id, next);
-      return;
-    }
-    if ((this.activeReaderCounts.get(id) ?? 0) > 0) return;
+    // Revocation removes future authority durably, even while a reader owns
+    // the bytes. Empty ownership survives a crash only as startup cleanup.
+    const next = { ...metadata, owners };
+    await this.writeMetadata(join(this.artifactDirectory, id, "metadata.json"), next);
+    this.index.set(id, next);
+    await this.removeUnowned(id);
+  }
+
+  /** Called only under the mutation lane; reader retirement joins that lane. */
+  private async removeUnowned(id: string): Promise<void> {
+    const metadata = this.index.get(id);
+    if (!metadata || metadata.owners.length > 0 || (this.activeReaderCounts.get(id) ?? 0) > 0) return;
     await rm(join(this.artifactDirectory, id), { recursive: true, force: true });
     this.index.delete(id);
     this.logicalBytes = Math.max(0, this.logicalBytes - metadata.size);
@@ -533,18 +547,12 @@ export class DisplayArtifactStore {
       for (const [id, metadata] of [...this.index]) {
         const owners = metadata.owners.filter((owner) => owner !== removingSessionID
           && (liveSessionIDs === undefined || liveSessionIDs.has(owner)));
-        if (owners.length === metadata.owners.length) continue;
-        if (owners.length > 0) {
+        if (owners.length !== metadata.owners.length) {
           const next = { ...metadata, owners };
           await this.writeMetadata(join(this.artifactDirectory, id, "metadata.json"), next);
           this.index.set(id, next);
-          continue;
         }
-        if ((this.activeReaderCounts.get(id) ?? 0) > 0) continue;
-        await rm(join(this.artifactDirectory, id), { recursive: true, force: true });
-        this.index.delete(id);
-        this.logicalBytes = Math.max(0, this.logicalBytes - metadata.size);
-        await this.removeObjectIfUnreferenced(metadata.digest);
+        await this.removeUnowned(id);
       }
     });
   }

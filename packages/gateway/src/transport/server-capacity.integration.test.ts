@@ -608,6 +608,77 @@ describe("WebSocket connection and outbound capacity", () => {
     expect(socket.readyState).toBe(WebSocket.OPEN);
   });
 
+  it.each([{ sessions: 1, peers: 1 }, { sessions: 4, peers: 4 }, { sessions: 16, peers: 16 }, { sessions: 16, peers: 32 }])(
+    "preserves global summary order and reusable capacity across $sessions sessions / $peers peers", async ({ sessions: sessionCount, peers: peerCount }) => {
+      const root = await mkdtemp(join(tmpdir(), "tron-fanout-qualification-"));
+      const devices = new DeviceStore(root, "fixture-machine");
+      await devices.initialize();
+      const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+      const port = await unusedPort();
+      const peers: WebSocket[] = [];
+      const physicalSockets: import("node:net").Socket[] = [];
+      const gateway = new GatewayServer({
+        host: "127.0.0.1", port, maxFrameBytes: 1_048_576,
+        maximumConnections: peerCount, maximumConnectionsPerIdentity: peerCount,
+        devices, uploads: {} as any, sessions: { unsubscribeClient: vi.fn() } as any,
+        auth: { detachClient: vi.fn() } as any,
+        service: { info: () => ({ protocolVersion: 5 }), releaseClient: vi.fn(), invoke: async () => ({ ready: true }) } as any,
+        logger: { log: () => {} } as any,
+      });
+      (gateway as unknown as { server: import("node:http").Server }).server.on("connection", socket => physicalSockets.push(socket));
+      cleanups.push(async () => {
+        for (const peer of peers) if (peer.readyState !== WebSocket.CLOSED) peer.terminate();
+        await bounded(gateway.close(), "fanout fixture close");
+        await rm(root, { recursive: true, force: true });
+      });
+      await gateway.listen();
+      for (let wave = 0; wave < 3; wave++) {
+        const physicalStart = physicalSockets.length;
+        const clients = await Promise.all(Array.from({ length: peerCount }, async () => {
+          const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
+          peers.push(socket);
+          const events: Array<[string, number]> = [];
+          let ready!: () => void, fenced!: () => void;
+          const hello = new Promise<void>(resolve => { ready = resolve; });
+          const fence = new Promise<void>(resolve => { fenced = resolve; });
+          socket.on("message", bytes => {
+            const frame = JSON.parse(bytes.toString());
+            if (frame.type === "hello" && frame.protocolVersion === 5) ready();
+            if (frame.topic === "session.summary") {
+              if (events.length >= 128) { socket.terminate(); return; }
+              events.push([frame.payload.sessionId, frame.payload.summaryRevision]);
+            }
+            if (frame.type === "response" && frame.id === "fence" && frame.ok) fenced();
+          });
+          socket.on("error", () => {});
+          await bounded(new Promise<void>(resolve => socket.once("open", resolve)), "fanout socket open");
+          socket.send(JSON.stringify({ type: "hello", protocolVersion: 5, clientRole: "mobile" }));
+          await bounded(hello, "fanout hello");
+          return { socket, events, fence };
+        }));
+        const expected: Array<[string, number]> = [];
+        for (let revision = 1; revision <= 8; revision++) {
+          for (let session = 0; session < sessionCount; session++) {
+            const sessionId = `fixture-session-${session}`;
+            expected.push([sessionId, revision]);
+            gateway.broadcast("session.summary", { sessionId, summaryRevision: revision, phase: "idle" });
+          }
+        }
+        // A real response follows every already-enqueued global summary on
+        // each socket. It proves ordering/drain without a timing sleep.
+        for (const client of clients) client.socket.send(JSON.stringify({ type: "request", id: "fence", method: "test.fence", params: {} }));
+        await bounded(Promise.all(clients.map(client => client.fence)), "fanout fences");
+        for (const client of clients) {
+          expect(client.events).toEqual(expected);
+          expect(client.socket.readyState).toBe(WebSocket.OPEN);
+        }
+        const closed = Promise.all(physicalSockets.slice(physicalStart).map(socket => new Promise<void>(resolve => socket.once("close", resolve))));
+        for (const client of clients) client.socket.close(1000);
+        await bounded(closed, "fanout physical retirement");
+      }
+    },
+  );
+
   it("admits same-turn ordered bursts, rejects connection overflow, and closes byte-oversized output", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-server-capacity-"));
     let gateway: GatewayServer | undefined;

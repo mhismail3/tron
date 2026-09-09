@@ -2,8 +2,38 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { UploadStore } from "./upload-store.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { MAXIMUM_ATTACHMENT_READERS, UploadStore } from "./upload-store.js";
+
+it("bounds attachment metadata acquisition before I/O and releases every reader", async () => {
+  const directory = await root();
+  const store = new UploadStore(directory, 1_024);
+  const upload = await store.save("fixture.txt", "text/plain", Buffer.from("fixture"));
+  await store.materialize([upload.id], "fixture-session");
+  const io = store as unknown as { metadata(id: string): Promise<unknown> };
+  const original = io.metadata.bind(store);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const metadata = vi.spyOn(io, "metadata").mockImplementation(async id => { await gate; return original(id); });
+  const requests = Array.from({ length: MAXIMUM_ATTACHMENT_READERS + 1 }, () => store.acquire(upload.id));
+  for (const request of requests) void request.catch(() => {});
+  try {
+    expect(metadata).toHaveBeenCalledTimes(MAXIMUM_ATTACHMENT_READERS);
+    release();
+    const results = await Promise.allSettled(requests);
+    expect(results.filter(result => result.status === "fulfilled")).toHaveLength(MAXIMUM_ATTACHMENT_READERS);
+    expect(results.at(-1)).toMatchObject({ status: "rejected", reason: { code: "busy" } });
+    for (const result of results) if (result.status === "fulfilled") await result.value.release();
+    const next = await store.acquire(upload.id);
+    expect(next.size).toBe(7);
+    await next.release();
+  } finally {
+    release();
+    const results = await Promise.allSettled(requests);
+    for (const result of results) if (result.status === "fulfilled") await result.value.release();
+    metadata.mockRestore();
+  }
+});
 
 const roots: string[] = [];
 afterEach(async () => {

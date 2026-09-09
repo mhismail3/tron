@@ -728,7 +728,7 @@ struct SessionMutationServiceTests {
         var events = harness.client.events.makeAsyncIterator()
         let delivery = try #require(await events.next())
         #expect(delivery.event.topic == "transport.disconnected")
-        harness.lifecycle.noteDisconnected(connectionID: delivery.connectionID)
+        await harness.lifecycle.noteDisconnected(connectionID: delivery.connectionID)
         await harness.replacement.enqueue(helloFrame())
         try await harness.lifecycle.connectHosted(profile: harness.profile, token: "token")
     }

@@ -37,6 +37,15 @@ struct GatewayProfileLogRecord: Hashable, Identifiable, Codable, Sendable {
     let profileID: String
     let profileLabel: String
     let record: GatewayLogRecord
+    // Local, validated correlation only; remote Gateway log records have none.
+    let incidentID: String?
+
+    init(profileID: String, profileLabel: String, record: GatewayLogRecord, incidentID: String? = nil) {
+        self.profileID = profileID
+        self.profileLabel = profileLabel
+        self.record = record
+        self.incidentID = incidentID
+    }
 
     var id: String { "\(profileID):\(record.id)" }
 }
@@ -110,7 +119,7 @@ enum GatewayDiagnosticFailure {
 
     static func normalizedCode(_ code: String) -> String {
         switch code {
-        case "timeout", "unauthenticated", "disconnected", "event_overflow", "invalid_response",
+        case "timeout", "unauthenticated", "forbidden", "busy", "disconnected", "event_overflow", "invalid_response",
              "protocol_mismatch", "identity_mismatch", "invalid_profile", "not_paired", "pong_timeout", "ping_timeout",
              "cancelled", "possibly_sent": return code
         default: return "transport"
@@ -153,6 +162,10 @@ struct GatewayConnectionDiagnostic: Sendable {
     let durationMilliseconds: Int
     let reason: GatewayConnectionDiagnosticReason?
     let platformCode: Int?
+    /// Transport metadata remains typed and separate: WebSocket close codes
+    /// and HTTP handshake statuses must never be merged into one numeric code.
+    let closeCode: Int?
+    let httpStatusCode: Int?
     let overflowCount: Int?
     let overflowReason: GatewayEventAdmissionReason?
     let rejectedTopic: String?
@@ -192,7 +205,9 @@ struct GatewayConnectionDiagnostic: Sendable {
         durationMilliseconds: Int,
         reason: GatewayConnectionDiagnosticReason?,
         platformCode: Int?,
-        overflowCount: Int?,
+        closeCode: Int? = nil,
+        httpStatusCode: Int? = nil,
+        overflowCount: Int? = nil,
         overflowReason: GatewayEventAdmissionReason? = nil,
         rejectedTopic: String? = nil,
         overflowBytes: Int? = nil,
@@ -230,6 +245,8 @@ struct GatewayConnectionDiagnostic: Sendable {
         self.durationMilliseconds = durationMilliseconds
         self.reason = reason
         self.platformCode = platformCode
+        self.closeCode = closeCode
+        self.httpStatusCode = httpStatusCode
         self.overflowCount = overflowCount
         self.overflowReason = overflowReason
         self.rejectedTopic = rejectedTopic
@@ -283,9 +300,11 @@ struct IOSClientDiagnosticBuffer: Sendable {
         let retained = values.map { value in
             GatewayProfileLogRecord(profileID: value.profileID, profileLabel: "iOS client · Retained",
                 record: GatewayLogRecord(timestamp: value.record.timestamp, level: value.record.level,
-                    message: value.record.message, event: value.record.event, source: "ios-client-retained"))
+                    message: value.record.message, event: value.record.event, source: "ios-client-retained"), incidentID: value.incidentID)
         }
-        records = Array((records + retained).sorted { gatewayLogRecordIsNewer($0, than: $1) }.prefix(Self.maximumRecords))
+        records = IOSClientDiagnosticStore.retainFirstIncidentAndLatest(
+            (records + retained).sorted { gatewayLogRecordIsNewer($0, than: $1) }
+        )
     }
 
     mutating func recordLifecycle(
@@ -356,6 +375,8 @@ struct IOSClientDiagnosticBuffer: Sendable {
         ]
         if let reason = diagnostic.reason { fields.append("reason=\(reason.rawValue)") }
         if let platformCode = diagnostic.platformCode { fields.append("platformCode=\(platformCode)") }
+        if let closeCode = diagnostic.closeCode { fields.append("closeCode=\(closeCode)") }
+        if let httpStatusCode = diagnostic.httpStatusCode { fields.append("httpStatusCode=\(httpStatusCode)") }
         if let overflowCount = diagnostic.overflowCount {
             fields.append("overflowCount=\(max(0, overflowCount))")
         }
@@ -394,7 +415,10 @@ struct IOSClientDiagnosticBuffer: Sendable {
                 message: fields.joined(separator: " "),
                 event: "gateway.connection",
                 source: "ios-client"
-            )
+            ),
+            incidentID: diagnostic.clientID.flatMap { client in
+                (diagnostic.attemptID ?? diagnostic.connectionID.map(String.init)).map { "\(client):\($0)" }
+            }
         )
     }
 
@@ -478,25 +502,52 @@ actor IOSClientDiagnosticStore {
     func load(now: Date = .now) -> [GatewayProfileLogRecord] {
         guard let data = defaults.data(forKey: key), data.count <= Self.maximumBytes,
               let values = try? JSONDecoder.gateway.decode([GatewayProfileLogRecord].self, from: data) else { return [] }
-        return Array(values.compactMap { Self.sanitize($0, now: now) }
-            .sorted { gatewayLogRecordIsNewer($0, than: $1) }
-            .prefix(Self.maximumRecords))
+        return Self.retainFirstIncidentAndLatest(values.compactMap { Self.sanitize($0, now: now) })
     }
 
     func save(_ values: [GatewayProfileLogRecord], now: Date = .now) {
         // One store serializes both direct transport incidents and UI context.
         // A late UI snapshot cannot erase a newer handshake/pressure incident.
         var seen = Set<String>()
-        var retained = Array((values + load(now: now)).compactMap { Self.sanitize($0, now: now) }
+        var retained = Self.retainFirstIncidentAndLatest((values + load(now: now)).compactMap { Self.sanitize($0, now: now) }
             .sorted { gatewayLogRecordIsNewer($0, than: $1) }
-            .filter { seen.insert($0.id).inserted }
-            .prefix(Self.maximumRecords))
+            .filter { seen.insert($0.id).inserted })
+        let reserved = Self.firstIncidentIDs(retained)
         while !retained.isEmpty,
               let data = try? JSONEncoder.gateway.encode(retained), data.count > Self.maximumBytes {
-            retained.removeLast()
+            if let removable = retained.lastIndex(where: { !reserved.contains($0.id) }) {
+                retained.remove(at: removable)
+            } else {
+                retained.removeLast()
+            }
         }
         guard let data = try? JSONEncoder.gateway.encode(retained), data.count <= Self.maximumBytes else { return }
         defaults.set(data, forKey: key)
+    }
+
+    private static func firstIncidentIDs(_ values: [GatewayProfileLogRecord]) -> Set<String> {
+        let sorted = values.sorted { gatewayLogRecordIsNewer($0, than: $1) }
+        var latest: [String: GatewayProfileLogRecord] = [:]
+        var first: [String: GatewayProfileLogRecord] = [:]
+        for value in sorted {
+            guard let incident = value.incidentID else { continue }
+            let key = "\(value.profileID):\(incident)"
+            if latest[key] == nil { latest[key] = value }
+            if ["warning", "error"].contains(value.record.level) { first[key] = value }
+        }
+        // Reserve oldest causes for the eight most recently observed incidents,
+        // not one ancient warning per profile/event for the entire seven days.
+        let keys = latest.keys.sorted { gatewayLogRecordIsNewer(latest[$0]!, than: latest[$1]!) }.prefix(8)
+        return Set(keys.compactMap { first[$0]?.id })
+    }
+
+    static func retainFirstIncidentAndLatest(_ values: [GatewayProfileLogRecord]) -> [GatewayProfileLogRecord] {
+        let sorted = values.sorted { gatewayLogRecordIsNewer($0, than: $1) }
+        guard sorted.count > maximumRecords else { return sorted }
+        let reserved = firstIncidentIDs(sorted)
+        let causes = sorted.filter { reserved.contains($0.id) }
+        let latest = sorted.filter { !reserved.contains($0.id) }.prefix(maximumRecords - causes.count)
+        return (causes + latest).sorted { gatewayLogRecordIsNewer($0, than: $1) }
     }
 
     private static func sanitize(_ value: GatewayProfileLogRecord, now: Date) -> GatewayProfileLogRecord? {
@@ -526,7 +577,12 @@ actor IOSClientDiagnosticStore {
                 message: safeMessage,
                 event: value.record.event,
                 source: value.record.source
-            )
+            ),
+            incidentID: value.incidentID.flatMap { id in
+                guard !id.isEmpty, id.utf8.count <= 160,
+                      id.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || [45, 46, 58, 95].contains($0) }) else { return nil }
+                return id
+            }
         )
     }
 }

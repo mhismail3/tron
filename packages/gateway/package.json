@@ -17,7 +17,8 @@
     "test:pi-sdk-rollback": "node scripts/check-pi-sdk-rollback.mjs",
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run test:pi-sdk-scripts && vitest run",
+    "test:resilience-fixtures": "node --test ../../scripts/ios-gateway-fault-proxy.test.mjs",
+    "test": "npm run test:pi-sdk-scripts && npm run test:resilience-fixtures && vitest run",
     "test:watch": "vitest",
     "start": "node dist/index.js",
     "chat": "node dist/client/terminal-chat.js"

@@ -21,13 +21,56 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   Rejected mutation/receipt projections remain an unknown command outcome, never
   proof that execution failed. Limits are not invitations to allocate an
   unbounded input before projecting it.
-- **Mobile recovery:** each transport owner retains a budget per paired profile.
+- **HTTP transport:** physical sockets, including incomplete headers and
+  upgrades, cap at 128 globally / 64 per source address. Pending requests and
+  upgrade authentication cap at 128 globally / 32 per address / eight per
+  connection; authenticated HTTP requests additionally cap at 16 per identity.
+  Headers have a 15-second allowance checked every second. Complete bodies retain
+  Node's five-minute allowance for slow uploads; socket/response inactivity and
+  pending-upgrade authentication are separately bounded at 30 seconds.
+  EOF/error/close retires a pending upgrade even after Node hands off its parser.
+  Credential reads remove canceled mutex waiters; a running credential operation
+  retains its serialization lock until actual settlement and cannot admit a
+  canceled caller. Read/staging transport waits may retire while their bounded
+  physical producer finishes; late leases release at the original resource owner.
+  Socket closure never manufactures free, unaccounted I/O capacity. Physical
+  filesystem stalls can still leave that resource's bounded producer allowance
+  unavailable; this does not promise recovery from a broken filesystem.
+  Normal close and failed-startup cleanup join one operation, immediately fence
+  observers and force physical HTTP socket retirement after one second. Accepted
+  domain/pairing/discard mutations keep their settlement authority. Revocation
+  closes token-bound live viewers but does not undo an admitted canonical asset
+  read. Display-owner removal durably denies future reads immediately; the final
+  reader releases the retained bytes under the store's mutation lane. Empty-owner
+  metadata is cleanup-only on startup, never restored authority. A blob acquire
+  that fails after prune/dispose also releases its retired reservation and bytes.
+  A lost upload receipt discards only unclaimed staging, with the store's
+  serialized claim check protecting accepted prompt attachments.
+- **Route workload envelope:** `BlobStore` defaults to 128 items / 200 MiB
+  total / 25 MiB per item with 32 concurrent readers and four file
+  productions. Attachment downloads reserve 32 readers before metadata/path I/O;
+  display artifacts reserve their four-reader allowance before verification/open.
+  Browser live views allow 64 registrations, four viewers per
+  view, 16 viewers total, and expire idle viewers after 15 seconds. Terminals
+  retain 128 records, admit 16 active PTYs, split output into 64 KiB chunks,
+  and cap replay at 768 KiB. `UploadStore` independently bounds each configured
+  item, 1,024 staging entries, 16,384 retained entries, eight item-sized
+  staging units, and a 24-hour unclaimed age; default body admission is four
+  concurrent bodies, derived from that staging envelope. These owners release
+  on their own finish/close/error
+  paths rather than duplicating HTTP counters.
+- **Mobile recovery:** focused and secondary transports share one allowance per
+  paired profile, but keep separate exact socket owners.
   Initial connection and reconnect attempts share a three-attempt allowance;
   creating another client or backgrounding does not forgive failures. A hello is
-  provisional until its epoch lasts 30 seconds. Intentional retirement refunds
-  a short successful connection, not preceding failures. Exhaustion stops
-  automatic recovery; **Connection Settings → Retry Connection** explicitly
-  re-arms it. Nonretryable failures stop immediately. Last-good projections and
+  provisional until three full timely transport-pong intervals prove stability;
+  suspension cannot supply those intervals. Intentional retirement refunds only
+  that connection's charged successful attempt, never an earlier fault or a free
+  maintenance attempt. A 30-second active-repair allowance blocks further
+  automatic attempts; admitted handshakes retain their own bounded deadlines.
+  Background/no-path waiting pauses that allowance. Accepted planned maintenance
+  uses its separate 90-second deadline. Exhaustion stops automatic recovery;
+  **Retry Connection** in Settings or the persistent recovery notice re-arms it. Nonretryable failures stop immediately. Last-good projections and
   mutation receipts remain intact. This budget is process-local, not a new
   persisted connection authority.
 
@@ -56,7 +99,9 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
 | Fast successful `session.open`, no `session.sync`, then client close / `decode_limit` | The client rejected response structure before sync. Compare `frameBytes`, `decodeLimit`, `decodeActual`, `decodeMaximum` and sanitized `decodePath`; a sub-megabyte response can still exceed the node ceiling. This is not proof of path loss. |
 | `event_overflow` with topic, count/byte limit, oldest age and dequeue timing | Mobile consumer pressure. Trace what held the consumer, including synchronization reads; do not merely enlarge the queue. |
 | `connection.outbound-capacity` | Actual server queue count/byte pressure. Inspect high-water marks, `wsBufferedBytes`, next-frame bytes and process memory. |
-| `connection.capacity` | The connection admission limit was reached; inspect total/per-identity counts and retiring peers. |
+| `connection.capacity` / `http.request-capacity` / `http.connection-capacity` | Inspect the named global, identity, address or connection bound and retiring owners; one physical socket is not one request. |
+| `http.authentication-timeout` | A pending upgrade exceeded its authentication deadline. The callback is fenced and its cancellable credential wait is retired. |
+| `closeCode` / `httpStatusCode` / `platformCode` | Separate facts, never interchangeable numbers. HTTP 401/403 stop automatic admission; 503 is retryable capacity/unavailability. URLSession may report 1005/1006 rather than expose the peer's exact close frame; that absence must remain explicit. |
 | `connection.projection-rejected` | A producer violated the projection contract. Narrow/reproduce that producer instead of reconnecting the whole service indefinitely. |
 | `gateway.event-loop-delay` | A sampled heartbeat timer was delayed by at least one second. Counts, queued bytes, RSS, heap and external-memory bytes help separate queue pressure from wider process work. |
 | `reconnect.exhausted` / `reconnect.stopped` | Automatic recovery ended. The first fixed failure code is retained by the recovery owner; use explicit Retry after checking the cause. |
@@ -88,8 +133,34 @@ These boundaries are not a certification of unlimited sessions or browser
 processes. Cold SDK session opening still parses complete JSONL synchronously;
 runtime snapshots perform history-dependent derivations, and projecting large
 provider results can do work before final wire truncation. Browser viewer bounds
-do not bound provider-owned browser process creation. Mobile event-driven
-resynchronization can still await a read in the event consumer. Those are separate
-capacity/lifecycle seams to reproduce and measure under representative histories
-and bursts before changing their owners. Do not introduce transcript mirrors,
+do not bound provider-owned browser process creation. Session recovery claims the
+existing bounded quarantine synchronously and runs only its network wait in an
+owned task; optional auth-completion refreshes do not block global intake. Input
+cost and provider process creation still require a documented workload envelope,
+not a blanket scalability claim. Do not introduce transcript mirrors,
 workers, speculative caches, or higher queue limits to conceal them.
+
+## Isolated qualification
+
+- `server-http-lifecycle` and `server-http-admission` exercise cancellation behind
+  blocked credentials, pending-upgrade EOF/deadline, bounded late file acquisition,
+  partial headers, pipelining, startup failure, and physical close. Resource-store
+  regressions protect pre-await reader reservations, exact late release, failed
+  acquisitions after prune/dispose, and durable display revocation during reads.
+- `server-capacity` checks three connect/fanout/close waves at 1/4/16/32 peers,
+  including global summaries for unsubscribed sessions and ordered wire fences.
+- `scripts/ios-gateway-e2e-test all` uses a private Gateway and a fixture-only
+  bounded proxy. The proxy verifies the harness's sibling Gateway process, its
+  birth/command identity and ownership of the loopback listener before forwarding.
+  It exercises delayed hello/open/sync, blackholed traffic, HTTP upgrade statuses,
+  remote-close metadata, and loss of an accepted response followed by durable
+  receipt/canonical exactly-once verification. A skipped boundary case fails the
+  runner. CI runs this boundary for source changes, not only SDK upgrades.
+- Build source, then run `node --expose-gc packages/gateway/scripts/measure-projection.mjs`
+  from the repository root (`--extended` adds 25k/100k-entry histories;
+  `--baseline /path/to/compiled/dist` enables balanced comparisons). The tool
+  checks canonical input and independent row/content/cursor equality while
+  recording input size, branch walks, output bytes/nodes and raw timing samples.
+  One canonical branch cut is reused per projection; full-branch tool ownership
+  is not replaced by a tail cache. These are warm CPU measurements, not cellular,
+  cold-start, energy or unlimited-concurrency certification.
