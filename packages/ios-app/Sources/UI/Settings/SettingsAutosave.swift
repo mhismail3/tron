@@ -83,19 +83,8 @@ struct SettingsAutosaveNotice: View {
 
     var body: some View {
         if let error = model.configurationAutosave.error(for: key) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Changes not saved").font(TronTypography.bodySM)
-                Text(error).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
-                if model.configurationAutosave.canRetry(key) {
-                    Button { model.configurationAutosave.retry(key) } label: {
-                        TronInlineActionLabel("Retry", icon: "arrow.clockwise", accent: .tronEmerald)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .tronGlassSurface(accent: .tronSlate)
+            TronSettingsNotice(message: error, title: "Changes not saved",
+                retry: model.configurationAutosave.canRetry(key) ? { model.configurationAutosave.retry(key) } : nil)
         }
     }
 }

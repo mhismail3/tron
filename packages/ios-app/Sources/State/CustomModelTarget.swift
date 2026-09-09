@@ -38,4 +38,5 @@ struct CustomModelDraftOwner: Equatable, Sendable {
 struct CustomModelLoadID: Hashable {
     let target: CustomModelTarget
     let invalidationGeneration: Int
+    let foregroundGeneration: Int
 }

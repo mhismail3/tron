@@ -24,11 +24,7 @@ struct AppLocalBehaviorSettingsView: View {
                         .accessibilityValue(retentionLabel(settings.subagentRecentFinishedRetentionMinutes))
                     }
                 }
-                TronInfoCard(
-                    icon: "info.circle",
-                    text: "Only active hides the button as soon as all subagents finish. This applies to every session on this iPhone. Finished subagents are always available in Manage Session’s Subagent History.",
-                    accent: .tronSlate
-                )
+                .tronSettingsCaption("Only active hides the button as soon as all subagents finish. This applies to every session on this iPhone. Finished subagents are always available in Manage Session’s Subagent History.")
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 18)

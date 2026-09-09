@@ -163,6 +163,21 @@ final class ConfigurationAutosaveTests: XCTestCase {
         XCTAssertEqual(explicit.patch(comparedTo: inherited).objectValue?["compaction"]?.objectValue?["thinkingLevel"], .string("high"))
     }
 
+    func testProviderEditorBindingSurvivesReorderAndRetiresOnRemoval() {
+        let first = CustomModelProviderDraft()
+        let second = CustomModelProviderDraft()
+        var values = [first, second]
+        let binding = first.editingBinding(in: Binding(get: { values }, set: { values = $0 }))
+        values.reverse()
+        binding.identifier.wrappedValue = "renamed"
+        XCTAssertEqual(values.first(where: { $0.id == first.id })?.identifier, "renamed")
+        XCTAssertEqual(values.first(where: { $0.id == second.id })?.identifier, "")
+        values.removeAll { $0.id == first.id }
+        binding.identifier.wrappedValue = "late callback"
+        XCTAssertEqual(values.map(\.id), [second.id])
+        XCTAssertEqual(values[0].identifier, "")
+    }
+
     func testIncompleteCustomModelInputNeverProducesAReplacementDocument() throws {
         XCTAssertThrowsError(try CustomModelDraftTransformation.autosaveValue(advancedDocument: "{}", root: [:], providers: []))
         XCTAssertThrowsError(try CustomModelDraftTransformation.autosaveValue(advancedDocument: "{", root: [:], providers: []))

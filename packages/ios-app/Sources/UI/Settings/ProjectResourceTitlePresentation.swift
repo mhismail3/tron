@@ -17,12 +17,22 @@ enum ProjectResourceTitlePresentation {
             return ComposerResourceNameFormatter.friendly(name)
         }
         if let path = nonempty(object["path"]?.stringValue) {
-            return ComposerResourceNameFormatter.friendly(stem(path))
+            return resourcePathTitle(path)
         }
         if let id = nonempty(object["id"]?.stringValue) {
             return ComposerResourceNameFormatter.friendly(id)
         }
         return "Unnamed \(kind.rawValue.dropLast())"
+    }
+
+    /// Package resolution has paths, not authored titles. Use the same friendly
+    /// fallback as session resources without inventing a new canonical name.
+    static func resourcePathTitle(_ path: String) -> String {
+        let file = (path as NSString).lastPathComponent
+        let candidate = file.lowercased() == "skill.md"
+            ? ((path as NSString).deletingLastPathComponent as NSString).lastPathComponent
+            : stem(path)
+        return ComposerResourceNameFormatter.friendly(candidate)
     }
 
     private static let toolLabels = [
@@ -81,7 +91,7 @@ enum ProjectResourceTitlePresentation {
     private static func stem(_ path: String) -> String {
         let file = (path as NSString).lastPathComponent
         let ext = (file as NSString).pathExtension.lowercased()
-        return ["ts", "tsx", "js", "jsx", "mjs", "cjs", "md"].contains(ext)
+        return ["ts", "tsx", "js", "jsx", "mjs", "cjs", "md", "json"].contains(ext)
             ? (file as NSString).deletingPathExtension : file
     }
 

@@ -63,11 +63,7 @@ struct GatewayLogsSettingsView: View {
                     .padding(.horizontal, 20)
                     .padding(.vertical, 24)
                 } else if rows.isEmpty {
-                    TronInfoCard(
-                        icon: "doc.text.magnifyingglass",
-                        text: emptyStateMessage,
-                        accent: .tronSlate
-                    )
+                    TronSettingsCaption(emptyStateMessage)
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
                 } else {

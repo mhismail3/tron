@@ -168,7 +168,8 @@ struct AgentDefaultsSettingsView: View {
                 settingsTarget: settingsTarget,
                 providerTarget: catalogTarget,
                 settingsInvalidationGeneration: model.settingsInvalidationGeneration,
-                providerInvalidationGeneration: model.providerInvalidationGeneration
+                providerInvalidationGeneration: model.providerInvalidationGeneration,
+                foregroundGeneration: model.foregroundReconciliationGeneration
             ),
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
@@ -249,6 +250,7 @@ struct AgentDefaultsSettingsView: View {
     }
 
     private func refresh() async {
+        let foreground = model.foregroundReconciliationGeneration
         guard let target = settingsTarget else { return }
         // Establish a clean local snapshot before the first async response. If the
         // user edits while the response is in flight, update() marks the draft dirty
@@ -259,6 +261,7 @@ struct AgentDefaultsSettingsView: View {
         async let catalogReady = model.refreshProviders(target: requestedCatalogTarget)
         let (loadedSettings, _) = await (settingsReady, catalogReady)
         guard loadedSettings,
+              foreground == model.foregroundReconciliationGeneration,
               presentationActivity.allowsPresentationPublication,
               !Task.isCancelled,
               target == settingsTarget,

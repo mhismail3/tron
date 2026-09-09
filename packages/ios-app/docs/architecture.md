@@ -1269,8 +1269,10 @@ or model choices disclose as progressively stacked sub-sheets rather than
 horizontal navigation pushes; Appearance uses the custom Liquid Glass segmented
 color-mode control with a compact 40-point color-mode height and keeps font axes directly beneath each
 font choice before its preview. Every font-selection title renders through `TronFontLoader` with that candidate family (and Recursive's mono axis in the code list), while the description retains the selected reading typography. Text and code previews share the same 14-point row padding without an
-extra code-only minimum height. Explanatory font and resource copy uses the shared informational card role
-so its greyer inherited hue does not compete with editable settings groups. Main Settings and progressive
+extra code-only minimum height. Passive Settings explanations use `TronSettingsCaption`: reading-family
+secondary text directly on the sheet, without a card, icon, or tap affordance. `tronSettingsCaption`
+attaches that copy eight points below the group or action it explains. Actionable failures instead use
+`TronSettingsNotice`, with standard row/icon geometry and a right-aligned Retry capsule. Main Settings and progressive
 sub-sheets apply `tronSettingsLayout`: Manage Session's icon column, row/divider insets, reading-family
 labels, metadata scale, and 28-point visual capsules inside 44-point targets. The larger model headline
 remains specific to Manage Session. `TronValueRow` delegates geometry to `TronSettingsRow`;
@@ -1285,7 +1287,10 @@ runtime-advertised API-key and account-login methods are presented together, con
 replacement credential or alternate-account login plus credential clearing, and the same visible sheet owns
 the exact operation-keyed auth prompt/event lifecycle. API-key prompts replace the option list in place with
 a header, credential field, and value-gated Save action; they never present another page or sheet.
-All provider and model catalog projections use `ModelDisplayFormatting` at the UI boundary: identifiers such as
+Custom-model rows have one Configure capsule; the editor owns a leading Remove toolbar action and
+its standard destructive confirmation sheet. Stable provider UUIDs, not editable identifiers, own
+presentation and field bindings. Removed/reordered rows cannot be indexed or resurrected by a late
+native callback. All provider and model catalog projections use `ModelDisplayFormatting` at the UI boundary: identifiers such as
 `openai-codex` and `gpt-5.6-luna` render as “OpenAI Codex” and “GPT 5.6 Luna” without changing
 canonical IDs or search/mutation values. New Session quick selections are compound
 server/project identities, so selecting one switches the owning Gateway profile before
@@ -1673,12 +1678,21 @@ Packages and Resources is one page: installed packages first, a standalone Insta
 then inline Skills, Prompts and Themes containers using Manage Session's emerald/cyan/teal resource
 accents. Resolved extensions are not duplicated beneath the installed list. Opaque, no-space source
 titles remain continuous and horizontally inspectable; ordinary titles and provenance wrap naturally,
-with complete source/status information retained for accessibility. Full technical resource data remains
-available separately. A Locations and Overrides disclosure retains optional discovery paths and
-advanced Mac overrides in the same page, explaining each before editing. Session storage remains
+with complete source/status information retained for accessibility. Resolved resource names use the
+same friendly title formatter as session resources, stripping Markdown/JSON suffixes and deriving a
+skill name from its directory. Raw paths, IDs and metadata remain untouched. Shared source/scope
+information appears once as a category caption, not repeated in each row; mixed sources retain row
+provenance. Empty categories use captions rather than empty info cards, and there is no aggregate
+resource-count card. Full technical resource data remains available separately, including extension-only
+or additive categories. Locations and Overrides is a separate sibling sheet directly below Packages
+and Resources in Settings, retaining optional discovery paths, advanced Mac overrides and autosave. Session storage remains
 Gateway-owned and is not exposed as a location override. Package catalog admission failures remain
 local to the Packages sheet, preserving the sheet while presenting a bounded retry
-state instead of routing a projection error through a global modal alert. The iOS
+state instead of routing a projection error through a global modal alert. Visible Settings reads include
+the successful `foregroundReconciliationGeneration` in their task identities and publication fences.
+Foreground/reconnect readiness therefore reloads the current sheet and replaces stale offline errors;
+scene activation alone does not claim connectivity. The Gateway lifecycle still owns reconnect, and
+this revalidation never retries or replays accepted mutations. The iOS
 projection validates bounded structure and paths while tolerating additive resource
 categories and future metadata scope/origin values; its rejection copy identifies
 whether the response exceeded the 768 KiB bound or failed structural admission.

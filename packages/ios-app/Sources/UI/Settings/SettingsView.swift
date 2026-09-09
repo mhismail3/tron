@@ -109,11 +109,20 @@ struct SettingsView: View {
                     TronSettingsGroup("Workspace & Diagnostics", accent: .tronBlue) {
                         settingsLink(
                             "Packages and Resources",
-                            summary: "Installed packages, resolved resources, and resource paths",
+                            summary: "Installed packages, skills, prompts, and themes",
                             icon: "shippingbox",
                             accent: .tronBlue
                         ) {
                             PackagesSettingsView(projectCWD: projectCWD)
+                        }
+                        settingsDivider(accent: .tronBlue)
+                        settingsLink(
+                            "Locations and Overrides",
+                            summary: "Additional resource paths and advanced Mac settings",
+                            icon: "folder.badge.gearshape",
+                            accent: .tronBlue
+                        ) {
+                            ResourceSettingsView(projectCWD: projectCWD)
                         }
                         if scope == .project {
                             settingsDivider(accent: .tronBlue)
@@ -228,6 +237,7 @@ struct SettingsView: View {
 
 struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
     let accessibilityLabel: String
+    let identity: String
     /// Keep destination construction inside the presented sheet so large
     /// settings payloads are not built while the parent sheet is scrolling.
     let destination: () -> Destination
@@ -238,11 +248,13 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
 
     init(
         accessibilityLabel: String,
+        identity: String? = nil,
         accent: Color? = nil,
         @ViewBuilder destination: @escaping () -> Destination,
         @ViewBuilder label: () -> Label
     ) {
         self.accessibilityLabel = accessibilityLabel
+        self.identity = identity ?? "settings.\(accessibilityLabel)"
         self.accent = accent
         self.destination = destination
         self.label = label()
@@ -254,7 +266,7 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
             .accessibilityLabel(accessibilityLabel)
             .tronManagedSheet(
                 isPresented: $isPresented,
-                identity: "settings.\(accessibilityLabel)"
+                identity: identity
             ) {
                 NavigationStack {
                     destinationContent

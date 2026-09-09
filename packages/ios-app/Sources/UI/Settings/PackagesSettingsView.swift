@@ -46,26 +46,12 @@ struct PackageResolvedResourceItem: Identifiable, Equatable, Sendable {
 
     var id: String { path }
 
-    var displayName: String {
-        let url = URL(fileURLWithPath: path)
-        if url.lastPathComponent == "SKILL.md" {
-            return url.deletingLastPathComponent().lastPathComponent
-        }
-        return url.lastPathComponent.isEmpty ? path : url.lastPathComponent
-    }
+    var displayName: String { ProjectResourceTitlePresentation.resourcePathTitle(path) }
 
-    var sourceDescription: String {
-        let scopeLabel = switch scope {
-        case "project": "Current project"
-        case "temporary": "This session"
-        default: "Every project"
-        }
-        if origin == "package", let source, !source.isEmpty {
-            return "From \(source) · \(scopeLabel)"
-        }
-        if source == "auto" { return "Discovered automatically · \(scopeLabel)" }
-        if let source, !source.isEmpty { return "From \(source) · \(scopeLabel)" }
-        return scopeLabel
+    var sourceDescription: String? {
+        if source == "auto" { return "Discovered automatically" }
+        if let source, !source.isEmpty { return "From \(source)" }
+        return nil
     }
 }
 
@@ -76,6 +62,20 @@ struct PackageResolvedResourceCategory: Identifiable, Equatable, Sendable {
     var id: String { kind.id }
     var enabledCount: Int { items.count(where: \.enabled) }
     var disabledCount: Int { items.count - enabledCount }
+    var hasSharedSource: Bool { Set(items.map(\.source)).count == 1 }
+
+    var caption: String? {
+        guard !items.isEmpty else { return nil }
+        let scopes = Set(items.map { $0.scope == "user" ? "global" : $0.scope })
+        let scope = switch scopes {
+        case ["global"]: "Available in every project."
+        case ["project"]: "Available in the current project."
+        case ["temporary"]: "Available in this session."
+        default: "Source and scope details are available in Technical Details."
+        }
+        let provenance = hasSharedSource ? items.first?.sourceDescription : nil
+        return [provenance, scope].compactMap { $0 }.joined(separator: " · ")
+    }
 
     var summary: String {
         guard !items.isEmpty else { return "None resolved" }
@@ -88,12 +88,9 @@ struct PackageResolvedResourceCategory: Identifiable, Equatable, Sendable {
 
 struct PackageResolvedResourcesPresentation: Equatable, Sendable {
     let categories: [PackageResolvedResourceCategory]
-    let additionalCategoryCount: Int
 
     init(resources: JSONValue) {
         let root = resources.objectValue ?? [:]
-        let knownKeys = Set(PackageResourceKind.allCases.map(\.rawValue))
-        additionalCategoryCount = root.keys.count(where: { !knownKeys.contains($0) })
         // Installed packages already occupy the first section. Do not render
         // their extensions again in the resolved resource lists.
         categories = [PackageResourceKind.skills, .prompts, .themes].map { kind in
@@ -112,32 +109,6 @@ struct PackageResolvedResourcesPresentation: Equatable, Sendable {
             }
             return PackageResolvedResourceCategory(kind: kind, items: items)
         }
-    }
-
-    var totalCount: Int { categories.reduce(0) { $0 + $1.items.count } }
-    var enabledCount: Int { categories.reduce(0) { $0 + $1.enabledCount } }
-    var disabledCount: Int { totalCount - enabledCount }
-    var populatedCategoryCount: Int { categories.count(where: { !$0.items.isEmpty }) }
-
-    var overview: String {
-        guard totalCount > 0 else {
-            return additionalCategoryCount == 0
-                ? "No package resources are currently resolved."
-                : "Additional technical resource data is available below."
-        }
-        let typeLabel = populatedCategoryCount == 1 ? "resource type" : "resource types"
-        let availability: String
-        if disabledCount == 0 {
-            availability = "All are ready to use."
-        } else {
-            let ready = "\(enabledCount) \(enabledCount == 1 ? "is" : "are") ready to use"
-            let disabled = "\(disabledCount) \(disabledCount == 1 ? "is" : "are") turned off"
-            availability = "\(ready) and \(disabled)."
-        }
-        let additional = additionalCategoryCount == 0
-            ? ""
-            : " Additional technical resource data is available below."
-        return "\(totalCount) \(totalCount == 1 ? "resource" : "resources") across \(populatedCategoryCount) \(typeLabel). \(availability)\(additional)"
     }
 }
 
@@ -185,6 +156,12 @@ struct PackagesSettingsView: View {
     }
     @State private var activeMutations: [PackageMutationOperation: OwnedMutation] = [:]
 
+    private var loadID: PackageLoadID {
+        PackageLoadID(target: target, profileRevision: model.profileRevision,
+                      invalidationGeneration: model.packageInvalidationGeneration,
+                      refreshGeneration: refreshGeneration, foregroundGeneration: model.foregroundReconciliationGeneration)
+    }
+
     private var packageError: String? {
         mutationErrors.values.first ?? refreshError
     }
@@ -193,21 +170,7 @@ struct PackagesSettingsView: View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
                 if let packageError {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label(packageError, systemImage: "exclamationmark.triangle")
-                            .font(TronTypography.bodySM)
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Button("Retry", action: reload)
-                            .buttonStyle(TronRowButtonStyle(accent: .tronAmber))
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .tronGlassSurface(
-                        accent: .tronAmber,
-                        tintOpacity: 0.09,
-                        respectsSettingsTheme: false
-                    )
+                    TronSettingsNotice(message: packageError, retry: reload)
                 }
 
                 TronSettingsGroup("Installed", surfaceStyle: .scrollOptimized) {
@@ -242,19 +205,13 @@ struct PackagesSettingsView: View {
                 }
                 .buttonStyle(.plain)
                 .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.06)
+                .tronSettingsCaption("Agent packages and extensions run with your Mac user authority. Review their source before installing.")
 
                 if let resources = inventory?.resources {
-                    resolvedResources(resources)
+                    PackageResolvedResourcesSection(resources: resources)
                         .environment(\.tronSettingsVisualTheme, nil)
                 }
 
-                ResourceSettingsSection(projectCWD: projectCWD)
-
-                TronInfoCard(
-                    icon: "exclamationmark.shield",
-                    text: "Agent packages and extensions run with your Mac user authority. Review their source before installing.",
-                    accent: .tronAmber
-                )
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 18)
@@ -267,25 +224,10 @@ struct PackagesSettingsView: View {
             }
         }
         .task(id: PresentationActivityTaskID(
-            source: PackageLoadID(
-                target: target,
-                profileRevision: model.profileRevision,
-                invalidationGeneration: model.packageInvalidationGeneration,
-                refreshGeneration: refreshGeneration
-            ),
+            source: loadID,
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
-            guard presentationActivity.allowsPresentationPublication else { return }
-            let requestedTarget = target
-            let profileRevision = model.profileRevision
-            let generation = refreshGeneration
-            let invalidationGeneration = model.packageInvalidationGeneration
-            await refreshPackages(
-                target: requestedTarget,
-                profileRevision: profileRevision,
-                generation: generation,
-                invalidationGeneration: invalidationGeneration
-            )
+            await refreshPackages(loadID)
         }
         .onChange(of: target) { _, _ in
             revokeMutationTasks()
@@ -328,117 +270,31 @@ struct PackagesSettingsView: View {
         }
     }
 
-    @ViewBuilder
-    private func resolvedResources(_ resources: JSONValue) -> some View {
-        let presentation = PackageResolvedResourcesPresentation(resources: resources)
-        TronInfoCard(
-            icon: presentation.totalCount == 0 ? "tray" : "checkmark.seal.fill",
-            text: presentation.overview,
-            accent: .tronTeal
-        )
-
-        ForEach(presentation.categories) { category in
-            TronSettingsGroup(
-                category.kind.title,
-                detail: category.summary,
-                accent: category.kind.accent
-            ) {
-                if category.items.isEmpty {
-                    TronSettingsRow(
-                        icon: category.kind.icon,
-                        title: "None resolved",
-                        subtitle: "No \(category.kind.title.lowercased()) are currently available.",
-                        accent: .tronSlate
-                    )
-                } else {
-                    VStack(spacing: 0) {
-                        ForEach(Array(category.items.enumerated()), id: \.element.id) { index, item in
-                            if index > 0 { TronSettingsDivider(accent: category.kind.accent) }
-                            PackageResolvedResourceRow(item: item, accent: category.kind.accent)
-                        }
-                    }
-                }
-            }
-        }
-
-        if presentation.totalCount > 0 || presentation.additionalCategoryCount > 0 {
-            TronTechnicalJSONRow(
-                value: resources,
-                title: "Technical Details",
-                subtitle: "View paths, provenance, status, and other resolved resource data",
-                sheetTitle: "Resolved Resources JSON",
-                accent: .tronSlate
-            )
-        }
-    }
-
     private func reload() {
         refreshGeneration &+= 1
     }
 
-    private func refreshPackages(
-        target requestedTarget: PackageConfigurationTarget,
-        profileRevision: Int,
-        generation: Int,
-        invalidationGeneration: Int
-    ) async {
-        guard refreshIsCurrent(
-            target: requestedTarget,
-            profileRevision: profileRevision,
-            generation: generation,
-            invalidationGeneration: invalidationGeneration
-        ) else { return }
+    private func refreshPackages(_ request: PackageLoadID) async {
+        guard refreshIsCurrent(request) else { return }
         reloading = true
         refreshError = nil
-        defer {
-            if refreshIsCurrent(
-                target: requestedTarget,
-                profileRevision: profileRevision,
-                generation: generation,
-                invalidationGeneration: invalidationGeneration
-            ) {
-                reloading = false
-            }
-        }
-        let loaded = await model.loadPackages(target: requestedTarget, surfaceError: false)
-        guard refreshIsCurrent(
-            target: requestedTarget,
-            profileRevision: profileRevision,
-            generation: generation,
-            invalidationGeneration: invalidationGeneration
-        ) else { return }
+        defer { if refreshIsCurrent(request) { reloading = false } }
+        let loaded = await model.loadPackages(target: request.target, surfaceError: false)
+        guard refreshIsCurrent(request) else { return }
         guard loaded else {
-            // A false result without coordinator error means this request was
-            // superseded or coalesced; it is not a user-visible failure.
-            guard let error = model.packageError(for: requestedTarget) else { return }
-            refreshError = error
+            // Superseded/coalesced reads have no error to publish.
+            refreshError = model.packageError(for: request.target)
             return
         }
-        let updatesLoaded = await model.checkPackageUpdates(target: requestedTarget, surfaceError: false)
-        guard refreshIsCurrent(
-            target: requestedTarget,
-            profileRevision: profileRevision,
-            generation: generation,
-            invalidationGeneration: invalidationGeneration
-        ) else { return }
-        if updatesLoaded {
-            refreshError = nil
-        } else if let error = model.packageError(for: requestedTarget) {
-            refreshError = error
-        }
+        let updatesLoaded = await model.checkPackageUpdates(target: request.target, surfaceError: false)
+        guard refreshIsCurrent(request) else { return }
+        refreshError = updatesLoaded ? nil : model.packageError(for: request.target)
     }
 
-    private func refreshIsCurrent(
-        target requestedTarget: PackageConfigurationTarget,
-        profileRevision: Int,
-        generation: Int,
-        invalidationGeneration: Int
-    ) -> Bool {
-        !Task.isCancelled
-            && requestedTarget == target
-            && profileRevision == model.profileRevision
-            && generation == refreshGeneration
-            && invalidationGeneration == model.packageInvalidationGeneration
+    private func refreshIsCurrent(_ request: PackageLoadID) -> Bool {
+        // A successful foreground/reconnect pass invalidates even a late offline
+        // failure. Only reads restart; accepted package commands are not replayed.
+        !Task.isCancelled && presentationActivity.allowsPresentationPublication && request == loadID
     }
 
     private func beginMutation(_ operation: PackageMutationOperation) -> Int {
@@ -760,20 +616,5 @@ private struct PackageSourceRow<Trailing: View>: View {
             trailing
         }
         .accessibilityLabel("\(source). \(detail)")
-    }
-}
-
-private struct PackageResolvedResourceRow: View {
-    let item: PackageResolvedResourceItem
-    let accent: Color
-
-    var body: some View {
-        TronSettingsRow(icon: item.enabled ? "checkmark.circle.fill" : "minus.circle",
-                        title: item.displayName, subtitle: item.sourceDescription,
-                        titleIsIdentifier: true, accent: item.enabled ? accent : .tronSlate,
-                        subtitleColor: .tronTextSecondary) {
-            TronDynamicValue(text: item.statusDescription, color: .tronTextSecondary)
-        }
-        .accessibilityValue(item.statusDescription)
     }
 }

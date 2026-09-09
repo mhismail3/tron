@@ -14,7 +14,6 @@ struct CustomModelsSettingsView: View {
     @State private var advancedDocumentEdited = false
     @State private var draftOwner = CustomModelDraftOwner()
     private var saving: Bool { model.configurationAutosave.hasPending(.customModels(target)) }
-    @State private var providerToRemove: CustomModelProviderDraft?
     @State private var rebuildGeneration = 0
     @State private var rebuildTask: Task<Void, Never>?
     @State private var localTransformationTask: Task<Void, Never>?
@@ -25,26 +24,9 @@ struct CustomModelsSettingsView: View {
                 SettingsAutosaveNotice(key: .customModels(target))
                 providersSection
                     .disabled(advancedDocumentEdited)
-                TronInfoCard(icon: "info.circle", text: "Valid changes save automatically. Restart the Gateway manually when ready to activate changes to its model registry.", accent: .tronSlate)
+                    .tronSettingsCaption("Valid changes save automatically. Restart the Gateway manually when ready to activate changes to its model registry.")
 
                 if advancedDocumentEdited {
-                    HStack(alignment: .center, spacing: TronSpacing.xl) {
-                        Image(systemName: "curlybraces")
-                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                            .foregroundStyle(settingsTheme?.accent ?? .tronCyan)
-                            .frame(width: 20, height: 20, alignment: .center)
-                            .accessibilityHidden(true)
-                        Text("Advanced JSON is active and saves automatically when valid. Load it into the guided editor to continue there.")
-                            .font(TronTypography.bodySM)
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(.horizontal, TronSpacing.xl)
-                    .padding(.vertical, 14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.09)
                     Button("Load JSON into Guided Editor") {
                         localTransformationTask?.cancel()
                         localTransformationTask = Task {
@@ -53,6 +35,7 @@ struct CustomModelsSettingsView: View {
                         }
                     }
                         .buttonStyle(TronActionButtonStyle())
+                        .tronSettingsCaption("Advanced JSON is active and saves automatically when valid. Load it into the guided editor to continue there.")
                 }
 
                 TronTechnicalJSONRow(
@@ -68,14 +51,7 @@ struct CustomModelsSettingsView: View {
                         }
                     }
                 )
-
-                if redacted {
-                    TronInfoCard(
-                        icon: "key.slash",
-                        text: "Secret-looking values are hidden and preserved automatically. Manage provider credentials from Providers.",
-                        accent: .tronAmber
-                    )
-                }
+                .tronSettingsCaption(redacted ? "Secret-looking values are hidden and preserved automatically. Manage provider credentials from Providers." : nil)
             }
             .padding(20)
         }
@@ -98,7 +74,8 @@ struct CustomModelsSettingsView: View {
         .task(id: PresentationActivityTaskID(
             source: CustomModelLoadID(
                 target: target,
-                invalidationGeneration: model.customModelInvalidationGeneration
+                invalidationGeneration: model.customModelInvalidationGeneration,
+                foregroundGeneration: model.foregroundReconciliationGeneration
             ),
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
@@ -119,32 +96,6 @@ struct CustomModelsSettingsView: View {
             localTransformationTask?.cancel()
             localTransformationTask = nil
         }
-        .alert(
-            "Remove \(providerRemovalName)?",
-            isPresented: providerRemovalPresented
-        ) {
-            Button("Cancel", role: .cancel) { providerToRemove = nil }
-            Button("Remove Provider", role: .destructive) {
-                if let providerToRemove {
-                    providers.removeAll { $0.id == providerToRemove.id }
-                }
-                providerToRemove = nil
-                draftOwner.markEdited()
-                rebuildDocument()
-                enqueueAutosave()
-            }
-        }
-        .tronManagedSystemPresentation(
-            isPresented: providerRemovalPresented,
-            identity: "settings.custom-model.remove-confirmation"
-        )
-    }
-
-    private var providerRemovalPresented: Binding<Bool> {
-        Binding(
-            get: { providerToRemove != nil },
-            set: { if !$0 { providerToRemove = nil } }
-        )
     }
 
     private var advancedEditorSheet: some View {
@@ -189,15 +140,10 @@ struct CustomModelsSettingsView: View {
             }
 
             if providers.isEmpty {
-                Label("No custom providers. Built-in providers are unchanged.", systemImage: "cpu")
-                    .font(TronTypography.bodySM)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.07)
+                TronSettingsCaption("No custom providers. Built-in providers are unchanged.")
             } else {
-                ForEach($providers) { $provider in
-                    providerRow($provider)
+                ForEach(providers) { provider in
+                    providerRow(provider)
                 }
             }
 
@@ -221,17 +167,8 @@ struct CustomModelsSettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func providerRow(_ provider: Binding<CustomModelProviderDraft>) -> some View {
-        CustomModelProviderRow(
-            provider: provider.wrappedValue,
-            onRemove: { providerToRemove = provider.wrappedValue },
-            destination: { providerEditorSheet(provider) }
-        ) {
-            providerSummary(provider.wrappedValue)
-        }
-    }
-
-    private func providerSummary(_ provider: CustomModelProviderDraft) -> some View {
+    private func providerRow(_ provider: CustomModelProviderDraft) -> some View {
+        let inputGeneration = model.configurationAutosave.inputGeneration
         let modelCount = provider.models
             .split(whereSeparator: \.isNewline)
             .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -241,23 +178,39 @@ struct CustomModelsSettingsView: View {
         let secondaryLine = "\(endpoint) · \(modelLabel) · \(apiTitle(provider.api))"
 
         return TronSettingsRow(icon: "cpu", title: provider.identifier.isEmpty ? "New Provider" : provider.identifier,
-                               subtitle: secondaryLine, titleIsIdentifier: true, subtitleColor: .tronTextSecondary)
+                               subtitle: secondaryLine, titleIsIdentifier: true, subtitleColor: .tronTextSecondary) {
+            TronProgressiveSheetLink(accessibilityLabel: "Configure \(provider.identifier)",
+                                     identity: "settings.custom-model.\(provider.id)") {
+                CustomModelProviderConfiguration(provider: provider, onRemove: {
+                    guard inputGeneration == model.configurationAutosave.inputGeneration,
+                          !advancedDocumentEdited, providers.contains(where: { $0.id == provider.id }) else { return }
+                    providers.removeAll { $0.id == provider.id }
+                    draftOwner.markEdited()
+                    rebuildDocument()
+                    enqueueAutosave()
+                }) {
+                    providerEditorSheet(provider.editingBinding(in: $providers))
+                }
+            } label: { TronInlineActionLabel("Configure") }
+        }
+        .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.07)
     }
 
     private func providerEditorSheet(_ provider: Binding<CustomModelProviderDraft>) -> some View {
-        let api = editedProviderBinding(provider.api)
+        let providerID = provider.wrappedValue.id
+        let api = editedProviderBinding(provider.api, providerID: providerID)
         return ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
                 SettingsAutosaveNotice(key: .customModels(target))
                 TronSettingsGroup("Connection") {
                     VStack(spacing: 0) {
-                        TronTextSettingRow(icon: "cpu", title: "Provider ID", value: editedProviderBinding(provider.identifier))
+                        TronTextSettingRow(icon: "cpu", title: "Provider ID", value: editedProviderBinding(provider.identifier, providerID: providerID))
                         TronSettingsDivider()
-                        TronTextSettingRow(icon: "network", title: "Base URL", value: editedProviderBinding(provider.baseURL), keyboard: .URL)
+                        TronTextSettingRow(icon: "network", title: "Base URL", value: editedProviderBinding(provider.baseURL, providerID: providerID), keyboard: .URL)
                     }
                 }
                 TronSettingsGroup("Models", detail: "One model ID per line. These appear in model selection.") {
-                    TextField("Model IDs", text: editedProviderBinding(provider.models), axis: .vertical)
+                    TextField("Model IDs", text: editedProviderBinding(provider.models, providerID: providerID), axis: .vertical)
                         .lineLimit(2...8).textInputAutocapitalization(.never).autocorrectionDisabled()
                         .tronField(monospaced: true, compact: true).padding(14)
                 }
@@ -294,7 +247,7 @@ struct CustomModelsSettingsView: View {
         )
     }
 
-    private func editedProviderBinding<Value: Equatable>(_ binding: Binding<Value>) -> Binding<Value> {
+    private func editedProviderBinding<Value: Equatable>(_ binding: Binding<Value>, providerID: UUID) -> Binding<Value> {
         let profile = model.profileRevision
         let inputGeneration = model.configurationAutosave.inputGeneration
         let initial = binding.wrappedValue
@@ -303,6 +256,7 @@ struct CustomModelsSettingsView: View {
             set: { value in
                 guard model.profileRevision == profile, presentationActivity.allowsDataPublication,
                       model.configurationAutosave.inputGeneration == inputGeneration,
+                      providers.contains(where: { $0.id == providerID }), !advancedDocumentEdited,
                       draftOwner.markEdited(from: binding.wrappedValue, to: value) else { return }
                 binding.wrappedValue = value
                 rebuildDocument()
@@ -322,21 +276,23 @@ struct CustomModelsSettingsView: View {
     }
 
     private func load() async {
+        let foreground = model.foregroundReconciliationGeneration
         guard presentationActivity.allowsPresentationPublication,
               await model.loadCustomModels(target: target),
-              !Task.isCancelled,
+              foreground == model.foregroundReconciliationGeneration, !Task.isCancelled,
               presentationActivity.allowsPresentationPublication else { return }
         await loadFromProjection()
     }
 
     private func loadFromProjection() async {
+        let foreground = model.foregroundReconciliationGeneration
         guard presentationActivity.allowsPresentationPublication,
               !saving, !advancedDocumentEdited, draftOwner.admitsPublication,
               let root = model.customModels(for: target)?.objectValue else { return }
         let value = root["document"] ?? .object(["providers": .object([:])])
         do {
             let prepared = try await prepareOffMain(value)
-            guard !Task.isCancelled,
+            guard !Task.isCancelled, foreground == model.foregroundReconciliationGeneration,
                   presentationActivity.allowsPresentationPublication,
                   !saving, !advancedDocumentEdited, draftOwner.admitsPublication,
                   model.customModels(for: target)?.objectValue == root else { return }
@@ -345,6 +301,8 @@ struct CustomModelsSettingsView: View {
             draftOwner.markInstalled()
         } catch is CancellationError {
         } catch {
+            guard !Task.isCancelled, foreground == model.foregroundReconciliationGeneration,
+                  presentationActivity.allowsPresentationPublication else { return }
             model.presentConfigurationActionError(error)
         }
     }
@@ -451,11 +409,6 @@ struct CustomModelsSettingsView: View {
         }
     }
 
-    private var providerRemovalName: String {
-        guard let providerToRemove else { return "this provider" }
-        return providerToRemove.identifier.isEmpty ? "this provider" : providerToRemove.identifier
-    }
-
     private func enqueueAutosave() {
         guard draftOwner.isDirty else { return }
         let revision = draftOwner.revision
@@ -484,71 +437,44 @@ struct CustomModelsSettingsView: View {
     }
 }
 
-private struct CustomModelProviderRow<Label: View, Destination: View>: View {
+/// The exact provider editor owns its destructive confirmation, not the list
+/// behind it. Removal retires the editor and its stable-ID field bindings.
+struct CustomModelProviderConfiguration<Content: View>: View {
     let provider: CustomModelProviderDraft
     let onRemove: () -> Void
-    let destination: () -> Destination
-    let label: Label
-    @State private var isPresented = false
-
-    init(
-        provider: CustomModelProviderDraft,
-        onRemove: @escaping () -> Void,
-        @ViewBuilder destination: @escaping () -> Destination,
-        @ViewBuilder label: () -> Label
-    ) {
-        self.provider = provider
-        self.onRemove = onRemove
-        self.destination = destination
-        self.label = label()
-    }
+    @ViewBuilder let content: () -> Content
+    @State private var confirmingRemoval = false
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        ZStack(alignment: .trailing) {
-            Button { isPresented = true } label: {
-                label
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.trailing, 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Edit provider \(provider.identifier.isEmpty ? "New Provider" : provider.identifier)")
-
-            Menu {
-                Button("Remove Provider", systemImage: "trash", role: .destructive, action: onRemove)
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .padding(.trailing, 8)
-            .accessibilityLabel("Provider actions")
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.07)
-        .tronManagedSheet(
-            isPresented: $isPresented,
-            identity: "settings.custom-model.destination.\(provider.id.uuidString)"
-        ) {
-            NavigationStack {
-                destination()
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button { isPresented = false } label: {
-                                Image(systemName: "checkmark")
-                                    .font(TronTypography.buttonSM)
-                                    .tronSettingsAccent()
-                            }
-                            .accessibilityLabel("Done")
-                        }
+        content()
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(role: .destructive) { confirmingRemoval = true } label: {
+                        TronToolbarTextLabel("Remove", systemImage: "trash")
                     }
+                    .tronToolbarAction(accent: .tronError)
+                    .accessibilityIdentifier("custom-model-remove")
+                }
             }
-            .tronTopBlur(.sheet)
-            .tronPresentation()
-            .tronSettingsLayout()
-            .presentationDragIndicator(.hidden)
-        }
+            .tronManagedSheet(isPresented: $confirmingRemoval, identity: "settings.custom-model.remove.\(provider.id)") {
+                TronConfirmationSheet(title: "Remove this provider?",
+                    message: provider.identifier.isEmpty ? "Remove this custom provider and its model definitions?" : "Remove \(provider.identifier) and its custom model definitions?",
+                    confirmTitle: "Remove Provider", destructive: true, icon: "trash") {
+                    dismiss()
+                    onRemove()
+                }
+            }
+    }
+}
+
+extension CustomModelProviderDraft {
+    /// A dismissed editor can still receive native field callbacks. Resolving
+    /// by UUID avoids indexing a removed row or reviving it during dismissal.
+    func editingBinding(in providers: Binding<[Self]>) -> Binding<Self> {
+        Binding(get: { providers.wrappedValue.first { $0.id == id } ?? self }, set: { next in
+            guard next.id == id, let index = providers.wrappedValue.firstIndex(where: { $0.id == id }) else { return }
+            providers.wrappedValue[index] = next
+        })
     }
 }

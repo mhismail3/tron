@@ -187,9 +187,11 @@ struct AgentDefaultsLoadID: Hashable {
     let providerTarget: ProviderCatalogTarget
     let settingsInvalidationGeneration: Int
     let providerInvalidationGeneration: Int
+    let foregroundGeneration: Int
 }
 
 struct SettingsLoadID: Hashable {
     let target: SettingsTarget?
     let invalidationGeneration: Int
+    let foregroundGeneration: Int
 }

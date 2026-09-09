@@ -19,30 +19,23 @@ struct ProvidersSettingsView: View {
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(spacing: 6) {
-                if let profile = model.profiles.selected {
-                    TronInfoCard(
-                        icon: "desktopcomputer",
-                        text: "Provider credentials are stored on \(profile.label) (\(profile.host)).",
-                        accent: .tronEmerald
-                    )
-                    .padding(.bottom, 6)
-                }
                 if loading && providers.isEmpty {
                     TronLoadingState(label: "Loading providers…", accent: .tronEmerald)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else if providers.isEmpty {
-                    TronInfoCard(
-                        icon: loadFailed ? "exclamationmark.triangle" : "key",
-                        text: loadFailed
-                            ? "Providers could not be loaded. Check the Gateway connection and try Reload."
-                            : "No providers are available from this Gateway.",
-                        accent: loadFailed ? .tronAmber : .tronSlate,
-                        usesSemanticAccent: loadFailed
-                    )
+                    if loadFailed {
+                        TronSettingsNotice(message: "Providers could not be loaded. Check the Gateway connection.", retry: reload)
+                    } else {
+                        TronSettingsCaption("No providers are available from this Gateway.")
+                    }
                 } else {
                     ForEach(providers) { provider in
                         ProviderSetupRow(provider: provider, sessionID: sessionID)
                     }
+                }
+                if let profile = model.profiles.selected {
+                    TronSettingsCaption("Provider credentials are stored on \(profile.label) (\(profile.host)).")
+                        .padding(.top, 2)
                 }
             }
             .padding(.horizontal, 16)
@@ -56,7 +49,7 @@ struct ProvidersSettingsView: View {
             }
         }
         .task(id: PresentationActivityTaskID(
-            source: "\(target):\(model.providerInvalidationGeneration):\(manualReloadGeneration)",
+            source: "\(target):\(model.providerInvalidationGeneration):\(manualReloadGeneration):\(model.foregroundReconciliationGeneration)",
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
             guard presentationActivity.allowsPresentationPublication else { return }
@@ -71,6 +64,7 @@ struct ProvidersSettingsView: View {
     }
 
     private func loadProviders(for requestedTarget: ProviderCatalogTarget) async {
+        let foreground = model.foregroundReconciliationGeneration
         guard presentationActivity.allowsPresentationPublication else { return }
         loadGeneration &+= 1
         let generation = loadGeneration
@@ -90,7 +84,7 @@ struct ProvidersSettingsView: View {
 
         loading = providers.isEmpty
         defer {
-            if generation == loadGeneration,
+            if generation == loadGeneration, foreground == model.foregroundReconciliationGeneration,
                !Task.isCancelled,
                presentationActivity.allowsPresentationPublication {
                 loading = false
@@ -99,7 +93,7 @@ struct ProvidersSettingsView: View {
         }
 
         let succeeded = await model.refreshProviders(target: requestedTarget)
-        guard generation == loadGeneration,
+        guard generation == loadGeneration, foreground == model.foregroundReconciliationGeneration,
               requestedTarget == target,
               presentationActivity.allowsPresentationPublication,
               !Task.isCancelled else { return }

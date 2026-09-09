@@ -249,12 +249,7 @@ private struct ProviderConfigurationSheet: View {
 
     @ViewBuilder private var connectionControls: some View {
         if provider.authMethods.isEmpty {
-            TronInfoCard(
-                icon: "exclamationmark.triangle",
-                text: "This provider does not advertise a supported connection method.",
-                accent: .tronAmber,
-                usesSemanticAccent: true
-            )
+            TronSettingsCaption("This provider does not advertise a supported connection method.")
         } else {
             TronSettingsGroup("Connection Options", accent: .tronEmerald) {
                 VStack(spacing: 0) {

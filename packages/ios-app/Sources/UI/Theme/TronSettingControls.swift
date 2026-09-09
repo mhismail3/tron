@@ -1,5 +1,51 @@
 import SwiftUI
 
+/// Passive explanations sit on the sheet, never in a surface that looks tappable.
+struct TronSettingsCaption: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+    var body: some View {
+        Text(text)
+            .font(TronTypography.secondaryDescription)
+            .foregroundStyle(Color.tronTextSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 4)
+    }
+}
+
+extension View {
+    /// Keep the explanation attached to its owner rather than a distant page footer.
+    func tronSettingsCaption(_ text: String?) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            self
+            if let text { TronSettingsCaption(text) }
+        }
+    }
+}
+
+/// Actionable failures share row geometry and a trailing retry target. They are
+/// deliberately distinct from passive, surface-free settings captions.
+struct TronSettingsNotice: View {
+    let message: String
+    var title: String? = nil
+    var icon: String = "exclamationmark.triangle"
+    var accent: Color = .tronAmber
+    var retry: (() -> Void)? = nil
+
+    var body: some View {
+        TronSettingsRow(icon: icon, title: title ?? message, subtitle: title == nil ? nil : message,
+                        accent: accent, titleFont: title == nil ? TronTypography.bodySM : TronTypography.body) {
+            if let retry {
+                Button(action: retry) { TronInlineActionLabel("Retry", accent: accent) }
+                    .buttonStyle(.plain)
+            }
+        }
+        .tronSettingsVisualTheme(accent: accent)
+        .tronGlassSurface(accent: accent, tintOpacity: 0.09, respectsSettingsTheme: false)
+    }
+}
+
 /// A chosen value belongs in its action capsule, not repeated as a subtitle.
 struct TronSelectionRow<Choices: View>: View {
     let icon: String

@@ -23,4 +23,5 @@ struct PackageLoadID: Hashable {
     let profileRevision: Int
     let invalidationGeneration: Int
     let refreshGeneration: Int
+    let foregroundGeneration: Int
 }

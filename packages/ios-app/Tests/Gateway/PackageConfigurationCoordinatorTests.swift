@@ -10,8 +10,10 @@ struct PackageConfigurationCoordinatorTests {
     @Test("package refresh identity includes profile revision and row operation identity")
     func packageOwnershipIdentity() {
         let target = PackageConfigurationTarget.workspace(cwd: "/workspace/project")
-        #expect(PackageLoadID(target: target, profileRevision: 1, invalidationGeneration: 2, refreshGeneration: 3) != PackageLoadID(target: target, profileRevision: 2, invalidationGeneration: 2, refreshGeneration: 3))
-        #expect(PackageLoadID(target: target, profileRevision: 1, invalidationGeneration: 2, refreshGeneration: 3) != PackageLoadID(target: target, profileRevision: 1, invalidationGeneration: 3, refreshGeneration: 3))
+        let initial = PackageLoadID(target: target, profileRevision: 1, invalidationGeneration: 2, refreshGeneration: 3, foregroundGeneration: 0)
+        #expect(initial != PackageLoadID(target: target, profileRevision: 2, invalidationGeneration: 2, refreshGeneration: 3, foregroundGeneration: 0))
+        #expect(initial != PackageLoadID(target: target, profileRevision: 1, invalidationGeneration: 3, refreshGeneration: 3, foregroundGeneration: 0))
+        #expect(initial != PackageLoadID(target: target, profileRevision: 1, invalidationGeneration: 2, refreshGeneration: 3, foregroundGeneration: 1))
         #expect(PackageInstallDraftPolicy.afterSuccess(current: "new draft", captured: "installed") == "new draft")
         #expect(PackageInstallDraftPolicy.afterSuccess(current: "installed", captured: "installed").isEmpty)
         let package = PackageSummary(source: "tool", scope: .project, filtered: false, installedPath: nil)
@@ -51,18 +53,59 @@ struct PackageConfigurationCoordinatorTests {
         ])
         let presentation = PackageResolvedResourcesPresentation(resources: resources)
         #expect(presentation.categories.map(\.kind) == [.skills, .prompts, .themes])
-        #expect(presentation.totalCount == 1)
-        #expect(presentation.enabledCount == 0)
-        #expect(presentation.disabledCount == 1)
-        #expect(presentation.populatedCategoryCount == 1)
-        #expect(presentation.additionalCategoryCount == 1)
-        #expect(presentation.overview == "1 resource across 1 resource type. 0 are ready to use and 1 is turned off. Additional technical resource data is available below.")
+        #expect(presentation.categories.flatMap(\.items).count == 1)
+        #expect(presentation.categories[0].disabledCount == 1)
         let skill = try #require(presentation.categories.first(where: { $0.kind == .skills })?.items.first)
-        #expect(skill.displayName == "review")
-        #expect(skill.sourceDescription == "From npm:sample · Current project")
-        #expect(PackageResolvedResourcesPresentation(resources: .object([:])).totalCount == 0)
+        #expect(skill.displayName == "Review")
+        #expect(skill.id == "/packages/sample/skills/review/SKILL.md")
+        #expect(skill.sourceDescription == "From npm:sample")
+        #expect(presentation.categories[0].caption == "From npm:sample · Available in the current project.")
+        #expect(PackageResolvedResourcesPresentation(resources: .object([:])).categories.allSatisfy { $0.items.isEmpty })
         #expect(PackageResolvedResourcesPresentation(resources: .string("opaque")).categories.allSatisfy { $0.items.isEmpty })
         #expect(skill.statusDescription == "Turned off")
+    }
+
+    @Test("friendly resource names preserve raw identity and group shared provenance once")
+    func friendlyResourceNames() {
+        let paths = ["/skills/tron-code-health/SKILL.md", "/skills/tron-ios/SKILL.md", "/prompts/parallel-review.md", "/themes/ios-theme.json"]
+        let expected = ["Tron Code Health", "Tron iOS", "Parallel Review", "iOS Theme"]
+        let items = paths.map { PackageResolvedResourceItem(path: $0, enabled: true, source: "auto", scope: "user", origin: "discovered") }
+        #expect(items.map(\.displayName) == expected)
+        #expect(items.map(\.id) == paths)
+        let category = PackageResolvedResourceCategory(kind: .skills, items: items)
+        #expect(category.hasSharedSource)
+        #expect(category.caption == "Discovered automatically · Available in every project.")
+        #expect(items.allSatisfy { $0.sourceDescription?.contains("Every project") != true })
+        let mixed = PackageResolvedResourceCategory(kind: .skills, items: items + [.init(path: "/other/SKILL.md", enabled: true, source: "npm:other", scope: "project", origin: "package")])
+        #expect(!mixed.hasSharedSource)
+        #expect(mixed.caption == "Source and scope details are available in Technical Details.")
+    }
+
+    @Test("a fresh read clears offline state and a delayed older failure cannot restore it")
+    func foregroundReadReplacesOfflineError() async throws {
+        try await runScenario {
+            let harness = try await makeHarness()
+            let offline = Task { await harness.owner.load(target: .global, surfaceError: false) }
+            try await harness.socket.waitUntilSent(count: 2)
+            let first = try request(await harness.socket.sentFrames()[1])
+            await harness.socket.enqueue(failure(id: first.id, message: "The Mac gateway is offline."))
+            #expect(!(await offline.value))
+            #expect(harness.owner.error(for: .global) != nil)
+            let older = Task { await harness.owner.load(target: .global, surfaceError: false) }
+            try await harness.socket.waitUntilSent(count: 3)
+            let newer = Task { await harness.owner.load(target: .global, surfaceError: false) }
+            try await harness.socket.waitUntilSent(count: 4)
+            let oldRequest = try request(await harness.socket.sentFrames()[2])
+            let newRequest = try request(await harness.socket.sentFrames()[3])
+            await harness.socket.enqueue(response(id: newRequest.id, result: inventory("fresh")))
+            #expect(await newer.value)
+            await harness.socket.enqueue(failure(id: oldRequest.id, message: "late offline failure"))
+            #expect(!(await older.value))
+            #expect(harness.owner.error(for: .global) == nil)
+            #expect(harness.owner.inventory(for: .global)?.packages.first?.source == "fresh")
+            #expect(try await harness.socket.sentFrames().dropFirst().map { try request($0).method } == ["packages.list", "packages.list", "packages.list"])
+            await harness.client.close()
+        }
     }
 
     @Test("resource categories retain Manage Session accents")

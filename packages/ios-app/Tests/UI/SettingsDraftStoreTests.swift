@@ -9,21 +9,23 @@ struct SettingsDraftStoreTests {
             settingsTarget: .global,
             providerTarget: .global,
             settingsInvalidationGeneration: 0,
-            providerInvalidationGeneration: 0
+            providerInvalidationGeneration: 0, foregroundGeneration: 0
         )
         let project = AgentDefaultsLoadID(
             settingsTarget: .project(cwd: "/workspace/project"),
             providerTarget: .session(id: "session-a"),
             settingsInvalidationGeneration: 0,
-            providerInvalidationGeneration: 0
+            providerInvalidationGeneration: 0, foregroundGeneration: 0
         )
         #expect(global != project)
         #expect(global != AgentDefaultsLoadID(
             settingsTarget: .global,
             providerTarget: .global,
             settingsInvalidationGeneration: 0,
-            providerInvalidationGeneration: 1
+            providerInvalidationGeneration: 1, foregroundGeneration: 0
         ))
+        #expect(global != AgentDefaultsLoadID(settingsTarget: .global, providerTarget: .global,
+            settingsInvalidationGeneration: 0, providerInvalidationGeneration: 0, foregroundGeneration: 1))
     }
 
     @Test("settings patches contain only changed fields")

@@ -135,6 +135,104 @@ final class SettingsLayoutStyleTests: XCTestCase {
         }
     }
 
+    func testPassiveCaptionsAndSharedResourceRows() async throws {
+        try await withHost(TronSettingsCaption("This explanation is not an action.")
+            .background(Color.tronBackground), size: CGSize(width: 404, height: 70), scheme: .dark) { host in
+            XCTAssertFalse(descendants(host.view).contains { $0 is UIVisualEffectView }, "A passive caption must not acquire a glass card")
+            XCTAssertFalse(descendants(host.view).contains { $0 is UIControl })
+        }
+        let resources: JSONValue = .object([
+            "skills": .array([resource("/skills/tron-code-health/SKILL.md", source: "auto", scope: "project"),
+                              resource("/skills/tron-ios/SKILL.md", source: "auto", scope: "project")]),
+            "prompts": .array([resource("/prompts/parallel-review.md", source: "npm:example-tools", scope: "user"),
+                               resource("/prompts/review-loop.md", source: "npm:example-tools", scope: "user")]),
+            "themes": .array([])
+        ])
+        for scheme in [ColorScheme.light, .dark] {
+            let fixture = ScrollView {
+                VStack(spacing: 18) {
+                    TronSettingsNotice(message: "The Mac gateway is offline.", retry: {})
+                    TronSettingsRow(icon: "cpu", title: "Example Provider", subtitle: "2 model IDs · OpenAI Chat") {
+                        Button {} label: { TronInlineActionLabel("Configure") }
+                    }
+                    .tronGlassSurface(accent: .tronPurple)
+                    .tronSettingsVisualTheme(accent: .tronPurple)
+                    .tronSettingsCaption("Valid changes save automatically. Restart the Gateway manually when ready to activate changes to its model registry.")
+                    PackageResolvedResourcesSection(resources: resources)
+                }.padding(18)
+            }
+            .tronPresentation().tronSettingsLayout().background(Color.tronBackground)
+            .environment(\.colorScheme, scheme)
+            try await withHost(fixture, size: CGSize(width: 440, height: 880), scheme: scheme) { host in
+                attach(image(host), name: "settings-captions-resources-\(scheme)")
+            }
+        }
+    }
+
+    func testVisiblePackagesRefreshAfterForegroundWithoutRetry() async throws {
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: [socket]).factory)
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let model = AppModel(client: client, cache: SnapshotCache(root: root))
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+        do {
+            try await model.connectHostedGateway(profile: GatewayProfile(id: "profile", label: "Mac", host: "gateway.test", port: 9_847,
+                machineId: "machine", deviceId: "device"), token: "token")
+            try await withHost(PackagesSettingsView(projectCWD: nil).environment(model).tronPresentation().tronSettingsLayout(),
+                               size: CGSize(width: 440, height: 800)) { _ in
+                let failed = try await request(socket, count: 2)
+                XCTAssertEqual(failed.method, "packages.list")
+                await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                    "type": .string("response"), "id": .string(failed.id), "ok": .bool(false),
+                    "error": .object(["code": .string("disconnected"), "message": .string("The Mac gateway is offline."), "retryable": .bool(true)])
+                ])))
+                try await Task.sleep(for: .milliseconds(40))
+                XCTAssertNotNil(model.packageError(for: .global))
+                // Exercise the real successful-foreground boundary on a live
+                // transport; epoch replacement itself is owned by lifecycle tests.
+                let reconciliation = model.becameActive()
+                let catalog = try await request(socket, count: 3)
+                XCTAssertEqual(catalog.method, "session.list")
+                await socket.enqueue(try reply(catalog.id, .object(["sessions": .array([]), "listRevision": .number(1)])))
+                await reconciliation?.value
+                let refreshed = try await request(socket, count: 4)
+                XCTAssertEqual(refreshed.method, "packages.list", "Foreground must re-read the visible page without tapping Retry")
+                await socket.enqueue(try reply(refreshed.id, .object(["packages": .array([]), "resources": .object([
+                    "extensions": .array([]), "skills": .array([]), "prompts": .array([]), "themes": .array([])
+                ])])))
+                let updates = try await request(socket, count: 5)
+                XCTAssertEqual(updates.method, "packages.checkUpdates")
+                await socket.enqueue(try reply(updates.id, .object(["updates": .array([])])))
+                try await Task.sleep(for: .milliseconds(40))
+                XCTAssertNil(model.packageError(for: .global))
+                XCTAssertNotNil(model.packageInventory(for: .global))
+            }
+        } catch {
+            await model.teardown(); await client.close(); try? FileManager.default.removeItem(at: root)
+            throw error
+        }
+        await model.teardown(); await client.close(); try? FileManager.default.removeItem(at: root)
+    }
+
+    private func resource(_ path: String, source: String, scope: String) -> JSONValue {
+        .object(["path": .string(path), "enabled": .bool(true),
+                 "metadata": .object(["source": .string(source), "scope": .string(scope), "origin": .string("package")])])
+    }
+    private struct SettingsRequest: Decodable { let id: String; let method: String }
+    private func request(_ socket: ScriptedGatewaySocket, count: Int) async throws -> SettingsRequest {
+        do {
+            try await withTestWatchdog(timeout: .seconds(3)) { try await socket.waitUntilSent(count: count) }
+        } catch {
+            let sent = await socket.sentFrames().compactMap { try? JSONDecoder.gateway.decode(SettingsRequest.self, from: $0).method }
+            XCTFail("Missing settings request \(count); received \(sent)")
+            throw error
+        }
+        return try JSONDecoder.gateway.decode(SettingsRequest.self, from: await socket.sentFrames()[count - 1])
+    }
+    private func reply(_ id: String, _ result: JSONValue) throws -> Data {
+        try JSONEncoder.gateway.encode(JSONValue.object(["type": .string("response"), "id": .string(id), "ok": .bool(true), "result": result]))
+    }
+
     private func descendants(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap(descendants) }
     private func image<Content: View>(_ host: UIHostingController<Content>) -> UIImage {
         UIGraphicsImageRenderer(bounds: host.view.bounds).image { _ in host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true) }

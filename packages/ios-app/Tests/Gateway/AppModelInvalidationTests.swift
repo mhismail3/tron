@@ -23,9 +23,14 @@ struct AppModelInvalidationTests {
         #expect(SettingsTarget.global.cwd == nil)
         #expect(SettingsTarget.project(cwd: "/workspace/project").scope == .project)
 
-        let initial = SettingsLoadID(target: .global, invalidationGeneration: 0)
-        #expect(initial != SettingsLoadID(target: .project(cwd: "/workspace/project"), invalidationGeneration: 0))
-        #expect(initial != SettingsLoadID(target: .global, invalidationGeneration: 1))
+        let initial = SettingsLoadID(target: .global, invalidationGeneration: 0, foregroundGeneration: 0)
+        #expect(initial != SettingsLoadID(target: .project(cwd: "/workspace/project"), invalidationGeneration: 0, foregroundGeneration: 0))
+        #expect(initial != SettingsLoadID(target: .global, invalidationGeneration: 1, foregroundGeneration: 0))
+        #expect(initial != SettingsLoadID(target: .global, invalidationGeneration: 0, foregroundGeneration: 1))
+        #expect(CustomModelLoadID(target: .global, invalidationGeneration: 0, foregroundGeneration: 0)
+            != CustomModelLoadID(target: .global, invalidationGeneration: 0, foregroundGeneration: 1))
+        #expect(TrustLoadID(target: nil, invalidationGeneration: 0, foregroundGeneration: 0)
+            != TrustLoadID(target: nil, invalidationGeneration: 0, foregroundGeneration: 1))
     }
 
     @Test("package targets map only nonempty workspace paths")

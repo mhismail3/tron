@@ -177,7 +177,8 @@ struct RuntimeBehaviorSettingsView: View {
         .tronNavigationTitle("Runtime Behavior")
         .tronSettingsAutosave(draft: $draft, store: $drafts, initial: RuntimeBehaviorDraft())
         .task(id: PresentationActivityTaskID(
-            source: SettingsLoadID(target: settingsTarget, invalidationGeneration: model.settingsInvalidationGeneration),
+            source: SettingsLoadID(target: settingsTarget, invalidationGeneration: model.settingsInvalidationGeneration,
+                                   foregroundGeneration: model.foregroundReconciliationGeneration),
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
             guard presentationActivity.allowsPresentationPublication else { return }
@@ -264,11 +265,13 @@ struct RuntimeBehaviorSettingsView: View {
     }
 
     private func load() async {
+        let foreground = model.foregroundReconciliationGeneration
         guard let target = settingsTarget else { return }
         // Installing a projection never submits an autosave; a user edit made
         // while this read is pending still rejects its stale result.
         _ = drafts.seedBaselineIfMissing(draft, for: target)
         guard await model.refreshSettings(target: target),
+              foreground == model.foregroundReconciliationGeneration,
               presentationActivity.allowsPresentationPublication,
               !Task.isCancelled,
               target == settingsTarget,

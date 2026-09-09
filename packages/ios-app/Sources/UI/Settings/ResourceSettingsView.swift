@@ -57,7 +57,7 @@ private func settingsLines(_ value: String) -> [String] {
         .filter { !$0.isEmpty }
 }
 
-struct ResourceSettingsSection: View {
+struct ResourceSettingsView: View {
     private enum Editor: String, Identifiable {
         case extensions, skills, prompts, themes, shellPath, shellPrefix, npmCommand, proxy
         var id: String { rawValue }
@@ -108,25 +108,22 @@ struct ResourceSettingsSection: View {
     @State private var scope: SettingsScope = .global
     @State private var draft = ResourceSettingsDraft()
     @State private var drafts = ScopedSettingsDraftStore<ResourceSettingsDraft>()
-    @State private var embeddedPathsExpanded = false
 
     private var allowsProjectScope: Bool { projectCWD != nil }
     @State private var editor: Editor?
 
     var body: some View {
-        DisclosureGroup(isExpanded: $embeddedPathsExpanded) {
-            resourceSettingsContent.padding(.top, 8)
-        } label: {
-            TronSettingsRow(icon: "folder.badge.gearshape", title: "Locations and Overrides",
-                            subtitle: "Additional resource paths and advanced Mac configuration", accent: .tronBlue)
+        ScrollView(.vertical, showsIndicators: true) {
+            resourceSettingsContent.padding(.horizontal, 20).padding(.vertical, 18)
         }
-        .padding(.horizontal, 14).padding(.vertical, 10)
-        .tronGlassSurface(accent: .tronBlue, tintOpacity: 0.06)
+        .tronScrollEdgeChrome()
+        .tronNavigationTitle("Locations and Overrides")
         .tronSettingsAutosave(draft: $draft, store: $drafts, initial: ResourceSettingsDraft())
         .task(id: PresentationActivityTaskID(
             source: SettingsLoadID(
                 target: settingsTarget,
-                invalidationGeneration: model.settingsInvalidationGeneration
+                invalidationGeneration: model.settingsInvalidationGeneration,
+                foregroundGeneration: model.foregroundReconciliationGeneration
             ),
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
@@ -166,6 +163,8 @@ struct ResourceSettingsSection: View {
                 }
             }
 
+            .tronSettingsCaption("Tron already discovers resources in the standard global and trusted-project folders. Add locations here only when resources live somewhere else.")
+
             TronSettingsGroup("Advanced Mac Overrides", detail: "Normally leave these on System Default.", accent: .tronSlate) {
                 VStack(spacing: 0) {
                     editorRow(.shellPath, icon: "terminal", value: draft.shellPath, accent: .tronTeal)
@@ -180,11 +179,6 @@ struct ResourceSettingsSection: View {
 
             if let target = settingsTarget { SettingsAutosaveNotice(key: .settings(target, sessionID: nil)) }
 
-            TronInfoCard(
-                icon: "info.circle",
-                text: "Tron already discovers resources in the standard global and trusted-project folders. Add locations here only when resources live somewhere else.",
-                accent: .tronCyan
-            )
         }
     }
 
@@ -241,17 +235,15 @@ struct ResourceSettingsSection: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    TronInfoCard(
-                        icon: "info.circle",
-                        text: value.explanation,
-                        accent: .tronCyan
-                    )
                     pathEditor(value)
-                    if value.acceptsMultipleLines {
-                        TronCaption("Enter one file, directory, glob, or exclusion per line.")
+                        .tronSettingsCaption(value.explanation + (value.acceptsMultipleLines ? "\nEnter one file, directory, glob, or exclusion per line." : ""))
+                    TronSettingsRow(icon: "arrow.uturn.backward", title: "System Default") {
+                        Button { binding(for: value).wrappedValue = "" } label: {
+                            TronInlineActionLabel("Restore")
+                        }
+                        .buttonStyle(.plain)
                     }
-                    Button("Use System Default") { binding(for: value).wrappedValue = "" }
-                        .buttonStyle(TronActionButtonStyle())
+                    .tronGlassSurface(accent: .tronBlue)
                 }
                 .padding(18)
             }
@@ -365,11 +357,14 @@ struct ResourceSettingsSection: View {
     }
 
     private func load() async {
+        let foreground = model.foregroundReconciliationGeneration
         guard let target = settingsTarget else { return }
         // Establish a clean snapshot before awaiting the gateway; a real edit
         // during the request still marks the draft dirty and rejects stale data.
         _ = drafts.seedBaselineIfMissing(draft, for: target)
         guard await model.refreshSettings(target: target),
+              !Task.isCancelled, presentationActivity.allowsPresentationPublication,
+              foreground == model.foregroundReconciliationGeneration,
               target == settingsTarget,
               editor == nil,
               let loaded = projectionDraft(target: target),

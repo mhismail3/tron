@@ -198,14 +198,12 @@ struct ProjectResourcesView: View {
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     if model.resources?.objectValue != nil {
-                        TronInfoCard(
-                            icon: "info.circle",
-                            text: "These are resolved resources actually available to this session. Open a row to inspect its source, path, capabilities, or schema.",
-                            accent: .tronCyan
-                        )
-                        ForEach(overviewSections) { section in
-                            resourceGroup(section)
+                        VStack(alignment: .leading, spacing: 18) {
+                            ForEach(overviewSections) { section in
+                                resourceGroup(section)
+                            }
                         }
+                        .tronSettingsCaption("These are resolved resources actually available to this session. Open a row to inspect its source, path, capabilities, or schema.")
                         if diagnostics != .array([]) {
                             TronSettingsGroup("Diagnostics", accent: .tronError, surfaceStyle: .scrollOptimized) {
                                 TronStructuredJSONView(value: diagnostics, title: "Resource Diagnostics", accent: .tronError)
@@ -425,11 +423,7 @@ private struct ProjectResourceDetailSheet: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: 16) {
-                    TronInfoCard(
-                        icon: selection.kind.icon,
-                        text: presentation.purpose,
-                        accent: selection.kind.accent
-                    )
+                    TronSettingsCaption(presentation.purpose)
 
                     if selection.kind == .prompts {
                         promptContent
@@ -478,11 +472,7 @@ private struct ProjectResourceDetailSheet: View {
                                 .font(TronTypography.sheetSectionHeader)
                                 .foregroundStyle(Color.tronTextPrimary)
                                 .accessibilityAddTraits(.isHeader)
-                            TronInfoCard(
-                                icon: "lightbulb",
-                                text: guidance,
-                                accent: selection.kind.accent
-                            )
+                            TronSettingsCaption(guidance)
                         }
                     }
 

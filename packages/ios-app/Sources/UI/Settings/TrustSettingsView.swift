@@ -81,18 +81,15 @@ struct TrustSettingsView: View {
                     )
                 }
 
-                TronInfoCard(
-                    icon: "exclamationmark.shield",
-                    text: "Trust gates project-local settings, extensions, skills, prompts, packages, and system prompt files. It is not a sandbox.",
-                    accent: .tronAmber
-                )
+                TronSettingsCaption("Trust gates project-local settings, extensions, skills, prompts, packages, and system prompt files. It is not a sandbox.")
             }
             .padding(20)
         }
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Project Trust")
         .task(id: PresentationActivityTaskID(
-            source: TrustLoadID(target: target, invalidationGeneration: model.trustRevision),
+            source: TrustLoadID(target: target, invalidationGeneration: model.trustRevision,
+                                foregroundGeneration: model.foregroundReconciliationGeneration),
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
             guard presentationActivity.allowsPresentationPublication else { return }
@@ -215,18 +212,19 @@ struct TrustSettingsView: View {
     }
 
     private func load() async {
+        let foreground = model.foregroundReconciliationGeneration
         guard presentationActivity.allowsPresentationPublication,
               let target else { return }
         do {
             let value = try await model.inspectTrust(target: target)
-            guard !Task.isCancelled,
+            guard !Task.isCancelled, foreground == model.foregroundReconciliationGeneration,
                   presentationActivity.allowsPresentationPublication,
                   target == self.target else { return }
             inspection = value
         } catch is CancellationError {
             return
         } catch {
-            guard !Task.isCancelled,
+            guard !Task.isCancelled, foreground == model.foregroundReconciliationGeneration,
                   presentationActivity.allowsPresentationPublication,
                   target == self.target else { return }
             model.presentError(error)

@@ -104,6 +104,7 @@ struct CompactionSettingsView: View {
                         .disabled(!supportsPolicy)
                     }
                 }
+                .tronSettingsCaption(draft.thinkingLevel == "low" ? "Low is an explicit experiment. Provider quality and cost may vary; standard behavior is recommended until evaluated with your provider." : nil)
                 TronSettingsGroup("Summary Focus", detail: "Optional guidance for future summaries.", accent: .tronPurple) {
                     VStack(spacing: 0) {
                         TronValueRow(icon: "text.alignleft", title: "Instructions",
@@ -132,9 +133,8 @@ struct CompactionSettingsView: View {
                         }
                     }
                 }
-                Text("Focus is captured when a summary starts. It does not change an active summary, chat, or branch summaries. Restore leaves automatic compaction and token budgets unchanged.")
-                    .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
-                    .padding(.horizontal, 4)
+                .tronSettingsCaption("Focus is captured when a summary starts. It does not change an active summary, chat, or branch summaries. Restore leaves automatic compaction and token budgets unchanged."
+                    + (supportsPolicy ? "" : "\nThis Gateway does not expose configurable summary thinking and focus."))
                 TronSettingsGroup("Context Budgets", detail: "Token allowances for future compactions.", accent: .tronPurple) {
                     VStack(spacing: 0) {
                         TronNumberSettingRow(icon: "gauge.with.dots.needle.33percent", title: "Reserve Tokens",
@@ -144,12 +144,6 @@ struct CompactionSettingsView: View {
                                              detail: "Recent history retained verbatim", value: editing.keepRecentTokens, accent: .tronPurple)
                     }
                 }
-                if draft.thinkingLevel == "low" {
-                    TronInfoCard(icon: "info.circle", text: "Low is an explicit experiment. Provider quality and cost may vary; standard behavior is recommended until evaluated with your provider.", accent: .tronSlate)
-                }
-                if !supportsPolicy {
-                    TronInfoCard(icon: "info.circle", text: "This Gateway does not expose configurable summary thinking and focus.", accent: .tronSlate)
-                }
             }
             .padding(.horizontal, 20).padding(.vertical, 18)
         }
@@ -157,7 +151,8 @@ struct CompactionSettingsView: View {
         .tronScrollEdgeChrome().tronNavigationTitle("Compaction")
         .tronSettingsAutosave(draft: $draft, store: $drafts, initial: CompactionSettingsDraft())
         .task(id: PresentationActivityTaskID(
-            source: SettingsLoadID(target: settingsTarget, invalidationGeneration: model.settingsInvalidationGeneration),
+            source: SettingsLoadID(target: settingsTarget, invalidationGeneration: model.settingsInvalidationGeneration,
+                                   foregroundGeneration: model.foregroundReconciliationGeneration),
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
             guard presentationActivity.allowsPresentationPublication else { return }
@@ -197,10 +192,11 @@ struct CompactionSettingsView: View {
     }
 
     private func load() async {
+        let foreground = model.foregroundReconciliationGeneration
         guard let target = settingsTarget else { return }
         _ = drafts.seedBaselineIfMissing(draft, for: target)
         guard await model.refreshSettings(target: target), presentationActivity.allowsPresentationPublication,
-              !Task.isCancelled, target == settingsTarget,
+              foreground == model.foregroundReconciliationGeneration, !Task.isCancelled, target == settingsTarget,
               let loaded = projectionDraft(target: target), drafts.install(loaded, for: target, ifCurrent: draft) else { return }
         draft = loaded
     }
@@ -253,16 +249,15 @@ struct CompactionRuntimeSection: View {
                         TronSettingsRow(icon: "text.alignleft", title: "Running Focus", subtitle: active.instructions)
                     }
                 }
-                if policy.extensionMayOverride {
-                    TronSettingsDivider()
-                    TronSettingsRow(icon: "info.circle", title: "Extension Summary",
-                                    subtitle: "An extension may supply its own summary. These defaults govern built-in summaries.", accent: .tronSlate)
-                }
-                if let warning = policy.warning {
-                    TronSettingsDivider()
-                    TronSettingsRow(icon: "info.circle", title: "Summary Note", subtitle: warning, accent: .tronSlate)
-                }
             }
         }
+        .tronSettingsCaption(runtimeNote)
+    }
+
+    private var runtimeNote: String? {
+        let notes = [policy.extensionMayOverride
+            ? "An extension may supply its own summary. These defaults govern built-in summaries." : nil,
+            policy.warning].compactMap { $0 }.filter { !$0.isEmpty }
+        return notes.isEmpty ? nil : notes.joined(separator: "\n")
     }
 }

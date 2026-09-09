@@ -31,4 +31,5 @@ struct TrustLoadOwner: Equatable, Sendable {
 struct TrustLoadID: Hashable {
     let target: TrustTarget?
     let invalidationGeneration: Int
+    let foregroundGeneration: Int
 }
