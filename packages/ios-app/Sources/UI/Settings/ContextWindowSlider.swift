@@ -171,27 +171,29 @@ private struct ContextWindowSliderOverlay: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            Rectangle()
-                .fill(.thinMaterial)
-                .opacity(expanded ? 1 : 0)
+            Color.clear
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture { close() }
                 .accessibilityHidden(true)
-            panel
-                .frame(width: expanded || reduceMotion ? target.width : source.width,
-                       height: expanded || reduceMotion ? target.height : source.height)
-                .glassEffect(
-                    .regular.tint(request.accent.opacity(0.12)),
-                    in: RoundedRectangle(cornerRadius: expanded ? 32 : source.height / 2, style: .continuous)
-                )
-                .shadow(color: request.accent.opacity(expanded ? 0.12 : 0), radius: 24, y: 10)
-                .opacity(reduceMotion && !expanded ? 0 : 1)
-                .position(x: expanded || reduceMotion ? target.midX : source.midX,
-                          y: expanded || reduceMotion ? target.midY : source.midY)
-                .accessibilityElement(children: .contain)
-                .accessibilityAddTraits(.isModal)
-                .accessibilityAction(.escape) { close() }
+            ContextWindowSliderSurface(
+                source: source, target: target, fraction: expanded ? 1 : 0,
+                reduceMotion: reduceMotion, accent: request.accent
+            ) {
+                panel
+                    .allowsHitTesting(expanded && !closing)
+            } label: {
+                Text(draft.changed ? draft.value.formatted() : request.title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .monospacedDigit()
+                    .tronSettingsButtonForeground(request.accent)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .padding(.horizontal, 10)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityAddTraits(.isModal)
+            .accessibilityAction(.escape) { close() }
         }
         .onAppear {
             withAnimation(motion) { expanded = true }
@@ -200,71 +202,58 @@ private struct ContextWindowSliderOverlay: View {
     }
 
     private var panel: some View {
-        ZStack(alignment: .topTrailing) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("Context Window")
-                        .font(TronTypography.sheetSectionHeader)
-                        .foregroundStyle(Color.tronTextSecondary)
-                    Spacer(minLength: 100)
+        VStack(alignment: .leading, spacing: 12) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 12) {
+                    headerTitle.fixedSize()
+                    Spacer(minLength: 0)
+                    headerValue.fixedSize()
                 }
-                .padding(.top, 5)
+                VStack(alignment: .leading, spacing: 8) {
+                    headerTitle.fixedSize(horizontal: false, vertical: true)
+                    headerValue.frame(maxWidth: .infinity, alignment: .trailing)
+                }
+            }
+            .font(TronTypography.buttonSM)
+            .accessibilityHidden(true)
+
+            VStack(spacing: 4) {
                 track
-                HStack(spacing: 8) {
+                ContextWindowSliderLabelsLayout(defaultProgress: request.scale.progress(for: request.scale.defaultValue)) {
                     Text(request.scale.limits.minimum.formatted())
-                        .accessibilityHidden(true)
-                    Spacer(minLength: 0)
-                    Button {
-                        withAnimation(motion) { select(request.scale.defaultValue) }
-                    } label: {
-                        Text("Default")
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                            .tronSettingsButtonForeground(request.accent)
-                            .frame(minHeight: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(request.resetLabel)
-                    .accessibilityIdentifier("context-window-default")
-                    Spacer(minLength: 0)
+                    Text("Default")
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .foregroundStyle(request.accent)
                     Text(dynamicTypeSize.isAccessibilitySize
                          ? request.scale.limits.maximum.formatted(.number.notation(.compactName).precision(.fractionLength(0...2)))
                          : request.scale.limits.maximum.formatted())
-                        .accessibilityHidden(true)
                 }
                 .font(TronTypography.secondaryCodeDescription)
                 .foregroundStyle(Color.tronTextSecondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-            .frame(width: target.width, height: target.height)
-            .opacity(expanded ? 1 : 0)
-            .scaleEffect(expanded || reduceMotion ? 1 : 0.88, anchor: .trailing)
-            .allowsHitTesting(expanded && !closing)
-            .accessibilityHidden(!expanded)
-
-            Text(expanded ? draft.value.formatted() : (draft.changed ? draft.value.formatted() : request.title))
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                .monospacedDigit()
-                .tronSettingsButtonForeground(request.accent)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .padding(.horizontal, expanded ? 20 : 10)
-                .padding(.top, expanded ? 25 : max(0, (source.height - 16) / 2))
                 .accessibilityHidden(true)
+            }
         }
-        // Accept the animated outer proposal even while the editor's contents
-        // retain their final layout. Only the glass grows; labels never reflow
-        // through dozens of intermediate narrow widths during the morph.
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-        .clipped()
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var headerTitle: some View {
+        Text("Context Window").foregroundStyle(Color.tronTextSecondary)
+    }
+
+    private var headerValue: some View {
+        Text(draft.value.formatted())
+            .monospacedDigit()
+            .tronSettingsButtonForeground(request.accent)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
     }
 
     private var track: some View {
         GeometryReader { geometry in
-            let inset: CGFloat = 22
+            let inset = ContextWindowSliderLabelsLayout.trackInset
             let width = max(1, geometry.size.width - inset * 2)
             let thumbX = inset + CGFloat(progress) * width
             ZStack(alignment: .leading) {
@@ -335,6 +324,9 @@ private struct ContextWindowSliderOverlay: View {
             case .decrement: select(request.scale.adjacentDetent(to: draft.value, increasing: false))
             @unknown default: break
             }
+        }
+        .accessibilityAction(named: request.resetLabel) {
+            withAnimation(motion) { select(request.scale.defaultValue) }
         }
         .accessibilityAction(named: "Save and close") { close() }
         .accessibilityFocused($sliderFocused)

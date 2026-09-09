@@ -829,8 +829,19 @@ show their values in trailing capsules. Tap Context Window to grow an anchored g
 verify smooth finger tracking, gentle magnetic stops, exact minimum/maximum, and the default
 near 200k/272k plus 500k/750k for million-token models. Other capacities use rounded quarters.
 Outside tap (or VoiceOver Save and close/escape) must shrink back to the original capsule and submit only one edited value;
-opening/closing without adjustment must not create an override. Default clears the override.
-Try narrow sheets, both appearances, large text, VoiceOver adjustment/escape, and Reduce Motion.
+opening/closing without adjustment must not create an override. Selecting the default detent
+(or VoiceOver reset action) clears the override; Default is now a label beneath that detent,
+not a button. Verify endpoint labels use the track's endpoint centers, with a second label
+line only when needed to avoid a collision. The larger title/value share a center-aligned row.
+Scrub opening and closing captures: no title, track, thumb, or label may escape the growing
+or shrinking rounded glass. Clear glass must retain translucent depth rather than a solid
+lavender fill. Nearby background softening must be visible outside the panel and feather away,
+leaving distant rows and toolbar readable. The native blur view keeps alpha 1; only its
+UIView mask changes strength and is reinstalled after resizing, as required by UIKit.
+`ContextWindowSliderLayoutTests` renders intermediate native surface
+fractions with a contrasting-content containment oracle, checks nearby versus distant stripe
+contrast for the real backdrop effect, and retains narrow light/dark and large-text previews. Try narrow sheets, both appearances, large text, VoiceOver
+adjustment/escape, and Reduce Motion.
 Verify Context Window and Thinking changes revert on failure and cannot carry into another
 model/runtime or overwrite a newer authoritative value. `ContextWindowSliderTests` covers the
 bounded detent/attraction math and draft/reset semantics; hands-on animation/haptic tuning is a

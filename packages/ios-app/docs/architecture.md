@@ -1502,7 +1502,18 @@ provider/model identity chooses the catalog display name. Switch Model opens the
 model picker. Capability-gated Context Window and Thinking place their current values in
 slim trailing capsules, not beneath their titles. Thinking retains its menu. Context Window
 morphs its capsule into an anchored Liquid Glass slider above the sheet, without relaying out
-the scrolling rows. The continuous thumb gently gravitates toward point-sized detent wells;
+the scrolling rows. `ContextWindowSliderSurface` interpolates one presentation-time rectangle
+and corner radius for the glass and its content clip, so the destination-sized contents never
+escape the visible container on either leg of the morph. Clear Liquid Glass provides the
+translucent panel and refractive rim; a public native `UIVisualEffectView` softens its backdrop.
+The effect stays at alpha 1 and its own elliptical UIView gradient mask feathers strength to
+zero before the bounded halo edge. UIKit forwards that mask to its backdrop internals; the
+owner reinstalls it after size/strength changes rather than masking an ancestor/CALayer or
+fading composited SwiftUI material. No private filter, screenshot, or sheet-wide blur is used. The larger header title/value
+share a center-aligned row (stacking only when accessibility text cannot fit). Minimum/maximum
+labels center beneath the track endpoints; the
+non-button Default label centers beneath its actual detent. If labels would collide, Default
+uses a second line without moving its horizontal anchor. The continuous thumb gently gravitates toward point-sized detent wells;
 release settles only near a detent. Bounds remain exact, the configured default is a detent,
 and rounded quarters avoid crowding it (million-token windows use familiar 500k/750k stops).
 Context values retain whole-token precision; accessibility exposes token units, source,
