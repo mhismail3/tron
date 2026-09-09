@@ -9,16 +9,11 @@ struct TronModelSelectionRow: View {
     var accent: Color = .tronPurple
 
     var body: some View {
-        TronProgressiveSheetLink(accessibilityLabel: navigationTitle, accent: accent) {
+        TronSelectionSheetRow(icon: "cpu", title: "Model", detail: "Default for new sessions",
+                              value: SessionModelSelectionPresentation.modelName(selection, catalog: models),
+                              accessibilityLabel: navigationTitle, accent: accent) {
             ModelPicker(selection: $selection, models: models)
                 .tronNavigationTitle(navigationTitle, accent: accent)
-        } label: {
-            TronValueRow(
-                icon: "cpu",
-                title: "Model",
-                value: selection?.displayDescription ?? "Choose model",
-                accent: accent
-            )
         }
     }
 }
@@ -31,6 +26,7 @@ struct ContextWindowSelectionRow: View {
     var resetLabel = "Use model default"
     var warning: String? = nil
     var source: String? = nil
+    var information: String? = nil
     var accent: Color = .tronTeal
     @State private var ownerID = UUID()
     @Environment(\.configurationSliderPresentation) private var sliderPresentation
@@ -69,6 +65,7 @@ struct ContextWindowSelectionRow: View {
             icon: "gauge.with.dots.needle.50percent",
             title: "Context Window",
             detail: detail,
+            information: information,
             value: displayValue,
             accent: accent
         ) {
@@ -117,6 +114,7 @@ struct ContextWindowSelectionRow: View {
 struct TronThinkingSelectionRow: View {
     @Binding var selection: String
     let levels: [String]
+    var information: String? = nil
     var accent: Color = .tronPurple
     @State private var ownerID = UUID()
     @Environment(\.configurationSliderPresentation) private var sliderPresentation
@@ -133,6 +131,7 @@ struct TronThinkingSelectionRow: View {
         AgentConfigurationValueRow(
             icon: "brain",
             title: "Thinking",
+            information: information,
             value: ThinkingLevelPresentation.title(selection),
             accent: accent
         ) {
@@ -179,6 +178,7 @@ private struct AgentConfigurationValueRow<Control: View>: View {
     let icon: String
     let title: String
     var detail: String? = nil
+    var information: String? = nil
     let value: String
     let accent: Color
     @ViewBuilder let control: () -> Control
@@ -186,7 +186,7 @@ private struct AgentConfigurationValueRow<Control: View>: View {
 
     var body: some View {
         if controlSize == .small {
-            TronSettingsRow(icon: icon, title: title, accent: accent) {
+            TronSettingsRow(icon: icon, title: title, subtitle: information, accent: accent) {
                 control()
             }
         } else {

@@ -57,9 +57,9 @@ struct CompactionSettingsDraft: Equatable {
         var compaction: [String: JSONValue] = [:]
         if enabled != baseline.enabled { compaction["enabled"] = .bool(enabled) }
         if useGlobalFields.contains(.thinking) { compaction["thinkingLevel"] = .null }
-        else if thinkingLevel != baseline.thinkingLevel || restoreStandardRequested { compaction["thinkingLevel"] = .string(thinkingLevel) }
+        else if thinkingLevel != baseline.thinkingLevel || restoreStandardRequested || baseline.useGlobalFields.contains(.thinking) { compaction["thinkingLevel"] = .string(thinkingLevel) }
         if useGlobalFields.contains(.focus) { compaction["instructions"] = .null }
-        else if instructions != baseline.instructions || restoreStandardRequested { compaction["instructions"] = .string(instructions) }
+        else if instructions != baseline.instructions || restoreStandardRequested || baseline.useGlobalFields.contains(.focus) { compaction["instructions"] = .string(instructions) }
         if reserveTokens != baseline.reserveTokens { compaction["reserveTokens"] = .number(Double(reserveTokens)) }
         if keepRecentTokens != baseline.keepRecentTokens { compaction["keepRecentTokens"] = .number(Double(keepRecentTokens)) }
         return .object(compaction.isEmpty ? [:] : ["compaction": .object(compaction)])
@@ -74,171 +74,120 @@ struct CompactionSettingsView: View {
     @State private var scope: SettingsScope = .global
     @State private var draft = CompactionSettingsDraft()
     @State private var drafts = ScopedSettingsDraftStore<CompactionSettingsDraft>()
-    @State private var saving = false
 
-    private var allowsProjectScope: Bool { projectCWD != nil }
     private var supportsPolicy: Bool { model.gatewayInfo?.capabilities.contains("compaction-policy.v1") == true }
-    private var sessionPolicy: CompactionPolicyProjection? {
-        guard let projectSessionID else { return nil }
-        return model.authoritativeSnapshot(for: projectSessionID)?.compactionPolicy
-    }
-    private var sourceDescription: String {
-        guard let target = settingsTarget,
-              let source = model.settings(for: target)?.objectValue?["effective"]?.objectValue?["compaction"]?.objectValue?["source"]?.objectValue else { return "Sources unavailable" }
-        return "Thinking: \(source["thinkingLevel"]?.stringValue ?? "unknown"); focus: \(source["instructions"]?.stringValue ?? "unknown")."
-    }
     private var settingsTarget: SettingsTarget? { SettingsTarget(scope: scope, projectCWD: projectCWD) }
-    private var hasUnsavedChanges: Bool {
-        guard let target = settingsTarget else { return false }
-        return drafts.hasChanges(draft, for: target)
+    private var sessionPolicy: CompactionPolicyProjection? {
+        projectSessionID.flatMap { model.authoritativeSnapshot(for: $0)?.compactionPolicy }
     }
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: true) {
+        let editing = editBinding
+        return ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
                 scopeGroup
-                if let sessionPolicy { effectiveGroup(sessionPolicy) }
-                TronSettingsGroup("Saved Configuration", detail: sourceDescription, accent: .tronTeal, surfaceStyle: .scrollOptimized) {
+                if let target = settingsTarget { SettingsAutosaveNotice(key: .settings(target, sessionID: nil)) }
+                if let sessionPolicy { CompactionRuntimeSection(policy: sessionPolicy) }
+                TronSettingsGroup("Defaults", detail: "Applied at the next idle prompt or manual compaction.", accent: .tronPurple) {
                     VStack(spacing: 0) {
-                        TronToggleRow(
-                            icon: "arrow.triangle.2.circlepath",
-                            title: "Automatic compaction",
-                            detail: "Applies at the next idle prompt or manual compaction",
-                            accent: .tronTeal,
-                            isOn: $draft.enabled
-                        )
-                        TronSettingsDivider(accent: .tronTeal)
-                        TronValueRow(icon: "brain", title: "Summary thinking", detail: "Same conversation model; SDK-resolved request level (provider defaults may still apply)", value: draft.thinkingLevel == "inherit" ? "Inherit conversation" : draft.thinkingLevel.capitalized, accent: .tronTeal) {
-                            TronInlineMenu("Change", accent: .tronTeal) {
-                                Button("Inherit conversation") { draft.setThinkingLevel("inherit") }
-                                ForEach(["off", "minimal", "low", "medium", "high", "xhigh", "max"], id: \.self) { level in
-                                    Button(level.capitalized) { draft.setThinkingLevel(level) }
-                                }
-                            }.disabled(!supportsPolicy)
+                        TronToggleRow(icon: "arrow.triangle.2.circlepath", title: "Automatic Compaction",
+                                      detail: "Summarize when the context window fills", accent: .tronPurple, isOn: editing.enabled)
+                        TronSettingsDivider(accent: .tronPurple)
+                        TronSelectionRow(icon: "brain", title: "Summary Thinking",
+                                         detail: "Reasoning effort for the summary, not the conversation",
+                                         value: draft.thinkingLevel == "inherit" ? "Inherit" : ThinkingLevelPresentation.title(draft.thinkingLevel), accent: .tronPurple) {
+                            Button("Inherit conversation") { editing.update { $0.setThinkingLevel("inherit") } }
+                            ForEach(["off", "minimal", "low", "medium", "high", "xhigh", "max"], id: \.self) { level in
+                                Button(ThinkingLevelPresentation.title(level)) { editing.update { $0.setThinkingLevel(level) } }
+                            }
                         }
+                        .disabled(!supportsPolicy)
                     }
                 }
-                TronSettingsGroup("Summary Focus", detail: "Optional. Up to 4,000 UTF-16 units; no hard summary-length guarantee.", accent: .tronPurple, surfaceStyle: .scrollOptimized) {
-                    VStack(alignment: .leading, spacing: 12) {
+                TronSettingsGroup("Summary Focus", detail: "Optional guidance for future summaries.", accent: .tronPurple) {
+                    VStack(spacing: 0) {
+                        TronValueRow(icon: "text.alignleft", title: "Instructions",
+                                     value: "\(draft.instructions.utf16.count.formatted()) / 4,000", accent: .tronPurple)
                         TextEditor(text: instructionsBinding)
-                            .frame(minHeight: 120)
+                            .frame(minHeight: 110)
                             .tronTextEditor()
+                            .padding(.horizontal, 14).padding(.bottom, 14)
                             .accessibilityLabel("Compaction summary focus")
                             .disabled(!supportsPolicy)
-                        Text("Thinking and focus are captured at the next compaction, including both split-summary passes. They do not change chat, branch summaries, or an already-running summary.")
-                            .font(TronTypography.secondaryDescription)
-                            .foregroundStyle(Color.tronTextSecondary)
-                        Button("Restore standard behavior") { draft.restoreStandard() }
-                            .disabled(!supportsPolicy)
-                        if scope == .project, let inherited = globalProjectionDraft() {
-                            Button("Use global values") { draft.useGlobalPolicy(from: inherited) }
-                                .disabled(!supportsPolicy)
-                            Text("Removes this project's thinking and focus overrides so future global changes are inherited. Save to apply.")
-                                .font(TronTypography.secondaryDescription)
-                                .foregroundStyle(Color.tronTextSecondary)
+                        TronSettingsDivider(accent: .tronPurple)
+                        TronSettingsRow(icon: "arrow.uturn.backward", title: "Standard Behavior",
+                                        subtitle: "Inherit conversation thinking and clear focus", accent: .tronPurple) {
+                            Button { editing.update { $0.restoreStandard() } } label: {
+                                TronInlineActionLabel("Restore", accent: .tronPurple)
+                            }.buttonStyle(.plain).disabled(!supportsPolicy)
                         }
-                        Text("Restores inherited conversation thinking and empty focus. Automatic compaction and token budgets are unchanged. Save to apply.")
-                            .font(TronTypography.secondaryDescription)
-                            .foregroundStyle(Color.tronTextSecondary)
-                    }.padding(14)
-                }
-                TronSettingsGroup("Advanced Context Budgets", detail: "Applied at the next idle prompt or manual compaction, never during an active run.", accent: .tronTeal, surfaceStyle: .scrollOptimized) {
-                    VStack(spacing: 0) {
-                        numberRow("gauge.with.dots.needle.33percent", "Reserve tokens", "Response headroom", value: $draft.reserveTokens)
-                        TronSettingsDivider(accent: .tronTeal)
-                        numberRow("text.line.last.and.arrowtriangle.forward", "Keep recent tokens", "Recent history retained verbatim", value: $draft.keepRecentTokens)
+                        if scope == .project, let inherited = globalProjectionDraft() {
+                            TronSettingsDivider(accent: .tronPurple)
+                            TronSettingsRow(icon: "globe", title: "Global Values",
+                                            subtitle: "Remove this project's thinking and focus overrides", accent: .tronPurple) {
+                                Button { editing.update { $0.useGlobalPolicy(from: inherited) } } label: {
+                                    TronInlineActionLabel("Use Global", accent: .tronPurple)
+                                }.buttonStyle(.plain).disabled(!supportsPolicy)
+                            }
+                        }
                     }
                 }
-                if !supportsPolicy {
-                    Text("This Gateway does not expose configurable summary thinking and focus.")
-                        .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(Color.tronAmber)
+                Text("Focus is captured when a summary starts. It does not change an active summary, chat, or branch summaries. Restore leaves automatic compaction and token budgets unchanged.")
+                    .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
+                    .padding(.horizontal, 4)
+                TronSettingsGroup("Context Budgets", detail: "Token allowances for future compactions.", accent: .tronPurple) {
+                    VStack(spacing: 0) {
+                        TronNumberSettingRow(icon: "gauge.with.dots.needle.33percent", title: "Reserve Tokens",
+                                             detail: "Response headroom", value: editing.reserveTokens, accent: .tronPurple)
+                        TronSettingsDivider(accent: .tronPurple)
+                        TronNumberSettingRow(icon: "text.line.last.and.arrowtriangle.forward", title: "Keep Recent Tokens",
+                                             detail: "Recent history retained verbatim", value: editing.keepRecentTokens, accent: .tronPurple)
+                    }
                 }
                 if draft.thinkingLevel == "low" {
-                    Text("Low is an explicit experiment. Provider quality and cost may vary; standard behavior is recommended until evaluated with your provider.")
-                        .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(Color.tronAmber)
-                        .padding(.horizontal, 4)
+                    TronInfoCard(icon: "info.circle", text: "Low is an explicit experiment. Provider quality and cost may vary; standard behavior is recommended until evaluated with your provider.", accent: .tronSlate)
+                }
+                if !supportsPolicy {
+                    TronInfoCard(icon: "info.circle", text: "This Gateway does not expose configurable summary thinking and focus.", accent: .tronSlate)
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 18)
+            .padding(.horizontal, 20).padding(.vertical, 18)
         }
-        .tronScrollEdgeChrome()
-        .tronNavigationTitle("Compaction")
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                TronSaveToolbarButton(isSaving: saving, isEnabled: hasUnsavedChanges) { Task { await save() } }
-            }
-        }
+        .scrollDismissesKeyboard(.interactively)
+        .tronScrollEdgeChrome().tronNavigationTitle("Compaction")
+        .tronSettingsAutosave(draft: $draft, store: $drafts, initial: CompactionSettingsDraft())
         .task(id: PresentationActivityTaskID(
             source: SettingsLoadID(target: settingsTarget, invalidationGeneration: model.settingsInvalidationGeneration),
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
             guard presentationActivity.allowsPresentationPublication else { return }
-            if !allowsProjectScope { scope = .global }
+            if projectCWD == nil { scope = .global }
             await load()
-        }
-        .onChange(of: draft) { _, value in
-            if let target = settingsTarget { drafts.update(value, for: target) }
-        }
-    }
-
-    private func effectiveGroup(_ policy: CompactionPolicyProjection) -> some View {
-        TronSettingsGroup("Current Session", detail: "Read-only runtime configuration, independent of this editor's scope.", accent: .tronTeal, surfaceStyle: .scrollOptimized) {
-            VStack(alignment: .leading, spacing: 12) {
-                if let selected = policy.next.model {
-                    Text("Model: \(selected.provider)/\(selected.id)")
-                } else {
-                    Text("No session model selected")
-                }
-                Text("Next summary: requested \(policy.next.requestedThinkingLevel), effective \(policy.next.effectiveThinkingLevel ?? "unavailable").")
-                Text("Current automatic compaction: \(policy.currentBudgets.enabled ? "On" : "Off"). Reserve \(policy.currentBudgets.reserveTokens); retain \(policy.currentBudgets.keepRecentTokens) tokens.")
-                if let active = policy.active {
-                    Text("Running \(active.reason ?? "") summary: requested \(active.requestedThinkingLevel), effective \(active.effectiveThinkingLevel ?? "unavailable"). Reserve \(active.reserveTokens); retain \(active.keepRecentTokens) tokens.")
-                    Text(active.instructions.isEmpty ? "Running focus: none" : "Running focus: \(active.instructions)")
-                }
-                if policy.extensionMayOverride {
-                    Text("An extension observes compaction and may supply its own summary. This policy governs built-in requests through this session, not independent extension generation.")
-                        .foregroundStyle(Color.tronAmber)
-                }
-                if let warning = policy.warning { Text(warning).foregroundStyle(Color.tronAmber) }
-            }
-            .font(TronTypography.secondaryDescription)
-            .foregroundStyle(Color.tronTextSecondary)
-            .padding(14)
         }
     }
 
     private var scopeGroup: some View {
-        TronSettingsGroup("Scope", detail: scope == .project
-            ? "Overrides apply only to the trusted current workspace."
-            : "Defaults apply to every workspace on this Mac.", surfaceStyle: .scrollOptimized) {
-            if allowsProjectScope {
-                TronValueRow(icon: "scope", title: "Settings Scope", value: scope == .project ? "Current Project" : "Global Defaults") {
-                    TronInlineMenu("Change") {
-                        Button("Global Defaults") { selectScope(.global) }
-                        Button("Current Project") { selectScope(.project) }
-                    }
+        TronSettingsGroup("Scope", detail: scope == .project ? "Overrides for this trusted workspace." : "Defaults for every workspace on this Mac.") {
+            if projectCWD != nil {
+                TronSelectionRow(icon: "scope", title: "Settings Scope", value: scope == .project ? "Current Project" : "Global Defaults") {
+                    Button("Global Defaults") { selectScope(.global) }
+                    Button("Current Project") { selectScope(.project) }
                 }
-            } else {
-                TronValueRow(icon: "scope", title: "Settings Scope", value: "Global Defaults")
-            }
+            } else { TronValueRow(icon: "scope", title: "Settings Scope", value: "Global Defaults") }
         }
+    }
+
+    private var editBinding: Binding<CompactionSettingsDraft> {
+        let target = settingsTarget
+        return SettingsAutosave.binding(draft: $draft, store: $drafts, model: model, target: target,
+            admits: { target == settingsTarget && presentationActivity.allowsDataPublication },
+            patch: { $0.patch(comparedTo: $1) },
+            settled: { value, target in (projectionDraft(target: target) ?? value).afterSuccessfulSave() })
     }
 
     private var instructionsBinding: Binding<String> {
-        Binding(get: { draft.instructions }, set: { draft.setInstructions($0) })
-    }
-
-    private func numberRow(_ icon: String, _ title: String, _ detail: String, value: Binding<Int>) -> some View {
-        TronValueRow(icon: icon, title: title, detail: detail, accent: .tronTeal) {
-            TextField(title, value: value, format: .number)
-                .keyboardType(.numberPad)
-                .tronInlineField(numeric: true)
-                .multilineTextAlignment(.trailing)
-                .frame(width: 118)
-        }
+        let editing = editBinding
+        return Binding(get: { editing.wrappedValue.instructions }, set: { value in editing.update { $0.setInstructions(value) } })
     }
 
     private func selectScope(_ newScope: SettingsScope) {
@@ -250,17 +199,14 @@ struct CompactionSettingsView: View {
     private func load() async {
         guard let target = settingsTarget else { return }
         _ = drafts.seedBaselineIfMissing(draft, for: target)
-        guard await model.refreshSettings(target: target),
-              presentationActivity.allowsPresentationPublication,
-              !Task.isCancelled,
-              target == settingsTarget,
+        guard await model.refreshSettings(target: target), presentationActivity.allowsPresentationPublication,
+              !Task.isCancelled, target == settingsTarget,
               let loaded = projectionDraft(target: target), drafts.install(loaded, for: target, ifCurrent: draft) else { return }
         draft = loaded
     }
 
     private func projectionDraft(target: SettingsTarget) -> CompactionSettingsDraft? {
-        guard let value = model.settings(for: target)?.objectValue?["effective"]?.objectValue,
-              let compaction = value["compaction"]?.objectValue else { return nil }
+        guard let compaction = model.settings(for: target)?.objectValue?["effective"]?.objectValue?["compaction"]?.objectValue else { return nil }
         return CompactionSettingsDraft(
             enabled: compaction.bool("enabled", fallback: true),
             thinkingLevel: compaction.string("thinkingLevel", fallback: "inherit"),
@@ -271,37 +217,52 @@ struct CompactionSettingsView: View {
     }
 
     private func globalProjectionDraft() -> CompactionSettingsDraft? {
-        // The scoped response already includes the canonical global document;
-        // avoid a second request and a different-time inheritance preview.
         guard let target = settingsTarget,
               let global = model.settings(for: target)?.objectValue?["documents"]?.objectValue?["global"]?.objectValue else { return nil }
         let compaction = global["compaction"]?.objectValue ?? [:]
-        return CompactionSettingsDraft(
-            thinkingLevel: compaction.string("thinkingLevel", fallback: "inherit"),
-            instructions: compaction.string("instructions", fallback: "")
-        )
+        return CompactionSettingsDraft(thinkingLevel: compaction.string("thinkingLevel", fallback: "inherit"),
+                                       instructions: compaction.string("instructions", fallback: ""))
     }
+}
 
-    private func save() async {
-        guard let target = settingsTarget else { return }
-        drafts.update(draft, for: target)
-        guard drafts.isDirty(target), let revision = drafts.revision(for: target) else { return }
-        let submitted = draft
-        saving = true
-        defer { saving = false }
-        let baseline = drafts.baseline(for: target) ?? CompactionSettingsDraft()
-        do {
-            try await model.updateSettings(submitted.patch(comparedTo: baseline), target: target)
-            guard target == settingsTarget, draft == submitted else { return }
-            let resultingDraft = (projectionDraft(target: target) ?? submitted).afterSuccessfulSave()
-            if drafts.markSaved(
-                submitted: submitted,
-                resulting: resultingDraft,
-                for: target,
-                expectedRevision: revision
-            ) {
-                draft = resultingDraft
+/// Read-only runtime facts use the same rows as editable defaults, without
+/// conflating the active session with the selected settings scope.
+struct CompactionRuntimeSection: View {
+    let policy: CompactionPolicyProjection
+    var body: some View {
+        TronSettingsGroup("Current Session", detail: "Live configuration, independent of the defaults below.", accent: .tronPurple) {
+            VStack(spacing: 0) {
+                TronValueRow(icon: "cpu", title: "Model", value: policy.next.model?.displayName ?? "Not selected")
+                TronSettingsDivider()
+                TronValueRow(icon: "brain", title: "Summary Thinking",
+                             detail: policy.next.effectiveThinkingLevel == policy.next.requestedThinkingLevel ? nil
+                                : "Requested: \(ThinkingLevelPresentation.title(policy.next.requestedThinkingLevel))",
+                             value: policy.next.effectiveThinkingLevel.map(ThinkingLevelPresentation.title) ?? "Unavailable")
+                TronSettingsDivider()
+                TronValueRow(icon: "arrow.triangle.2.circlepath", title: "Automatic Compaction", value: policy.currentBudgets.enabled ? "On" : "Off")
+                TronSettingsDivider()
+                TronValueRow(icon: "gauge.with.dots.needle.33percent", title: "Reserve Tokens", value: policy.currentBudgets.reserveTokens.formatted())
+                TronSettingsDivider()
+                TronValueRow(icon: "text.line.last.and.arrowtriangle.forward", title: "Keep Recent Tokens", value: policy.currentBudgets.keepRecentTokens.formatted())
+                if let active = policy.active {
+                    TronSettingsDivider()
+                    TronSettingsRow(icon: "arrow.triangle.2.circlepath", title: "Summary Running",
+                                    subtitle: "\(ThinkingLevelPresentation.title(active.effectiveThinkingLevel ?? active.requestedThinkingLevel)) · \(active.reserveTokens.formatted()) reserved · \(active.keepRecentTokens.formatted()) retained")
+                    if !active.instructions.isEmpty {
+                        TronSettingsDivider()
+                        TronSettingsRow(icon: "text.alignleft", title: "Running Focus", subtitle: active.instructions)
+                    }
+                }
+                if policy.extensionMayOverride {
+                    TronSettingsDivider()
+                    TronSettingsRow(icon: "info.circle", title: "Extension Summary",
+                                    subtitle: "An extension may supply its own summary. These defaults govern built-in summaries.", accent: .tronSlate)
+                }
+                if let warning = policy.warning {
+                    TronSettingsDivider()
+                    TronSettingsRow(icon: "info.circle", title: "Summary Note", subtitle: warning, accent: .tronSlate)
+                }
             }
-        } catch { model.presentError(error) }
+        }
     }
 }

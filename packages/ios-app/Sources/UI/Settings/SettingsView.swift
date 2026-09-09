@@ -108,17 +108,8 @@ struct SettingsView: View {
 
                     TronSettingsGroup("Workspace & Diagnostics", accent: .tronBlue) {
                         settingsLink(
-                            "Resource Paths",
-                            summary: "Instructions, skills, and project resources",
-                            icon: "folder.badge.gearshape",
-                            accent: .tronBlue
-                        ) {
-                            ResourceSettingsView(projectCWD: projectCWD)
-                        }
-                        settingsDivider(accent: .tronBlue)
-                        settingsLink(
                             "Packages and Resources",
-                            summary: "Installed packages and executable resources",
+                            summary: "Installed packages, resolved resources, and resource paths",
                             icon: "shippingbox",
                             accent: .tronBlue
                         ) {
@@ -203,6 +194,7 @@ struct SettingsView: View {
             hasRefreshedNotificationBadge = true
         }
         .tronPresentation()
+        .tronSettingsLayout()
     }
 
     private func settingsLink<Destination: View>(
@@ -279,6 +271,7 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
                 }
                 .tronTopBlur(.sheet)
                 .tronPresentation()
+                .tronSettingsLayout()
                 .presentationDragIndicator(.hidden)
             }
     }

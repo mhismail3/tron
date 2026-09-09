@@ -39,6 +39,7 @@ struct RenderedCustomModelDraft: Sendable {
 
 enum CustomModelDraftTransformationError: LocalizedError {
     case invalidRoot
+    case incompleteProvider
     case invalidProviders
     case invalidProvider(String)
     case invalidModels(String)
@@ -49,6 +50,8 @@ enum CustomModelDraftTransformationError: LocalizedError {
         switch self {
         case .invalidRoot:
             "Advanced JSON must have an object at the top level."
+        case .incompleteProvider:
+            "Enter a provider identifier to save this configuration."
         case .invalidProviders:
             "Advanced JSON must contain a providers object."
         case .invalidProvider(let identifier):
@@ -64,6 +67,14 @@ enum CustomModelDraftTransformationError: LocalizedError {
 }
 
 enum CustomModelDraftTransformation {
+    static func autosaveValue(advancedDocument: String?, root: [String: JSONValue], providers: [CustomModelProviderDraft]) throws -> JSONValue {
+        if let advancedDocument { return .object(try decodeAdvanced(advancedDocument).root) }
+        guard !providers.contains(where: { $0.identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+            throw CustomModelDraftTransformationError.incompleteProvider
+        }
+        return try rebuild(root: root, providers: providers).value
+    }
+
     static func decodeAdvanced(_ document: String) throws -> PreparedCustomModelDraft {
         guard let data = document.data(using: .utf8) else {
             throw CustomModelDraftTransformationError.invalidRoot

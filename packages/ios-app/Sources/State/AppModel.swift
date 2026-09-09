@@ -160,6 +160,7 @@ final class AppModel {
     private let providerAuth: ProviderAuthCoordinator
     private let packageConfiguration: PackageConfigurationCoordinator
     private let customModelConfiguration: CustomModelConfigurationCoordinator
+    let configurationAutosave = ConfigurationAutosaveCoordinator()
     let composerDrafts: ComposerDraftCoordinator
     let extensionInteractionDrafts: ExtensionInteractionDraftStore
     let gatewayDiagnostics: GatewayDiagnosticsService
@@ -532,6 +533,9 @@ final class AppModel {
         providerAuth.delegate = self
         packageConfiguration.delegate = self
         customModelConfiguration.delegate = self
+        configurationAutosave.didFail = { [weak self] error in
+            self?.presentConfigurationActionError(error)
+        }
         let events = client.events
         eventTask = Task { [weak self, events] in
             for await delivery in events {
@@ -1135,6 +1139,7 @@ final class AppModel {
         settingsTrust.clearProfile()
         packageConfiguration.clearProfile()
         customModelConfiguration.clearProfile()
+        configurationAutosave.clearProfile()
         cancelAllExtensionEditorSynchronization()
         composerDrafts.retireProfilePresentation()
         noticeCenter.dismissAll()
@@ -2923,7 +2928,7 @@ final class AppModel {
         await customModelConfiguration.load(target: target)
     }
 
-    func replaceCustomModelsAndRestart(
+    func replaceCustomModels(
         _ document: JSONValue,
         target: CustomModelTarget
     ) async throws {
@@ -2936,12 +2941,6 @@ final class AppModel {
             throw error
         }
         try requireLifecycle(admission)
-        do {
-            _ = try await restartGateway(admission: admission)
-        } catch {
-            guard admitsLifecycle(admission) else { throw CancellationError() }
-            throw error
-        }
     }
 
     nonisolated static func supportsSafeGatewayRestart(capabilities: [String]) -> Bool {

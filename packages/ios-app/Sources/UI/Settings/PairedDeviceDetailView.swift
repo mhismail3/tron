@@ -245,12 +245,12 @@ struct PairedDeviceDetailView: View {
             TronValueRow(
                 icon: "folder.badge.gearshape",
                 title: "Source Repository",
-                value: config?.sourceRoot.map(GatewayConnectionDetailPresentation.redactedMacPath) ?? "Not configured",
                 accent: .tronEmerald
             ) {
-                Image(systemName: "chevron.right")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                    .foregroundStyle(Color.tronTextMuted)
+                TronInlineActionLabel(
+                    config?.sourceRoot.map(GatewayConnectionDetailPresentation.redactedMacPath) ?? "Not configured",
+                    accent: .tronEmerald
+                )
             }
             .contentShape(Rectangle())
         }

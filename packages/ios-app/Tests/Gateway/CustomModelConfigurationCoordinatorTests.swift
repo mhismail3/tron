@@ -221,8 +221,8 @@ struct CustomModelConfigurationCoordinatorTests {
         #expect(model.customModelInvalidationGeneration == 1)
     }
 
-    @Test("save and restart share one lifecycle admission")
-    func saveRestartLifecycle() async throws {
+    @Test("saving custom models validates and writes without restarting the Gateway")
+    func saveWithoutRestart() async throws {
         try await runScenario {
             let socket = ScriptedGatewaySocket()
             let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
@@ -232,7 +232,7 @@ struct CustomModelConfigurationCoordinatorTests {
             let model = AppModel(client: client, uuidSource: ids.source)
             await socket.enqueue(helloFrame())
             try await model.connectHostedGateway(profile: profile, token: "token")
-            let operation = Task { try await model.replaceCustomModelsAndRestart(models("document"), target: .global) }
+            let operation = Task { try await model.replaceCustomModels(models("document"), target: .global) }
             try await socket.waitUntilSent(count: 2)
             let validation = try request(await socket.sentFrames()[1])
             await socket.enqueue(response(id: validation.id, result: .null))
@@ -240,40 +240,29 @@ struct CustomModelConfigurationCoordinatorTests {
             let put = try request(await socket.sentFrames()[2])
             #expect(put.params?["commandId"] == .string("00000000-0000-0000-0000-000000000083"))
             await socket.enqueue(response(id: put.id, result: .null))
-            try await socket.waitUntilSent(count: 4)
-            let restart = try request(await socket.sentFrames()[3])
-            #expect(restart.method == "gateway.restart")
-            #expect(restart.params?["commandId"] == .string("00000000-0000-0000-0000-000000000084"))
-            await socket.enqueue(response(id: restart.id, result: .object([
-                "restarting": .bool(true),
-                "scheduled": .bool(false),
-                "activeSessionIds": .array([]),
-            ])))
             try await operation.value
-            #expect(ids.consumedCount == 3)
+            #expect(await socket.sentFrames().count == 3)
+            #expect(ids.consumedCount == 1)
             await model.teardown()
         }
     }
 
-    @Test("restart failure after lifecycle retirement becomes cancellation")
-    func retirementPreventsRestartError() async throws {
+    @Test("custom model replacement is retired with its lifecycle")
+    func retirementPreventsReplacementError() async throws {
         try await runScenario {
             let socket = ScriptedGatewaySocket()
             let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
             let model = AppModel(client: client)
             await socket.enqueue(helloFrame())
             try await model.connectHostedGateway(profile: profile, token: "token")
-            let operation = Task { try await model.replaceCustomModelsAndRestart(models("document"), target: .global) }
+            let operation = Task { try await model.replaceCustomModels(models("document"), target: .global) }
             defer { operation.cancel() }
             try await socket.waitUntilSent(count: 2)
             let validation = try request(await socket.sentFrames()[1])
             await socket.enqueue(response(id: validation.id, result: .null))
             try await socket.waitUntilSent(count: 3)
             let put = try request(await socket.sentFrames()[2])
-            await socket.enqueue(response(id: put.id, result: .null))
-            try await socket.waitUntilSent(count: 4)
-            let restart = try request(await socket.sentFrames()[3])
-            #expect(restart.method == "gateway.restart")
+            #expect(put.method == "models.custom.put")
             await model.teardown()
             await #expect(throws: CancellationError.self) { try await operation.value }
         }
@@ -303,12 +292,12 @@ struct CustomModelConfigurationCoordinatorTests {
         let admittedEdit = owner.markEdited(from: "before", to: "after")
         #expect(admittedEdit)
         #expect(owner.isDirty)
-        let submitted = owner.beginSave()
+        let submitted = owner.revision
         owner.markEdited()
         let staleCompleted = owner.completeSave(revision: submitted)
         #expect(!staleCompleted)
         #expect(owner.isDirty)
-        let latest = owner.beginSave()
+        let latest = owner.revision
         let latestCompleted = owner.completeSave(revision: latest)
         #expect(latestCompleted)
         #expect(!owner.isDirty)

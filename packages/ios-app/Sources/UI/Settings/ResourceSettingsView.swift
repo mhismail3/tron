@@ -57,7 +57,7 @@ private func settingsLines(_ value: String) -> [String] {
         .filter { !$0.isEmpty }
 }
 
-struct ResourceSettingsView: View {
+struct ResourceSettingsSection: View {
     private enum Editor: String, Identifiable {
         case extensions, skills, prompts, themes, shellPath, shellPrefix, npmCommand, proxy
         var id: String { rawValue }
@@ -108,59 +108,21 @@ struct ResourceSettingsView: View {
     @State private var scope: SettingsScope = .global
     @State private var draft = ResourceSettingsDraft()
     @State private var drafts = ScopedSettingsDraftStore<ResourceSettingsDraft>()
-    @State private var saving = false
+    @State private var embeddedPathsExpanded = false
 
     private var allowsProjectScope: Bool { projectCWD != nil }
     @State private var editor: Editor?
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 18) {
-                scopeGroup
-
-                TronSettingsGroup("Additional Locations", detail: "Optional paths outside automatic discovery.") {
-                    VStack(spacing: 0) {
-                        editorRow(.extensions, icon: "shippingbox", value: draft.extensions, accent: .tronPurple)
-                        TronSettingsDivider(accent: .tronPurple)
-                        editorRow(.skills, icon: "sparkles", value: draft.skills, accent: .tronEmerald)
-                        TronSettingsDivider(accent: .tronPurple)
-                        editorRow(.prompts, icon: "text.quote", value: draft.prompts, accent: .tronCyan)
-                        TronSettingsDivider(accent: .tronPurple)
-                        editorRow(.themes, icon: "paintpalette", value: draft.themes, accent: .tronTeal)
-                    }
-                }
-
-                TronSettingsGroup("Advanced Mac Overrides", detail: "Normally leave these on System Default.", accent: .tronSlate) {
-                    VStack(spacing: 0) {
-                        editorRow(.shellPath, icon: "terminal", value: draft.shellPath, accent: .tronTeal)
-                        TronSettingsDivider(accent: .tronSlate)
-                        editorRow(.shellPrefix, icon: "text.insert", value: draft.shellPrefix, accent: .tronTeal)
-                        TronSettingsDivider(accent: .tronSlate)
-                        editorRow(.npmCommand, icon: "shippingbox.and.arrow.backward", value: draft.npmCommand, accent: .tronPurple)
-                        TronSettingsDivider(accent: .tronSlate)
-                        editorRow(.proxy, icon: "network", value: draft.proxy, accent: .tronAmber)
-                    }
-                }
-
-                TronInfoCard(
-                    icon: "info.circle",
-                    text: "Tron already discovers resources in the standard global and trusted-project folders. Add locations here only when resources live somewhere else.",
-                    accent: .tronCyan
-                )
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 18)
+        DisclosureGroup(isExpanded: $embeddedPathsExpanded) {
+            resourceSettingsContent.padding(.top, 8)
+        } label: {
+            TronSettingsRow(icon: "folder.badge.gearshape", title: "Locations and Overrides",
+                            subtitle: "Additional resource paths and advanced Mac configuration", accent: .tronBlue)
         }
-        .scrollDismissesKeyboard(.interactively)
-        .tronScrollEdgeChrome()
-        .tronNavigationTitle("Resource Locations")
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                TronSaveToolbarButton(isSaving: saving, isEnabled: hasUnsavedChanges) {
-                    Task { await save() }
-                }
-            }
-        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .tronGlassSurface(accent: .tronBlue, tintOpacity: 0.06)
+        .tronSettingsAutosave(draft: $draft, store: $drafts, initial: ResourceSettingsDraft())
         .task(id: PresentationActivityTaskID(
             source: SettingsLoadID(
                 target: settingsTarget,
@@ -172,8 +134,14 @@ struct ResourceSettingsView: View {
             if !allowsProjectScope { scope = .global }
             await load()
         }
-        .onChange(of: draft) { _, value in
-            if let target = settingsTarget { drafts.update(value, for: target) }
+        .onChange(of: settingsTarget) { _, _ in editor = nil }
+        .onChange(of: model.configurationAutosave.inputGeneration) { _, _ in editor = nil }
+        .onChange(of: editor) { previous, current in
+            guard previous != nil, current == nil else { return }
+            // A partial executable path or proxy URL is not a usable setting.
+            // Closing the text editor accepts the complete value automatically.
+            editBinding.wrappedValue = draft
+            model.configurationAutosave.flush()
         }
         .tronManagedSheet(
             item: $editor,
@@ -181,18 +149,51 @@ struct ResourceSettingsView: View {
         ) { value in editorSheet(value) }
     }
 
+    @ViewBuilder
+    private var resourceSettingsContent: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            scopeGroup
+
+            TronSettingsGroup("Additional Locations", detail: "Optional paths outside automatic discovery.") {
+                VStack(spacing: 0) {
+                    editorRow(.extensions, icon: "shippingbox", value: draft.extensions, accent: .tronPurple)
+                    TronSettingsDivider(accent: .tronPurple)
+                    editorRow(.skills, icon: "sparkles", value: draft.skills, accent: .tronEmerald)
+                    TronSettingsDivider(accent: .tronPurple)
+                    editorRow(.prompts, icon: "text.quote", value: draft.prompts, accent: .tronCyan)
+                    TronSettingsDivider(accent: .tronPurple)
+                    editorRow(.themes, icon: "paintpalette", value: draft.themes, accent: .tronTeal)
+                }
+            }
+
+            TronSettingsGroup("Advanced Mac Overrides", detail: "Normally leave these on System Default.", accent: .tronSlate) {
+                VStack(spacing: 0) {
+                    editorRow(.shellPath, icon: "terminal", value: draft.shellPath, accent: .tronTeal)
+                    TronSettingsDivider(accent: .tronSlate)
+                    editorRow(.shellPrefix, icon: "text.insert", value: draft.shellPrefix, accent: .tronTeal)
+                    TronSettingsDivider(accent: .tronSlate)
+                    editorRow(.npmCommand, icon: "shippingbox.and.arrow.backward", value: draft.npmCommand, accent: .tronPurple)
+                    TronSettingsDivider(accent: .tronSlate)
+                    editorRow(.proxy, icon: "network", value: draft.proxy, accent: .tronAmber)
+                }
+            }
+
+            if let target = settingsTarget { SettingsAutosaveNotice(key: .settings(target, sessionID: nil)) }
+
+            TronInfoCard(
+                icon: "info.circle",
+                text: "Tron already discovers resources in the standard global and trusted-project folders. Add locations here only when resources live somewhere else.",
+                accent: .tronCyan
+            )
+        }
+    }
+
     private var scopeGroup: some View {
         TronSettingsGroup("Applies To", detail: scopeExplanation) {
             if allowsProjectScope {
-                TronValueRow(
-                    icon: "scope",
-                    title: "Settings Scope",
-                    value: scope == .project ? "Current Project" : "Every Project"
-                ) {
-                    TronInlineMenu("Change") {
-                        Button("Every Project") { selectScope(.global) }
-                        Button("Current Project") { selectScope(.project) }
-                    }
+                TronSelectionRow(icon: "scope", title: "Settings Scope", value: scope == .project ? "Current Project" : "Every Project") {
+                    Button("Every Project") { selectScope(.global) }
+                    Button("Current Project") { selectScope(.project) }
                 }
             } else {
                 TronValueRow(
@@ -303,26 +304,34 @@ struct ResourceSettingsView: View {
     }
 
     private func binding(for editor: Editor) -> Binding<String> {
-        Binding {
-            switch editor {
-            case .extensions: draft.extensions
-            case .skills: draft.skills
-            case .prompts: draft.prompts
-            case .themes: draft.themes
-            case .shellPath: draft.shellPath
-            case .shellPrefix: draft.shellPrefix
-            case .npmCommand: draft.npmCommand
-            case .proxy: draft.proxy
+        let profile = model.profileRevision
+        let inputGeneration = model.configurationAutosave.inputGeneration
+        let target = settingsTarget
+        let generation = drafts.scopeGeneration
+        return Binding {
+            let value = draft
+            return switch editor {
+            case .extensions: value.extensions
+            case .skills: value.skills
+            case .prompts: value.prompts
+            case .themes: value.themes
+            case .shellPath: value.shellPath
+            case .shellPrefix: value.shellPrefix
+            case .npmCommand: value.npmCommand
+            case .proxy: value.proxy
             }
         } set: { value in
+            guard profile == model.profileRevision, target == settingsTarget,
+                  inputGeneration == model.configurationAutosave.inputGeneration,
+                  generation == drafts.scopeGeneration, presentationActivity.allowsDataPublication else { return }
             switch editor {
-            case .extensions: draft.extensions = value
-            case .skills: draft.skills = value
-            case .prompts: draft.prompts = value
-            case .themes: draft.themes = value
-            case .shellPath: draft.shellPath = value
-            case .shellPrefix: draft.shellPrefix = value
-            case .npmCommand: draft.npmCommand = value
+                case .extensions: draft.extensions = value
+                case .skills: draft.skills = value
+                case .prompts: draft.prompts = value
+                case .themes: draft.themes = value
+                case .shellPath: draft.shellPath = value
+                case .shellPrefix: draft.shellPrefix = value
+                case .npmCommand: draft.npmCommand = value
             case .proxy:
                 draft.proxy = value
                 draft.proxyEdited = true
@@ -334,9 +343,12 @@ struct ResourceSettingsView: View {
         SettingsTarget(scope: scope, projectCWD: projectCWD)
     }
 
-    private var hasUnsavedChanges: Bool {
-        guard let target = settingsTarget else { return false }
-        return drafts.hasChanges(draft, for: target)
+    private var editBinding: Binding<ResourceSettingsDraft> {
+        let target = settingsTarget
+        return SettingsAutosave.binding(draft: $draft, store: $drafts, model: model, target: target,
+            admits: { target == settingsTarget && presentationActivity.allowsDataPublication },
+            patch: { $0.patch(comparedTo: $1) },
+            settled: { value, target in projectionDraft(target: target) ?? value.afterSuccessfulSave() })
     }
 
     private func selectScope(_ newScope: SettingsScope) {
@@ -382,33 +394,6 @@ struct ResourceSettingsView: View {
             loaded.themes = resources.lines("themes")
         }
         return loaded
-    }
-
-    private func save() async {
-        guard let target = settingsTarget else { return }
-        drafts.update(draft, for: target)
-        guard drafts.isDirty(target),
-              let savingRevision = drafts.revision(for: target) else { return }
-        let savingDraft = draft
-        saving = true
-        defer { saving = false }
-        let baseline = drafts.baseline(for: target) ?? ResourceSettingsDraft()
-        let patch = savingDraft.patch(comparedTo: baseline)
-        do {
-            try await model.updateSettings(patch, target: target)
-            guard target == settingsTarget, draft == savingDraft else { return }
-            let resultingDraft = projectionDraft(target: target)
-                ?? savingDraft.afterSuccessfulSave()
-            if drafts.markSaved(
-                submitted: savingDraft,
-                resulting: resultingDraft,
-                for: target,
-                expectedRevision: savingRevision
-            ) {
-                draft = resultingDraft
-            }
-        }
-        catch { model.presentError(error) }
     }
 
     private func lines(_ value: String) -> [String] {

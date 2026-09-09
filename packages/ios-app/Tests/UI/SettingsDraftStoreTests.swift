@@ -359,7 +359,7 @@ struct SettingsDraftStoreTests {
         #expect(store.draft(for: .global) == "newer edit")
     }
 
-    @Test("a scope round trip restores each target and invalidates an older save")
+    @Test("a scope round trip preserves unchanged autosave receipt authority")
     func scopeRoundTrip() {
         let project = SettingsTarget.project(cwd: "/workspace/project")
         var store = ScopedSettingsDraftStore<String>()
@@ -389,8 +389,8 @@ struct SettingsDraftStoreTests {
         #expect(projectDraft == "project default")
         #expect(restoredGlobal == "saving edit")
         #expect(store.draft(for: project) == "project edit")
-        #expect(!markedSaved)
-        #expect(store.isDirty(.global))
+        #expect(markedSaved)
+        #expect(!store.isDirty(.global))
     }
 
     @Test("an edit made before the first response still rejects that response")

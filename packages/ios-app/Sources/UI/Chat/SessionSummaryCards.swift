@@ -4,7 +4,7 @@ import SwiftUI
 /// reading-family scale and other sheets keep their ordinary metadata sizes.
 @MainActor
 enum SessionSummaryTypography {
-    static let metadataSizeAdjustment: CGFloat = 0.5
+    static let metadataSizeAdjustment = TronSettingsLayoutPolicy.metadataSizeAdjustment
     static var headline: Font { TronTypography.sans(size: TronTypography.sizeXL, weight: .bold) }
     static var detail: Font { TronTypography.sans(size: TronTypography.sizeSecondary + metadataSizeAdjustment) }
     static var usageValue: Font { TronTypography.code(size: TronTypography.sizeSecondary + metadataSizeAdjustment) }

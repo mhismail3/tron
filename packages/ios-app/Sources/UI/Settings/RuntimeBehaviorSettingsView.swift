@@ -73,51 +73,52 @@ struct RuntimeBehaviorSettingsView: View {
     @State private var scope: SettingsScope = .global
     @State private var draft = RuntimeBehaviorDraft()
     @State private var drafts = ScopedSettingsDraftStore<RuntimeBehaviorDraft>()
-    @State private var saving = false
 
     private var allowsProjectScope: Bool { projectCWD != nil }
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: true) {
+        let editing = editBinding
+        return ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
                 scopeGroup
+                if let target = settingsTarget { SettingsAutosaveNotice(key: .settings(target, sessionID: nil)) }
                 TronSettingsGroup("Provider Transport", accent: .tronCyan, surfaceStyle: .scrollOptimized) {
                     VStack(spacing: 0) {
                         choiceRow("network", "Transport", transportLabel, accent: .tronCyan) {
-                            Button("Automatic") { draft.transport = "auto" }
-                            Button("Server-Sent Events") { draft.transport = "sse" }
-                            Button("WebSocket") { draft.transport = "websocket" }
-                            Button("Cached WebSocket") { draft.transport = "websocket-cached" }
+                            Button("Automatic") { editing.update { $0.transport = "auto" } }
+                            Button("Server-Sent Events") { editing.update { $0.transport = "sse" } }
+                            Button("WebSocket") { editing.update { $0.transport = "websocket" } }
+                            Button("Cached WebSocket") { editing.update { $0.transport = "websocket-cached" } }
                         }
                         TronSettingsDivider(accent: .tronCyan)
-                        numberRow("timer", "HTTP idle timeout", "Milliseconds", value: $draft.httpIdleTimeout, accent: .tronCyan)
+                        numberRow("timer", "HTTP idle timeout", "Milliseconds", value: editing.httpIdleTimeout, accent: .tronCyan)
                         TronSettingsDivider(accent: .tronCyan)
-                        numberRow("bolt.horizontal", "WebSocket timeout", "Milliseconds", value: $draft.websocketTimeout, accent: .tronCyan)
+                        numberRow("bolt.horizontal", "WebSocket timeout", "Milliseconds", value: editing.websocketTimeout, accent: .tronCyan)
                     }
                 }
                 TronSettingsGroup("Message Queue", accent: .tronPurple, surfaceStyle: .scrollOptimized) {
                     VStack(spacing: 0) {
                         choiceRow("arrow.turn.up.right", "Steering delivery", queueLabel(draft.steeringMode), accent: .tronPurple) {
-                            Button("Deliver all") { draft.steeringMode = "all" }
-                            Button("One at a time") { draft.steeringMode = "one-at-a-time" }
+                            Button("Deliver all") { editing.update { $0.steeringMode = "all" } }
+                            Button("One at a time") { editing.update { $0.steeringMode = "one-at-a-time" } }
                         }
                         TronSettingsDivider(accent: .tronPurple)
                         choiceRow("clock.arrow.circlepath", "Follow-up delivery", queueLabel(draft.followUpMode), accent: .tronPurple) {
-                            Button("Deliver all") { draft.followUpMode = "all" }
-                            Button("One at a time") { draft.followUpMode = "one-at-a-time" }
+                            Button("Deliver all") { editing.update { $0.followUpMode = "all" } }
+                            Button("One at a time") { editing.update { $0.followUpMode = "one-at-a-time" } }
                         }
                     }
                 }
                 TronSettingsGroup("Branch Summaries", accent: .tronTeal, surfaceStyle: .scrollOptimized) {
                     VStack(spacing: 0) {
-                        numberRow("arrow.triangle.branch", "Branch summary reserve", "Tokens reserved for branch summaries", value: $draft.branchReserve, accent: .tronTeal)
+                        numberRow("arrow.triangle.branch", "Branch summary reserve", "Tokens reserved for branch summaries", value: editing.branchReserve, accent: .tronTeal)
                         TronSettingsDivider(accent: .tronTeal)
                         TronToggleRow(
                             icon: "text.bubble",
                             title: "Skip branch-summary prompt",
                             detail: "Skip the optional branch-summary instruction",
                             accent: .tronTeal,
-                            isOn: $draft.branchSkipPrompt
+                            isOn: editing.branchSkipPrompt
                         )
                     }
                 }
@@ -128,18 +129,18 @@ struct RuntimeBehaviorSettingsView: View {
                             title: "Automatic retry",
                             detail: "Retry transient request failures",
                             accent: .tronAmber,
-                            isOn: $draft.retryEnabled
+                            isOn: editing.retryEnabled
                         )
                         TronSettingsDivider(accent: .tronAmber)
-                        numberRow("number", "Agent retry count", "Maximum retries for agent requests", value: $draft.retryCount, accent: .tronAmber)
+                        numberRow("number", "Agent retry count", "Maximum retries for agent requests", value: editing.retryCount, accent: .tronAmber)
                         TronSettingsDivider(accent: .tronAmber)
-                        numberRow("timer", "Base delay", "Initial delay in milliseconds", value: $draft.retryDelay, accent: .tronAmber)
+                        numberRow("timer", "Base delay", "Initial delay in milliseconds", value: editing.retryDelay, accent: .tronAmber)
                         TronSettingsDivider(accent: .tronAmber)
-                        numberRow("hourglass", "Provider timeout", "Request timeout in milliseconds", value: $draft.providerTimeout, accent: .tronAmber)
+                        numberRow("hourglass", "Provider timeout", "Request timeout in milliseconds", value: editing.providerTimeout, accent: .tronAmber)
                         TronSettingsDivider(accent: .tronAmber)
-                        numberRow("number", "Provider retry count", "Maximum retries for provider requests", value: $draft.providerRetryCount, accent: .tronAmber)
+                        numberRow("number", "Provider retry count", "Maximum retries for provider requests", value: editing.providerRetryCount, accent: .tronAmber)
                         TronSettingsDivider(accent: .tronAmber)
-                        numberRow("timer", "Maximum provider delay", "Delay cap in milliseconds", value: $draft.providerRetryDelay, accent: .tronAmber)
+                        numberRow("timer", "Maximum provider delay", "Delay cap in milliseconds", value: editing.providerRetryDelay, accent: .tronAmber)
                     }
                 }
                 TronSettingsGroup("Conversation", surfaceStyle: .scrollOptimized) {
@@ -149,26 +150,23 @@ struct RuntimeBehaviorSettingsView: View {
                 }
                 TronSettingsGroup("Markdown", accent: .tronPurple, surfaceStyle: .scrollOptimized) {
                     VStack(spacing: 0) {
-                        choiceRow("flowchart", "Mermaid diagrams", draft.mermaid.capitalized, accent: .tronPurple) {
-                            Button("Off") { draft.mermaid = "off" }
-                            Button("Completed responses") { draft.mermaid = "final" }
-                            Button("While streaming") { draft.mermaid = "streaming" }
+                        choiceRow("flowchart", "Mermaid diagrams", mermaidLabel, accent: .tronPurple) {
+                            Button("Off") { editing.update { $0.mermaid = "off" } }
+                            Button("Completed responses") { editing.update { $0.mermaid = "final" } }
+                            Button("While streaming") { editing.update { $0.mermaid = "streaming" } }
                         }
                         TronSettingsDivider(accent: .tronPurple)
-                        TronValueRow(icon: "chevron.left.forwardslash.chevron.right", title: "Code block indent", accent: .tronPurple) {
-                            TextField("Indent", text: $draft.codeIndent)
-                                .tronInlineField(monospaced: true)
-                                .frame(width: 100)
-                        }
+                        TronTextSettingRow(icon: "chevron.left.forwardslash.chevron.right", title: "Code block indent",
+                                           value: editing.codeIndent, accent: .tronPurple)
                     }
                 }
                 TronSettingsGroup("Privacy and Warnings", accent: .tronSlate, surfaceStyle: .scrollOptimized) {
                     VStack(spacing: 0) {
-                        TronToggleRow(icon: "chart.bar", title: "Installation telemetry", accent: .tronSlate, isOn: $draft.installTelemetry)
+                        TronToggleRow(icon: "chart.bar", title: "Installation telemetry", accent: .tronSlate, isOn: editing.installTelemetry)
                         TronSettingsDivider(accent: .tronSlate)
-                        TronToggleRow(icon: "waveform.path.ecg", title: "Anonymous analytics", accent: .tronSlate, isOn: $draft.analytics)
+                        TronToggleRow(icon: "waveform.path.ecg", title: "Anonymous analytics", accent: .tronSlate, isOn: editing.analytics)
                         TronSettingsDivider(accent: .tronSlate)
-                        TronToggleRow(icon: "exclamationmark.triangle", title: "Anthropic extra-usage warning", accent: .tronSlate, isOn: $draft.anthropicWarning)
+                        TronToggleRow(icon: "exclamationmark.triangle", title: "Anthropic extra-usage warning", accent: .tronSlate, isOn: editing.anthropicWarning)
                     }
                 }
             }
@@ -177,13 +175,7 @@ struct RuntimeBehaviorSettingsView: View {
         }
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Runtime Behavior")
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                TronSaveToolbarButton(isSaving: saving, isEnabled: hasUnsavedChanges) {
-                    Task { await save() }
-                }
-            }
-        }
+        .tronSettingsAutosave(draft: $draft, store: $drafts, initial: RuntimeBehaviorDraft())
         .task(id: PresentationActivityTaskID(
             source: SettingsLoadID(target: settingsTarget, invalidationGeneration: model.settingsInvalidationGeneration),
             presentationActive: presentationActivity.allowsPresentationPublication
@@ -192,9 +184,7 @@ struct RuntimeBehaviorSettingsView: View {
             if !allowsProjectScope { scope = .global }
             await load()
         }
-        .onChange(of: draft) { _, value in
-            if let target = settingsTarget { drafts.update(value, for: target) }
-        }
+
     }
 
     private var scopeGroup: some View {
@@ -221,45 +211,43 @@ struct RuntimeBehaviorSettingsView: View {
     }
 
     @ViewBuilder private var toggleRows: some View {
-        TronToggleRow(icon: "brain", title: "Hide thinking blocks", detail: "Keep model reasoning out of the transcript", isOn: $draft.hideThinking)
+        let editing = editBinding
+        TronToggleRow(icon: "brain", title: "Hide thinking blocks", detail: "Keep model reasoning out of the transcript", isOn: editing.hideThinking)
         TronSettingsDivider()
-        TronToggleRow(icon: "bell", title: "Show cache-miss notices", detail: "Surface provider cache misses in chat", isOn: $draft.cacheNotices)
+        TronToggleRow(icon: "bell", title: "Show cache-miss notices", detail: "Surface provider cache misses in chat", isOn: editing.cacheNotices)
         TronSettingsDivider()
-        TronToggleRow(icon: "photo", title: "Resize large images", detail: "Reduce oversized images before upload", isOn: $draft.resizeImages)
+        TronToggleRow(icon: "photo", title: "Resize large images", detail: "Reduce oversized images before upload", isOn: editing.resizeImages)
         TronSettingsDivider()
-        TronToggleRow(icon: "photo.slash", title: "Block images", detail: "Prevent image input from reaching providers", isOn: $draft.blockImages)
+        TronToggleRow(icon: "photo.slash", title: "Block images", detail: "Prevent image input from reaching providers", isOn: editing.blockImages)
         TronSettingsDivider()
-        TronToggleRow(icon: "command", title: "Enable skill commands", detail: "Expose installed skills as slash commands", isOn: $draft.skillCommands)
+        TronToggleRow(icon: "command", title: "Enable skill commands", detail: "Expose installed skills as slash commands", isOn: editing.skillCommands)
     }
 
-    private func choiceRow<Content: View>(_ icon: String, _ title: String, _ value: String, accent: Color = .tronEmerald, @ViewBuilder choices: () -> Content) -> some View {
-        TronValueRow(icon: icon, title: title, value: value, accent: accent) {
-            TronInlineMenu("Change", accent: accent, content: choices)
-        }
+    private func choiceRow<Content: View>(_ icon: String, _ title: String, _ value: String, accent: Color = .tronEmerald, @ViewBuilder choices: @escaping () -> Content) -> some View {
+        TronSelectionRow(icon: icon, title: title, value: value, accent: accent, choices: choices)
     }
 
     private func numberRow(_ icon: String, _ title: String, _ detail: String?, value: Binding<Int>, accent: Color) -> some View {
-        TronValueRow(icon: icon, title: title, detail: detail, accent: accent) {
-            TextField(title, value: value, format: .number)
-                .keyboardType(.numberPad)
-                .tronInlineField(numeric: true)
-                .multilineTextAlignment(.trailing)
-                .frame(width: 118)
-        }
+        TronNumberSettingRow(icon: icon, title: title, detail: detail, value: value, accent: accent)
     }
 
     private var transportLabel: String {
         switch draft.transport { case "sse": "Server-Sent Events"; case "websocket": "WebSocket"; case "websocket-cached": "Cached WebSocket"; default: "Automatic" }
     }
     private func queueLabel(_ value: String) -> String { value == "all" ? "Deliver all" : "One at a time" }
+    private var mermaidLabel: String {
+        switch draft.mermaid { case "off": "Off"; case "final": "Completed responses"; case "streaming": "While streaming"; default: draft.mermaid }
+    }
 
     private var settingsTarget: SettingsTarget? {
         SettingsTarget(scope: scope, projectCWD: projectCWD)
     }
 
-    private var hasUnsavedChanges: Bool {
-        guard let target = settingsTarget else { return false }
-        return drafts.hasChanges(draft, for: target)
+    private var editBinding: Binding<RuntimeBehaviorDraft> {
+        let target = settingsTarget
+        return SettingsAutosave.binding(draft: $draft, store: $drafts, model: model, target: target,
+            admits: { target == settingsTarget && presentationActivity.allowsDataPublication },
+            patch: { $0.patch(comparedTo: $1) })
     }
 
     private func selectScope(_ newScope: SettingsScope) {
@@ -277,8 +265,8 @@ struct RuntimeBehaviorSettingsView: View {
 
     private func load() async {
         guard let target = settingsTarget else { return }
-        // Keep the toolbar disabled while the initial response is pending, but
-        // preserve any edit that arrives before that response.
+        // Installing a projection never submits an autosave; a user edit made
+        // while this read is pending still rejects its stale result.
         _ = drafts.seedBaselineIfMissing(draft, for: target)
         guard await model.refreshSettings(target: target),
               presentationActivity.allowsPresentationPublication,
@@ -333,25 +321,4 @@ struct RuntimeBehaviorSettingsView: View {
         return loaded
     }
 
-    private func save() async {
-        guard let target = settingsTarget else { return }
-        drafts.update(draft, for: target)
-        guard drafts.isDirty(target),
-              let savingRevision = drafts.revision(for: target) else { return }
-        let savingDraft = draft
-        saving = true
-        defer { saving = false }
-        let baseline = drafts.baseline(for: target) ?? RuntimeBehaviorDraft()
-        let patch = savingDraft.patch(comparedTo: baseline)
-        do {
-            try await model.updateSettings(patch, target: target)
-            guard target == settingsTarget, draft == savingDraft else { return }
-            _ = drafts.markSaved(
-                savingDraft,
-                for: target,
-                expectedRevision: savingRevision
-            )
-        }
-        catch { model.presentError(error) }
-    }
 }

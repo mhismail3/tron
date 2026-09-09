@@ -819,23 +819,13 @@ struct GatewayConnectionDetailView: View {
 
     private func gatewayUpdateGroup(config: GatewayUpdateConfig?) -> some View {
         TronSettingsGroup("Gateway Maintenance", accent: .tronEmerald) {
-            TronValueRow(
-                icon: "folder",
-                title: "Source repository",
-                value: GatewayConnectionDetailPresentation.sourceRepositoryDetail(config),
-                accent: .tronEmerald
-            ) {
-                Button("Configure") { configuringSourceRepository = true }
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                    .tronSettingsButtonForeground(settingsTheme?.accent ?? .tronEmerald)
-                    .padding(.horizontal, 10)
-                    .frame(minHeight: 36)
-                    .buttonStyle(.plain)
-                    .glassEffect(
-                        .regular.tint((settingsTheme?.accent ?? .tronEmerald).opacity(0.10)).interactive(),
-                        in: Capsule()
-                    )
-                    .disabled(updateIsActive)
+            TronSettingsRow(icon: "folder", title: "Source repository", accent: .tronEmerald) {
+                Button { configuringSourceRepository = true } label: {
+                    TronInlineActionLabel(GatewayConnectionDetailPresentation.sourceRepositoryDetail(config), accent: .tronEmerald)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Configure source repository")
+                .disabled(updateIsActive)
             }
         }
     }

@@ -131,6 +131,7 @@ final class CustomModelConfigurationCoordinator {
     /// profile, including an A → B → A selection cycle.
     func clearProfile() {
         profileGeneration &+= 1
+        invalidationGeneration &+= 1
         loadGenerationByTarget = loadGenerationByTarget.mapValues { $0 &+ 1 }
         mutationGenerationByTarget = mutationGenerationByTarget.mapValues { $0 &+ 1 }
         modelsByTarget.removeAll()

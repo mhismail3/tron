@@ -59,7 +59,6 @@ struct AgentDefaultsSettingsView: View {
     @State private var sliderPresentation = ConfigurationSliderPresentation()
     @State private var drafts = ScopedSettingsDraftStore<AgentDefaultsDraft>()
     @State private var scope: SettingsScope = .global
-    @State private var saving = false
     @State private var refreshingCatalog = false
 
     init(
@@ -75,8 +74,12 @@ struct AgentDefaultsSettingsView: View {
     }
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: true) {
+        let editing = editBinding
+        return ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
+                if let target = settingsTarget {
+                    SettingsAutosaveNotice(key: .settings(target, sessionID: target.scope == .project ? projectSessionID : nil))
+                }
                 TronSettingsGroup(
                     "Scope",
                     detail: scope == .project
@@ -84,15 +87,10 @@ struct AgentDefaultsSettingsView: View {
                         : "Defaults apply to every Tron workspace on this Mac."
                 ) {
                     if allowsProjectScope {
-                        TronValueRow(
-                            icon: "scope",
-                            title: "Settings Scope",
-                            value: scope == .project ? "Current Project" : "Global Defaults"
-                        ) {
-                            TronInlineMenu("Change") {
-                                Button("Global Defaults") { selectScope(.global) }
-                                Button("Current Project") { selectScope(.project) }
-                            }
+                        TronSelectionRow(icon: "scope", title: "Settings Scope",
+                                         value: scope == .project ? "Current Project" : "Global Defaults") {
+                            Button("Global Defaults") { selectScope(.global) }
+                            Button("Current Project") { selectScope(.project) }
                         }
                     } else {
                         TronValueRow(
@@ -106,7 +104,7 @@ struct AgentDefaultsSettingsView: View {
                     TronSettingsGroup("Default Model", accent: .tronPurple) {
                         VStack(spacing: 0) {
                             TronModelSelectionRow(
-                                selection: $draft.selectedModel,
+                                selection: editing.selectedModel,
                                 models: availableModels,
                                 navigationTitle: "Models"
                             )
@@ -117,21 +115,18 @@ struct AgentDefaultsSettingsView: View {
                                     selection: contextWindowBinding(for: selectedModel),
                                     limits: limits,
                                     inheritedValue: draft.inheritedModelContextWindows[selectedModel.ref.contextWindowKey],
-                                    resetLabel: scope == .project ? "Use inherited default" : "Use model default"
+                                    resetLabel: scope == .project ? "Use inherited default" : "Use model default",
+                                    information: "Conversation capacity for new sessions"
                                 )
                                 .id("\(scope.rawValue):\(selectedModel.ref.contextWindowKey)")
-                                Text("Defaults apply to new sessions and after reloading session resources. Use Manage Session to change a live session. Larger windows do not restore compacted history.")
-                                    .font(TronTypography.secondaryDescription)
-                                    .foregroundStyle(Color.tronTextSecondary)
-                                    .padding(.horizontal, 14)
-                                    .padding(.bottom, 10)
                             }
                             TronSettingsDivider(accent: .tronPurple)
                             TronThinkingSelectionRow(
-                                selection: thinkingBinding,
+                                selection: editing.thinking,
                                 // Persisted defaults are model-independent; only a live
                                 // session uses the runtime's available-level subset.
-                                levels: ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
+                                levels: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+                                information: "Reasoning effort; higher levels can take longer"
                             )
                             .id(settingsTarget)
                         }
@@ -145,7 +140,7 @@ struct AgentDefaultsSettingsView: View {
                             title: "Automatic Retry",
                             detail: "Retry transient agent and provider failures",
                             accent: .tronTeal,
-                            isOn: $draft.retry
+                            isOn: editing.retry
                         )
                     }
                 }
@@ -154,17 +149,10 @@ struct AgentDefaultsSettingsView: View {
                     detail: "Trust controls project resource loading; it is not a sandbox.",
                     accent: .tronAmber
                 ) {
-                    TronValueRow(
-                        icon: "checkmark.shield",
-                        title: "Default Trust",
-                        value: draft.trust.capitalized,
-                        accent: .tronAmber
-                    ) {
-                        TronInlineMenu("Change", accent: .tronAmber) {
-                            Button("Ask") { draft.trust = "ask" }
-                            Button("Always") { draft.trust = "always" }
-                            Button("Never") { draft.trust = "never" }
-                        }
+                    TronSelectionRow(icon: "checkmark.shield", title: "Default Trust", value: draft.trust.capitalized, accent: .tronAmber) {
+                        Button("Ask") { editing.update { $0.trust = "ask" } }
+                        Button("Always") { editing.update { $0.trust = "always" } }
+                        Button("Never") { editing.update { $0.trust = "never" } }
                     }
                 }
             }
@@ -174,20 +162,7 @@ struct AgentDefaultsSettingsView: View {
         .tronScrollEdgeChrome()
         .tronConfigurationSliderHost(sliderPresentation)
         .tronNavigationTitle("Models and Defaults")
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                TronSaveToolbarButton(
-                    isSaving: saving,
-                    isEnabled: hasUnsavedChanges && !refreshingCatalog && sliderPresentation.session == nil
-                ) {
-                    Task { await save() }
-                }
-            }
-        }
-        .onChange(of: draft) { _, value in
-            guard let target = settingsTarget else { return }
-            drafts.update(value, for: target)
-        }
+        .tronSettingsAutosave(draft: $draft, store: $drafts, initial: AgentDefaultsDraft())
         .task(id: PresentationActivityTaskID(
             source: AgentDefaultsLoadID(
                 settingsTarget: settingsTarget,
@@ -224,55 +199,33 @@ struct AgentDefaultsSettingsView: View {
         selectedModel?.contextWindowLimits?.withMinimum(draft.contextWindowMinimum)
     }
 
-    private var thinkingBinding: Binding<String> {
+    private var editBinding: Binding<AgentDefaultsDraft> {
         let target = settingsTarget
-        return Binding(get: { draft.thinking }, set: { value in
-            guard let target, settingsTarget == target,
-                  presentationActivity.allowsPresentationPublication else { return }
-            draft.thinking = value
-        })
+        return SettingsAutosave.binding(draft: $draft, store: $drafts, model: model, target: target,
+            sessionID: target?.scope == .project ? projectSessionID : nil,
+            admits: { target == settingsTarget && presentationActivity.allowsDataPublication },
+            patch: { $0.patch(comparedTo: $1) })
     }
 
     private func contextWindowBinding(for modelSummary: ModelSummary) -> Binding<Int?> {
-        Binding(
-            get: { draft.contextWindowOverride(for: modelSummary.ref) },
-            set: { value in
-                draft.setContextWindowOverride(value, for: modelSummary.ref)
-            }
+        let editing = editBinding
+        return Binding(
+            get: { editing.wrappedValue.contextWindowOverride(for: modelSummary.ref) },
+            set: { value in editing.update { $0.setContextWindowOverride(value, for: modelSummary.ref) } }
         )
     }
 
     private var refreshModelCatalogButton: some View {
-        Button {
-            Task { await refreshModelCatalog() }
-        } label: {
-            TronSettingsRow(
-                icon: "arrow.clockwise",
-                title: "Refresh Model Catalog",
-                subtitle: refreshingCatalog ? "Checking configured providers…" : modelCatalogSummary,
-                accent: .tronPurple
-            ) {
-                if refreshingCatalog {
-                    TronPulseLoadingIndicator(size: 18)
-                        .accessibilityLabel("Refreshing model catalog")
-                } else {
-                    Image(systemName: "arrow.clockwise")
-                        .font(TronTypography.buttonSM)
-                        .foregroundStyle(Color.tronPurple)
-                        .accessibilityHidden(true)
-                }
+        TronSettingsRow(icon: "list.bullet.rectangle", title: "Model Catalog",
+                        subtitle: modelCatalogSummary, accent: .tronPurple) {
+            Button { Task { await refreshModelCatalog() } } label: {
+                TronInlineActionLabel("Refresh", icon: "arrow.clockwise", isWorking: refreshingCatalog, accent: .tronPurple)
             }
+            .buttonStyle(.plain)
+            .disabled(refreshingCatalog)
+            .accessibilityLabel("Refresh Model Catalog")
         }
-        .buttonStyle(.plain)
-        .disabled(refreshingCatalog || saving)
-        .tronGlassSurface(
-            accent: .tronPurple,
-            tintOpacity: 0.14,
-            interactive: !refreshingCatalog && !saving
-        )
-        .accessibilityLabel("Refresh Model Catalog")
-        .accessibilityValue(refreshingCatalog ? "In progress" : modelCatalogSummary)
-        .accessibilityHint("Checks configured providers for newly available models.")
+        .tronGlassSurface(accent: .tronPurple, tintOpacity: 0.14)
     }
 
     private var modelCatalogSummary: String {
@@ -280,11 +233,6 @@ struct AgentDefaultsSettingsView: View {
         return availableModels.count == 1
             ? "1 model currently available"
             : "\(availableModels.count) models currently available"
-    }
-
-    private var hasUnsavedChanges: Bool {
-        guard let target = settingsTarget else { return false }
-        return drafts.hasChanges(draft, for: target)
     }
 
     private func selectScope(_ newScope: SettingsScope) {
@@ -359,7 +307,7 @@ struct AgentDefaultsSettingsView: View {
     }
 
     private func refreshModelCatalog() async {
-        guard !refreshingCatalog, !saving else { return }
+        guard !refreshingCatalog else { return }
         let requestedTarget = catalogTarget
         refreshingCatalog = true
         defer { refreshingCatalog = false }
@@ -372,30 +320,4 @@ struct AgentDefaultsSettingsView: View {
         }
     }
 
-    private func save() async {
-        guard let target = settingsTarget else { return }
-        drafts.update(draft, for: target)
-        guard drafts.isDirty(target),
-              let savingRevision = drafts.revision(for: target) else { return }
-        let savingDraft = draft
-        let baseline = drafts.baseline(for: target) ?? AgentDefaultsDraft()
-        let patch = savingDraft.patch(comparedTo: baseline)
-        saving = true
-        defer { saving = false }
-        do {
-            try await model.updateSettings(
-                patch,
-                target: target,
-                sessionID: target.scope == .project ? projectSessionID : nil
-            )
-            guard target == settingsTarget, draft == savingDraft else { return }
-            _ = drafts.markSaved(
-                savingDraft,
-                for: target,
-                expectedRevision: savingRevision
-            )
-        } catch {
-            model.presentError(error)
-        }
-    }
 }

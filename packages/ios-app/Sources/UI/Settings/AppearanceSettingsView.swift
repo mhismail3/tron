@@ -24,15 +24,14 @@ struct AppearanceSettingsView: View {
 
                 TronSettingsGroup("Text Font", accent: .tronPurple) {
                     VStack(alignment: .leading, spacing: 0) {
-                        TronProgressiveSheetLink(accessibilityLabel: "Text Font") {
+                        TronSelectionSheetRow(icon: "textformat", title: "Font", value: fonts.selectedFamily.displayName,
+                                              accessibilityLabel: "Text Font", accent: .tronPurple) {
                             FontFamilySelectionView(
                                 title: "Text Font",
                                 selection: $fonts.selectedFamily,
                                 families: FontFamily.textFamilies,
                                 previewsMonospacedVariant: false
                             )
-                        } label: {
-                            TronValueRow(icon: "textformat", title: "Font", value: fonts.selectedFamily.displayName, accent: .tronPurple)
                         }
                         if fonts.selectedFamily.isVariable {
                             TronSettingsDivider(accent: .tronPurple)
@@ -67,15 +66,14 @@ struct AppearanceSettingsView: View {
 
                 TronSettingsGroup("Code Font", accent: .tronCyan) {
                     VStack(alignment: .leading, spacing: 0) {
-                        TronProgressiveSheetLink(accessibilityLabel: "Code Font") {
+                        TronSelectionSheetRow(icon: "curlybraces", title: "Font", value: fonts.selectedMonoFamily.displayName,
+                                              accessibilityLabel: "Code Font", accent: .tronCyan) {
                             FontFamilySelectionView(
                                 title: "Code Font",
                                 selection: $fonts.selectedMonoFamily,
                                 families: FontFamily.monoFamilies,
                                 previewsMonospacedVariant: true
                             )
-                        } label: {
-                            TronValueRow(icon: "curlybraces", title: "Font", value: fonts.selectedMonoFamily.displayName, accent: .tronCyan)
                         }
                         if fonts.selectedMonoFamily.isVariable {
                             TronSettingsDivider(accent: .tronCyan)

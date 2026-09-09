@@ -165,6 +165,7 @@ final class SettingsTrustCoordinator {
     /// profile and drops its disposable settings projections.
     func clearProfile() {
         profileGeneration &+= 1
+        settingsInvalidationGeneration &+= 1
         settingsLoadGenerationByTarget = settingsLoadGenerationByTarget.mapValues { $0 &+ 1 }
         settingsByTarget.removeAll()
     }

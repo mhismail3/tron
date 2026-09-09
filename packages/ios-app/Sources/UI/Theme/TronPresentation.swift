@@ -79,6 +79,18 @@ private struct TronSettingsSecondaryTextSizeAdjustmentKey: EnvironmentKey {
     static let defaultValue: CGFloat = 0
 }
 
+/// Shared geometry for settings rows. The visible control is compact while its
+/// surrounding hit target remains at least 44 points, matching Manage Session.
+enum TronSettingsLayoutPolicy {
+    static let metadataSizeAdjustment: CGFloat = 0.5
+    static let iconSize: CGFloat = 22
+    static let rowMinimumHeight: CGFloat = 48
+    static let rowHorizontalPadding: CGFloat = 14
+    static let dividerLeadingPadding: CGFloat = 52
+    static let compactPillHeight: CGFloat = 28
+    static let compactPillTargetHeight: CGFloat = 44
+}
+
 private struct TronSettingsVisualThemeKey: EnvironmentKey {
     static let defaultValue: TronSettingsVisualTheme? = nil
 }
@@ -102,6 +114,15 @@ private struct TronSettingsVisualThemeModifier: ViewModifier {
         content
             .environment(\.tronSettingsVisualTheme, TronSettingsVisualTheme(accent: accent))
             .tint(accent)
+    }
+}
+
+private struct TronSettingsLayoutModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .environment(\.tronSettingsSecondaryTextSizeAdjustment, TronSettingsLayoutPolicy.metadataSizeAdjustment)
+            .controlSize(.small)
+            .font(TronTypography.body)
     }
 }
 
@@ -206,6 +227,12 @@ extension View {
     /// Tron's selected family and emerald interaction color.
     func tronPresentation() -> some View {
         modifier(TronPresentationModifier())
+    }
+
+    /// Applies the compact settings row contract without changing unrelated
+    /// app surfaces. Parent settings routes opt in at their destination.
+    func tronSettingsLayout() -> some View {
+        modifier(TronSettingsLayoutModifier())
     }
 
     /// Applies one visual identity to a progressive settings destination and
@@ -475,12 +502,20 @@ private struct TronInlineFieldModifier: ViewModifier {
     let monospaced: Bool
     let numeric: Bool
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+    @Environment(\.controlSize) private var controlSize
+    @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
+
+    private var font: Font {
+        if composer { return TronTypography.input }
+        if controlSize == .small { return TronTypography.code(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment) }
+        return numeric ? TronTypography.numericValue : monospaced ? TronTypography.codeContent : TronTypography.bodySM
+    }
 
     func body(content: Content) -> some View {
         let accent = settingsTheme?.accent ?? .tronEmerald
         content
             .textFieldStyle(.plain)
-            .font(composer ? TronTypography.input : numeric ? TronTypography.numericValue : monospaced ? TronTypography.codeContent : TronTypography.bodySM)
+            .font(font)
             .foregroundStyle(composer ? accent : Color.tronTextPrimary)
             .tint(accent)
     }
@@ -1076,32 +1111,6 @@ enum TronSaveActionPresentation {
     static let systemImage = "externaldrive"
 }
 
-struct TronSaveToolbarButton: View {
-    let isSaving: Bool
-    let isEnabled: Bool
-    let action: () -> Void
-    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
-
-    private var actionColor: Color {
-        isEnabled && !isSaving ? settingsTheme?.accent ?? .tronEmerald : .tronTextMuted
-    }
-
-    var body: some View {
-        Button(action: action) {
-            TronToolbarTextLabel(
-                isSaving ? "Saving…" : "Save",
-                systemImage: TronSaveActionPresentation.systemImage,
-                isWorking: isSaving
-            )
-            .tronToolbarAction(accent: actionColor)
-        }
-        .tint(actionColor)
-        .disabled(isSaving || !isEnabled)
-        .accessibilityLabel(isSaving ? "Saving" : "Save")
-        .accessibilityValue(isSaving ? "In progress" : isEnabled ? "Available" : "No changes")
-    }
-}
-
 struct TronReloadToolbarButton: View {
     let isReloading: Bool
     let action: () -> Void
@@ -1248,6 +1257,7 @@ struct TronSettingsRow<Trailing: View>: View {
     let title: String
     let subtitle: String?
     let subtitleLineLimit: Int?
+    let titleIsIdentifier: Bool
     let accent: Color
     let titleFont: Font
     let titleColor: Color
@@ -1263,6 +1273,7 @@ struct TronSettingsRow<Trailing: View>: View {
         title: String,
         subtitle: String? = nil,
         subtitleLineLimit: Int? = nil,
+        titleIsIdentifier: Bool = false,
         accent: Color = .tronEmerald,
         titleFont: Font = TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold),
         titleColor: Color = .tronTextPrimary,
@@ -1273,6 +1284,7 @@ struct TronSettingsRow<Trailing: View>: View {
         self.title = title
         self.subtitle = subtitle
         self.subtitleLineLimit = subtitleLineLimit
+        self.titleIsIdentifier = titleIsIdentifier
         self.accent = accent
         self.titleFont = titleFont
         self.titleColor = titleColor
@@ -1288,7 +1300,11 @@ struct TronSettingsRow<Trailing: View>: View {
             Image(systemName: icon)
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(settingsTheme?.accent ?? accent)
-                .frame(width: 22, height: 22, alignment: .center)
+                .frame(
+                    width: TronSettingsLayoutPolicy.iconSize,
+                    height: TronSettingsLayoutPolicy.iconSize,
+                    alignment: .center
+                )
                 .accessibilityHidden(true)
             // Compact value actions still use standard row insets; at larger
             // accessibility sizes they sit below the label, not beside a sliver.
@@ -1298,10 +1314,20 @@ struct TronSettingsRow<Trailing: View>: View {
                 : AnyLayout(HStackLayout(alignment: .center, spacing: TronSpacing.xl))
             layout {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
-                        .font(titleFont)
-                        .foregroundStyle(titleColor)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if titleIsIdentifier && !title.contains(where: \.isWhitespace) {
+                        // Opaque sources are one token, never broken at a slash
+                        // or hyphen. Prose still wraps naturally at large text.
+                        ScrollView(.horizontal) {
+                            Text(title).font(titleFont).foregroundStyle(titleColor)
+                                .fixedSize(horizontal: true, vertical: true)
+                                .textSelection(.enabled)
+                        }
+                        .scrollBounceBehavior(.basedOnSize)
+                        .accessibilityLabel(title)
+                    } else {
+                        Text(title).font(titleFont).foregroundStyle(titleColor)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     if let subtitle {
                         Text(subtitle)
                             .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
@@ -1317,9 +1343,9 @@ struct TronSettingsRow<Trailing: View>: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
         .padding(.vertical, labelsOwnInsets ? 0 : TronSpacing.xl)
-        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: TronSettingsLayoutPolicy.rowMinimumHeight, alignment: .leading)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
@@ -1331,6 +1357,7 @@ extension TronSettingsRow where Trailing == EmptyView {
         title: String,
         subtitle: String? = nil,
         subtitleLineLimit: Int? = nil,
+        titleIsIdentifier: Bool = false,
         accent: Color = .tronEmerald,
         titleFont: Font = TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold),
         titleColor: Color = .tronTextPrimary,
@@ -1341,6 +1368,7 @@ extension TronSettingsRow where Trailing == EmptyView {
             title: title,
             subtitle: subtitle,
             subtitleLineLimit: subtitleLineLimit,
+            titleIsIdentifier: titleIsIdentifier,
             accent: accent,
             titleFont: titleFont,
             titleColor: titleColor,
@@ -1393,7 +1421,7 @@ struct TronSettingsDivider: View {
     var body: some View {
         Divider()
             .overlay((settingsTheme?.accent ?? accent).opacity(0.14))
-            .padding(.leading, 52)
+            .padding(.leading, TronSettingsLayoutPolicy.dividerLeadingPadding)
     }
 }
 
@@ -1413,10 +1441,11 @@ enum TronSettingsRowSemantics {
 struct TronDynamicValue: View {
     let text: String
     var color: Color = .tronTextPrimary
+    @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
 
     var body: some View {
         Text(text)
-            .font(TronTypography.secondaryCodeDescription)
+            .font(TronTypography.code(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
             .foregroundStyle(color)
             .lineLimit(1)
             .truncationMode(.middle)
@@ -1434,6 +1463,7 @@ struct TronValueRow<Trailing: View>: View {
     let accent: Color
     let trailing: Trailing
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+    @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
 
     init(
         icon: String,
@@ -1478,35 +1508,12 @@ struct TronValueRow<Trailing: View>: View {
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: TronSpacing.xl) {
-            Image(systemName: icon)
-                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(settingsTheme?.accent ?? accent)
-                .frame(width: 22)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let secondaryText, !secondaryText.isEmpty {
-                    Text(secondaryText)
-                        .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            Spacer(minLength: TronSpacing.md)
+        TronSettingsRow(icon: icon, title: title, subtitle: secondaryText, accent: accent) {
             if valuePlacement == .trailing, let value, !value.isEmpty {
-                TronDynamicValue(text: value)
-                    .layoutPriority(1)
+                TronDynamicValue(text: value).layoutPriority(1)
             }
             trailing
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-        .contentShape(Rectangle())
     }
 }
 
@@ -1540,16 +1547,37 @@ enum TronToggleMotionPolicy {
     }
 }
 
+enum TronToggleContrastPolicy {
+    static func trackColor(isOn: Bool, accent: Color, colorScheme: ColorScheme) -> Color {
+        guard colorScheme == .dark else { return accent.opacity(isOn ? 0.28 : 0.08) }
+        return isOn ? accent.opacity(0.52) : Color.white.opacity(0.18)
+    }
+
+    static func thumbColor(isOn: Bool, accent: Color, colorScheme: ColorScheme) -> Color {
+        guard colorScheme == .dark else { return isOn ? accent : Color.tronTextMuted }
+        return isOn ? .white : Color.white.opacity(0.78)
+    }
+}
+
 private struct TronToggleControl: View {
     let isOn: Bool
     let accent: Color
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         ZStack(alignment: isOn ? .trailing : .leading) {
-            Capsule().fill(accent.opacity(isOn ? 0.28 : 0.08))
+            Capsule().fill(TronToggleContrastPolicy.trackColor(
+                isOn: isOn,
+                accent: accent,
+                colorScheme: colorScheme
+            ))
             Circle()
-                .fill(isOn ? accent : Color.tronTextMuted)
+                .fill(TronToggleContrastPolicy.thumbColor(
+                    isOn: isOn,
+                    accent: accent,
+                    colorScheme: colorScheme
+                ))
                 .padding(4)
                 .phaseAnimator([false, true, false], trigger: isOn) { thumb, isStretched in
                     thumb.scaleEffect(
@@ -1661,14 +1689,20 @@ struct TronInlineActionLabel: View {
                 Image(systemName: icon)
             }
             Text(title)
-                .fixedSize(horizontal: controlSize == .small, vertical: true)
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
         }
         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
         .tronSettingsButtonForeground(resolvedAccent)
         .padding(.horizontal, 10)
-        .frame(minHeight: controlSize == .small ? 28 : 36)
+        .frame(minHeight: controlSize == .small ? TronSettingsLayoutPolicy.compactPillHeight : 36)
         .glassEffect(.regular.tint(resolvedAccent.opacity(0.10)).interactive(), in: Capsule())
-        .padding(.vertical, controlSize == .small ? 8 : 0)
+        .padding(
+            .vertical,
+            controlSize == .small
+                ? (TronSettingsLayoutPolicy.compactPillTargetHeight - TronSettingsLayoutPolicy.compactPillHeight) / 2
+                : 0
+        )
         .contentShape(Rectangle())
     }
 }

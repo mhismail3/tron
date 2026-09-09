@@ -50,18 +50,27 @@ struct PackageConfigurationCoordinatorTests {
             "futureCategory": .array([.string("preserved only in technical JSON")]),
         ])
         let presentation = PackageResolvedResourcesPresentation(resources: resources)
-        #expect(presentation.totalCount == 2)
-        #expect(presentation.enabledCount == 1)
+        #expect(presentation.categories.map(\.kind) == [.skills, .prompts, .themes])
+        #expect(presentation.totalCount == 1)
+        #expect(presentation.enabledCount == 0)
         #expect(presentation.disabledCount == 1)
-        #expect(presentation.populatedCategoryCount == 2)
+        #expect(presentation.populatedCategoryCount == 1)
         #expect(presentation.additionalCategoryCount == 1)
-        #expect(presentation.overview == "2 resources across 2 resource types. 1 is ready to use and 1 is turned off. Additional technical resource data is available below.")
-        #expect(PackageResourceSummaryPolicy.summary(for: resources) == "2 known resolved resources")
+        #expect(presentation.overview == "1 resource across 1 resource type. 0 are ready to use and 1 is turned off. Additional technical resource data is available below.")
         let skill = try #require(presentation.categories.first(where: { $0.kind == .skills })?.items.first)
         #expect(skill.displayName == "review")
         #expect(skill.sourceDescription == "From npm:sample · Current project")
-        #expect(PackageResourceSummaryPolicy.summary(for: .object(["skills": .array([])])) == "No resources resolved")
-        #expect(PackageResourceSummaryPolicy.summary(for: .string("opaque")) == "No resources resolved")
+        #expect(PackageResolvedResourcesPresentation(resources: .object([:])).totalCount == 0)
+        #expect(PackageResolvedResourcesPresentation(resources: .string("opaque")).categories.allSatisfy { $0.items.isEmpty })
+        #expect(skill.statusDescription == "Turned off")
+    }
+
+    @Test("resource categories retain Manage Session accents")
+    func resourceCategoryAccents() {
+        #expect(PackageResourceKind.extensions.accent == .tronPurple)
+        #expect(PackageResourceKind.skills.accent == .tronEmerald)
+        #expect(PackageResourceKind.prompts.accent == .tronCyan)
+        #expect(PackageResourceKind.themes.accent == .tronTeal)
     }
 
     @Test("target-keyed inventories admit independently and newest same-target load wins")

@@ -50,6 +50,7 @@ struct TrustSettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+    @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
     let target: TrustTarget?
     @State private var inspection: JSONValue?
 
@@ -115,7 +116,7 @@ struct TrustSettingsView: View {
                         .font(TronTypography.headline)
                         .foregroundStyle(Color.tronTextPrimary)
                     Text(summary.stateDetail)
-                        .font(TronTypography.bodySM)
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM + secondaryTextSizeAdjustment))
                         .foregroundStyle(Color.tronTextSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -139,7 +140,7 @@ struct TrustSettingsView: View {
     private func trustMetadataRow(_ title: String, _ value: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text(title)
-                .font(TronTypography.bodySM)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM + secondaryTextSizeAdjustment))
                 .foregroundStyle(Color.tronTextSecondary)
             Spacer(minLength: 8)
             Text(value)
@@ -160,7 +161,7 @@ struct TrustSettingsView: View {
                     .foregroundStyle(Color.tronTextPrimary)
                     .accessibilityAddTraits(.isHeader)
                 Text("Controls whether project-local resources may load.")
-                    .font(TronTypography.bodySM)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM + secondaryTextSizeAdjustment))
                     .foregroundStyle(Color.tronTextMuted)
             }
 
@@ -199,7 +200,7 @@ struct TrustSettingsView: View {
                 Text(title)
                     .font(TronTypography.headline)
                 Text(detail)
-                    .font(TronTypography.bodySM)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM + secondaryTextSizeAdjustment))
                     .foregroundStyle(Color.tronTextSecondary)
             }
             Spacer(minLength: 0)

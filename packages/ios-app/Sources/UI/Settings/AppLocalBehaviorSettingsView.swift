@@ -13,16 +13,15 @@ struct AppLocalBehaviorSettingsView: View {
                         detail: "Keep the subagent button visible after work finishes",
                         accent: .tronEmerald
                     ) {
-                        Picker("Show finished subagents", selection: $settings.subagentRecentFinishedRetentionMinutes) {
+                        TronInlineMenu(retentionLabel(settings.subagentRecentFinishedRetentionMinutes), accent: .tronEmerald) {
                             ForEach(Array(AppLocalBehaviorSettings.subagentRecentFinishedRetentionRange), id: \.self) { minutes in
-                                Text(minutes == 0 ? "Only active" : "\(minutes) minute\(minutes == 1 ? "" : "s")")
-                                    .tag(minutes)
+                                Button(retentionLabel(minutes)) {
+                                    settings.subagentRecentFinishedRetentionMinutes = minutes
+                                }
                             }
                         }
-                        .labelsHidden()
-                        .pickerStyle(.menu)
-                        .tint(.tronEmerald)
                         .accessibilityLabel("Show finished subagents")
+                        .accessibilityValue(retentionLabel(settings.subagentRecentFinishedRetentionMinutes))
                     }
                 }
                 TronInfoCard(
@@ -38,4 +37,7 @@ struct AppLocalBehaviorSettingsView: View {
         .tronNavigationTitle("App Settings")
     }
 
+    private func retentionLabel(_ minutes: Int) -> String {
+        minutes == 0 ? "Only active" : "\(minutes) minute\(minutes == 1 ? "" : "s")"
+    }
 }
