@@ -10,8 +10,24 @@ struct ContextWindowSliderSurface<Content: View, Label: View>: View, @preconcurr
     var fraction: CGFloat
     let reduceMotion: Bool
     let accent: Color
-    @ViewBuilder let content: () -> Content
-    @ViewBuilder let label: () -> Label
+    private let content: Content
+    private let label: Label
+
+    init(
+        source: CGRect, target: CGRect, fraction: CGFloat,
+        reduceMotion: Bool, accent: Color,
+        @ViewBuilder content: () -> Content, @ViewBuilder label: () -> Label
+    ) {
+        self.source = source
+        self.target = target
+        self.fraction = fraction
+        self.reduceMotion = reduceMotion
+        self.accent = accent
+        // Build payloads on input changes, not for every interpolated geometry
+        // sample. In particular, font/label construction is not animation work.
+        self.content = content()
+        self.label = label()
+    }
 
     var animatableData: CGFloat {
         get { fraction }
@@ -41,17 +57,17 @@ struct ContextWindowSliderSurface<Content: View, Label: View>: View, @preconcurr
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
 
-            Color.clear
+            Color.tronSurface.opacity(0.18 * phase)
                 .frame(width: frame.width, height: frame.height)
                 .overlay(alignment: .topTrailing) {
-                    content()
+                    content
                         .frame(width: target.width, height: target.height)
                         .opacity(reveal * reveal * (3 - 2 * reveal))
                         .allowsHitTesting(phase == 1)
                         .accessibilityHidden(phase < 1)
                 }
                 .overlay {
-                    label()
+                    label
                         .frame(width: source.width, height: source.height)
                         .opacity(max(0, 1 - phase * 3))
                         .accessibilityHidden(true)
@@ -59,9 +75,9 @@ struct ContextWindowSliderSurface<Content: View, Label: View>: View, @preconcurr
                 // Clip at the interpolated viewport, not the child's final
                 // layout bounds. Apply glass afterward to preserve its rim.
                 .clipShape(shape)
-                // Clear glass keeps the refraction/rim without the regular
-                // material's opaque lavender fill. The local backdrop below
-                // supplies the softening needed for readable foreground text.
+                // A light neutral fill quiets clear glass without returning
+                // to opaque lavender. The native backdrop supplies softening
+                // while this material retains the translucent rim.
                 .glassEffect(.clear.tint(accent.opacity(0.08)), in: shape)
                 .contentShape(shape)
                 .onTapGesture {} // Blank glass is not an outside-dismiss tap.

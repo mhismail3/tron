@@ -166,7 +166,9 @@ private struct ContextWindowSliderOverlay: View {
     }
 
     private var motion: Animation {
-        reduceMotion ? .easeOut(duration: 0.12) : .spring(duration: 0.42, bounce: 0.12)
+        // A finite, non-overshooting curve cannot bounce across the surface's
+        // clamped fully-open geometry and interaction boundary.
+        reduceMotion ? .easeOut(duration: 0.12) : .easeInOut(duration: 0.28)
     }
 
     var body: some View {

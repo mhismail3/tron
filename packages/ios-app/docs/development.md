@@ -834,14 +834,22 @@ opening/closing without adjustment must not create an override. Selecting the de
 not a button. Verify endpoint labels use the track's endpoint centers, with a second label
 line only when needed to avoid a collision. The larger title/value share a center-aligned row.
 Scrub opening and closing captures: no title, track, thumb, or label may escape the growing
-or shrinking rounded glass. Clear glass must retain translucent depth rather than a solid
-lavender fill. Nearby background softening must be visible outside the panel and feather away,
+or shrinking rounded glass. The 280 ms finite transition must settle without an overshoot
+or a delayed interactive tail. Clear glass's light neutral fill must soften its finish while
+retaining translucent depth rather than solid lavender. Nearby background softening must be visible outside the panel and feather away,
 leaving distant rows and toolbar readable. The native blur view keeps alpha 1; only its
 UIView mask changes strength and is reinstalled after resizing, as required by UIKit.
 `ContextWindowSliderLayoutTests` renders intermediate native surface
 fractions with a contrasting-content containment oracle, checks nearby versus distant stripe
-contrast for the real backdrop effect, and retains narrow light/dark and large-text previews. Try narrow sheets, both appearances, large text, VoiceOver
-adjustment/escape, and Reduce Motion.
+contrast for the real backdrop effect, and retains narrow light/dark and large-text previews.
+`ContextWindowSliderMotionTests` runs the actual morph surface over representative settings
+content, pins payload reconstruction to input changes rather than display cadence, and attaches
+six warmed CPU/run-loop-delivery samples after two warmups. Its fixed 420 ms spring is a
+comparison workload, deliberately independent of product timing; run with
+`scripts/tron-ios-test run --only-testing TronMobileTests/ContextWindowSliderMotionTests`.
+These simulator/test-process measurements do not establish device GPU frame time or release
+performance. Its temporary window and display link are owned and released by the test.
+Try narrow sheets, both appearances, large text, VoiceOver adjustment/escape, and Reduce Motion.
 Verify Context Window and Thinking changes revert on failure and cannot carry into another
 model/runtime or overwrite a newer authoritative value. `ContextWindowSliderTests` covers the
 bounded detent/attraction math and draft/reset semantics; hands-on animation/haptic tuning is a

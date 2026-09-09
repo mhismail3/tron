@@ -1504,8 +1504,11 @@ slim trailing capsules, not beneath their titles. Thinking retains its menu. Con
 morphs its capsule into an anchored Liquid Glass slider above the sheet, without relaying out
 the scrolling rows. `ContextWindowSliderSurface` interpolates one presentation-time rectangle
 and corner radius for the glass and its content clip, so the destination-sized contents never
-escape the visible container on either leg of the morph. Clear Liquid Glass provides the
-translucent panel and refractive rim; a public native `UIVisualEffectView` softens its backdrop.
+escape the visible container on either leg of the morph. A finite 280 ms ease-in-out avoids
+spring overshoot against that clamped geometry and interaction boundary. Content and label
+values are built on input changes, never rebuilt by each interpolated geometry sample.
+Clear Liquid Glass with a restrained neutral surface fill provides a softly translucent
+panel and refractive rim; a public native `UIVisualEffectView` softens its backdrop.
 The effect stays at alpha 1 and its own elliptical UIView gradient mask feathers strength to
 zero before the bounded halo edge. UIKit forwards that mask to its backdrop internals; the
 owner reinstalls it after size/strength changes rather than masking an ancestor/CALayer or
