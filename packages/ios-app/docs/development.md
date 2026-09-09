@@ -825,11 +825,25 @@ model card beside Compact Now. The model name matches the remaining-token headli
 the serif provider line sits closely beneath it and the action reads Switch Model. Thinking,
 Context Window (when supported), and Automatic Compaction appear in that order, using the
 same icon column, indented dividers, label scale, and padding as the Session rows. Context Window when supported and Thinking
-show their values in trailing capsules. Tap Context Window to grow an anchored glass slider;
+show their values in trailing capsules. Both open the same configuration-slider host and
+container; Thinking must no longer open a menu. Tap Context Window to grow the glass slider;
 verify smooth finger tracking, gentle magnetic stops, exact minimum/maximum, and the default
 near 200k/272k plus 500k/750k for million-token models. Other capacities use rounded quarters.
+Thinking must show only the live runtime's ordered supported choices; Models and Defaults
+retains the full model-independent list. Verify discrete dragging/tapping and selection haptics,
+with the top-right header updating live (Extra High displayed while `xhigh` remains the raw
+selection). Thinking has no lower label section and uses a 140-point nominal panel rather than
+Context Window's unchanged 170 points. Supported names remain available to VoiceOver.
+Empty/no-alternative lists are read-only; an unlisted
+current value has no invented selected stop and is unchanged until explicitly edited.
 Outside tap (or VoiceOver Save and close/escape) must shrink back to the original capsule and submit only one edited value;
-opening/closing without adjustment must not create an override. Selecting the default detent
+opening/closing without adjustment must not create an override. Returning Thinking to its
+original level must submit nothing. Manage Session's Done first closes an open editor; Settings
+Save stays unavailable until the preview has closed into its existing draft. Switching settings
+target, model/runtime, supported choices or managed presentation must discard the old editor,
+even when replacement values match. Beginning close revokes gesture/accessibility editing
+synchronously; duplicate or late animation callbacks cannot write or cancel a reopened editor.
+Selecting the default detent
 (or VoiceOver reset action) clears the override; Default is now a label beneath that detent,
 not a button. Verify endpoint labels use the track's endpoint centers, with a second label
 line only when needed to avoid a collision. The larger title/value share a center-aligned row.
@@ -840,8 +854,16 @@ retaining translucent depth rather than solid lavender. Nearby background soften
 leaving distant rows and toolbar readable. The native blur view keeps alpha 1; only its
 UIView mask changes strength and is reinstalled after resizing, as required by UIKit.
 `ContextWindowSliderLayoutTests` renders intermediate native surface
-fractions with a contrasting-content containment oracle, checks nearby versus distant stripe
-contrast for the real backdrop effect, and retains narrow light/dark and large-text previews.
+fractions with a contrasting-content containment oracle (including destination-sized Reduce
+Motion), checks nearby versus distant stripe contrast for the real backdrop effect, and retains
+narrow light/dark and large-text previews. `ThinkingSliderTests` covers discrete bounds, raw
+values, missing/single/duplicate choices, live draft readout, final-only commits and exact editor
+replacement/once-only completion. `ThinkingSliderLayoutTests` verifies the compact native
+viewport and that the header/rail fit without lower labels, exercises native close completion
+and a surface retired during closing before its activity projection updates, and retains seven
+normal/narrow/dark/large-text/subset/unlisted-value captures. Short large-text editors must scroll
+to all their content rather than clip it permanently. The presentation owner rechecks its live
+registry at completion, not only the potentially stale environment projection.
 `ContextWindowSliderMotionTests` runs the actual morph surface over representative settings
 content, pins payload reconstruction to input changes rather than display cadence, and attaches
 six warmed CPU/run-loop-delivery samples after two warmups. Its fixed 420 ms spring is a

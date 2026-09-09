@@ -113,7 +113,7 @@ private struct SliderMotionFixture: View {
                 }
             }
             .padding(18)
-            ContextWindowSliderSurface(
+            ConfigurationSliderSurface(
                 source: CGRect(x: 322, y: 356, width: 100, height: 28),
                 target: CGRect(x: 18, y: 285, width: 404, height: 170),
                 fraction: driver.fraction, reduceMotion: false, accent: .tronPurple

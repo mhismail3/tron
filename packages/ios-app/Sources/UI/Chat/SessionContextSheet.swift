@@ -174,6 +174,7 @@ struct SessionContextSheet: View {
     @State private var pendingModelSelection: SessionPendingModelSelection?
     @State private var pendingContextWindow: SessionPendingSetting<Int?>?
     @State private var pendingThinking: SessionPendingSetting<String>?
+    @State private var sliderPresentation = ConfigurationSliderPresentation()
     @State private var settingContextWindow = false
     @State private var forkNavigation = ChatForkNavigationOwner()
 
@@ -245,7 +246,11 @@ struct SessionContextSheet: View {
                     TronSheetTitle(title: "Manage Session", accent: .tronEmerald)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: {
+                    Button {
+                        if let editor = sliderPresentation.session {
+                            _ = sliderPresentation.beginClosing(editor)
+                        } else { dismiss() }
+                    } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
                             .foregroundStyle(Color.tronEmerald)
@@ -320,7 +325,7 @@ struct SessionContextSheet: View {
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(Color.tronEmerald)
-        .tronContextWindowSliderHost()
+        .tronConfigurationSliderHost(sliderPresentation)
         .onAppear {
             if capturedNoticeScope == nil {
                 capturedNoticeScope = model.presentationTarget(for: sessionID).map {
@@ -445,6 +450,8 @@ struct SessionContextSheet: View {
     }
 
     private func modelSummaryCard(_ snapshot: SessionContextPresentation) -> some View {
+        let thinkingScope = SessionThinkingEditScope(snapshot)
+        let displayedThinking = pendingThinking?.admitted(in: snapshot)?.value ?? snapshot.thinkingLevel
         let selection = modelSelection(snapshot)
         let catalog = model.providerCatalog(for: .session(id: sessionID))?.models ?? []
         return SessionModelSummaryCard(
@@ -454,18 +461,23 @@ struct SessionContextSheet: View {
         ) {
             TronThinkingSelectionRow(
                 selection: Binding(
-                    get: { pendingThinking?.admitted(in: snapshot)?.value ?? snapshot.thinkingLevel },
+                    get: { displayedThinking },
                     set: { level in
-                        guard level != (pendingThinking?.admitted(in: snapshot)?.value ?? snapshot.thinkingLevel),
-                              pendingModelSelection == nil,
+                        guard level != displayedThinking, pendingModelSelection == nil,
+                              presentationActivity.allowsPresentationPublication,
                               let current = model.sessionContextPresentation(for: sessionID),
-                              current.runtimeGeneration == snapshot.runtimeGeneration,
-                              current.model == snapshot.model,
-                              current.availableThinkingLevels.contains(level) else { return }
+                              thinkingScope.admits(level, in: current),
+                              (pendingThinking?.admitted(in: current)?.value ?? current.thinkingLevel) == displayedThinking else { return }
                         let pending = SessionPendingSetting(level, snapshot: snapshot)
                         pendingThinking = pending
                         Task {
                             do {
+                                // The task may start after a runtime/model replacement.
+                                guard let current = model.sessionContextPresentation(for: sessionID),
+                                      thinkingScope.admits(level, in: current), pendingModelSelection == nil else {
+                                    pendingThinking = pendingThinking?.rejecting(pending.id)
+                                    return
+                                }
                                 try await model.setThinking(level, sessionID: sessionID)
                                 pendingThinking = pendingThinking?.confirming(pending.id)
                                 if presentationActivity.allowsPresentationPublication { reconcilePresentation(presentationSource) }
@@ -479,6 +491,8 @@ struct SessionContextSheet: View {
                 levels: snapshot.availableThinkingLevels,
                 accent: configurationRowAccent
             )
+            .id(thinkingScope)
+            .disabled(snapshot.phase.isActive || pendingModelSelection != nil)
             if model.gatewayInfo?.capabilities.contains("context-window.v1") == true,
                let policy = snapshot.contextWindowPolicy {
                 let pendingWindow = pendingContextWindow?.admitted(in: snapshot)

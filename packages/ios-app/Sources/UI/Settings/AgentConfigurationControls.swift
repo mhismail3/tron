@@ -1,8 +1,7 @@
 import SwiftUI
 
 /// Shared model and reasoning controls used by both persisted defaults and a
-/// live session. Keeping the sheet link and inline menu here prevents the
-/// Manage Session surface from drifting back to stock menus.
+/// live session. Both setting capsules use the same anchored slider host.
 struct TronModelSelectionRow: View {
     @Binding var selection: ModelRef?
     let models: [ModelSummary]
@@ -33,10 +32,12 @@ struct ContextWindowSelectionRow: View {
     var warning: String? = nil
     var source: String? = nil
     var accent: Color = .tronTeal
-    @State private var editorID: UUID?
+    @State private var ownerID = UUID()
+    @Environment(\.configurationSliderPresentation) private var sliderPresentation
     @Environment(\.controlSize) private var controlSize
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     private var currentValue: Int { effectiveValue ?? selection ?? inheritedValue ?? limits.default }
@@ -71,48 +72,62 @@ struct ContextWindowSelectionRow: View {
             value: displayValue,
             accent: accent
         ) {
-            Button { editorID = UUID() } label: {
+            Button {
+                guard isEnabled, presentationActivity.allowsPresentationPublication,
+                      sliderPresentation?.session == nil else { return }
+                sliderPresentation?.open(owner: ownerID, surface: surfaceToken)
+            } label: {
                 TronInlineActionLabel(currentValue.formatted(), accent: accent)
             }
             .buttonStyle(.plain)
-            .opacity(editorID == nil ? 1 : 0)
+            .disabled(sliderPresentation == nil)
+            .opacity(sliderPresentation?.session?.owner == ownerID ? 0 : 1)
             .accessibilityLabel("Context Window")
             .accessibilityValue(displayValue)
             .accessibilityIdentifier("context-window-control")
-            .anchorPreference(key: ContextWindowSliderPreference.self, value: .bounds) { anchor in
-                guard let editorID, isEnabled, presentationActivity.allowsPresentationPublication else { return nil }
-                return ContextWindowSliderRequest(
-                    id: editorID, anchor: anchor, sourceVerticalInset: controlSize == .small ? 8 : 0,
-                    scale: ContextWindowSliderScale(limits: limits, defaultValue: defaultValue),
-                    value: currentValue, selection: selection, title: currentValue.formatted(),
-                    resetLabel: resetLabel, detail: detail,
-                    accent: settingsTheme?.accent ?? accent
-                ) { draft in
-                    guard self.editorID == editorID, isEnabled,
-                          presentationActivity.allowsPresentationPublication else { return }
-                    self.editorID = nil
-                    if draft.changed, draft.selection != selection { selection = draft.selection }
-                }
+            .anchorPreference(key: ConfigurationSliderPreference.self, value: .bounds) { anchor in
+                guard let session = sliderPresentation?.session, session.owner == ownerID,
+                      isEnabled, presentationActivity.allowsPresentationPublication else { return nil }
+                return ConfigurationSliderRequest(
+                    session: session, anchor: anchor, sourceVerticalInset: controlSize == .small ? 8 : 0,
+                    accent: settingsTheme?.accent ?? accent,
+                    editor: .contextWindow(ContextWindowSliderRequest(
+                        scale: ContextWindowSliderScale(limits: limits, defaultValue: defaultValue),
+                        value: currentValue, selection: selection, title: currentValue.formatted(),
+                        resetLabel: resetLabel, detail: detail
+                    ) { draft in
+                        guard isEnabled, presentationActivity.allowsPresentationPublication else { return }
+                        if draft.changed, draft.selection != selection { selection = draft.selection }
+                    })
+                )
             }
         }
-        .onChange(of: isEnabled) { _, enabled in if !enabled { editorID = nil } }
-        .onChange(of: limits) { _, _ in editorID = nil }
-        .onChange(of: currentValue) { _, _ in editorID = nil }
-        .onChange(of: selection) { _, _ in editorID = nil }
-        .onChange(of: defaultValue) { _, _ in editorID = nil }
-        .onChange(of: presentationActivity) { _, activity in
-            if !activity.allowsPresentationPublication { editorID = nil }
-        }
-        .onDisappear { editorID = nil }
+        .onChange(of: isEnabled) { _, enabled in if !enabled { cancelEditor() } }
+        .onChange(of: limits) { _, _ in cancelEditor() }
+        .onChange(of: currentValue) { _, _ in cancelEditor() }
+        .onChange(of: selection) { _, _ in cancelEditor() }
+        .onChange(of: defaultValue) { _, _ in cancelEditor() }
+        .onDisappear { cancelEditor() }
         .accessibilityHint("\(detail) Opens a continuous slider with gentle detents. Dismiss to save.")
     }
+
+    private func cancelEditor() { sliderPresentation?.cancel(owner: ownerID) }
 }
 
 struct TronThinkingSelectionRow: View {
     @Binding var selection: String
     let levels: [String]
     var accent: Color = .tronPurple
+    @State private var ownerID = UUID()
+    @Environment(\.configurationSliderPresentation) private var sliderPresentation
     @Environment(\.controlSize) private var controlSize
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+
+    private var scale: ThinkingSliderScale { ThinkingSliderScale(levels: levels) }
+    private var canEdit: Bool { scale.levels.count > 1 || scale.levels.first.map { $0 != selection } == true }
 
     var body: some View {
         AgentConfigurationValueRow(
@@ -121,15 +136,41 @@ struct TronThinkingSelectionRow: View {
             value: ThinkingLevelPresentation.title(selection),
             accent: accent
         ) {
-            TronInlineMenu(controlSize == .small ? ThinkingLevelPresentation.title(selection) : "Change", accent: accent) {
-                ForEach(levels, id: \.self) { level in
-                    Button(ThinkingLevelPresentation.title(level)) { selection = level }
-                }
+            Button {
+                guard canEdit, isEnabled, presentationActivity.allowsPresentationPublication,
+                      sliderPresentation?.session == nil else { return }
+                sliderPresentation?.open(owner: ownerID, surface: surfaceToken)
+            } label: {
+                TronInlineActionLabel(ThinkingLevelPresentation.title(selection), accent: accent)
             }
+            .buttonStyle(.plain)
+            .disabled(!canEdit || sliderPresentation == nil)
+            .opacity(sliderPresentation?.session?.owner == ownerID ? 0 : 1)
             .accessibilityLabel("Thinking")
             .accessibilityValue(ThinkingLevelPresentation.title(selection))
+            .accessibilityIdentifier("thinking-level-control")
+            .anchorPreference(key: ConfigurationSliderPreference.self, value: .bounds) { anchor in
+                guard let session = sliderPresentation?.session, session.owner == ownerID,
+                      canEdit, isEnabled, presentationActivity.allowsPresentationPublication else { return nil }
+                return ConfigurationSliderRequest(
+                    session: session, anchor: anchor, sourceVerticalInset: controlSize == .small ? 8 : 0,
+                    accent: settingsTheme?.accent ?? accent,
+                    editor: .thinking(ThinkingSliderRequest(scale: scale, value: selection) { draft in
+                        guard isEnabled, presentationActivity.allowsPresentationPublication,
+                              let value = draft.selectionToCommit(currentValue: selection, levels: scale.levels) else { return }
+                        selection = value
+                    })
+                )
+            }
         }
+        .onChange(of: selection) { _, _ in cancelEditor() }
+        .onChange(of: levels) { _, _ in cancelEditor() }
+        .onChange(of: isEnabled) { _, enabled in if !enabled { cancelEditor() } }
+        .onDisappear { cancelEditor() }
+        .accessibilityHint(canEdit ? "Opens a slider of available thinking levels. Dismiss to save." : "No alternative thinking levels are available.")
     }
+
+    private func cancelEditor() { sliderPresentation?.cancel(owner: ownerID) }
 }
 
 /// The same mutation controls fit either ordinary settings rows or a compact

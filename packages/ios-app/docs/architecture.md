@@ -1500,9 +1500,11 @@ The model card replaces the Configuration section. Its selected model name uses 
 large bold reading-family heading as remaining tokens, with a serif provider line beneath it; exact
 provider/model identity chooses the catalog display name. Switch Model opens the shared
 model picker. Capability-gated Context Window and Thinking place their current values in
-slim trailing capsules, not beneath their titles. Thinking retains its menu. Context Window
-morphs its capsule into an anchored Liquid Glass slider above the sheet, without relaying out
-the scrolling rows. `ContextWindowSliderSurface` interpolates one presentation-time rectangle
+slim trailing capsules, not beneath their titles. Both morph into the same anchored Liquid
+Glass slider above the sheet, without relaying out the scrolling rows.
+`ConfigurationSliderPresentation` admits one exact editor per host; replacement, source
+retirement, and duplicate dismissal cannot commit or cancel a successor editor.
+`ConfigurationSliderSurface` interpolates one presentation-time rectangle
 and corner radius for the glass and its content clip, so the destination-sized contents never
 escape the visible container on either leg of the morph. A finite 280 ms ease-in-out avoids
 spring overshoot against that clamped geometry and interaction boundary. Content and label
@@ -1521,8 +1523,16 @@ release settles only near a detent. Bounds remain exact, the configured default 
 and rounded quarters avoid crowding it (million-token windows use familiar 500k/750k stops).
 Context values retain whole-token precision; accessibility exposes token units, source,
 bounds, warnings, adjustable detent steps, reset, Save and close, and escape. Reduce Motion uses a short
-fade instead of the expanding geometry. All rows
-beneath the model header reuse `TronSettingsRow` and `TronSettingsDivider`: standard icons,
+fade instead of the expanding geometry. Thinking uses discrete, evenly spaced supported
+levels, selection haptics and accessible stepping. Its raw runtime order is preserved after
+deduplication. Thinking has no labels beneath the rail: the top-right header value updates live
+from the local draft as the knob moves. Its nominal panel height is 140 points, versus Context
+Window's unchanged 170 points; both scale with Dynamic Type. VoiceOver retains the supported
+level names and current value. Empty lists and a sole already-selected level are read-only. An unlisted
+current value stays visible without a fabricated selected stop; only explicit selection of
+an available raw level can change it. Both editors retain one content tree in a size-bounded
+native scroll surface so large text and short viewports remain reachable.
+All rows beneath the model header reuse `TronSettingsRow` and `TronSettingsDivider`: standard icons,
 leading insets, title scale, and indented separators match the Session container below.
 Compact rows pad their labels, not the already padded action target, so single-line and
 subtitle rows retain the same content-driven heights as ordinary Session rows. Accessibility
@@ -1539,17 +1549,26 @@ the parent settings destination retains its existing name. The model card scopes
 its inline controls and nested sheets. An in-flight choice appears immediately without replacing canonical authority.
 Context-window model/revision guards, Thinking's available-level list, and compaction
 queue/export/active-operation admission stay owned by the existing session mutations.
-The context slider keeps an ephemeral local draft and commits at most once when an outside
-tap or accessibility Save and close/escape collapses it. Opening without editing sends no mutation;
-the default detent clears the override. Model/runtime, limits, effective-value, or presentation
-replacement discards an open draft. The shared Models and Defaults control edits its existing
-settings draft, whose Save remains authoritative. Context and Thinking selections update their
-capsules as their slider or menu closes, using one pending choice per control scoped to the exact session/model/runtime.
+Both sliders keep ephemeral local drafts and commit at most once when an outside tap or
+accessibility Save and close/escape collapses them. Manage Session's Done first closes an open
+editor. Opening without editing sends no mutation; returning Thinking to its original value
+also sends nothing. Context's default detent clears its override. Model/runtime, limits,
+effective-value, supported-level, disabled-state or presentation replacement discards an open
+draft. Completion rechecks the live presentation registry as well as the exact editor identity,
+so a retired surface cannot publish during its closing animation. Live Thinking revalidates
+session/model/runtime, idle phase, available levels and the displayed base value before
+submission, retaining the existing serialized/idempotent mutation and rollback owner.
+The shared Models and Defaults controls edit their existing settings draft; its Save remains
+authoritative and is unavailable while an editor is open. Defaults keep the full model-independent
+thinking list, not a live model's subset. Exact settings-target row identity and binding admission
+prevent a closing editor from writing into a successor scope, including same-valued scopes.
+Context and Thinking selections update their capsules as their sliders close, using one pending
+choice per control scoped to the exact session/model/runtime.
 The exact command completion plus matching canonical projection retires that choice;
 failure rolls back only its exact request,
 and model/runtime replacement discards it. Reset-to-default remains distinct from no
 pending choice. Shared Thinking labels render `xhigh` and extra-high spelling/case variants
-as **Extra High** in settings, menus, transcript notices, and typed history previews without
+as **Extra High** in settings, sliders, transcript notices, and typed history previews without
 rewriting wire values, canonical content, or authored labels.
 The blue Session container orders Current Branch, Agent Instructions,
 Project Resources, Session History, and Subagent History, followed by any diagnostics.

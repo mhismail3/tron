@@ -35,7 +35,7 @@ final class ContextWindowSliderLayoutTests: XCTestCase {
                     }
                 }
                 .background(.white)
-                ContextWindowSliderSurface(source: frame, target: frame, fraction: 1, reduceMotion: false, accent: .tronPurple) {
+                ConfigurationSliderSurface(source: frame, target: frame, fraction: 1, reduceMotion: false, accent: .tronPurple) {
                     EmptyView()
                 } label: { EmptyView() }
             }
@@ -76,27 +76,34 @@ final class ContextWindowSliderLayoutTests: XCTestCase {
         let target = CGRect(x: 18, y: 95, width: 284, height: 170)
         // Opening and closing use the same fraction-to-geometry mapping. These
         // are actual native render samples, not a timing-sensitive animation test.
-        for fraction in [CGFloat(0.4), 0.6, 0.8, 0.95] {
+        for (fraction, reduceMotion) in [(CGFloat(0.4), false), (0.6, false), (0.8, false), (0.95, false), (0.6, true)] {
             let image = try await capture(
-                ContextWindowSliderSurface(source: source, target: target, fraction: fraction, reduceMotion: false, accent: .clear) {
-                    Color(red: 1, green: 0, blue: 1)
-                        .overlay {
-                            Circle().fill(.white.opacity(0.1))
-                                .glassEffect(.regular, in: .circle)
-                                .frame(width: 38, height: 38)
-                        }
+                ConfigurationSliderSurface(source: source, target: target, fraction: fraction, reduceMotion: reduceMotion, accent: .clear) {
+                    // Include the native scroll layer used by both editors;
+                    // its composited knob must obey the same morph clip.
+                    ScrollView {
+                        Color(red: 1, green: 0, blue: 1)
+                            .frame(width: target.width, height: target.height)
+                            .overlay {
+                                Circle().fill(.white.opacity(0.1))
+                                    .glassEffect(.regular, in: .circle)
+                                    .frame(width: 38, height: 38)
+                            }
+                    }
+                    .scrollBounceBehavior(.basedOnSize)
                 } label: { EmptyView() }
                     .background(.white)
                     .environment(\.colorScheme, .light),
                 size: CGSize(width: 320, height: 360)
             )
+            let geometry = reduceMotion ? 1 : fraction
             let frame = CGRect(
-                x: source.minX + (target.minX - source.minX) * fraction,
-                y: source.minY + (target.minY - source.minY) * fraction,
-                width: source.width + (target.width - source.width) * fraction,
-                height: source.height + (target.height - source.height) * fraction
+                x: source.minX + (target.minX - source.minX) * geometry,
+                y: source.minY + (target.minY - source.minY) * geometry,
+                width: source.width + (target.width - source.width) * geometry,
+                height: source.height + (target.height - source.height) * geometry
             )
-            let radius = 14 + (32 - 14) * fraction
+            let radius = 14 + (32 - 14) * geometry
             let allowed = CGPath(roundedRect: frame.insetBy(dx: -2, dy: -2), cornerWidth: radius + 2, cornerHeight: radius + 2, transform: nil)
             let bitmap = try XCTUnwrap(image.cgImage)
             var pixels = [UInt8](repeating: 0, count: bitmap.width * bitmap.height * 4)
@@ -108,20 +115,25 @@ final class ContextWindowSliderLayoutTests: XCTestCase {
             }
             var inside = 0
             var outside = 0
+            var paintedLeft = CGFloat.infinity
             for y in 0..<bitmap.height {
                 for x in 0..<bitmap.width {
                     let offset = (y * bitmap.width + x) * 4
                     if Int(pixels[offset]) > Int(pixels[offset + 1]) + 20,
                        Int(pixels[offset + 2]) > Int(pixels[offset + 1]) + 20 {
                         let point = CGPoint(x: (CGFloat(x) + 0.5) / image.scale, y: (CGFloat(y) + 0.5) / image.scale)
+                        paintedLeft = min(paintedLeft, point.x)
                         if allowed.contains(point) { inside += 1 } else { outside += 1 }
                     }
                 }
             }
             XCTAssertGreaterThan(inside, 100, "The containment oracle must see real content at \(fraction)")
             XCTAssertEqual(outside, 0, "Content escaped the animated glass boundary at \(fraction)")
+            if reduceMotion {
+                XCTAssertLessThan(paintedLeft, target.minX + 5, "Reduce Motion must fade at destination size, never interpolate its geometry")
+            }
             let attachment = XCTAttachment(image: image)
-            attachment.name = "context-window-morph-\(fraction)"
+            attachment.name = "configuration-slider-morph-\(fraction)-reduce-motion-\(reduceMotion)"
             attachment.lifetime = .keepAlways
             add(attachment)
         }
@@ -155,7 +167,8 @@ final class ContextWindowSliderLayoutTests: XCTestCase {
 }
 
 private struct SliderFixture: View {
-    private let id = UUID()
+    @State private var presentation = ConfigurationSliderPresentation()
+    @State private var owner = UUID()
 
     var body: some View {
         NavigationStack {
@@ -168,15 +181,17 @@ private struct SliderFixture: View {
                     TronSettingsRow(icon: "gauge.with.dots.needle.50percent", title: "Context Window", accent: .tronPurple) {
                         TronInlineActionLabel("272,000", accent: .tronPurple)
                             .opacity(0)
-                            .anchorPreference(key: ContextWindowSliderPreference.self, value: .bounds) { anchor in
-                                ContextWindowSliderRequest(
-                                    id: id, anchor: anchor, sourceVerticalInset: 8,
-                                    scale: ContextWindowSliderScale(
-                                        limits: ContextWindowLimits(minimum: 37_408, maximum: 1_050_000, default: 272_000, longContextThreshold: nil),
-                                        defaultValue: 272_000
-                                    ), value: 272_000, selection: nil, title: "272,000",
-                                    resetLabel: "Use configured default", detail: "Supported model bounds.",
-                                    accent: .tronPurple, finish: { _ in }
+                            .anchorPreference(key: ConfigurationSliderPreference.self, value: .bounds) { anchor in
+                                guard let session = presentation.session else { return nil }
+                                return ConfigurationSliderRequest(
+                                    session: session, anchor: anchor, sourceVerticalInset: 8, accent: .tronPurple,
+                                    editor: .contextWindow(ContextWindowSliderRequest(
+                                        scale: ContextWindowSliderScale(
+                                            limits: ContextWindowLimits(minimum: 37_408, maximum: 1_050_000, default: 272_000, longContextThreshold: nil),
+                                            defaultValue: 272_000
+                                        ), value: 272_000, selection: nil, title: "272,000",
+                                        resetLabel: "Use configured default", detail: "Supported model bounds.", finish: { _ in }
+                                    ))
                                 )
                             }
                     }
@@ -191,7 +206,8 @@ private struct SliderFixture: View {
             .navigationTitle("Manage Session")
             .navigationBarTitleDisplayMode(.inline)
         }
-        .tronContextWindowSliderHost()
+        .tronConfigurationSliderHost(presentation)
+        .onAppear { presentation.open(owner: owner) }
     }
 }
 

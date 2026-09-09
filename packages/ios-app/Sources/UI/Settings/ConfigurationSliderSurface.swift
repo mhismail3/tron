@@ -4,7 +4,7 @@ import UIKit
 /// One presentation-time geometry owns the glass, contents, and clipping edge.
 /// Animating an outer frame around a destination-sized clipped child lets that
 /// child's composited glass escape the *visible* frame during the transition.
-struct ContextWindowSliderSurface<Content: View, Label: View>: View, @preconcurrency Animatable {
+struct ConfigurationSliderSurface<Content: View, Label: View>: View, @preconcurrency Animatable {
     let source: CGRect
     let target: CGRect
     var fraction: CGFloat
@@ -51,7 +51,7 @@ struct ContextWindowSliderSurface<Content: View, Label: View>: View, @preconcurr
             // Keep backdrop sampling in a native effect view at alpha 1. The
             // effect's own feather mask controls intensity; fading a composited
             // SwiftUI material can leave little/no actual blur on device.
-            ContextWindowSliderBackdrop(fraction: phase)
+            ConfigurationSliderBackdrop(fraction: phase)
                 .frame(width: frame.width + 192, height: frame.height + 192)
                 .position(x: frame.midX, y: frame.midY)
                 .allowsHitTesting(false)
@@ -94,15 +94,15 @@ struct ContextWindowSliderSurface<Content: View, Label: View>: View, @preconcurr
     }
 }
 
-private struct ContextWindowSliderBackdrop: UIViewRepresentable {
+private struct ConfigurationSliderBackdrop: UIViewRepresentable {
     let fraction: CGFloat
     @Environment(\.colorScheme) private var colorScheme
 
-    func makeUIView(context: Context) -> ContextWindowSliderBackdropView {
-        ContextWindowSliderBackdropView()
+    func makeUIView(context: Context) -> ConfigurationSliderBackdropView {
+        ConfigurationSliderBackdropView()
     }
 
-    func updateUIView(_ view: ContextWindowSliderBackdropView, context: Context) {
+    func updateUIView(_ view: ConfigurationSliderBackdropView, context: Context) {
         let style: UIUserInterfaceStyle = colorScheme == .dark ? .dark : .light
         if view.overrideUserInterfaceStyle != style { view.overrideUserInterfaceStyle = style }
         view.fraction = fraction
@@ -111,7 +111,7 @@ private struct ContextWindowSliderBackdrop: UIViewRepresentable {
 
 /// Public backdrop blur with a GPU-interpolated elliptical falloff. No snapshot,
 /// private blur filter, per-frame bitmap, or sheet-wide effect is needed.
-private final class ContextWindowSliderBackdropView: UIVisualEffectView {
+private final class ConfigurationSliderBackdropView: UIVisualEffectView {
     private let featherView = UIView()
     private let feather = CAGradientLayer()
     var fraction: CGFloat = 0 {
@@ -171,7 +171,7 @@ private final class ContextWindowSliderBackdropView: UIVisualEffectView {
 /// default label moves to a second line; its horizontal detent anchor never moves.
 struct ContextWindowSliderLabelsLayout: Layout {
     let defaultProgress: Double
-    static let trackInset: CGFloat = 22
+    static let trackInset = ConfigurationSliderTrack.inset
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let width = proposal.width ?? 240

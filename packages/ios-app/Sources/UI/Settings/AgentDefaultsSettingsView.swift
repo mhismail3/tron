@@ -56,6 +56,7 @@ struct AgentDefaultsSettingsView: View {
     let projectCWD: String?
     let projectSessionID: String?
     @State private var draft = AgentDefaultsDraft()
+    @State private var sliderPresentation = ConfigurationSliderPresentation()
     @State private var drafts = ScopedSettingsDraftStore<AgentDefaultsDraft>()
     @State private var scope: SettingsScope = .global
     @State private var saving = false
@@ -127,9 +128,12 @@ struct AgentDefaultsSettingsView: View {
                             }
                             TronSettingsDivider(accent: .tronPurple)
                             TronThinkingSelectionRow(
-                                selection: $draft.thinking,
+                                selection: thinkingBinding,
+                                // Persisted defaults are model-independent; only a live
+                                // session uses the runtime's available-level subset.
                                 levels: ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
                             )
+                            .id(settingsTarget)
                         }
                     }
                     refreshModelCatalogButton
@@ -168,13 +172,13 @@ struct AgentDefaultsSettingsView: View {
             .padding(.vertical, 18)
         }
         .tronScrollEdgeChrome()
-        .tronContextWindowSliderHost()
+        .tronConfigurationSliderHost(sliderPresentation)
         .tronNavigationTitle("Models and Defaults")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 TronSaveToolbarButton(
                     isSaving: saving,
-                    isEnabled: hasUnsavedChanges && !refreshingCatalog
+                    isEnabled: hasUnsavedChanges && !refreshingCatalog && sliderPresentation.session == nil
                 ) {
                     Task { await save() }
                 }
@@ -218,6 +222,15 @@ struct AgentDefaultsSettingsView: View {
 
     private var selectedContextWindowLimits: ContextWindowLimits? {
         selectedModel?.contextWindowLimits?.withMinimum(draft.contextWindowMinimum)
+    }
+
+    private var thinkingBinding: Binding<String> {
+        let target = settingsTarget
+        return Binding(get: { draft.thinking }, set: { value in
+            guard let target, settingsTarget == target,
+                  presentationActivity.allowsPresentationPublication else { return }
+            draft.thinking = value
+        })
     }
 
     private func contextWindowBinding(for modelSummary: ModelSummary) -> Binding<Int?> {

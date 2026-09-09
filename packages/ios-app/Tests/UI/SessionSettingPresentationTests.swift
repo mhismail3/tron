@@ -47,7 +47,37 @@ struct SessionSettingPresentationTests {
         #expect(pending.admitted(in: progress)?.value == "high")
     }
 
-    @Test("a pending menu choice is visible before authority changes, then retires on confirmation")
+    @Test("deferred Thinking admission rejects replacement identity, busy phases and changed choices")
+    func thinkingEditorAdmission() throws {
+        var snapshot = try SessionScenarioBuilder(seed: 7_816).openingTail(targetEncodedBytes: 4_096)
+        snapshot.phase = .idle
+        snapshot.availableThinkingLevels = ["off", "high", "xhigh"]
+        let original = snapshot
+        let scope = SessionThinkingEditScope(SessionContextPresentation(snapshot))
+        #expect(scope.admits("xhigh", in: SessionContextPresentation(snapshot)))
+        #expect(!scope.admits("medium", in: SessionContextPresentation(snapshot)))
+        snapshot.revision += 1
+        snapshot.thinkingLevel = "xhigh" // Receipt acknowledgement is not a new scope.
+        #expect(scope == SessionThinkingEditScope(SessionContextPresentation(snapshot)))
+        for phase in [SessionPhase.running, .compacting, .retrying] {
+            snapshot.phase = phase
+            #expect(!scope.admits("xhigh", in: SessionContextPresentation(snapshot)))
+        }
+        snapshot = original
+        snapshot.model = ModelRef(provider: "other", id: "model")
+        #expect(!scope.admits("xhigh", in: SessionContextPresentation(snapshot)))
+        snapshot = original
+        snapshot.runtimeGeneration = "new-runtime"
+        #expect(!scope.admits("xhigh", in: SessionContextPresentation(snapshot)))
+        snapshot = original
+        snapshot.sessionId = "other-session"
+        #expect(!scope.admits("xhigh", in: SessionContextPresentation(snapshot)))
+        snapshot = original
+        snapshot.availableThinkingLevels = ["off", "xhigh"]
+        #expect(!scope.admits("xhigh", in: SessionContextPresentation(snapshot)))
+    }
+
+    @Test("a pending slider choice is visible before authority changes, then retires on confirmation")
     func immediateSelection() throws {
         var snapshot = try SessionScenarioBuilder(seed: 7_811).openingTail(targetEncodedBytes: 4_096)
         snapshot.thinkingLevel = "high"

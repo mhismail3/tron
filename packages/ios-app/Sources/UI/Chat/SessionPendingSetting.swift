@@ -1,5 +1,26 @@
 import Foundation
 
+/// Deferred Thinking edits keep the same session/model/runtime and supported
+/// choices. Progress revisions and acknowledgement of our pending value do not
+/// create a new editor; the caller also compares the current displayed choice.
+struct SessionThinkingEditScope: Hashable {
+    let sessionID: String
+    let runtimeGeneration: String
+    let model: ModelRef?
+    let levels: [String]
+
+    init(_ snapshot: SessionContextPresentation) {
+        sessionID = snapshot.sessionID
+        runtimeGeneration = snapshot.runtimeGeneration
+        model = snapshot.model
+        levels = snapshot.availableThinkingLevels
+    }
+
+    func admits(_ level: String, in current: SessionContextPresentation) -> Bool {
+        self == Self(current) && !current.phase.isActive && levels.contains(level)
+    }
+}
+
 struct SessionPendingModelSelection: Equatable {
     let id = UUID()
     let value: ModelRef
