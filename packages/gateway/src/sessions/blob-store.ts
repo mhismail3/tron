@@ -5,6 +5,7 @@ import { basename, dirname, join } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { GatewayError } from "../errors.js";
+import { abortableRead } from "../util/abortable-read.js";
 
 interface BlobValueBase {
   mimeType: string;
@@ -307,7 +308,11 @@ export class BlobStore {
     return { data: value.data, mimeType: value.mimeType };
   }
 
-  async acquire(id: string, requestedRange?: BlobByteRange): Promise<BlobLease> {
+  acquire(id: string, requestedRange?: BlobByteRange, signal?: AbortSignal): Promise<BlobLease> {
+    return abortableRead(signal, () => this.acquireOwned(id, requestedRange), lease => lease.release());
+  }
+
+  private async acquireOwned(id: string, requestedRange?: BlobByteRange): Promise<BlobLease> {
     if (this.disposed) throw new GatewayError("not_found", "Blob is not available; refresh the session snapshot");
     const value = this.available(id);
     const rangeStart = requestedRange?.start ?? 0;

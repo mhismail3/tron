@@ -247,6 +247,43 @@ struct ProviderAuthCoordinatorTests {
         }
     }
 
+    @Test("event completion claims terminal ownership synchronously and bounds optional refresh")
+    func completionDispatchIsOwned() async throws {
+        try await runScenario {
+            let harness = try await makeHarness()
+            do {
+                harness.owner.installHostedAuthOperation("old", target: .global)
+                let completion: JSONValue = .object(["operationId": .string("old"), "success": .bool(false), "error": .string("old failure")])
+                harness.owner.dispatchCompletion(completion)
+                #expect(harness.owner.hostedActiveAuthOperationID == nil)
+                #expect(harness.owner.hostedTarget(for: "old") == nil)
+                for _ in 0..<200 { harness.owner.dispatchCompletion(completion) }
+                harness.owner.installHostedAuthOperation("new", target: .global)
+                harness.owner.handlePrompt(promptPayload(operation: "new", prompt: "new-prompt"))
+                #expect(harness.owner.prompt?.id == "new-prompt")
+                try await harness.socket.waitUntilSent(count: 3)
+                let oldReads = try await requests(in: 1...2, socket: harness.socket)
+                harness.owner.clearProfile()
+                try await respondCatalog(oldReads, marker: "old", socket: harness.socket)
+                let fresh = Task { await harness.owner.refreshCatalog(target: .global) }
+                defer { fresh.cancel() }
+                try await harness.socket.waitUntilSent(count: 5)
+                try await respondCatalog(requests(in: 3...4, socket: harness.socket), marker: "fresh", socket: harness.socket)
+                #expect(await fresh.value)
+                #expect(harness.owner.catalog(for: .global)?.providers.first?.id == "fresh")
+                #expect(harness.delegate.completionErrors.isEmpty)
+                #expect(harness.delegate.errors.isEmpty)
+                #expect(await harness.socket.sentFrames().count == 5)
+                harness.owner.clearProfile()
+                await harness.client.close()
+            } catch {
+                harness.owner.clearProfile()
+                await harness.client.close()
+                throw error
+            }
+        }
+    }
+
     @Test("auth target survives prompts and drives exact completion refresh")
     func authTargetRetainedThroughCompletion() async throws {
         try await runScenario {

@@ -8,9 +8,11 @@ import { basename, dirname, extname, join } from "node:path";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { GatewayError } from "../errors.js";
 import { atomicWriteJson, readJson } from "../util/json.js";
+import { abortableRead } from "../util/abortable-read.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import type { PromptAttachmentState } from "../protocol/types.js";
 
+export const MAXIMUM_ATTACHMENT_READERS = 32;
 const UPLOAD_METADATA_MAX_BYTES = 64 * 1_024;
 const DEFAULT_MAXIMUM_STAGING_ENTRIES = 1_024;
 const DEFAULT_MAXIMUM_RETAINED_ENTRIES = 16_384;
@@ -161,6 +163,7 @@ export class UploadStore {
   private readonly maximumConcurrentBodies: number;
   private activeBodyAdmissions = 0;
   private readonly stagedUploads = new Map<string, number>();
+  private activeDownloadReaders = 0;
   private readonly activeImportLeases = new Map<string, number>();
   /** Rebuildable physical attachment index; canonical session ownership remains JSONL/catalog authority. */
   private readonly logicalIndex = new Map<string, UploadMetadataV2>();
@@ -701,23 +704,35 @@ export class UploadStore {
     }).catch(() => {});
   }
 
-  async acquire(id: string): Promise<UploadLease> {
+  acquire(id: string, signal?: AbortSignal): Promise<UploadLease> {
+    return abortableRead(signal, () => this.acquireOwned(id), lease => lease.release());
+  }
+
+  private async acquireOwned(id: string): Promise<UploadLease> {
     this.validateID(id);
-    const metadata = await this.metadata(id);
-    // Unclaimed uploads are private staging state and cannot become arbitrary
-    // authenticated file reads. Only a prompt-owned canonical attachment is
-    // eligible for its bounded mobile preview.
-    if (!metadata.sessionId) throw new GatewayError("not_found", "Attachment is not available");
-    const owned = await this.ownedLogicalPath(metadata);
-    const handle = await open(owned.actual, "r");
+    if (this.activeDownloadReaders >= MAXIMUM_ATTACHMENT_READERS) throw new GatewayError("busy", "Attachment reader capacity is full", true);
+    // Metadata/path I/O is part of the reader lifetime, not free preflight.
+    this.activeDownloadReaders += 1;
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
     let released = false;
+    const release = async (): Promise<void> => {
+      if (released) return;
+      released = true;
+      await handle?.close().catch(() => {});
+      this.activeDownloadReaders -= 1;
+    };
     try {
+      const metadata = await this.metadata(id);
+      // Unclaimed staging cannot become an authenticated preview. Only an
+      // exact prompt-owned attachment may acquire this reader.
+      if (!metadata.sessionId) throw new GatewayError("not_found", "Attachment is not available");
+      const owned = await this.ownedLogicalPath(metadata);
+      handle = await open(owned.actual, "r");
       const actual = await handle.stat();
       if (!actual.isFile() || actual.size !== metadata.size) {
         throw new GatewayError("conflict", "Attachment changed after prompt admission");
       }
-      const stream = createReadStream(owned.actual, {
-        fd: handle.fd,
+      const stream = handle.createReadStream({
         autoClose: false,
         start: 0,
         end: Math.max(0, metadata.size - 1),
@@ -728,14 +743,12 @@ export class UploadStore {
         size: metadata.size,
         stream,
         release: async () => {
-          if (released) return;
-          released = true;
           stream.destroy();
-          await handle.close().catch(() => {});
+          await release();
         },
       };
     } catch (error) {
-      await handle.close().catch(() => {});
+      await release();
       throw error;
     }
   }

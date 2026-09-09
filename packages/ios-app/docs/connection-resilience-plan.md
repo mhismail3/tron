@@ -1,6 +1,6 @@
 # Real-world connection and resource resilience plan
 
-**Status: broader phases proposed. The structural session-projection boundary fix and typed decode-limit diagnostics below are implemented in source; deployment and broader qualification are not implied.**
+**Status: remaining source hardening implemented on `agent/connection-resilience`, based on `ae83d4480`; deployment and physical qualification are not complete.** The phases below remain the acceptance contract. The completion record distinguishes implemented mechanisms, automated evidence, and unresolved qualification rather than treating green focused tests as a reliability guarantee.
 
 Build on checkpoint `cba48f894` without weakening its resource bounds or accepted-command safety. The goal is reliable operation under mobile roaming, suspension, slow peers, busy sessions, partial failures, and sustained use—not merely quieter error labels. Reliability must be demonstrated within a documented workload envelope; neither this plan nor green unit tests can guarantee unlimited scale or zero bugs.
 
@@ -8,7 +8,7 @@ This plan covers the iOS/Gateway connection and recovery paths, their presentati
 
 ## 1. Investigation findings and evidence limits
 
-The checkpoint passed Gateway build/48 focused tests and iOS build/128 focused tests. Those are prior checkpoint results, not new executions for this plan. This planning pass inspected source and test oracles only; it did not reproduce cellular/Tailscale behavior, run new builds/tests, or touch the running Gateway.
+The structural projection checkpoint is preserved. The implementation adds bounded recovery/retirement, finite read admission, truthful failure presentation, and isolated qualification without changing a running Gateway or canonical user sessions. Automated wire, state, rendered-harness and synthetic capacity checks are separate from cellular/Tailscale, physical-device and energy evidence; see the completion record below.
 
 | Finding | Inspected owner / source fact | Disposition |
 | --- | --- | --- |
@@ -16,18 +16,18 @@ The checkpoint passed Gateway build/48 focused tests and iOS build/128 focused t
 | A session-specific open failure was a structural payload-contract defect | A sub-1-MiB browser-result transcript crossed the native 32,768-node budget before typed decoding. Hello/open succeeded, then iOS closed before sync. The original capture failed and the fitted response passed actual native open admission with all 60 row IDs/text/displays/cursor preserved | FIXED in source: aggregate transcript/snapshot node fitting, common sender guard and correlated fallback; synthetic and real-capture validation, no canonical edits |
 | Projection rejection can occur after mutation execution | `response_too_large` may represent an unencodable successful command or receipt result, not a definitive execution rejection | FIXED in source: confirmed mutation/status rejection preserves `outcome_unknown` and command identity without replay |
 | Established-socket recovery is already immediate | `AppModel.handleDeliveredEvent` calls `requestReconnect(immediate: true)` | KEEP; do not add another fast retry loop |
-| Roaming information is diagnostic-only | `TronMobileApp.GatewayPathDiagnosticsObserver` logs coalesced `NWPathMonitor` facts | Add bounded recovery hints, not connectivity authority |
+| Path information is advisory | The existing path observer delivers hints to focused and admitted secondary owners | IMPLEMENTED: park/one fallback/eligible resume; hints cannot replace a handshake, invent connectivity or clear a terminal stop |
 | Half-open detection can wait for the next probe | `GatewayClient.startLivenessWait`: 10-second interval, 8-second pong deadline; initial/reconnect hello deadlines are 15/5 seconds | Characterize detection separately from replacement speed; no blind heartbeat reduction |
-| Focused and secondary recovery policies can drift | `GatewayLifecycleCoordinator` and `DashboardGatewayConnectionPool` keep separate profile-budget dictionaries and different backoff schedules | Share policy and define allowance transfer across role handoff; retain distinct socket owners |
-| Catalog retries can continue indefinitely | `AppModel.startCatalogRefresh` and pool `startRefreshLease` clamp the retry counter to 3 but continue scheduling; `DashboardCatalogRetryPolicy.shouldRetry` has no exhaustion condition | FIX; a capped delay is not a retry bound |
-| Session recovery can block unrelated event consumption | The single AppModel event iterator awaits `SessionPresentationStore.admit` / `handleResyncRequired`, which can await open/sync reads | Reproduce, then move only the recovery wait into its existing owner |
-| Persistent recovery failure lacks a main-surface action | `stopAutomaticRecovery` sets offline state and logs; explicit Retry is in Connection Settings. Many visible effects come from readiness/catch-up state, not a single global connection badge | Add one coherent persistent-failure presentation; audit real consumers before adding UI timers |
-| Planned restart and ordinary recovery limits overlap | A 90-second restart watchdog exists, but ordinary three-attempt exhaustion clears it; replacement hello can fail after 5 seconds | Test a slow healthy restart; use the existing bounded maintenance intent rather than an ordinary outage budget |
-| Optional reconnect reads start together | `AppModel.lifecycleRefreshAll` starts auth, catalog, provider, settings, and device work while mounted restoration runs | Preserve early transport readiness; measure/prioritize useful restoration rather than assuming parallel is faster |
-| HTTP resources are less uniformly bounded than WebSocket work | `GatewayServer.handleAuthenticatedHttp` has route-specific stream leases; upload downloads have no analogous reader cap. `close` waits on HTTP server closure without a shared stream-drain policy | Reproduce slow-stream admission/drain gaps and harden at the transport/lease owner |
-| A bounded output does not bound its production cost | `RuntimeSlot.snapshot` uses a full canonical tool-result ownership scan before fitting output; branch/catalog/history paths do input-dependent work | Measure before choosing an optimization; preserve canonical ownership for paged-out results |
-| Global summaries amplify work | Runtime summary publication reaches all ready Gateway connections; detached activity and heartbeats also publish summaries | Measure workload/freshness before coalescing; dashboards intentionally need unsubscribed-session summaries |
-| Diagnostics may lose the initiating fault | Typed `decode_limit` evidence now precedes generic retirement, including frame bytes/kind/observed limit/maximum/sanitized path. Memory still keeps 200 records; persistence keeps newest 96 / 96 KiB / seven days; numeric WebSocket close codes remain absent | PARTIAL: preserve the new decoder diagnostics; complete first-fault retention and other typed transport causes within existing ceilings |
+| Recovery allowance spans roles | Focused and secondary executors share profile-keyed failure and active-time accounting while keeping exact socket owners and per-profile retirement barriers | IMPLEMENTED: role changes cannot mint attempts; free maintenance hello cannot refund ordinary faults |
+| Catalog failure admission must be finite | Both owners fence automatic invalidation and read entrypoints after three application failures | IMPLEMENTED: retained rows are explicitly stale; profile/connection-scoped Retry rearms the catalog without replacing a healthy socket |
+| Global control intake must not wait on projections | Session recovery synchronously claims the existing bounded quarantine and delegates only the read wait; auth completion commits ownership before one bounded optional-refresh worker | IMPLEMENTED: no additional event queue or task per auth event; current-generation cleanup cannot erase a successor |
+| Persistent failure needs truthful action | The first transport loss owns a two-second notice deadline; mounted authority, transport and display remain distinct | IMPLEMENTED: scoped Retry/Logs, separate catalog Retry, retained chat/draft/geometry, no false Send grant |
+| Planned maintenance is separate authority | Focused and secondary owners retain a profile-bound 90-second intent/watchdog | IMPLEMENTED: no ordinary debit/refund; deadline is terminal until explicit Retry; predecessor disconnects cannot change roaming history |
+| Optional refresh must not gate useful restoration | Mounted authority and accepted receipts retain their owners; provider/settings/device/catalog work uses separately retired read tasks | IMPLEMENTED: critical readiness is independent, while exhausted catalog freshness remains visibly separate |
+| HTTP needs both logical and physical bounds | Transport budgets cover raw sockets, address/pipeline/identity requests and pending upgrades; resource owners reserve before metadata/open | IMPLEMENTED: cancellable credential/display queues, bounded late leases, startup/close joining and claimed-upload protection. Broken filesystem recovery remains a documented capacity limit |
+| A bounded output does not bound its production cost | Branch/catalog/history paths still do input-dependent work | MEASURED: reuse one branch cut per projection; preserve full canonical tool-result ownership. Progressive warm histories reached 100k entries; no speculative index, mirror or worker was introduced |
+| Global summaries intentionally reach dashboards | Revisioned summary publication reaches ready peers, including unsubscribed sessions | QUALIFIED in isolated fanout waves through 32 peers; preserved freshness/ordering rather than introducing unsupported subscription-only routing or coalescing |
+| Diagnostics must retain initiating and latest evidence | Typed decoder/platform/HTTP/close facts and validated client/attempt incident identities use the existing bounded stores | IMPLEMENTED: reserve first causes of eight recently observed incidents under count and byte pressure. URLSession can expose a no-status sentinel instead of the peer's exact code; do not invent missing facts |
 | Foreground notifications are a separate seam | Gateway presence is token-bound and removed on disconnect; `AppDelegate.willPresent` requests banner/sound | Test completion during recovery; do not extend obsolete server presence to hide a disconnect |
 
 ### Coverage
@@ -85,7 +85,7 @@ Presentation is a bounded read-only projection of these facts. Its only independ
 ### Starting policy values—not performance promises
 
 - Keep the established-connection immediate retry and existing 15/5-second hello deadlines while measuring.
-- Start with the checkpoint's **three automatic transport attempts**, shared across role handoff, and **30-second stable-epoch** requirement. Add a finite active-recovery deadline so cancellations/replacements cannot extend an episode forever. Proposed ordinary active-recovery cap: **30 seconds**, excluding passive no-path waiting.
+- Start with the checkpoint's **three automatic transport attempts**, shared across role handoff, and **30-second stable-epoch** requirement. Add a finite active-recovery deadline so cancellations/replacements cannot extend an episode forever. Implemented ordinary active-repair admission allowance: **30 seconds**, excluding passive no-path/background time and usable transport. An already-admitted handshake retains its existing finite deadline; this is not a hard real-time promise. Provisional hello pauses repair work without forgiving attempt history.
 - Preserve the existing **90-second planned-restart** bound as a distinct explicit intent; prove the policy works when a valid restart takes longer than three replacement handshakes.
 - Proposed **two-second outage-presentation grace**, measured from the first relevant failure, not from each retry/path callback. It delays only presentation, never recovery. A provisional hello cannot clear it while the mounted session is still unusable.
 - Give catalog/projection recovery an actual finite failed-attempt allowance, initially **three**, not a saturating retry counter. Coalesce invalidations; repeated failure-triggered or high-rate invalidations cannot re-arm a failure storm. Successful normal refreshes are not subject to a lifetime cap.
@@ -265,5 +265,44 @@ Each phase is a reviewable checkpoint: code + focused tests + owning documentati
 Recommended order: **P0 → P1 → P2 → P3 → P4 → P5**, with P6's independent Gateway characterization/source work in isolated ownership if parallelized; **P7 only after measurements justify it**; P8 integrates and qualifies everything. Each checkpoint includes fresh adversarial review, finding disposition, actual validation output and updated owning docs before the next dependent change.
 
 Maintain a run-owned evidence ledger linking requirement → source revision → scenario → test/measurement → result → remaining limitation. The final report must distinguish implemented, source-verified, synthetically tested, physically verified and not tested. Counted tests, inspected code, and live behavior are different kinds of evidence.
+
+### Current implementation/qualification record
+
+- **P0–P6 source:** bounded profile recovery/maintenance and single-flight handoff;
+  current-command authority separate from retained chat; synchronous quarantine;
+  finite automatic catalog/session recovery with scoped Retry; bounded first-fault
+  diagnostics; and HTTP/resource cancellation/retirement are implemented with
+  owning tests and documentation. Source review findings were repaired at their
+  owners rather than hidden by wider buffers or socket recycling.
+- **Gateway checkpoint:** source build, 1,173 tests in 119 files, 26 SDK-script
+  tests and two fault-proxy tests passed on the pinned Node 22.22.0 toolchain.
+  Four focused negative controls failed when queued cancellation, post-I/O auth
+  fencing, and single branch acquisition were disabled; exact source was restored.
+- **Native qualification:** the combined checkpoint passed 1,618 tests with four
+  expected skips, including 1,585 Swift Testing cases in 119 suites. The separate
+  real-Gateway case runs only through its fixture. An unmodified
+  `ChatAttachmentStripTests` photo-animation sampling case failed intermittently
+  in an earlier full run, then passed both isolation and the integrated checkpoint;
+  that timing sensitivity remains a test-confidence risk, not evidence of a
+  changed attachment implementation. Focused recovery, metadata, auth, catalog
+  and synchronization checks also passed at their owning boundaries.
+- **Real isolated boundary:** delayed actual URLSession hello/open/sync,
+  blackholed traffic, HTTP 401/403/503, platform-supplied close metadata, lost
+  accepted response, durable receipt resolution, and exactly-once canonical
+  prompt/tool settlement passed. The fixture explicitly selects its faux model,
+  proves its upstream process/listener ownership, fails on a skipped test, and
+  is included in CI for source changes. No user Gateway/session was used.
+- **P7 evidence:** balanced warm projection measurements at 100/1k/10k/25k/100k
+  entries preserved canonical/row/content/cursor equality; the 100k case reduced
+  median stage time from about 34.5 to 28.8 ms on the recorded host. A separate
+  isolated 1/4/16-active-faux-session workload (1k entries/session) observed complete
+  canonical settlement, bounded snapshots, and descriptor counts returning to
+  baseline. These are workload-specific observations, not unlimited scale or
+  physical-device performance promises.
+- **P8 remains open for manual qualification:** real cellular/Wi-Fi/Tailscale
+  roaming, physical sleep/lock/energy/thermal behavior, eligible APNs delivery
+  during unseen completion, and deployment-specific long-running soak. The
+  attachment-animation timing sensitivity above also warrants follow-up before
+  making a release/long-soak reliability claim. Gateway/app activation is still a manual maintainer step.
 
 This plan intentionally does **not** prescribe higher buffers, endless retries, a new network protocol, a second socket/runtime, blanket cancellation, arbitrary caches, or an app-wide rewrite. The first priority is to repair misplaced ownership and bounded recovery; optimize only the measured work that remains.

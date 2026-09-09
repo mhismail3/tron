@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { AsyncMutex } from "../util/async-mutex.js";
+import { abortableRead } from "../util/abortable-read.js";
 import { atomicWriteJson, removeIfExists } from "../util/json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
@@ -307,21 +308,23 @@ export class DeviceStore {
   /** Authenticate and synchronously register/start the next effect under the
    * durable credential mutex. The callback must not return a promise: admitted
    * streams and provider work run without holding this mutex across awaits. */
-  async authenticateAndAdmit<T>(token: string | undefined, register: (identity: { kind: "local" } | DeviceIdentity) => T): Promise<T | null> {
+  async authenticateAndAdmit<T>(token: string | undefined, register: (identity: { kind: "local" } | DeviceIdentity) => T, signal?: AbortSignal): Promise<T | null> {
     if (!token) return null;
-    return this.mutex.run(async () => {
+    return abortableRead(signal, () => this.mutex.run(async () => {
       const identity = await this.authenticateLocked(token);
+      signal?.throwIfAborted();
       return identity ? requireSynchronousResult(register(identity)) : null;
-    });
+    }, signal));
   }
 
   /** Revalidate a device and synchronously create one owner-bound operation. */
-  async admitDevice<T>(deviceId: string, register: () => T): Promise<T | undefined> {
-    return this.mutex.run(async () => {
+  async admitDevice<T>(deviceId: string, register: () => T, signal?: AbortSignal): Promise<T | undefined> {
+    return abortableRead(signal, () => this.mutex.run(async () => {
       const document = await this.readDevices();
+      signal?.throwIfAborted();
       if (!document.devices.some((device) => device.id === deviceId)) return undefined;
       return requireSynchronousResult(register());
-    });
+    }, signal));
   }
 
   async listDevices(): Promise<DeviceListEntry[]> {

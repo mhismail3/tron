@@ -1,8 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { canAttachTerminal, clearRequestSynchronizations, encodeOutboundFrame, existingSessionOpenOwner, heartbeatTimerDelay, releaseOwnedSubscription, releaseSessionTerminals, shouldTerminateHeartbeat } from "./server.js";
+import { canAttachTerminal, clearRequestSynchronizations, encodeOutboundFrame, existingSessionOpenOwner, heartbeatTimerDelay, HttpTransportAdmission, releaseOwnedSubscription, releaseSessionTerminals, shouldTerminateHeartbeat } from "./server.js";
 import { SessionSyncBarrier } from "./session-sync.js";
 
 describe("bounded outbound gateway frames", () => {
+  it("bounds HTTP requests globally and per identity with exact idempotent release", () => {
+    const admission = new HttpTransportAdmission(2, 1);
+    const connection = {};
+    const first = admission.admit("fixture", connection);
+    const second = admission.admit("fixture", connection);
+    expect(first).toBeDefined();
+    expect(second).toBeDefined();
+    expect(admission.admit("fixture", connection)).toBeUndefined();
+
+    first!.identify("device-a");
+    expect(() => second!.identify("device-a")).toThrow("HTTP request capacity");
+    second!.identify("device-b");
+    first!.release();
+    first!.release();
+    expect(admission.snapshot()).toMatchObject({ activeRequests: 1, identities: 1 });
+    const replacement = admission.admit("fixture", connection);
+    expect(replacement).toBeDefined();
+    replacement!.identify("device-a");
+    replacement!.release();
+    second!.release();
+    expect(admission.snapshot()).toMatchObject({ activeRequests: 0, identities: 0 });
+  });
+
   it("tolerates two unanswered heartbeat rounds before retiring a client", () => {
     expect(shouldTerminateHeartbeat(0)).toBe(false);
     expect(shouldTerminateHeartbeat(1)).toBe(false);

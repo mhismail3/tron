@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import Testing
 @testable import TronMobile
 
@@ -35,6 +36,106 @@ struct AppModelEventTests {
             setupComplete: false,
             suppressSetup: true
         ))
+    }
+
+    @Test("held session synchronization does not block unrelated control event intake")
+    func heldSessionSyncLeavesControlIntakeLive() async throws {
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        let model = AppModel(client: client)
+        let profile = GatewayProfile(
+            id: "profile", label: "Mac", host: "gateway.test", port: 9_847,
+            machineId: "machine", deviceId: "device"
+        )
+        let connected = Task { try await model.connectHostedGateway(profile: profile, token: "token") }
+        try await socket.waitUntilSent(count: 1)
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+        try await connected.value
+
+        let snapshot = try SessionScenarioBuilder(seed: 9_301).openingTail(targetEncodedBytes: 4_096)
+        model.installHostedSubscribedSnapshot(snapshot)
+        let target = try #require(model.presentationTarget(for: snapshot.sessionId))
+        var gap = snapshot
+        gap.eventSequence += 2
+        gap.revision += 2
+        let encodedSnapshot = try JSONEncoder.gateway.encode(gap)
+        let snapshotValue = try JSONDecoder.gateway.decode(JSONValue.self, from: encodedSnapshot)
+        await socket.enqueue(Self.eventFrame(topic: "session.snapshot", sessionID: snapshot.sessionId, payload: snapshotValue))
+        try await socket.waitUntilSent(count: 2)
+        #expect(!model.admitsLiveSessionCommands(target))
+        let settingsBefore = model.settingsInvalidationGeneration
+        let providersBefore = model.providerInvalidationGeneration
+        let delivered = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        withObservationTracking { _ = model.providerInvalidationGeneration } onChange: {
+            delivered.continuation.yield(())
+            delivered.continuation.finish()
+        }
+        await socket.enqueue(Self.eventFrame(topic: "settings.changed", sessionID: nil, payload: .object([:])))
+        await socket.enqueue(Self.eventFrame(topic: "providers.changed", sessionID: nil, payload: .object([:])))
+        try await withTestWatchdog {
+            var iterator = delivered.stream.makeAsyncIterator()
+            guard await iterator.next() != nil else { throw CancellationError() }
+        }
+        #expect(model.settingsInvalidationGeneration > settingsBefore)
+        #expect(model.providerInvalidationGeneration > providersBefore)
+        await model.teardown()
+        await client.close()
+    }
+
+    @Test("failed automatic resync stops, preserves rows and retries only through its scoped action")
+    func resyncFailureHasScopedRecovery() async throws {
+        try await withTestWatchdog { @MainActor in
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+            let model = AppModel(client: client)
+            do {
+                let profile = GatewayProfile(id: "profile", label: "Mac", host: "gateway.test", port: 9847, machineId: "machine", deviceId: "device")
+                await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+                try await model.connectHostedGateway(profile: profile, token: "fixture")
+                let snapshot = try SessionScenarioBuilder(seed: 9302).openingTail(targetEncodedBytes: 4096)
+                model.installHostedSubscribedSnapshot(snapshot)
+                let target = try #require(model.presentationTarget(for: snapshot.sessionId))
+                await socket.enqueue(Self.eventFrame(topic: "transport.resyncRequired", sessionID: snapshot.sessionId, payload: .object([:])))
+                try await socket.waitUntilSent(count: 2)
+                let open = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[1])
+                let id = try #require(open.objectValue?["id"]?.stringValue)
+                // These invalidations join the in-flight transaction. Its
+                // failure cannot turn them into a fresh automatic transaction.
+                for _ in 0..<5 { await model.handle(GatewayEvent(type: "event", topic: "transport.resyncRequired", sessionId: snapshot.sessionId, payload: .object([:]))) }
+                let noticed = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+                withObservationTracking { _ = model.visibleNotices } onChange: { noticed.continuation.yield(()); noticed.continuation.finish() }
+                await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                    "type": .string("response"), "id": .string(id), "ok": .bool(false),
+                    "error": .object(["code": .string("response_too_large"), "message": .string("fixture"), "retryable": .bool(false)])
+                ])))
+                var noticeIterator = noticed.stream.makeAsyncIterator()
+                _ = await noticeIterator.next()
+                let notice = try #require(model.visibleNotices.first { $0.replacement?.key == .sessionCatchUp && !$0.actions.isEmpty })
+                #expect(!model.admitsLiveSessionCommands(target))
+                #expect(model.selectedSnapshot?.transcript.map(\.id) == snapshot.transcript.map(\.id))
+                for _ in 0..<20 { await model.handle(GatewayEvent(type: "event", topic: "transport.resyncRequired", sessionId: snapshot.sessionId, payload: .object([:]))) }
+                #expect(await socket.sentFrames().count == 2)
+                model.noticeCenter.performAction(try #require(notice.actions.first), for: notice.id)
+                try await socket.waitUntilSent(count: 3)
+                let retried = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[2])
+                let snapshotValue = try JSONDecoder.gateway.decode(JSONValue.self, from: JSONEncoder.gateway.encode(snapshot))
+                await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                    "type": .string("response"), "id": retried.objectValue!["id"]!, "ok": .bool(true),
+                    "result": .object(["session": snapshotValue, "syncToken": .string("retry-token"), "subscriptionToken": .string("retry-token"), "completionRevision": .number(0)])
+                ])))
+                try await socket.waitUntilSent(count: 4)
+                let sync = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[3])
+                let installed = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+                withObservationTracking { _ = model.admitsLiveSessionCommands(target) } onChange: { installed.continuation.yield(()); installed.continuation.finish() }
+                await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                    "type": .string("response"), "id": sync.objectValue!["id"]!, "ok": .bool(true), "result": .object(["synchronized": .bool(true)])
+                ])))
+                var installation = installed.stream.makeAsyncIterator()
+                _ = await installation.next()
+                #expect(model.hasMountedSessionAuthority(target))
+            } catch { await client.close(); await model.teardown(); throw error }
+            await client.close(); await model.teardown()
+        }
     }
 
     @Test("compact extension activity deltas update the hub without rebuilding chat")
@@ -856,6 +957,16 @@ struct AppModelEventTests {
             return
         }
         #expect(closeFrame.closed == true)
+    }
+
+    private static func eventFrame(topic: String, sessionID: String?, payload: JSONValue) -> Data {
+        var object: [String: JSONValue] = [
+            "type": .string("event"),
+            "topic": .string(topic),
+            "payload": payload,
+        ]
+        if let sessionID { object["sessionId"] = .string(sessionID) }
+        return try! JSONEncoder.gateway.encode(JSONValue.object(object))
     }
 
     private func snapshotEvent(_ snapshot: SessionSnapshot, sessionID: String) -> GatewayEvent {

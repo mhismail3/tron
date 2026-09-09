@@ -17,6 +17,7 @@ ENVIRONMENT_KEYS = (
     "TRON_E2E_CODE",
     "TRON_E2E_WORKSPACE",
     "TRON_E2E_PI_VERSION",
+    "TRON_E2E_PROXY_TOKEN",
 )
 
 
@@ -91,8 +92,8 @@ def patch_file(path: Path, values: dict[str, str]) -> None:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 6:
-        print("usage: patch-ios-gateway-e2e-xctestrun.py XCTESTRUN PORT CODE WORKSPACE PI_VERSION", file=sys.stderr)
+    if len(argv) != 7:
+        print("usage: patch-ios-gateway-e2e-xctestrun.py XCTESTRUN PORT CODE WORKSPACE PI_VERSION PROXY_TOKEN", file=sys.stderr)
         return 64
     path = Path(argv[1])
     values = dict(zip(ENVIRONMENT_KEYS, argv[2:]))

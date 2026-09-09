@@ -293,6 +293,19 @@ Outbound relay requests use one fixed `/v3/notifications` route, no redirects, a
 
 ## Transport
 
+HTTP admission accounts for physical sockets (128 global / 64 per address),
+requests and pending upgrades (128 global / 32 per address / eight per connection),
+and authenticated HTTP identity demand (16). Canceled credential waiters leave
+ordered admission; active credential I/O keeps its mutex until actual settlement,
+and late read leases return to their bounded resource owner. Attachment readers
+reserve their 32 slots before metadata I/O; display readers reserve four before
+verification/open. Headers allow 15 seconds, complete request bodies five minutes,
+and inactivity/upgrade authentication 30 seconds. Normal close and failed startup
+share one bounded retirement, fencing observers before one-second physical close.
+These disposable limits never cancel accepted domain work or delete a claimed
+attachment. See [connection resilience](docs/connection-resilience.md) for exact
+ownership, diagnostics, qualification commands, and remaining platform limits.
+
 For failure-boundary interpretation, evidence collection, and regression
 expectations, see [connection resilience and diagnosis](docs/connection-resilience.md).
 

@@ -68,6 +68,25 @@ struct AppModelReconnectTests {
         await client.close()
     }
 
+    @Test("path return during initial hello cannot start a second socket")
+    func pathHintDoesNotOverlapInitialConnect() async throws {
+        let clock = ManualClock()
+        try await withFixture(
+            sockets: [ScriptedGatewaySocket(), ScriptedGatewaySocket()],
+            clock: clock,
+            units: SequenceReconnectUnits([0])
+        ) { fixture in
+            let start = Task { await fixture.model.start() }
+            defer { start.cancel() }
+            try await fixture.sockets[0].waitUntilSent(count: 1)
+            fixture.model.lifecycleNotePathHint(satisfied: true)
+            for _ in 0..<20 { await Task.yield() }
+            #expect(fixture.socketFactory.requests.count == 1)
+            await fixture.sockets[0].failPendingReceivers(CancellationError())
+            await start.value
+        }
+    }
+
     @Test("non-immediate retries jitter each preserved backoff delay")
     func jitteredRetryProgression() async throws {
         let units = SequenceReconnectUnits([0, 0.5, 1])
@@ -159,6 +178,38 @@ struct AppModelReconnectTests {
             )
             fixture.model.retryGatewayConnection(for: profile)
             try await sockets[3].waitUntilSent(count: 1)
+        }
+    }
+
+    @Test("no-path parking permits one fallback and explicit Retry despite a missed return callback")
+    func noPathParkingAndExplicitRetry() async throws {
+        let clock = ManualClock()
+        let sockets = (0..<3).map { _ in ScriptedGatewaySocket() }
+        try await withFixture(sockets: sockets, clock: clock, units: SequenceReconnectUnits([0, 0])) { fixture in
+            let start = Task { await fixture.model.start() }
+            try await failHandshake(sockets[0])
+            try await clock.waitUntilSleeping(count: 1)
+            await start.value
+            fixture.model.lifecycleNotePathHint(satisfied: false)
+            clock.advance(by: .seconds(1.6))
+            try await sockets[1].waitUntilSent(count: 1)
+            try await failHandshake(sockets[1])
+            try await sockets[1].waitUntilClosed()
+            await Task.yield()
+            #expect(fixture.socketFactory.requests.count == 2)
+            clock.advance(by: .seconds(30))
+            await Task.yield()
+            #expect(fixture.socketFactory.requests.count == 2)
+
+            // The OS return callback is intentionally omitted. Explicit Retry
+            // clears the stale path hint and owns the exact new attempt.
+            let profile = GatewayProfile(
+                id: "gateway", label: "Mac", host: "gateway.test", port: 9_847,
+                machineId: "machine", deviceId: "device"
+            )
+            fixture.model.retryGatewayConnection(for: profile)
+            try await sockets[2].waitUntilSent(count: 1)
+            #expect(fixture.socketFactory.requests.count == 3)
         }
     }
 
@@ -507,6 +558,88 @@ struct AppModelReconnectTests {
 
         await model.teardown()
         await client.close()
+    }
+
+    @Test("recovery warning timer uses its injected clock and never grants Send authority")
+    func recoveryWarningTimerAndAuthorityFence() async throws {
+        let suite = "GatewayRecoveryWarningTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        let profile = GatewayProfile(
+            id: "gateway", label: "Mac", host: "gateway.test", port: 9_847,
+            machineId: "machine", deviceId: "device"
+        )
+        defaults.set(try JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
+        defaults.set(profile.id, forKey: "selectedGateway.v1")
+        let displayClock = ManualClock()
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        let model = AppModel(
+            client: client,
+            profiles: GatewayProfileStore(defaults: defaults),
+            recoveryDisplayClock: displayClock.clock,
+            profileTokenLookup: { _ in "token" }
+        )
+        let connected = Task { try await model.connectHostedGateway(profile: profile, token: "token") }
+        try await socket.waitUntilSent(count: 1)
+        await socket.enqueue(helloFrame())
+        try await connected.value
+        let admission = GatewayLifecycleCoordinator.Admission(generation: 0, connectionID: nil)
+        model.lifecycleBeginReconciliationAggregate(admission: admission)
+        model.lifecycleCompleteReconciliationAggregate(admission: admission, succeeded: false)
+        try await displayClock.waitUntilSleeping(count: 1, duration: .seconds(2))
+        #expect(model.visibleNotices.isEmpty)
+        displayClock.advance(by: .seconds(2))
+        for _ in 0..<10 { await Task.yield() }
+        let warning = try #require(model.visibleNotices.first { $0.replacement?.key == .gatewayRecovery })
+        #expect(Set(warning.actions.map(\.title)) == Set(["Retry", "View Logs"]))
+        let target = SessionPresentationIdentity(sessionID: "unmounted", generation: 1)
+        #expect(!model.admitsLiveSessionCommands(target))
+        await model.teardown()
+        await client.close()
+    }
+
+    @Test("planned maintenance restart watchdog uses the controlled clock without charging roaming recovery")
+    func maintenanceRestartWatchdogUsesControlledClock() async throws {
+        try await withTestWatchdog { @MainActor in
+            let clock = ManualClock()
+            let suite = "GatewayMaintenanceWatchdogTests.\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let profile = GatewayProfile(id: "gateway", label: "Mac", host: "gateway.test", port: 9847, machineId: "machine", deviceId: "device")
+            defaults.set(try JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
+            defaults.set(profile.id, forKey: "selectedGateway.v1")
+            let sockets = (0..<3).map { _ in ScriptedGatewaySocket() }
+            let factory = ScriptedGatewaySocketFactory(sockets: sockets)
+            let client = GatewayClient(socketFactory: factory.factory)
+            let budget = GatewayRecoveryAllowanceStore()
+            let projection = NoopGatewayLifecycleProjection()
+            let coordinator = GatewayLifecycleCoordinator(client: client, profiles: GatewayProfileStore(defaults: defaults),
+                clock: clock.clock, reconnectDelayPolicy: .standard, uuidSource: .random, pairer: GatewayPairer(),
+                pairingCommit: { _, _ in }, profileTokenLookup: { _ in "fixture" }, recoveryBudgets: budget)
+            coordinator.delegate = projection
+            do {
+                await sockets[0].enqueue(helloFrame())
+                await coordinator.start()
+                let initial = budget[profile.id]?.automaticAttempts
+                coordinator.beginRestarting()
+                await coordinator.noteDisconnected(connectionID: await client.activeConnectionID(), countsAsTransportFailure: false)
+                coordinator.requestReconnect(immediate: true)
+                try await sockets[1].waitUntilSent(count: 1)
+                try await clock.waitUntilSleeping(count: 1, duration: .seconds(90))
+                #expect(budget[profile.id]?.automaticAttempts == initial)
+                clock.advance(by: .seconds(90))
+                try await sockets[1].waitUntilClosed()
+                #expect(budget[profile.id]?.isStopped == true)
+                coordinator.notePathHint(satisfied: true)
+                await coordinator.becameActive()?.value
+                #expect(factory.requests.count == 2)
+                coordinator.retryReconnect()
+                try await sockets[2].waitUntilSent(count: 1)
+            } catch {
+                await coordinator.teardown(); await client.close(); throw error
+            }
+            await coordinator.teardown(); await client.close()
+        }
     }
 
     @Test("paired Debug profile publishes an authenticated replacement before projection refresh without prompt replay")

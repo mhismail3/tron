@@ -270,6 +270,20 @@ final class SessionPresentationStore {
     private let synchronization = SessionSynchronizationCoordinator()
     private var deferredEffectsByTarget: [SessionPresentationIdentity: [ReducerEffect]] = [:]
     private var terminalSynchronizationFailures: [SessionPresentationIdentity: GatewayFailure] = [:]
+    private struct AutomaticSynchronization {
+        let lease: SessionSynchronizationCoordinator.Lease
+        let target: SessionPresentationIdentity
+        let connectionGeneration: Int
+        var failed = false
+    }
+    private var automaticSynchronization: AutomaticSynchronization?
+    // Intake is synchronous at the event-consumer boundary. The coordinator
+    // owns the bounded quarantined suffix; only network recovery is drained by
+    // this one owner task.
+    private var pendingSynchronizationSessionIDs = Set<String>()
+    private var pendingSynchronizationLeases: [String: SessionSynchronizationCoordinator.Lease] = [:]
+    @ObservationIgnored private var eventProcessingTask: Task<Void, Never>?
+    private var eventProcessingGeneration = 0
 
     private(set) var context: JSONValue?
     private(set) var sessionTree: [SessionTreeNode] = []
@@ -479,6 +493,8 @@ final class SessionPresentationStore {
 
     func hasInstalledSubscription(for sessionID: String) -> Bool {
         guard let target = mountedTarget else { return false }
+        if let recovery = automaticSynchronization,
+           recovery.target == target, recovery.connectionGeneration == connectionGeneration { return false }
         return isAuthoritative
             && target.sessionID == sessionID
             && subscribedSessionID == sessionID
@@ -1101,6 +1117,12 @@ final class SessionPresentationStore {
     }
 
     func retireConnection() {
+        automaticSynchronization = nil
+        eventProcessingGeneration &+= 1
+        eventProcessingTask?.cancel()
+        eventProcessingTask = nil
+        pendingSynchronizationSessionIDs.removeAll()
+        pendingSynchronizationLeases.removeAll()
         attentionReadTask?.cancel()
         attentionReadTask = nil
         pendingAttentionRead = nil
@@ -1176,13 +1198,59 @@ final class SessionPresentationStore {
         clearSecondaryProjection()
     }
 
+    /// Admits and reduces the event synchronously. If it invalidates the
+    /// mounted projection, `scheduleResynchronization` claims the existing
+    /// bounded coordinator quarantine before this method returns.
+    func admitSynchronously(_ event: GatewayEvent) {
+        if event.topic == "session.rebaseline" {
+            processAdmittedEvent(event)
+            return
+        }
+        switch synchronization.admit(event) {
+        case .deliver(let admitted):
+            processAdmittedEvent(admitted)
+        case .buffered:
+            break
+        case .overflow(let sessionID):
+            scheduleResynchronization(sessionID: sessionID)
+        }
+    }
+
     func admit(_ event: GatewayEvent) async {
+        // Reduction and quarantine admission are synchronous. The recovery
+        // task intentionally remains independent so an unusable network read
+        // cannot stall the event caller or unrelated session intake.
+        admitSynchronously(event)
+        await Task.yield()
+    }
+
+    private func startEventProcessingIfNeeded() {
+        guard eventProcessingTask == nil else { return }
+        eventProcessingGeneration &+= 1
+        let generation = eventProcessingGeneration
+        eventProcessingTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                guard let sessionID = self.pendingSynchronizationSessionIDs.popFirst() else {
+                    guard self.eventProcessingGeneration == generation else { return }
+                    self.eventProcessingTask = nil
+                    return
+                }
+                guard let lease = self.pendingSynchronizationLeases.removeValue(forKey: sessionID) else { continue }
+                _ = await self.performClaimedSynchronization(sessionID: sessionID, lease: lease)
+            }
+            guard self.eventProcessingGeneration == generation else { return }
+            self.eventProcessingTask = nil
+        }
+    }
+
+    private func processAdmittedEvent(_ event: GatewayEvent) {
         if event.topic == "session.rebaseline" {
             guard case .sessionRebaseline(let rebaseline) = event.preparation else {
                 if let sessionID = event.sessionId,
                    mountedTarget?.sessionID == sessionID,
                    hasInstalledSubscription(for: sessionID) {
-                    _ = await synchronize(sessionID, operation: .sessionResync)
+                    scheduleResynchronization(sessionID: sessionID)
                 }
                 return
             }
@@ -1193,15 +1261,13 @@ final class SessionPresentationStore {
                   ) else { return }
             let authoritative = rebaseline.snapshot
             switch SessionRebaselineAdmission.evaluate(current: snapshot, incoming: authoritative) {
-            case .ignore:
-                return
+            case .ignore: return
             case .resynchronize:
                 if hasInstalledSubscription(for: authoritative.sessionId) {
-                    _ = await synchronize(authoritative.sessionId, operation: .sessionResync)
+                    scheduleResynchronization(sessionID: authoritative.sessionId)
                 }
                 return
-            case .install:
-                break
+            case .install: break
             }
             if !hasInstalledSubscription(for: authoritative.sessionId) {
                 if let pending = pendingRebaselines[authoritative.sessionId],
@@ -1209,24 +1275,12 @@ final class SessionPresentationStore {
                 pendingRebaselines[authoritative.sessionId] = rebaseline
                 return
             }
-            let reconciledPrefix = reconcilePrefix(
-                mountedTranscriptWindow,
-                from: snapshot,
-                into: authoritative
-            )
+            let reconciledPrefix = reconcilePrefix(mountedTranscriptWindow, from: snapshot, into: authoritative)
             guard mountedTranscriptWindow == nil
                 || reconciledPrefix != nil
-                || replacementCoversMountedWindow(
-                    mountedTranscriptWindow,
-                    from: snapshot,
-                    into: authoritative
-                ) else {
-                // Keep the last complete visible commit until a synchronized
-                // authority proves continuity. Installing an incompatible
-                // sparse tail would shrink the mounted transcript and make the
-                // scrollbar jump upward during resume/send.
+                || replacementCoversMountedWindow(mountedTranscriptWindow, from: snapshot, into: authoritative) else {
                 if hasInstalledSubscription(for: authoritative.sessionId) {
-                    _ = await synchronize(authoritative.sessionId, operation: .sessionResync)
+                    scheduleResynchronization(sessionID: authoritative.sessionId)
                 }
                 return
             }
@@ -1242,27 +1296,57 @@ final class SessionPresentationStore {
             delegate?.sessionPresentationStoreCheckpointCache()
             return
         }
-        switch synchronization.admit(event) {
-        case .deliver(let event):
-            guard admitsSequencedEvent(event) else { return }
-            let previousResourceRevision = resourceRevision
-            if let sessionID = reduce(event) {
-                _ = await synchronize(sessionID, operation: .sessionResync)
-            } else if resourceRevision != previousResourceRevision,
-                      let sessionID = event.sessionId {
-                Task { [weak self] in await self?.loadCommands(sessionID: sessionID) }
-            }
-        case .buffered:
-            break
-        case .overflow(let sessionID):
-            _ = await synchronize(sessionID, operation: .sessionResync)
+        guard admitsSequencedEvent(event) else { return }
+        let previousResourceRevision = resourceRevision
+        if let sessionID = reduce(event) {
+            scheduleResynchronization(sessionID: sessionID)
+        } else if resourceRevision != previousResourceRevision,
+                  let sessionID = event.sessionId {
+            Task { [weak self] in await self?.loadCommands(sessionID: sessionID) }
         }
     }
 
-    func handleResyncRequired(sessionID: String?) async {
-        if let sessionID = sessionID ?? subscribedSessionID {
-            _ = await synchronize(sessionID, operation: .sessionResync)
+    func scheduleResynchronization(sessionID: String?) {
+        guard let sessionID = sessionID ?? subscribedSessionID,
+              let target = mountedTarget,
+              target.sessionID == sessionID else { return }
+        if let recovery = automaticSynchronization, recovery.failed,
+           recovery.target == target, recovery.connectionGeneration == connectionGeneration { return }
+        // Claim the coordinator synchronously. The network task may begin
+        // later, but subsequent events are already bounded in its suffix.
+        let lease = synchronization.acquire(
+            sessionID: sessionID,
+            intent: .reconnect(presentationGeneration: target.generation)
+        )
+        if lease.role == .leader {
+            // Keep the last canonical snapshot for display; its old token is
+            // not current command authority while a replacement is in flight.
+            automaticSynchronization = AutomaticSynchronization(lease: lease, target: target, connectionGeneration: connectionGeneration)
         }
+        // A queued join must retain its existing outcome, not acquire a fresh
+        // transaction after that owner fails. Never overwrite an unstarted
+        // leader with a join to itself.
+        if pendingSynchronizationLeases[sessionID] == nil, lease.role != .leader {
+            _ = synchronization.markRetryRequired(sessionID: sessionID)
+        }
+        if pendingSynchronizationLeases[sessionID] == nil || lease.role == .leader {
+            pendingSynchronizationLeases[sessionID] = lease
+        }
+        pendingSynchronizationSessionIDs.insert(sessionID)
+        startEventProcessingIfNeeded()
+    }
+
+    func retryMountedSynchronization(target: SessionPresentationIdentity) async -> Bool {
+        guard mountedTarget == target else { return false }
+        automaticSynchronization = nil
+        scheduleResynchronization(sessionID: target.sessionID)
+        await eventProcessingTask?.value
+        return mountedTarget == target && hasInstalledSubscription(for: target.sessionID)
+    }
+
+    func handleResyncRequired(sessionID: String?) async {
+        scheduleResynchronization(sessionID: sessionID)
+        await Task.yield()
     }
 
     @discardableResult
@@ -1502,6 +1586,38 @@ final class SessionPresentationStore {
         )
     }
 
+    private func performClaimedSynchronization(
+        sessionID: String,
+        lease: SessionSynchronizationCoordinator.Lease
+    ) async -> Bool {
+        switch lease.role {
+        case .leader:
+            synchronization.prepareLeaderAttempt(lease)
+            pendingRebaselines[sessionID] = nil
+            let generation = connectionGeneration
+            let target = mountedTarget
+            let succeeded = await performSynchronization(sessionID: sessionID, lease: lease, operation: .sessionResync)
+            if !Task.isCancelled, connectionGeneration == generation,
+               let target, mountedTarget == target, automaticSynchronization?.lease.sameOwner(as: lease) == true {
+                if succeeded { automaticSynchronization = nil }
+                else {
+                    automaticSynchronization?.failed = true
+                    delegate?.sessionPresentationStorePostNotice(
+                        "The conversation could not catch up. Your last complete transcript and draft are retained.",
+                        replacing: .sessionCatchUp, role: .warning, scope: noticeScope
+                    )
+                }
+            }
+            return succeeded
+        case .join:
+            return await lease.sharedValue()
+        case .retryAfterCurrent:
+            let shared = await lease.sharedValue()
+            if !shared { scheduleResynchronization(sessionID: sessionID) }
+            return shared
+        }
+    }
+
     @discardableResult
     private func synchronize(
         _ sessionID: String,
@@ -1578,6 +1694,10 @@ final class SessionPresentationStore {
                 retriesInvalidResponse: attempt < 2
             ) {
             case .success:
+                if let recovery = automaticSynchronization, recovery.failed,
+                   recovery.target == mountedTarget, recovery.connectionGeneration == connectionGeneration {
+                    automaticSynchronization = nil
+                }
                 delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp, scope: noticeScope)
                 delegate?.sessionPresentationStoreCheckpointCache()
                 return true

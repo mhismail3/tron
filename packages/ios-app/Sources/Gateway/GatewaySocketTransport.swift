@@ -29,11 +29,21 @@ final class GatewayPingCompletion: @unchecked Sendable {
     func cancel() { settle(.failure(CancellationError())) }
 }
 
+struct GatewaySocketMetadata: Sendable, Equatable {
+    let closeCode: Int?
+    let httpStatusCode: Int?
+}
+
 protocol GatewaySocketConnection: Sendable {
     func send(_ data: Data) async throws
     func ping() async throws
     func receive() async throws -> Data
     func close() async
+    func metadata() async -> GatewaySocketMetadata
+}
+
+extension GatewaySocketConnection {
+    func metadata() async -> GatewaySocketMetadata { GatewaySocketMetadata(closeCode: nil, httpStatusCode: nil) }
 }
 
 enum GatewaySocketPolicy {
@@ -57,9 +67,32 @@ struct GatewaySocketFactory: Sendable {
 
 /// A byte-only transport owner. Actor isolation confines the non-value
 /// URLSession and WebSocket task to one Sendable owner under Swift 6.
+private final class GatewayWebSocketDelegate: NSObject, URLSessionWebSocketDelegate, URLSessionTaskDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private var closeCode: Int?
+    private var httpStatusCode: Int?
+
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
+                    didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+        lock.lock(); self.closeCode = closeCode.rawValue; lock.unlock()
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let response = task.response as? HTTPURLResponse {
+            lock.lock(); httpStatusCode = response.statusCode; lock.unlock()
+        }
+    }
+
+    func metadata() -> GatewaySocketMetadata {
+        lock.lock(); defer { lock.unlock() }
+        return GatewaySocketMetadata(closeCode: closeCode, httpStatusCode: httpStatusCode)
+    }
+}
+
 private actor URLSessionGatewaySocketConnection: GatewaySocketConnection {
     private let session: URLSession
     private let task: URLSessionWebSocketTask
+    private let delegate: GatewayWebSocketDelegate
     private var closed = false
     private var activePing: GatewayPingCompletion?
 
@@ -67,7 +100,9 @@ private actor URLSessionGatewaySocketConnection: GatewaySocketConnection {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.waitsForConnectivity = true
         configuration.timeoutIntervalForRequest = GatewaySocketPolicy.requestTimeout
-        let session = URLSession(configuration: configuration)
+        let delegate = GatewayWebSocketDelegate()
+        let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+        self.delegate = delegate
         self.session = session
         task = session.webSocketTask(with: request)
         task.resume()
@@ -101,6 +136,17 @@ private actor URLSessionGatewaySocketConnection: GatewaySocketConnection {
             // completed/obsolete probe must not close a healthy socket later.
             completion.cancel()
         }
+    }
+
+    func metadata() -> GatewaySocketMetadata {
+        let observed = delegate.metadata()
+        // Async send/receive failure can resume before the delegate queue runs.
+        // The exact URLSession task's immutable response/close facts are the
+        // same authority, not a delay or a guess from localized error prose.
+        return GatewaySocketMetadata(
+            closeCode: observed.closeCode ?? (task.closeCode == .invalid ? nil : task.closeCode.rawValue),
+            httpStatusCode: observed.httpStatusCode ?? (task.response as? HTTPURLResponse)?.statusCode
+        )
     }
 
     func receive() async throws -> Data {

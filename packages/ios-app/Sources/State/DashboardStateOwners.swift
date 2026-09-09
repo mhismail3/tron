@@ -465,6 +465,12 @@ struct SessionCatalogCoordinator: Equatable {
         loadGeneration &+= 1
     }
 
+    mutating func markLoadUnavailable() {
+        freshness = .stale
+        // A failed complete list cannot erase individually observed summaries.
+        liveSessionIDs = Set(liveUpdates.keys)
+    }
+
     func admits(_ admission: LoadAdmission, key: SessionCatalogLoadKey? = nil) -> Bool {
         admission.generation == loadGeneration
             && (key == nil || admission.key == key)

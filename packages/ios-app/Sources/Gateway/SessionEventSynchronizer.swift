@@ -68,6 +68,7 @@ final class SessionSynchronizationCoordinator {
         fileprivate let outcome: SharedOutcome
 
         func sharedValue() async -> Bool { await outcome.value() }
+        func sameOwner(as other: Lease) -> Bool { sessionID == other.sessionID && token == other.token }
     }
 
     private struct Synchronization {

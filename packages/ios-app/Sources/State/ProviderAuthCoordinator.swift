@@ -247,6 +247,16 @@ final class ProviderAuthCoordinator {
     private var quarantinedPresentationByOperation: [String: QuarantinedPresentation] = [:]
     private var quarantinedOperationOrder: [String] = []
     private var profileGeneration = 0
+    private struct PreparedCompletion {
+        let completion: AuthCompletion
+        let profileGeneration: Int
+        let presentationGeneration: Int
+        let wasActive: Bool
+        let target: ProviderCatalogTarget?
+    }
+    private var pendingCompletionRefresh: PreparedCompletion?
+    private var completionRefreshTask: Task<Void, Never>?
+    private var completionRefreshGeneration = 0
 
     private(set) var invalidationGeneration = 0
     private(set) var prompt: ProviderAuthPromptState?
@@ -617,6 +627,35 @@ final class ProviderAuthCoordinator {
         }
     }
 
+    /// Commit exact terminal ownership before returning to global intake. Only
+    /// the optional catalog refresh is deferred, with one worker and one latest
+    /// pending active presentation; repeated/unowned events cannot queue tasks.
+    func dispatchCompletion(_ payload: JSONValue) {
+        guard let completion = parseCompletion(payload) else { return }
+        guard activeAuthOperationID == completion.operationID
+                || targetByAuthOperation[completion.operationID] != nil else {
+            if !inFlightAuthBeginGenerations.isEmpty { quarantine(completion: completion) }
+            return
+        }
+        let prepared = prepareCompletion(completion)
+        invalidationGeneration &+= 1
+        if prepared.wasActive || pendingCompletionRefresh == nil {
+            pendingCompletionRefresh = prepared
+        }
+        guard completionRefreshTask == nil else { return }
+        completionRefreshGeneration &+= 1
+        let generation = completionRefreshGeneration
+        completionRefreshTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { if self.completionRefreshGeneration == generation { self.completionRefreshTask = nil } }
+            while !Task.isCancelled, self.completionRefreshGeneration == generation,
+                  let pending = self.pendingCompletionRefresh {
+                self.pendingCompletionRefresh = nil
+                await self.finishCompletion(pending)
+            }
+        }
+    }
+
     func handleCompletion(_ payload: JSONValue) async {
         // AuthBroker starts login before the async request dispatcher flushes
         // auth.begin. An already-resolved login can therefore complete first.
@@ -645,6 +684,10 @@ final class ProviderAuthCoordinator {
     }
 
     private func revokeConnectionOwnership(clearCatalogs: Bool, preserveActiveAuth: Bool) {
+        completionRefreshGeneration &+= 1
+        completionRefreshTask?.cancel()
+        completionRefreshTask = nil
+        pendingCompletionRefresh = nil
         profileGeneration &+= 1
         invalidationGeneration &+= 1
         authBeginGeneration &+= 1
@@ -763,6 +806,10 @@ final class ProviderAuthCoordinator {
     }
 
     private func processCompletion(_ completion: AuthCompletion) async {
+        await finishCompletion(prepareCompletion(completion))
+    }
+
+    private func prepareCompletion(_ completion: AuthCompletion) -> PreparedCompletion {
         let admittedProfileGeneration = profileGeneration
         let admittedPresentationGeneration = authPresentationGeneration
         let wasActiveOperation = activeAuthOperationID == completion.operationID
@@ -776,14 +823,18 @@ final class ProviderAuthCoordinator {
             submittingBrowserCallbackOperationID = nil
         }
         let target = targetByAuthOperation.removeValue(forKey: completion.operationID)
-        if let target {
-            _ = await refreshCatalog(target: target)
-        }
-        guard wasActiveOperation,
-              profileGeneration == admittedProfileGeneration,
-              authPresentationGeneration == admittedPresentationGeneration else { return }
-        if completion.success == false {
-            delegate?.providerAuthCoordinatorSetCompletionError(completion.error)
+        return PreparedCompletion(completion: completion, profileGeneration: admittedProfileGeneration,
+                                  presentationGeneration: admittedPresentationGeneration, wasActive: wasActiveOperation, target: target)
+    }
+
+    private func finishCompletion(_ prepared: PreparedCompletion) async {
+        guard !Task.isCancelled, profileGeneration == prepared.profileGeneration else { return }
+        if let target = prepared.target { _ = await refreshCatalog(target: target) }
+        guard !Task.isCancelled, prepared.wasActive,
+              profileGeneration == prepared.profileGeneration,
+              authPresentationGeneration == prepared.presentationGeneration else { return }
+        if prepared.completion.success == false {
+            delegate?.providerAuthCoordinatorSetCompletionError(prepared.completion.error)
         }
     }
 
@@ -868,7 +919,7 @@ final class ProviderAuthCoordinator {
     }
 
     private func admits(_ admission: CatalogAdmission) -> Bool {
-        profileGeneration == admission.profileGeneration
+        !Task.isCancelled && profileGeneration == admission.profileGeneration
             && loadGenerationByTarget[admission.target] == admission.targetGeneration
     }
 

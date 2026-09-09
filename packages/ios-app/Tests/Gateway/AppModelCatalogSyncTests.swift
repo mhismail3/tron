@@ -5,6 +5,45 @@ import Testing
 @MainActor
 @Suite("Dashboard catalog synchronization", .serialized)
 struct AppModelCatalogSyncTests {
+    @Test("catalog invalidations and manual refresh stop after three application failures")
+    func catalogFailureAdmissionClosesEveryEntrypoint() async throws {
+        let clock = ManualClock()
+        try await withHarness(manualClock: clock) { harness in
+            for index in 0..<3 {
+                let loading = Task { await harness.model.refreshSessions() }
+                let request = try await request(harness.socket, index: index + 1)
+                await harness.socket.enqueue(errorResponse(id: request.id, code: "invalid_dashboard_catalog"))
+                #expect(await loading.value == .retained)
+                if index < 2 {
+                    let delay: Duration = index == 0 ? .seconds(2) : .seconds(4)
+                    try await clock.waitUntilSleeping(count: 1, duration: delay)
+                    clock.advance(by: delay)
+                }
+            }
+            let sentAfterFailures = (await harness.socket.sentFrames()).count
+            for _ in 0..<5 {
+                #expect(await harness.model.refreshSessions() == .retained)
+                await harness.model.handle(GatewayEvent(
+                    type: "event", topic: "session.listChanged", sessionId: nil,
+                    payload: .object([:])
+                ))
+            }
+            await Task.yield()
+            #expect((await harness.socket.sentFrames()).count == sentAfterFailures)
+            let notice = try #require(harness.model.visibleNotices.first { $0.replacement?.key == .sessionCatalogCatchUp })
+            #expect(notice.actions.map(\.title) == ["Retry Session List"])
+            let connection = await harness.client.activeConnectionID()
+            let retry = Task { await harness.model.retrySessionCatalog() }
+            defer { retry.cancel() }
+            let retried = try await request(harness.socket, index: sentAfterFailures)
+            await harness.socket.enqueue(response(id: retried.id, sessions: [summary(id: "fresh", revision: 1)], listRevision: 1))
+            #expect(await retry.value == .published)
+            #expect(harness.model.sessions.map(\.id) == ["fresh"])
+            #expect(await harness.client.activeConnectionID() == connection)
+            #expect(!harness.model.visibleNotices.contains { $0.replacement?.key == .sessionCatalogCatchUp })
+        }
+    }
+
     @Test("known summary overlays synchronously without scheduling a catalog reload")
     func knownSummaryNeedsNoReload() async throws {
         try await withHarness { harness in
@@ -207,9 +246,11 @@ struct AppModelCatalogSyncTests {
         let reconciliation = model.becameActive()
         let catalog = try await request(socket, index: 1)
         #expect(catalog.method == "session.list")
-        #expect(model.isReconcilingForeground)
-        #expect(model.foregroundReconciliationGeneration == foregroundBaseline)
-        #expect(model.diagnosticsReadinessGeneration == baseline)
+        // Mounted authority is complete before optional catalog convergence;
+        // the catalog request remains owned and fenced in the background.
+        #expect(!model.isReconcilingForeground)
+        #expect(model.foregroundReconciliationGeneration == foregroundBaseline + 1)
+        #expect(model.diagnosticsReadinessGeneration == baseline + 1)
         await socket.enqueue(response(id: catalog.id, sessions: [], listRevision: 1))
         await reconciliation?.value
 
@@ -255,12 +296,17 @@ struct AppModelCatalogSyncTests {
 
     private func withHarness(
         sockets: [ScriptedGatewaySocket] = [ScriptedGatewaySocket()],
+        manualClock: ManualClock? = nil,
         operation: @escaping @MainActor @Sendable (Harness) async throws -> Void
     ) async throws {
         let socket = try #require(sockets.first)
         let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: sockets).factory)
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
-        let model = AppModel(client: client, cache: SnapshotCache(root: root))
+        let model = AppModel(
+            client: client,
+            cache: SnapshotCache(root: root),
+            clock: manualClock?.clock ?? .continuous
+        )
         let profile = GatewayProfile(
             id: "profile", label: "Mac", host: "gateway.test", port: 9_847,
             machineId: "machine", deviceId: "device"

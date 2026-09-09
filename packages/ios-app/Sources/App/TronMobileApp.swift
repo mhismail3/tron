@@ -6,10 +6,13 @@ private final class GatewayPathDiagnosticsObserver {
     private let monitor = NWPathMonitor()
     private let delivery = GatewayPathDiagnosticCoalescer()
     private let record: @MainActor @Sendable (String) -> Void
+    private let pathHint: @MainActor @Sendable (Bool) -> Void
 
     init(model: AppModel) {
         record = { [weak model] in model?.lifecycleRecordDiagnostic(event: "path.changed", message: $0) }
-        monitor.pathUpdateHandler = { [delivery, record] path in
+        pathHint = { [weak model] satisfied in model?.lifecycleNotePathHint(satisfied: satisfied) }
+        monitor.pathUpdateHandler = { [delivery, record, pathHint] path in
+            Task { @MainActor in pathHint(path.status == .satisfied) }
             Self.offer(Self.facts(path), delivery: delivery, record: record)
         }
         monitor.start(queue: DispatchQueue(label: "tron.gateway.path-monitor"))
@@ -17,7 +20,10 @@ private final class GatewayPathDiagnosticsObserver {
 
     func setSceneActive(_ active: Bool) {
         delivery.setActive(active)
-        if active { Self.offer(Self.facts(monitor.currentPath), delivery: delivery, record: record) }
+        if active {
+            pathHint(monitor.currentPath.status == .satisfied)
+            Self.offer(Self.facts(monitor.currentPath), delivery: delivery, record: record)
+        }
     }
 
     private nonisolated static func offer(

@@ -447,17 +447,28 @@ export class DisplayArtifactStore {
       );
     }
     const path = join(this.artifactDirectory, id, "content");
-    await this.verify(metadata.digest, metadata.size, path);
-    const handle = await open(path, "r");
+    // Reserve before validation/open yields; otherwise concurrent acquisitions
+    // all pass the same cap and revocation can remove a file being admitted.
+    this.activeReaders += 1;
+    this.activeReaderCounts.set(id, (this.activeReaderCounts.get(id) ?? 0) + 1);
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
+    let released = false;
+    const release = async (): Promise<void> => {
+      if (released) return;
+      released = true;
+      await handle?.close().catch(() => {});
+      this.activeReaders -= 1;
+      const count = this.activeReaderCounts.get(id)! - 1;
+      if (count === 0) this.activeReaderCounts.delete(id); else this.activeReaderCounts.set(id, count);
+    };
     try {
+      await this.verify(metadata.digest, metadata.size, path);
+      handle = await open(path, "r");
       const info = await handle.stat();
       if (!info.isFile() || info.size !== metadata.size) throw new GatewayError("not_found", "Display artifact is unavailable");
-      this.activeReaders += 1;
-      this.activeReaderCounts.set(id, (this.activeReaderCounts.get(id) ?? 0) + 1);
       // Share FileHandle's close ownership, including unread conditional GETs.
       // A raw numeric fd lets stream.destroy() race handle.close() with EBADF.
       const stream: ReadStream = handle.createReadStream({ autoClose: false, start, end });
-      let released = false;
       return {
         mimeType: metadata.mimeType,
         size: end - start + 1,
@@ -466,17 +477,12 @@ export class DisplayArtifactStore {
         rangeEnd: end,
         stream,
         release: async () => {
-          if (released) return;
-          released = true;
           stream.destroy();
-          await handle.close().catch(() => {});
-          this.activeReaders = Math.max(0, this.activeReaders - 1);
-          const count = Math.max(0, (this.activeReaderCounts.get(id) ?? 1) - 1);
-          if (count === 0) this.activeReaderCounts.delete(id); else this.activeReaderCounts.set(id, count);
+          await release();
         },
       };
     } catch (error) {
-      await handle.close().catch(() => {});
+      await release();
       throw error;
     }
   }

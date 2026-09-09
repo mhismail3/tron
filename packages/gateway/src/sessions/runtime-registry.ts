@@ -28,6 +28,7 @@ import {
   type SessionPresentationPresenceProjection,
 } from "./session-presentation-presence.js";
 import { AsyncMutex } from "../util/async-mutex.js";
+import { abortableRead } from "../util/abortable-read.js";
 import type { TrustService } from "../admin/trust-service.js";
 import { BlobStore } from "./blob-store.js";
 import {
@@ -3556,12 +3557,12 @@ export class RuntimeRegistry {
     return this.blobs.registerData(data, mimeType);
   }
 
-  async acquireBlob(id: string, range?: import("./blob-store.js").BlobByteRange) {
+  async acquireBlob(id: string, range?: import("./blob-store.js").BlobByteRange, signal?: AbortSignal) {
     try {
-      return await this.blobs.acquire(id, range);
+      return await this.blobs.acquire(id, range, signal);
     } catch (error) {
       if (!(error instanceof GatewayError) || error.code !== "not_found") throw error;
-      return this.exports.acquire(id, range);
+      return this.exports.acquire(id, range, signal);
     }
   }
 
@@ -3585,13 +3586,15 @@ export class RuntimeRegistry {
     sessionID: string,
     artifactID: string,
     requestedRange?: import("./blob-store.js").BlobByteRange,
+    signal?: AbortSignal,
   ) {
-    return this.displayArtifactLane.run(async () => {
+    return abortableRead(signal, () => this.displayArtifactLane.run(async () => {
       if (this.deletingSessionIds.has(sessionID)
         || !await this.authorizeDisplayArtifact(sessionID, artifactID)) {
         throw new GatewayError("not_found", "Display artifact is unavailable");
       }
+      signal?.throwIfAborted();
       return this.displayArtifacts.acquire(artifactID, sessionID, requestedRange);
-    });
+    }, signal), lease => lease.release());
   }
 }
