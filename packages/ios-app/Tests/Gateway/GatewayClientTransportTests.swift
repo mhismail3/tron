@@ -897,7 +897,9 @@ struct GatewayClientTransportTests {
                 await predecessor.enqueue(helloFrame())
                 _ = try await client.connectForLifecycle(profile: profile, token: "token")
                 await socket.enqueue(helloFrame())
-                let connection = try await client.reconnectForLifecycle(activateEvents: true, attemptID: "fixture-attempt")
+                let connection = try await client.reconnectForLifecycle(
+                    profile: profile, token: "token", activateEvents: true, attemptID: "fixture-attempt"
+                )
                 try await clock.waitUntilSleeping(count: 1, duration: .seconds(10))
                 var events = client.events.makeAsyncIterator()
                 clock.advance(by: .seconds(10))

@@ -577,6 +577,7 @@ final class DashboardGatewayConnectionPool {
                 }
                 do {
                     let identity = try await entry.client.reconnectForLifecycle(
+                        profile: entry.profile, token: entry.token,
                         activateEvents: true,
                         attemptID: loopID
                     )

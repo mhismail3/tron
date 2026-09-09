@@ -851,17 +851,19 @@ actor GatewayClient {
     }
 
     func reconnect() async throws -> GatewayInfo {
-        try await reconnectForLifecycle(activateEvents: true).info
-    }
-
-    func reconnectForLifecycle(
-        activateEvents: Bool = false,
-        attemptID: String? = nil
-    ) async throws -> GatewayConnectionIdentity {
         guard let profile, let token else {
             throw GatewayFailure(code: "not_paired", message: "No paired gateway is selected.", retryable: false, details: nil)
         }
-        return try await establish(
+        return try await reconnectForLifecycle(profile: profile, token: token, activateEvents: true).info
+    }
+
+    func reconnectForLifecycle(
+        profile: GatewayProfile,
+        token: String,
+        activateEvents: Bool = false,
+        attemptID: String? = nil
+    ) async throws -> GatewayConnectionIdentity {
+        try await establish(
             profile: profile,
             token: token,
             activateEvents: activateEvents,

@@ -3681,7 +3681,9 @@ final class AppModel {
         admission: GatewayLifecycleCoordinator.Admission
     ) async {
         let value = await cache.load(profileID: profileID)
-        guard admitsLifecycle(admission), profiles.selected?.id == profileID else { return }
+        // Background can cancel startup without changing the profile generation;
+        // its late disk read must not replace the resumed authoritative catalog.
+        guard !Task.isCancelled, admitsLifecycle(admission), profiles.selected?.id == profileID else { return }
         sessionCatalog.installCached(value.sessions)
         reconcileSelection()
         installSelectedDashboardCatalog()

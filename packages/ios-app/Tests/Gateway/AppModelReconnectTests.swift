@@ -54,7 +54,10 @@ struct AppModelReconnectTests {
             profileTokenLookup: { _ in nil }
         )
 
+        coordinator.notePathHint(satisfied: true)
+        await coordinator.becameActive()?.value
         await coordinator.start()
+        coordinator.notePathHint(satisfied: true)
         #expect(coordinator.connectionState == .unpaired)
         #expect(coordinator.hasResolvedLaunchState)
         #expect(factory.requests.isEmpty)
@@ -66,6 +69,163 @@ struct AppModelReconnectTests {
 
         await coordinator.teardown()
         await client.close()
+    }
+
+    @Test("a path callback before cold startup cannot consume recovery or bypass cached-profile admission")
+    func pathHintBeforeStartup() async throws {
+        try await withStartupCoordinator { coordinator, projection, factory, budget, _ in
+            // Production starts NWPathMonitor before the root task, and sends
+            // another path hint before awaiting notification badge cleanup.
+            coordinator.notePathHint(satisfied: true)
+            await coordinator.becameActive()?.value
+            #expect(budget["gateway"]?.automaticAttempts ?? 0 == 0)
+            #expect(budget["gateway"]?.firstFailureCode == nil)
+
+            await coordinator.start()
+
+            #expect(coordinator.connectionState == .connected)
+            #expect(coordinator.hasResolvedLaunchState)
+            #expect(factory.requests.count == 1)
+            #expect(projection.cacheLoads == 1)
+            #expect(projection.refreshCount == 1)
+            #expect(projection.failures.isEmpty)
+        }
+    }
+
+    @Test("cold AppModel startup loads authoritative sessions after an early path callback without manual Retry")
+    func coldStartupLoadsSessions() async throws {
+        try await withFixture(sockets: [ScriptedGatewaySocket()], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
+            let socket = fixture.sockets[0]
+            await socket.enqueue(helloFrame())
+            fixture.model.lifecycleNotePathHint(satisfied: true)
+            await fixture.model.becameActive()?.value
+            let start = Task { await fixture.model.start() }
+            defer { start.cancel() }
+            // Startup obtains the catalog before scheduling optional reads.
+            // Leave those reads pending: they must not block session loading.
+            try await socket.waitUntilSent(count: 2)
+            let requests = try await socket.sentFrames().dropFirst().map(requestFrame)
+            let catalog = try #require(requests.first { $0.method == "session.list" })
+            let sessions = try JSONDecoder.gateway.decode(
+                JSONValue.self, from: JSONEncoder.gateway.encode([startupSummary("loaded")])
+            )
+            await socket.enqueue(successResponse(id: catalog.id, result: .object([
+                "sessions": sessions, "nextCursor": .null, "listRevision": .number(1)
+            ])))
+            await start.value
+            #expect(fixture.model.sessions.map(\.id) == ["loaded"])
+            #expect(fixture.model.connectionState == .connected)
+            #expect(fixture.model.visibleNotices.isEmpty)
+            #expect(fixture.socketFactory.requests.count == 1)
+        }
+    }
+
+    @Test("a canceled startup cache read cannot replace the foreground session catalog")
+    func canceledStartupCacheCannotPublish() async throws {
+        try await withFixture(sockets: [ScriptedGatewaySocket()], clock: ManualClock(), units: SequenceReconnectUnits([])) { fixture in
+            let cache = SnapshotCache(root: fixture.cacheRoot)
+            await cache.save(profileID: "gateway", sessions: [startupSummary("cached")])
+            let admission = GatewayLifecycleCoordinator.Admission(generation: 0, connectionID: nil)
+            await fixture.model.lifecycleLoadCache(profileID: "gateway", admission: admission)
+            #expect(fixture.model.sessions.map(\.id) == ["cached"])
+            fixture.model.sessions = [startupSummary("current")]
+            let read = Task {
+                await fixture.model.lifecycleLoadCache(profileID: "gateway", admission: admission)
+            }
+            read.cancel()
+            await read.value
+            #expect(fixture.model.sessions.map(\.id) == ["current"])
+        }
+    }
+
+    @Test("path and foreground callbacks cannot steal startup or a profile switch during cache loading",
+          arguments: [false, true])
+    func pathHintDuringStartupCache(switching: Bool) async throws {
+        let gate = TestReadGate()
+        try await withStartupCoordinator(cacheGate: gate) { coordinator, projection, factory, budget, _ in
+            let target = switching ? coordinator.profiles.profiles[1] : coordinator.profiles.selected!
+            let start = Task {
+                if switching { await coordinator.switchGateway(target) }
+                else { await coordinator.start() }
+            }
+            do {
+                try await gate.waitForEntry()
+                let attemptsBeforeHint = budget[target.id]?.automaticAttempts ?? 0
+                coordinator.notePathHint(satisfied: true)
+                await coordinator.becameActive()?.value
+                #expect(factory.requests.isEmpty)
+                #expect(budget[target.id]?.automaticAttempts ?? 0 == attemptsBeforeHint)
+                #expect(budget[target.id]?.firstFailureCode == nil)
+            } catch {
+                await gate.release()
+                await start.value
+                throw error
+            }
+            await gate.release()
+            await start.value
+            #expect(coordinator.connectionState == .connected)
+            #expect(factory.requests.count == 1)
+            #expect(projection.cacheLoads == 1)
+            #expect(factory.requests.first?.url?.host == target.host)
+            #expect(factory.requests.first?.value(forHTTPHeaderField: "Authorization") == "Bearer token-for-\(target.id)")
+        }
+    }
+
+    @Test("a repeated start preserves the existing admission instead of loading cache and connecting twice")
+    func repeatedStartDuringCache() async throws {
+        let gate = TestReadGate()
+        try await withStartupCoordinator(cacheGate: gate) { coordinator, projection, factory, _, _ in
+            let first = Task { await coordinator.start() }
+            do {
+                try await gate.waitForEntry()
+                try await withTestWatchdog(timeout: .seconds(1)) {
+                    await withTaskCancellationHandler {
+                        await coordinator.start()
+                    } onCancel: {
+                        Task { await gate.release() }
+                    }
+                }
+                #expect(projection.cacheLoads == 1)
+                #expect(factory.requests.isEmpty)
+            } catch {
+                await gate.release()
+                await first.value
+                throw error
+            }
+            await gate.release()
+            await first.value
+            #expect(coordinator.connectionState == .connected)
+            #expect(factory.requests.count == 1)
+        }
+    }
+
+    @Test("background before the first hello resumes the selected profile and fences late cache completion")
+    func backgroundDuringStartupCache() async throws {
+        let gate = TestReadGate()
+        try await withStartupCoordinator(cacheGate: gate) { coordinator, projection, factory, budget, socket in
+            let start = Task { await coordinator.start() }
+            do {
+                try await gate.waitForEntry()
+                coordinator.enteredBackground()
+                await coordinator.becameActive()?.value // Join exact retirement.
+                await coordinator.becameActive()?.value // Join its replacement.
+                #expect(coordinator.connectionState == .connected)
+                #expect(coordinator.hasResolvedLaunchState)
+                #expect(factory.requests.count == 1)
+                #expect(factory.requests.first?.value(forHTTPHeaderField: "Authorization") == "Bearer token-for-gateway")
+                #expect(budget["gateway"]?.firstFailureCode == nil)
+                #expect(projection.refreshCount == 1)
+            } catch {
+                await gate.release()
+                await start.value
+                throw error
+            }
+            await gate.release()
+            await start.value
+            #expect(coordinator.connectionState == .connected)
+            #expect(factory.requests.count == 1)
+            #expect(await socket.closeInvocationCount() == 0)
+        }
     }
 
     @Test("path return during initial hello cannot start a second socket")
@@ -777,6 +937,14 @@ struct AppModelReconnectTests {
         }
     }
 
+    private func startupSummary(_ id: String) -> SessionSummary {
+        SessionSummary(
+            id: id, name: id, cwd: "/workspace", parentSessionId: nil,
+            createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
+            messageCount: 0, firstMessage: id, phase: .idle, summaryRevision: 1
+        )
+    }
+
     private func helloFrame(
         runtimeEpoch: String? = nil,
         machineID: String = "machine",
@@ -822,6 +990,49 @@ struct AppModelReconnectTests {
             retryable: true,
             details: nil
         ))
+    }
+
+    private func withStartupCoordinator(
+        cacheGate: TestReadGate? = nil,
+        operation: @escaping @MainActor @Sendable (
+            GatewayLifecycleCoordinator, NoopGatewayLifecycleProjection,
+            ScriptedGatewaySocketFactory, GatewayRecoveryAllowanceStore, ScriptedGatewaySocket
+        ) async throws -> Void
+    ) async throws {
+        let suiteName = "GatewayColdStartupTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let profile = GatewayProfile(id: "gateway", label: "Mac", host: "gateway.test", port: 9_847,
+                                     machineId: "machine", deviceId: "device")
+        defaults.set(profile.id, forKey: "selectedGateway.v1")
+        let replacement = GatewayProfile(
+            id: "replacement", label: "Replacement", host: "replacement.gateway.test", port: 9_847,
+            machineId: "replacement-machine", deviceId: "replacement-device"
+        )
+        defaults.set(try JSONEncoder.gateway.encode([profile, replacement]), forKey: "gatewayProfiles.v1")
+        let socket = ScriptedGatewaySocket()
+        await socket.enqueue(helloFrame())
+        let factory = ScriptedGatewaySocketFactory(socket: socket)
+        let client = GatewayClient(socketFactory: factory.factory)
+        let budget = GatewayRecoveryAllowanceStore()
+        let projection = NoopGatewayLifecycleProjection(cacheGate: cacheGate)
+        let coordinator = GatewayLifecycleCoordinator(
+            client: client, profiles: GatewayProfileStore(defaults: defaults), clock: .continuous,
+            reconnectDelayPolicy: .standard, uuidSource: .random, pairer: GatewayPairer(),
+            pairingCommit: { _, _ in }, profileTokenLookup: { "token-for-\($0.id)" }, recoveryBudgets: budget
+        )
+        coordinator.delegate = projection
+        do {
+            try await withTestWatchdog {
+                try await operation(coordinator, projection, factory, budget, socket)
+            }
+        } catch {
+            await cacheGate?.release()
+            await coordinator.teardown()
+            throw error
+        }
+        await cacheGate?.release()
+        await coordinator.teardown()
     }
 
     private func withFixture(
@@ -887,8 +1098,17 @@ struct AppModelReconnectTests {
 @MainActor
 private final class NoopGatewayLifecycleProjection: GatewayLifecycleProjectionDelegate {
     private(set) var aggregateCompletions: [Bool] = []
+    private(set) var cacheLoads = 0
+    private(set) var refreshCount = 0
+    private(set) var failures: [String] = []
+    private let cacheGate: TestReadGate?
 
-    func lifecycleLoadCache(profileID: String, admission: GatewayLifecycleCoordinator.Admission) async {}
+    init(cacheGate: TestReadGate? = nil) { self.cacheGate = cacheGate }
+
+    func lifecycleLoadCache(profileID: String, admission: GatewayLifecycleCoordinator.Admission) async {
+        cacheLoads += 1
+        await cacheGate?.wait()
+    }
     func lifecycleInvalidateSessionConnectionOwnership() {}
     func lifecycleBeginReconciliationAggregate(admission: GatewayLifecycleCoordinator.Admission) {}
     func lifecycleCompleteReconciliationAggregate(
@@ -897,12 +1117,12 @@ private final class NoopGatewayLifecycleProjection: GatewayLifecycleProjectionDe
     ) {
         aggregateCompletions.append(succeeded)
     }
-    func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {}
+    func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async { refreshCount += 1 }
     func lifecycleRestoreMountedPresentation(admission: GatewayLifecycleCoordinator.Admission) async -> Bool { true }
     func lifecycleReattachTerminals(admission: GatewayLifecycleCoordinator.Admission) async {}
     func lifecycleReconcileForeground(admission: GatewayLifecycleCoordinator.Admission) async throws {}
     func lifecycleRetireProjection(final: Bool) async {}
-    func lifecycleSurface(_ error: Error) {}
+    func lifecycleSurface(_ error: Error) { failures.append(error.localizedDescription) }
 }
 
 @MainActor

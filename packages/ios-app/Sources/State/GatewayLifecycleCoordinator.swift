@@ -206,20 +206,10 @@ final class GatewayLifecycleCoordinator {
             hasResolvedLaunchState = true
             return
         }
-        let admission = Admission(generation: phase.generation, connectionID: nil)
-        await delegate?.lifecycleLoadCache(profileID: profile.id, admission: admission)
-        guard admits(admission) else { return }
-        connectionAdmissionGeneration &+= 1
-        let admissionGeneration = connectionAdmissionGeneration
-        let task = Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.connect(profile: profile, token: token, admission: admission)
-        }
-        connectionAdmissionTask = task
-        await task.value
-        if connectionAdmissionGeneration == admissionGeneration { connectionAdmissionTask = nil }
-        guard admitsGeneration(admission.generation) else { return }
-        hasResolvedLaunchState = true
+        await loadCacheAndConnect(
+            profile: profile, token: token,
+            admission: Admission(generation: phase.generation, connectionID: nil)
+        )
     }
 
     @discardableResult
@@ -244,6 +234,7 @@ final class GatewayLifecycleCoordinator {
                 self.requestReconnect(immediate: true, replaceExisting: true)
             }
         }
+        guard connectionAdmissionTask == nil, committedConnectionTask == nil else { return nil }
         guard connectionState == .connected else {
             switch connectionState {
             case .offline, .reconnecting, .restarting:
@@ -403,10 +394,11 @@ final class GatewayLifecycleCoordinator {
             return
         }
         finishTransition(generation)
-        let admission = Admission(generation: generation, connectionID: nil)
-        await delegate?.lifecycleLoadCache(profileID: profile.id, admission: admission)
-        guard admits(admission) else { return }
-        await connect(profile: profile, token: token, admission: admission, awaitProjection: false)
+        await loadCacheAndConnect(
+            profile: profile, token: token,
+            admission: Admission(generation: generation, connectionID: nil),
+            awaitProjection: false
+        )
     }
 
     @discardableResult
@@ -531,12 +523,18 @@ final class GatewayLifecycleCoordinator {
     /// revive a parked episode even when the missed callback left no task.
     func notePathHint(satisfied: Bool) {
         guard phase.admitsWork, !sceneIsBackgrounded,
-              connectionAdmissionTask == nil, committedConnectionTask == nil,
               let profileID = selectedProfileID else { return }
         var budget = recoveryBudgets[profileID, default: GatewayRecoveryBudget()]
         budget.notePathHint(satisfied: satisfied, at: clock.now())
         recoveryBudgets[profileID] = budget
-        guard satisfied, connectionState != .connected else { return }
+        guard satisfied, connectionAdmissionTask == nil, committedConnectionTask == nil else { return }
+        // NWPathMonitor can deliver before startup or pairing. A path hint may
+        // revive recovery, but cannot bypass initial profile/cache admission or
+        // turn an unpaired/unauthorized selection into a transport failure.
+        switch connectionState {
+        case .offline, .reconnecting, .restarting: break
+        case .unpaired, .unauthorized, .connecting, .connected: return
+        }
         if reconnectTask != nil, reconnectCanBeAccelerated {
             cancelReconnect()
         }
@@ -835,6 +833,35 @@ final class GatewayLifecycleCoordinator {
         phase = .active(generation)
     }
 
+    private func loadCacheAndConnect(
+        profile: GatewayProfile,
+        token: String,
+        admission: Admission,
+        awaitProjection: Bool = true
+    ) async {
+        guard admits(admission), connectionAdmissionTask == nil else { return }
+        connectionAdmissionGeneration &+= 1
+        let admissionGeneration = connectionAdmissionGeneration
+        // Claim the whole operation before cache I/O yields. Startup, path,
+        // foreground, and profile-switch work must not create a peer hello.
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.delegate?.lifecycleLoadCache(profileID: profile.id, admission: admission)
+            guard !Task.isCancelled, self.admits(admission),
+                  self.connectionAdmissionGeneration == admissionGeneration else { return }
+            await self.connect(
+                profile: profile, token: token, admission: admission,
+                awaitProjection: awaitProjection
+            )
+        }
+        connectionAdmissionTask = task
+        await task.value
+        guard connectionAdmissionGeneration == admissionGeneration else { return }
+        connectionAdmissionTask = nil
+        guard admitsGeneration(admission.generation) else { return }
+        hasResolvedLaunchState = true
+    }
+
     private func connect(
         profile: GatewayProfile,
         token: String,
@@ -1095,7 +1122,14 @@ final class GatewayLifecycleCoordinator {
                     )
                     var establishedConnectionID: Int?
                     var reconciliationAggregateAdmission: Admission?
-                    guard let profileID = self.selectedProfileID else { return }
+                    guard let profile = self.profiles.selected,
+                          let token = self.profileTokenLookup(profile) else {
+                        self.connectionState = .unpaired
+                        self.hasResolvedLaunchState = true
+                        self.finishReconnect(lifecycleGeneration: lifecycleGeneration, attemptGeneration: attemptGeneration)
+                        return
+                    }
+                    let profileID = profile.id
                     if !self.restartRequested { self.recoveryBudgets[profileID]?.resumeRecovery(at: clock.now()) }
                     guard self.restartRequested || self.recoveryBudgets[profileID, default: GatewayRecoveryBudget()].beginAutomaticAttempt() else {
                         self.stopAutomaticRecovery(profileID: profileID)
@@ -1106,7 +1140,12 @@ final class GatewayLifecycleCoordinator {
                         return
                     }
                     do {
-                        let connection = try await self.client.reconnectForLifecycle(attemptID: loopID)
+                        // Background may retire startup before its first hello
+                        // configured the client. The lifecycle's selected profile
+                        // owns replacement credentials, not a predecessor socket.
+                        let connection = try await self.client.reconnectForLifecycle(
+                            profile: profile, token: token, attemptID: loopID
+                        )
                         establishedConnectionID = connection.id
                         try self.requireReconnect(
                             lifecycleGeneration: lifecycleGeneration,
@@ -1145,6 +1184,7 @@ final class GatewayLifecycleCoordinator {
                         self.restartRequested = false
                         self.maintenanceIntent = false
                         self.connectionState = .connected
+                        self.hasResolvedLaunchState = true
                         self.delegate?.lifecycleRecordDiagnostic(event: "reconnect.connected",
                             message: "attempt=\(attemptGeneration) loop=\(loopID) retry=\(retry) connectionID=\(connection.id) handshakeMs=\(diagnosticMilliseconds(startedAt.duration(to: clock.now())))")
                         reconciliationAggregateAdmission = admission
