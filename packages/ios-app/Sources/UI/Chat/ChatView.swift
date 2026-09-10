@@ -19,6 +19,8 @@ struct ChatView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.tronPresentationActivityCoordinator) private var presentationCoordinator
+    @Environment(\.tronPresentationSurfaceToken) private var presentationSurfaceToken
     @State private var sessionPresentation: ChatSessionPresentation
     @State private var composerScope: ComposerDraftScope?
     @State private var initialModelSettled = true
@@ -37,7 +39,9 @@ struct ChatView: View {
     @State private var composerResponder = ChatComposerResponder()
     @State private var keyboardObserver = ChatKeyboardObserver()
     @State private var layoutTransaction = ChatLayoutTransaction()
-    @State private var composerResourceCatalog = ComposerResourceCatalog(commands: [])
+    @State private var installedComposerResourceCatalog: (
+        source: ComposerResourceCatalogIdentity, catalog: ComposerResourceCatalog
+    )?
     @State private var composerResourcePicker: ComposerResourcePickerSource?
     @State private var composerResourceResults: [ComposerResourceEntry] = []
     /// The exact installed frame from before a descendant began consuming live
@@ -217,13 +221,24 @@ struct ChatView: View {
                   commit?.items.contains(where: { $0.id == editor.id }) != true else { return }
             sessionPresentation.queuedMessageEditor = nil
         }
-        .task(id: composerResourceCatalogIdentity) {
+        .task(id: PresentationActivityTaskID(
+            source: composerResourceCatalogIdentity,
+            presentationActive: presentationActivity.allowsPresentationPublication && scenePhase == .active
+        )) {
+            let activity = composerCatalogActivity
+            guard !Task.isCancelled, activity.allowsPresentationPublication, scenePhase == .active else { return }
+            // Command authority continues under a sheet; only this composer's
+            // disposable index pauses, retaining its last complete value.
             let identity = composerResourceCatalogIdentity
             let ownsCatalog = identity.catalogTarget != nil
                 && identity.catalogTarget == identity.presentationTarget
             let commands = ownsCatalog
                 ? identity.commands.filter { identity.supportsSkillPrompt || $0.source != .skill }
                 : []
+            #if HOSTED_TEST
+            hostedProbe?.recordComposerCatalogBuild()
+            defer { hostedProbe?.composerCatalogDidFinish?(commands) }
+            #endif
             let build = Task.detached(priority: .userInitiated) {
                 try Task.checkCancellation()
                 let catalog = ComposerResourceCatalog(commands: commands)
@@ -240,8 +255,15 @@ struct ChatView: View {
             } catch {
                 return
             }
-            guard !Task.isCancelled else { return }
-            composerResourceCatalog = catalog
+            #if HOSTED_TEST
+            await hostedProbe?.composerCatalogWillInstall?(catalog)
+            #endif
+            guard !Task.isCancelled, activity == composerCatalogActivity, scenePhase == .active,
+                  identity == composerResourceCatalogIdentity else { return }
+            installedComposerResourceCatalog = (identity, catalog)
+            #if HOSTED_TEST
+            hostedProbe?.recordComposerCatalogInstall(catalog)
+            #endif
             if ownsCatalog, let composerScope {
                 model.composerDrafts.reconcileSelectedResource(for: composerScope, commands: commands)
             }
@@ -2104,6 +2126,10 @@ struct ChatView: View {
                 state: interactionTraceState(installed: installed)
             )
         }
+        probe.composerPickerEntries = {
+            presentedComposerResourcePicker == nil ? [] : composerResourceResults
+        }
+        probe.composerResourceSelection = { selectComposerResource($0) }
         probe.installScrollControls(
             geometry: { previous, current, viewport in
                 if viewport {
@@ -2616,8 +2642,8 @@ struct ChatView: View {
             processActivities: selectedAuthoritativeSnapshot?.processActivities,
             pendingAttachments: pendingAttachments,
             selectedResource: selectedComposerResource,
-            resourcePicker: composerResourcePicker,
-            resourceResults: composerResourceResults,
+            resourcePicker: presentedComposerResourcePicker,
+            resourceResults: presentedComposerResourcePicker == nil ? [] : composerResourceResults,
             submissionTransitionID: layoutTransaction.activeSubmissionGenerationID,
             submissionAnimation: layoutTransaction.resolvedAnimation,
             reduceMotion: reduceMotion,
@@ -2644,6 +2670,7 @@ struct ChatView: View {
             attachmentMenuState: attachmentMenuState,
             attachmentActionsEnabled: attachmentActionsEnabled,
             resourcePickerAvailable: resourcePickerAvailable,
+            commandPickerAvailable: currentComposerResourceCatalog != nil,
             glassNamespace: composerGlassNamespace,
             onProcessesTap: {
                 sessionPresentation.showProcesses = true
@@ -2790,8 +2817,26 @@ struct ChatView: View {
     }
 
     private var resourcePickerAvailable: Bool {
-        guard let presentationTarget else { return false }
-        return model.commandCatalogTarget == presentationTarget
+        supportsSkillPrompt && currentComposerResourceCatalog != nil
+    }
+
+    private var currentComposerResourceCatalog: ComposerResourceCatalog? {
+        guard let presentationTarget, model.commandCatalogTarget == presentationTarget,
+              let installed = installedComposerResourceCatalog,
+              installed.source == composerResourceCatalogIdentity else { return nil }
+        return installed.catalog
+    }
+
+    private var presentedComposerResourcePicker: ComposerResourcePickerSource? {
+        guard let picker = composerResourcePicker, currentComposerResourceCatalog != nil,
+              picker.kind != .skill || supportsSkillPrompt else { return nil }
+        return picker
+    }
+
+    private var composerCatalogActivity: PresentationSurfaceActivity {
+        // Read the retained topology owner after awaits, not only the activity
+        // value captured by the task's last SwiftUI environment update.
+        presentationCoordinator?.activity(for: presentationSurfaceToken) ?? presentationActivity
     }
 
     private var composerResourceCatalogIdentity: ComposerResourceCatalogIdentity {
@@ -2807,6 +2852,8 @@ struct ChatView: View {
         guard attachmentActionsEnabled else { return }
         if destination.isComposerResource {
             let kind: ComposerResourceEntry.Kind = destination == .skills ? .skill : .command
+            guard currentComposerResourceCatalog != nil,
+                  kind != .skill || supportsSkillPrompt else { return }
             sessionPresentation.attachmentPresentationTask?.cancel()
             sessionPresentation.queuedAttachmentDestination = nil
             sessionPresentation.attachmentPresentationTask = Task { @MainActor in
@@ -2814,9 +2861,11 @@ struct ChatView: View {
                 // inline child. The UITextView remains the responder owner.
                 do { try await Task.sleep(for: .milliseconds(100)) }
                 catch { return }
-                guard !Task.isCancelled, attachmentActionsEnabled else { return }
+                guard !Task.isCancelled, attachmentActionsEnabled,
+                      let catalog = currentComposerResourceCatalog,
+                      kind != .skill || supportsSkillPrompt else { return }
                 let picker = ComposerResourcePickerSource.menu(kind)
-                composerResourceResults = composerResourceCatalog.entries(kind: kind, query: "")
+                composerResourceResults = catalog.entries(kind: kind, query: "")
                 composerResourcePicker = picker
             }
             return
@@ -2869,6 +2918,7 @@ struct ChatView: View {
     }
 
     private func reconcileComposerResourcePicker() {
+        guard let catalog = currentComposerResourceCatalog else { return }
         if let token = ComposerSuggestionTriggerPolicy.activeToken(
             in: composerText,
             selection: composerSelection
@@ -2876,7 +2926,7 @@ struct ChatView: View {
             sessionPresentation.attachmentPresentationTask?.cancel()
             sessionPresentation.attachmentPresentationTask = nil
             if composerResourcePicker != .token(token) {
-                composerResourceResults = composerResourceCatalog.entries(kind: token.kind, query: token.query)
+                composerResourceResults = catalog.entries(kind: token.kind, query: token.query)
                 composerResourcePicker = .token(token)
             }
         } else if case .token = composerResourcePicker {
@@ -2885,7 +2935,8 @@ struct ChatView: View {
     }
 
     private func selectComposerResource(_ entry: ComposerResourceEntry) {
-        guard let composerScope else { return }
+        guard let composerScope, let catalog = currentComposerResourceCatalog,
+              catalog.entries(kind: entry.kind, query: "").contains(entry) else { return }
         switch entry.kind {
         case .skill:
             var replacement = (text: composerText, selection: composerSelection)
@@ -2900,7 +2951,7 @@ struct ChatView: View {
             replacement = ComposerCommandCompletionPolicy.removingLeadingCommand(
                 text: replacement.text,
                 selection: replacement.selection,
-                commands: composerResourceCatalog.commands
+                commands: catalog.commands
             )
             applyComposerReplacement(replacement)
             model.composerDrafts.selectResource(entry.commandInfo, for: composerScope)
@@ -2920,7 +2971,7 @@ struct ChatView: View {
                 replacement = ComposerCommandCompletionPolicy.removingLeadingCommand(
                     text: composerText,
                     selection: composerSelection,
-                    commands: composerResourceCatalog.commands
+                    commands: catalog.commands
                 )
             }
             model.composerDrafts.selectResource(entry.commandInfo, for: composerScope)

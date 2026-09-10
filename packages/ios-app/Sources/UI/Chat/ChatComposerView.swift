@@ -33,6 +33,7 @@ struct ChatComposerView: View {
     let attachmentMenuState: ChatAttachmentMenuState
     let attachmentActionsEnabled: Bool
     let resourcePickerAvailable: Bool
+    let commandPickerAvailable: Bool
     let glassNamespace: Namespace.ID
 
     let onProcessesTap: () -> Void
@@ -255,6 +256,7 @@ struct ChatComposerView: View {
             ComposerAttachmentMenuButton(
                 isEnabled: attachmentActionsEnabled,
                 showsSkills: resourcePickerAvailable,
+                commandsAvailable: commandPickerAvailable,
                 onSelect: onSelectAttachmentDestination
             )
             .frame(width: ComposerControlMetrics.hitTarget, height: ComposerControlMetrics.hitTarget)

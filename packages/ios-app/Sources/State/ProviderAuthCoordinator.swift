@@ -284,6 +284,7 @@ final class ProviderAuthCoordinator {
 
     @discardableResult
     func refreshCatalog(target: ProviderCatalogTarget) async -> Bool {
+        guard !Task.isCancelled else { return false }
         let admission = beginCatalogLoad(target: target)
         do {
             async let providerRequest: ProviderResponse = client.request(

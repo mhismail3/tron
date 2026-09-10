@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import Testing
 @testable import TronMobile
 
@@ -32,6 +33,12 @@ struct AppModelCatalogSyncTests {
             #expect((await harness.socket.sentFrames()).count == sentAfterFailures)
             let notice = try #require(harness.model.visibleNotices.first { $0.replacement?.key == .sessionCatalogCatchUp })
             #expect(notice.actions.map(\.title) == ["Retry Session List"])
+            let cancelledRetry = Task { await harness.model.retrySessionCatalog() }
+            cancelledRetry.cancel()
+            #expect(await cancelledRetry.value == .retained)
+            #expect(await harness.model.refreshSessions() == .retained)
+            #expect(await harness.socket.sentFrames().count == sentAfterFailures)
+            #expect(harness.model.visibleNotices.contains { $0.id == notice.id })
             let connection = await harness.client.activeConnectionID()
             let retry = Task { await harness.model.retrySessionCatalog() }
             defer { retry.cancel() }
@@ -227,6 +234,209 @@ struct AppModelCatalogSyncTests {
         }
     }
 
+    @Test("cancelled catalog demand cannot create a shared traversal")
+    func cancelledCatalogDemandCannotStartTraversal() async throws {
+        try await withHarness { harness in
+            let cancelled = Task { await harness.model.refreshSessions() }
+            cancelled.cancel()
+            #expect(await cancelled.value == .retained)
+            #expect(!harness.model.sessionCatalogIsLoading)
+            #expect(await harness.socket.sentFrames().count == 1)
+        }
+    }
+
+    @Test("cancelled connection-refresh admission cannot schedule reads or publish readiness")
+    func cancelledOptionalRefreshAdmission() async throws {
+        try await withHarness { harness in
+            let connectionID = try #require(await harness.client.activeConnectionID())
+            let baseline = harness.model.diagnosticsReadinessGeneration
+            let refresh = Task { @MainActor in
+                await harness.model.lifecycleRefreshAll(admission: .init(generation: 0, connectionID: connectionID))
+            }
+            refresh.cancel() // Cancel before this MainActor child can enter the delegate.
+            await refresh.value
+            #expect(harness.model.diagnosticsReadinessGeneration == baseline)
+            #expect(!harness.model.sessionCatalogIsLoading)
+            #expect(await harness.socket.sentFrames().count == 1)
+        }
+    }
+
+    @Test("background retires optional connection reads without publishing their late catalog")
+    func backgroundRetiresOptionalRefresh() async throws {
+        try await withHarness { harness in
+            harness.model.sessions = [summary(id: "retained", revision: 1)]
+            let connectionID = try #require(await harness.client.activeConnectionID())
+            await harness.model.lifecycleRefreshAll(admission: .init(generation: 0, connectionID: connectionID))
+            try await harness.socket.waitUntilSent(count: 2)
+            let requests = try await harness.socket.sentFrames().dropFirst().map {
+                try JSONDecoder.gateway.decode(Request.self, from: $0)
+            }
+            let catalog = try #require(requests.first { $0.method == "session.list" })
+            #expect(harness.model.sessionCatalogIsLoading)
+            let read = Task { await harness.model.refreshSessions() }
+            defer { read.cancel() }
+            await harness.model.enteredBackground().value
+            try await harness.socket.waitUntilClosed()
+            await harness.socket.enqueue(response(
+                id: catalog.id, sessions: [summary(id: "late", revision: 2)], listRevision: 2
+            ))
+            #expect(await read.value == .retained)
+            #expect(harness.model.sessions.map(\.id) == ["retained"])
+            #expect(!harness.model.sessionCatalogIsLoading)
+            #expect(!harness.model.diagnosticsAreReady)
+            #expect(harness.model.visibleNotices.isEmpty)
+        }
+    }
+
+    @Test("transport loss during optional catalog loading does not fan out later reads")
+    func optionalCatalogLossStopsLaterReads() async throws {
+        try await withHarness { harness in
+            let connectionID = try #require(await harness.client.activeConnectionID())
+            // Hosted connection installs only the transport. This fixture's
+            // empty profile store makes the independent inbox owner ineligible.
+            #expect(harness.model.profiles.selected == nil)
+            await harness.model.lifecycleRefreshAll(admission: .init(generation: 0, connectionID: connectionID))
+            let catalog = try await request(harness.socket, index: 1)
+            #expect(catalog.method == "session.list")
+            let loss = Task { @MainActor in
+                await harness.socket.failPendingReceivers(URLError(.networkConnectionLost))
+            }
+            #expect(await harness.model.refreshSessions() != .published)
+            await loss.value
+            try await harness.socket.waitUntilClosed()
+            #expect(await harness.client.activeConnectionID() == nil)
+            #expect(await harness.socket.sentFrames().count == 2)
+            #expect(harness.model.visibleNotices.isEmpty)
+        }
+    }
+
+    @Test("responsive foreground preserves unfinished connection refreshes", arguments: [false, true])
+    func foregroundPreservesConnectionRefresh(afterCatalog: Bool) async throws {
+        try await withHarness { harness in
+            let model = harness.model
+            let connectionID = try #require(await harness.client.activeConnectionID())
+            await model.lifecycleRefreshAll(admission: .init(generation: 0, connectionID: connectionID))
+            let catalog = try await request(harness.socket, index: 1)
+            #expect(catalog.method == "session.list")
+            var reads: [Request] = []
+            if afterCatalog {
+                await harness.socket.enqueue(response(id: catalog.id, sessions: [], listRevision: 1))
+                for index in 2..<6 { reads.append(try await request(harness.socket, index: index)) }
+            }
+            let baseline = model.foregroundReconciliationGeneration
+            await model.becameActive()?.value
+            #expect(model.foregroundReconciliationGeneration == baseline + 1)
+            #expect(!model.isReconcilingForeground)
+            #expect(model.connectionState == .connected)
+            if afterCatalog {
+                let foregroundCatalog = try await request(harness.socket, index: 6)
+                #expect(foregroundCatalog.method == "session.list")
+                await harness.socket.enqueue(response(id: foregroundCatalog.id, sessions: [], listRevision: 2))
+            } else {
+                await harness.socket.enqueue(response(id: catalog.id, sessions: [], listRevision: 1))
+                for index in 2..<6 { reads.append(try await request(harness.socket, index: index)) }
+            }
+            let settings: JSONValue = .object(["effective": .object(["theme": .string("current")])])
+            let devices = [PairedDevice(id: "current-device", name: "Phone", createdAt: "2026-09-10T00:00:00Z")]
+            for read in reads {
+                let result: JSONValue
+                switch read.method {
+                case "settings.get": result = settings
+                case "provider.list": result = .object(["providers": .array([])])
+                case "model.list": result = .object(["models": .array([]), "nextCursor": .null])
+                case "device.list": result = .object(["devices": try JSONValue.encode(devices)])
+                default: throw CancellationError()
+                }
+                await harness.socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                    "type": .string("response"), "id": .string(read.id), "ok": .bool(true), "result": result,
+                ])))
+            }
+            try await withTestWatchdog(timeout: .seconds(2)) { @MainActor in
+                while true {
+                    let changed = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+                    defer { changed.continuation.finish() }
+                    let complete = withObservationTracking {
+                        model.settings(for: .global) == settings
+                            && model.providerCatalog(for: .global) != nil
+                            && model.pairedDevices == devices
+                    } onChange: { changed.continuation.yield(()) }
+                    if complete { return }
+                    var iterator = changed.stream.makeAsyncIterator()
+                    guard await iterator.next() != nil else { throw CancellationError() }
+                }
+            }
+            let methods = try await harness.socket.sentFrames().dropFirst().map {
+                try JSONDecoder.gateway.decode(Request.self, from: $0).method
+            }
+            #expect(methods.filter { $0 == "session.list" }.count == (afterCatalog ? 2 : 1))
+            for method in ["provider.list", "model.list", "settings.get", "device.list"] {
+                #expect(methods.filter { $0 == method }.count == 1)
+            }
+            #expect(await harness.client.activeConnectionID() == connectionID)
+            #expect(model.visibleNotices.isEmpty)
+        }
+    }
+
+    enum OptionalRead: CaseIterable, Sendable { case settings, providers, devices }
+
+    @Test("a cancelled optional read cannot supersede a current read before entry", arguments: OptionalRead.allCases)
+    func cancelledOptionalReadCannotSupersede(owner: OptionalRead) async throws {
+        try await withHarness { harness in
+            let refresh: @MainActor @Sendable () async -> Void = {
+                switch owner {
+                case .settings: _ = await harness.model.refreshSettings(target: .global)
+                case .providers: _ = await harness.model.refreshProviders(target: .global)
+                case .devices: await harness.model.refreshDevices()
+                }
+            }
+            let current = Task { await refresh() }
+            let gate = TestReadGate()
+            let obsolete = Task {
+                await gate.wait()
+                await refresh()
+            }
+            do {
+                let expectedFrames = owner == .providers ? 3 : 2
+                try await harness.socket.waitUntilSent(count: expectedFrames)
+                try await gate.waitForEntry()
+                obsolete.cancel()
+                await gate.release()
+                await obsolete.value
+                #expect(await harness.socket.sentFrames().count == expectedFrames)
+                let settings: JSONValue = .object(["effective": .object(["theme": .string("current")])])
+                let devices = [PairedDevice(id: "current-device", name: "Phone", createdAt: "2026-09-10T00:00:00Z")]
+                for frame in await harness.socket.sentFrames().dropFirst() {
+                    let request = try JSONDecoder.gateway.decode(Request.self, from: frame)
+                    let result: JSONValue
+                    switch request.method {
+                    case "settings.get": result = settings
+                    case "provider.list": result = .object(["providers": .array([])])
+                    case "model.list": result = .object(["models": .array([]), "nextCursor": .null])
+                    case "device.list": result = .object(["devices": try JSONValue.encode(devices)])
+                    default: throw CancellationError()
+                    }
+                    await harness.socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                        "type": .string("response"), "id": .string(request.id), "ok": .bool(true), "result": result,
+                    ])))
+                }
+                await current.value
+                switch owner {
+                case .settings: #expect(harness.model.settings(for: .global) == settings)
+                case .providers: #expect(harness.model.providerCatalog(for: .global) != nil)
+                case .devices: #expect(harness.model.pairedDevices == devices)
+                }
+                #expect(harness.model.visibleNotices.isEmpty)
+            } catch {
+                obsolete.cancel()
+                await gate.release()
+                await obsolete.value
+                current.cancel()
+                await current.value
+                throw error
+            }
+        }
+    }
+
     @Test("foreground diagnostics readiness does not await optional catalog convergence")
     func foregroundDiagnosticsReadiness() async throws {
         let socket = ScriptedGatewaySocket()
@@ -302,8 +512,12 @@ struct AppModelCatalogSyncTests {
         let socket = try #require(sockets.first)
         let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: sockets).factory)
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let suiteName = "AppModelCatalogSyncTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
         let model = AppModel(
             client: client,
+            profiles: GatewayProfileStore(defaults: defaults),
             cache: SnapshotCache(root: root),
             clock: manualClock?.clock ?? .continuous
         )
@@ -311,10 +525,10 @@ struct AppModelCatalogSyncTests {
             id: "profile", label: "Mac", host: "gateway.test", port: 9_847,
             machineId: "machine", deviceId: "device"
         )
-        await socket.enqueue(helloFrame())
-        try await model.connectHostedGateway(profile: profile, token: "token")
         let harness = Harness(socket: socket, sockets: sockets, client: client, model: model, root: root)
         do {
+            await socket.enqueue(helloFrame())
+            try await model.connectHostedGateway(profile: profile, token: "token")
             try await withTestWatchdog {
                 try await operation(harness)
             }

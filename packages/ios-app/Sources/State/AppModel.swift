@@ -1154,6 +1154,8 @@ final class AppModel {
         pushNavigationActivationGeneration &+= 1
         noticeCenter.setBackgrounded(true)
         diagnosticsAreReady = false
+        optionalReconnectRefreshTask?.cancel()
+        optionalReconnectRefreshTask = nil
         reconciliationAggregateAdmission = nil
         isReconcilingForeground = false
         dashboardConnections.retire()
@@ -1314,15 +1316,19 @@ final class AppModel {
 
     @discardableResult
     func refreshSessions() async -> SessionCatalogRefreshOutcome {
-        guard let key = currentCatalogLoadKey() else { return .retained }
+        guard let task = scheduleCatalogRefresh() else { return .retained }
+        return await task.value
+    }
+
+    @discardableResult
+    private func scheduleCatalogRefresh() -> Task<SessionCatalogRefreshOutcome, Never>? {
+        guard !Task.isCancelled, let key = currentCatalogLoadKey() else { return nil }
         prepareCatalogOwner(key)
-        guard catalogRefreshFailedAttempts < DashboardCatalogRetryPolicy.maximumFailedAttempts else { return .retained }
-        if let task = catalogRefreshTask, catalogRefreshKey == key {
-            return await task.value
-        }
+        guard catalogRefreshFailedAttempts < DashboardCatalogRetryPolicy.maximumFailedAttempts else { return nil }
+        if let task = catalogRefreshTask, catalogRefreshKey == key { return task }
         if catalogRefreshTask != nil { cancelCatalogRefresh() }
         catalogInvalidationGeneration &+= 1
-        return await startCatalogRefresh(key: key).value
+        return startCatalogRefresh(key: key)
     }
 
     func retrySessionCatalog() async -> SessionCatalogRefreshOutcome {
@@ -1331,7 +1337,7 @@ final class AppModel {
     }
 
     private func retryCatalog(ownedBy key: SessionCatalogLoadKey) async -> SessionCatalogRefreshOutcome {
-        guard currentCatalogLoadKey() == key else { return .retained }
+        guard !Task.isCancelled, currentCatalogLoadKey() == key else { return .retained }
         if let task = catalogRefreshTask, catalogRefreshKey == key { return await task.value }
         catalogRefreshFailedAttempts = 0
         catalogRefreshRetryAttempt = 0
@@ -1586,15 +1592,16 @@ final class AppModel {
 
     func refreshDevices() async {
         struct Response: Decodable { let devices: [PairedDevice] }
+        guard !Task.isCancelled else { return }
         deviceLoadGeneration &+= 1
         let generation = deviceLoadGeneration
         do {
             let response: Response = try await client.request("device.list", EmptyParams())
             let admitted = try PairedDeviceCatalogPolicy.admit(response.devices)
-            guard deviceLoadGeneration == generation else { return }
+            guard !Task.isCancelled, deviceLoadGeneration == generation else { return }
             pairedDevices = admitted
         } catch {
-            guard deviceLoadGeneration == generation else { return }
+            guard !Task.isCancelled, deviceLoadGeneration == generation else { return }
             surface(error)
         }
     }
@@ -2545,6 +2552,19 @@ final class AppModel {
         runtimeGeneration: String? = nil
     ) throws -> ComposerSubmissionSnapshot {
         guard admitsLiveSessionCommands(target) else { throw CancellationError() }
+        let invokesSkill: Bool
+        if let resourceInvocation {
+            invokesSkill = resourceInvocation.source == .skill
+        } else if let scope = composerDrafts.scope(for: target) {
+            invokesSkill = composerDrafts.selectedResource(for: scope)?.source == .skill
+        } else {
+            invokesSkill = false
+        }
+        // Capability is command authority, not a side effect of asynchronous
+        // picker cleanup. Reject before the draft or submission ledger changes.
+        guard !invokesSkill || gatewayInfo?.capabilities.contains("skill-prompt.v1") == true else {
+            throw GatewayFailure(code: "unsupported", message: "This Mac does not support skill prompts.", retryable: false, details: nil)
+        }
         return try composerDrafts.beginSubmission(
             target: target,
             behavior: behavior,
@@ -3979,20 +3999,21 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
     }
 
     func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {
-        guard admitsLifecycle(admission) else { return }
+        guard !Task.isCancelled, admitsLifecycle(admission) else { return }
         adoptConnectedGatewayIdentity()
-        let sessionOutcome = await refreshSessions()
-        guard admitsLifecycle(admission) else { return }
-        guard sessionOutcome != .transportFailure else {
-            lifecycle.noteProjectionFailure(admission)
-            return
-        }
-        // Mounted authority and accepted-operation reconciliation must not wait
-        // behind optional settings/provider/device reads. Those reads retain
-        // their existing owner generation fences and are retired with this task.
+        // A complete catalog traversal is optional, just like settings and
+        // providers. Only exact mounted authority and live transport may gate
+        // reconnect readiness; the catalog keeps its own finite retry owner.
         optionalReconnectRefreshTask?.cancel()
         optionalReconnectRefreshTask = Task { @MainActor [weak self] in
-            guard let self else { return }
+            guard let self, !Task.isCancelled, self.admitsLifecycle(admission) else { return }
+            // Preserve staged optional loading: a slow/failed catalog must not
+            // fan out more reads, but neither stage gates the mounted chat.
+            let catalogOutcome = await self.refreshSessions()
+            guard catalogOutcome != .transportFailure else { return }
+            let activeConnectionID = await self.client.activeConnectionID()
+            guard !Task.isCancelled, self.admitsLifecycle(admission),
+                  activeConnectionID == admission.connectionID else { return }
             async let authResume: Void = self.providerAuth.resumeAuthIfNeeded()
             async let providerLoad = self.refreshProviders(target: .global)
             async let settingLoad = self.refreshSettings(target: .global)
@@ -4067,13 +4088,10 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         _ = await authResume.value
         reconcileDashboardConnections()
         try requireLifecycle(admission)
-        optionalReconnectRefreshTask?.cancel()
-        optionalReconnectRefreshTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            _ = await self.refreshSessions()
-            guard self.admitsLifecycle(admission) else { return }
-            self.reconcileDashboardConnections()
-        }
+        // A responsive foreground refresh needs only catalog demand. Reuse
+        // that owner without cancelling an unfinished connection refresh and
+        // silently losing its later provider/settings/device publications.
+        scheduleCatalogRefresh()
         // The inbox coordinator owns this optional read. Reconnect needs fresh
         // demand without an invalidation, but readiness must not await its RPC.
         if let profile = profiles.selected, profile.isEnabled {

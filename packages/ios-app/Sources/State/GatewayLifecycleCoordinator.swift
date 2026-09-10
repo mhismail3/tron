@@ -513,11 +513,6 @@ final class GatewayLifecycleCoordinator {
         if case .restarting = connectionState { connectionState = .connected }
     }
 
-    func noteProjectionFailure(_ admission: Admission) {
-        guard admits(admission) else { return }
-        projectionFailureGeneration = admission.generation
-    }
-
     /// Path hints only gate replacement attempts. They never establish endpoint
     /// reachability or revoke a currently viable socket. A satisfied hint may
     /// revive a parked episode even when the missed callback left no task.

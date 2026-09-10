@@ -226,26 +226,31 @@ struct ComposerResourcePickerTests {
     }
 
     @MainActor
-    @Test("native attachment menu exposes commands and capability-gated skills")
-    func attachmentMenuResources() {
+    @Test("native attachment menu exposes commands and capability-gated skills", arguments: [true, false])
+    func attachmentMenuResources(commandsAvailable: Bool) {
         let supported = ComposerAttachmentMenuButton(
             isEnabled: true,
             showsSkills: true,
+            commandsAvailable: commandsAvailable,
             onSelect: { _ in }
         )
-        let supportedTitles = ComposerAttachmentMenuButton.Coordinator(parent: supported)
-            .makeMenu().children.compactMap { ($0 as? UIAction)?.title }
-        #expect(supportedTitles == ["Take Photo", "Select Photos", "Attach Files", "Add Skills", "Add Commands"])
+        let supportedActions = ComposerAttachmentMenuButton.Coordinator(parent: supported)
+            .makeMenu().children.compactMap { $0 as? UIAction }
+        #expect(supportedActions.last?.attributes.contains(.disabled) == !commandsAvailable)
+        #expect(supportedActions.dropLast().allSatisfy { !$0.attributes.contains(.disabled) })
+        #expect(supportedActions.map(\.title) == ["Take Photo", "Select Photos", "Attach Files", "Add Skills", "Add Commands"])
 
         let legacy = ComposerAttachmentMenuButton(
             isEnabled: true,
             showsSkills: false,
+            commandsAvailable: commandsAvailable,
             onSelect: { _ in }
         )
-        let legacyTitles = ComposerAttachmentMenuButton.Coordinator(parent: legacy)
-            .makeMenu().children.compactMap { ($0 as? UIAction)?.title }
-        #expect(!legacyTitles.contains("Add Skills"))
-        #expect(legacyTitles.last == "Add Commands")
+        let legacyActions = ComposerAttachmentMenuButton.Coordinator(parent: legacy)
+            .makeMenu().children.compactMap { $0 as? UIAction }
+        #expect(!legacyActions.map(\.title).contains("Add Skills"))
+        #expect(legacyActions.last?.title == "Add Commands")
+        #expect(legacyActions.last?.attributes.contains(.disabled) == !commandsAvailable)
     }
 
     @Test("selected resource detail requires exact identity and bounded content")

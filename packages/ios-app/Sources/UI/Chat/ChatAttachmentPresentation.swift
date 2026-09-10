@@ -20,6 +20,7 @@ enum ChatAttachmentImportPolicy {
 struct ComposerAttachmentMenuButton: UIViewRepresentable {
     let isEnabled: Bool
     let showsSkills: Bool
+    let commandsAvailable: Bool
     let onSelect: @MainActor (ChatAttachmentDestination) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
@@ -56,7 +57,9 @@ struct ComposerAttachmentMenuButton: UIViewRepresentable {
             if parent.showsSkills {
                 children.append(action("Add Skills", systemImage: "sparkles", destination: .skills))
             }
-            children.append(action("Add Commands", systemImage: "command", destination: .commands))
+            let commands = action("Add Commands", systemImage: "command", destination: .commands)
+            if !parent.commandsAvailable { commands.attributes = [.disabled] }
+            children.append(commands)
             return UIMenu(children: children)
         }
 
