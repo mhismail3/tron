@@ -44,6 +44,32 @@ struct SettingsTrustCoordinatorTests {
         }
     }
 
+    @Test("cancelled optional settings reads retain values without publishing an error")
+    func cancelledSettingsReadRetainsProjection() async throws {
+        try await runScenario {
+            let harness = try await makeHarness()
+            let failures = SettingsReadFailureRecorder()
+            harness.owner.delegate = failures
+            harness.owner.installHostedSettings(settingsValue("retained"), for: .global)
+            let load = Task { await harness.owner.refreshSettings(target: .global) }
+            do {
+                try await harness.socket.waitUntilSent(count: 2)
+                let pending = try request(await harness.socket.sentFrames()[1])
+                load.cancel()
+                #expect(!(await load.value))
+                await harness.socket.enqueue(response(id: pending.id, result: settingsValue("late")))
+                #expect(harness.owner.settings(for: .global) == settingsValue("retained"))
+                #expect(failures.count == 0)
+            } catch {
+                load.cancel()
+                await harness.client.close()
+                _ = await load.value
+                throw error
+            }
+            await harness.client.close()
+        }
+    }
+
     @Test("profile clear atomically clears projections and rejects suspended reads")
     func profileClearRejectsLateRead() async throws {
         try await runScenario {
@@ -349,6 +375,12 @@ struct SettingsTrustCoordinatorTests {
         try await withTestWatchdog {
             try await valueOfOwnedTask(scenario)
         }
+    }
+
+    @MainActor
+    private final class SettingsReadFailureRecorder: SettingsTrustCoordinatorDelegate {
+        private(set) var count = 0
+        func settingsTrustCoordinatorSurface(_ error: Error) { count += 1 }
     }
 
     private struct Harness {

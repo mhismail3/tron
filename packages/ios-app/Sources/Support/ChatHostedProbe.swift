@@ -127,6 +127,12 @@ final class ChatHostedProbe {
     private var projectionSubmitCount = 0
     private var projectionWorkAdmissionCount = 0
     private var projectionInstallCount = 0
+    private(set) var composerCatalogBuildCount = 0
+    private(set) var composerCatalogCommandNames: [String] = []
+    var composerCatalogWillInstall: (@MainActor (ComposerResourceCatalog) async -> Void)?
+    var composerCatalogDidFinish: (@MainActor ([CommandInfo]) -> Void)?
+    var composerPickerEntries: (@MainActor () -> [ComposerResourceEntry])?
+    var composerResourceSelection: (@MainActor (ComposerResourceEntry) -> Void)?
     private var committedHistoryRowEvaluationCount = 0
     private var remountedWhileSemanticIDDisplayed = 0
     private var physicalRowAppearanceCounts: [String: Int] = [:]
@@ -351,6 +357,16 @@ final class ChatHostedProbe {
         revision &+= 1
     }
 
+    func recordComposerCatalogBuild() {
+        composerCatalogBuildCount &+= 1
+        revision &+= 1
+    }
+
+    func recordComposerCatalogInstall(_ catalog: ComposerResourceCatalog) {
+        composerCatalogCommandNames = catalog.commands.map(\.invocationName)
+        revision &+= 1
+    }
+
     func recordToolChip(_ sample: ToolChipInstrumentationSample) {
         toolChipSamples.append(sample)
         if toolChipSamples.count > 128 {
@@ -570,9 +586,32 @@ final class ChatHostedProbe {
         revision &+= 1
     }
 
-    func cancelPresentation() {
+    func retirePresentation() {
         cancelPresentationControl?()
         refreshControlledState()
+        cancelPrependPageWait()
+        discardOpeningRevealCompletionsForTesting()
+        // Hosted controls capture the mounted view/probe. Final retirement
+        // must break those cycles, not merely invoke their cancellation.
+        geometryControl = nil
+        phaseControl = nil
+        nativeControl = nil
+        catchUpControl = nil
+        semanticResponseControl = nil
+        submitPromptControl = nil
+        displayControl = nil
+        frameControl = nil
+        stateControl = nil
+        prependControl = nil
+        reapplyPinnedPositionControl = nil
+        invalidatePresentationControl = nil
+        reopenPresentationControl = nil
+        cancelPresentationControl = nil
+        nextProjectionInstallControl = nil
+        composerCatalogWillInstall = nil
+        composerCatalogDidFinish = nil
+        composerPickerEntries = nil
+        composerResourceSelection = nil
         revision &+= 1
     }
 

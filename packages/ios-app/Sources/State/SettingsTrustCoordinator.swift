@@ -94,6 +94,7 @@ final class SettingsTrustCoordinator {
 
     @discardableResult
     func refreshSettings(target: SettingsTarget) async -> Bool {
+        guard !Task.isCancelled else { return false }
         let admission = beginSettingsLoad(target: target)
         do {
             let value = try await client.requestValue(
@@ -181,7 +182,7 @@ final class SettingsTrustCoordinator {
     }
 
     private func admits(_ admission: SettingsLoadAdmission) -> Bool {
-        profileGeneration == admission.profileGeneration
+        !Task.isCancelled && profileGeneration == admission.profileGeneration
             && settingsLoadGenerationByTarget[admission.target] == admission.targetGeneration
     }
 

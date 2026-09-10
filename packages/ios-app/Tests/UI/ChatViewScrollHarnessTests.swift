@@ -533,6 +533,206 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    @Test("covered or inactive chat defers composer catalog work and resumes with the latest canonical commands", arguments: [true, false], [true, false])
+    func coveredChatDefersComposerCatalog(managedSheet: Bool, changesCommands: Bool) async throws {
+        try await withTestWatchdog(timeout: .seconds(15)) {
+            let snapshot = try SessionScenarioBuilder(seed: 1_245).openingTail(targetEncodedBytes: 10_000)
+            try await withHarness(
+                snapshot: snapshot, enablesComposerSubmission: true, enablesPresentationCover: true
+            ) { harness in
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady && $0.nativeGeometryMatches }
+                try await harness.loadCanonicalCommands(["initial"])
+                _ = try await harness.recorder.waitUntil { _ in
+                    harness.probe.composerCatalogCommandNames == ["initial"]
+                }
+                if managedSheet {
+                    harness.setCovered(true)
+                    try await harness.waitForCoverTransition(presented: true)
+                } else {
+                    harness.setScenePhase(.inactive)
+                    for _ in 0..<3 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+                }
+                #expect(harness.chatSurfaceActivity == (managedSheet ? .presentingDescendant : .active))
+                let buildsBefore = harness.probe.composerCatalogBuildCount
+                #expect(buildsBefore > 0)
+                if changesCommands {
+                    for index in 1...3 {
+                        try await harness.loadCanonicalCommands(["latest-\(index)"])
+                        try await DisplayFrameScheduler.displayLink.nextFrame()
+                    }
+                }
+                let latest = changesCommands ? ["latest-3"] : ["initial"]
+                for _ in 0..<3 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+                // Canonical intake continues, but this hidden composer's derived
+                // catalog and its worker stay frozen until the managed uncover.
+                #expect(harness.canonicalCommandNames == latest)
+                #expect(harness.probe.composerCatalogBuildCount == buildsBefore)
+                #expect(harness.probe.composerCatalogCommandNames == ["initial"])
+                if managedSheet {
+                    harness.setCovered(false)
+                    try await harness.waitForCoverTransition(presented: false)
+                } else {
+                    harness.setScenePhase(.active)
+                }
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.isReady && $0.nativeGeometryMatches
+                        && harness.probe.composerCatalogBuildCount >= buildsBefore + 1
+                        && harness.probe.composerCatalogCommandNames == latest
+                }
+                #expect(harness.probe.composerCatalogBuildCount == buildsBefore + 1)
+                #expect(abs(try harness.nativeTranscriptSignedTailError()) <= 2)
+            }
+        }
+    }
+
+    @Test("a composer catalog completion retired by a managed sheet cannot publish")
+    func retiredComposerCatalogDoesNotPublish() async throws {
+        try await withTestWatchdog(timeout: .seconds(15)) {
+            let snapshot = try SessionScenarioBuilder(seed: 1_246).openingTail(targetEncodedBytes: 10_000)
+            try await withHarness(
+                snapshot: snapshot, enablesComposerSubmission: true, enablesPresentationCover: true
+            ) { harness in
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady && $0.nativeGeometryMatches }
+                try await harness.loadCanonicalCommands(["initial"], skills: ["skill:retain"])
+                _ = try await harness.recorder.waitUntil { _ in
+                    harness.probe.composerCatalogCommandNames == ["initial"]
+                }
+                try harness.selectCanonicalSkill(named: "skill:retain")
+                let selectedBefore = try #require(harness.selectedComposerResource)
+                try harness.setComposerText("retain this draft")
+                let draftBefore = try harness.composerTextAndSelection()
+                let gate = TestReadGate()
+                let finished = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+                let completion = Task { @MainActor in
+                    var iterator = finished.stream.makeAsyncIterator()
+                    return await iterator.next()
+                }
+                var held = false
+                harness.probe.composerCatalogWillInstall = { catalog in
+                    guard catalog.commands.map(\.invocationName) == ["retired"] else { return }
+                    held = true
+                    await gate.wait()
+                }
+                harness.probe.composerCatalogDidFinish = { commands in
+                    if commands.map(\.name) == ["retired"] { finished.continuation.yield(()) }
+                }
+                defer {
+                    harness.probe.composerCatalogWillInstall = nil
+                    harness.probe.composerCatalogDidFinish = nil
+                    finished.continuation.finish()
+                    completion.cancel()
+                }
+                do {
+                    try await harness.loadCanonicalCommands(["retired"])
+                    try await gate.waitForEntry()
+                    let installedBeforeCover = harness.probe.composerCatalogCommandNames
+                    harness.setCovered(true)
+                    try await harness.waitForCoverTransition(presented: true)
+                    try await harness.loadCanonicalCommands(["current"])
+                    await gate.release()
+                    #expect(await completion.value != nil)
+                    #expect(harness.chatSurfaceActivity == .presentingDescendant)
+                    #expect(harness.probe.composerCatalogCommandNames == installedBeforeCover)
+                    #expect(harness.selectedComposerResource == selectedBefore)
+                    #expect(harness.canonicalCommandNames == ["current"])
+                    harness.setCovered(false)
+                    try await harness.waitForCoverTransition(presented: false)
+                    _ = try await harness.recorder.waitUntil {
+                        $0.observation.isReady && $0.nativeGeometryMatches
+                            && harness.probe.composerCatalogCommandNames == ["current"]
+                    }
+                    #expect(harness.selectedComposerResource == nil)
+                    let draftAfter = try harness.composerTextAndSelection()
+                    #expect(draftAfter.text == draftBefore.text)
+                    #expect(draftAfter.selection == draftBefore.selection)
+                    #expect(draftAfter.identity == draftBefore.identity)
+                    #expect(abs(try harness.nativeTranscriptSignedTailError()) <= 2)
+                } catch {
+                    await gate.release()
+                    if held { _ = await completion.value }
+                    throw error
+                }
+            }
+        }
+    }
+
+    @Test("picker consumers reject old entries before replacement derivation installs")
+    func pickerRejectsRetiredCatalog() async throws {
+        try await withTestWatchdog(timeout: .seconds(15)) {
+            let snapshot = try SessionScenarioBuilder(seed: 1_249).openingTail(targetEncodedBytes: 10_000)
+            try await withHarness(snapshot: snapshot, enablesComposerSubmission: true, enablesPresentationCover: true) { harness in
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady && $0.nativeGeometryMatches }
+                try await harness.loadCanonicalCommands(["original"])
+                try harness.setComposerText("/")
+                _ = try await harness.recorder.waitUntil { _ in
+                    harness.probe.composerPickerEntries?().map(\.invocationName) == ["original"]
+                }
+                let old = try #require(harness.probe.composerPickerEntries?().first)
+                let draft = try harness.composerTextAndSelection()
+                let gate = TestReadGate()
+                let finished = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+                let completion = Task { @MainActor in
+                    var iterator = finished.stream.makeAsyncIterator()
+                    return await iterator.next()
+                }
+                var held = false
+                harness.probe.composerCatalogWillInstall = { catalog in
+                    if catalog.commands.map(\.invocationName) == ["replacement"] { held = true }
+                    await gate.wait()
+                }
+                harness.probe.composerCatalogDidFinish = { commands in
+                    if commands.map(\.name) == ["replacement"] { finished.continuation.yield(()) }
+                }
+                defer {
+                    harness.probe.composerCatalogWillInstall = nil
+                    harness.probe.composerCatalogDidFinish = nil
+                    finished.continuation.finish()
+                    completion.cancel()
+                }
+                do {
+                    try await harness.loadCanonicalCommands(["replacement"], beforeResponse: {
+                        #expect(harness.probe.composerPickerEntries?().isEmpty == true)
+                        harness.probe.composerResourceSelection?(old)
+                        try #require(harness.selectedComposerResource == nil)
+                        let currentDraft = try harness.composerTextAndSelection()
+                        #expect(currentDraft.text == draft.text)
+                    })
+                    try await gate.waitForEntry()
+                    #expect(harness.probe.composerPickerEntries?().isEmpty == true)
+                    harness.probe.composerResourceSelection?(old)
+                    try #require(harness.selectedComposerResource == nil)
+                    #expect(try harness.composerTextAndSelection().text == draft.text)
+                    await gate.release()
+                    #expect(await completion.value != nil)
+                    _ = try await harness.recorder.waitUntil { _ in
+                        harness.probe.composerPickerEntries?().map(\.invocationName) == ["replacement"]
+                    }
+                    let current = try #require(harness.probe.composerPickerEntries?().first)
+                    harness.probe.composerResourceSelection?(current)
+                    #expect(harness.selectedComposerResource == current.commandInfo)
+                    #expect(try harness.composerTextAndSelection().identity == draft.identity)
+                } catch {
+                    await gate.release()
+                    if held { _ = await completion.value }
+                    throw error
+                }
+            }
+        }
+    }
+
+    @Test("hosted retirement releases composer control captures")
+    func retiredProbeReleasesComposerControls() {
+        let probe = ChatHostedProbe()
+        var owner: NSObject? = NSObject()
+        weak var retained = owner
+        probe.composerResourceSelection = { [owner] _ in _ = owner?.description }
+        owner = nil
+        #expect(retained != nil)
+        probe.retirePresentation()
+        #expect(retained == nil)
+        #expect(probe.composerResourceSelection == nil)
+    }
+
     @Test("cancelled reveal drains and active resume re-enables the real chat surface")
     func cancelledRevealResumesThroughReadyControls() async throws {
         try await withTestWatchdog(timeout: .seconds(20)) {
@@ -1733,6 +1933,7 @@ struct ChatViewScrollHarnessTests {
         } catch {
             if let sample = harness.recorder.samples.last {
                 print("Hosted failure frame \(sample.frameIndex): commands=\(sample.observation.tailMaterializationCommandCount) releases=\(sample.observation.targetReleaseCount) rows=\(sample.nativeRows.suffix(8))")
+                print("Composer catalog: builds=\(harness.probe.composerCatalogBuildCount) installed=\(harness.probe.composerCatalogCommandNames) canonical=\(harness.canonicalCommandNames) activity=\(harness.chatSurfaceActivity)")
             }
             await harness.close()
             throw error
@@ -1861,6 +2062,7 @@ private func harnessMessage(id: String) throws -> TranscriptItem {
 @MainActor @Observable
 private final class HarnessCoverState {
     var presented = false
+    var scenePhase: ScenePhase = .active
     var rootToken: PresentationSurfaceToken?
     let coordinator = PresentationActivityCoordinator()
 }
@@ -1876,6 +2078,9 @@ private struct HarnessManagedSurface: View {
             }
         }
         .environment(\.tronPresentationActivityCoordinator, cover.coordinator)
+        // UIHostingController is not a SwiftUI Scene; declare this fixture's
+        // scene input independently of its real native sheet ownership.
+        .environment(\.scenePhase, cover.scenePhase)
     }
 }
 
@@ -1901,6 +2106,7 @@ final class ChatViewScrollHarness {
 
     private let model: AppModel
     private let client: GatewayClient
+    private let socket: ScriptedGatewaySocket?
     private let suiteName: String
     private let cacheRoot: URL
     private let defaults: UserDefaults
@@ -1938,7 +2144,7 @@ final class ChatViewScrollHarness {
         guard let socket = dependencies.socket, let profile = dependencies.profile else {
             throw HarnessError.invalidAuthorityBoundary
         }
-        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"hosted-machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"hosted-machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","skill-prompt.v1"]}"#.utf8))
         do {
             try await dependencies.model.connectHostedGateway(
                 profile: profile,
@@ -2036,6 +2242,7 @@ final class ChatViewScrollHarness {
         cacheRoot = dependencies.cacheRoot
         client = dependencies.client
         model = dependencies.model
+        socket = dependencies.socket
         guard model.authoritativeSnapshot(for: snapshot.sessionId) == nil else {
             throw HarnessError.invalidAuthorityBoundary
         }
@@ -2093,6 +2300,7 @@ final class ChatViewScrollHarness {
     }
 
     func setCovered(_ value: Bool) { cover.presented = value }
+    func setScenePhase(_ phase: ScenePhase) { cover.scenePhase = phase }
     func releaseOpeningRevealCompletion() {
         probe.releaseOpeningRevealCompletionForTesting()
     }
@@ -2113,6 +2321,39 @@ final class ChatViewScrollHarness {
     var probeObservation: ChatHostedObservation { probe.observation }
     var traceRecords: [GatewayProfileLogRecord] { model.chatInteractionTrace.diagnosticRecords(limit: 256) }
     var screenScale: CGFloat { window.screen.scale }
+
+    var canonicalCommandNames: [String] { model.commands.map(\.name) }
+
+    func loadCanonicalCommands(
+        _ names: [String], skills: [String] = [],
+        beforeResponse: (@MainActor () async throws -> Void)? = nil
+    ) async throws {
+        let socket = try #require(socket)
+        let priorFrames = await socket.sentFrames().count
+        let loading = Task { await model.loadCommands(sessionID: snapshot.sessionId) }
+        do {
+            try await socket.waitUntilSent(count: priorFrames + 1)
+            let request = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[priorFrames])
+            #expect(request.objectValue?["method"]?.stringValue == "session.commands")
+            let id = try #require(request.objectValue?["id"]?.stringValue)
+            try await beforeResponse?()
+            let commands = names.map {
+                CommandInfo(name: $0, description: nil, argumentHint: nil, source: .extension, sourcePath: nil)
+            } + skills.map {
+                CommandInfo(name: $0, description: nil, argumentHint: nil, source: .skill, sourcePath: nil)
+            }
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(id), "ok": .bool(true),
+                "result": .object(["commands": try JSONValue.encode(commands)]),
+            ])))
+            await loading.value
+            #expect(model.commandCatalogTarget == model.mountedPresentationTarget)
+        } catch {
+            loading.cancel()
+            await loading.value
+            throw error
+        }
+    }
 
     func replaceAuthoritativeSnapshot(_ snapshot: SessionSnapshot) {
         model.replaceHostedAuthoritativeSnapshot(snapshot)
@@ -2290,6 +2531,26 @@ final class ChatViewScrollHarness {
         hostingController.view.setNeedsLayout()
     }
 
+    func selectCanonicalSkill(named name: String) throws {
+        let target = try #require(model.mountedPresentationTarget)
+        let scope = try #require(model.composerDrafts.scope(for: target))
+        let command = try #require(model.commands.first { $0.source == .skill && $0.name == name })
+        model.composerDrafts.selectResource(command, for: scope)
+    }
+
+    var selectedComposerResource: CommandInfo? {
+        guard let target = model.mountedPresentationTarget,
+              let scope = model.composerDrafts.scope(for: target) else { return nil }
+        return model.composerDrafts.selectedResource(for: scope)
+    }
+
+    func composerTextAndSelection() throws -> (text: String, selection: NSRange, identity: ObjectIdentifier) {
+        guard let textView = Self.textViews(in: hostingController.view).first else {
+            throw HarnessError.missingComposer
+        }
+        return (textView.text, textView.selectedRange, ObjectIdentifier(textView))
+    }
+
     func setComposerDraftText(_ text: String) throws {
         guard model.setHostedComposerText(text, sessionID: snapshot.sessionId) else {
             throw HarnessError.missingComposer
@@ -2323,8 +2584,7 @@ final class ChatViewScrollHarness {
     }
 
     private func retireHostedView() {
-        probe.cancelPresentation()
-        probe.discardOpeningRevealCompletionsForTesting()
+        probe.retirePresentation()
         recorder.stop()
         window.isHidden = true
         window.rootViewController = nil

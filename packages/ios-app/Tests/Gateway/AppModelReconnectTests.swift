@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import Synchronization
 import Testing
 @testable import TronMobile
@@ -101,22 +102,144 @@ struct AppModelReconnectTests {
             await fixture.model.becameActive()?.value
             let start = Task { await fixture.model.start() }
             defer { start.cancel() }
-            // Startup obtains the catalog before scheduling optional reads.
-            // Leave those reads pending: they must not block session loading.
-            try await socket.waitUntilSent(count: 2)
-            let requests = try await socket.sentFrames().dropFirst().map(requestFrame)
-            let catalog = try #require(requests.first { $0.method == "session.list" })
-            let sessions = try JSONDecoder.gateway.decode(
-                JSONValue.self, from: JSONEncoder.gateway.encode([startupSummary("loaded")])
-            )
-            await socket.enqueue(successResponse(id: catalog.id, result: .object([
-                "sessions": sessions, "nextCursor": .null, "listRevision": .number(1)
-            ])))
+            // Startup admits transport without waiting for optional reads.
+            // The catalog owns loading and its eventual atomic publication.
             await start.value
+            var index = 1
+            let catalog: (id: String, method: String)
+            while true {
+                try await socket.waitUntilSent(count: index + 1)
+                let request = try requestFrame(await socket.sentFrames()[index])
+                index += 1
+                if request.method == "session.list" {
+                    catalog = request
+                    break
+                }
+                #expect(request.method == "notification.inbox.list")
+            }
+            #expect(fixture.model.sessionCatalogIsLoading)
+            let startedMethods = try await socket.sentFrames().dropFirst().map { try requestFrame($0).method }
+            #expect(Set(startedMethods).isSubset(of: ["session.list", "notification.inbox.list"]))
+            let sessions = try JSONValue.encode([startupSummary("loaded")])
+            let reply = Task {
+                await socket.enqueue(successResponse(id: catalog.id, result: .object([
+                    "sessions": sessions, "nextCursor": .null, "listRevision": .number(1)
+                ])))
+            }
+            #expect(await fixture.model.refreshSessions() == .published)
+            await reply.value
             #expect(fixture.model.sessions.map(\.id) == ["loaded"])
             #expect(fixture.model.connectionState == .connected)
             #expect(fixture.model.visibleNotices.isEmpty)
             #expect(fixture.socketFactory.requests.count == 1)
+        }
+    }
+
+    @Test("replacement reconnect restores mounted authority before an optional catalog page responds",
+          arguments: [false, true])
+    func replacementReadinessDoesNotAwaitCatalog(holdContinuation: Bool) async throws {
+        try await withFixture(
+            sockets: [ScriptedGatewaySocket(), ScriptedGatewaySocket()],
+            clock: ManualClock(), units: SequenceReconnectUnits([])
+        ) { fixture in
+            let model = fixture.model
+            let first = fixture.sockets[0]
+            let replacement = fixture.sockets[1]
+            let profile = try #require(model.profiles.selected)
+            await first.enqueue(helloFrame())
+            try await model.connectHostedGateway(profile: profile, token: "token")
+            let snapshot = try SessionScenarioBuilder(seed: 47_021).openingTail(targetEncodedBytes: 10_000)
+            model.installHostedSubscribedSnapshot(snapshot)
+            model.sessions = [startupSummary(snapshot.sessionId)]
+            let target = try #require(model.mountedPresentationTarget)
+            let scope = try #require(model.composerDrafts.scope(for: target))
+            #expect(model.setHostedComposerText("Retain this draft", sessionID: snapshot.sessionId))
+            let baseline = model.foregroundReconciliationGeneration
+            let completed = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            defer { completed.continuation.finish() }
+            withObservationTracking {
+                _ = model.foregroundReconciliationGeneration
+            } onChange: {
+                completed.continuation.yield(())
+            }
+
+            await model.enteredBackground().value
+            #expect(!model.admitsLiveSessionCommands(target))
+            await model.becameActive()?.value // Join retirement; replacement owns its own flight.
+            try await replacement.waitUntilSent(count: 1)
+            await replacement.enqueue(helloFrame())
+            var recovered = snapshot
+            recovered.revision += 1
+            recovered.eventSequence += 1
+            var index = 1
+            var catalogID: String?
+            var catalogPages = 0
+            var synchronized = false
+            while !synchronized || catalogID == nil {
+                try await replacement.waitUntilSent(count: index + 1)
+                let request = try requestFrame(await replacement.sentFrames()[index])
+                index += 1
+                switch request.method {
+                case "session.list":
+                    catalogPages += 1
+                    #expect(catalogID == nil)
+                    if holdContinuation && catalogPages == 1 {
+                        await replacement.enqueue(successResponse(id: request.id, result: .object([
+                            "sessions": try JSONValue.encode([startupSummary(snapshot.sessionId)]),
+                            "listRevision": .number(1), "nextCursor": .string("next-page"),
+                        ])))
+                    } else {
+                        catalogID = request.id // Intentionally keep this page pending.
+                    }
+                case "session.open":
+                    await replacement.enqueue(successResponse(id: request.id, result: .object([
+                        "session": try JSONValue.encode(recovered),
+                        "syncToken": .string("replacement-sync"),
+                        "subscriptionToken": .string("replacement-subscription"),
+                    ])))
+                case "session.sync":
+                    #expect(model.isReconcilingForeground)
+                    #expect(!model.admitsLiveSessionCommands(target))
+                    await replacement.enqueue(successResponse(
+                        id: request.id, result: .object(["synchronized": .bool(true)])
+                    ))
+                    synchronized = true
+                case "provider.list", "model.list", "settings.get", "device.list", "notification.inbox.list":
+                    break // These optional reads must not gate mounted readiness either.
+                default:
+                    Issue.record("Unexpected request before mounted synchronization: \(request.method)")
+                    throw CancellationError()
+                }
+            }
+            // An observed aggregate completion, not a fixed sleep or a mock
+            // refresh result, proves the true replacement executor can finish.
+            try await withTestWatchdog(timeout: .seconds(2)) {
+                var iterator = completed.stream.makeAsyncIterator()
+                guard await iterator.next() != nil else { throw CancellationError() }
+            }
+            #expect(model.connectionState == .connected)
+            #expect(!model.isReconcilingForeground)
+            #expect(model.foregroundReconciliationGeneration == baseline + 1)
+            #expect(model.mountedPresentationTarget == target)
+            #expect(model.authoritativeSnapshot(for: snapshot.sessionId)?.revision == recovered.revision)
+            #expect(model.admitsLiveSessionCommands(target))
+            #expect(model.composerDrafts.text(for: scope) == "Retain this draft")
+            #expect(!model.visibleNotices.contains { $0.replacement?.key == .gatewayRecovery })
+            #expect(fixture.socketFactory.requests.count == 2)
+
+            #expect(model.sessions.map(\.id) == [snapshot.sessionId])
+            #expect(model.sessionCatalogIsLoading)
+            let pendingCatalog = try #require(catalogID)
+            let remaining = holdContinuation ? [] : [startupSummary(snapshot.sessionId)]
+            let reply = Task {
+                await replacement.enqueue(successResponse(id: pendingCatalog, result: .object([
+                    "sessions": try JSONValue.encode(remaining), "listRevision": .number(1),
+                ])))
+            }
+            #expect(await model.refreshSessions() == .published)
+            try await reply.value
+            #expect(model.sessions.map(\.id) == [snapshot.sessionId])
+            #expect(model.foregroundReconciliationGeneration == baseline + 1)
         }
     }
 
@@ -852,12 +975,13 @@ struct AppModelReconnectTests {
         #expect(model.connectionState == .restarting)
         await replacement.enqueue(helloFrame(runtimeEpoch: "debug-epoch-2", machineID: "machine-debug", gatewayChannel: "dev"))
 
-        try await replacement.waitUntilSent(count: 6)
-        #expect(model.connectionState == .connected)
-        let reconnectFrames = await replacement.sentFrames()
+        let requiredRefreshes: Set<String> = ["session.list", "provider.list", "model.list", "settings.get", "device.list"]
         var refreshedMethods = Set<String>()
-        for frame in reconnectFrames.dropFirst() {
-            let request = try requestFrame(frame)
+        var frameIndex = 1
+        while !requiredRefreshes.isSubset(of: refreshedMethods) {
+            try await replacement.waitUntilSent(count: frameIndex + 1)
+            let request = try requestFrame(await replacement.sentFrames()[frameIndex])
+            frameIndex += 1
             refreshedMethods.insert(request.method)
             let result: JSONValue
             switch request.method {
@@ -867,6 +991,7 @@ struct AppModelReconnectTests {
             case "model.list": result = .object(["models": .array([]), "nextCursor": .null])
             case "settings.get": result = .object(["effective": .object([:])])
             case "device.list": result = .object(["devices": .array([])])
+            case "notification.inbox.list": continue // Independent optional owner; leave it pending.
             default:
                 Issue.record("unexpected reconnect baseline request: \(request.method)")
                 result = .object([:])
@@ -887,7 +1012,7 @@ struct AppModelReconnectTests {
         #expect(factory.requests.count == 2)
         #expect(factory.requests.allSatisfy { $0.url?.port == 9_848 })
         #expect(factory.requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == "Bearer debug-token" })
-        let replacementText = reconnectFrames.compactMap { String(data: $0, encoding: .utf8) }.joined(separator: "\n")
+        let replacementText = await replacement.sentFrames().compactMap { String(data: $0, encoding: .utf8) }.joined(separator: "\n")
         #expect(!replacementText.contains("session.prompt"))
 
         await model.teardown()
