@@ -532,12 +532,61 @@ final class SessionSheetPresentationTests: XCTestCase {
                     let sheet = try XCTUnwrap(controller.sheetPresentationController)
                     XCTAssertEqual(Set(sheet.detents.map(\.identifier)), [.medium, .large])
                     XCTAssertEqual(sheet.selectedDetentIdentifier, .medium)
+                    let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
+                    self.assertToolbarPaint(.tronSessionTeal, bar: bar, leading: false, controller: controller)
                     // Users can still expand this presentation; a fresh presentation starts medium.
                     sheet.selectedDetentIdentifier = .large
                 }
                 try await self.withSheet(SessionProcessesSheet(sessionID: "process-fixture").environment(model)) { controller in
                     XCTAssertEqual(controller.sheetPresentationController?.selectedDetentIdentifier, .medium)
+                    let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
+                    self.assertToolbarPaint(.tronSubagent, bar: bar, leading: false, controller: controller)
                 }
+            }
+        }
+    }
+
+    func testSubagentThemeRowsAndChildSheet() async throws {
+        let processes = [SessionProcessLifecycleState.running, .completed, .failed].map { state in
+            SessionProcessActivity(
+                processId: state.rawValue, kind: .subagent, executionMode: .asynchronous, source: .delegatedAgent,
+                lifecycle: SessionProcessLifecycle(state: state, sequence: 1, observedAt: "2026-01-01T00:00:02Z"),
+                visibility: state == .running ? .active : .recent,
+                startedAt: GatewayTimestamp.string(from: .now.addingTimeInterval(-42)),
+                title: state.displayName, currentTool: "read", outputTail: "Reviewing the selected files.",
+                durationMs: 42_000
+            )
+        }
+        for scheme: ColorScheme in [.light, .dark] {
+            try await withSheet(NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Active sheet · lifecycle colors").font(TronTypography.sheetSectionHeader)
+                        ForEach(processes) { process in
+                            SessionProcessRow(process: process, style: .activity) {}
+                        }
+                        Text("History · subagent theme").font(TronTypography.sheetSectionHeader)
+                        ForEach(processes) { process in
+                            SessionProcessRow(process: process, style: .history) {}
+                        }
+                    }
+                    .padding(18)
+                }
+                .tronNavigationTitle("Subagent colors")
+            }
+            // Simulate the inherited Manage Session theme: it must not repaint rows.
+            .tronSettingsVisualTheme(accent: .tronSessionTeal)
+            .presentationDetents([.large], selection: .constant(.large))
+            .preferredColorScheme(scheme)) { controller in
+                self.capture(controller, name: "subagent-theme-\(scheme)")
+            }
+        }
+        try await withModel { model in
+            try await self.withSheet(ReadOnlySubagentSessionSheet(
+                parentSessionID: "theme-fixture", process: processes[1]
+            ).environment(model)) { controller in
+                let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
+                self.assertToolbarPaint(.tronSubagent, bar: bar, leading: false, controller: controller)
             }
         }
     }

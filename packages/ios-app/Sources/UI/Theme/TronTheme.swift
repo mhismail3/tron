@@ -29,6 +29,8 @@ extension Color {
     /// progressive descendants. Keep this separate from Settings' blue group.
     static let tronSessionTeal = Color(lightHex: "#0E7490", darkHex: "#67E8F9")
     static let tronTeal = Color(lightHex: "#0D9488", darkHex: "#2DD4BF")
+    /// Subagent seafoam identity; darker light-mode ink keeps sheet controls readable.
+    static let tronSubagent = Color(lightHex: "#007D6C", darkHex: "#03C3A8")
     static let tronCoral = Color(lightHex: "#C06545", darkHex: "#D97757")
     static let tronAutomation = Color(lightHex: "#31889A", darkHex: "#74CBDC")
     static let tronAutomationText = Color(lightHex: "#1F6675", darkHex: "#8BD8E4")

@@ -20,9 +20,12 @@ struct SessionProcessPresentation: Hashable, Sendable {
     let sessionID: String
     let activities: [SessionProcessActivity]
 
-    init(_ snapshot: SessionSnapshot) {
+    init(_ snapshot: SessionSnapshot, previous: Self? = nil) {
         sessionID = snapshot.sessionId
-        activities = snapshot.processActivities ?? []
+        let previousActivities = previous?.sessionID == sessionID ? previous?.activities ?? [] : []
+        activities = (snapshot.processActivities ?? []).map { process in
+            process.retainingDurationSample(from: previousActivities.first { $0.processId == process.processId })
+        }
     }
 }
 

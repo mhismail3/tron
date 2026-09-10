@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import TronMobile
 
@@ -6,7 +7,8 @@ struct InboundContextPresentationTests {
     @Test("extension context uses pastel provenance while unknown remains neutral")
     func provenanceTones() {
         #expect(InboundProducerPresentationPolicy.tone(for: .extension) == .purple)
-        #expect(InboundProducerPresentationPolicy.tone(for: .subagent) == .information)
+        #expect(InboundProducerPresentationPolicy.tone(for: .subagent) == .subagent)
+        #expect(InboundProducerPresentationPolicy.tone(for: .process) == .information)
         #expect(InboundProducerPresentationPolicy.tone(for: .unknown) == .neutral)
     }
 
@@ -61,7 +63,7 @@ struct InboundContextPresentationTests {
             )
             #expect(presentation.title == "Subagent")
             #expect(presentation.status == expected)
-            #expect(presentation.tone == .purple)
+            #expect(presentation.tone == .subagent)
             #expect(presentation.detailsTitle == "Subagent update")
             #expect(InboundProducerPresentationPolicy.title(for: unknown) == "Unknown source")
             #expect(unknown.confidence == .unknown)
@@ -80,7 +82,7 @@ struct InboundContextPresentationTests {
         )
         #expect(presentation.title == "Subagent")
         #expect(presentation.status == "Needs Attention")
-        #expect(presentation.tone == .purple)
+        #expect(presentation.tone == .subagent)
         #expect(InboundContextMessagePresentation(origin: nil, customType: "subagent_control_notice", details: .object([
             "event": .object(["type": .string("active_long_running")]),
         ])).status == "Still Working")
@@ -94,7 +96,7 @@ struct InboundContextPresentationTests {
             )
             #expect(presentation.title == "Subagent")
             #expect(presentation.status == "Wait Update")
-            #expect(presentation.tone == .purple)
+            #expect(presentation.tone == .subagent)
             #expect(presentation.detailsTitle == "Subagent update")
         }
         #expect(InboundContextMessagePresentation(
@@ -107,6 +109,7 @@ struct InboundContextPresentationTests {
         let presentation = InboundContextMessagePresentation(origin: nil, customType: "subagent-notify", details: nil)
         #expect(presentation.title == "Subagent")
         #expect(presentation.status == "Result Received")
+        #expect(presentation.tone == .subagent)
         #expect(presentation.status != "Completed")
     }
 
@@ -131,6 +134,21 @@ struct InboundContextPresentationTests {
         )
         #expect(goal.title == "Goal · Context")
         #expect(goal.status == "Active")
+    }
+
+    @Test("subagent fork and notification categories share seafoam without recoloring unrelated notices")
+    func otherSubagentCategories() throws {
+        let boundary = try TranscriptForkBoundary(kind: .subagentFork, inheritedAnchorId: "parent", gapOrdinal: 1)
+        #expect(ChatNotificationPresentation.forkBoundary(boundary).tone == .subagent)
+        for origin in ["subagent", "extension"] {
+            let item = try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
+            {"id":"notice","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"customEntry","customType":"tron.extension-notification.v1","data":{"message":"Review failed.","tone":"error"},"semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"status","origin":{"kind":"\(origin)","confidence":"receipt"},"sequence":1}}
+            """.utf8))
+            let notice = try #require(ChatNotificationPresentation.canonical(item, globalOrdinal: 0))
+            #expect(notice.tone == (origin == "subagent" ? .subagent : .error))
+            #expect(notice.detail == "Error")
+            #expect(notice.icon == "exclamationmark.triangle.fill")
+        }
     }
 
     @Test("unrelated dynamic details do not manufacture a goal")

@@ -77,7 +77,8 @@ struct SessionProcessButton: View {
                 Button(action: onTap) {
                     ProcessActivityOrb(
                         mode: overview.visibility == .active ? .solving : .thinking,
-                        isVisible: isVisible
+                        isVisible: isVisible,
+                        accent: .tronSubagent
                     )
                     .frame(
                         width: ComposerControlMetrics.hitTarget,

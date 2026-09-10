@@ -20,6 +20,31 @@ struct ManageSessionThemeTests {
         #expect(TronSettingsVisualTheme(accent: .tronSessionTeal).accent == .tronSessionTeal)
     }
 
+    @Test("subagent seafoam theme stays readable and lifecycle colors are confined to activity rows")
+    @MainActor
+    func subagentTheme() {
+        let light = UITraitCollection(userInterfaceStyle: .light)
+        let dark = UITraitCollection(userInterfaceStyle: .dark)
+        #expect(UIColor(Color.tronSubagent).resolvedColor(with: dark) == UIColor(hex: "#03C3A8"))
+        for traits in [light, dark] {
+            let background = UIColor(Color.tronBackground).resolvedColor(with: traits)
+            for color in [Color.tronSubagent, ChatNotificationTone.subagent.primaryColor, ChatNotificationTone.subagent.secondaryColor] {
+                #expect(contrastRatio(UIColor(color).resolvedColor(with: traits), background) >= 4.5)
+            }
+        }
+        #expect(ChatNotificationTone.subagent.surfaceColor == .tronSubagent)
+        for state: SessionProcessLifecycleState in [.queued, .running, .paused] {
+            #expect(SessionProcessRowStyle.activity.accent(for: state) == .tronAmber)
+            #expect(SessionProcessRowStyle.history.accent(for: state) == .tronSubagent)
+        }
+        #expect(SessionProcessRowStyle.activity.accent(for: .completed) == .tronSuccess)
+        #expect(SessionProcessRowStyle.history.accent(for: .completed) == .tronSubagent)
+        for state: SessionProcessLifecycleState in [.failed, .stopped, .rejected, .interrupted, .unknown] {
+            #expect(SessionProcessRowStyle.activity.accent(for: state) == .tronError)
+            #expect(SessionProcessRowStyle.history.accent(for: state) == .tronSubagent)
+        }
+    }
+
     @Test("Manage Session destinations install the inherited session theme")
     func destinationThemeRouting() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)

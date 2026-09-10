@@ -1421,6 +1421,7 @@ enum ChatNotificationTone: Hashable, Sendable {
     case tool
     case information
     case purple
+    case subagent
     case warning
     case error
     case neutral
@@ -1459,7 +1460,7 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
             title: subagent ? "Subagent created" : "Session forked",
             detail: nil,
             body: nil,
-            tone: subagent ? .purple : .accent,
+            tone: subagent ? .subagent : .accent,
             material: .flat
         )
     }
@@ -1521,7 +1522,7 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
                   let message = data["message"]?.stringValue,
                   !message.isEmpty else { return nil }
             let severity: String
-            let tone: ChatNotificationTone
+            var tone: ChatNotificationTone
             switch data["tone"]?.stringValue {
             case "error":
                 severity = "Error"
@@ -1533,6 +1534,7 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
                 severity = "Info"
                 tone = ChatSemanticPillRole.notification.tone
             }
+            if item.semantic?.origin.kind == .subagent { tone = .subagent }
             let producer = if let title = item.semantic?.origin.title, !title.isEmpty {
                 title
             } else {
@@ -1540,7 +1542,7 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
             }
             return ChatNotificationPresentation(
                 id: "notification-\(item.id)", semanticID: item.id,
-                icon: tone == .error ? "exclamationmark.triangle.fill" : "bell.badge.fill",
+                icon: severity == "Error" ? "exclamationmark.triangle.fill" : "bell.badge.fill",
                 title: "\(producer) · \(ChatSemanticPillRole.notification.label)",
                 detail: severity,
                 body: message,

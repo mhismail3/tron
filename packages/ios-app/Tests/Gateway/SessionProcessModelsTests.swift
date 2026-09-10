@@ -77,6 +77,65 @@ struct SessionProcessModelsTests {
         #expect(Set(projected.map(\.processId)).count == 50)
     }
 
+    @Test("orb rows show the producer start in local time, not a progress timestamp")
+    func friendlyStartedTimestamp() throws {
+        let now = try #require(GatewayTimestamp.parse("2026-01-01T14:00:00Z"))
+        let locale = Locale(identifier: "en_US_POSIX")
+        let zone = try #require(TimeZone(secondsFromGMT: 0))
+        let process = makeProcess(startedAt: "2026-01-01T13:45:00Z")
+        let text = try #require(SessionProcessRowPresentation.startedText(for: process, relativeTo: now, locale: locale, timeZone: zone))
+        #expect(text.hasPrefix("Started 1:45"))
+        #expect(text.contains("PM"))
+        let older = SessionProcessRowPresentation.startedText(for: makeProcess(startedAt: "2025-12-31T13:45:00Z"), relativeTo: now, locale: locale, timeZone: zone)
+        #expect(older?.contains("Dec 31") == true)
+        for start: String? in [nil, "malformed"] {
+            #expect(SessionProcessRowPresentation.startedText(for: makeProcess(startedAt: start), relativeTo: now) == nil)
+        }
+    }
+
+    @Test("running counters advance from receipt uptime without comparing Mac and iPhone clocks")
+    func liveElapsedCounter() throws {
+        let now = try #require(GatewayTimestamp.parse("2026-01-01T00:00:10Z"))
+        let process = makeProcess(startedAt: "2030-01-01T00:00:00Z", durationMs: 4_200, sampleUptime: 100)
+        #expect(SessionProcessRowPresentation.elapsedMilliseconds(for: process, at: now, uptime: 100) == 4_200)
+        #expect(SessionProcessRowPresentation.elapsedMilliseconds(for: process, at: now, uptime: 103) == 7_200)
+        #expect(SessionProcessRowPresentation.elapsedMilliseconds(for: process, at: now.addingTimeInterval(-3_600), uptime: 104) == 8_200)
+        #expect(SessionProcessRowPresentation.elapsedMilliseconds(for: makeProcess(), at: now) == 10_000)
+        #expect(SessionProcessRowPresentation.elapsedMilliseconds(for: makeProcess(startedAt: nil), at: now) == nil)
+        for state: SessionProcessLifecycleState in [.queued, .paused, .completed, .failed, .stopped] {
+            let frozen = makeProcess(state: state, durationMs: 4_200, sampleUptime: 100)
+            #expect(SessionProcessRowPresentation.elapsedMilliseconds(for: frozen, at: now, uptime: 9_000) == 4_200)
+        }
+        let completed = makeProcess(state: .completed, terminalAt: "2026-01-01T00:00:09Z")
+        #expect(SessionProcessRowPresentation.elapsedMilliseconds(for: completed, at: now.addingTimeInterval(3_600)) == 9_000)
+        #expect(SessionProcessRowPresentation.durationText(3_661_000) == "1h 1m 1s")
+        #expect(SessionProcessRowPresentation.durationText(3_662_000) == "1h 1m 2s")
+    }
+
+    @Test("progress publications and row remounts retain the exact duration sample anchor")
+    func durationSampleProjection() throws {
+        var snapshot = try SessionScenarioBuilder(seed: 8_061).openingTail(targetEncodedBytes: 4_096)
+        snapshot.processActivities = [makeProcess(durationMs: 1_000, sampleUptime: 100)]
+        let initial = SessionProcessPresentation(snapshot)
+        snapshot.processActivities = [makeProcess(outputTail: "new progress", durationMs: 1_000, sampleUptime: 110)]
+        let updated = SessionProcessPresentation(snapshot, previous: initial)
+        let current = try #require(updated.activities.first)
+        #expect(current.durationSampleAnchor.uptime == 100)
+        #expect(SessionProcessRowPresentation.elapsedMilliseconds(for: current, uptime: 112) == 13_000)
+
+        snapshot.processActivities = [makeProcess(durationMs: 14_000, sampleUptime: 113)]
+        let next = try #require(SessionProcessPresentation(snapshot, previous: updated).activities.first)
+        #expect(next.durationSampleAnchor.uptime == 113)
+        #expect(SessionProcessRowPresentation.elapsedMilliseconds(for: next, uptime: 114) == 15_000)
+
+        let encoded = try JSONEncoder().encode(current)
+        let json = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        #expect(json["durationSampleAnchor"] == nil)
+        let decoded = try JSONDecoder.gateway.decode(SessionProcessActivity.self, from: encoded)
+        #expect(decoded == current)
+        #expect(decoded.durationSampleAnchor.uptime != 100)
+    }
+
     @Test("subagent rows standardize the latest action and bound output to three lines")
     func rowPresentation() {
         let process = makeProcess(
@@ -559,10 +618,12 @@ struct SessionProcessModelsTests {
         terminalAt: String? = nil,
         recentUntil: String? = nil,
         observedAt: String? = nil,
-        startedAt: String = "2026-01-01T00:00:00Z",
+        startedAt: String? = "2026-01-01T00:00:00Z",
         currentTool: String? = nil,
         currentPathBasename: String? = nil,
-        outputTail: String? = "output"
+        outputTail: String? = "output",
+        durationMs: Int? = nil,
+        sampleUptime: TimeInterval = ProcessInfo.processInfo.systemUptime
     ) -> SessionProcessActivity {
         let effectiveRecentUntil = recentUntil ?? (
             terminalAt != nil && (visibility == .recent || visibility == .historical)
@@ -580,7 +641,8 @@ struct SessionProcessModelsTests {
             visibility: visibility,
             startedAt: startedAt, title: "worker",
             currentTool: currentTool, currentPathBasename: currentPathBasename, outputTail: outputTail,
-            toolCallId: "call-1", runId: "run-1"
+            durationMs: durationMs, toolCallId: "call-1", runId: "run-1",
+            durationSampleAnchor: ToolDurationSampleAnchor(uptime: sampleUptime)
         )
     }
 }

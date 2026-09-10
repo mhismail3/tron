@@ -86,6 +86,9 @@ struct SessionProcessActivity: Codable, Hashable, Identifiable, Sendable {
     let outputTail: String?
     let outputTruncated: Bool
     let durationMs: Int?
+    // Receipt-local presentation time, never encoded or part of value identity.
+    // Keeping it with the sample prevents sheet/row remounts restarting the clock.
+    private(set) var durationSampleAnchor = ToolDurationSampleAnchor(uptime: ProcessInfo.processInfo.systemUptime)
     let toolCount: Int?
     let turnCount: Int?
     let childCount: Int?
@@ -117,7 +120,8 @@ struct SessionProcessActivity: Codable, Hashable, Identifiable, Sendable {
         childCount: Int? = nil,
         toolCallId: String? = nil,
         runId: String? = nil,
-        childSessionRef: String? = nil
+        childSessionRef: String? = nil,
+        durationSampleAnchor: ToolDurationSampleAnchor = ToolDurationSampleAnchor(uptime: ProcessInfo.processInfo.systemUptime)
     ) {
         self.version = version
         self.processId = processId
@@ -135,12 +139,31 @@ struct SessionProcessActivity: Codable, Hashable, Identifiable, Sendable {
         self.outputTail = outputTail
         self.outputTruncated = outputTruncated
         self.durationMs = durationMs
+        self.durationSampleAnchor = durationSampleAnchor
         self.toolCount = toolCount
         self.turnCount = turnCount
         self.childCount = childCount
         self.toolCallId = toolCallId
         self.runId = runId
         self.childSessionRef = childSessionRef
+    }
+
+    /// Progress/output changes may repeat the same duration sample. Such frames
+    /// must not move its receipt anchor forward and make the counter restart.
+    func retainingDurationSample(from previous: Self?) -> Self {
+        guard let previous,
+              processId == previous.processId, runId == previous.runId, startedAt == previous.startedAt,
+              lifecycle.state == .running, previous.lifecycle.state == .running,
+              durationMs != nil, durationMs == previous.durationMs else { return self }
+        var result = self
+        result.durationSampleAnchor = previous.durationSampleAnchor
+        return result
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case version, processId, kind, executionMode, source, parentProcessId, lifecycle, visibility,
+             startedAt, title, command, currentTool, currentPathBasename, outputTail, outputTruncated,
+             durationMs, toolCount, turnCount, childCount, toolCallId, runId, childSessionRef
     }
 }
 

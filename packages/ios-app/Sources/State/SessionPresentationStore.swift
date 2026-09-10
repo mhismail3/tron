@@ -190,7 +190,7 @@ final class SessionPresentationStore {
             if sessionContextPresentation != next { sessionContextPresentation = next }
             let history = snapshot.map(SessionHistoryPresentation.init)
             if historyPresentation != history { historyPresentation = history }
-            let processes = snapshot.map(SessionProcessPresentation.init)
+            let processes = snapshot.map { SessionProcessPresentation($0, previous: processPresentation) }
             if processPresentation != processes { processPresentation = processes }
             let queue = snapshot.map(SessionQueuePresentation.init)
             if queuePresentation != queue { queuePresentation = queue }

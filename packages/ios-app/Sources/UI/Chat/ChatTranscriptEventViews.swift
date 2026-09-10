@@ -4,11 +4,13 @@ import SwiftUI
 /// The glass remains content-sized while the owning button supplies a separate
 /// 44-point semantic target.
 struct ChatTranscriptPillModifier: ViewModifier {
+    var tone: ChatNotificationTone = .accent
+
     func body(content: Content) -> some View {
-        ChatCompactPillSurface(tone: .accent, material: .glass, interactive: true) {
+        ChatCompactPillSurface(tone: tone, material: .glass, interactive: true) {
             content
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(Color.tronAccentText)
+                .foregroundStyle(tone.primaryColor)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(minWidth: 44, minHeight: 44)
@@ -17,8 +19,8 @@ struct ChatTranscriptPillModifier: ViewModifier {
 }
 
 extension View {
-    func chatTranscriptPill() -> some View {
-        modifier(ChatTranscriptPillModifier())
+    func chatTranscriptPill(tone: ChatNotificationTone = .accent) -> some View {
+        modifier(ChatTranscriptPillModifier(tone: tone))
     }
 }
 

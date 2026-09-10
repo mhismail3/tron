@@ -8,17 +8,22 @@ struct SessionProcessesSheet: View {
     @State private var selectedProcess: SessionProcessActivity?
     @State private var detent: PresentationDetent = .medium
     @State private var appSettings = AppLocalBehaviorSettings.shared
+    @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack {
-            TimelineView(.periodic(from: .now, by: 1)) { context in
+            TimelineView(.animation(minimumInterval: 1, paused: !PresentationClockPolicy.runs(
+                surfaceActive: presentationActivity.allowsContinuousAnimation,
+                sceneActive: scenePhase == .active
+            ))) { context in
                 let visible = SessionProcessButtonPolicy.visibleActivities(
                     activities,
                     retentionMinutes: appSettings.subagentRecentFinishedRetentionMinutes,
                     now: context.date
                 )
                 if !visible.isEmpty {
-                    processList(activities: visible)
+                    processList(activities: visible, now: context.date, uptime: ProcessInfo.processInfo.systemUptime)
                 } else {
                     SessionProcessPlaceholder(
                         title: "No active subagents",
@@ -28,7 +33,7 @@ struct SessionProcessesSheet: View {
                     .padding(18)
                 }
             }
-            .tronNavigationTitle("Subagents")
+            .tronNavigationTitle("Subagents", accent: .tronSubagent)
             .toolbar { doneToolbar }
         }
         .tronManagedSheet(
@@ -40,6 +45,7 @@ struct SessionProcessesSheet: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.hidden)
+        .tronSettingsVisualTheme(accent: .tronSubagent)
         .tronPresentation()
         .accessibilityIdentifier("session-processes-sheet")
     }
@@ -54,22 +60,22 @@ struct SessionProcessesSheet: View {
             Button { dismiss() } label: {
                 Image(systemName: "checkmark")
                     .font(TronTypography.buttonSM)
-                    .foregroundStyle(Color.tronEmerald)
+                    .foregroundStyle(Color.tronSubagent)
             }
             .accessibilityLabel("Done")
         }
     }
 
     @ViewBuilder
-    private func processList(activities: [SessionProcessActivity]) -> some View {
+    private func processList(activities: [SessionProcessActivity], now: Date, uptime: TimeInterval) -> some View {
         let sections = SessionProcessProjection.sections(activities)
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 8) {
                 if !sections.active.isEmpty {
-                    processSection("Active", processes: sections.active)
+                    processSection("Active", processes: sections.active, now: now, uptime: uptime)
                 }
                 if !sections.recent.isEmpty {
-                    processSection("Recently finished", processes: sections.recent)
+                    processSection("Recently finished", processes: sections.recent, now: now, uptime: uptime)
                 }
             }
             .padding(18)
@@ -78,10 +84,10 @@ struct SessionProcessesSheet: View {
     }
 
     @ViewBuilder
-    private func processSection(_ title: String, processes: [SessionProcessActivity]) -> some View {
+    private func processSection(_ title: String, processes: [SessionProcessActivity], now: Date, uptime: TimeInterval) -> some View {
         processSectionHeader(title)
         ForEach(processes) { process in
-            SessionProcessRow(process: process, surfaceStyle: .glass) {
+            SessionProcessRow(process: process, style: .activity, now: now, uptime: uptime) {
                 selectedProcess = process
             }
         }
@@ -110,8 +116,10 @@ struct ProcessHistorySheet: View {
         NavigationStack {
             Group {
                 if let store { history(store) }
-                else { TronLoadingState(label: "Preparing subagent history…") }
+                else { TronLoadingState(label: "Preparing subagent history…", accent: .tronSubagent) }
             }
+            // The history header inherits Manage Session; only its content is subagent themed.
+            .tronSettingsVisualTheme(accent: .tronSubagent)
             .tronNavigationTitle("Subagent History", accent: .tronSessionTeal)
             .toolbar { doneToolbar }
             .tint(Color.tronSessionTeal)
@@ -243,7 +251,7 @@ struct ProcessHistorySheet: View {
             .padding(.top, 4)
             .accessibilityAddTraits(.isHeader)
         ForEach(processes) { process in
-            SessionProcessRow(process: process, surfaceStyle: .scrollOptimized) {
+            SessionProcessRow(process: process, style: .history) {
                 selectedProcess = process
             }
         }
@@ -304,18 +312,31 @@ private struct SessionProcessPlaceholder: View {
     }
 }
 
-private enum SessionProcessRowSurfaceStyle {
-    case glass
-    case scrollOptimized
+enum SessionProcessRowStyle {
+    case activity
+    case history
+
+    @MainActor func accent(for state: SessionProcessLifecycleState) -> Color {
+        guard self == .activity else { return .tronSubagent }
+        return switch SessionProcessRowPresentation.tone(for: state) {
+        case .inProgress: .tronAmber
+        case .succeeded: .tronSuccess
+        case .unsuccessful: .tronError
+        }
+    }
 }
 
-private struct SessionProcessRow: View {
+struct SessionProcessRow: View {
     let process: SessionProcessActivity
-    let surfaceStyle: SessionProcessRowSurfaceStyle
+    let style: SessionProcessRowStyle
+    var now = Date.now
+    var uptime = ProcessInfo.processInfo.systemUptime
     let openTranscript: () -> Void
 
     var body: some View {
         Button(action: openTranscript) { card }
+            // An inherited sheet theme must not replace this row's lifecycle color.
+            .tronSettingsVisualTheme(accent: cardAccent)
             .buttonStyle(.plain)
             .contentShape(Rectangle())
             .accessibilityElement(children: .ignore)
@@ -326,12 +347,12 @@ private struct SessionProcessRow: View {
 
     @ViewBuilder
     private var card: some View {
-        switch surfaceStyle {
-        case .glass:
+        switch style {
+        case .activity:
             TronGlassCard(accent: cardAccent, cornerRadius: 14, interactive: false) {
                 rowContent
             }
-        case .scrollOptimized:
+        case .history:
             rowContent
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .tronScrollSurface(accent: cardAccent, cornerRadius: 12, tintOpacity: 0.10)
@@ -346,8 +367,8 @@ private struct SessionProcessRow: View {
                     .foregroundStyle(Color.tronTextPrimary)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if let durationMs = process.durationMs {
-                    Text(ToolTiming.format(milliseconds: durationMs))
+                if let durationMs = elapsedMilliseconds {
+                    Text(SessionProcessRowPresentation.durationText(durationMs))
                         .font(TronTypography.secondaryCodeDescription)
                         .foregroundStyle(Color.tronTextSecondary)
                         .monospacedDigit()
@@ -357,9 +378,16 @@ private struct SessionProcessRow: View {
                 if tone == .unsuccessful {
                     Image(systemName: "exclamationmark.circle.fill")
                         .font(TronTypography.caption2)
-                        .foregroundStyle(Color.tronError)
+                        .foregroundStyle(cardAccent)
                         .accessibilityHidden(true)
                 }
+            }
+
+            if let startedText {
+                Text(startedText)
+                    .font(TronTypography.secondaryDescription)
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             ToolChipFlowLayout(spacing: 5) {
@@ -421,13 +449,7 @@ private struct SessionProcessRow: View {
         SessionProcessRowPresentation.tone(for: process.lifecycle.state)
     }
 
-    private var cardAccent: Color {
-        switch tone {
-        case .inProgress: .tronAmber
-        case .succeeded: .tronSuccess
-        case .unsuccessful: .tronError
-        }
-    }
+    private var cardAccent: Color { style.accent(for: process.lifecycle.state) }
 
     /// Lifecycle remains explicit for VoiceOver while container color is the
     /// sole visible status treatment.
@@ -439,11 +461,21 @@ private struct SessionProcessRow: View {
         }
     }
 
+    private var startedText: String? {
+        guard style == .activity else { return nil }
+        return SessionProcessRowPresentation.startedText(for: process, relativeTo: now)
+    }
+
+    private var elapsedMilliseconds: Int? {
+        SessionProcessRowPresentation.elapsedMilliseconds(for: process, at: now, uptime: uptime)
+    }
+
     private var summaryParts: [String] {
         [
             statusText,
+            startedText,
             process.executionMode.displayName.isEmpty ? nil : process.executionMode.displayName,
-            process.durationMs.map { ToolTiming.format(milliseconds: $0) },
+            elapsedMilliseconds.map(SessionProcessRowPresentation.durationText),
             latestAction,
             process.toolCount.map { SessionProcessRowPresentation.countLabel($0, singular: "tool") },
             process.turnCount.map { SessionProcessRowPresentation.countLabel($0, singular: "turn") },
@@ -468,11 +500,11 @@ struct SessionProcessPill: View {
     let text: String
 
     var body: some View {
-        ChatCompactPillSurface(tone: .neutral, material: .flat) {
+        ChatCompactPillSurface(tone: .subagent, material: .flat) {
             HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
                 ChatCompactPillLeadingIcon(
                     icon: icon,
-                    accent: ChatNotificationTone.neutral.primaryColor,
+                    accent: ChatNotificationTone.subagent.primaryColor,
                     iconSize: ChatCompactPillLayoutPolicy.standardIconSize
                 )
                 .frame(
@@ -483,7 +515,7 @@ struct SessionProcessPill: View {
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                     .lineLimit(1)
             }
-            .foregroundStyle(ChatNotificationTone.neutral.primaryColor)
+            .foregroundStyle(ChatNotificationTone.subagent.primaryColor)
         }
         .accessibilityHidden(true)
     }
@@ -507,6 +539,45 @@ enum SessionProcessRowPresentation {
         case .completed: .succeeded
         case .failed, .stopped, .rejected, .interrupted, .unknown: .unsuccessful
         }
+    }
+
+    static func durationText(_ milliseconds: Int) -> String {
+        guard milliseconds >= 3_600_000 else { return ToolTiming.format(milliseconds: milliseconds) }
+        // Keep the live tick visible even after a subagent has run for an hour.
+        let seconds = milliseconds / 1_000
+        return "\(seconds / 3_600)h \((seconds % 3_600) / 60)m \(seconds % 60)s"
+    }
+
+    static func startedText(
+        for process: SessionProcessActivity,
+        relativeTo now: Date = .now,
+        locale: Locale = .current,
+        timeZone: TimeZone = .current
+    ) -> String? {
+        ToolInvocationTimestamp.text(for: process.startedAt, relativeTo: now, locale: locale, timeZone: timeZone)
+            .map { "Started \($0)" }
+    }
+
+    static func elapsedMilliseconds(
+        for process: SessionProcessActivity,
+        at now: Date = .now,
+        uptime: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) -> Int? {
+        if process.lifecycle.state == .running {
+            return ToolTiming.runningDuration(
+                sampledDuration: process.durationMs,
+                sampleAnchor: process.durationSampleAnchor,
+                startedAt: process.startedAt,
+                at: now,
+                uptime: uptime
+            )
+        }
+        // Queued/paused samples and terminal results never accrue local runtime.
+        return ToolTiming.resolvedDuration(
+            startedAt: process.startedAt,
+            completedAt: process.lifecycle.terminalAt,
+            fallback: process.durationMs
+        )
     }
 
     static func countLabel(_ count: Int, singular: String) -> String {
@@ -627,13 +698,13 @@ struct ReadOnlySubagentSessionSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronSessionTeal)
+                            .foregroundStyle(Color.tronSubagent)
                     }
                     .accessibilityLabel("Done")
                 }
             }
         }
-        .tronSettingsVisualTheme(accent: .tronSessionTeal)
+        .tronSettingsVisualTheme(accent: .tronSubagent)
         .task(id: openIdentity) {
             guard model.connectionState == .connected,
                   let target = model.presentationTarget(for: parentSessionID) else { return }
@@ -757,14 +828,14 @@ struct ReadOnlySubagentSessionSheet: View {
                         HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
                             ChatCompactPillLeadingIcon(
                                 icon: "arrow.up",
-                                accent: .tronAccentText,
+                                accent: ChatNotificationTone.subagent.primaryColor,
                                 showsProgress: store.status == .loadingEarlier
                             )
                             Text(store.status == .loadingEarlier
                                 ? "Loading earlier…"
                                 : "Load earlier messages")
                         }
-                        .chatTranscriptPill()
+                        .chatTranscriptPill(tone: .subagent)
                     }
                     .buttonStyle(.plain)
                     .frame(maxWidth: .infinity, minHeight: 44)

@@ -28,7 +28,8 @@ enum InboundProducerPresentationPolicy {
 
     static func tone(for origin: ChatOriginKind?) -> ChatNotificationTone {
         switch origin {
-        case .subagent, .process: return .information
+        case .subagent: return .subagent
+        case .process: return .information
         case .user: return .accent
         case .extension: return .purple
         case .gateway, .assistant, .unknown, nil: return .neutral
@@ -193,7 +194,7 @@ struct InboundContextMessagePresentation: Equatable {
         if let status = Self.subagentStatus(customType: customType, details: details) {
             title = "Subagent"
             self.status = status
-            tone = .purple
+            tone = .subagent
             icon = "person.2.fill"
             detailsTitle = "Subagent update"
         } else {

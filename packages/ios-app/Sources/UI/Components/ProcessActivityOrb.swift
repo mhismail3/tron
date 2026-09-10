@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Minimal emerald activity animation inspired by Jakub Antalik's
+/// Minimal activity animation inspired by Jakub Antalik's
 /// MIT-licensed thinking-orbs project. Working uses a sparse twisting sphere;
 /// resting uses a small set of continuous curved strands.
 /// Geometry stays renderer-independent for deterministic focused tests.
@@ -359,6 +359,7 @@ struct ProcessActivityOrb: View {
     var size: CGFloat = 20
     var isVisible = true
     var animationSpeedScale = 1.0
+    var accent: Color = .tronEmerald
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -380,7 +381,8 @@ struct ProcessActivityOrb: View {
                     : ProcessInfo.processInfo.systemUptime,
                 speedScale: max(0.1, animationSpeedScale),
                 usesFixedTime: reduceMotion,
-                thinkingBlend: mode == .thinking ? 1 : 0
+                thinkingBlend: mode == .thinking ? 1 : 0,
+                accent: accent
             )
         }
         .animation(
@@ -399,6 +401,7 @@ private struct ProcessActivityOrbCanvas: View, @preconcurrency Animatable {
     let speedScale: Double
     let usesFixedTime: Bool
     var thinkingBlend: Double
+    let accent: Color
 
     var animatableData: Double {
         get { thinkingBlend }
@@ -460,7 +463,7 @@ private struct ProcessActivityOrbCanvas: View, @preconcurrency Animatable {
             )
             let top = scaled(stroke.start, by: scale)
             let bottom = scaled(stroke.end, by: scale)
-            let ink = Color.tronEmerald
+            let ink = accent
             context.stroke(
                 path,
                 with: .linearGradient(
@@ -490,7 +493,7 @@ private struct ProcessActivityOrbCanvas: View, @preconcurrency Animatable {
             )
             context.fill(
                 Path(ellipseIn: rect),
-                with: .color(Color.tronEmerald.opacity(dot.opacity * opacity))
+                with: .color(accent.opacity(dot.opacity * opacity))
             )
         }
     }
