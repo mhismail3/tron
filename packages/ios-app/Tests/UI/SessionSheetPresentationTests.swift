@@ -546,6 +546,61 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testCompletedSubagentTranscriptOpensWithVisibleContentWithoutScrolling() async throws {
+        let paragraph = "The worker inspected the selected files and verified the focused checks. "
+        let longTranscript = (0..<16).map { index in
+            "## Inspection \(index + 1)\n\n" + String(repeating: paragraph, count: index % 4 + 1)
+        } + ["## Completed\n\n" + String(repeating: paragraph + "\n\n", count: 20) + "Final result is ready."]
+        for texts in [[], ["The worker completed the requested review."], longTranscript] {
+            let gateway = ProcessSheetGatewayFixture()
+            try await withModel(client: gateway.client) { model in
+                try await gateway.connect(model: model)
+                let snapshot = try SessionScenarioBuilder(seed: 8_920).openingTail(targetEncodedBytes: 4_096)
+                model.installHostedAuthoritativeSnapshot(snapshot)
+                let response = Task {
+                    try await gateway.respond(at: 1, method: "session.processTranscript.open",
+                        result: ProcessSheetGatewayFixture.transcript(texts: texts))
+                }
+                defer { response.cancel() }
+                try await self.withSheet(ReadOnlySubagentSessionSheet(
+                    parentSessionID: snapshot.sessionId, process: ProcessSheetGatewayFixture.process()
+                ).environment(model)) { controller in
+                    try await response.value
+                    try await self.waitForRouting { !self.views(of: UIScrollView.self, in: controller.view).isEmpty }
+                    // Let asynchronous Markdown preparation and native lazy measurement settle,
+                    // without sending a scroll command or dragging the sheet.
+                    for _ in 0..<12 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+                    let scroll = try XCTUnwrap(self.views(of: UIScrollView.self, in: controller.view).first)
+                    self.capture(controller, name: "worker-initial-\(texts.count)-messages")
+                    self.assertSubagentOpeningOffset(scroll, isLong: texts.count > 1)
+                    controller.sheetPresentationController?.selectedDetentIdentifier = .large
+                    controller.presentationController?.containerView?.layoutIfNeeded()
+                    for _ in 0..<6 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+                    self.assertSubagentOpeningOffset(scroll, isLong: texts.count > 1)
+                    self.capture(controller, name: "worker-expanded-\(texts.count)-messages")
+                    if texts.count > 1 {
+                        scroll.setContentOffset(CGPoint(x: 0, y: 200), animated: false)
+                        for _ in 0..<6 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+                        let readingOffset = scroll.contentOffset.y
+                        controller.sheetPresentationController?.selectedDetentIdentifier = .medium
+                        controller.presentationController?.containerView?.layoutIfNeeded()
+                        for _ in 0..<6 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+                        XCTAssertEqual(scroll.contentOffset.y, readingOffset, accuracy: 2,
+                            "Resizing must not pull a reader away from earlier messages back to the tail")
+                    }
+                }
+            }
+            await gateway.client.close()
+        }
+    }
+
+    private func assertSubagentOpeningOffset(_ scroll: UIScrollView, isLong: Bool) {
+        let top = -scroll.adjustedContentInset.top
+        let tail = max(top, scroll.contentSize.height + scroll.adjustedContentInset.bottom - scroll.bounds.height)
+        XCTAssertEqual(scroll.contentOffset.y, isLong ? tail : top, accuracy: 2,
+            "Initial and resized sheets must show the tail (or top-aligned short content), never an empty lazy-layout gap")
+    }
+
     func testSubagentThemeRowsAndChildSheet() async throws {
         let processes = [SessionProcessLifecycleState.running, .completed, .failed].map { state in
             SessionProcessActivity(
@@ -708,7 +763,7 @@ final class SessionSheetPresentationTests: XCTestCase {
         XCTAssertGreaterThan(matches, 3, "Toolbar symbol must match its resource title color")
     }
 
-    private func withModel(_ body: (AppModel) async throws -> Void) async throws {
+    private func withModel(client: GatewayClient = GatewayClient(), _ body: (AppModel) async throws -> Void) async throws {
         let suiteName = "session-sheet-tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         let cacheURL = FileManager.default.temporaryDirectory.appending(path: suiteName)
@@ -716,7 +771,7 @@ final class SessionSheetPresentationTests: XCTestCase {
             defaults.removePersistentDomain(forName: suiteName)
             try? FileManager.default.removeItem(at: cacheURL)
         }
-        let model = AppModel(profiles: GatewayProfileStore(defaults: defaults), cache: SnapshotCache(root: cacheURL))
+        let model = AppModel(client: client, profiles: GatewayProfileStore(defaults: defaults), cache: SnapshotCache(root: cacheURL))
         try await body(model)
     }
 

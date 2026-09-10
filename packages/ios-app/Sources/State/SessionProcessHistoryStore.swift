@@ -145,10 +145,19 @@ final class SessionProcessHistoryStore {
         }
     }
 
+    /// Revealing a covered sheet resumes an unfinished initial read; it never
+    /// advances pagination or replays a completed page. Load More owns paging.
+    func loadInitialPageIfNeeded(sessionID: String, presentationGeneration: Int) {
+        guard historyRevision == nil else { return }
+        loadNext(sessionID: sessionID, presentationGeneration: presentationGeneration)
+    }
+
     func loadNext(sessionID: String, presentationGeneration: Int) {
         guard self.sessionID == sessionID,
               self.presentationGeneration == presentationGeneration,
-              pageTask == nil else { return }
+              pageTask == nil,
+              status != .conflict,
+              historyRevision == nil || nextCursor != nil else { return }
         pageGeneration &+= 1
         let generation = pageGeneration
         let cursor = nextCursor

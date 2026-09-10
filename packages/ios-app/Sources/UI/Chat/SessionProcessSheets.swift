@@ -139,7 +139,7 @@ struct ProcessHistorySheet: View {
                 || store?.presentationGeneration != target.generation {
                 store?.reset(sessionID: sessionID, presentationGeneration: target.generation)
             }
-            store?.loadNext(sessionID: sessionID, presentationGeneration: target.generation)
+            store?.loadInitialPageIfNeeded(sessionID: sessionID, presentationGeneration: target.generation)
         }
         .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
             if !active { store?.suspendPendingWork() }
@@ -229,7 +229,7 @@ struct ProcessHistorySheet: View {
                     EmptyView()
                 }
 
-                if store.nextCursor != nil {
+                if store.nextCursor != nil, store.status != .conflict {
                     Button("Load More") {
                         store.loadNext(sessionID: sessionID, presentationGeneration: generation)
                     }
@@ -883,7 +883,10 @@ struct ReadOnlySubagentSessionSheet: View {
         }
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .defaultScrollAnchor(.top, for: .alignment)
-        .defaultScrollAnchor(.top, for: .sizeChanges)
+        // Native tail anchoring must track lazy Markdown measurement and sheet
+        // resizing. A top-owned size change can strand the opening offset below
+        // the actual content, leaving a blank viewport until the user drags it.
+        .defaultScrollAnchor(isNearTail ? .bottom : .top, for: .sizeChanges)
         .scrollPosition($scrollPosition)
         .onScrollGeometryChange(for: Bool.self) { geometry in
             geometry.contentOffset.y + geometry.containerSize.height
