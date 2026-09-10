@@ -258,7 +258,9 @@ jobs:
       - run: python3 scripts/test-personal-info-guard.py
       - name: Test native computer-control primitives (offline)
         timeout-minutes: 3
-        run: swift test --package-path packages/mac-app/native-computer-control --scratch-path "$RUNNER_TEMP/tron-computer-control-build"
+        run: |
+          python3 -m unittest discover -s packages/mac-app/native-computer-control/qualification -p 'test_*.py'
+          swift test --package-path packages/mac-app/native-computer-control --scratch-path "$RUNNER_TEMP/tron-computer-control-build"
       - run: packages/mac-app/scripts/bundle-gateway.sh
       - run: packages/mac-app/scripts/test-tron-gateway-launcher.sh
       - run: packages/mac-app/scripts/test-gateway-payload-verifier.sh

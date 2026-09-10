@@ -237,6 +237,60 @@ they do not create or start a real tap. Signed-host permission, WindowServer
 health, event delivery, physical takeover, native release, and application
 consumption remain unqualified gates.
 
+## Standalone native observer qualification host
+
+`native-computer-control/qualification/build-observer.sh` prepares a separate,
+Apple-Development-signed GUI `.app` containing the `TronNativeObserverQualification`
+executable. It is a preparation artifact only: it never launches, installs,
+registers, restarts, or mutates Tron.app, the Gateway, or another application.
+The generated source and signature manifests bind the app to this package's
+first-party bytes, hardened runtime, bundle identifier, certificate SHA-1 and
+Apple team requirement. The host is not a menu app, Gateway service, native input
+backend, production registration, or completed qualification claim.
+
+Help, no arguments, and invalid arguments only parse and print usage/errors. The
+single explicit `--observe` mode starts the existing `NativeEventObserver` using
+its listen-only session tap, records bounded metadata for taps owned by its own
+PID (never event payloads, text, keys, screenshots or target effects), requests
+Stop, joins the actual startup/tap/callback lifetime, and checks that the tap
+created by this run is absent after the join. A deadline or cancellation requests
+Stop but cannot make the report claim native work retired before the join. There
+is no tap restart or permission prompt. SIGINT/SIGTERM cancel the owning task,
+which still joins Stop before reporting. Unavailable permission, deadline,
+cancellation, incomplete inventory or mismatched tap metadata produce a nonzero
+exit, never an empty-set success. This is observer-retirement evidence only, not
+OS input release, application semantic effect, target identity, or Gateway health.
+
+Explicit qualification gate (after parent/maintainer artifact and containment
+review; never during ordinary package tests):
+
+```sh
+packages/mac-app/native-computer-control/qualification/build-observer.sh \
+  --output "$HOME/.tron/workspace/files/builds/native-observer/<run>" \
+  --identity <APPLE_DEVELOPMENT_CERTIFICATE_SHA1>
+RESULTS="$(mktemp -d "${TMPDIR:-/tmp}/tron-observer.XXXXXX")"
+open -g -n -W --stdout "$RESULTS/report.json" --stderr "$RESULTS/stderr.log" \
+  "$HOME/.tron/workspace/files/builds/native-observer/<run>/TronNativeObserverQualification.app" \
+  --args --observe --deadline-ms 5000
+```
+
+The preparation script freezes package inputs before compiling with a fresh,
+external scratch directory. Its `artifact-manifest.json` binds those exact bytes,
+the canonical Mac project and reused signing-policy source, toolchain, build
+command, signed app files and verified leaf certificate. Frozen source changes
+are rejected. It refuses existing outputs and installation/system/source trees;
+it never launches the artifact or changes a running Gateway.
+
+Use an application launch through Launch Services: direct execution of the helper
+binary can inherit different TCC responsibility and ignore the app's grant. The
+`open` exit status only covers launching/waiting, not qualification success.
+Inspect the JSON report and require `availability.available=true`,
+exactly one newly observed own-PID tap with the canonical mask/session/listen-only
+metadata, `stopJoined=true`, no deadline/cancellation/inventory error, and a final
+inventory equal to baseline. This gate requires the user to have already granted listen-event access
+to this exact signed artifact; the host does not request it. Ordinary `swift test`
+uses only the explicit fake port seam and is incapable of starting a real tap.
+
 Parent validation uses the small package (do not substitute a real native home):
 
 ```sh
@@ -244,7 +298,8 @@ swift test --package-path packages/mac-app/native-computer-control \
   --scratch-path /tmp/tron-computer-control-build
 ```
 
-The existing Mac CI job runs this same offline package with a three-minute step
+The existing Mac CI job runs the offline build-input Python tests and this same
+Swift package with a three-minute step
 timeout. Interactive agent test execution is parent-owned and must use a hard
 process watchdog; continuation bugs must not stall an unattended run. Timeout is
 a failed test run, never native release evidence. Child workers do not run the

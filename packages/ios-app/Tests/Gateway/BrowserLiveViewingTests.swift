@@ -226,7 +226,7 @@ private actor BrowserLiveTransportProbe {
     private let holdOpen: Bool
     private let holdFrame: Bool
     private let echoDescriptor: Bool
-    private let frames: [Data]
+    private var frames: [Data]
     private var framing = false
     private var frameWaiters: [CheckedContinuation<Void, Never>] = []
     private var heldFrames: [CheckedContinuation<Void, Never>] = []
@@ -237,6 +237,7 @@ private actor BrowserLiveTransportProbe {
         self.holdOpen = holdOpen; self.holdFrame = holdFrame; self.echoDescriptor = echoDescriptor
         self.frames = frames
     }
+    func appendFrame(_ frame: Data) { frames.append(frame) }
     func waitForFrame() async {
         if framing { return }
         await withCheckedContinuation { frameWaiters.append($0) }
@@ -287,9 +288,10 @@ private actor BrowserLiveTransportProbe {
             if !frames.isEmpty {
                 let after = Int(request.value(forHTTPHeaderField: "X-Tron-Live-After") ?? "0") ?? 0
                 if frames.indices.contains(after) {
+                    let dimensions = UIImage(data: frames[after]).map { (Int($0.size.width), Int($0.size.height)) } ?? (48, 36)
                     return (frames[after], HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
-                        headerFields: ["Content-Type": "image/jpeg", "X-Tron-Live-Width": "48",
-                                       "X-Tron-Live-Height": "36", "X-Tron-Live-Sequence": String(after + 1)])!)
+                        headerFields: ["Content-Type": "image/jpeg", "X-Tron-Live-Width": String(dimensions.0),
+                                       "X-Tron-Live-Height": String(dimensions.1), "X-Tron-Live-Sequence": String(after + 1)])!)
                 }
                 return (Data(), HTTPURLResponse(url: request.url!, statusCode: 204, httpVersion: nil,
                     headerFields: ["X-Tron-Live-State": "unchanged"])!)
@@ -351,11 +353,11 @@ struct BrowserLiveMountedViewingTests {
         }
     }
 
-    private static func jpeg(_ color: UIColor) -> Data {
+    private static func jpeg(_ color: UIColor, size: CGSize = CGSize(width: 48, height: 36)) -> Data {
         let format = UIGraphicsImageRendererFormat(); format.scale = 1
-        return UIGraphicsImageRenderer(size: CGSize(width: 48, height: 36), format: format)
+        return UIGraphicsImageRenderer(size: size, format: format)
             .jpegData(withCompressionQuality: 0.8) { context in
-                color.setFill(); context.fill(CGRect(x: 0, y: 0, width: 48, height: 36))
+                color.setFill(); context.fill(CGRect(origin: .zero, size: size))
             }
     }
 
@@ -569,6 +571,73 @@ struct BrowserLiveMountedViewingTests {
         }
     }
 
+    @Test("admitted portrait and wide frames resize one mounted panel without restarting its lease")
+    func floatingFrameGeometryAdaptsWithoutRemounting() async throws {
+        let probe = BrowserLiveTransportProbe(echoDescriptor: true, frames: [
+            Self.jpeg(.red, size: CGSize(width: 9, height: 16))
+        ])
+        try await Self.withMountedHost(probe: probe, profile: Self.profile("adaptive-geometry"), floating: true) { _, state, _, host in
+            _ = try await Self.waitForPanel(host) { $0.height > $0.width }
+            let panel = try #require(host.floatingPanel)
+            let bounds = try #require(host.marker("live-floating-container"))
+            let container = bounds.convert(bounds.bounds, to: host.window)
+            panel.move?(.topLeading)
+            let portrait = try await Self.waitForPanel(host) { $0.height > $0.width && abs($0.minX - container.minX - 8) <= 1 }
+            Self.attachSimulatorImage(host.window, name: "simulator-live-portrait.png")
+
+            let grab = CGPoint(x: 30, y: 30)
+            let heldPoint = CGPoint(x: portrait.minX + grab.x, y: portrait.minY + grab.y)
+            let start = CGPoint(x: heldPoint.x - container.minX, y: heldPoint.y - container.minY)
+            panel.pan?(.init(state: .began, location: start, locationInWindow: grab, velocity: .zero))
+            panel.pan?(.init(state: .changed, location: start, locationInWindow: grab, velocity: .zero))
+            // The next frame is not available until the first frame is actually
+            // laid out and the drag is active. GET arrival alone is not an oracle.
+            await probe.appendFrame(Self.jpeg(.green, size: CGSize(width: 32, height: 9)))
+            let wide = try await Self.waitForPanel(host) { $0.width > $0.height }
+            #expect(panel === host.floatingPanel)
+            #expect(abs(wide.minX + grab.x - heldPoint.x) <= 2)
+            #expect(abs(wide.minY + grab.y - heldPoint.y) <= 2)
+            #expect(Self.greenPixelCount(in: host.window) > 50)
+            Self.attachSimulatorImage(host.window, name: "simulator-live-wide.png")
+
+            // Model the native available-area contraction while the same finger
+            // remains down; no subsequent pan sample is allowed to repair it.
+            state.floatingHeight = 180
+            for _ in 0..<8 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+            let contracted = panel.convert(panel.bounds, to: host.window)
+            #expect(panel === host.floatingPanel)
+            #expect(abs(contracted.minX + grab.x - heldPoint.x) <= 2)
+            #expect(abs(contracted.minY + grab.y - heldPoint.y) <= 2)
+            #expect(await probe.requests.filter { $0.request.httpMethod == "POST" }.count == 1)
+            panel.pan?(.init(state: .cancelled, location: .zero, locationInWindow: grab, velocity: .zero))
+
+            // Raise the old producer's activity epoch, then replace that actual
+            // producer via sheet handoff. Its local counter must not reject the
+            // new producer's lower initial counter on return to floating.
+            state.sceneActive = false
+            try await Self.waitForRequests(1, probe: probe) { $0.request.httpMethod == "DELETE" }
+            state.sceneActive = true
+            try await Self.waitForRequests(2, probe: probe) {
+                $0.request.httpMethod == "GET" && $0.request.value(forHTTPHeaderField: "X-Tron-Live-After") == "2"
+            }
+            state.floatingHeight = 320
+            state.sheetRoute = state.floatingRoute
+            try await Self.waitForRequests(3, probe: probe) { $0.request.httpMethod == "POST" }
+            await probe.appendFrame(Self.jpeg(.blue, size: CGSize(width: 18, height: 32)))
+            try await Self.waitForRequests(1, probe: probe) {
+                $0.request.httpMethod == "GET" && $0.request.value(forHTTPHeaderField: "X-Tron-Live-After") == "3"
+            }
+            state.sheetRoute = nil
+            try await Self.waitForRequests(4, probe: probe) { $0.request.httpMethod == "POST" }
+            try await Self.waitForRequests(2, probe: probe) {
+                $0.request.httpMethod == "GET" && $0.request.value(forHTTPHeaderField: "X-Tron-Live-After") == "3"
+            }
+            _ = try await Self.waitForPanel(host) { $0.height > $0.width }
+            #expect(panel === host.floatingPanel)
+            #expect(Self.greenPixelCount(in: host.window) == 0)
+        }
+    }
+
     @Test("nonzero layout changes keep the painted browser on one lease")
     func floatingResizePreservesViewing() async throws {
         let probe = BrowserLiveTransportProbe(echoDescriptor: true, frames: [Self.jpeg(.green)])
@@ -742,6 +811,27 @@ struct BrowserLiveMountedViewingTests {
         throw BrowserLiveMountedError.requestTimedOut(expected)
     }
 
+    private static func waitForPanel(_ host: BrowserLiveMountedHost, matching: (CGRect) -> Bool) async throws -> CGRect {
+        for _ in 0..<180 {
+            try await DisplayFrameScheduler.displayLink.nextFrame()
+            host.window.layoutIfNeeded()
+            if let panel = host.floatingPanel {
+                let frame = panel.convert(panel.bounds, to: host.window)
+                if matching(frame) { return frame }
+            }
+        }
+        Issue.record("The admitted frame did not reach the expected native panel geometry")
+        throw BrowserLiveMountedError.expectedFailure
+    }
+
+    private static func attachSimulatorImage(_ window: UIWindow, name: String) {
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        let image = UIGraphicsImageRenderer(size: window.bounds.size, format: format).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        if let data = image.pngData() { Attachment.record(data, named: name) }
+    }
+
     private static func waitForSurfaceCount(_ expected: Int, coordinator: PresentationActivityCoordinator) async throws {
         for _ in 0..<300 {
             if coordinator.mountedSurfaceCount == expected { return }
@@ -761,6 +851,7 @@ private final class BrowserLiveMountedState {
     var surface: PresentationSurfaceToken?
     let floatingMode: Bool
     var floatingHeight: CGFloat = 320
+    let containerProbeIdentity = UUID()
     var floatingRoute: DisplayRoute?
     var sheetRoute: DisplayRoute?
 
@@ -783,6 +874,8 @@ private struct BrowserLiveMountedRoot: View {
             if state.mounted, state.floatingMode {
                 ChatFloatingDisplayHost(route: $state.floatingRoute, onOpenSheet: { state.sheetRoute = $0 })
                     .frame(height: state.floatingHeight)
+                    .background(ChatHostedNativeRowProbe(physicalID: "live-floating-container",
+                        semanticID: "live-floating-container", identity: state.containerProbeIdentity))
                     .environment(model)
                     .tronManagedSheet(item: $state.sheetRoute, identity: { $0.sheetPresentationID }) { route in
                         DisplaySheet(route: route).environment(model)
@@ -797,6 +890,7 @@ private struct BrowserLiveMountedRoot: View {
                 Color.clear
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .environment(\.scenePhase, state.sceneActive ? .active : .background)
     }
 }

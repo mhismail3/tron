@@ -13,6 +13,33 @@ struct DisplayRoute: Identifiable, Hashable, Sendable {
     var sheetPresentationID: String { "chat.display.\(id)" }
 }
 
+struct BrowserLiveFrameSource: Hashable, Sendable {
+    let sessionID: String?
+    let profileID: String?
+    let presentationIdentity: String
+    let viewID: String
+    let generation: String
+    let surface: PresentationSurfaceToken?
+    let producerID: UUID
+    let activityGeneration: UInt64
+}
+
+struct BrowserLiveFrameGeometry: Equatable, Sendable {
+    let width: CGFloat
+    let height: CGFloat
+
+    var aspectRatio: CGFloat? {
+        guard width.isFinite, height.isFinite, width > 0, height > 0 else { return nil }
+        let ratio = width / height
+        return ratio.isFinite && ratio > 0 ? ratio : nil
+    }
+}
+
+struct BrowserLiveFrameUpdate: Equatable, Sendable {
+    let source: BrowserLiveFrameSource
+    let geometry: BrowserLiveFrameGeometry?
+}
+
 enum DisplayPresentationCommand: Hashable, Sendable {
     case showSheet(DisplayRoute)
     case showFloating(DisplayRoute)
@@ -665,6 +692,7 @@ struct DisplayArtifactContent: View {
     let sessionID: String?
     let display: DisplayProjection
     let context: DisplayRenderContext
+    var onBrowserLiveFrameGeometry: (@MainActor (BrowserLiveFrameUpdate) -> Void)? = nil
 
     var body: some View {
         Group {
@@ -680,7 +708,11 @@ struct DisplayArtifactContent: View {
             case .video, .audio:
                 DisplayVideoArtifactView(sessionID: sessionID, display: display)
             case .browserLive:
-                BrowserLiveDisplayView(sessionID: sessionID, display: display)
+                BrowserLiveDisplayView(
+                    sessionID: sessionID,
+                    display: display,
+                    onFrameGeometry: onBrowserLiveFrameGeometry
+                )
             case .webpage, .hls:
                 // Public remote content stays in Safari's isolated, explicit-
                 // gesture browser boundary. Gateway credentials are never
@@ -1106,10 +1138,25 @@ private struct BrowserLiveDisplayView: View {
         let profileID: String?
         let display: DisplayProjection
         let surface: PresentationSurfaceToken?
+        let producerID: UUID
         let activityGeneration: UInt64
+
+        var frameSource: BrowserLiveFrameSource {
+            BrowserLiveFrameSource(
+                sessionID: sessionID,
+                profileID: profileID,
+                presentationIdentity: display.presentationIdentity,
+                viewID: display.liveView?.viewId ?? "",
+                generation: display.liveView?.generation ?? "",
+                surface: surface,
+                producerID: producerID,
+                activityGeneration: activityGeneration
+            )
+        }
     }
     let sessionID: String?
     let display: DisplayProjection
+    var onFrameGeometry: (@MainActor (BrowserLiveFrameUpdate) -> Void)? = nil
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.tronPresentationActivity) private var presentationActivity
@@ -1117,24 +1164,33 @@ private struct BrowserLiveDisplayView: View {
     @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
     @State private var image: UIImage?
     @State private var failed = false
+    @State private var renderedSource: Source?
+    @State private var admittedTaskSource: Source?
     @State private var requestID = UUID()
     @State private var viewingActivity = BrowserLiveViewingActivity()
+    @State private var producerID = UUID()
 
     var body: some View {
         let source = Source(sessionID: sessionID, profileID: model.selectedGatewayProfileID(), display: display,
-                            surface: surfaceToken, activityGeneration: viewingActivity.generation)
+                            surface: surfaceToken, producerID: producerID, activityGeneration: viewingActivity.generation)
+        let managedActivityAllowsPublication = surfaceToken.map {
+            activityCoordinator?.activity(for: $0).allowsPresentationPublication == true
+        } ?? false
         let active = scenePhase == .active && viewingActivity.allowsViewing && presentationActivity.allowsPresentationPublication
-            && surfaceToken != nil && activityCoordinator != nil
+            && managedActivityAllowsPublication
         // Keep the native activity host on one structural container. A Group
         // distributes its background to each conditional branch: the first
         // image/error would remount the host, restart the task and clear itself.
+        // The source/activity check is evaluated by the body, before the task
+        // that retires old pixels gets a chance to run.
+        let rendersCurrentResult = renderedSource == source && active
         ZStack {
-            if let image {
+            if rendersCurrentResult, let image {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if failed {
+            } else if rendersCurrentResult, failed {
                 DisplayUnavailableView(text: display.fallbackText)
             } else {
                 TronLoadingState(label: "Connecting to browser…", accent: .tronBlue)
@@ -1149,8 +1205,13 @@ private struct BrowserLiveDisplayView: View {
             guard !Task.isCancelled else { return }
             let request = UUID()
             requestID = request
+            if admittedTaskSource != source {
+                admittedTaskSource = source
+                onFrameGeometry?(BrowserLiveFrameUpdate(source: source.frameSource, geometry: nil))
+            }
             image = nil
             failed = false
+            renderedSource = nil
             guard active else { return }
             await receiveFrames(source: source, request: request)
         }
@@ -1158,7 +1219,13 @@ private struct BrowserLiveDisplayView: View {
 
     private func receiveFrames(source: Source, request: UUID) async {
         guard let sessionID = source.sessionID, let liveView = source.display.liveView,
-              let profileID = source.profileID else { failed = true; return }
+              let profileID = source.profileID else {
+            if !Task.isCancelled, requestID == request {
+                renderedSource = source
+                failed = true
+            }
+            return
+        }
         func current() -> Bool {
             // Read the mutable presentation owner after each await, not the
             // captured Environment activity or SwiftUI cancellation timing.
@@ -1173,7 +1240,10 @@ private struct BrowserLiveDisplayView: View {
         do {
             lease = try await model.openBrowserLiveView(viewId: liveView.viewId, generation: liveView.generation, sessionID: sessionID, profileID: profileID)
         } catch {
-            if current() { failed = true }
+            if current() {
+                renderedSource = source
+                failed = true
+            }
             return
         }
         await withTaskCancellationHandler {
@@ -1191,14 +1261,26 @@ private struct BrowserLiveDisplayView: View {
                             guard current() else { break }
                             if let decoded {
                                 lastSequence = frame.sequence
+                                renderedSource = source
                                 image = decoded
+                                onFrameGeometry?(BrowserLiveFrameUpdate(
+                                    source: source.frameSource,
+                                    geometry: BrowserLiveFrameGeometry(
+                                        width: CGFloat(frame.width),
+                                        height: CGFloat(frame.height)
+                                    )
+                                ))
                             }
                         }
                     }
                     try await Task.sleep(for: .milliseconds(200))
                 }
             } catch {
-                if current() { image = nil; failed = true }
+                if current() {
+                    renderedSource = source
+                    image = nil
+                    failed = true
+                }
             }
             if requestID == request { image = nil }
             await lease.close()

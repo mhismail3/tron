@@ -28,7 +28,10 @@ internal struct NativeEventFacts: Sendable, Equatable {
             && (location.map { event.location.x == $0.x && event.location.y == $0.y } ?? true)
     }
 }
-internal struct NativeStreamGeneration: Hashable, Sendable { let id: UUID; let number: UInt64 }
+package struct NativeStreamGeneration: Hashable, Sendable {
+    package let id: UUID
+    package let number: UInt64
+}
 internal struct NativeStreamRegistration: Equatable, Sendable {
     let generation: NativeStreamGeneration
     let ticket: NativeInputEventTicket
@@ -43,7 +46,7 @@ internal struct NativeStreamSeen: Sendable, Equatable {
 }
 internal enum NativeStreamResult: Sendable { case seen(NativeStreamSeen), unavailable(String), cancelled }
 internal enum NativeStreamClassification: Sendable { case seen(NativeStreamSeen), activity, unavailable(String) }
-internal enum NativeEventObserverAvailability: Sendable, Equatable {
+package enum NativeEventObserverAvailability: Sendable, Equatable {
     case available(NativeStreamGeneration), unavailable(String)
 }
 internal enum NativeEventPortState: Sendable, Equatable {
@@ -86,7 +89,7 @@ private final class StreamWaiter: @unchecked Sendable {
     }
 }
 
-internal final class NativeEventObserver: @unchecked Sendable {
+package final class NativeEventObserver: @unchecked Sendable {
     private enum State { case idle, starting, running, unavailable, stopping, stopped }
     private struct Entry {
         let registration: NativeStreamRegistration
@@ -114,7 +117,14 @@ internal final class NativeEventObserver: @unchecked Sendable {
         self.platform = platform; self.maxEvents = maxEvents; self.activity = activity
     }
 
-    func start() async -> NativeEventObserverAvailability {
+    /// Package-facing construction is intentionally fixed to the passive,
+    /// listen-only session adapter. Test seams use the narrower internal init.
+    package convenience init(maxEvents: Int = 512,
+                             activity: @escaping @Sendable () -> Void = {}) {
+        self.init(platform: NativeSessionEventTapPlatform(), maxEvents: maxEvents, activity: activity)
+    }
+
+    package func start() async -> NativeEventObserverAvailability {
         let task: Task<NativeEventObserverAvailability, Never>? = lock.withLock {
             guard state == .idle || state == .starting || state == .running else { return nil }
             if let startTask { return startTask }
@@ -315,9 +325,9 @@ internal final class NativeEventObserver: @unchecked Sendable {
         return .unavailable(message)
     }
 
-    func requestStop() { _ = stoppingTask() }
+    package func requestStop() { _ = stoppingTask() }
 
-    func stopAndJoin() async { await stoppingTask().value }
+    package func stopAndJoin() async { await stoppingTask().value }
 
     private func stoppingTask() -> Task<Void, Never> {
         lock.withLock {
@@ -347,9 +357,47 @@ internal final class NativeEventObserver: @unchecked Sendable {
         .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp,
         .leftMouseDragged, .rightMouseDragged, .otherMouseDragged, .scrollWheel,
     ]
-    static let requiredEventsOfInterest: CGEventMask = observedTypes.reduce(0) { $0 | (CGEventMask(1) << $1.rawValue) }
+    package static let requiredEventsOfInterest: CGEventMask = observedTypes.reduce(0) { $0 | (CGEventMask(1) << $1.rawValue) }
 }
 internal enum NativeObserverError: Error, Equatable { case capacity, duplicateTicket, unavailable(String) }
+
+/// Metadata for one event tap owned by the current process. It contains no event
+/// payload, text, key history or screenshot data.
+package struct NativeEventTapInventoryEntry: Codable, Equatable, Sendable {
+    package let eventTapID: UInt32
+    package let tappingProcess: Int32
+    package let processBeingTapped: Int32
+    package let tapPointRawValue: Int32
+    package let optionsRawValue: UInt32
+    package let eventsOfInterest: UInt64
+    package let enabled: Bool
+
+}
+
+package enum NativeEventTapInventory {
+    /// Returns only the bounded metadata inventory for this process. This is a
+    /// read-only diagnostic; it neither creates taps nor requests permission.
+    package static func currentProcess() throws -> [NativeEventTapInventoryEntry] {
+        let capacity: UInt32 = 64
+        var count: UInt32 = 0
+        guard CGGetEventTapList(0, nil, &count) == .success, count <= capacity else {
+            throw NativeObserverError.unavailable("tap inventory is unavailable or exceeds bound")
+        }
+        var values = [CGEventTapInformation](repeating: CGEventTapInformation(), count: Int(capacity))
+        let result = values.withUnsafeMutableBufferPointer { CGGetEventTapList(capacity, $0.baseAddress, &count) }
+        guard result == .success, count <= capacity else {
+            throw NativeObserverError.unavailable("tap inventory changed beyond bound")
+        }
+        let pid = Int32(getpid())
+        return values.prefix(Int(count)).filter { Int32($0.tappingProcess) == pid }.map {
+            .init(eventTapID: $0.eventTapID, tappingProcess: Int32($0.tappingProcess),
+                  processBeingTapped: Int32($0.processBeingTapped),
+                  tapPointRawValue: Int32($0.tapPoint.rawValue),
+                  optionsRawValue: UInt32($0.options.rawValue),
+                  eventsOfInterest: UInt64($0.eventsOfInterest), enabled: $0.enabled)
+        }
+    }
+}
 
 /// Explicit-start factory only. No permission request or tap occurs at package load.
 internal struct NativeSessionEventTapPlatform: NativeEventObserverPlatform {
@@ -379,7 +427,7 @@ private final class NativeSessionEventTapPort: @unchecked Sendable, NativeEventO
     init(eventsOfInterest: CGEventMask, callback: @escaping @Sendable (CGEventType, CGEvent?) -> Void) throws {
         callbackBox = CallbackBox(callback)
         requestedMask = eventsOfInterest
-        let before = Set(try Self.tapInventory().filter { $0.tappingProcess == getpid() }.map(\.eventTapID))
+        let before = Set(try NativeEventTapInventory.currentProcess().map(\.eventTapID))
         let handler: CGEventTapCallBack = { _, type, event, info in
             guard let info else {
                 // The run-loop owner still holds the callback box. End delivery;
@@ -400,10 +448,11 @@ private final class NativeSessionEventTapPort: @unchecked Sendable, NativeEventO
             throw NativeObserverError.unavailable("session event tap creation returned nil")
         }
         do {
-            let added = try Self.tapInventory().filter { $0.tappingProcess == getpid() && !before.contains($0.eventTapID) }
+            let added = try NativeEventTapInventory.currentProcess().filter { !before.contains($0.eventTapID) }
             guard added.count == 1, let entry = added.first,
-                  entry.tapPoint == .cgSessionEventTap, entry.options == .listenOnly,
-                  entry.processBeingTapped == 0, entry.eventsOfInterest == eventsOfInterest else {
+                  entry.tapPointRawValue == Int32(CGEventTapLocation.cgSessionEventTap.rawValue),
+                  entry.optionsRawValue == UInt32(CGEventTapOptions.listenOnly.rawValue),
+                  entry.processBeingTapped == 0, entry.eventsOfInterest == UInt64(eventsOfInterest) else {
                 throw NativeObserverError.unavailable("new tap identity is missing or ambiguous")
             }
             tap = created; tapID = entry.eventTapID
@@ -439,10 +488,11 @@ private final class NativeSessionEventTapPort: @unchecked Sendable, NativeEventO
 
     func health() -> NativeEventPortState {
         guard !condition.withLock({ stopRequested || exited }), CGPreflightListenEventAccess(),
-              CGEvent.tapIsEnabled(tap: tap), let inventory = try? Self.tapInventory(),
-              let info = inventory.first(where: { $0.eventTapID == tapID && $0.tappingProcess == getpid() }),
-              info.tapPoint == .cgSessionEventTap, info.options == .listenOnly, info.processBeingTapped == 0,
-              info.eventsOfInterest == requestedMask else {
+              CGEvent.tapIsEnabled(tap: tap), let inventory = try? NativeEventTapInventory.currentProcess(),
+              let info = inventory.first(where: { $0.eventTapID == tapID && $0.tappingProcess == Int32(getpid()) }),
+              info.tapPointRawValue == Int32(CGEventTapLocation.cgSessionEventTap.rawValue),
+              info.optionsRawValue == UInt32(CGEventTapOptions.listenOnly.rawValue), info.processBeingTapped == 0,
+              info.eventsOfInterest == UInt64(requestedMask) else {
             return .unavailable("tap health or identity is unavailable")
         }
         return .ready(eventsOfInterest: info.eventsOfInterest, enabled: info.enabled)
@@ -503,16 +553,4 @@ private final class NativeSessionEventTapPort: @unchecked Sendable, NativeEventO
     }
 
     deinit { CFMachPortInvalidate(tap) }
-
-    private static func tapInventory() throws -> [CGEventTapInformation] {
-        let capacity: UInt32 = 64
-        var count: UInt32 = 0
-        guard CGGetEventTapList(0, nil, &count) == .success, count <= capacity else {
-            throw NativeObserverError.unavailable("tap inventory is unavailable or exceeds bound")
-        }
-        var values = [CGEventTapInformation](repeating: CGEventTapInformation(), count: Int(capacity))
-        let result = values.withUnsafeMutableBufferPointer { CGGetEventTapList(capacity, $0.baseAddress, &count) }
-        guard result == .success, count <= capacity else { throw NativeObserverError.unavailable("tap inventory changed beyond bound") }
-        return Array(values.prefix(Int(count)))
-    }
 }

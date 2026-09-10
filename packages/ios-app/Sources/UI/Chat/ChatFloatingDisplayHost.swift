@@ -11,25 +11,68 @@ enum DisplayFloatingLayoutPolicy {
     // independent deceleration simulation or a second animation clock.
     static let releaseProjectionDuration: CGFloat = 0.15
 
-    static func panelSize(in container: CGSize, browserLive: Bool = false) -> CGSize {
+    static func panelSize(
+        in container: CGSize,
+        browserLive: Bool = false,
+        browserLiveAspectRatio: CGFloat? = nil
+    ) -> CGSize {
         let availableWidth = max(0, container.width - panelEdgeInset * 2)
         let availableHeight = max(0, container.height - panelEdgeInset * 2)
         let preferredWidth = max(240, container.width * 0.78)
         let width = min(420, min(availableWidth, preferredWidth))
-        if browserLive {
-            let height = min(width * 3 / 4, availableHeight)
-            // Preserve the glass controls at their native touch sizes. In very
-            // short regions the 4:3 image letterboxes inside the fitted window;
-            // neither the image nor the controls are stretched or scaled down.
-            return CGSize(width: max(min(minimumUsableWidth, availableWidth), height * 4 / 3), height: height)
+        guard browserLive else {
+            let preferredHeight = min(320, max(200, min(container.height * 0.32, width * 0.68)))
+            return CGSize(width: width, height: min(preferredHeight, availableHeight))
         }
-        let preferredHeight = min(320, max(200, min(container.height * 0.32, width * 0.68)))
-        return CGSize(width: width, height: min(preferredHeight, availableHeight))
+
+        // The provider's 4:3 launch viewport remains the pre-frame fallback.
+        // Once a renderable frame is admitted, fit its pixels to the native
+        // proposal. Controls still own a minimum panel, so extreme ratios
+        // letterbox rather than shrinking the 44-point hit targets.
+        let ratio = browserLiveAspectRatio.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? (4.0 / 3.0)
+        let fittedWidth = min(width, availableHeight * ratio)
+        let fittedHeight = min(availableHeight, width / ratio)
+        // Control minima bound the panel, not the image. Do not expand a wide
+        // image to full container width merely to make room for its controls.
+        return CGSize(width: max(min(minimumUsableWidth, availableWidth), fittedWidth),
+                      height: max(min(minimumUsableHeight, availableHeight), fittedHeight))
     }
 
-    // The native proposal already excludes toolbar, keyboard and composer.
-    // GeometryProxy.safeAreaInsets still describes those ancestor obstructions;
-    // subtracting it here counts them twice.
+    static func matchesBrowserLiveSource(_ source: BrowserLiveFrameSource, route: DisplayRoute,
+                                         profileID: String?, surface: PresentationSurfaceToken?) -> Bool {
+        guard route.display.kind == .browserLive, let liveView = route.display.liveView else { return false }
+        return source.sessionID == route.sessionID && source.presentationIdentity == route.display.presentationIdentity
+            && source.viewID == liveView.viewId && source.generation == liveView.generation
+            && source.profileID == profileID && source.surface == surface
+    }
+
+    static func acceptsBrowserLiveGeometry(
+        _ update: BrowserLiveFrameUpdate,
+        route: DisplayRoute,
+        profileID: String?,
+        surface: PresentationSurfaceToken?,
+        allowsPublication: Bool,
+        previousSource: BrowserLiveFrameSource?
+    ) -> Bool {
+        let source = update.source
+        guard matchesBrowserLiveSource(source, route: route, profileID: profileID, surface: surface) else { return false }
+        if let geometry = update.geometry {
+            guard geometry.aspectRatio != nil, allowsPublication else { return false }
+        } // A nil update retires geometry; it never admits pixels.
+        if let previousSource,
+           previousSource.sessionID == source.sessionID,
+           previousSource.profileID == source.profileID,
+           previousSource.presentationIdentity == source.presentationIdentity,
+           previousSource.surface == source.surface,
+           previousSource.producerID == source.producerID,
+           source.activityGeneration < previousSource.activityGeneration {
+            return false
+        }
+        return true
+    }
+
+    // Native proposals already exclude toolbar, keyboard and composer.
+    // Subtracting GeometryProxy.safeAreaInsets here would count them twice.
     static func safeCenterRect(container: CGSize, panelSize: CGSize) -> CGRect {
         let minX = panelSize.width / 2 + panelEdgeInset
         let minY = panelSize.height / 2 + panelEdgeInset
@@ -42,6 +85,12 @@ enum DisplayFloatingLayoutPolicy {
 
     static func clamped(_ point: CGPoint, to rect: CGRect) -> CGPoint {
         CGPoint(x: min(max(point.x, rect.minX), rect.maxX), y: min(max(point.y, rect.minY), rect.maxY))
+    }
+
+    static func draggedCenter(globalLocation: CGPoint, grabPoint: CGPoint,
+                              container: CGRect, panelSize: CGSize, in rect: CGRect) -> CGPoint {
+        clamped(CGPoint(x: globalLocation.x - container.minX + panelSize.width / 2 - grabPoint.x,
+                        y: globalLocation.y - container.minY + panelSize.height / 2 - grabPoint.y), to: rect)
     }
 
     static func center(for anchor: UnitPoint, in rect: CGRect) -> CGPoint {
@@ -72,7 +121,7 @@ struct ChatFloatingDisplayHost: View {
     var body: some View {
         GeometryReader { geometry in
             if let route {
-                FloatingDisplayWindow(route: route, container: geometry.size, onOpenSheet: {
+                FloatingDisplayWindow(route: route, container: geometry.frame(in: .global), onOpenSheet: {
                     if self.route?.id == route.id { onOpenSheet(route) }
                 }, onClose: {
                     if self.route?.id == route.id { self.route = nil }
@@ -90,32 +139,57 @@ struct ChatFloatingDisplayHost: View {
 
 private struct FloatingDisplayWindow: View {
     let route: DisplayRoute
-    let container: CGSize
+    let container: CGRect
     let onOpenSheet: () -> Void
     let onClose: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.tronPresentationActivityCoordinator) private var activityCoordinator
     @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
+    @Environment(AppModel.self) private var model
     @State private var anchor: UnitPoint = .topTrailing
-    @State private var grabPoint: UnitPoint?
+    private struct Drag {
+        // The glass handle keeps its native size; its grab offset must not
+        // scale with the image's changing aspect ratio.
+        let grabPoint: CGPoint
+        var globalLocation: CGPoint
+    }
+    @State private var drag: Drag?
+    @State private var liveFrameUpdate: BrowserLiveFrameUpdate?
 
     var body: some View {
-        let size = DisplayFloatingLayoutPolicy.panelSize(in: container, browserLive: route.display.kind == .browserLive)
-        let safeRect = DisplayFloatingLayoutPolicy.safeCenterRect(container: container, panelSize: size)
+        let currentLiveAspectRatio: CGFloat? = {
+            guard let update = liveFrameUpdate, let geometry = update.geometry,
+                  DisplayFloatingLayoutPolicy.matchesBrowserLiveSource(update.source, route: route,
+                      profileID: model.selectedGatewayProfileID(), surface: surfaceToken) else { return nil }
+            return geometry.aspectRatio
+        }()
+        let size = DisplayFloatingLayoutPolicy.panelSize(
+            in: container.size,
+            browserLive: route.display.kind == .browserLive,
+            browserLiveAspectRatio: currentLiveAspectRatio
+        )
+        let safeRect = DisplayFloatingLayoutPolicy.safeCenterRect(container: container.size, panelSize: size)
+        // Held gestures render from the actual touch, not a delayed geometry
+        // repair. This also covers a moving/resizing native container.
+        let center = drag.map {
+            DisplayFloatingLayoutPolicy.draggedCenter(globalLocation: $0.globalLocation, grabPoint: $0.grabPoint,
+                                                       container: container, panelSize: size, in: safeRect)
+        } ?? DisplayFloatingLayoutPolicy.center(for: anchor, in: safeRect)
         // An impossibly small region retains route and placement, not a hidden
         // capture lease or controls painted over the composer.
         if size.width >= DisplayFloatingLayoutPolicy.minimumUsableWidth,
            size.height >= DisplayFloatingLayoutPolicy.minimumUsableHeight {
             floatingPanel(size: size, safeRect: safeRect)
                 .frame(width: size.width, height: size.height)
+                .onDisappear { _ = retireDrag(size: size, safeRect: safeRect) }
                 #if HOSTED_TEST
                 .background(FloatingDisplayHostedProbe(move: { move($0) }, pan: {
                     handlePan($0, size: size, safeRect: safeRect)
                 }))
                 #endif
                 .coordinateSpace(name: FloatingWindowPanGesture.Space.window)
-                .position(DisplayFloatingLayoutPolicy.center(for: anchor, in: safeRect))
+                .position(center)
                 .transition(reduceMotion ? .opacity : .scale(scale: 0.96).combined(with: .opacity))
         }
         // Layout follows the existing native/structural clock, not a second
@@ -135,7 +209,12 @@ private struct FloatingDisplayWindow: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .accessibilityLabel("Opened in sheet")
             } else {
-                DisplayArtifactContent(sessionID: route.sessionID, display: route.display, context: .floating)
+                DisplayArtifactContent(
+                    sessionID: route.sessionID,
+                    display: route.display,
+                    context: .floating,
+                    onBrowserLiveFrameGeometry: receiveLiveFrameGeometry
+                )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
             }
@@ -189,29 +268,45 @@ private struct FloatingDisplayWindow: View {
             .accessibilityLabel(accessibilityLabel)
     }
 
+    private func receiveLiveFrameGeometry(_ update: BrowserLiveFrameUpdate) {
+        let allowsPublication = update.source.surface.map {
+            activityCoordinator?.activity(for: $0).allowsPresentationPublication == true
+        } ?? false
+        guard DisplayFloatingLayoutPolicy.acceptsBrowserLiveGeometry(
+            update, route: route, profileID: model.selectedGatewayProfileID(), surface: surfaceToken,
+            allowsPublication: allowsPublication, previousSource: liveFrameUpdate?.source
+        ) else { return }
+        if liveFrameUpdate != update { liveFrameUpdate = update }
+    }
+
+    private func retireDrag(size: CGSize, safeRect: CGRect) -> CGPoint? {
+        guard let drag else { return nil }
+        let current = DisplayFloatingLayoutPolicy.draggedCenter(
+            globalLocation: drag.globalLocation, grabPoint: drag.grabPoint,
+            container: container, panelSize: size, in: safeRect)
+        var transaction = Transaction(animation: .linear(duration: 0))
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            anchor = DisplayFloatingLayoutPolicy.anchor(for: current, in: safeRect, retaining: anchor)
+            self.drag = nil
+        }
+        return current
+    }
+
     private func handlePan(_ sample: FloatingWindowPanGesture.Sample, size: CGSize, safeRect: CGRect) {
         switch sample.state {
-        case .began:
-            // Use the actual touched window, including an interrupted docking
-            // animation. Its model anchor may already describe the destination.
-            grabPoint = UnitPoint(x: sample.locationInWindow.x / size.width,
-                                  y: sample.locationInWindow.y / size.height)
-            fallthrough
-        case .changed:
-            guard let grabPoint else { return }
-            let center = CGPoint(x: sample.location.x + (0.5 - grabPoint.x) * size.width,
-                                 y: sample.location.y + (0.5 - grabPoint.y) * size.height)
-            // Replace any in-flight dock immediately. A nil animation only
-            // suppresses new interpolation; it can leave the old dock running.
+        case .began, .changed:
+            // The first grab publication must itself cancel the old dock; an
+            // equal second assignment can be elided before its transaction runs.
+            guard let grabPoint = sample.state == .began ? sample.locationInWindow : drag?.grabPoint else { return }
+            let next = Drag(grabPoint: grabPoint,
+                            globalLocation: CGPoint(x: sample.location.x + container.minX,
+                                                    y: sample.location.y + container.minY))
             var transaction = Transaction(animation: .linear(duration: 0))
             transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                anchor = DisplayFloatingLayoutPolicy.anchor(for: center, in: safeRect, retaining: anchor)
-            }
+            withTransaction(transaction) { drag = next }
         case .ended, .cancelled, .failed:
-            guard grabPoint != nil else { return }
-            grabPoint = nil
-            let current = DisplayFloatingLayoutPolicy.center(for: anchor, in: safeRect)
+            guard let current = retireDrag(size: size, safeRect: safeRect) else { return }
             let duration = sample.state == .ended && !reduceMotion
                 ? DisplayFloatingLayoutPolicy.releaseProjectionDuration : 0
             let projected = CGPoint(x: current.x + sample.velocity.x * duration,
