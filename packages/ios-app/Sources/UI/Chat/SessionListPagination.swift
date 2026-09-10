@@ -152,14 +152,28 @@ struct SessionListPaginationTransition: Equatable {
 /// generation on every transition rejects delayed completions from an older
 /// refresh or animation.
 struct SessionListSessionExpansion: Equatable {
-    static let pageSize = 10
+    private(set) var pageSize: Int
 
     private(set) var visibleCountsByGroupID: [String: Int] = [:]
     private var transitionByGroupID: [String: SessionListPaginationTransition] = [:]
     private var generationByGroupID: [String: Int] = [:]
 
+    init(pageSize: Int = AppLocalBehaviorSettings.defaultDashboardChatsPerProject) {
+        self.pageSize = AppLocalBehaviorSettings.boundedDashboardChatsPerProject(pageSize)
+    }
+
+    mutating func updatePageSize(_ value: Int) {
+        let next = AppLocalBehaviorSettings.boundedDashboardChatsPerProject(value)
+        guard next != pageSize else { return }
+        pageSize = next
+        visibleCountsByGroupID.removeAll()
+        transitionByGroupID.removeAll()
+        // Keep generations: delayed completions must not match the first
+        // transition started after a settings change for the same project.
+    }
+
     func visibleCount(for groupID: String, totalCount: Int) -> Int {
-        min(max(totalCount, 0), visibleCountsByGroupID[groupID] ?? Self.pageSize)
+        min(max(totalCount, 0), visibleCountsByGroupID[groupID] ?? pageSize)
     }
 
     func visibleSessions(in group: SessionListWorkspaceGroup) -> [SessionSummary] {
@@ -171,12 +185,12 @@ struct SessionListSessionExpansion: Equatable {
     }
 
     func canViewLess(groupID: String, totalCount: Int) -> Bool {
-        totalCount > Self.pageSize && visibleCount(for: groupID, totalCount: totalCount) > Self.pageSize
+        totalCount > pageSize && visibleCount(for: groupID, totalCount: totalCount) > pageSize
     }
 
     mutating func revealMore(groupID: String, totalCount: Int) {
         let currentCount = visibleCount(for: groupID, totalCount: totalCount)
-        let nextCount = min(max(totalCount, 0), currentCount + Self.pageSize)
+        let nextCount = min(max(totalCount, 0), currentCount + pageSize)
         guard nextCount > currentCount else { return }
         visibleCountsByGroupID[groupID] = nextCount
     }
@@ -211,7 +225,7 @@ struct SessionListSessionExpansion: Equatable {
     ) -> SessionListPaginationTransition? {
         guard transitionByGroupID[groupID] == nil else { return nil }
         let currentCount = visibleCount(for: groupID, totalCount: totalCount)
-        let nextCount = min(max(totalCount, 0), currentCount + Self.pageSize)
+        let nextCount = min(max(totalCount, 0), currentCount + pageSize)
         guard nextCount > currentCount else { return nil }
 
         let transition = makeTransition(
@@ -232,7 +246,7 @@ struct SessionListSessionExpansion: Equatable {
     ) -> SessionListPaginationTransition? {
         guard transitionByGroupID[groupID] == nil else { return nil }
         let currentCount = visibleCount(for: groupID, totalCount: totalCount)
-        let stableCount = min(Self.pageSize, max(totalCount, 0))
+        let stableCount = min(pageSize, max(totalCount, 0))
         guard currentCount > stableCount else { return nil }
 
         let transition = makeTransition(
@@ -273,8 +287,8 @@ struct SessionListSessionExpansion: Equatable {
         // the visible count is retained and the next user action starts clean.
         transitionByGroupID.removeAll()
         visibleCountsByGroupID = visibleCountsByGroupID.reduce(into: [:]) { result, entry in
-            guard let totalCount = groupCounts[entry.key], totalCount > Self.pageSize else { return }
-            result[entry.key] = min(max(entry.value, Self.pageSize), totalCount)
+            guard let totalCount = groupCounts[entry.key], totalCount > pageSize else { return }
+            result[entry.key] = min(max(entry.value, pageSize), totalCount)
         }
         generationByGroupID = generationByGroupID.filter { validGroupIDs.contains($0.key) }
     }

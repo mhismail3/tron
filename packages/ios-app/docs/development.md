@@ -54,6 +54,15 @@ automation journals in iOS.
 ## App Settings and model search
 
 Settings → App Settings owns iPhone-local behavior, separate from Mac/runtime configuration.
+**Chats per project** accepts 1–100 (default 10) through the shared numeric settings field. It sets
+both the initial project row count and Show more batch size; Show less returns to that baseline.
+Changes apply when the dashboard becomes visible, without resetting project disclosure or changing
+Recent Activity ordering or Gateway catalog reads. Pagination retires pending animations while
+retaining generation counters so old completions cannot affect the new setting.
+`AppLocalBehaviorSettingsTests`, `SessionListPaginationTests`, and the focused
+`SessionSheetPresentationTests.testAppSettingsCommitsChatsPerProject` cover persistence,
+bounds, staged-transition retirement, and the real field's edit/commit path.
+
 **Show finished subagents** persists a 0–5 minute choice (default 5); **Only active** hides the
 composer orb as soon as all subagents finish. The orb and its recent list use admitted canonical
 terminal timestamps, never sheet-open time. The last eligible completion owns orb expiry;

@@ -143,9 +143,13 @@ cancellation retires them. Protocol-v5 clients require the complete attention an
 and do not attach to earlier Gateways. The local snapshot cache remains
 display-only, and projections written before attention fields existed decode as
 read rather than inventing unread state. The dashboard groups user
-sessions by workspace and renders the newest ten per workspace by default; explicit Show more/Show less
-pagination is a disposable UI projection with generation-checked staged animations, so catalog refreshes
-cannot expose stale rows or leave controls stuck. Successful session creation starts a shared background
+sessions by workspace and renders ten per workspace by default. Settings → App Settings → **Chats per project**
+configures 1–100 through the iPhone-local `AppLocalBehaviorSettings` owner; the same count governs Show more
+batches and the Show less baseline. The preference does not change Gateway catalog limits or Recent Activity
+ordering. Dashboard reconciliation applies changes when visible, resets project pagination to the new baseline,
+and retires staged animations without reusing their generations. Explicit Show more/Show less pagination
+remains a disposable UI projection with generation-checked staged animations, so catalog refreshes cannot
+expose stale rows or leave controls stuck. Successful session creation starts a shared background
 catalog reconciliation without delaying chat navigation. The Gateway projects a newly created empty row
 while it owns that live runtime slot; if Pi has not persisted content, the disposable row may disappear
 after Gateway restart or idle slot retirement. Initial connection, structural and summary events,

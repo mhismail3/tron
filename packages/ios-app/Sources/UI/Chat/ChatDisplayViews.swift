@@ -505,7 +505,7 @@ private struct DisplayInlineImageChip: View {
                     .foregroundStyle(Color.tronTextSecondary)
             } else {
                 ProgressView()
-                    .tint(.tronLavender)
+                    .tint(.tronEmerald)
             }
         }
         .frame(

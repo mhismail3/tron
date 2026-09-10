@@ -1,11 +1,26 @@
 import SwiftUI
 
 struct AppLocalBehaviorSettingsView: View {
-    @State private var settings = AppLocalBehaviorSettings.shared
+    @State private var settings: AppLocalBehaviorSettings
+
+    init(settings: AppLocalBehaviorSettings = .shared) {
+        _settings = State(initialValue: settings)
+    }
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
+                TronSettingsGroup("Dashboard", accent: .tronEmerald, surfaceStyle: .scrollOptimized) {
+                    TronNumberSettingRow(
+                        icon: "bubble.left.and.bubble.right",
+                        title: "Chats per project",
+                        detail: "Shown by default",
+                        value: $settings.dashboardChatsPerProject
+                    )
+                }
+                .tronSettingsVisualTheme(accent: .tronEmerald)
+                .tronSettingsCaption("Choose 1–100 chats (default 10). Show more reveals another batch of this size. Applies to every project on this iPhone.")
+
                 TronSettingsGroup("Subagent Activity", accent: .tronSubagent, surfaceStyle: .scrollOptimized) {
                     TronValueRow(
                         icon: "circle.dotted",

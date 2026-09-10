@@ -525,6 +525,56 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testAppSettingsCommitsChatsPerProject() async throws {
+        let suite = "app-settings-sheet.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppLocalBehaviorSettings(defaults: defaults)
+        try await withSheet(NavigationStack {
+            AppLocalBehaviorSettingsView(settings: settings)
+        }.tronSettingsVisualTheme(accent: .tronEmerald)) { controller in
+            let field = try XCTUnwrap(self.views(of: UITextField.self, in: controller.view).first)
+            XCTAssertEqual(field.keyboardType, .numberPad)
+            XCTAssertEqual(field.text, "10")
+            field.becomeFirstResponder()
+            for _ in 0..<3 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+            field.text = "7"
+            field.sendActions(for: .editingChanged)
+            field.resignFirstResponder()
+            for _ in 0..<6 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+            XCTAssertEqual(settings.dashboardChatsPerProject, 7)
+            XCTAssertEqual(AppLocalBehaviorSettings(defaults: defaults).dashboardChatsPerProject, 7)
+            self.capture(controller, name: "app-settings-chats-per-project")
+        }
+    }
+
+    func testInlinePhotoLoadingSpinnerIsEmerald() async throws {
+        let display = DisplayProjection(displayId: "photo", title: "Photo", altText: "Preview", kind: .image,
+            presentation: .init(requestedSurface: .inline, inlineTapAction: .sheet),
+            eligibleSurfaces: [.inline, .sheet], fallbackText: "Unavailable")
+        let tool = routingTool(id: "photo", display: display)
+        try await withModel { model in
+            for scheme: ColorScheme in [.light, .dark] {
+                try await self.withSheet(DisplayToolView(tool: tool.descriptor, onOpenTechnicalDetails: {})
+                    .environment(model).environment(\.displayTranscriptReady, false)
+                    .environment(\.canonicalResourceSessionID, "photo-fixture")
+                    .preferredColorScheme(scheme)) { controller in
+                    let spinner = try XCTUnwrap(self.views(of: UIActivityIndicatorView.self, in: controller.view).first)
+                    let actual = try XCTUnwrap(spinner.color).resolvedColor(with: spinner.traitCollection)
+                    let expected = UIColor(Color.tronEmerald).resolvedColor(with: spinner.traitCollection)
+                    var ar: CGFloat = 0, ag: CGFloat = 0, ab: CGFloat = 0, aa: CGFloat = 0
+                    var er: CGFloat = 0, eg: CGFloat = 0, eb: CGFloat = 0, ea: CGFloat = 0
+                    actual.getRed(&ar, green: &ag, blue: &ab, alpha: &aa)
+                    expected.getRed(&er, green: &eg, blue: &eb, alpha: &ea)
+                    XCTAssertEqual(ar, er, accuracy: 0.01)
+                    XCTAssertEqual(ag, eg, accuracy: 0.01)
+                    XCTAssertEqual(ab, eb, accuracy: 0.01)
+                    self.capture(controller, name: "inline-photo-loading-\(scheme)")
+                }
+            }
+        }
+    }
+
     func testSubagentListsStartAtMediumOnEachPresentation() async throws {
         try await withModel { model in
             for _ in 0..<2 {

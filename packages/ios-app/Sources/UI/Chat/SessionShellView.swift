@@ -75,7 +75,8 @@ struct SessionShellView: View {
     @State private var sessionToRename: SessionSummary?
     @State private var renameName = ""
     @State private var workspaceDisclosure = SessionListWorkspaceDisclosure()
-    @State private var sessionExpansion = SessionListSessionExpansion()
+    @State private var sessionExpansion: SessionListSessionExpansion
+    @State private var appSettings: AppLocalBehaviorSettings
     @State private var navigationOwner = DashboardNavigationOwner()
     @State private var routeReplacementOwner = SessionRouteReplacementOwner()
     @State private var mountedSessionRouteToken: PresentationSurfaceToken?
@@ -89,6 +90,9 @@ struct SessionShellView: View {
     @State private var dashboardReconcileTask: Task<Void, Never>?
 
     init() {
+        let appSettings = AppLocalBehaviorSettings.shared
+        _appSettings = State(initialValue: appSettings)
+        _sessionExpansion = State(initialValue: SessionListSessionExpansion(pageSize: appSettings.dashboardChatsPerProject))
         _serverFilter = State(initialValue: DashboardServerFilterPreferences.load())
         _automationPreferences = State(initialValue: AutomationDashboardPreferencesOwner())
     }
@@ -179,6 +183,10 @@ struct SessionShellView: View {
                 }
             }
             .onChange(of: model.profileRevision) { _, _ in
+                guard activity.allowsPresentationPublication else { return }
+                scheduleDashboardReconciliation()
+            }
+            .onChange(of: appSettings.dashboardChatsPerProject) { _, _ in
                 guard activity.allowsPresentationPublication else { return }
                 scheduleDashboardReconciliation()
             }
@@ -860,6 +868,7 @@ struct SessionShellView: View {
         let sources = model.dashboardServerSources
         withAnimation(TronDashboardContentMotion.animation(reduceMotion: reduceMotion)) {
             dashboardPresentation = nextPresentation
+            sessionExpansion.updatePageSize(appSettings.dashboardChatsPerProject)
             sessionExpansion.reconcile(
                 groupCounts: Dictionary(uniqueKeysWithValues: groups.map { ($0.id, $0.sessions.count) })
             )

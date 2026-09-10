@@ -4,6 +4,49 @@ import Testing
 
 @Suite("Dashboard session pagination")
 struct SessionListPaginationTests {
+    @Test("configured counts govern initial rows, Show more, and Show less", arguments: [1, 3, 25, 100])
+    func configuredPageSize(count: Int) {
+        let group = SessionListWorkspaceGroup.groups(from: makeSessions(count: 40, workspace: "Workspace"))[0]
+        var expansion = SessionListSessionExpansion(pageSize: count)
+        #expect(expansion.visibleSessions(in: group).count == min(count, 40))
+        #expect(expansion.canViewMore(groupID: group.id, totalCount: 40) == (count < 40))
+        #expect(!expansion.canViewLess(groupID: group.id, totalCount: 40))
+        expansion.revealMore(groupID: group.id, totalCount: 40)
+        #expect(expansion.visibleSessions(in: group).count == min(count * 2, 40))
+        expansion.showLess(groupID: group.id)
+        #expect(expansion.visibleSessions(in: group).count == min(count, 40))
+    }
+
+    @Test("changing the configured count rejects old animations without reusing their generation")
+    func changedPageSizeRetiresOldTransitions() throws {
+        var expansion = SessionListSessionExpansion(pageSize: 3)
+        let oldTransition = expansion.beginRevealMore(groupID: "workspace", totalCount: 40)
+        let old = try #require(oldTransition)
+        expansion.updatePageSize(7)
+        #expect(expansion.visibleCount(for: "workspace", totalCount: 40) == 7)
+        let nextTransition = expansion.beginRevealMore(groupID: "workspace", totalCount: 40)
+        let current = try #require(nextTransition)
+        #expect(current.renderedCount == 14)
+        let oldBegan = expansion.beginRevealRows(old)
+        let oldFinished = expansion.finish(old)
+        let currentBegan = expansion.beginRevealRows(current)
+        let currentFinished = expansion.finish(current)
+        #expect(!oldBegan)
+        #expect(!oldFinished)
+        #expect(currentBegan)
+        #expect(currentFinished)
+        expansion.updatePageSize(7)
+        #expect(expansion.visibleCount(for: "workspace", totalCount: 40) == 14)
+        let hideTransition = expansion.beginShowLess(groupID: "workspace", totalCount: 40)
+        let hide = try #require(hideTransition)
+        #expect(hide.stableCount == 7)
+        let hidden = expansion.finish(hide)
+        #expect(hidden)
+        #expect(expansion.visibleCount(for: "workspace", totalCount: 40) == 7)
+        #expect(SessionListSessionExpansion(pageSize: Int.min).pageSize == 1)
+        #expect(SessionListSessionExpansion(pageSize: Int.max).pageSize == 100)
+    }
+
     @Test("shows only the latest ten sessions in each workspace by default")
     func defaultsToTenPerWorkspace() {
         let groups = SessionListWorkspaceGroup.groups(from: makeSessions(count: 24, workspace: "Workspace"))
