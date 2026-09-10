@@ -656,7 +656,10 @@ struct ToolDetailPresentation: Hashable, Sendable {
         readableResult = Self.readableResult(tool: tool)
         readableResultPreview = readableResult.map(ToolTextPreview.make)
         structuredResult = Self.structuredResult(tool: tool, readableResult: readableResult)
+        // Prose/live output must not disappear behind an extension's metadata.
+        // Actual JSON text still gets the compact structured presentation.
         prefersStructuredResult = kind == .generic && structuredResult != nil
+            && (readableResult == nil || Self.parsedJSON(readableResult ?? "") != nil)
         usesCodeResult = [.read, .write, .edit, .bash, .grep, .find, .list].contains(kind)
     }
 
@@ -845,11 +848,30 @@ struct ToolDetailPresentation: Hashable, Sendable {
     private static func readableString(in value: JSONValue?) -> String? {
         if let text = value?.stringValue, !text.isEmpty { return text }
         guard let object = value?.objectValue else { return nil }
+        if let blocks = object["content"]?.arrayValue {
+            let text = blocks.compactMap { block -> String? in
+                guard block.objectValue?["type"]?.stringValue == "text" else { return nil }
+                return block.objectValue?["text"]?.stringValue
+            }.joined(separator: "\n")
+            if !text.isEmpty { return text }
+        }
         return firstString(in: object, keys: ["content", "output", "text", "message", "summary", "answer", "result"])
     }
 
     static func structuredResult(tool: ChatToolPresentation, readableResult: String?) -> JSONValue? {
-        if let response = tool.response {
+        if let response = tool.response, response != .null {
+            if let object = response.objectValue,
+               let blocks = object["content"]?.arrayValue,
+               blocks.allSatisfy({
+                   $0.objectValue?["type"]?.stringValue == "text"
+                       && $0.objectValue?["text"]?.stringValue != nil
+               }),
+               Set(object.keys).isSubset(of: ["content", "details"]) {
+                // SDK result envelopes aren't user data. Empty content/details
+                // means no output yet, not a table of empty transport fields.
+                if let details = object["details"], details != .null { return details }
+                return readableResult.flatMap(parsedJSON)
+            }
             if isCollection(response) { return response }
             if let text = response.stringValue, let parsed = parsedJSON(text) { return parsed }
             if let text = response.stringValue, text == readableResult { return nil }

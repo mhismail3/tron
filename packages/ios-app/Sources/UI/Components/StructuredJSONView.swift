@@ -61,6 +61,8 @@ struct StructuredJSONField: Identifiable, Sendable {
     let value: JSONValue
 
     var id: StructuredJSONPathComponent { component }
+    var typeLabel: String { value.typeName }
+    var valuePreview: String { value.preview }
 
     var label: String {
         switch component {
@@ -164,6 +166,7 @@ struct TronStructuredJSONView: View {
     var rootValue: JSONValue? = nil
     var pathComponents: [StructuredJSONPathComponent] = []
     @State private var selectedField: JSONFieldSelection?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var authoritativeRoot: JSONValue { rootValue ?? value }
 
@@ -203,45 +206,50 @@ struct TronStructuredJSONView: View {
             primitive("Empty collection")
         } else {
             VStack(alignment: .leading, spacing: TronSpacing.md) {
-                Text("FIELDS")
+                Text(title.uppercased())
                     .font(TronTypography.sheetSectionHeader)
                     .foregroundStyle(Color.tronTextMuted)
                 TronGlassCard(accent: accent) {
                     LazyVStack(spacing: 0) {
                         ForEach(fields) { field in
-                            if field.position > 0 { TronSettingsDivider(accent: accent) }
+                            if field.position > 0 {
+                                Divider().overlay(accent.opacity(0.14))
+                                    .padding(.leading, TronSettingsLayoutPolicy.rowHorizontalPadding)
+                            }
                             Button {
                                 selectedField = JSONFieldSelection(
                                     title: field.label,
                                     components: pathComponents + [field.component]
                                 )
                             } label: {
-                                HStack(alignment: .center, spacing: 11) {
-                                    Image(systemName: field.value.isCollection ? "doc.text.magnifyingglass" : "text.alignleft")
-                                        .foregroundStyle(accent)
-                                        .frame(width: 22)
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        HStack(alignment: .firstTextBaseline) {
-                                            Text(field.label)
-                                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                                                .foregroundStyle(Color.tronTextPrimary)
-                                            Spacer()
-                                            Text(field.value.typeName)
-                                                .font(TronTypography.caption)
-                                                .foregroundStyle(Color.tronTextMuted)
-                                        }
-                                        Text(field.value.preview)
-                                            .font(TronTypography.caption)
-                                            .foregroundStyle(Color.tronTextSecondary)
-                                            .lineLimit(3)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
+                                let layout = dynamicTypeSize.isAccessibilitySize
+                                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                                    : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+                                layout {
+                                    Text(field.label)
+                                        .font(TronTypography.bodySM.weight(.semibold))
+                                        .foregroundStyle(Color.tronTextPrimary)
+                                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                                        .layoutPriority(1)
+                                    Text(field.typeLabel)
+                                        .font(TronTypography.secondaryDescription)
+                                        .foregroundStyle(Color.tronTextMuted)
+                                        .fixedSize(horizontal: true, vertical: false)
+                                    Text(field.valuePreview)
+                                        .font(TronTypography.code(size: TronTypography.sizeBodySM))
+                                        .foregroundStyle(Color.tronTextSecondary)
+                                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
+                                        .frame(maxWidth: .infinity, alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
                                 }
-                                .padding(.horizontal, 13)
-                                .padding(.vertical, 10)
+                                .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
+                                .padding(.vertical, 12)
+                                .frame(minHeight: TronSettingsLayoutPolicy.rowMinimumHeight)
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("\(field.label), \(field.typeLabel), \(field.valuePreview)")
+                            .accessibilityHint("Opens the complete value")
                         }
                     }
                 }
@@ -305,7 +313,7 @@ struct TronTechnicalJSONRow: View {
     }
 }
 
-private struct TechnicalJSONSheet: View {
+struct TechnicalJSONSheet: View {
     let value: JSONValue
     let title: String
     let accent: Color
@@ -336,14 +344,14 @@ private struct TechnicalJSONSheet: View {
                         } label: {
                             TronToolbarTextLabel("Edit", systemImage: "pencil")
                         }
-                        .tronToolbarAction(accent: .tronEmerald)
+                        .tronSettingsAccent(accent)
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .tronSettingsAccent(accent)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -369,7 +377,7 @@ private struct TechnicalJSONSheet: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.hidden)
-        .tint(Color.tronEmerald)
+        .tint(accent)
     }
 }
 
@@ -417,7 +425,7 @@ private struct JSONFieldSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .tronSettingsAccent(accent)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -426,7 +434,7 @@ private struct JSONFieldSheet: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(Color.tronEmerald)
+        .tint(accent)
     }
 }
 
@@ -435,14 +443,10 @@ private extension String {
 }
 
 private extension JSONValue {
-    var isCollection: Bool {
-        switch self { case .object, .array: true; default: false }
-    }
-
     var typeName: String {
         switch self {
-        case .object(let value): "Object · \(value.count) field\(value.count == 1 ? "" : "s")"
-        case .array(let value): "List · \(value.count) item\(value.count == 1 ? "" : "s")"
+        case .object: "Object"
+        case .array: "List"
         case .string: "Text"
         case .number: "Number"
         case .bool: "Boolean"

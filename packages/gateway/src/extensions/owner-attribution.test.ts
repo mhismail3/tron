@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attributeExtensions, attributedCommandOwner, attributedToolOwner, currentExtensionOwner } from "./owner-attribution.js";
+import { attributeExtensions, attributedCommandOwner, attributedToolOwner, currentExtensionOwner, trustedExtensionOriginKind } from "./owner-attribution.js";
 
 describe("extension owner attribution", () => {
   it("rejects extension tools that collide with the canonical assistant bash tool", () => {
@@ -30,6 +30,37 @@ describe("extension owner attribution", () => {
       commands: new Map(), shortcuts: new Map(), messageRenderers: new Map(), entryRenderers: new Map(),
     };
     expect(() => attributeExtensions({ extensions: [extension as any], errors: [], runtime: {} as any })).toThrow(/display tool name is reserved/);
+  });
+
+  it("resolves finalized package provenance for callbacks and tool/command lookups", async () => {
+    const seen: Array<ReturnType<typeof currentExtensionOwner>> = [];
+    const capture = async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      seen.push(currentExtensionOwner());
+      return { content: [] };
+    };
+    const extension = {
+      path: "/packages/subagents/index.ts", resolvedPath: "/packages/subagents/index.ts",
+      sourceInfo: { path: "/packages/subagents/index.ts", source: "local", scope: "user", origin: "top-level" },
+      handlers: new Map([["session_start", [capture]]]),
+      tools: new Map([["subagent", { definition: { execute: capture } }]]),
+      commands: new Map([["review", { handler: capture }]]),
+      shortcuts: new Map(), messageRenderers: new Map(), entryRenderers: new Map(),
+    };
+    const result = attributeExtensions({ extensions: [extension as any], errors: [], runtime: {} as any });
+    // Mirrors the SDK's post-override assignment, not a second extension load.
+    extension.sourceInfo = { ...extension.sourceInfo, source: "npm:pi-subagents" };
+    const tool = result.extensions[0]!.tools.get("subagent")!;
+    const command = result.extensions[0]!.commands.get("review")!;
+    await result.extensions[0]!.handlers.get("session_start")![0]!();
+    await tool.definition.execute("id", {}, undefined, undefined, {} as any);
+    await command.handler("", {} as any);
+    expect(seen).toHaveLength(3);
+    expect(seen.every((owner) => owner?.source === "npm:pi-subagents")).toBe(true);
+    expect(attributedToolOwner(tool)).toEqual(seen[0]);
+    expect(attributedCommandOwner(command)).toEqual(seen[0]);
+    expect(trustedExtensionOriginKind(seen[0]!)).toBe("subagent");
+    expect(currentExtensionOwner()).toBeUndefined();
   });
 
   it("keeps handler and deferred tool callbacks inside the loaded owner", async () => {

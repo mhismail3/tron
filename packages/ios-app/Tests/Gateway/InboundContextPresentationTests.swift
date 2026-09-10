@@ -86,6 +86,22 @@ struct InboundContextPresentationTests {
         ])).status == "Still Working")
     }
 
+    @Test("wait subscriptions use subagent styling without claiming success or producer evidence")
+    func waitSubscriptionCategory() {
+        for details: JSONValue? in [nil, .object(["status": .string("failed")]), .object(["status": .string("completed")])] {
+            let presentation = InboundContextMessagePresentation(
+                origin: nil, customType: "subagent-wait-subscription", details: details
+            )
+            #expect(presentation.title == "Subagent")
+            #expect(presentation.status == "Wait Update")
+            #expect(presentation.tone == .purple)
+            #expect(presentation.detailsTitle == "Subagent update")
+        }
+        #expect(InboundContextMessagePresentation(
+            origin: nil, customType: "subagent-wait-subscription-extra", details: nil
+        ).title == "Context")
+    }
+
     @Test("completion notices identify a received result without claiming successful completion")
     func subagentResultsAreNotSuccessClaims() {
         let presentation = InboundContextMessagePresentation(origin: nil, customType: "subagent-notify", details: nil)

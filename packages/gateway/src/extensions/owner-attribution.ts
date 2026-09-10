@@ -22,8 +22,8 @@ export interface InvocationExecutionContext {
   operationId: string;
 }
 const invocationStorage = new AsyncLocalStorage<InvocationExecutionContext>();
-const attributedCommandOwners = new WeakMap<RegisteredCommand["handler"], ExtensionOwner>();
-const attributedToolOwners = new WeakMap<ToolDefinition["execute"], ExtensionOwner>();
+const attributedCommandOwners = new WeakMap<RegisteredCommand["handler"], Extension>();
+const attributedToolOwners = new WeakMap<ToolDefinition["execute"], Extension>();
 
 export function currentExtensionOwner(): ExtensionOwner | undefined { return ownerStorage.getStore(); }
 export function currentInvocationContext(): InvocationExecutionContext | undefined { return invocationStorage.getStore(); }
@@ -31,10 +31,12 @@ export function withInvocationContext<T>(context: InvocationExecutionContext, op
   return invocationStorage.run(context, operation);
 }
 export function attributedCommandOwner(command: RegisteredCommand | undefined): ExtensionOwner | undefined {
-  return command ? attributedCommandOwners.get(command.handler) : undefined;
+  const extension = command ? attributedCommandOwners.get(command.handler) : undefined;
+  return extension ? extensionOwnerFor(extension) : undefined;
 }
 export function attributedToolOwner(tool: RegisteredTool | undefined): ExtensionOwner | undefined {
-  return tool ? attributedToolOwners.get(tool.definition.execute) : undefined;
+  const extension = tool ? attributedToolOwners.get(tool.definition.execute) : undefined;
+  return extension ? extensionOwnerFor(extension) : undefined;
 }
 
 function humanizedDisplayName(extension: Extension): string {
@@ -57,8 +59,10 @@ export function trustedExtensionOriginKind(owner: ExtensionOwner): "subagent" | 
   return trustedSubagentOwnerIDs.has(owner.id) ? "subagent" : "extension";
 }
 
-function owned<T extends (...args: any[]) => any>(fn: T, owner: ExtensionOwner): T {
-  return ((...args: Parameters<T>) => ownerStorage.run(owner, () => fn(...args))) as T;
+function owned<T extends (...args: any[]) => any>(fn: T, extension: Extension): T {
+  // The SDK finalizes package SourceInfo after extensionsOverride returns.
+  // Resolve at admission so callbacks and command/tool lookups agree.
+  return ((...args: Parameters<T>) => ownerStorage.run(extensionOwnerFor(extension), () => fn(...args))) as T;
 }
 
 /** Wrap every callback registered by one loaded extension. The result is safe
@@ -89,9 +93,8 @@ export function attributeExtensions(base: LoadExtensionsResult, browserLiveView?
     throw new GatewayError("conflict", "The first-party display tool was registered more than once");
   }
   for (const extension of base.extensions) {
-    const owner = extensionOwnerFor(extension);
     for (const [event, handlers] of extension.handlers) {
-      extension.handlers.set(event, handlers.map((handler) => owned(adaptedExtensionEventHandler(extension, handler), owner)));
+      extension.handlers.set(event, handlers.map((handler) => owned(adaptedExtensionEventHandler(extension, handler), extension)));
     }
     for (const [name, registered] of extension.tools) {
       const definition = adaptedToolDefinition(extension, name, registered.definition);
@@ -110,30 +113,30 @@ export function attributeExtensions(base: LoadExtensionsResult, browserLiveView?
           loadToken: loadToken!,
           views: browserLiveView.views,
         }) as Awaited<ReturnType<ToolDefinition["execute"]>>;
-      }, owner);
-      attributedToolOwners.set(execute, owner);
+      }, extension);
+      attributedToolOwners.set(execute, extension);
       extension.tools.set(name, {
         ...registered,
         definition: {
           ...definition,
           execute,
-          ...(definition.prepareArguments ? { prepareArguments: owned(definition.prepareArguments, owner) } : {}),
-          ...(definition.renderCall ? { renderCall: owned(definition.renderCall, owner) } : {}),
-          ...(definition.renderResult ? { renderResult: owned(definition.renderResult, owner) } : {}),
+          ...(definition.prepareArguments ? { prepareArguments: owned(definition.prepareArguments, extension) } : {}),
+          ...(definition.renderCall ? { renderCall: owned(definition.renderCall, extension) } : {}),
+          ...(definition.renderResult ? { renderResult: owned(definition.renderResult, extension) } : {}),
         } as ToolDefinition,
       } as RegisteredTool);
     }
     for (const [name, command] of extension.commands) {
-      const handler = owned(command.handler, owner);
-      attributedCommandOwners.set(handler, owner);
+      const handler = owned(command.handler, extension);
+      attributedCommandOwners.set(handler, extension);
       extension.commands.set(name, { ...command, handler } as RegisteredCommand);
     }
     for (const [name, shortcut] of extension.shortcuts) {
-      extension.shortcuts.set(name, { ...shortcut, handler: owned(shortcut.handler, owner) });
+      extension.shortcuts.set(name, { ...shortcut, handler: owned(shortcut.handler, extension) });
     }
-    for (const [name, renderer] of extension.messageRenderers) extension.messageRenderers.set(name, owned(renderer, owner));
-    for (const [name, renderer] of extension.entryRenderers ?? []) extension.entryRenderers!.set(name, owned(renderer, owner));
-    if (extension.markdownTransformer) extension.markdownTransformer = owned(extension.markdownTransformer, owner);
+    for (const [name, renderer] of extension.messageRenderers) extension.messageRenderers.set(name, owned(renderer, extension));
+    for (const [name, renderer] of extension.entryRenderers ?? []) extension.entryRenderers!.set(name, owned(renderer, extension));
+    if (extension.markdownTransformer) extension.markdownTransformer = owned(extension.markdownTransformer, extension);
   }
   return base;
 }

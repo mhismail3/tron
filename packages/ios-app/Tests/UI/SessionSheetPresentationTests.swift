@@ -578,6 +578,43 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testCompactToolResultAndQueueSheets() async throws {
+        let tool = ChatToolPresentation(
+            id: "preview-tool", title: "Web Search", subtitle: "Completed", request: nil,
+            response: .object(["status": .number(200), "queries": .array([.string("one"), .string("two")]),
+                               "includeContent": .bool(false), "resultCount": .number(18)]),
+            content: "Found 18 results across two queries.", fallbackContent: nil, error: false,
+            startedAt: nil, completedAt: nil, durationMs: 3300, lastProgressAt: nil, progressSequence: nil
+        )
+        try await withSheet(NavigationStack {
+            ToolDetailSheet(tool: tool, density: .glance)
+                .tronNavigationTitle("Web Search")
+        }.presentationDetents([.medium, .large], selection: .constant(.medium))) { controller in
+            XCTAssertEqual(controller.sheetPresentationController?.selectedDetentIdentifier, .medium)
+            self.capture(controller, name: "compact-tool-result")
+        }
+        try await withSheet(QueuedMessageEditorSheet(
+            message: .init(id: "queued", behavior: .steer, text: "Please check the current result.", attachmentCount: 0),
+            isSaving: false, onSave: { _, _ in }, onDelete: {}
+        )) { controller in
+            let sheet = try XCTUnwrap(controller.sheetPresentationController)
+            XCTAssertEqual(Set(sheet.detents.map(\.identifier)), [.medium, .large])
+            self.capture(controller, name: "standard-queued-message")
+        }
+    }
+
+    func testAdvancedJSONActionsMatchInheritedPurpleTheme() async throws {
+        try await withSheet(TechnicalJSONSheet(
+            value: .object(["providers": .object([:])]), title: "Advanced JSON", accent: .tronSlate,
+            detent: .constant(.medium), onEdit: {}
+        ).tronSettingsVisualTheme(accent: .tronPurple)) { controller in
+            let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
+            self.assertToolbarPaint(.tronPurple, bar: bar, leading: true, controller: controller)
+            self.assertToolbarPaint(.tronPurple, bar: bar, leading: false, controller: controller)
+            self.capture(controller, name: "advanced-json-themed-actions")
+        }
+    }
+
     private func capture(_ controller: UIViewController, name: String) {
         let image = UIGraphicsImageRenderer(size: controller.view.bounds.size).image { _ in
             controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)

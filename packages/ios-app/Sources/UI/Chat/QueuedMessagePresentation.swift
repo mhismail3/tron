@@ -533,32 +533,23 @@ struct QueuedMessageEditorSheet: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 18) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Delivery")
-                            .font(TronTypography.sheetSectionHeader)
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .accessibilityAddTraits(.isHeader)
-                        Text(behavior == .steer
-                            ? "Delivered after the current assistant turn finishes its tool calls."
-                            : "Follow-up waits until Tron finishes its current work.")
-                            .font(TronTypography.secondaryDescription)
-                            .foregroundStyle(Color.tronTextMuted)
-                            .fixedSize(horizontal: false, vertical: true)
-                        HStack(spacing: 8) {
-                            deliveryChoice(
-                                .steer,
-                                title: "Steer next",
-                                icon: "arrow.turn.up.right",
-                                accent: .tronEmerald
-                            )
-                            deliveryChoice(
-                                .followUp,
-                                title: "Follow up",
-                                icon: "text.line.last.and.arrowtriangle.forward",
-                                accent: .tronPurple
-                            )
+                    TronGlassCard(accent: accent) {
+                        TronSelectionRow(
+                            icon: "arrow.turn.up.right",
+                            title: "Delivery",
+                            value: behavior == .steer ? "Steer next" : "Follow up",
+                            accent: accent
+                        ) {
+                            Picker("Delivery", selection: $behavior) {
+                                Text("Steer next").tag(SessionSnapshot.QueuedMessage.Behavior.steer)
+                                Text("Follow up").tag(SessionSnapshot.QueuedMessage.Behavior.followUp)
+                            }
                         }
+                        .controlSize(.small)
                     }
+                    .tronSettingsCaption(behavior == .steer
+                        ? "Delivered after the current assistant turn finishes its tool calls."
+                        : "Follow-up waits until Tron finishes its current work.")
 
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Message")
@@ -566,9 +557,7 @@ struct QueuedMessageEditorSheet: View {
                             .foregroundStyle(Color.tronTextPrimary)
                             .accessibilityAddTraits(.isHeader)
                         TextEditor(text: $text)
-                            .font(TronTypography.body)
                             .frame(minHeight: 160)
-                            .padding(10)
                             .tronTextEditor()
                             .accessibilityLabel("Queued message")
 
@@ -584,6 +573,7 @@ struct QueuedMessageEditorSheet: View {
                 }
                 .padding(18)
             }
+            .scrollDismissesKeyboard(.interactively)
             .tronScrollEdgeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -600,7 +590,7 @@ struct QueuedMessageEditorSheet: View {
                     .disabled(isSaving)
                 }
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: "Queued Message", accent: behavior == .steer ? .tronEmerald : .tronPurple)
+                    TronSheetTitle(title: "Queued Message", accent: accent)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
@@ -608,11 +598,11 @@ struct QueuedMessageEditorSheet: View {
                         dismiss()
                     } label: {
                         if isSaving {
-                            TronPulseLoadingIndicator(accent: behavior == .steer ? .tronEmerald : .tronPurple, size: 18)
+                            TronPulseLoadingIndicator(accent: accent, size: 18)
                         } else {
-                            Image(systemName: TronSaveActionPresentation.systemImage)
+                            Image(systemName: "checkmark")
                                 .font(TronTypography.buttonSM)
-                                .foregroundStyle(behavior == .steer ? Color.tronEmerald : Color.tronPurple)
+                                .foregroundStyle(accent)
                         }
                     }
                     .accessibilityLabel("Save queued message")
@@ -624,39 +614,9 @@ struct QueuedMessageEditorSheet: View {
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .interactiveDismissDisabled(isSaving)
-        .tint(behavior == .steer ? Color.tronEmerald : Color.tronPurple)
+        .tint(accent)
+        .tronSettingsVisualTheme(accent: accent)
     }
 
-    private func deliveryChoice(
-        _ value: SessionSnapshot.QueuedMessage.Behavior,
-        title: String,
-        icon: String,
-        accent: Color
-    ) -> some View {
-        let selected = behavior == value
-        return Button {
-            behavior = value
-        } label: {
-            VStack(spacing: 7) {
-                Image(systemName: selected ? "checkmark.circle.fill" : icon)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
-                Text(title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .foregroundStyle(selected ? accent : Color.tronTextSecondary)
-            .frame(maxWidth: .infinity, minHeight: 48)
-            .contentShape(Rectangle())
-        }
-        .background(
-            (selected ? accent.opacity(0.14) : Color.tronSlate.opacity(0.06)),
-            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(selected ? accent.opacity(0.45) : Color.tronSlate.opacity(0.16), lineWidth: 0.75)
-        }
-        .accessibilityLabel(title)
-        .accessibilityAddTraits(selected ? .isSelected : [])
-    }
+    private var accent: Color { behavior == .steer ? .tronEmerald : .tronPurple }
 }

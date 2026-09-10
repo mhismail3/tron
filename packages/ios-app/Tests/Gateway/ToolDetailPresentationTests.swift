@@ -901,6 +901,42 @@ struct ToolDetailPresentationTests {
         ))
     }
 
+    @Test("empty SDK envelopes wait for real output instead of rendering transport fields")
+    func emptyRuntimeEnvelope() {
+        for response: JSONValue in [.null, .object(["content": .array([]), "details": .null])] {
+            let presentation = ToolDetailPresentation(tool: tool("bash", subtitle: "Running", response: response))
+            #expect(presentation.readableResult == nil)
+            #expect(presentation.structuredResult == nil)
+        }
+        let envelope: JSONValue = .object([
+            "content": .array([.object(["type": .string("text"), "text": .string("building target\nlinked app")])]),
+            "details": .null,
+        ])
+        let live = ToolDetailPresentation(tool: tool("bash", subtitle: "Running", response: envelope))
+        #expect(live.readableResultPreview?.text == "building target\nlinked app")
+        #expect(live.structuredResult == nil)
+        let imageEnvelope: JSONValue = .object([
+            "content": .array([.object(["type": .string("image"), "mimeType": .string("image/png")])]),
+            "details": .null,
+        ])
+        #expect(ToolDetailPresentation(tool: tool("custom", response: imageEnvelope)).structuredResult == imageEnvelope)
+    }
+
+    @Test("generic tools foreground live and completed prose without discarding structured details")
+    func genericReadableOutputWins() {
+        let details: JSONValue = .object(["status": .number(200), "count": .number(3)])
+        for status in ["Running", "Completed"] {
+            let presentation = ToolDetailPresentation(tool: tool(
+                "web_search", subtitle: status, response: details, content: "Found three sources."
+            ))
+            #expect(!presentation.prefersStructuredResult)
+            #expect(presentation.readableResultPreview?.text == "Found three sources.")
+            #expect(presentation.structuredResult == details)
+        }
+        let payload: JSONValue = .object(["content": .array([]), "details": .null, "status": .string("queued")])
+        #expect(ToolDetailPresentation(tool: tool("custom", response: payload)).structuredResult == payload)
+    }
+
     @Test("unknown tools remain generic and surface structured results")
     func genericFallback() {
         let response: JSONValue = .object(["items": .array([.string("one"), .string("two")])])

@@ -220,6 +220,10 @@ struct InboundContextMessagePresentation: Equatable {
             case "active_long_running": return "Still Working"
             default: return "Update"
             }
+        case "subagent-wait-subscription":
+            // A wake subscription is a category of subagent message, not proof
+            // that the referenced execution completed successfully.
+            return "Wait Update"
         case "subagent-notify":
             // This emitter omits structured status and can report successful,
             // failed, paused, or grouped results. Never infer success from prose.

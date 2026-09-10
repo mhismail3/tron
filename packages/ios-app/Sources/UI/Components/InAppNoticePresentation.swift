@@ -158,7 +158,9 @@ private struct InAppNoticeCard: View {
         notice.message == nil && notice.actions.isEmpty
     }
     private var cornerRadius: CGFloat {
-        isCompactPill ? 1_000 : 18
+        // Short notices remain capsules; expanded notices keep the same soft
+        // ends without clipping multiline copy or accessible action targets.
+        isCompactPill ? 1_000 : 32
     }
     private var contentAlignment: VerticalAlignment {
         isCompactPill ? .center : .top
@@ -166,15 +168,18 @@ private struct InAppNoticeCard: View {
 
     var body: some View {
         HStack(alignment: contentAlignment, spacing: 9) {
-            Image(systemName: symbol).foregroundStyle(accent).accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
+            Image(systemName: symbol)
+                .font(TronTypography.headline)
+                .foregroundStyle(accent)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 5) {
                 Text(notice.title)
-                    .font(TronTypography.bodySM.weight(.semibold))
+                    .font(TronTypography.body.weight(.semibold))
                     .foregroundStyle(Color.tronTextPrimary)
                     .fixedSize(horizontal: false, vertical: true)
                 if let message = notice.message {
                     Text(message)
-                        .font(TronTypography.caption)
+                        .font(TronTypography.bodySM)
                         .foregroundStyle(Color.tronTextSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -194,8 +199,8 @@ private struct InAppNoticeCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 13)
-        .padding(.vertical, 9)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
         .frame(maxWidth: 420, minHeight: 44, alignment: .leading)
         .background(
             Color.tronSurfaceElevated.opacity(index == 0 ? 0.88 : 0.76),
@@ -241,11 +246,14 @@ private struct InAppNoticeCard: View {
         let layout = axis == .horizontal ? AnyLayout(HStackLayout(spacing: 10)) : AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
         layout {
             ForEach(notice.actions) { action in
-                Button(action.title) { model.noticeCenter.performAction(action, for: notice.id) }
-                    .font(TronTypography.caption.weight(.semibold))
-                    .foregroundStyle(action.role == .destructive ? Color.tronError : accent)
-                    .frame(minHeight: 44)
-                    .contentShape(Rectangle())
+                Button { model.noticeCenter.performAction(action, for: notice.id) } label: {
+                    TronInlineActionLabel(
+                        action.title,
+                        accent: action.role == .destructive ? .tronError : accent
+                    )
+                }
+                .buttonStyle(.plain)
+                .controlSize(.small)
             }
         }
     }

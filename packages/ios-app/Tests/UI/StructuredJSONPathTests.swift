@@ -80,6 +80,23 @@ struct StructuredJSONPathTests {
         #expect(fields.map(\.label) == ["Status", "Answer", "Camel Case", "Z Value"])
     }
 
+    @Test("compact rows separate title, type, and value without repeating collection counts")
+    func compactFieldValues() {
+        let fields = StructuredJSONFields(object: [
+            "queries": .array([.string("one"), .string("two")]),
+            "enabled": .bool(false),
+            "status": .number(200),
+            "missing": .null,
+        ])
+        let queries = fields.first { $0.component == .key("queries") }!
+        #expect(queries.label == "Queries")
+        #expect(queries.typeLabel == "List")
+        #expect(queries.valuePreview == "2 items")
+        #expect(fields.first { $0.component == .key("enabled") }?.valuePreview == "False")
+        #expect(fields.first { $0.component == .key("status") }?.valuePreview == "200")
+        #expect(fields.first { $0.component == .key("missing") }?.valuePreview == "No value")
+    }
+
     @Test("removed or type-changed paths fail closed")
     func missingPath() {
         let path: [StructuredJSONPathComponent] = [.key("items"), .index(2)]

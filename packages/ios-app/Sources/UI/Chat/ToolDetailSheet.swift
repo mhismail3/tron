@@ -212,6 +212,9 @@ struct ToolDetailSheet: View {
                         .tronGlassSurface(accent: accent, tintOpacity: 0.07)
                 }
             }
+            if presentation.kind == .generic, let structured = presentation.structuredResult {
+                structuredResultSection(structured, title: "Details")
+            }
         } else if let structured = presentation.structuredResult, presentation.diff == nil {
             structuredResultSection(structured)
         } else if presentation.diff == nil {
@@ -221,16 +224,13 @@ struct ToolDetailSheet: View {
         }
     }
 
-    private func structuredResultSection(_ structured: JSONValue) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            sectionLabel(tool.isRunning ? "Current result" : "Result")
-            TronStructuredJSONView(
-                value: structured,
-                title: "Result",
-                accent: accent,
-                showsRawDisclosure: false
-            )
-        }
+    private func structuredResultSection(_ structured: JSONValue, title: String? = nil) -> some View {
+        TronStructuredJSONView(
+            value: structured,
+            title: title ?? (tool.isRunning ? "Live output" : "Result"),
+            accent: accent,
+            showsRawDisclosure: false
+        )
     }
 
     private var primaryValueFont: Font {
