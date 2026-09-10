@@ -49,7 +49,8 @@ sessions, credentials, and runtime markers remain separate.
 - `packages/mac-app/Sources/Server/Health/` — authenticated `system.info` gateway probe
 - `packages/mac-app/Sources/Server/Paths/` — canonical wrapper identities and filesystem paths
 - `packages/mac-app/Sources/Support/Pairing/` — strict invitation URL and QR generation
-- `packages/mac-app/Sources/Resources/Library/` — tracked Login Item and LaunchAgent skeletons
+- `packages/mac-app/Sources/Resources/Library/` — tracked Gateway Login Item and LaunchAgent skeletons
+- `packages/mac-app/Sources/NativeHost/` — signed Aqua permission host source and metadata; the built app is embedded once at `Contents/Library/Native/Tron Native Host.app`
 - `packages/mac-app/scripts/bundle-gateway.sh` — generated gateway payload owner
 
 The retired Mac Operator accessibility/socket bridge is absent. The agent uses
@@ -71,6 +72,65 @@ settings/credential resets, preserve both workspace content and the Gateway's
 `gateway/workspace-state` lifecycle evidence. Missing/unsafe workspace recovery is
 manual; never remove it as an application or signing repair. The Gateway owns the
 [initialization, backup and restore contract](../../gateway/docs/internal-workspace.md).
+
+## Native host and first-time permissions
+
+`Tron.app` embeds one dedicated Aqua `Tron Native Host` with the stable bundle
+identifier `com.tron.mac.native-host`. Core onboarding continues to require FDA
+only; the same page offers explicitly optional preparation of native permissions.
+Completing that page does not enable computer control or imply an input backend
+exists. The menu's Permissions window uses the same bounded surface after
+onboarding, without rewriting the saved wizard step or repeating installation.
+Closing that window retires its probes/watchers, not accepted consent commands.
+Actual computer-control execution must independently require all of its native
+grants and safety gates. Its bundled Aqua LaunchAgent declares a
+Mach service with the same name and associates it with the Tron app. Explicit
+setup first enables this service through SMAppService; if macOS requires background
+approval, the separate helper step opens Login Items settings and remains visibly
+unfinished. Permission Allow buttons are enabled only after a fresh service status
+reports enabled. Approval itself never queues a delayed TCC request: the user then
+chooses the explicit permission action. Once approved, launchd owns
+activation and singleton lifetime across menu closure and login. Probes may wake
+an already registered service but never register it, request TCC, or restart the
+Gateway. Explicit uninstall unregisters the native service before local cleanup;
+a failure preserves local state. The helper queries Accessibility, Input Monitoring,
+and Screen Recording from its own signed process, so a wrapper Boolean or the
+Node Gateway cannot become permission authority. FDA remains the wrapper's
+existing filesystem probe.
+
+The host validates initial peers with
+`NSXPCListener.setConnectionCodeSigningRequirement`; both connection directions
+use `NSXPCConnection.setCodeSigningRequirement` before activation. Requirements
+bind fixed product identifiers, the signed build's team and the actual bundled
+peer's CDHash, not an arbitrary old build with the same identifier. Endpoint
+bytes, PID and UID are not authentication. The declared Mach service carries
+connections directly; no endpoint file, custom singleton lock or filesystem
+rendezvous exists. Delegates stay strongly owned through the run loop.
+
+The injected platform boundary separates read-only status/probes, explicit service
+activation/removal and explicit TCC requests. Offline coordinator tests check that
+neither probing nor premature consent registers a service, background approval
+never silently launches consent, and accepted consent survives waiter cancellation.
+Each disposable probe owns its connection and bounded cancellation. A consent
+request has a separately retained owner and joins its real reply/error rather
+than expiring after a UI timeout. Native TCC operations serialize on the helper's
+main queue. A false preflight/request does not invent an explicit-denial history.
+Requests carry an operation UUID and the wrapper applies an exact latest-request
+fence, then publishes only a fresh post-command probe. The host retains sixteen
+bounded command receipts to reject conflicting/duplicate permission requests;
+these receipts are not a cache of current grants. TCC may be revoked: a fresh unavailable/revoked response replaces an old
+badge rather than preserving a cached permanent grant. There is no automatic
+prompt retry. If registration is enabled but fresh GUI probes are all unavailable,
+setup offers an explicit Restart Helper action: it joins locally accepted consent,
+unregisters before registering, stops at the first error, and never itself asks
+for TCC. It is not an automatic update/relaunch guarantee. Before adding input
+execution, this lifecycle boundary must also join the native input owner; the
+current service has no input work. Debug/read-only wrapper modes cannot request
+permissions or activate the Stable helper. Actual signed-service TCC attribution, update/relaunch behavior
+and background approval require release qualification; the separate observation
+qualification app's grant is not assumed to transfer. The helper is deliberately limited to readiness/probes and
+explicit permission requests; it contains no tap, capture, input, tool, or Gateway
+lifecycle implementation.
 
 ## Wizard installation
 

@@ -66,6 +66,7 @@ enum MenuBarItemBuilder {
         items.append(.separator)
 
         items.append(.action(title: "Show pairing info", isEnabled: true, action: .showPairingInfo))
+        items.append(.action(title: "Permissions…", isEnabled: true, action: .showPermissions))
         switch debugGateway {
         case .admitted(let isPairable):
             if isPairable {

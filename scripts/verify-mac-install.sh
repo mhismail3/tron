@@ -39,6 +39,22 @@ verify_codesign() {
 }
 verify_codesign "$APP" "outer app"
 verify_codesign "$APP/Contents/Library/LoginItems/Tron Agent.app" "Tron Agent.app"
+NATIVE_HOST="$APP/Contents/Library/Native/Tron Native Host.app"
+if [[ -x "$NATIVE_HOST/Contents/MacOS/TronNativeHost" ]]; then
+  pass "Tron Native Host executable present"
+else
+  fail "Tron Native Host executable missing"
+fi
+verify_codesign "$NATIVE_HOST" "Tron Native Host.app"
+if python3 "$(dirname "$0")/validate-native-host.py" --app "$APP" >/dev/null 2>&1; then
+  pass "native helper and Aqua Mach service composition"
+else
+  fail "native helper or Aqua Mach service composition invalid"
+fi
+NATIVE_IDENTIFIER="$(codesign -dv --verbose=4 "$NATIVE_HOST" 2>&1 | sed -n 's/^Identifier=//p' | head -n 1)"
+[[ "$NATIVE_IDENTIFIER" == "com.tron.mac.native-host" ]] \
+  && pass "Tron Native Host identity is stable" \
+  || fail "Tron Native Host identity is not com.tron.mac.native-host"
 [[ ! -e "$APP/Contents/Library/LoginItems/Tron Agent Dev.app" ]] \
   && pass "Release app contains no Debug Login Item" \
   || fail "Release app unexpectedly contains a Debug Login Item"

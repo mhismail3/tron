@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import Darwin
 @testable import TronMac
 
 @Suite("ExistingInstallDetector")
@@ -329,6 +330,35 @@ struct ExistingInstallDetectorTests {
         """)
 
         #expect(problem == nil)
+    }
+
+    @Test("native host validation is offline and requires the executable")
+    func nativeHostValidationUsesInjectedSignatureBoundary() async throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let bundle = tmp.appendingPathComponent("Tron Native Host.app", isDirectory: true)
+        let executable = bundle.appendingPathComponent("Contents/MacOS/TronNativeHost", isDirectory: false)
+        try FileManager.default.createDirectory(at: executable.deletingLastPathComponent(), withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: executable.path, contents: Data([0]))
+        chmod(executable.path, 0o700)
+
+        let accepted = await ExistingInstallDetector.validateNativeHost(
+            bundle: bundle,
+            executable: executable,
+            signatureProblemResolver: { candidate in
+                #expect(candidate == bundle)
+                return nil
+            }
+        )
+        #expect(accepted == nil)
+
+        try FileManager.default.removeItem(at: executable)
+        let missing = await ExistingInstallDetector.validateNativeHost(
+            bundle: bundle,
+            executable: executable,
+            signatureProblemResolver: { _ in nil }
+        )
+        #expect(missing?.contains("not executable") == true)
     }
 
     private typealias HelperFixture = (helperBundle: URL, helperBinary: URL, plistPath: URL)

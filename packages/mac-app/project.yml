@@ -34,6 +34,7 @@ targets:
         createIntermediateGroups: true
         excludes:
           - "Resources/**"
+          - "NativeHost/**"
       # Ordinary resources are copied through Xcode's resource phase. The
       # tracked Library tree is excluded because the post-build script owns
       # its `Contents/Library` placement and nested signing order.
@@ -44,6 +45,8 @@ targets:
         excludes:
           - "Library/**"
           - "Gateway/**"
+    dependencies:
+      - target: TronNativeHost
     settings:
       base:
         INFOPLIST_FILE: Sources/Info.plist
@@ -85,16 +88,20 @@ targets:
           set -euo pipefail
           SRC="$SRCROOT/Sources/Resources/Library"
           DST="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Library"
+          NATIVE_SRC="$BUILT_PRODUCTS_DIR/TronNativeHost.app"
+          NATIVE_DST="$DST/Native/Tron Native Host.app"
           GATEWAY_SRC="$SRCROOT/Sources/Resources/Gateway"
           GATEWAY_DST="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Resources/Gateway"
           test -d "$SRC" || { echo "Missing bundled Library resources at $SRC" >&2; exit 1; }
+          test -d "$NATIVE_SRC" || { echo "Missing built Tron Native Host at $NATIVE_SRC" >&2; exit 1; }
           test -d "$GATEWAY_SRC" || { echo "Missing bundled Gateway resources at $GATEWAY_SRC; run scripts/bundle-gateway.sh" >&2; exit 1; }
           # A previous build may contain the deliberately read-only payload.
           # Make only that generated destination removable before replacing it.
           chmod -R u+w "$GATEWAY_DST" 2>/dev/null || true
           rm -rf "$DST" "$GATEWAY_DST"
-          mkdir -p "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Resources"
+          mkdir -p "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Resources" "$DST/Native"
           ditto "$SRC" "$DST"
+          ditto "$NATIVE_SRC" "$NATIVE_DST"
           # ditto/cp can fail while materializing symlinks inside a 0555 source
           # tree because they apply directory modes before populating children.
           # rsync defers final directory modes and preserves the internal links.
@@ -123,6 +130,9 @@ targets:
               [ -d "$HELPER" ] || continue
               codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$HELPER"
             done
+            # Sign the Aqua TCC host after copying it into its final nested
+            # location, then the outer app seals both native compositions.
+            codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$NATIVE_DST"
             # Native signing changes payload bytes. Recompute the selected
             # bundle fingerprint before the outer app seals its resources.
             PAYLOAD_HASHER="$DST/LoginItems/Tron Agent.app/Contents/MacOS/tron"
@@ -148,6 +158,23 @@ targets:
             chmod -R a-w "$GATEWAY_DST"
           fi
 
+  TronNativeHost:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/NativeHost
+        createIntermediateGroups: true
+      - path: Sources/Support/Onboarding/NativeHostProtocol.swift
+    settings:
+      base:
+        INFOPLIST_FILE: Sources/NativeHost/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        PRODUCT_BUNDLE_IDENTIFIER: com.tron.mac.native-host
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "7"
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_HARDENED_RUNTIME: YES
+
   SingleInstanceLockProbe:
     type: tool
     platform: macOS
@@ -167,6 +194,7 @@ targets:
           - Fixtures/SingleInstanceLockProbe/**
     dependencies:
       - target: TronMac
+      - target: TronNativeHost
       - target: SingleInstanceLockProbe
     settings:
       base:

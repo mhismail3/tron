@@ -3,8 +3,14 @@ import Darwin
 import Foundation
 import TronComputerControl
 
+enum ObserverQualificationScope: String, Codable, Sendable { case session, selfProcess }
+
 struct ObserverQualificationConfig: Equatable, Sendable {
     let deadlineMilliseconds: UInt64
+    let scope: ObserverQualificationScope
+    init(deadlineMilliseconds: UInt64, scope: ObserverQualificationScope = .session) {
+        self.deadlineMilliseconds = deadlineMilliseconds; self.scope = scope
+    }
     static let defaults = Self(deadlineMilliseconds: 5_000)
 }
 
@@ -15,12 +21,18 @@ enum ObserverQualificationInvocation: Equatable {
 
     static func parse(_ arguments: [String]) -> Self {
         if arguments.isEmpty || arguments == ["--help"] || arguments == ["-h"] { return .help }
-        if arguments == ["--observe"] { return .observe(.defaults) }
-        guard arguments.count == 3, arguments[0] == "--observe", arguments[1] == "--deadline-ms",
-              let value = UInt64(arguments[2]), (1...300_000).contains(value) else {
-            return .invalid("Use --observe [--deadline-ms 1...300000].")
+        let scope: ObserverQualificationScope
+        switch arguments.first {
+        case "--observe": scope = .session
+        case "--observe-self-process": scope = .selfProcess
+        default: return .invalid("Use --observe or --observe-self-process [--deadline-ms 1...300000].")
         }
-        return .observe(.init(deadlineMilliseconds: value))
+        if arguments.count == 1 { return .observe(.init(deadlineMilliseconds: 5_000, scope: scope)) }
+        guard arguments.count == 3, arguments[1] == "--deadline-ms",
+              let value = UInt64(arguments[2]), (1...300_000).contains(value) else {
+            return .invalid("Use --observe or --observe-self-process [--deadline-ms 1...300000].")
+        }
+        return .observe(.init(deadlineMilliseconds: value, scope: scope))
     }
 }
 
@@ -34,6 +46,7 @@ struct ObserverQualificationAvailability: Codable, Equatable, Sendable {
 struct ObserverQualificationReport: Codable, Equatable, Sendable {
     let schema: String
     let processIdentifier: Int32
+    let scope: ObserverQualificationScope
     let deadlineMilliseconds: UInt64
     let requestedEventsOfInterest: UInt64
     let inventoryBefore: [NativeEventTapInventoryEntry]
@@ -55,7 +68,7 @@ struct ObserverQualificationReport: Codable, Equatable, Sendable {
     /// refusal is still an unsuccessful qualification, never an empty-set pass.
     func validationErrors() -> [String] {
         var errors: [String] = []
-        if schema != "tron.native-observer-qualification.v1" { errors.append("schema mismatch") }
+        if schema != "tron.native-observer-qualification.v2" { errors.append("schema mismatch") }
         if processIdentifier <= 0 || !(1...300_000).contains(deadlineMilliseconds) { errors.append("invalid configuration") }
         if requestedEventsOfInterest != NativeEventObserver.requiredEventsOfInterest { errors.append("noncanonical requested mask") }
         if inventoryError != nil { errors.append("tap inventory is incomplete") }
@@ -82,8 +95,8 @@ struct ObserverQualificationReport: Codable, Equatable, Sendable {
             }
             if newlyOwnedTapIDs.count != 1 { errors.append("available observer must own exactly one new tap") }
             for entry in inventoryAfterStart where owned.contains(entry.eventTapID) {
-                if entry.processBeingTapped != 0
-                    || entry.tapPointRawValue != Int32(CGEventTapLocation.cgSessionEventTap.rawValue)
+                if entry.processBeingTapped != (scope == .session ? 0 : processIdentifier)
+                    || (scope == .session && entry.tapPointRawValue != Int32(CGEventTapLocation.cgSessionEventTap.rawValue))
                     || entry.optionsRawValue != UInt32(CGEventTapOptions.listenOnly.rawValue)
                     || entry.eventsOfInterest != requestedEventsOfInterest || !entry.enabled {
                     errors.append("owned tap metadata does not match requested session observer")
@@ -115,7 +128,8 @@ private final class QualificationState: @unchecked Sendable {
 enum ObserverQualificationLifecycle {
     static func run(_ config: ObserverQualificationConfig) async -> ObserverQualificationReport {
         let state = QualificationState()
-        let observer = NativeEventObserver(activity: { state.sawActivity() })
+        let target: NativeEventTapTarget = config.scope == .session ? .session : .process(getpid())
+        let observer = NativeEventObserver(target: target, activity: { state.sawActivity() })
         return await withTaskCancellationHandler {
             await execute(config, observer: observer, state: state)
         } onCancel: {
@@ -151,7 +165,7 @@ enum ObserverQualificationLifecycle {
             available = .init(available: false, generationID: nil, generationNumber: nil, reason: reason)
         }
         let final = state.snapshot
-        return .init(schema: "tron.native-observer-qualification.v1", processIdentifier: getpid(),
+        return .init(schema: "tron.native-observer-qualification.v2", processIdentifier: getpid(), scope: config.scope,
                      deadlineMilliseconds: config.deadlineMilliseconds,
                      requestedEventsOfInterest: NativeEventObserver.requiredEventsOfInterest,
                      inventoryBefore: before.entries, availability: available,
@@ -174,8 +188,8 @@ struct TronNativeObserverQualification {
     static func main() {
         switch ObserverQualificationInvocation.parse(Array(CommandLine.arguments.dropFirst())) {
         case .help:
-            print("Usage: TronNativeObserverQualification --observe [--deadline-ms N]")
-            print("Creates one listen-only session observer, then joins Stop. No input is posted.")
+            print("Usage: TronNativeObserverQualification --observe|--observe-self-process [--deadline-ms N]")
+            print("Creates one listen-only observer, then joins Stop. Process mode targets only this process. No input is posted.")
         case let .invalid(reason):
             FileHandle.standardError.write(Data("Qualification refused: \(reason)\n".utf8))
             exit(2)

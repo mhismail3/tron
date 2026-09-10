@@ -4,6 +4,46 @@ import Testing
 
 @Suite("MacPermissionProbe")
 struct MacPermissionProbeTests {
+    @Test("GUI permission categories have distinct System Settings destinations")
+    func guiPermissionSettingsDestinations() {
+        #expect(Permission.allCases.count == 4)
+        #expect(Permission.accessibility.systemSettingsURL.absoluteString.contains("Privacy_Accessibility"))
+        #expect(Permission.inputMonitoring.systemSettingsURL.absoluteString.contains("Privacy_ListenEvent"))
+        #expect(Permission.screenRecording.systemSettingsURL.absoluteString.contains("Privacy_ScreenCapture"))
+    }
+
+    @Test("native host trust is identifier-bound, not PID-bound")
+    func nativeHostTrustRequirements() throws {
+        let wrapper = try NativeHostTrust.requirement(identifier: "com.tron.mac", team: "EXAMPLE123")
+        let host = try NativeHostTrust.requirement(identifier: NativeHostTrust.bundleIdentifier, team: "EXAMPLE123")
+        #expect(wrapper == "anchor apple generic and certificate leaf[subject.OU] = \"EXAMPLE123\" and identifier \"com.tron.mac\"")
+        #expect(host.contains(NativeHostTrust.bundleIdentifier))
+        #expect(throws: NativeHostTrustError.self) { try NativeHostTrust.requirement(identifier: "untrusted", team: "EXAMPLE123") }
+        #expect(throws: NativeHostTrustError.self) { try NativeHostTrust.requirement(identifier: "com.tron.mac", team: nil) }
+    }
+
+    @Test("an unsigned path cannot become a pinned XPC peer")
+    func unsignedPeerRejected() throws {
+        let root = TestTempDir.make()
+        defer { TestTempDir.cleanup(root) }
+        let base = try NativeHostTrust.requirement(identifier: NativeHostTrust.bundleIdentifier, team: "EXAMPLE123")
+        #expect(throws: NativeHostTrustError.self) { try NativeHostTrust.pin(base, to: root) }
+    }
+
+    @Test("optional native pre-consent cannot block or satisfy core setup")
+    func coreSetupGate() {
+        #expect(Permission.coreSetupSatisfied(by: [.fullDiskAccess: .granted]))
+        #expect(!Permission.coreSetupSatisfied(by: [.accessibility: .granted, .inputMonitoring: .granted, .screenRecording: .granted]))
+        #expect(!Permission.coreSetupSatisfied(by: [.fullDiskAccess: .probeUnavailable]))
+    }
+
+    @Test("wrapper probe remains FDA-only")
+    func wrapperProbeDoesNotClaimGuiPermission() async {
+        #expect(await MacPermissionProbe.probe(.accessibility) == .probeUnavailable)
+        #expect(await MacPermissionProbe.probe(.inputMonitoring) == .probeUnavailable)
+        #expect(await MacPermissionProbe.probe(.screenRecording) == .probeUnavailable)
+    }
+
     @Test("Full Disk Access is granted when the TCC database opens")
     func fullDiskAccessGrantedByTCCDatabase() {
         #expect(MacPermissionProbe.classifyFullDiskAccess(

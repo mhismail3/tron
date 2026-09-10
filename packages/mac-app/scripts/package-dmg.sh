@@ -50,6 +50,8 @@ case "$layout" in structural|release) ;; *) die "--layout must be structural or 
 bundle="$(basename "$app")"
 [[ "$bundle" == *.app ]] || die "--app must name an .app bundle"
 helper="Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
+native_host="Contents/Library/Native/Tron Native Host.app/Contents/MacOS/TronNativeHost"
+native_host_bundle="Contents/Library/Native/Tron Native Host.app"
 gateway_root="Contents/Resources/Gateway"
 launch_agent="Contents/Library/LaunchAgents/com.tron.server.plist"
 
@@ -61,6 +63,7 @@ verify_app_bundle() {
     local expected_fingerprint actual_fingerprint runtime expected_arch actual_arch entitlements helper_archs node_version alias pi_alias pi_cli
     local required_files=(
         "$helper"
+        "$native_host"
         "$launch_agent"
         "$gateway_root/manifest.json"
         "$gateway_root/app/dist/index.js"
@@ -90,13 +93,23 @@ verify_app_bundle() {
     python3 "$REPO_ROOT/scripts/verify-gateway-protocol-contract.py" --mac-app "$root" >/dev/null \
         || die "app bundle and Gateway protocol contracts differ"
     [ -x "$root/$helper" ] || die "app bundle helper is not executable: $root/$helper"
+    [ -x "$root/$native_host" ] || die "Tron Native Host is not executable: $root/$native_host"
+    python3 "$REPO_ROOT/scripts/validate-native-host.py" --app "$root" >/dev/null \
+        || die "Tron native helper/service composition is invalid"
     codesign --verify --deep --strict "$root" >/dev/null 2>&1 \
         || die "app bundle deep strict signature is invalid: $root"
     codesign --verify --deep --strict "$root/Contents/Library/LoginItems/Tron Agent.app" >/dev/null 2>&1 \
         || die "Tron Agent helper signature is invalid"
+    codesign --verify --deep --strict "$root/$native_host_bundle" >/dev/null 2>&1 \
+        || die "Tron Native Host signature is invalid"
+    [ "$(codesign -dv --verbose=4 "$root/$native_host_bundle" 2>&1 | sed -n 's/^Identifier=//p' | head -n 1)" = "com.tron.mac.native-host" ] \
+        || die "Tron Native Host has an unexpected bundle identifier"
     helper_archs="$(lipo -archs "$root/$helper" 2>/dev/null || true)"
     [[ " $helper_archs " == *" arm64 "* && " $helper_archs " == *" x86_64 "* ]] \
         || die "Tron Agent helper is not universal arm64/x86_64"
+    helper_archs="$(lipo -archs "$root/$native_host" 2>/dev/null || true)"
+    [[ " $helper_archs " == *" arm64 "* && " $helper_archs " == *" x86_64 "* ]] \
+        || die "Tron Native Host is not universal arm64/x86_64"
 
     expected_fingerprint="$(plutil -extract payloadFingerprint raw -o - "$manifest" 2>/dev/null || true)"
     [[ "$expected_fingerprint" =~ ^[0-9a-f]{64}$ ]] \

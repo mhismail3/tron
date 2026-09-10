@@ -58,12 +58,17 @@ struct EnvironmentSetup: Sendable {
     /// returns at least one address.
     var probeTailscale: @Sendable () async -> TailscaleStatus
 
-    /// Probes wizard permissions from the wrapper process.
-    /// The LaunchAgent associates the helper with the wrapper bundle IDs,
-    /// so macOS presents and evaluates the TCC row under `Tron.app`
-    /// / `TronMac.app`. Keeping probes here avoids a stale helper row in
-    /// System Settings and makes Re-check instantaneous.
+    /// Probes FDA from the wrapper and GUI permissions from the signed Aqua
+    /// host. No probe requests TCC or registers a service.
     var probePermissions: @Sendable () async -> [Permission: PermissionStatus]
+
+    /// Explicit user-only GUI permission request. The request is never made
+    /// by polling, setup readiness, or a view appearance.
+    var nativeHostServiceState: @Sendable () async -> NativeHostServiceState = { .unavailable }
+    var enableNativeHost: @Sendable () async -> NativeHostServiceState = { .unavailable }
+    var refreshNativeHost: @Sendable () async -> NativeHostServiceState = { .unavailable }
+    var requestPermission: @Sendable (Permission) async -> PermissionStatus = { _ in .probeUnavailable }
+    var unregisterNativeHost: @Sendable () async throws -> Void = {}
 
     /// Detects whether the bundled Login Item is registered and usable.
     var detectExistingInstall: @Sendable () async -> ExistingInstallStatus
@@ -210,7 +215,29 @@ struct EnvironmentSetup: Sendable {
                 try? GatewayNetworkCacheWriter.cacheTailscaleIP(ip, at: cache)
             },
             probeTailscale: { await TailscaleProbe.probe() },
-            probePermissions: { await MacPermissionProbe.probeAll() },
+            probePermissions: {
+                var snapshot = await MacPermissionProbe.probeAll()
+                let native = await NativeHostCoordinator.shared.probe()
+                snapshot.merge(native) { _, native in native }
+                return snapshot
+            },
+            nativeHostServiceState: { await NativeHostCoordinator.shared.serviceState() },
+            enableNativeHost: {
+                guard TronPaths.canManageLaunchAgent(profile: profile) else { return .unavailable }
+                return await NativeHostCoordinator.shared.enable()
+            },
+            refreshNativeHost: {
+                guard TronPaths.canManageLaunchAgent(profile: profile) else { return .unavailable }
+                return await NativeHostCoordinator.shared.refresh()
+            },
+            requestPermission: { permission in
+                guard TronPaths.canManageLaunchAgent(profile: profile) else { return .probeUnavailable }
+                return await NativeHostCoordinator.shared.request(permission)
+            },
+            unregisterNativeHost: {
+                guard TronPaths.canManageLaunchAgent(profile: profile) else { throw NativeHostError.serviceUnavailable }
+                try await NativeHostCoordinator.shared.unregister()
+            },
             detectExistingInstall: {
                 await ExistingInstallDetector.detect(
                     helperBundle: TronPaths.serverHelperBundle(profile: profile),
@@ -225,12 +252,13 @@ struct EnvironmentSetup: Sendable {
             },
             validateApplicationLocation: { MacRuntimeVariant.detect().locationProblem },
             validateBundledHelper: {
-                await ExistingInstallDetector.validateBundledHelper(
+                if let problem = await ExistingInstallDetector.validateBundledHelper(
                     helperBundle: TronPaths.serverHelperBundle(profile: profile),
                     helperBinary: TronPaths.serverHelperBinary(profile: profile),
                     plistPath: plist,
                     profile: profile
-                )
+                ) { return problem }
+                return await ExistingInstallDetector.validateNativeHost()
             },
             validateGatewayPayload: { ExistingInstallDetector.validateGatewayPayload() },
             pingServer: { token in

@@ -23,7 +23,12 @@ enum MacPermissionProbe {
     static func probe(_ permission: Permission) async -> PermissionStatus {
         switch permission {
         case .fullDiskAccess:
-            await probeFullDiskAccess()
+            return await probeFullDiskAccess()
+        case .accessibility, .inputMonitoring, .screenRecording:
+            // These permissions belong to the signed Aqua host. Keeping this
+            // owner FDA-only prevents a wrapper Boolean from becoming GUI
+            // permission authority.
+            return .probeUnavailable
         }
     }
 

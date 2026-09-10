@@ -26,7 +26,10 @@ enum TronUninstaller {
             return outcome
         }
 
-        // Stable uninstall owns only the stable service. Developer-owned
+        do { try await setup.unregisterNativeHost() }
+        catch { return .launchdRefused(message: "Tron's native helper could not be unregistered. Local state was preserved.") }
+
+        // Stable uninstall owns only the stable services. Developer-owned
         // Debug registration, data, credentials, and sessions are untouched.
         cleanLocalState(setup: setup, options: options)
         return outcome

@@ -4,6 +4,26 @@ import XCTest
 @testable import TronComputerControl
 
 final class NativeEventObserverTests: XCTestCase {
+    func testProcessTapIdentityCannotBecomeSessionOrForeignProcess() {
+        let mask = NativeEventObserver.requiredEventsOfInterest
+        func entry(process: Int32, mask: UInt64, enabled: Bool = true) -> NativeEventTapInventoryEntry {
+            .init(eventTapID: 9, tappingProcess: 100, processBeingTapped: process,
+                  tapPointRawValue: Int32(CGEventTapLocation.cgSessionEventTap.rawValue),
+                  optionsRawValue: UInt32(CGEventTapOptions.listenOnly.rawValue),
+                  eventsOfInterest: mask, enabled: enabled)
+        }
+        let target = NativeEventTapTarget.process(42)
+        XCTAssertTrue(target.matches(entry(process: 42, mask: mask), mask: mask))
+        XCTAssertFalse(target.matches(entry(process: 0, mask: mask), mask: mask))
+        XCTAssertFalse(target.matches(entry(process: 43, mask: mask), mask: mask))
+        XCTAssertFalse(target.matches(entry(process: 42, mask: mask | 1), mask: mask))
+        XCTAssertFalse(target.matches(entry(process: 42, mask: mask, enabled: false), mask: mask))
+        XCTAssertFalse(NativeEventTapTarget.process(0).isValid)
+        XCTAssertFalse(NativeEventTapTarget.process(-1).isValid)
+        XCTAssertTrue(NativeEventTapTarget.session.matches(entry(process: 0, mask: mask), mask: mask))
+        XCTAssertFalse(NativeEventTapTarget.session.matches(entry(process: 42, mask: mask), mask: mask))
+    }
+
     func testRegistrationClonesAndDeliversExactlyOneSeenResult() async throws {
         try await withFixture { f in
             let registration = try f.register()

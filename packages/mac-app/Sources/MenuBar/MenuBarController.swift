@@ -18,6 +18,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var pairingInfoWindowController: NSWindowController?
     private var debugPairingInfoWindowController: NSWindowController?
     private var logsWindowController: NSWindowController?
+    private var permissionSettingsWindow: PermissionSettingsWindow?
     private(set) var debugGatewayState = DebugGatewayMenuState.unavailable
     private(set) var debugGatewayAdmission: DebugGatewayObserver.Admission?
     private(set) var debugPairingWindowAdmission: DebugGatewayObserver.Admission?
@@ -62,6 +63,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     func dispose() {
+        permissionSettingsWindow?.close()
+        permissionSettingsWindow = nil
         pollerTask?.cancel()
         pollerTask = nil
         debugRefreshGeneration &+= 1
@@ -187,6 +190,16 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     func showPairingInfoWindow() {
         showPairingInfoWindow(setup: setup)
+    }
+
+    func showPermissionsWindow() {
+        if permissionSettingsWindow == nil {
+            permissionSettingsWindow = PermissionSettingsWindow(setup: setup) { [weak self] in
+                self?.permissionSettingsWindow = nil
+            }
+        }
+        permissionSettingsWindow?.showWindow(nil)
+        NSApplication.shared.activate(ignoringOtherApps: true)
     }
 
     func showLogsWindow() {

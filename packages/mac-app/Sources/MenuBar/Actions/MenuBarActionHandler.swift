@@ -6,6 +6,7 @@ import UserNotifications
 /// controller-owned action handler.
 enum MenuBarAction: Equatable, Sendable {
     case showPairingInfo
+    case showPermissions
     case showDebugPairingInfo
     case viewLogs
     case sendFeedback
@@ -34,6 +35,8 @@ final class MenuBarActionHandler {
         switch action {
         case .showPairingInfo:
             menuBarController?.showPairingInfoWindow()
+        case .showPermissions:
+            menuBarController?.showPermissionsWindow()
         case .showDebugPairingInfo:
             await menuBarController?.showDebugPairingInfoWindow()
         case .viewLogs:

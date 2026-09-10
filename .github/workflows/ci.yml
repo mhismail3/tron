@@ -256,6 +256,7 @@ jobs:
       - run: scripts/install-ci-tools.sh xcodegen
       - run: scripts/verify-ci-toolchain.sh node xcode xcodegen
       - run: python3 scripts/test-personal-info-guard.py
+      - run: python3 scripts/test-native-host.py
       - name: Test native computer-control primitives (offline)
         timeout-minutes: 3
         run: |

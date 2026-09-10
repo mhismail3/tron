@@ -74,6 +74,21 @@ enum ExistingInstallDetector {
         }
     }
 
+    static func validateNativeHost(
+        bundle: URL = TronPaths.nativeHostBundle,
+        executable: URL = TronPaths.nativeHostExecutable,
+        signatureProblemResolver: (@Sendable (URL) async -> String?)? = nil
+    ) async -> String? {
+        guard FileManager.default.fileExists(atPath: bundle.path) else {
+            return "The bundled Tron Native Host is missing. Reinstall Tron.app."
+        }
+        guard FileManager.default.isExecutableFile(atPath: executable.path) else {
+            return "The bundled Tron Native Host executable is missing or not executable. Reinstall Tron.app."
+        }
+        if let signatureProblemResolver { return await signatureProblemResolver(bundle) }
+        return await bundleSignatureProblem(of: bundle, expectedBundleIdentifier: NativeHostTrust.bundleIdentifier)
+    }
+
     static func validateBundledHelper(
         helperBundle: URL = TronPaths.serverHelperBundle,
         helperBinary: URL = TronPaths.serverHelperBinary,

@@ -32,6 +32,20 @@ struct TronUninstallerTests {
         #expect(FileManager.default.fileExists(atPath: setup.bearerTokenPath.path))
     }
 
+    @Test("native helper unregister failure preserves local state after gateway removal")
+    func nativeUnregisterFailurePreservesState() async throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let manager = MockLaunchAgentManager()
+        var setup = makeSetup(tmp: tmp, manager: manager)
+        try createFixtureFile(setup.onboardedMarkerPath, contents: "keep")
+        setup.unregisterNativeHost = { throw NativeHostError.serviceUnavailable }
+        let outcome = await TronUninstaller.unregisterAndClean(setup: setup)
+        #expect(manager.calls.map(\.kind) == [.unload])
+        if case .launchdRefused = outcome {} else { Issue.record("Native unregister failure was hidden") }
+        #expect(FileManager.default.fileExists(atPath: setup.onboardedMarkerPath.path))
+    }
+
     @Test("Release uninstall cleanup never includes Debug canonical homes")
     func uninstallPreservesDebugCanonicalPaths() {
         let setup = makeSetup(tmp: URL(fileURLWithPath: "/tmp/tron-uninstall-test"), manager: MockLaunchAgentManager())

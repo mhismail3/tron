@@ -165,6 +165,19 @@ execute the signed embedded runtime, not only check that the binary is present;
 a hardened Node runtime without its JIT entitlement exits before the Gateway
 can bind its port.
 
+The same build embeds the signed Aqua `Tron Native Host` at
+`Contents/Library/Native/Tron Native Host.app`. Packaging must retain its fixed
+`com.tron.mac.native-host` identity and deep strict signature. Its bundled Aqua
+LaunchAgent/Mach service is registered only by explicit setup and removed by
+explicit uninstall; ordinary readiness probes never register it or ask for TCC.
+The helper queries TCC from its own process and both peers pin XPC messages to the
+signed bundled build. `package-dmg.sh` checks the nested host signature and both
+architectures. Packaging and the installed-app verifier also use
+`scripts/validate-native-host.py` to require the exact Aqua Mach-service plist,
+parent association, program path, accessory metadata and matching signing-team
+metadata; signature checks remain separate. Validate final service attribution and background approval with
+the signed installed composition; a temporary qualification app is not that proof.
+
 The `.bin/pi` projection is an executable contract transition. Existing signed
 launchers retain the old private CLI path until the user performs the documented
 manual Mac Release reinstall; source-only payload promotion through that launcher

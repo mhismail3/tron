@@ -20,6 +20,18 @@ struct MenuBarItemBuilderTests {
         )
     }
 
+    @Test("permission setup remains reachable after onboarding and while Gateway is busy")
+    func permissionsRemainReachable() {
+        for snapshot in [ServerStatusSnapshot.checking, .init(state: .busy(.restarting))] {
+            let items = Self.build(snapshot: snapshot, canManageLaunchAgent: false)
+            let permissionItems = items.compactMap { item -> Bool? in
+                guard case .action(_, let enabled, .showPermissions) = item else { return nil }
+                return enabled
+            }
+            #expect(permissionItems == [true])
+        }
+    }
+
     @Test("running snapshot preserves endpoint and process diagnostics")
     func runningSnapshot() {
         let snap = ServerStatusSnapshot(

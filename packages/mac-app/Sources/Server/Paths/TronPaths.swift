@@ -110,6 +110,14 @@ enum TronPaths {
     static var serverHelperBundle: URL { serverHelperBundle(profile: activeProfile) }
     static var serverHelperBinary: URL { serverHelperBinary(profile: activeProfile) }
 
+    /// Dedicated Aqua host for TCC queries and explicit permission requests.
+    /// Explicit setup registers its bundled agent; launchd then owns activation.
+    static var nativeHostBundle: URL {
+        applicationBundle.appendingPathComponent(NativeHostTrust.relativeBundlePath, isDirectory: true)
+    }
+    static var nativeHostExecutable: URL {
+        nativeHostBundle.appendingPathComponent("Contents/MacOS/TronNativeHost", isDirectory: false)
+    }
     static var gatewayPayloadRoot: URL {
         applicationBundle
             .appendingPathComponent("Contents/Resources/Gateway", isDirectory: true)

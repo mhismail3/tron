@@ -2,7 +2,9 @@
 
 `native-computer-control` contains unregistered construction, interlock, lifetime
 and explicitly started passive-observation primitives for the future Tron GUI
-capability host. It is not a production tool, executor, focus manager, AX target
+capability host. `Tron.app` now bundles a separate Aqua permission host for
+first-time TCC setup, but that host is only a signed readiness/request consumer;
+it does not start the passive observer or expose input/capture tools. It is not a production tool, executor, focus manager, AX target
 resolver, capture service, or proof of application effects. It does not post
 events or launch a process. The live input backend and trusted host still need
 to establish when an inert `ConstructedInputPlan` may be admitted and released.
@@ -188,6 +190,23 @@ grant/recovery binding, disposable-window/focus qualification, canonical tool
 exposure, and stable floating live-view gates remain open.
 
 ## Bounded passive stream observation
+
+The observer defaults to its qualified session route. A separate process-bound
+route uses public `CGEvent.tapCreateForPid` and requires the inventory's exact
+`processBeingTapped` PID, canonical mask and listen-only/enabled flags. Route
+selection is immutable for that observer; failures never switch routes. The
+caller still owns live process-generation/target authority: a PID is not a grant.
+The signed self-process qualification has exercised creation and joined retirement
+on the tested OS. No events have been posted through this route, and another
+process's delivery, target lifetime, release or recovery is not yet qualified.
+A process tap does not observe physical input routed to other applications; it
+cannot replace session-wide takeover detection.
+
+The observation-only qualification executable adds `--observe-self-process`;
+it observes only its own PID and never posts input or accepts an arbitrary target.
+Its report is version2 and validates scope-specific metadata. Session reports
+remain distinct from process reports; the previously signed version1 artifact
+and its retained evidence are unchanged.
 
 `NativeEventObserver` is an internal, explicitly started owner for passive
 observation only. It uses the supported user-session `kCGSessionEventTap` with

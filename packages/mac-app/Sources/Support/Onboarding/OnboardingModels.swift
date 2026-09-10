@@ -56,16 +56,28 @@ enum HeaderIcon: Equatable, Sendable {
     case symbol(String)
 }
 
-/// Permission category the wizard probes during the Permissions step.
-/// The Mac wrapper only preflights broad local file access; visual
-/// inspection and click/type control are no longer startup requirements.
+/// Permission categories surfaced by first-time setup. FDA remains owned by
+/// the wrapper; GUI permissions are queried by the signed Aqua host process.
 enum Permission: String, CaseIterable, Sendable {
     case fullDiskAccess
+    case accessibility
+    case inputMonitoring
+    case screenRecording
+
+    static func coreSetupSatisfied(by statuses: [Permission: PermissionStatus]) -> Bool {
+        statuses[.fullDiskAccess] == .granted
+    }
 
     var systemSettingsURL: URL {
         switch self {
         case .fullDiskAccess:
             return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!
+        case .accessibility:
+            return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+        case .inputMonitoring:
+            return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!
+        case .screenRecording:
+            return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
         }
     }
 }

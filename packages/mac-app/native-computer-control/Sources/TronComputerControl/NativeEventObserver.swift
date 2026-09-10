@@ -117,11 +117,11 @@ package final class NativeEventObserver: @unchecked Sendable {
         self.platform = platform; self.maxEvents = maxEvents; self.activity = activity
     }
 
-    /// Package-facing construction is intentionally fixed to the passive,
-    /// listen-only session adapter. Test seams use the narrower internal init.
-    package convenience init(maxEvents: Int = 512,
+    /// Package-facing construction remains passive and listen-only. The route
+    /// is selected once before startup; no failure switches it to another route.
+    package convenience init(target: NativeEventTapTarget = .session, maxEvents: Int = 512,
                              activity: @escaping @Sendable () -> Void = {}) {
-        self.init(platform: NativeSessionEventTapPlatform(), maxEvents: maxEvents, activity: activity)
+        self.init(platform: NativeEventTapPlatform(target: target), maxEvents: maxEvents, activity: activity)
     }
 
     package func start() async -> NativeEventObserverAvailability {
@@ -399,16 +399,41 @@ package enum NativeEventTapInventory {
     }
 }
 
-/// Explicit-start factory only. No permission request or tap occurs at package load.
-internal struct NativeSessionEventTapPlatform: NativeEventObserverPlatform {
-    func makePort(eventsOfInterest: CGEventMask,
-                  callback: @escaping @Sendable (CGEventType, CGEvent?) -> Void) throws -> any NativeEventObserverPort {
-        guard CGPreflightListenEventAccess() else { throw NativeObserverError.unavailable("listen-event permission is not granted") }
-        return try NativeSessionEventTapPort(eventsOfInterest: eventsOfInterest, callback: callback)
+/// A process tap is a distinct route, never a fallback for a failed session tap.
+/// The caller must bind the PID to its live, owned target; this value is not a grant.
+package enum NativeEventTapTarget: Equatable, Sendable {
+    case session
+    case process(Int32)
+
+    var isValid: Bool {
+        switch self { case .session: true; case let .process(pid): pid > 0 }
+    }
+    func matches(_ entry: NativeEventTapInventoryEntry, mask: CGEventMask) -> Bool {
+        guard isValid, entry.enabled, entry.eventsOfInterest == mask,
+              entry.optionsRawValue == UInt32(CGEventTapOptions.listenOnly.rawValue) else { return false }
+        switch self {
+        case .session:
+            return entry.processBeingTapped == 0 && entry.tapPointRawValue == Int32(CGEventTapLocation.cgSessionEventTap.rawValue)
+        case let .process(pid):
+            // Process tap location metadata is not a session-route claim. The
+            // processBeingTapped field must identify the exact requested PID.
+            return entry.processBeingTapped == pid
+        }
     }
 }
 
-private final class NativeSessionEventTapPort: @unchecked Sendable, NativeEventObserverPort {
+/// Explicit-start factory only. No permission request or tap occurs at package load.
+internal struct NativeEventTapPlatform: NativeEventObserverPlatform {
+    let target: NativeEventTapTarget
+    func makePort(eventsOfInterest: CGEventMask,
+                  callback: @escaping @Sendable (CGEventType, CGEvent?) -> Void) throws -> any NativeEventObserverPort {
+        guard target.isValid else { throw NativeObserverError.unavailable("invalid event-tap target") }
+        guard CGPreflightListenEventAccess() else { throw NativeObserverError.unavailable("listen-event permission is not granted") }
+        return try NativeEventTapPort(target: target, eventsOfInterest: eventsOfInterest, callback: callback)
+    }
+}
+
+private final class NativeEventTapPort: @unchecked Sendable, NativeEventObserverPort {
     private final class CallbackBox {
         let callback: @Sendable (CGEventType, CGEvent?) -> Void
         init(_ callback: @escaping @Sendable (CGEventType, CGEvent?) -> Void) { self.callback = callback }
@@ -418,13 +443,15 @@ private final class NativeSessionEventTapPort: @unchecked Sendable, NativeEventO
     private let tap: CFMachPort
     private let tapID: UInt32
     private let requestedMask: CGEventMask
+    private let target: NativeEventTapTarget
     private var runLoop: CFRunLoop?
     private var worker: Thread?
     private var stopRequested = false
     private var exited = false
     private var startup: NativeEventPortState?
 
-    init(eventsOfInterest: CGEventMask, callback: @escaping @Sendable (CGEventType, CGEvent?) -> Void) throws {
+    init(target: NativeEventTapTarget, eventsOfInterest: CGEventMask, callback: @escaping @Sendable (CGEventType, CGEvent?) -> Void) throws {
+        self.target = target
         callbackBox = CallbackBox(callback)
         requestedMask = eventsOfInterest
         let before = Set(try NativeEventTapInventory.currentProcess().map(\.eventTapID))
@@ -442,17 +469,21 @@ private final class NativeSessionEventTapPort: @unchecked Sendable, NativeEventO
             }
             return Unmanaged.passUnretained(event)
         }
-        guard let created = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap,
-            options: .listenOnly, eventsOfInterest: eventsOfInterest, callback: handler,
-            userInfo: Unmanaged.passUnretained(callbackBox).toOpaque()) else {
-            throw NativeObserverError.unavailable("session event tap creation returned nil")
+        let info = Unmanaged.passUnretained(callbackBox).toOpaque()
+        let candidate: CFMachPort?
+        switch target {
+        case .session:
+            candidate = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap,
+                options: .listenOnly, eventsOfInterest: eventsOfInterest, callback: handler, userInfo: info)
+        case let .process(pid):
+            candidate = CGEvent.tapCreateForPid(pid: pid, place: .headInsertEventTap,
+                options: .listenOnly, eventsOfInterest: eventsOfInterest, callback: handler, userInfo: info)
         }
+        guard let created = candidate else { throw NativeObserverError.unavailable("event tap creation returned nil") }
         do {
             let added = try NativeEventTapInventory.currentProcess().filter { !before.contains($0.eventTapID) }
             guard added.count == 1, let entry = added.first,
-                  entry.tapPointRawValue == Int32(CGEventTapLocation.cgSessionEventTap.rawValue),
-                  entry.optionsRawValue == UInt32(CGEventTapOptions.listenOnly.rawValue),
-                  entry.processBeingTapped == 0, entry.eventsOfInterest == UInt64(eventsOfInterest) else {
+                  target.matches(entry, mask: eventsOfInterest) else {
                 throw NativeObserverError.unavailable("new tap identity is missing or ambiguous")
             }
             tap = created; tapID = entry.eventTapID
@@ -490,9 +521,7 @@ private final class NativeSessionEventTapPort: @unchecked Sendable, NativeEventO
         guard !condition.withLock({ stopRequested || exited }), CGPreflightListenEventAccess(),
               CGEvent.tapIsEnabled(tap: tap), let inventory = try? NativeEventTapInventory.currentProcess(),
               let info = inventory.first(where: { $0.eventTapID == tapID && $0.tappingProcess == Int32(getpid()) }),
-              info.tapPointRawValue == Int32(CGEventTapLocation.cgSessionEventTap.rawValue),
-              info.optionsRawValue == UInt32(CGEventTapOptions.listenOnly.rawValue), info.processBeingTapped == 0,
-              info.eventsOfInterest == UInt64(requestedMask) else {
+              target.matches(info, mask: requestedMask) else {
             return .unavailable("tap health or identity is unavailable")
         }
         return .ready(eventsOfInterest: info.eventsOfInterest, enabled: info.enabled)

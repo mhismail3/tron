@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.tron.mac.native-host</string>
+    <key>BundleProgram</key>
+    <string>Contents/Library/Native/Tron Native Host.app/Contents/MacOS/TronNativeHost</string>
+    <key>MachServices</key>
+    <dict>
+        <key>com.tron.mac.native-host</key>
+        <true/>
+    </dict>
+    <key>AssociatedBundleIdentifiers</key>
+    <array><string>com.tron.mac</string></array>
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>

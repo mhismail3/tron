@@ -1,307 +1,195 @@
 import SwiftUI
 import AppKit
 
-/// Permissions step. The shell owns the icon, title, progress pill,
-/// and the bottom action bar (Back / Continue, with Continue gated by
-/// the Full Disk Access grant in `WizardView.permissionsCanContinue`).
-/// This view contributes the description, the permission card, the
-/// Settings deep-link, and an inline Re-check link.
-///
-/// This step runs AFTER Install (see `WizardStep.allCases` ordering
-/// test) on purpose. macOS ties sandbox/TCC extensions to the process
-/// that was launched when the grant was made, so granting FDA to the
-/// agent before it exists would prompt the user for a permission they
-/// can't satisfy. By the time the wizard gets here the agent bundle
-/// is already embedded at `Tron.app/Contents/Library/LoginItems/Tron Agent.app`
-/// and the LaunchAgent is running. The LaunchAgent associates the helper
-/// with the wrapper bundle IDs, so macOS surfaces the privacy row
-/// under the responsible wrapper app (`Tron.app` in Release,
-/// `TronMac.app` in Debug). Returning from Settings, pressing Re-check,
-/// and the background watcher are all fast native wrapper probes. Hidden
-/// server restarts make the UI feel stuck and produce transient
-/// "unknown" states while launchd is cycling the helper; explicit
-/// restart remains a menu-bar action outside this wizard page.
+/// Core onboarding still requires FDA only. The same permission surface is also
+/// reachable after onboarding without changing the wizard's persisted position.
 struct PermissionsStep: View {
     @Bindable var state: WizardState
-    @Environment(\.environmentSetup) private var setup
+    var body: some View { PermissionSetupView(statuses: $state.permissionStatuses) }
+}
 
-    @State private var appActivationObserver: NSObjectProtocol?
-    @State private var settingsGrantWatchTask: Task<Void, Never>?
-    @State private var checkingPermissions = false
-    @State private var settingsReturnPending = false
+struct PermissionSetupView: View {
+    @Binding var statuses: [Permission: PermissionStatus]
+    @Environment(\.environmentSetup) private var setup
+    @State private var activationObserver: NSObjectProtocol?
+    @State private var settingsWatch: Task<Void, Never>?
+    @State private var active = false
+    @State private var checking = false
+    @State private var busy = false
+    @State private var actionID = UUID()
+    @State private var probeID = UUID()
+    @State private var serviceState = NativeHostServiceState.unavailable
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(PermissionsStepContent.intro)
-                .font(TronTypography.wizardBody)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            permissionRow(.fullDiskAccess,
-                          title: "Full Disk Access",
-                          detail: "Lets Tron Agent read and edit files.")
-            .padding(.vertical, 1)
-
-            Button {
-                Task { await refreshAll(showActivity: true) }
-            } label: {
-                Label(checkingPermissions ? "Checking permissions…" : "Re-check permissions",
-                      systemImage: checkingPermissions ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text(PermissionsStepContent.intro)
+                    .font(TronTypography.wizardBody).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                permissionRow(.fullDiskAccess, title: "Full Disk Access", detail: "Lets Tron read and edit files.")
+                HStack {
+                    Text(serviceState == .enabled ? "Native helper enabled" : "Optional: prepare computer control")
+                        .font(TronTypography.wizardHeadline)
+                    Spacer()
+                    if serviceState != .enabled || helperConnectionUnavailable {
+                        Button(serviceActionTitle) { changeService() }
+                            .buttonStyle(.wizardSecondary)
+                            .fixedSize()
+                            .disabled(busy || !setup.canManageLaunchAgent)
+                    }
+                }
+                Text("Grant the permissions below after the helper is enabled.")
+                    .font(TronTypography.wizardCaption).foregroundStyle(.secondary)
+                permissionRow(.accessibility, title: "Accessibility", detail: "Prepares inspection and control of approved apps.")
+                permissionRow(.inputMonitoring, title: "Input Monitoring", detail: "Prepares detection of user-session input.")
+                permissionRow(.screenRecording, title: "Screen Recording", detail: "Prepares viewing of selected app windows.")
+                Button { Task { await refresh(showActivity: true) } } label: {
+                    Label(checking ? "Checking permissions…" : "Re-check permissions",
+                          systemImage: checking ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
+                }
+                .buttonStyle(.wizardLink)
+                .padding(.leading, PermissionsStepLayout.recheckLeadingPadding)
+                .disabled(checking || busy)
             }
-            .buttonStyle(.wizardLink)
-            .padding(.leading, PermissionsStepLayout.recheckLeadingPadding)
-            .disabled(checkingPermissions)
         }
-        .task { await startPolling() }
-        .onAppear { installAppActivationObserver() }
-        .onDisappear { teardown() }
+        .onAppear { active = true; installActivationObserver() }
+        .task(id: active) {
+            guard active else { return }
+            if statuses.isEmpty { try? await Task.sleep(nanoseconds: PermissionsStepContent.initialProbeDelayNanoseconds) }
+            await refresh(showActivity: false)
+        }
+        .onDisappear { retirePresentation() }
     }
 
-    // MARK: - Row + badge
+    private var serviceActionTitle: String {
+        switch serviceState {
+        case .enabled: "Restart Helper"
+        case .needsApproval: "Open Login Items"
+        case .needsRegistration, .unavailable: "Enable Helper"
+        }
+    }
+    private var helperConnectionUnavailable: Bool {
+        serviceState == .enabled && [Permission.accessibility, .inputMonitoring, .screenRecording].allSatisfy {
+            statuses[$0] == .probeUnavailable
+        }
+    }
 
-    @ViewBuilder
-    private func permissionRow(
-        _ permission: Permission,
-        title: String,
-        detail: String
-    ) -> some View {
-        let status = state.permissionStatuses[permission] ?? .notDetermined
-        let appName = permissionAppDisplayName
-        WizardInfoCard(
-            verticalPadding: PermissionsStepLayout.cardVerticalPadding,
-            horizontalPadding: PermissionsStepLayout.cardHorizontalPadding
-        ) {
-            WizardIconTextRow(
-                iconColumnWidth: PermissionsStepLayout.statusIconColumnWidth,
-                iconTextSpacing: PermissionsStepLayout.iconTextSpacing
-            ) {
-                statusBadge(status)
+    private func permissionRow(_ permission: Permission, title: String, detail: String) -> some View {
+        let status = statuses[permission] ?? .notDetermined
+        return WizardInfoCard(verticalPadding: PermissionsStepLayout.cardVerticalPadding,
+                              horizontalPadding: PermissionsStepLayout.cardHorizontalPadding) {
+            WizardIconTextRow(iconColumnWidth: PermissionsStepLayout.statusIconColumnWidth,
+                              iconTextSpacing: PermissionsStepLayout.iconTextSpacing) {
+                statusBadge(status).font(.system(size: PermissionsStepLayout.statusIconSize, weight: .semibold))
             } content: {
                 VStack(alignment: .leading, spacing: PermissionsStepLayout.textLineSpacing) {
                     Text(title).font(TronTypography.wizardHeadline)
-                    Text(detail)
-                        .font(TronTypography.wizardBodySmall)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .allowsTightening(true)
-                        .minimumScaleFactor(0.92)
-                    Text(instruction(for: permission, appName: appName))
-                        .font(TronTypography.wizardCaption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .allowsTightening(true)
-                        .minimumScaleFactor(0.88)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Text(detail).font(TronTypography.wizardBodySmall).foregroundStyle(.secondary)
+                    Text(permission == .fullDiskAccess
+                         ? "Enable \"\(PermissionsStepContent.appDisplayName(for: setup.applicationBundle))\" in Full Disk Access."
+                         : "Press Allow, then follow the macOS prompt for Tron.")
+                        .font(TronTypography.wizardCaption).foregroundStyle(.secondary)
                 }
-                .layoutPriority(1)
+                .fixedSize(horizontal: false, vertical: true)
             } trailing: {
-                Button {
-                    openPermissionSettings(permission)
-                } label: {
-                    Image(systemName: "gearshape.fill")
+                HStack(spacing: 8) {
+                    if permission != .fullDiskAccess, status != .granted {
+                        Button("Allow") { request(permission) }
+                            .buttonStyle(.wizardSecondary)
+                            .fixedSize()
+                            .disabled(busy || serviceState != .enabled || !setup.canManageLaunchAgent)
+                    }
+                    Button { openSettings(permission) } label: { Image(systemName: "gearshape.fill") }
+                        .buttonStyle(.wizardTertiary)
+                        .accessibilityLabel("Open Settings for \(title)")
                 }
-                .buttonStyle(.wizardTertiary)
-                .help("Open Settings and enable \(appName)")
-                .accessibilityLabel("Open Settings for \(title) and enable \(appName)")
             }
         }
     }
 
-    @ViewBuilder
-    private func statusBadge(_ status: PermissionStatus) -> some View {
+    @ViewBuilder private func statusBadge(_ status: PermissionStatus) -> some View {
         switch status {
-        case .granted:
-            Image(systemName: "checkmark.seal.fill")
-                .font(.system(size: PermissionsStepLayout.statusIconSize, weight: .semibold))
-                .foregroundStyle(.green)
-        case .denied:
-            Image(systemName: "xmark.octagon.fill")
-                .font(.system(size: PermissionsStepLayout.statusIconSize, weight: .semibold))
-                .foregroundStyle(.red)
-        case .notDetermined:
-            Image(systemName: "questionmark.circle.fill")
-                .font(.system(size: PermissionsStepLayout.statusIconSize, weight: .semibold))
-                .foregroundStyle(.orange)
-        case .probeUnavailable:
-            Image(systemName: "minus.circle.fill")
-                .font(.system(size: PermissionsStepLayout.statusIconSize, weight: .semibold))
-                .foregroundStyle(.secondary)
+        case .granted: Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+        case .denied: Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)
+        case .notDetermined: Image(systemName: "questionmark.circle.fill").foregroundStyle(.orange)
+        case .probeUnavailable: Image(systemName: "minus.circle.fill").foregroundStyle(.secondary)
         }
     }
 
-    private var permissionAppDisplayName: String {
-        PermissionsStepContent.appDisplayName(for: setup.applicationBundle)
-    }
-
-    private func instruction(for permission: Permission, appName: String) -> String {
-        switch permission {
-        case .fullDiskAccess:
-            return "Enable \"\(appName)\" in Full Disk Access."
+    @MainActor private func changeService() {
+        guard active, !busy, setup.canManageLaunchAgent else { return }
+        let id = UUID(); actionID = id; probeID = UUID(); busy = true; checking = false
+        let restart = serviceState == .enabled
+        Task { @MainActor in
+            _ = restart ? await setup.refreshNativeHost() : await setup.enableNativeHost()
+            guard active, actionID == id else { return }
+            busy = false
+            await refresh(showActivity: true)
+            if serviceState == .needsApproval { watchSettings(permission: nil) }
         }
     }
 
-    /// Opens the relevant Settings pane without calling prompt APIs.
-    /// macOS lists the wrapper automatically for the signed app builds
-    /// we support; extra prompt dialogs add confusion because the pane
-    /// is already visible.
-    private func openPermissionSettings(_ permission: Permission) {
-        settingsReturnPending = true
-        startSettingsGrantWatch(for: permission)
+    @MainActor private func request(_ permission: Permission) {
+        guard active, !busy, serviceState == .enabled, setup.canManageLaunchAgent else { return }
+        let id = UUID(); actionID = id; probeID = UUID(); busy = true; checking = false
+        Task { @MainActor in
+            _ = await setup.requestPermission(permission)
+            guard active, actionID == id else { return }
+            busy = false
+            await refresh(showActivity: true)
+            if statuses[permission] != .granted { watchSettings(permission: permission) }
+        }
+    }
+
+    @MainActor private func refresh(showActivity: Bool) async {
+        guard active, !busy, !Task.isCancelled else { return }
+        let id = UUID(); probeID = id; checking = showActivity
+        defer { if probeID == id { checking = false } }
+        let native = await setup.nativeHostServiceState()
+        guard active, !Task.isCancelled, probeID == id else { return }
+        let result = await setup.probePermissions()
+        guard active, !Task.isCancelled, probeID == id else { return }
+        serviceState = native
+        statuses = Dictionary(uniqueKeysWithValues: Permission.allCases.map { ($0, result[$0] ?? .probeUnavailable) })
+    }
+
+    @MainActor private func openSettings(_ permission: Permission) {
         NSWorkspace.shared.open(permission.systemSettingsURL)
+        watchSettings(permission: permission)
     }
-
-    // MARK: - Polling lifecycle
-
-    /// Runs the view-scoped 2 s agent-probe loop until SwiftUI cancels
-    /// the `.task` or Full Disk Access is observed.
-    @MainActor
-    private func startPolling() async {
-        // Seed the state before the recurring 2 s loop. On revisits,
-        // refresh immediately so stale grants correct as soon as the
-        // step appears. On the first visit, the status dictionary is
-        // empty and the whole page is still in its slide transition. If
-        // the probe resolves during that animation, SwiftUI can insert
-        // the newly-resolved SF Symbol badges at their final
-        // coordinates while the rest of the card is still moving.
-        // Waiting one shell transition keeps the first resolved badge
-        // render inside the same moving page subtree.
-        if state.permissionStatuses.isEmpty {
-            try? await Task.sleep(nanoseconds: PermissionsStepContent.initialProbeDelayNanoseconds)
-            if Task.isCancelled { return }
-        }
-
-        await refreshAll(showActivity: false)
-        guard !Task.isCancelled else { return }
-        if Permission.allCases.allSatisfy({ state.permissionStatuses[$0] == .granted }) {
-            return
-        }
-
-        while !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 2 * 1_000_000_000)
-            guard !Task.isCancelled else { return }
-            await refreshAll(showActivity: false)
-            guard !Task.isCancelled else { return }
-            // Stop polling once the grant is observed — no point
-            // probing while the user admires the green badge.
-            if Permission.allCases.allSatisfy({ state.permissionStatuses[$0] == .granted }) {
-                return
-            }
-        }
-    }
-
-    /// Installs an observer on `NSApp.didBecomeActiveNotification`.
-    /// When the user comes back to the wrapper, we first check whether
-    /// that activation corresponds to a Settings pane opened by this
-    /// view. Both paths are fast probes; the only difference is whether
-    /// the visible Re-check control briefly shows activity.
-    ///
-    /// The observer is stored as a `@State` token so `onDisappear` can
-    /// remove it — SwiftUI will recreate the view each time the user
-    /// navigates to this step, so leaving the observer attached would
-    /// leak one per visit.
-    private func installAppActivationObserver() {
-        guard appActivationObserver == nil else { return }
-        appActivationObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.didBecomeActiveNotification,
-            object: nil,
-            queue: .main
-        ) { _ in
-            Task { @MainActor in
-                await handleAppActivation()
-            }
-        }
-    }
-
-    private func teardown() {
-        settingsGrantWatchTask?.cancel()
-        settingsGrantWatchTask = nil
-        if let token = appActivationObserver {
-            NotificationCenter.default.removeObserver(token)
-            appActivationObserver = nil
-        }
-    }
-
-    /// Starts a short-lived background watcher after the user opens a
-    /// Settings pane from this page. It does not restart the helper; it
-    /// just performs quick non-prompting wrapper probes so the row flips
-    /// green as soon as macOS reports the grant.
-    @MainActor
-    private func startSettingsGrantWatch(for permission: Permission) {
-        settingsGrantWatchTask?.cancel()
-        guard (state.permissionStatuses[permission] ?? .notDetermined) != .granted else {
-            return
-        }
-
-        settingsGrantWatchTask = Task { @MainActor in
+    @MainActor private func watchSettings(permission: Permission?) {
+        settingsWatch?.cancel()
+        settingsWatch = Task { @MainActor in
             for _ in 0..<PermissionsStepContent.settingsGrantWatchAttempts {
-                try? await Task.sleep(nanoseconds: PermissionsStepContent.settingsGrantWatchIntervalNanoseconds)
-                if Task.isCancelled { return }
-                guard state.step == .permissions else { return }
-
-                await refreshAll(showActivity: false)
-
-                if state.permissionStatuses[permission] == .granted {
-                    return
-                }
+                do { try await Task.sleep(nanoseconds: PermissionsStepContent.settingsGrantWatchIntervalNanoseconds) } catch { return }
+                guard active else { return }
+                await refresh(showActivity: false)
+                if let permission, statuses[permission] == .granted { return }
+                if permission == nil, serviceState == .enabled { return }
             }
         }
     }
-
-    /// One-shot wrapper probe. This is intentionally a probe only: no
-    /// `launchctl kickstart`, no launchd polling loop, and no prompt.
-    @MainActor
-    private func refreshAll(showActivity: Bool) async {
-        if showActivity {
-            checkingPermissions = true
-        }
-        defer {
-            if showActivity {
-                checkingPermissions = false
-            }
-        }
-        let snapshot = await setup.probePermissions()
-        guard !Task.isCancelled else { return }
-        Self.applyPermissionSnapshot(snapshot, to: state)
-    }
-
-    /// Applies a probe snapshot while preserving the last concrete
-    /// answer across transient engine protocol failures. If launchd is briefly
-    /// cycling for some unrelated reason, an all-unknown probe snapshot should
-    /// not wipe green/red badges into confusing gray icons.
-    @MainActor
-    private static func applyPermissionSnapshot(
-        _ snapshot: [Permission: PermissionStatus],
-        to state: WizardState
-    ) {
-        for permission in Permission.allCases {
-            guard let status = snapshot[permission] else { continue }
-            if status == .probeUnavailable,
-               state.permissionStatuses[permission] != nil {
-                continue
-            }
-            state.permissionStatuses[permission] = status
+    private func installActivationObserver() {
+        guard activationObserver == nil else { return }
+        activationObserver = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification,
+                                                                    object: nil, queue: .main) { _ in
+            Task { @MainActor in await refresh(showActivity: true) }
         }
     }
-
-    /// Wrapper for the app-activation path. The pending Settings
-    /// round-trip is consumed before awaiting so repeated activation
-    /// notifications from the same System Settings visit cannot keep
-    /// flipping the visible Re-check control into a busy state.
-    @MainActor
-    private func handleAppActivation() async {
-        guard state.step == .permissions else { return }
-        let showActivity = settingsReturnPending
-        settingsReturnPending = false
-        await refreshAll(showActivity: showActivity)
+    private func retirePresentation() {
+        active = false; probeID = UUID(); actionID = UUID(); checking = false; busy = false
+        settingsWatch?.cancel(); settingsWatch = nil
+        if let observer = activationObserver { NotificationCenter.default.removeObserver(observer) }
+        activationObserver = nil
+        // The coordinator, not this view, still owns any accepted consent work.
     }
 }
 
 enum PermissionsStepContent {
-    static let intro = "Enable the Tron app named on each row in System Settings."
+    static let intro = "Full Disk Access is required for core setup. You can also prepare computer-control permissions here: enable the helper first, approve its background item if asked, then grant access. Computer control is not enabled by completing this page alone."
     static let initialProbeDelayNanoseconds: UInt64 = 520_000_000
     static let settingsGrantWatchAttempts = 24
     static let settingsGrantWatchIntervalNanoseconds: UInt64 = 750_000_000
-
     static func appDisplayName(for applicationBundle: URL) -> String {
         let name = applicationBundle.lastPathComponent
         return name.isEmpty ? "Tron.app" : name
@@ -315,6 +203,5 @@ enum PermissionsStepLayout {
     static let statusIconSize: CGFloat = 23
     static let iconTextSpacing: CGFloat = 9
     static let textLineSpacing: CGFloat = 2
-    static let recheckLeadingPadding: CGFloat = cardHorizontalPadding
-        + ((statusIconColumnWidth - 16) / 2)
+    static let recheckLeadingPadding = cardHorizontalPadding + ((statusIconColumnWidth - 16) / 2)
 }

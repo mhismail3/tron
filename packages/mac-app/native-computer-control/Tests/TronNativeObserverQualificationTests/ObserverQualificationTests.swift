@@ -11,6 +11,8 @@ final class ObserverQualificationTests: XCTestCase {
             XCTAssertEqual(ObserverQualificationInvocation.parse(args), .help)
         }
         XCTAssertEqual(ObserverQualificationInvocation.parse(["--observe"]), .observe(.defaults))
+        XCTAssertEqual(ObserverQualificationInvocation.parse(["--observe-self-process"]),
+                       .observe(.init(deadlineMilliseconds: 5_000, scope: .selfProcess)))
         XCTAssertEqual(ObserverQualificationInvocation.parse(["--observe", "--deadline-ms", "100"]),
                        .observe(.init(deadlineMilliseconds: 100)))
         for args in [["--invalid"], ["--observe", "--deadline-ms"], ["--observe", "--deadline-ms", "0"],
@@ -61,6 +63,17 @@ final class ObserverQualificationTests: XCTestCase {
         }
     }
 
+    func testProcessReportRequiresItsOwnPIDAndCannotAcceptASessionTap() throws {
+        let baseline = report()
+        XCTAssertFalse(try replacing(baseline, ["scope": "selfProcess"]).passed)
+        var processTap = try object(tap(id: 11))
+        processTap["processBeingTapped"] = 42
+        let process = try replacing(baseline, ["scope": "selfProcess", "inventoryAfterStart": [processTap]])
+        XCTAssertTrue(process.passed)
+        processTap["processBeingTapped"] = 43
+        XCTAssertFalse(try replacing(process, ["inventoryAfterStart": [processTap]]).passed)
+    }
+
     func testUnrelatedBaselineTapIsPreservedNotMisidentifiedAsOwned() throws {
         let before = try object(tap(id: 10))
         let own = try object(tap(id: 11))
@@ -71,7 +84,7 @@ final class ObserverQualificationTests: XCTestCase {
     }
 
     private func report() -> ObserverQualificationReport {
-        .init(schema: "tron.native-observer-qualification.v1", processIdentifier: 42,
+        .init(schema: "tron.native-observer-qualification.v2", processIdentifier: 42, scope: .session,
               deadlineMilliseconds: 5_000, requestedEventsOfInterest: NativeEventObserver.requiredEventsOfInterest,
               inventoryBefore: [], availability: .init(available: true, generationID: UUID().uuidString,
                                                         generationNumber: 1, reason: nil),

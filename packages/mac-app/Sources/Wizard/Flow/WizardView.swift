@@ -422,13 +422,10 @@ struct WizardShell<Content: View>: View {
         }
     }
 
-    /// Gate for the Permissions step's Continue button. Full Disk Access
-    /// must be granted before pairing so agent file-backed execution
-    /// does not start from a half-working install.
+    /// Preserve core setup without requiring consent for an unavailable or
+    /// unused native capability. Computer control has its own execution gate.
     private var permissionsCanContinue: Bool {
-        Permission.allCases.allSatisfy { permission in
-            state.permissionStatuses[permission] == .granted
-        }
+        Permission.coreSetupSatisfied(by: state.permissionStatuses)
     }
 
     /// The primary CTA advances only after the wizard-owned pipeline
