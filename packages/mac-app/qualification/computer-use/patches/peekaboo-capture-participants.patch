@@ -1,0 +1,151 @@
+diff --git a/Core/PeekabooAutomationKit/Sources/PeekabooAutomationKit/Services/Capture/ScreenCaptureKitProcessCapabilityRegistry.swift b/Core/PeekabooAutomationKit/Sources/PeekabooAutomationKit/Services/Capture/ScreenCaptureKitProcessCapabilityRegistry.swift
+index 71bb9d30..ec391729 100644
+--- a/Core/PeekabooAutomationKit/Sources/PeekabooAutomationKit/Services/Capture/ScreenCaptureKitProcessCapabilityRegistry.swift
++++ b/Core/PeekabooAutomationKit/Sources/PeekabooAutomationKit/Services/Capture/ScreenCaptureKitProcessCapabilityRegistry.swift
+@@ -328,21 +328,13 @@ enum ScreenCaptureKitProcessCapabilityRegistry {
+         return self.unsignedMainBundleIsScreenCaptureKitHost(executablePath: executablePath)
+     }
+ 
++    // External Bridge app identities are not native Peekaboo evidence; those hosts use explicit socket coordination.
+     private static let screenCaptureKitHostIdentifiers: Set<String> = [
+         "peekaboo",
+         "boo.peekaboo",
+         "boo.peekaboo.peekaboo",
+         "boo.peekaboo.mac",
+         "boo.peekaboo.mac.debug",
+-        "com.anthropic.claudefordesktop",
+-        "com.clawdis.mac",
+-        "com.clawdis.mac.debug",
+-        "com.clawdbot.mac",
+-        "com.clawdbot.mac.debug",
+-        "bot.molt.mac",
+-        "bot.molt.mac.debug",
+-        "ai.openclaw.mac",
+-        "ai.openclaw.mac.debug",
+     ]
+ 
+     private static func unsignedMainBundleIsScreenCaptureKitHost(executablePath: String) -> Bool {
+diff --git a/Core/PeekabooAutomationKit/Tests/PeekabooAutomationKitTests/ScreenCaptureKitOwnerLeaseTests.swift b/Core/PeekabooAutomationKit/Tests/PeekabooAutomationKitTests/ScreenCaptureKitOwnerLeaseTests.swift
+index 70b2ece6..c068f0d6 100644
+--- a/Core/PeekabooAutomationKit/Tests/PeekabooAutomationKitTests/ScreenCaptureKitOwnerLeaseTests.swift
++++ b/Core/PeekabooAutomationKit/Tests/PeekabooAutomationKitTests/ScreenCaptureKitOwnerLeaseTests.swift
+@@ -103,6 +103,60 @@ struct ScreenCaptureKitOwnerLeaseTests {
+         }
+     }
+ 
++    @Test
++    func `Missing malformed stale and forged capability receipts fail closed`() throws {
++        let fixture = try LeaseFixture(name: "capability-receipt-validation")
++        defer { fixture.removeLockPath() }
++        let executableURL = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
++        let buildIdentity = try ScreenCaptureKitOwnerLease.executableBuildIdentity(at: executableURL)
++        let ownerIdentity = ScreenCaptureKitOwnerLease.OwnerIdentity(
++            processIdentifier: getpid(),
++            processStartIdentity: fixture.processStartIdentity,
++            buildIdentity: buildIdentity)
++        let markerURL = ScreenCaptureKitOwnerLease.processCapabilityMarkerURL(
++            processIdentifier: ownerIdentity.processIdentifier,
++            processStartIdentity: ownerIdentity.processStartIdentity,
++            directory: fixture.directoryURL)
++        let isValid: () -> Bool = {
++            ScreenCaptureKitOwnerLease.hasValidProcessCapability(
++                processIdentifier: ownerIdentity.processIdentifier,
++                processStartIdentity: ownerIdentity.processStartIdentity,
++                executablePath: executableURL.path,
++                signature: nil,
++                directory: fixture.directoryURL)
++        }
++
++        #expect(!isValid())
++        try ScreenCaptureKitProcessCapabilityRegistry.register(
++            ownerIdentity: ownerIdentity,
++            directory: fixture.directoryURL,
++            signatureIdentity: nil)
++        #expect(isValid())
++
++        try Data("not-json".utf8).write(to: markerURL)
++        #expect(!isValid())
++
++        let staleReceipt = ScreenCaptureKitOwnerLease.ProcessCapabilityReceipt(
++            processIdentifier: ownerIdentity.processIdentifier,
++            processStartIdentity: ownerIdentity.processStartIdentity &+ 1,
++            buildIdentity: buildIdentity,
++            codeSignatureHash: nil,
++            signingIdentifier: nil,
++            teamIdentifier: nil)
++        try JSONEncoder().encode(staleReceipt).write(to: markerURL)
++        #expect(!isValid())
++
++        let forgedReceipt = ScreenCaptureKitOwnerLease.ProcessCapabilityReceipt(
++            processIdentifier: ownerIdentity.processIdentifier,
++            processStartIdentity: ownerIdentity.processStartIdentity,
++            buildIdentity: "sha256:forged",
++            codeSignatureHash: nil,
++            signingIdentifier: nil,
++            teamIdentifier: nil)
++        try JSONEncoder().encode(forgedReceipt).write(to: markerURL)
++        #expect(!isValid())
++    }
++
+     @Test
+     func `Fork probe inherits a close-on-exec-only descriptor`() throws {
+         let fixture = try LeaseFixture(name: "fork-cloexec-control")
+@@ -228,11 +282,6 @@ struct ScreenCaptureKitOwnerLeaseTests {
+             ("/tmp/renamed-cli", "boo.peekaboo.peekaboo"),
+             ("/Applications/Peekaboo.app/Contents/MacOS/Peekaboo", "boo.peekaboo.mac"),
+             ("/Applications/Peekaboo.app/Contents/MacOS/Peekaboo", "boo.peekaboo.mac.debug"),
+-            ("/Applications/Claude.app/Contents/MacOS/Claude", "com.anthropic.claudefordesktop"),
+-            ("/Applications/Clawdis.app/Contents/MacOS/Clawdis", "com.clawdis.mac"),
+-            ("/Applications/Clawdbot.app/Contents/MacOS/Clawdbot", "com.clawdbot.mac.debug"),
+-            ("/Applications/Moltbot.app/Contents/MacOS/Moltbot", "bot.molt.mac"),
+-            ("/Applications/OpenClaw.app/Contents/MacOS/OpenClaw", "ai.openclaw.mac.debug"),
+         ]
+         for host in signedHosts {
+             #expect(ScreenCaptureKitOwnerLease.isPotentialPeekabooProcess(
+@@ -264,6 +313,11 @@ struct ScreenCaptureKitOwnerLeaseTests {
+             ("/Applications/PeekabooInspector.app/Contents/MacOS/PeekabooInspector", "boo.peekaboo.inspector"),
+             ("/Applications/Playground.app/Contents/MacOS/Playground", "boo.peekaboo.playground.debug"),
+             ("/tmp/PeekabooTestHost", "boo.peekaboo.peekaboo.testhost"),
++            ("/Applications/Claude.app/Contents/MacOS/Claude", "com.anthropic.claudefordesktop"),
++            ("/Applications/Clawdis.app/Contents/MacOS/Clawdis", "com.clawdis.mac"),
++            ("/Applications/Clawdbot.app/Contents/MacOS/Clawdbot", "com.clawdbot.mac.debug"),
++            ("/Applications/Moltbot.app/Contents/MacOS/Moltbot", "bot.molt.mac"),
++            ("/Applications/OpenClaw.app/Contents/MacOS/OpenClaw", "ai.openclaw.mac.debug"),
+             ("/tmp/Claude", "com.example.anthropic.claude.integration"),
+             ("/tmp/OpenClaw", "com.example.openclaw.helper"),
+             ("/tmp/Clawdbot", "com.example.clawdbot.helper"),
+@@ -284,7 +338,7 @@ struct ScreenCaptureKitOwnerLeaseTests {
+         try FileManager.default.createDirectory(at: executableDirectory, withIntermediateDirectories: true)
+         let infoData = try PropertyListSerialization.data(
+             fromPropertyList: [
+-                "CFBundleIdentifier": "ai.openclaw.mac",
++                "CFBundleIdentifier": "boo.peekaboo.mac.debug",
+                 "CFBundleExecutable": "OpenClaw",
+                 "CFBundlePackageType": "APPL",
+             ],
+diff --git a/docs/engine.md b/docs/engine.md
+index d408c337..e9e40384 100644
+--- a/docs/engine.md
++++ b/docs/engine.md
+@@ -81,13 +81,14 @@ owner PID/process generation and signed build; otherwise Peekaboo refuses before
+ or remove the explicit socket. Classic remains a process-isolated, in-process-SCK-free recovery path.
+ 
+ New CLI and app processes publish a private PID/process-generation/build receipt and retain its file lock for their
+-lifetime. Before every SCK leaf, Peekaboo scans exact same-user Peekaboo and companion host entry points plus the known
+-Peekaboo, Claude, and Clawdbot Bridge sockets. Ordinary Claude Code, renderer, crash-reporting, audio, and model helpers
+-are not hosts. A matching live host without a valid current receipt blocks SCK because its coordination cannot be
+-proven, including a renamed official binary or long-running `agent`/`capture live` process. This observation does not
+-establish whether that process has used SCK or which build first implemented ownership. Unlocked stale receipts
+-are safely removed from a dedicated private marker directory; repeated scans reuse PID, process-generation, executable,
+-and signature inspection results while revalidating the executable path.
++lifetime. Before every SCK leaf, Peekaboo scans exact same-user native Peekaboo entry points plus the known Peekaboo,
++Claude, and Clawdbot Bridge sockets. External app signing identifiers alone do not make stock Claude, Clawdbot, or their
++helpers native Peekaboo participants; an explicitly registered Bridge host is handled by its separate coordination path.
++A matching live native host without a valid current receipt blocks SCK because its coordination cannot be proven, including
++a renamed official binary or long-running `agent`/`capture live` process. This observation does not establish whether
++that process has used SCK or which build first implemented ownership. Unlocked stale receipts are safely removed from a
++dedicated private marker directory; repeated scans reuse PID, process-generation, executable, and signature inspection
++results while revalidating the executable path.
+ 
+ The owner lease and capability marker retain `flock` descriptors for process lifetime. Their opens atomically include
+ `O_CLOEXEC` and, under the existing Swift 6.4 compiler/SDK gate, `O_CLOFORK`. An inherited descriptor could keep the

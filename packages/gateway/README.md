@@ -106,6 +106,13 @@ the Gateway is stopped and restarted; the runtime also snapshots the admitted
 session directory at startup so an out-of-band settings edit cannot redirect
 new work around the ownership lock.
 
+A native executor adapter must retain its tool promise through actual native
+cleanup, not reject it when only its client waiter stops. The existing Pi/slot
+operation owner then keeps Stop and drain pending without a second work registry.
+The [native-tool settlement qualification](docs/native-tool-settlement.md) proves
+that boundary and its waiter-only negative control with a synthetic peer; it
+registers no production computer-use capability or native input path.
+
 ## Automations
 
 The Gateway is the sole scheduler and canonical owner for durable automations.
