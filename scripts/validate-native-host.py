@@ -56,6 +56,14 @@ def validate(app):
         raise ValueError('Native bundle identity/executable mismatch')
     if host.get('LSUIElement') is not True or host.get('LSBackgroundOnly') is not False:
         raise ValueError('Native helper must be an accessory Aqua application')
+    # Only the explicitly placed helper is valid. Xcode's automatic embedding
+    # of an application dependency can otherwise add a second Resources copy.
+    for candidate in (app / 'Contents').rglob('*.app'):
+        if candidate == app / BUNDLE:
+            continue
+        metadata = candidate / 'Contents/Info.plist'
+        if metadata.exists() and plist(app, str(metadata.relative_to(app))).get('CFBundleIdentifier') == SERVICE:
+            raise ValueError('Duplicate native helper bundle outside its canonical location')
     _, info = regular(app, EXECUTABLE)
     if not info.st_mode & 0o111:
         raise ValueError('Native host is not executable')

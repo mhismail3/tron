@@ -5,6 +5,19 @@ enum NativeHostServiceState: Sendable, Equatable {
     case needsRegistration, needsApproval, enabled, unavailable
 }
 
+/// Read-only status is not an activation attempt. macOS can return notFound
+/// for a valid bundled agent that has never been registered. After validating
+/// the bundled helper, an explicit Enable must attempt registration in both cases.
+enum NativeHostRegistrationPolicy {
+    static func shouldRegister(_ status: SMAppService.Status) throws -> Bool {
+        switch status {
+        case .notRegistered, .notFound: true
+        case .enabled, .requiresApproval: false
+        @unknown default: throw NativeHostError.serviceUnavailable
+        }
+    }
+}
+
 /// Real platform operations are injected at one boundary. Tests never register
 /// services, create XPC connections or ask the operating system for consent.
 struct NativeHostOperations: Sendable {
@@ -37,12 +50,8 @@ actor NativeHostCoordinator {
         guard !Task.isCancelled, await operations.state() == .enabled else { return Self.unavailable }
         return await operations.probe()
     }
-    func enable() async -> NativeHostServiceState {
-        do { return try await perform(.enable) } catch { return .unavailable }
-    }
-    func refresh() async -> NativeHostServiceState {
-        do { return try await perform(.refresh) } catch { return .unavailable }
-    }
+    func enable() async throws -> NativeHostServiceState { try await perform(.enable) }
+    func refresh() async throws -> NativeHostServiceState { try await perform(.refresh) }
     func unregister() async throws { _ = try await perform(.unregister) }
 
     private func perform(_ kind: Command) async throws -> NativeHostServiceState {
@@ -105,7 +114,7 @@ private struct NativeHostPlatform: Sendable {
             throw NativeHostError.bundleUnavailable
         }
         let service = SMAppService.agent(plistName: NativeHostTrust.launchAgentPlistName)
-        if service.status == .notRegistered { try service.register() }
+        if try NativeHostRegistrationPolicy.shouldRegister(service.status) { try service.register() }
         if service.status == .requiresApproval {
             SMAppService.openSystemSettingsLoginItems()
             return // The UI explicitly shows approval as an unfinished first phase.
@@ -200,4 +209,13 @@ final class NativeHostReply<Value: Sendable>: @unchecked Sendable {
     }
 }
 
-enum NativeHostError: Error { case bundleUnavailable, serviceUnavailable, busy }
+enum NativeHostError: Error, LocalizedError {
+    case bundleUnavailable, serviceUnavailable, busy
+    var errorDescription: String? {
+        switch self {
+        case .bundleUnavailable: "The bundled native helper could not be verified, or this app cannot manage it. Use the installed signed Release app."
+        case .serviceUnavailable: "The native helper is unavailable. Check Tron's background-item approval in System Settings."
+        case .busy: "Another native setup operation is still running. Wait for it to finish before retrying."
+        }
+    }
+}

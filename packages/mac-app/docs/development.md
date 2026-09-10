@@ -166,7 +166,13 @@ a hardened Node runtime without its JIT entitlement exits before the Gateway
 can bind its port.
 
 The same build embeds the signed Aqua `Tron Native Host` at
-`Contents/Library/Native/Tron Native Host.app`. Packaging must retain its fixed
+`Contents/Library/Native/Tron Native Host.app`. Its target explicitly keeps
+`PRODUCT_NAME=TronNativeHost`; the shared Release configuration's `Tron` product
+name belongs only to the outer application. The build dependency disables
+Xcode's automatic embedding/linking: the existing copy/sign phase is the sole
+owner of the helper's `Contents/Library/Native` placement. Do not leave another
+copy under `Contents/Resources`; composition validation rejects duplicate helper
+bundle identities. Packaging must retain its fixed
 `com.tron.mac.native-host` identity and deep strict signature. Its bundled Aqua
 LaunchAgent/Mach service is registered only by explicit setup and removed by
 explicit uninstall; ordinary readiness probes never register it or ask for TCC.
@@ -238,6 +244,41 @@ TRON_RUN_LAUNCHD_FIXTURE=1 packages/mac-app/scripts/test-launchd-relaunch-fixtur
 
 The fixture registers a temporary `com.example.*` label and cleans it up on exit. It is
 never part of ordinary automated tests because it intentionally invokes `launchctl`.
+
+## Permission identity and stale listings
+
+For normal Stable use, keep `Tron.app` (`com.tron.mac`) at `/Applications/Tron.app`
+and its sole bundled `Tron Native Host.app` (`com.tron.mac.native-host`) under
+`Contents/Library/Native`. FDA belongs to the wrapper. Depending on the service,
+macOS can attribute the native helper's request to the responsible wrapper:
+Screen Recording may appear as Tron, while Accessibility appears as Tron Native
+Host. A green effective Input Monitoring probe need not create a separate row
+when existing Accessibility authorization covers it. Never infer identity from
+the display name alone or merge Debug and Stable bundle identifiers to hide rows.
+
+After granting Screen Recording, macOS may restart only the wrapper while the
+native helper remains alive. If Settings shows the current Tron entry enabled but
+Tron's own row remains ungranted, explicitly restart the permission-only helper
+and re-check. Do not restart the Gateway or reset working grants as a workaround.
+A still-failing fresh helper requires diagnosis, not repeated permission toggles.
+
+Users who no longer use development/qualification builds can remove these old
+permission-list entries through System Settings's minus control:
+
+- `Tron-Dev` / `com.tron.agent` (retired application identity)
+- `TronMac` / `com.tron.mac.dev` (development wrapper)
+- `TronComputerUseQualification` / `com.tron.qualification.computer-use`
+- `TronNativeObserverQualification` / `com.tron.qualification.native-observer`
+
+This revokes only those old/test grants; it is not deletion of sessions or apps.
+Keep unrelated apps and the current Stable identities. Do not use a global TCC
+reset or edit TCC databases. Removing an old app's grant does not require deleting
+`~/.tron`, `~/.pi`, worktrees or qualification evidence. Historical expanded app
+bundles may also remain in Launch Services; archive/unregister only exact stale
+artifacts after verifying they are not running or needed for development. Never
+remove a nested helper from the installed signed app by hand. Release packaging
+must contain exactly one native helper; the validator rejects automatic duplicate
+embedding under Resources.
 
 ## Reinstall a local Release build
 

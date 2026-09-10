@@ -65,8 +65,8 @@ struct EnvironmentSetup: Sendable {
     /// Explicit user-only GUI permission request. The request is never made
     /// by polling, setup readiness, or a view appearance.
     var nativeHostServiceState: @Sendable () async -> NativeHostServiceState = { .unavailable }
-    var enableNativeHost: @Sendable () async -> NativeHostServiceState = { .unavailable }
-    var refreshNativeHost: @Sendable () async -> NativeHostServiceState = { .unavailable }
+    var enableNativeHost: @Sendable () async throws -> NativeHostServiceState = { .unavailable }
+    var refreshNativeHost: @Sendable () async throws -> NativeHostServiceState = { .unavailable }
     var requestPermission: @Sendable (Permission) async -> PermissionStatus = { _ in .probeUnavailable }
     var unregisterNativeHost: @Sendable () async throws -> Void = {}
 
@@ -223,12 +223,12 @@ struct EnvironmentSetup: Sendable {
             },
             nativeHostServiceState: { await NativeHostCoordinator.shared.serviceState() },
             enableNativeHost: {
-                guard TronPaths.canManageLaunchAgent(profile: profile) else { return .unavailable }
-                return await NativeHostCoordinator.shared.enable()
+                guard TronPaths.canManageLaunchAgent(profile: profile) else { throw NativeHostError.bundleUnavailable }
+                return try await NativeHostCoordinator.shared.enable()
             },
             refreshNativeHost: {
-                guard TronPaths.canManageLaunchAgent(profile: profile) else { return .unavailable }
-                return await NativeHostCoordinator.shared.refresh()
+                guard TronPaths.canManageLaunchAgent(profile: profile) else { throw NativeHostError.bundleUnavailable }
+                return try await NativeHostCoordinator.shared.refresh()
             },
             requestPermission: { permission in
                 guard TronPaths.canManageLaunchAgent(profile: profile) else { return .probeUnavailable }

@@ -87,7 +87,10 @@ grants and safety gates. Its bundled Aqua LaunchAgent declares a
 Mach service with the same name and associates it with the Tron app. Explicit
 setup first enables this service through SMAppService; if macOS requires background
 approval, the separate helper step opens Login Items settings and remains visibly
-unfinished. Permission Allow buttons are enabled only after a fresh service status
+unfinished. A valid bundled agent can initially report ServiceManagement
+`notFound`; explicit Enable attempts registration for both `notFound` and
+`notRegistered` after bundle validation. Registration errors propagate to an
+inline setup error instead of being collapsed into a silent unavailable state. Permission Allow buttons are enabled only after a fresh service status
 reports enabled. Approval itself never queues a delayed TCC request: the user then
 chooses the explicit permission action. Once approved, launchd owns
 activation and singleton lifetime across menu closure and login. Probes may wake
@@ -120,8 +123,12 @@ fence, then publishes only a fresh post-command probe. The host retains sixteen
 bounded command receipts to reject conflicting/duplicate permission requests;
 these receipts are not a cache of current grants. TCC may be revoked: a fresh unavailable/revoked response replaces an old
 badge rather than preserving a cached permanent grant. There is no automatic
-prompt retry. If registration is enabled but fresh GUI probes are all unavailable,
-setup offers an explicit Restart Helper action: it joins locally accepted consent,
+prompt retry. Once registration is enabled, setup keeps an explicit Restart Helper
+action available, including when only Screen Recording still reports unavailable.
+Screen Recording may be attributed to the responsible outer Tron app while AX is
+attributed to the native host; macOS restarting only the outer app after a grant
+can leave the existing host with an old preflight result. Restart Helper joins
+locally accepted consent,
 unregisters before registering, stops at the first error, and never itself asks
 for TCC. It is not an automatic update/relaunch guarantee. Before adding input
 execution, this lifecycle boundary must also join the native input owner; the

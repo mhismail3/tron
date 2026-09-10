@@ -47,6 +47,8 @@ targets:
           - "Gateway/**"
     dependencies:
       - target: TronNativeHost
+        embed: false
+        link: false
     settings:
       base:
         INFOPLIST_FILE: Sources/Info.plist
@@ -98,7 +100,9 @@ targets:
           # A previous build may contain the deliberately read-only payload.
           # Make only that generated destination removable before replacing it.
           chmod -R u+w "$GATEWAY_DST" 2>/dev/null || true
-          rm -rf "$DST" "$GATEWAY_DST"
+          # Retire the obsolete auto-embedded helper in incremental build output;
+          # only the explicit Library/Native copy below belongs in the app.
+          rm -rf "$DST" "$GATEWAY_DST" "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Resources/TronNativeHost.app"
           mkdir -p "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Resources" "$DST/Native"
           ditto "$SRC" "$DST"
           ditto "$NATIVE_SRC" "$NATIVE_DST"
@@ -170,6 +174,7 @@ targets:
         INFOPLIST_FILE: Sources/NativeHost/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         PRODUCT_BUNDLE_IDENTIFIER: com.tron.mac.native-host
+        PRODUCT_NAME: TronNativeHost
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "7"
         CODE_SIGN_STYLE: Automatic

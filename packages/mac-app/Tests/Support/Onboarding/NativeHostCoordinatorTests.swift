@@ -1,9 +1,27 @@
 import Foundation
+import ServiceManagement
 import Testing
 @testable import TronMac
 
 @Suite("Native helper setup phases", .serialized)
 struct NativeHostCoordinatorTests {
+    @Test("explicit enable attempts registration for a valid bundle reported notFound")
+    func firstRegistrationPolicy() throws {
+        #expect(try NativeHostRegistrationPolicy.shouldRegister(.notFound))
+        #expect(try NativeHostRegistrationPolicy.shouldRegister(.notRegistered))
+        #expect(try !NativeHostRegistrationPolicy.shouldRegister(.enabled))
+        #expect(try !NativeHostRegistrationPolicy.shouldRegister(.requiresApproval))
+    }
+
+    @Test("enable errors reach the caller instead of becoming silent unavailable status")
+    func enableFailureIsVisible() async {
+        let fake = FakeNativeHost()
+        await fake.failEnable()
+        let owner = NativeHostCoordinator(operations: fake.operations)
+        await #expect(throws: NativeHostError.self) { try await owner.enable() }
+        #expect(await fake.events == ["register"])
+    }
+
     @Test("probing and premature consent never register or request native permission")
     func noImplicitActivation() async {
         let fake = FakeNativeHost()
@@ -14,10 +32,10 @@ struct NativeHostCoordinatorTests {
     }
 
     @Test("background approval is explicit and does not consume a consent request")
-    func approvalThenConsent() async {
+    func approvalThenConsent() async throws {
         let fake = FakeNativeHost()
         let owner = NativeHostCoordinator(operations: fake.operations)
-        #expect(await owner.enable() == .needsApproval)
+        #expect(try await owner.enable() == .needsApproval)
         #expect(await owner.request(.accessibility) == .probeUnavailable)
         #expect(await fake.events == ["register"])
         await fake.approve()
@@ -45,11 +63,11 @@ struct NativeHostCoordinatorTests {
     }
 
     @Test("explicit refresh removes the stale service before registering and never asks TCC")
-    func explicitRefresh() async {
+    func explicitRefresh() async throws {
         let fake = FakeNativeHost()
         await fake.approve()
         let owner = NativeHostCoordinator(operations: fake.operations)
-        #expect(await owner.refresh() == .needsApproval)
+        #expect(try await owner.refresh() == .needsApproval)
         #expect(await fake.events == ["unregister", "register"])
         #expect(await fake.requestIDs.isEmpty)
     }
@@ -59,7 +77,7 @@ struct NativeHostCoordinatorTests {
         let fake = FakeNativeHost()
         await fake.approve(); await fake.failUnregister()
         let owner = NativeHostCoordinator(operations: fake.operations)
-        #expect(await owner.refresh() == .unavailable)
+        await #expect(throws: NativeHostError.self) { try await owner.refresh() }
         #expect(await owner.serviceState() == .enabled)
         #expect(await fake.events == ["unregister"])
     }
@@ -82,15 +100,21 @@ private actor FakeNativeHost {
     private(set) var requestIDs: [UUID] = []
     private var status = NativeHostServiceState.needsRegistration
     private var unregisterFails = false
+    private var enableFails = false
     nonisolated var operations: NativeHostOperations {
-        .init(state: { await self.state() }, enable: { await self.enable() },
+        .init(state: { await self.state() }, enable: { try await self.enable() },
               unregister: { try await self.unregister() }, probe: { await self.probe() },
               request: { await self.request($0, id: $1) })
     }
     func state() -> NativeHostServiceState { status }
     func approve() { status = .enabled }
     func failUnregister() { unregisterFails = true }
-    func enable() { events.append("register"); status = .needsApproval }
+    func failEnable() { enableFails = true }
+    func enable() throws {
+        events.append("register")
+        if enableFails { throw NativeHostError.serviceUnavailable }
+        status = .needsApproval
+    }
     func unregister() throws {
         events.append("unregister")
         if unregisterFails { throw NativeHostError.serviceUnavailable }

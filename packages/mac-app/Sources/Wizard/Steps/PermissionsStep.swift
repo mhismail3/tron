@@ -19,6 +19,7 @@ struct PermissionSetupView: View {
     @State private var actionID = UUID()
     @State private var probeID = UUID()
     @State private var serviceState = NativeHostServiceState.unavailable
+    @State private var actionError: String?
 
     var body: some View {
         ScrollView {
@@ -31,18 +32,29 @@ struct PermissionSetupView: View {
                     Text(serviceState == .enabled ? "Native helper enabled" : "Optional: prepare computer control")
                         .font(TronTypography.wizardHeadline)
                     Spacer()
-                    if serviceState != .enabled || helperConnectionUnavailable {
-                        Button(serviceActionTitle) { changeService() }
-                            .buttonStyle(.wizardSecondary)
-                            .fixedSize()
-                            .disabled(busy || !setup.canManageLaunchAgent)
-                    }
+                    Button(serviceActionTitle) { changeService() }
+                        .buttonStyle(.wizardSecondary)
+                        .fixedSize()
+                        .disabled(busy || !setup.canManageLaunchAgent)
+                }
+                if let actionError {
+                    Text(actionError)
+                        .font(TronTypography.wizardCaption)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel("Native helper setup failed: \(actionError)")
                 }
                 Text("Grant the permissions below after the helper is enabled.")
                     .font(TronTypography.wizardCaption).foregroundStyle(.secondary)
                 permissionRow(.accessibility, title: "Accessibility", detail: "Prepares inspection and control of approved apps.")
                 permissionRow(.inputMonitoring, title: "Input Monitoring", detail: "Prepares detection of user-session input.")
                 permissionRow(.screenRecording, title: "Screen Recording", detail: "Prepares viewing of selected app windows.")
+                if serviceState == .enabled, statuses[.screenRecording] != .granted {
+                    Text("Screen Recording may be listed under Tron.app in macOS Settings. If it is enabled there but not here, restart the helper, then re-check. This does not restart the Gateway.")
+                        .font(TronTypography.wizardCaption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Button { Task { await refresh(showActivity: true) } } label: {
                     Label(checking ? "Checking permissions…" : "Re-check permissions",
                           systemImage: checking ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
@@ -68,12 +80,6 @@ struct PermissionSetupView: View {
         case .needsRegistration, .unavailable: "Enable Helper"
         }
     }
-    private var helperConnectionUnavailable: Bool {
-        serviceState == .enabled && [Permission.accessibility, .inputMonitoring, .screenRecording].allSatisfy {
-            statuses[$0] == .probeUnavailable
-        }
-    }
-
     private func permissionRow(_ permission: Permission, title: String, detail: String) -> some View {
         let status = statuses[permission] ?? .notDetermined
         return WizardInfoCard(verticalPadding: PermissionsStepLayout.cardVerticalPadding,
@@ -119,13 +125,24 @@ struct PermissionSetupView: View {
     @MainActor private func changeService() {
         guard active, !busy, setup.canManageLaunchAgent else { return }
         let id = UUID(); actionID = id; probeID = UUID(); busy = true; checking = false
+        actionError = nil
         let restart = serviceState == .enabled
         Task { @MainActor in
-            _ = restart ? await setup.refreshNativeHost() : await setup.enableNativeHost()
-            guard active, actionID == id else { return }
-            busy = false
-            await refresh(showActivity: true)
-            if serviceState == .needsApproval { watchSettings(permission: nil) }
+            do {
+                let result: NativeHostServiceState
+                if restart { result = try await setup.refreshNativeHost() }
+                else { result = try await setup.enableNativeHost() }
+                guard active, actionID == id else { return }
+                serviceState = result
+                busy = false
+                await refresh(showActivity: true)
+                if serviceState == .needsApproval { watchSettings(permission: nil) }
+            } catch {
+                guard active, actionID == id else { return }
+                busy = false
+                actionError = String(error.localizedDescription.prefix(512))
+                await refresh(showActivity: false)
+            }
         }
     }
 

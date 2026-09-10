@@ -35,6 +35,18 @@ class NativeCompositionTests(unittest.TestCase):
     def test_valid_composition(self):
         validator.validate(self.app)
 
+    def test_outer_release_product_name_cannot_replace_native_executable(self):
+        executable = self.app / validator.EXECUTABLE
+        executable.rename(executable.with_name('Tron'))
+        with self.assertRaises(FileNotFoundError):
+            validator.validate(self.app)
+
+    def test_duplicate_auto_embedded_host_is_rejected(self):
+        host = plistlib.loads((self.app / validator.BUNDLE / 'Contents/Info.plist').read_bytes())
+        self.put('Contents/Resources/TronNativeHost.app/Contents/Info.plist', host)
+        with self.assertRaisesRegex(ValueError, 'Duplicate native helper'):
+            validator.validate(self.app)
+
     def test_missing_service_is_rejected(self):
         (self.app / self.agent).unlink()
         with self.assertRaises(FileNotFoundError):
