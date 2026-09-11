@@ -52,8 +52,11 @@ private struct CaptureSelectionStamp: Equatable, Sendable {
 }
 
 public struct NativeCaptureContext: Sendable {
-    public init(outerBundle: URL, teamRequirement: String) {
+    let automationEndpoint: @Sendable () -> NativeAutomationEndpoint?
+    public init(outerBundle: URL, teamRequirement: String,
+                automationEndpoint: @escaping @Sendable () -> NativeAutomationEndpoint? = { nil }) {
         self.outerBundle = outerBundle; self.teamRequirement = teamRequirement
+        self.automationEndpoint = automationEndpoint
     }
     let outerBundle: URL
     let teamRequirement: String

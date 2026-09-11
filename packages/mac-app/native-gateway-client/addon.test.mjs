@@ -13,7 +13,7 @@ const path = process.env.TRON_CAPTURE_TEST_ADDON;
 assert.ok(path?.endsWith("/tron-native-capture-test.node"));
 const nativeAddon = createRequire(import.meta.url)(path);
 assert.equal(typeof nativeAddon.testStats, "function");
-assert.equal(nativeAddon.apiVersion, 2);
+assert.equal(nativeAddon.apiVersion, 3);
 // Promises belong to JavaScript; this thin adapter retains native synchronous
 // argument rejection for the raw-API tests, but owns no native lifecycle.
 function completion(action) {
@@ -70,6 +70,14 @@ test("import is inert; explicit open is per-env and bounded", { timeout: 3000 },
   await Promise.all(clients.map((client) => client.closeLocal()));
   await rejected;
   await retired();
+});
+
+test("automation endpoint bootstrap uses the ordinary native request lane", { timeout: 3000 }, async () => {
+  const client = addon.open();
+  const pending = client.request(control("automationEndpoint"));
+  client.testReply(0, result, null, false);
+  assert.deepEqual(await pending, { control: result, jpeg: null });
+  await client.closeLocal(); await retired();
 });
 
 test("actual buffer copies settle once; delayed duplicate cannot settle a reused slot", { timeout: 3000 }, async () => {

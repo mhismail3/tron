@@ -2,7 +2,6 @@
 """Freeze, build and sign a closed native qualification product; never launch it."""
 import argparse
 import hashlib
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -16,29 +15,35 @@ import subprocess
 ROOT = Path(__file__).resolve().parent.parent
 MAC = ROOT.parent
 REPO = MAC.parent.parent
-PRODUCTS = {
-    "observer": {"executable": "TronNativeObserverQualification",
-                 "bundleIdentifier": "com.tron.qualification.native-observer",
-                 "displayName": "Tron Native Observer Qualification", "minimumSystem": "15.0",
-                 "schema": "tron.native-observer-qualification.artifact.v1"},
-    "capture": {"executable": "TronNativeCaptureQualification",
-                "bundleIdentifier": "com.tron.qualification.native-capture",
-                "displayName": "Tron Native Capture Qualification", "minimumSystem": "15.2",
-                "schema": "tron.native-capture-qualification.artifact.v1"},
-}
+PRODUCT = {"executable": "TronNativeCaptureQualification",
+           "bundleIdentifier": "com.tron.qualification.native-capture",
+           "displayName": "Tron Native Capture Qualification", "minimumSystem": "15.2",
+           "schema": "tron.native-capture-qualification.artifact.v1"}
 
 
 def arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True)
     parser.add_argument("--identity", help="Existing Apple Development certificate SHA-1")
-    parser.add_argument("--product", choices=tuple(PRODUCTS), default="observer")
     return parser.parse_args(argv)
 
 
-def build_command(package, scratch, product):
+def build_command(package, scratch):
     return ["xcrun", "swift", "build", "--package-path", package, "--scratch-path", scratch,
-            "--configuration", "release", "--product", PRODUCTS[product]["executable"]]
+            "--configuration", "release", "--product", PRODUCT["executable"]]
+
+
+def signing_policy(identity, inventory, team):
+    if not re.fullmatch(r"[A-Z0-9]{10}", team):
+        raise ValueError("Invalid canonical signing team")
+    identities = re.findall(r'\b([0-9A-F]{40}) "Apple Development:[^"\n]+"', inventory)
+    if identity is None:
+        if len(identities) != 1:
+            raise ValueError("Select one existing Apple Development certificate using --identity SHA1")
+        identity = identities[0]
+    if identity not in identities:
+        raise ValueError("Signing identity must be a listed Apple Development certificate SHA1; ad-hoc signing is forbidden")
+    return identity
 
 
 def digest(path):
@@ -121,15 +126,15 @@ def run(arguments, log, timeout=60):
 
 def main():
     args = arguments()
-    product = PRODUCTS[args.product]
+    product = PRODUCT
     output = output_path(args.output)
     output.mkdir(mode=0o700)  # Parent must already exist; never create installation trees.
     frozen = output / "source"
     sources = freeze_sources(ROOT, frozen)
     context = output / "source-context"
     context.mkdir()
-    # Reuse and attest the existing signing policy, not a second certificate policy.
-    inputs = [MAC / "project.yml", MAC / "qualification/computer-use/build_qualification.py"]
+    # The capture builder owns its signing policy; project.yml owns the team.
+    inputs = [MAC / "project.yml"]
     context_hashes = {}
     for path in inputs:
         expected = digest(path)
@@ -141,15 +146,12 @@ def main():
     teams = re.findall(r"^    DEVELOPMENT_TEAM: ([A-Z0-9]{10})$", (context / "project.yml").read_text(), re.M)
     if len(teams) != 1:
         raise ValueError("Expected one canonical Mac development team")
-    spec = importlib.util.spec_from_file_location("qualification_signing_policy", context / "build_qualification.py")
-    policy = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(policy)
     inventory = run(["/usr/bin/security", "find-identity", "-v", "-p", "codesigning"], output / "identity.log")
-    identity = policy.signing_policy(args.identity, inventory, teams[0])
+    identity = signing_policy(args.identity, inventory, teams[0])
     toolchain = run(["xcrun", "swift", "--version"], output / "toolchain.log")
     xcode = run(["xcodebuild", "-version"], output / "xcode.log")
     scratch = output / "scratch"
-    command = build_command(frozen, scratch, args.product)
+    command = build_command(frozen, scratch)
     run(command, output / "build.log", timeout=300)
     bin_path = run(["xcrun", "swift", "build", "--package-path", frozen, "--scratch-path", scratch,
                     "--configuration", "release", "--show-bin-path"], output / "bin-path.log").strip()
@@ -180,7 +182,7 @@ def main():
     if any(p.is_symlink() for p in app.rglob("*")):
         raise ValueError("Unexpected link in signed artifact")
     app_files = {str(p.relative_to(app)): digest(p) for p in sorted(app.rglob("*")) if p.is_file()}
-    manifest = {"schema": product["schema"], "bundleIdentifier": product["bundleIdentifier"], "product": args.product,
+    manifest = {"schema": product["schema"], "bundleIdentifier": product["bundleIdentifier"], "product": "capture",
                 "sources": sources, "context": context_hashes, "toolchain": toolchain, "xcode": xcode,
                 "buildCommand": [str(a) for a in command], "appFiles": app_files,
                 "signingCertificateSHA1": identity, "teamIdentifier": teams[0], "designatedRequirement": requirement,

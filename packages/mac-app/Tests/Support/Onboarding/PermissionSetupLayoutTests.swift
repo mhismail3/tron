@@ -12,7 +12,7 @@ struct PermissionSetupLayoutTests {
         setup.canManageLaunchAgent = false
         setup.nativeHostServiceState = { .enabled }
         setup.probePermissions = { [.fullDiskAccess: .granted, .accessibility: .notDetermined,
-                                    .inputMonitoring: .notDetermined, .screenRecording: .notDetermined] }
+                                    .screenRecording: .notDetermined] }
         setup.requestPermission = { _ in Issue.record("Unexpected TCC request from layout"); return .probeUnavailable }
         setup.enableNativeHost = { Issue.record("Unexpected registration from layout"); return .unavailable }
         setup.refreshNativeHost = { Issue.record("Unexpected refresh from layout"); return .unavailable }

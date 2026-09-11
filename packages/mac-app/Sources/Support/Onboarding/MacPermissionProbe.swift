@@ -24,7 +24,7 @@ enum MacPermissionProbe {
         switch permission {
         case .fullDiskAccess:
             return await probeFullDiskAccess()
-        case .accessibility, .inputMonitoring, .screenRecording:
+        case .accessibility, .screenRecording:
             // These permissions belong to the signed Aqua host. Keeping this
             // owner FDA-only prevents a wrapper Boolean from becoming GUI
             // permission authority.

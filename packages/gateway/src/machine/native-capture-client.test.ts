@@ -58,6 +58,23 @@ const jpeg = Buffer.from([
   0xff, 0xda, 0, 8, 1, 1, 0, 0, 63, 0, 0, 0xff, 0xd9,
 ]);
 describe("NativeCaptureClient", () => {
+  it("bootstraps only an exact generation-bound automation socket through ordinary admission", async () => {
+    const client = await ready(), id = randomUUID();
+    const endpoint = client.automationEndpoint();
+    expect(at(1).request.operation).toBe("automationEndpoint");
+    await expect(client.catalog()).rejects.toThrow(/may be pending/);
+    reply(1, "automationEndpoint", { socket: `/tmp/tron-cua-${id}/s`, generation: id });
+    expect(await endpoint).toEqual({ socket: `/tmp/tron-cua-${id}/s`, generation: id });
+    const closed = client.close(); reply(2, "joined"); await closed;
+    await expect(client.automationEndpoint()).rejects.toThrow(/closed/);
+    expect(pending).toHaveLength(3);
+  });
+  it.each(["relative/s", "/tmp/other/s", "/tmp/../tmp/s", "/" + "x".repeat(110)])("rejects automation endpoint %s", async (socket) => {
+    const client = await ready(); const endpoint = client.automationEndpoint();
+    const refused = expect(endpoint).rejects.toThrow(/Invalid native automation/);
+    reply(1, "automationEndpoint", { socket, generation: randomUUID() }); await refused;
+    const closed = client.close(); reply(2, "joined"); await closed;
+  });
   it("suspends during a read and waits for that callback before resuming the same target with a fresh stream", async () => {
     const client = await started();
     const read = client.pull(), discarded = expect(read).rejects.toThrow("retired before publication");

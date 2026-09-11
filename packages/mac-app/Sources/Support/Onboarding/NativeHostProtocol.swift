@@ -13,7 +13,6 @@ protocol NativeHostPermissionService {
 
 enum NativeHostPermission: String, CaseIterable, Hashable, Sendable {
     case accessibility
-    case inputMonitoring
     case screenRecording
 }
 

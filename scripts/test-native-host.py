@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import plistlib
@@ -27,6 +28,12 @@ class NativeCompositionTests(unittest.TestCase):
         (self.app / validator.CLIENT).write_bytes(b'offline fixture' * 100)
         (self.app / validator.CLIENT_INPUTS).write_text(json.dumps({
             'schema': 1, 'testOnly': False, 'inputs': {'fixture': '0' * 64}}))
+        cua = self.app / validator.CUA
+        cua.write_bytes(b'offline Cua fixture'); cua.chmod(0o755)
+        (self.app / 'Contents/Library/Native/cua-driver-LICENSE.txt').write_text('fixture license')
+        (self.app / validator.CUA_MANIFEST).write_text(json.dumps({
+            'version': '0.28.0', 'revision': '0' * 40, 'githubPrerelease': True, 'upstreamSigner': 'YCK386LBJ7',
+            'archiveSHA256': '0' * 64, 'binarySHA256': hashlib.sha256(cua.read_bytes()).hexdigest()}))
 
     def tearDown(self):
         self.temp.cleanup()
@@ -38,6 +45,18 @@ class NativeCompositionTests(unittest.TestCase):
 
     def test_valid_composition(self):
         validator.validate(self.app)
+
+    def test_cua_bytes_must_match_manifest_and_cannot_be_symlinked(self):
+        cua = self.app / validator.CUA
+        original = cua.read_bytes(); cua.write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError, 'pinned release'):
+            validator.validate(self.app)
+        cua.unlink(); cua.symlink_to('/bin/echo')
+        with self.assertRaisesRegex(ValueError, 'Symlink'):
+            validator.validate(self.app)
+        cua.unlink(); cua.write_bytes(original); cua.chmod(0o755)
+        (self.app / validator.CUA_MANIFEST).unlink()
+        with self.assertRaises(FileNotFoundError): validator.validate(self.app)
 
     def test_outer_release_product_name_cannot_replace_native_executable(self):
         executable = self.app / validator.EXECUTABLE

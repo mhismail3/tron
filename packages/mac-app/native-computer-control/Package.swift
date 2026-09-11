@@ -7,14 +7,11 @@ let package = Package(
     platforms: [.macOS(.v15)],
     products: [
         .library(name: "TronComputerControl", targets: ["TronComputerControl"]),
-        .executable(name: "TronNativeObserverQualification", targets: ["TronNativeObserverQualification"]),
         .executable(name: "TronNativeCaptureQualification", targets: ["TronNativeCaptureQualification"]),
     ],
     targets: [
         .target(name: "TronComputerControl", dependencies: []),
-        .executableTarget(name: "TronNativeObserverQualification", dependencies: ["TronComputerControl"]),
         .executableTarget(name: "TronNativeCaptureQualification", dependencies: ["TronComputerControl"]),
         .testTarget(name: "TronComputerControlTests", dependencies: ["TronComputerControl"]),
-        .testTarget(name: "TronNativeObserverQualificationTests", dependencies: ["TronNativeObserverQualification", "TronComputerControl"]),
         .testTarget(name: "TronNativeCaptureQualificationTests", dependencies: ["TronNativeCaptureQualification", "TronComputerControl"]),
     ])

@@ -257,6 +257,7 @@ jobs:
       - run: scripts/verify-ci-toolchain.sh node xcode xcodegen
       - run: python3 scripts/test-personal-info-guard.py
       - run: python3 scripts/test-native-host.py
+      - run: scripts/test-cua-assets.sh
       - name: Test actual native capture addon ownership (offline transport only)
         timeout-minutes: 3
         run: |

@@ -16,7 +16,7 @@ it("explicit-open capacity/admission errors are not relabeled as app updates", (
   mac();
   const failure = new Error("connection capacity exhausted");
   const open = vi.fn(() => { throw failure; });
-  load.mockReturnValue({ apiVersion: 2, open });
+  load.mockReturnValue({ apiVersion: 3, open });
   expect(() => openNativeCaptureTransport()).toThrow(failure);
   expect(open).toHaveBeenCalledWith();
 });
@@ -28,7 +28,7 @@ it("JavaScript owns request/close Promises and native callbacks settle them", as
     request: vi.fn((_control: Buffer, done: typeof reply) => { reply = done; }),
     closeLocal: vi.fn((done: typeof closed) => { closed = done; }),
   };
-  load.mockReturnValue({ apiVersion: 2, open: () => raw });
+  load.mockReturnValue({ apiVersion: 3, open: () => raw });
   const transport = openNativeCaptureTransport();
   const pending = transport.request(Buffer.from("control"));
   const value = { control: Buffer.from("reply"), jpeg: null };
@@ -47,7 +47,7 @@ it("JavaScript owns request/close Promises and native callbacks settle them", as
 it("an incompatible native API cannot open a connection", () => {
   mac();
   const open = vi.fn();
-  load.mockReturnValue({ apiVersion: 1, open });
+  load.mockReturnValue({ apiVersion: 2, open });
   expect(() => openNativeCaptureTransport()).toThrow("manual signed Mac app update");
   expect(open).not.toHaveBeenCalled();
 });

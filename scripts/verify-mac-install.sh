@@ -56,6 +56,13 @@ if python3 "$(dirname "$0")/validate-native-host.py" --app "$APP" >/dev/null 2>&
 else
   fail "native helper or Aqua Mach service composition invalid"
 fi
+CUA_DRIVER="$APP/Contents/Library/Native/cua-driver"
+if codesign --verify --strict -R '=anchor apple generic and certificate leaf[subject.OU] = "YCK386LBJ7" and identifier "cua-driver"' "$CUA_DRIVER" >/dev/null 2>&1 \
+  && lipo "$CUA_DRIVER" -verify_arch arm64 x86_64 >/dev/null 2>&1; then
+  pass "pinned Cua executor signature and architectures"
+else
+  fail "Cua executor signature or architectures invalid"
+fi
 NATIVE_IDENTIFIER="$(codesign -dv --verbose=4 "$NATIVE_HOST" 2>&1 | sed -n 's/^Identifier=//p' | head -n 1)"
 [[ "$NATIVE_IDENTIFIER" == "com.tron.mac.native-host" ]] \
   && pass "Tron Native Host identity is stable" \

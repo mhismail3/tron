@@ -263,9 +263,13 @@ and its sole bundled `Tron Native Host.app` (`com.tron.mac.native-host`) under
 `Contents/Library/Native`. FDA belongs to the wrapper. Depending on the service,
 macOS can attribute the native helper's request to the responsible wrapper:
 Screen Recording may appear as Tron, while Accessibility appears as Tron Native
-Host. A green effective Input Monitoring probe need not create a separate row
-when existing Accessibility authorization covers it. Never infer identity from
-the display name alone or merge Debug and Stable bundle identifiers to hide rows.
+Host. Native computer use needs Accessibility and Screen Recording; it does not
+request Input Monitoring for an unused observer. Never infer identity from the
+display name alone or merge Debug and Stable bundle identifiers to hide rows.
+macOS can also present a separate direct-capture consent dialog on first capture.
+The ordinary grant booleans do not prove that dialog was completed. The user must
+handle it; foreground automation must first inspect the full desktop, not only a
+window screenshot that can omit the blocking system prompt.
 
 After granting Screen Recording, macOS may restart only the wrapper while the
 native helper remains alive. If Settings shows the current Tron entry enabled but

@@ -193,7 +193,7 @@ private actor FakeNativeHost {
     }
     func probe() -> [Permission: PermissionStatus] {
         events.append("probe")
-        return [.accessibility: .granted, .inputMonitoring: .granted, .screenRecording: .granted]
+        return [.accessibility: .granted, .screenRecording: .granted]
     }
     func request(_ permission: Permission, id: UUID) async -> PermissionStatus {
         events.append("request"); requestIDs.append(id)

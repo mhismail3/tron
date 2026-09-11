@@ -122,7 +122,7 @@ mobile renderer serve both producers with shared viewer/decode budgets.
 
 `machine/native-capture-client.ts` binds one connection to the canonical session
 and extension load. Import is inert; explicit catalog opens the API-versioned,
-signed `Tron.app/Contents/Library/Native/tron-native-capture.node` (API2). This Mac
+signed `Tron.app/Contents/Library/Native/tron-native-capture.node` (API3). This Mac
 capability is optional: missing/incompatible code disables capture, not Gateway
 startup or source updates. No endpoint, credentials, process/window ID or input
 is accepted. Listing and selection start no stream. First-viewer admission starts
@@ -135,6 +135,25 @@ Frames remain latest-only, bounded and outside JSONL/artifact caches. Installed
 XPC and real-window/mobile qualification remain required; offline tests are not
 that evidence. See the
 [Mac wire and lifetime contract](../mac-app/docs/computer-control.md#direct-gateway-capture-client).
+
+The optional first-party `computer` tool is a thin `{tool, arguments}` client of
+pinned Cua Driver 0.28.0 (revision `1b50c02e2d34734f64d2d22f54eb76cc97b4a663`).
+The permission-bearing Native Host owns one direct embedded Cua process and a
+private per-generation socket; Gateway receives only a read-only
+`{socket, generation}` bootstrap through the authenticated native boundary and
+never accepts an endpoint, environment, or session from model input. Invocations
+bind the canonical session/load and require fresh observations and element
+references. Refused, background-unavailable, malformed, non-zero, or disconnected
+results are refusal or `outcomeUnknown`, never success or replay. Cua telemetry is
+disabled for daemon and clients. Missing Cua assets disable only this tool;
+permissions and capture remain available. Administrative history, browser,
+config, update, install, and grant surfaces are not exposed. Each extension load
+owns its binding and awaited shutdown; there is no global computer-session mirror.
+Accepted calls outlive waiter Stop without replay. Observations return bounded
+image blocks from disposable files, and actions require fresh references from
+that load. Before foreground input, inspect the full desktop for blocking system
+dialogs: window-only capture and ordinary-window ordering can hide macOS's separate
+direct-capture consent prompt. The agent never approves OS permissions itself.
 
 ## Automations
 

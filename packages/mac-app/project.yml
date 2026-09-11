@@ -86,6 +86,7 @@ targets:
         basedOnDependencyAnalysis: false
         script: |
           "$SRCROOT/native-gateway-client/prepare.sh"
+          "$SRCROOT/scripts/ensure-cua-driver.sh" "$DERIVED_FILE_DIR/tron-cua"
     postBuildScripts:
       - name: Copy Bundled Login Item
         basedOnDependencyAnalysis: false
@@ -116,6 +117,9 @@ targets:
           ditto "$NATIVE_SRC" "$NATIVE_DST"
           install -m 0644 "$DERIVED_FILE_DIR/tron-native-capture.node" "$DST/Native/tron-native-capture.node"
           install -m 0644 "$DERIVED_FILE_DIR/tron-native-capture.inputs.json" "$DST/Native/tron-native-capture.inputs.json"
+          install -m 0755 "$DERIVED_FILE_DIR/tron-cua/cua-driver" "$DST/Native/cua-driver"
+          install -m 0644 "$DERIVED_FILE_DIR/tron-cua/manifest.json" "$DST/Native/cua-driver.manifest.json"
+          install -m 0644 "$DERIVED_FILE_DIR/tron-cua/LICENSE.txt" "$DST/Native/cua-driver-LICENSE.txt"
           # ditto/cp can fail while materializing symlinks inside a 0555 source
           # tree because they apply directory modes before populating children.
           # rsync defers final directory modes and preserves the internal links.
@@ -144,6 +148,8 @@ targets:
               [ -d "$HELPER" ] || continue
               codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$HELPER"
             done
+            # Cua remains byte-identical to its verified vendor-signed release.
+            # It executes as a child; it is not loaded into Tron's process.
             # Sign the Aqua TCC host after copying it into its final nested
             # location, then the outer app seals both native compositions.
             codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$NATIVE_DST"
@@ -178,6 +184,7 @@ targets:
     platform: macOS
     sources:
       - path: Sources/NativeHost/main.swift
+      - path: Sources/NativeHost/CuaProcessOwner.swift
       - path: Sources/Support/Onboarding/NativeHostProtocol.swift
     dependencies:
       - target: TronNativeCaptureHost
@@ -202,6 +209,7 @@ targets:
         createIntermediateGroups: true
         excludes:
           - main.swift
+          - CuaProcessOwner.swift
           - Info.plist
       - path: Sources/Support/Onboarding/NativeCodeSigning.swift
       - path: Sources/Server/Paths/TronGatewayProfile.swift
@@ -233,6 +241,7 @@ targets:
     type: bundle.unit-test
     platform: macOS
     sources:
+      - path: Sources/NativeHost/CuaProcessOwner.swift
       - path: Tests
         createIntermediateGroups: true
         optional: true

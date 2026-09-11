@@ -1,7 +1,8 @@
 # XcodeGen-generated project; regenerate with `xcodegen generate`
 TronMac.xcodeproj/
 
-# Build artifacts
+# Build artifacts (including SwiftPM products and pinned native asset caches)
+.build/
 build/
 *.xcarchive
 *.dmg

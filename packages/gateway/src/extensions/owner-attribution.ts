@@ -78,7 +78,7 @@ export function attributeExtensions(base: LoadExtensionsResult, browserLiveView?
   if (bashOwners.length > 0) {
     throw new GatewayError("conflict", "The bash tool name is reserved by Tron");
   }
-  for (const [tool, owner] of [["notify", "tron-notify"], ["display", "tron-display"], ["native_capture", "tron-native-capture"]] as const) {
+  for (const [tool, owner] of [["notify", "tron-notify"], ["display", "tron-display"], ["native_capture", "tron-native-capture"], ["computer", "tron-computer"]] as const) {
     const owners = base.extensions.filter((extension) => extension.tools.has(tool));
     if (owners.some((extension) => extension.path !== `<inline:${owner}>`)) {
       throw new GatewayError("conflict", `The ${tool} tool name is reserved by Tron`);

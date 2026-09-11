@@ -1,761 +1,191 @@
-# Native computer-control foundations
+# Native computer use
 
-`native-computer-control` contains unregistered construction, interlock, lifetime,
-explicitly started passive-observation, and capture-only window-stream primitives
-for Tron's GUI capability host. `Tron.app` bundles one Aqua Native Host with
-separate permission and capture-only XPC roles. The host source connects the
-capture facade to authenticated Stable-peer requests. The separate
-`native-gateway-client` and Gateway transport supply a direct capture client;
-model-tool registration and mobile integration are not implemented. No
-observer or input backend is started by the host. The package is not an input executor, focus
-manager, AX target resolver, or proof of application effects. It does not post
-events or launch a process. The live input backend and trusted host still need
-to establish when an inert `ConstructedInputPlan` may be admitted and released.
+Tron owns the signed Mac permission host, canonical Gateway sessions, and the
+read-only iPhone viewer. Cua Driver owns desktop observation and input. There is
+no second planner, browser engine, custom event injector, held-input ledger, or
+input-recovery mirror. Browser automation remains with `agent_browser`.
 
-## Contract
+## Owners and permissions
 
-`InputPlan` is caller-owned typed data. Pointer actions require explicit logical
-screen `targetBounds`; every point must be finite and inside those bounds. The
-constructor does not infer display coordinates, resolve a target, activate an
-app, request TCC grants, or use AX/capture/global events.
+One bundled `Tron Native Host.app` is an accessory Aqua application. The wrapper
+alone requests permissions and controls helper registration/retirement. The
+Native Host needs Accessibility and Screen Recording; Full Disk Access remains
+part of the Mac wrapper's core setup. Input Monitoring is not requested for an
+unused event-observer implementation. Existing OS grants are never reset by an
+update or by removing an unused permission surface.
 
-Physical keys use the closed `PhysicalKey` identity set and macOS hardware
-keycode mapping. These are physical key positions, not a promise of layout-aware
-character shortcuts. There is no uppercase key identity: use explicit `.shift`
-for an uppercase physical chord, or literal text for textual intent. Caps Lock is
-a persistent latch, not an operation-owned modifier, and is excluded. Modifier
-arrays reject duplicate identities. Each key action emits cumulative
-`flagsChanged` transitions, a physical key down/up, and matching modifier
-releases. The constructed release metadata names the exact held resource and
-its opening event ordinal.
+macOS may additionally ask to allow direct screen capture rather than its private
+window picker. The two ordinary TCC booleans do **not** prove that this separate
+system dialog has been completed. A window-only screenshot can exclude an alert
+covering the window. Before foreground input, the agent must inspect the full
+desktop and ask the user to handle blocking permission/security dialogs. Neither
+a focused window nor first-in-ordinary-window order proves an unobstructed input
+target. Tron never approves OS permission prompts automatically.
 
-Literal text is separate from physical shortcuts. Each chunk produces exactly
-one Unicode-bearing keycode-0 down and one keycode-0 up with an empty Unicode
-payload. There is no preceding bare down. Native held identity is `.keyboard(0)`
-for both Unicode commitment and physical A, so semantic aliases cannot acquire
-the same native resource twice. Only a down acquires a resource; each release
-consumes its exact opening ordinal once. Text chunks preserve `Character`
-boundaries and therefore never split a UTF-16 surrogate pair; an individual
-extended grapheme larger than one event is rejected. The SDK permits frameworks
-to ignore overridden Unicode and translate physical keys themselves, so this
-construction contract does not prove text acceptance by every app.
+`CuaProcessOwner` starts the bundled driver directly from this permission-bearing
+process, with `--embedded`, its exact host bundle ID, standard authorization, and
+an owned parent-liveness stdin pipe. The Gateway never launches the daemon. Cua's
+telemetry is disabled in both daemon and CLI environments. History, PiP, browser,
+agent, installer and backend-configuration surfaces are not exposed by `computer`.
+The native helper owns a private0700 directory and a fresh UUID-scoped socket for
+each child generation. It exposes only a running, same-user UNIX socket. No
+endpoint is reused after restart. Startup failure leaves permission/capture
+services available. Retirement seals startup, closes the pipe, and shares one
+retained wait for actual child exit across every caller; it does not equate a
+proxy's exit with native completion.
 
-Mouse events carry exact logical position, button, event type, and click state.
-Only left/right/center buttons are accepted. Clicks are bounded to 1–3 and
-expose typed hold/inter-click delays, defaulting to 28/80 milliseconds. Native
-multi-click recognition still requires live qualification. Drags carry
-an explicit path (2–128 points), button, bounded duration, and deterministic
-per-segment delays. Scrolls carry vertical/horizontal deltas and unit. Delays
-are typed records rather than sleeps hidden in construction.
+The shipped driver is pinned to Cua0.28.0, revision
+`1b50c02e2d34734f64d2d22f54eb76cc97b4a663`. GitHub marks this release prerelease.
+`ensure-cua-driver.sh` checks the archive and executable digests, both supported
+architectures, and the upstream signing identity before staging. The vendor
+signature is preserved; the outer app seals the executable and its MIT notice.
+No installer, daemon, permission request, or production update runs during staging.
+Cua is optional to ordinary Gateway startup and source-only updates; missing or
+incompatible native assets fail the computer operation, not the whole Gateway.
 
-Hard ceilings are 64 actions, 64 KiB UTF-8 per plan, 32 Ki UTF-16 units per plan,
-20 UTF-16 units per commitment, 512 expanded records, 30 seconds of total planned
-delay (including drag/click timing), 2 seconds per click hold/inter-click interval,
-and absolute scroll magnitude 100,000. The 20-unit chunk cap is a conservative
-Tron policy, not a stated universal platform limit. Callers may tighten limits;
-widening any ceiling is rejected. Pointer bounds are half-open at their right
-and bottom edges. Pixel and line scroll fields retain Core Graphics' native unit
-conversion rather than overwriting pixel values into line fields. Validation completes
-before any `CGEvent` is constructed; all native construction is fallible and
-results remain inert. Construction provides no native success, grant, recovery,
-posting, or lifetime-owner proof; the separate internal file barrier below is
-not part of event construction.
+## Gateway computer tool
 
-`TronComputerControlTests` inspects actual `CGEvent` type, flags, keycode,
-Unicode buffer, button, click state, position, scroll fields, timing records,
-and matched identities using independently specified expectations. It does not
-post an event or call AX/capture APIs. The package also contains focused tests
-for the internal file interlock, including real independent-process flock
-exclusion, an unarmed no-marker crash control, an armed crash marker, and
-fail-closed malformed, oversized, replacement, symlink, hard-link, mode, arm,
-close, duplicate-retirement, and root-boundary cases. Those process probes use
-only private temporary roots and standard `Process` helpers and are not proof of
-native release.
+The first-party `computer({tool, arguments})` tool is a narrow adapter over Cua's
+public CLI. One extension load owns its endpoint binding, session identity, latest
+opaque references, and at most one accepted invocation. Pi remains the canonical
+session/operation owner. Its awaited `session_shutdown` event closes the bound Cua
+session before invalidating the load; no parallel session registry is introduced.
 
-The interlock is a deliberately internal, small physical-resource barrier. A
-trusted host supplies one explicit owner-only root; package initialization does
-not choose or create a native-home path. The root descriptor is retained while
-an admission holds the one owner-only lock file via non-blocking exclusive
-`flock`. Fixed relative lock and marker names are opened without following
-symlinks and checked for regular shape, owner, mode, and link count. Ordinary
-admission fails closed for any existing marker, including a partial, malformed,
-old, or unattributable marker. Before a future owner’s first mutation, `arm`
-flushes a bounded marker containing only schema/version and a random lease
-identity. An unarmed close releases the descriptor; an armed drop or process
-crash releases the OS lock but deliberately leaves the marker.
+Only explicit observation can establish or refresh an endpoint. Actions cannot
+silently reconnect to a successor. Caller-supplied session, endpoint, environment,
+private protocol fields, and screenshot paths are refused. The adapter injects
+its load identity and bounds argument/output size, AX traversal and image bytes.
+Images are returned as actual model image blocks after bounded PNG header/size
+admission, not as dead temporary-file references. Temporary image files are
+removed after publication preparation; they are not a live-video cache.
 
-Only the later trusted native lifetime/recovery owner may invoke the internal
-exact-marker clean-retirement/recovery primitives. Clean retirement keeps the
-lease lock while it performs bounded no-follow inspection and exact
-identity/content and pathname-inode checks, then removes and flushes only that
-marker. The armed lease retains its original marker inode; even a same-identity
-replacement cannot be removed by that lease. Crash recovery admits the currently
-matching marker under the lock and pins that inspection through removal. Opened
-marker attributes are checked before and after the bounded read; special-file
-opens are nonblocking. Crash recovery takes the lock before applying its proof. Neither
-path starts input, and this file barrier cannot prove physical native
-quiescence, user authorization, app/focus/AX state, or a user grant. No executor, event-state registry/flags, PID reaper,
-persistent action log, model-callable retirement, posting, capture, or tool
-registration belongs here.
+Fresh observation is required before another action. Element references must
+belong to this load's latest window observation. Coordinate actions require an
+image; foreground/desktop actions additionally require full-desktop observation.
+These are admission checks, not proof that the desktop cannot change afterward.
+The agent still verifies the intended app effect and honors user takeover/Stop.
 
-Owned descriptors are unguarded POSIX descriptors and are closed once, never
-blindly retried after an error. Lock descriptors are explicitly unlocked first.
-Setup, admission, arm, marker and recovery failures retain both the primary error
-and any cleanup error. Repeated explicit retirement observes the same completion
-error without closing a reused descriptor; ordinary abandonment cannot later
-report trusted clean retirement. Nonthrowing deinitializers report close failures
-through a metadata-only diagnostic. The host must not externally close/guard these
-descriptors or use pthread cancellation against their operations; Swift Task
-cancellation is not pthread syscall cancellation. The internal close seam tests
-late errors by actually closing first, then reporting EIO—not by leaving a fake
-live descriptor and inviting retries.
-
-Original-lease clean retirement rejects even a same-identity replacement inode.
-Fresh explicit recovery separately admits a currently matching marker under its
-own lock; wrong-identity replacements remain quarantined until their actual
-identity is explicitly selected by the higher-level trusted recovery owner.
-Neither primitive supplies that owner's physical-release or authorization proof.
-
-The host must keep this owner-only directory stable and control all of its
-writers. Descriptor-relative operations protect path resolution; cooperating
-writers serialize through the lock. This is not a sandbox against hostile code
-running as the same UID: macOS provides no atomic compare-inode-and-unlink
-operation, so a malicious same-UID replacement after the final check is outside
-this trusted-root contract. There is no claim of hostile-filesystem protection.
-
-## Native operation lifetime (internal, not yet a live tool)
-
-`NativeInputLifetimeOwner` is the next internal owner above `InputConstructor` and
-`NativeControlInterlockRoot`. It constructs and validates the complete inert plan,
-acquires one interlock lease, arms its quarantine marker, and starts one host-owned
-completion task. The task is independent of menu/phone presentation; cancelled
-waiters request a monotonic stop but never cancel the completion task or abandon a
-native backend await. Multiple callers join that exact task. Stop closes admission
-to NEW events and leaves owned release work eligible; `requestTakeover` additionally
-revokes the shared `NativeInputControlScope`, including a zero-event prefix and
-after focus. A newly constructed operation cannot renew that same revoked scope;
-only the later trusted host can issue a new grant. It never restores or overwrites
-human focus/state.
-
-The `NativeInputIO` protocol is deliberately narrow and has no production backend
-or success facade. A future signed GUI host must bind its target to the actual
-process/window/session generations and its scope to the real grant/source, then
-return exact operation/event tickets, dispatch acknowledgements, and post-event
-observations. Preparation receives the owner's complete inert packet, including each matching
-release and delay, with all non-delay tickets assigned before native work starts.
-Ticket sequence is event ordinal +1; delay gaps are intentional and stopping does
-not renumber cleanup tickets. The backend must prepare its fallible native copies,
-source, tags and matching releases for the whole packet before returning ready or
-mutating focus/input. It must not reconstruct a different plan or discover that a
-release cannot be constructed after its down was posted. Dispatch uses those exact
-preassigned tickets and original inert event references. This internal contract is
-not proof that an unimplemented native backend has prepared or released anything.
-
-Preparation and dispatch receive a live owner-admission query. The
-backend must check it after its own fallible/awaited preparation immediately
-before native mutation, as well as validating actual target and cleanup authority.
-Each query is bound to its exact in-flight native call. The owner linearizes its
-return against the deadline under the lock, clearing admission before cancelling
-the timer; retaining a query cannot authorize work during a later call. The backend
-must perform no late work after returning. The query closes input admission; it
-is not release evidence. Every event has
-one attempted ticket and separate attempted,
-accepted, and observed accounting. Resource acquisitions are keyed by the actual
-native key/button identity and opening ordinal. A possible acquisition is reserved
-before entering backend dispatch, not only after an acknowledgement; a matching
-release ordinal is attempted at most once. Definitive no-dispatch and uncertain results are distinct,
-and uncertain prefixes are never replayed. Focus preparation has separate
-accounting from CGEvent records.
-
-An acknowledgement or observation with a foreign operation, target, scope,
-sequence, or resource identity is rejected. Every distinct acknowledgement,
-observation and quiescence item must have a strictly newer backend sequence.
-Quiescence must match the current request and control revision, not a pre-await
-snapshot; focus uncertainty requires positive resolution. An already-up snapshot
-cannot retire a queued down.
-A failed or stopped prefix performs only attribution-safe, not-yet-attempted
-matching releases. Unresolved post/ack/release, target drift, or preparation
-uncertainty publishes `needsRecovery` while retaining the owner, lease, marker,
-resources and pending completion. Recovery may be initiated only by the trusted
-host through the same backend; its authoritative evidence is not a model Boolean
-and timeout/PID death never clears state. Quiescence evidence must match every
-uncertain ticket, pending opening ordinal, target/scope generation, and takeover
-revocation before the internal trusted marker retirement primitive is called.
-After native quiescence is actually established and the file operation returns,
-a file retirement error is reported once as a terminal failure. It does not enter
-an endless recovery loop for an already-removed marker or retry a consumed
-descriptor. Any remaining marker still blocks subsequent admission.
-
-Native I/O has a bounded diagnostic deadline (default five seconds). Expiry marks
-`needsRecovery` and closes further input admission, but the owner still joins the
-actual native call: it does not launch another native call or recovery while that
-call survives. Recovery evidence is requested only when the owner is awaiting it.
-Waiting for explicit authoritative recovery can remain pending; a timer never
-manufactures that evidence. Plan delays are owned cancellable timers, not backend
-I/O, so Stop interrupts a long delay while still joining any required release.
-`completed` means the native packet and its retirement completed under this I/O
-contract; it is not an application-effect confirmation.
-
-`NativeInputLifetimeTests` checks that the complete packet and matching releases
-reach preparation before the first dispatch. Its controlled backend refuses any
-dispatched ticket/event not present in the initial packet; a leading delay tests
-that dispatch does not regenerate dense ticket sequences.
-
-This layer is controlled-I/O infrastructure, not proof of native OS effects. No
-CGEvent is posted here, and no AX, app activation, capture, tool registration,
-or floating viewer is added. Native backend implementation, signed-host
-grant/recovery binding, disposable-window/focus qualification, canonical tool
-exposure, and stable floating live-view gates remain open.
-
-## Bounded passive stream observation
-
-The observer defaults to its qualified session route. A separate process-bound
-route uses public `CGEvent.tapCreateForPid` and requires the inventory's exact
-`processBeingTapped` PID, canonical mask and listen-only/enabled flags. Route
-selection is immutable for that observer; failures never switch routes. The
-caller still owns live process-generation/target authority: a PID is not a grant.
-The signed self-process qualification has exercised creation and joined retirement
-on the tested OS. No events have been posted through this route, and another
-process's delivery, target lifetime, release or recovery is not yet qualified.
-A process tap does not observe physical input routed to other applications; it
-cannot replace session-wide takeover detection.
-
-The observation-only qualification executable adds `--observe-self-process`;
-it observes only its own PID and never posts input or accepts an arbitrary target.
-Its report is version2 and validates scope-specific metadata. Session reports
-remain distinct from process reports; the previously signed version1 artifact
-and its retained evidence are unchanged.
-
-`NativeEventObserver` is an internal, explicitly started owner for passive
-observation only. It uses the supported user-session `kCGSessionEventTap` with
-`kCGEventTapOptionListenOnly`; it never uses the root-restricted HID tap, asks
-for permission, or starts from an initializer/package load. The platform adapter
-preflights `CGPreflightListenEventAccess`, creates a dedicated CFRunLoop on an
-owned thread, and verifies the one newly registered same-process tap through a
-bounded `CGGetEventTapList` before accepting its exact `eventsOfInterest`,
-location, listen-only mode, enabled state, and mask. Missing permission,
-ambiguous inventory, missing or extra mask bits, disabled tap, nil callback, or
-tap-disabled callback is unavailable. If callback context is missing, the native
-loop stops; its owning worker reports stream loss through the retained callback
-box before retirement, settling pending reads. It is never silently re-enabled.
-
-Each observer is single-use, with a fresh generation and at most 512 registrations
-bound to one operation/target/scope. Unsupported event types are rejected before
-registration. The owner registers `NativeStreamRegistration` tickets before
-dispatch and allocates random positive `eventSourceUserData` tags, not counters
-that repeat across instances. Tags correlate events; they are not authentication.
-Exact registrations and supplied literal type, flags, key/button, click state
-and position must match. Stamping clones the inert event and its source, then
-verifies the tag and expected facts by read-back. A field-only rewrite can leave
-cached source data unchanged on macOS 26.4; unsuccessful stamping returns nil.
-Original events are unchanged and nothing is posted here. The offline private-source
-regression also verifies that stamped down/up copies retain one actual native state
-table ID, distinct from another source and the predefined state IDs, without
-changing the original events/source. This is construction evidence only; neither
-that test nor a currently-up source table proves native delivery or release.
-
-One pending waiter per registration is admitted; a second is rejected rather
-than overwriting its continuation. Cancellation affects only that wait and cannot
-consume an already-seen result. A seen result is delivered once. Foreign input
-raises at most one activity indication per observer, without retaining ambient
-text, key history, event objects or screenshots. Disabled/mismatched/duplicate
-callbacks close admission; failure never reuses a previous ready result. Health
-is checked on demand, without a background poll or silent restart.
-
-Async Stop shares one completion, closes admission immediately and joins even a
-port created after the stop request. Startup failure also retires that exact
-port. Cancellation requests Stop but never abandons the startup task. A pre-start
-native stop is terminal, and native callback/run-loop resources retire before
-joiners are resumed. Teardown runs away from the callback thread; callback
-failure only requests stop, avoiding a self-join. Late callbacks cannot revive
-state or report new activity. Dropping an observer requests cleanup, but only
-explicit `stopAndJoin` is a joined-completion API. There is no timeout escape
-hatch for active native work. Stream `NativeStreamSeen`
-is intentionally distinct from `NativeInputObservation`,
-`NativeQuiescenceEvidence`, application effects, target identity, and release
-proof. The focused tests use an explicit test-only port seam and inert CGEvents;
-they do not create or start a real tap. Signed-host permission, WindowServer
-health, event delivery, physical takeover, native release, and application
-consumption remain unqualified gates.
-
-## Bounded capture-only window producer
-
-`NativeWindowCapture` is one single-use ScreenCaptureKit stream. Construction is
-inert; selection and `start()` are explicit operations. The Mac capture facade
-and Native Host connect this owner to the shared Gateway/iOS viewer. A retained
-selection can create a fresh stream only after its prior stream joins cleanly.
-This capture boundary supplies no native input commands.
-
-`NativeWindowCaptureSelection.select` performs one initial lookup of an explicit
-window ID for a retained `NSRunningApplication`. Public `PROC_PIDTBSDINFO` pins
-PID plus exact kernel start seconds/microseconds before the SDK await and checks
-that identity, the retained application's launch date/termination, and the
-existing screen-recording grant after it. The exact `SCWindow` and private
-`SCContentFilter(desktopIndependentWindow:)` are retained; no title matching,
-PID-only rebinding, filter updates, restart, or window/desktop fallback exists.
-Only a single ordinary application window (layer zero) is admitted. Ambient
-window inventory is not logged or retained. There is no permission-request API;
-preflight checks precede selection/start and frame publication. Preflight and
-SCK calls are not an atomic TCC transaction: OS consent UI behavior during a
-concurrent revocation still needs signed-host qualification.
-
-**Authority limit:** SCK exposes no WindowServer window-incarnation token. This
-selection means the exact initially selected SCK window/filter, not proof of a
-caller's historical window generation or of window-ID reuse safety inside SCK.
-Kernel launch time is process-lifetime evidence, not exec/code-signing identity.
-The producer UUID fences callbacks and consumer work only; it is not a window
-incarnation, `NativeControlTargetBinding`, or input grant. Exact input authority
-and authenticated target integration remain separate gates. macOS 15.2 or newer
-is required for SCK's window-inactive notification; older systems fail closed.
-
-The producer configures at most 1280×1280 pixels, three native queued surfaces,
-1–5 frames/second (default 5), BGRA8/sRGB/SDR, no audio, microphone, cursor,
-child-window inclusion, or window shadows. Sample admission checks status,
-timestamp, finite content rectangle/pixel density, exact canvas dimensions/format,
-row stride and an 8 MiB raw-buffer cap. Encoding is synchronous on one serial SCK
-callback queue. SCK's `minimumFrameInterval` owns cadence: a second clock/drop
-gate could discard a static window's final complete update. The ImageIO byte
-consumer refuses writes beyond 2 MiB rather than checking an unbounded allocation
-later. These are producer/work bounds, not measured RSS, CPU, energy or latency.
-
-The fixed native canvas avoids reconfiguration on resize. Each complete frame
-is cropped using SCK's dictionary `contentRect` (surface points) multiplied by
-`scaleFactor` (pixel density, 1–4), not `contentScale`. Scaled bounds must fit the
-canvas before rounding; fractional edges keep only fully contained pixels. Signed
-metadata sizes and inward extents are checked before constructing a crop: CGRect's
-width/height accessors can otherwise hide negative sizes by standardizing them.
-Out-of-bounds, empty or malformed geometry fails, never silently intersects or
-clamps. JPEG dimensions describe the actual cropped content, including resize,
-not a relabeled square canvas or source-window/input coordinates. This follows
-[Apple's window-stream guidance](https://developer.apple.com/videos/play/wwdc2022/10155/)
-and the public SDK coordinate definitions. Synthetic crop evidence still does
-not qualify real-window scale/resize behavior or viewer/input integration.
-
-Only the latest bounded JPEG is retained; `takeLatestFrame(generation:)` consumes
-it once, without a waiter list, push callbacks or Task-per-frame backlog. A slow
-consumer loses intermediate frames, never queues them. Frames are transient and
-not written to disk. Callers must not accumulate returned frames and must carry
-the producer generation through asynchronous presentation; retirement cannot
-revoke a value already handed to a caller. Process/grant validation is repeated
-at startup boundaries, on sample delivery, before publication and on pull.
-Source-inactive, blank/suspended/stopped frames, presenter effects, malformed
-samples, stream errors and unavailable identity/grants close admission, clear
-the frame and initiate teardown; no later active callback revives the source.
-Per-sample presenter-overlay metadata rejects small and large composites even
-when the effect delegate is late; malformed overlay metadata also fails closed.
-SCK's canonical absent-overlay `CGRect.null` attachment (positive infinite origins,
-zero signed size) is accepted as empty, as is finite empty geometry. Other infinite,
-NaN, negative-size or nonempty overlay values remain rejected. The live metadata
-regression protects this sentinel without relaxing captured-content bounds.
-The presenter privacy-alert setting alone does not disable composition.
-Static-source health also relies on SCK terminal notifications and on-demand
-pull validation, not a second background poll.
-
-Stop shares one cancellation-independent task: it fences publication immediately,
-waits for actual startup (including a stream handed over after Stop), awaits
-SCK stop, removes the output, drains its sample queue and joins admitted delegate
-work. The native callback gate atomically seals terminal-receipt admission when
-the last admitted callback leaves, before publishing joined completion; a late
-terminal callback cannot reopen bookkeeping after that seal.
-Startup cancellation/failure also waits for that cleanup. Callback failure
-requests teardown off the callback thread; it never self-joins. `stopAndJoin()`
-stays pending after an uncertain native stop error until the native delegate
-reports terminal evidence. `retirementFailure` exposes that error independently;
-the pending cleanup task keeps the exact stream alive without retries, a global
-registry or a self-retention cycle. Output-removal failure returns
-`.failed(.stopFailed)`, not joined, and retains the failed resource. Normal owner
-abandonment transfers its stream to the same actual native join path once, rather
-than just closing callbacks; deinitialization itself is not quiescence evidence.
-There is no timeout escape that pretends uncompleted native work ended. An OS
-failure to provide terminal evidence can leave cleanup pending indefinitely.
-
-`NativeWindowCaptureTests` uses only the internal fake platform/stream seam to
-hold creation, startup and callback join independently; it covers cancellation,
-late/foreign callbacks, failure, source/grant/process loss, abandonment, delayed
-terminal evidence, stale-pull rejection before platform probes, bounded latest
-frames and failed removal. `WindowCaptureJPEGEncoderTests` uses synthetic color
-markers, real ImageIO encoding/decoding and inert SCK configuration to cover
-format, scaled/non-origin/fractional crops, resize, final static updates and byte
-admission. `WindowCaptureStreamLifetimeTests` exercises the actual adapter's
-retirement control with only SDK stop/removal completions substituted. It covers
-terminal-before/after-waiter, uncertain Stop after an attempted start, admitted
-delegate and queued sample drains, final terminal admission sealing and failed
-removal. These tests do not query grants, enumerate/capture real windows or prove
-native SCK teardown. The package's existing SwiftPM test target discovers all
-three suites. Parent-owned offline tests
-and later explicitly authorized signed real-stream/Stop qualification are
-required; no native capture has been qualified by construction or compilation.
+Cua can exit0 with a refusal or an unverifiable result. The adapter parses these
+outcomes: refusal is not success, and `unverifiable`/partial results remain
+`outcomeUnknown`. It never retries a mutation. Waiter cancellation does not kill
+an already-admitted CLI call; Stop prevents subsequent actions and waits for that
+invocation. A command may complete after Stop was requested. Host/transport loss
+leaves its effect uncertain, not safe to replay. Crash containment is not a claim
+that process death proves physical key/button release in every failure scenario.
 
 ## Installed capture wire contract
 
-`Sources/Support/Onboarding/NativeCaptureService.h` is the single Objective-C
-protocol for the Swift host and direct Node-API client. Do not duplicate
-selectors or serialize Mach endpoints into files. The fixed Mach name is
-`com.tron.mac.native-host.capture`; permission/service-retirement RPC remains on
-its separate wrapper-only listener. A static `TronNativeCaptureHost` module owns
-the service logic; importing it starts no listener, capture or permission request.
+The separate capture service `com.tron.mac.native-host.capture` remains in the
+same Aqua process. Its shared Objective-C protocol is implemented in the inert
+`TronNativeCaptureHost` static library; only the executable starts listeners.
+The capture listener authenticates actual XPC PID/UID/audit session, public code
+requirements, and current Stable job/process/payload provenance. Birth/path and
+retained SCK objects are not exec- or WindowServer-incarnation proof. This is not
+a sandbox against arbitrary code inside the admitted Gateway or the same OS user.
 
-### Admission and authority
+Each connection has one issued transport session bound by the Gateway to its
+canonical session/load. Up to32 explicit capture handles retain initial SCK
+window/filter and process bindings. App/title text is bounded display metadata,
+never a target re-resolution mechanism. Capture handles are not input grants.
+Four authenticated connections and four pending handshakes are bounded separately;
+only a started stream reserves the one global native-capture slot.
 
-The listener bounds four pending handshakes and four authenticated connections.
-Before activation, it pins the actual XPC peer's signed executable and admits it
-against current Stable launchd job, helper/parent/argument provenance, validated
-selected-or-bundled payload, kernel PID/birth/executable and audit-session facts.
-Checks cross awaited observations; timed-out/invalidated handshakes cannot
-activate later. Signing requirements also apply to subsequent messages. No caller
-PID, role, environment marker or permission Boolean is accepted as authority.
-This is distinct native-peer admission: the wrapper's existing SM/listener and
-authenticated `system.info` Running/pairing checks remain unchanged.
+Control JSON is nonempty UTF-8 and at most65,536 bytes. All requests carry version1,
+operation and loadID. Except hello, they carry issued bootID/connectionID/sessionID.
+Controls carry exact command IDs and bounded receipts (64, with Stop reserved).
+Pulls forbid commandID and use strictly increasing disposable readSequence values.
+The service reserves two cleanup replies independently of eight ordinary replies.
 
-Birth/path and SCK objects are not exec/window-incarnation proof. This boundary
-is not a sandbox against code inside the admitted Gateway. Actual signed XPC
-peer rejection, update behavior and installed-service transport still require
-qualification; typecheck, injected validation and the standalone self-window
-qualifier cannot establish those claims.
+| Operation | Payload / result |
+| --- | --- |
+| hello | ready + issued identities |
+| catalog | bounded opaque sources |
+| start | exact handle → fresh stream generation |
+| pull | generation/readSequence → latest JPEG or empty |
+| suspend | actual stream join; only a clean join allows the retained target to resume |
+| stop | terminal scope retirement, joined or retirementFailed, optional diagnostic |
+| automationEndpoint | read-only Cua socket/generation bootstrap; no JPEG/input authority |
 
-Each authenticated connection has one host-issued single-use transport session.
-The Gateway must bind that connection to its canonical session/runtime load;
-host-issued UUIDs are correlation fences, not canonical Pi session identity or
-input grants. Catalog is explicit and once-only: up to32 opaque source handles
-retain initial SCK window/filter and process bindings. Application/title text is
-bounded to256 UTF-8 bytes, never used to re-resolve a target or logged as ambient
-inventory. No local picker or arbitrary model PID/window selector is part of the
-wire. Catalogs and idle connections reserve no native stream.
-
-### Closed requests and replies
-
-Control JSON is UTF-8, nonempty and at most65,536 bytes. Unknown keys/operations,
-invalid UUIDs and invalid read sequences are rejected. Version is exactly1.
-All requests carry `version`, `operation`, `loadID` (UUID). Except `hello`, they
-also carry the exact issued `bootID`, `connectionID`, `sessionID` UUIDs.
-
-| Operation | Additional request fields | Successful status / data |
-| --- | --- | --- |
-| `hello` | `commandID` UUID | `ready`, issued identities |
-| `catalog` | `commandID` UUID | `catalog`, `sources` array of handle/applicationName/title |
-| `start` | `commandID`, `handle` UUIDs | `started`, producer `generation` UUID |
-| `pull` | `generation` UUID, `readSequence` integer1…9007199254740991 | `frame` plus JPEG, or `empty`; echoes `readSequence` |
-| `suspend` | `commandID` UUID | `joined` or `retirementFailed`; clean join retains only the selected target |
-| `stop` | `commandID` UUID | `joined` or `retirementFailed`; optional bounded `diagnostic`; terminal scope retirement |
-
-Successful replies carry version/status and the exact issued identities/load.
-Control replies echo commandID. **Pulls have no commandID** (supplying one is
-invalid), use a separate strictly increasing readSequence namespace, and are
-admitted at most once. Repeated/older reads are stale; overlapping work can be
-busy. They do not enter command receipts, retain pixels for replay or permit a
-read ID to become a Stop command. Control commands retain at most64 exact typed
-request/result receipts, reserving Stop capacity; exact duplicates join/reuse the
-same result and changed payloads for an existing commandID reject.
-
-JPEG bytes are a separate optional NSData, never JSON/base64. Only `frame` carries
-JPEG: nonempty, at most2MiB, actual width/height1…1280, a matching generation and
-native `sequence` encoded as an unsigned decimal string. Native sequence and
-readSequence are different namespaces; neither is input authority. Consumers
-must validate encoded image dimensions before allocating a decode and fence all
-late data against their own exact request/source/presentation. Error replies are
-bounded `{version:1,status:...}`; statuses include invalidRequest, unauthorized,
-stale, busy, exhausted, unavailable and retirementFailed.
-
-### Native work and retirement
-
-Only start reserves the single global native stream. One accepted catalog/start
-or pull may be pending per session; the service has eight ordinary reply slots
-and two separate Stop slots, so ordinary backpressure cannot starve Stop. Valid
-start/pull refreshes a15-second monotonic demand expiry. Expiry/peer loss closes
-admission and requests Stop; it never frees capacity by elapsed time. A fresh
-session requires a fresh connection, not an automatic producer restart.
-
-Stop joins pending work and the exact producer's native retirement before freeing
-stream capacity. A joined result with a diagnostic remains joined and releases
-capacity with that diagnostic preserved; failed removal retains the producer and
-reservation. New consumers cannot acquire that reservation through service-wide
-closure or caller loss. No frames enter persistent state or command receipts.
-Clients must close unused connections so bounded inert catalogs/sessions retire.
-
-Wrapper-only **Disable Helper for Update**, refresh and uninstall close native
-admission and join it before unregistering. Uninstall does this before touching
-Gateway registration or local runtime files. Application replacement must use the
-OLD authenticated wrapper's drain/unregister first; see the [manual sequence](development.md#reinstall-a-local-release-build).
-No pin weakening, forced kill, timeout-success or old-version fallback is provided.
-
-`NativeHostRetirementPolicy` explicitly preserves the existing `.notRegistered`
-no-service case, requires an authenticated join for enabled/approval states, and
-refuses `.notFound` or unknown status without opening XPC or changing services.
-A valid never-registered optional helper can report `.notFound`, so successful
-fresh-helper uninstall/refresh remains an availability gate requiring authoritative
-bootstrap policy; enabling or inferring absence is not a retirement workaround.
-Focused policy/coordinator/uninstaller tests require that this refusal preserves
-Gateway registration and local files. A failed or wrong-pin join also fails closed.
-
-The current source connects the Mac host/client to `native_capture` and the
-existing Gateway/iOS live viewer. Native input/recovery and installed cross-process
-validation remain unfinished; building these sources is not an installed update.
+Native demand expiry requests Stop after15 seconds without demand and joins it.
+Timeout itself never releases the stream reservation. Joined retirement with a
+diagnostic releases capacity but is not a clean qualification result. Failed
+native retirement retains capacity. Last-viewer close suspends capture; explicit
+Stop, source loss, failed suspension and load replacement retire the reference.
+A new stream is created only for the exact retained target after the previous
+stream's clean join, never by PID/title/window lookup or uncertain-start replay.
 
 ## Direct Gateway capture client
 
-`native-gateway-client` uses only the C Node-API8 surface and the shared capture
-header. The Mac app owns its signed `Contents/Library/Native/tron-native-capture.node`
-and build-input manifest. It is not required by Gateway payload startup or source
-updates. The Gateway loader checks `apiVersion == 2` and reports native capture
-unavailable for missing/incompatible Mac code; it does not disable other Gateway
-features or load an alternate native binary. Import only registers inert
-per-environment metadata/methods. Explicit
-`open()` accepts no arguments: the service is fixed, and Security validates
-`/Applications/Tron.app` and its exact nested Native Host against the actual signed
-Node publisher, then pins the host CDHash on the XPC connection. This is not peer
-admission by the addon signature: the host separately authenticates actual Stable
-job/process/payload/code facts. Wrapper `system.info` and pairing remain unchanged.
-No exec-incarnation, atomic process observation or sandbox claim is made.
+The Mac-owned `Contents/Library/Native/tron-native-capture.node` uses C Node-API8,
+not V8 APIs or a relay. API3 is required for endpoint bootstrap. Import is inert;
+explicit open validates the installed outer/helper signatures against the actual
+signed Node publisher and pins the helper CDHash on NSXPC. No alternate binary,
+endpoint, credential or code requirement is accepted from a model.
 
-Each Node environment has four connection slots; an idle catalog does not block
-another canonical owner. Each connection is single-use and bounds four ordinary
-requests (at most one pull), one independent suspend/Stop request, and one terminal event.
-One six-entry TSFN queue covers those five request slots plus terminal delivery;
-ordinary requests cannot consume the Stop reservation. Only pulls may carry a
-JPEG on the wire, at most2MiB.
-Reply copying/parsing is preceded by control/JPEG limits. NSXPC deserialization
-itself is an OS/trusted-peer boundary, not a measured memory limit. Returned JS
-buffers are transient caller-owned values; consumers must not accumulate them.
+JavaScript owns Promises; native code owns disposable callback references. Each
+Node environment bounds four connections, with four ordinary request slots, one
+independent suspend/Stop slot, and one terminal queue slot per connection. Accepted
+requests and explicit close retain actual event-loop liveness; idle clients do not.
+One bounded TSFN queue carries callbacks. Native allocation failure seals admission
+and uses a NULL terminal sentinel without allocating another payload object.
+Rejection sweeps clear each callback exception before notifying later callbacks;
+callbacks are consumed once and are not retried. Forced teardown drops references
+without calling JavaScript; NULL-env queue disposal never reads finalized context.
 
-A mutex seals native callback admission against nonblocking TSFN enqueue. All
-NSXPC calls and JS work happen outside it; late reply/error blocks hold only weak
-owners and exact request tickets. Interruption closes a native terminal gate and
-invalidates immediately, without waiting for Node delivery. An already-admitted
-send can race interruption and remains uncertain; no atomic check-and-send or
-NSXPC-internal reconnect impossibility is claimed. No successor/replay is created.
+Suspension joins the host receipt **and** an already-admitted JS read/start callback
+before allowing resume. Terminal close joins a pending suspension before using the
+reserved control lane. Interruption invalidates immediately before JS notification;
+an already-admitted send may remain uncertain. Native transport loss is never
+reported as clean remote retirement.
 
-Gateway `openNativeCaptureClient` binds the connection to one canonical session
-and runtime load, validates exact closed reply fields/identities, retains opaque
-catalog handles, and separates monotonic disposable read IDs from native frame
-sequences. Bounded JPEG header dimensions are checked before handing out pixels;
-this does not prove decoding or rendering. `close()` shares one Stop promise,
-closes publication immediately, joins the host's pending operation and native
-retirement, then joins local transport cleanup. An ordinary error cannot retire
-transport beneath a concurrent Stop. Malformed Stop replies and cleanup failures
-reject; diagnostics and primary/cleanup errors are preserved. No native input or
-input grant is exposed.
+## Capture and viewer
 
-Selected-window identity and active capture have distinct lifetimes. `suspend()`
-uses the reserved control lane, requests immediate stream Stop even during start,
-then joins both the host operation and its outstanding JS callback. Only a clean
-join permits another stream for the **same retained target**; the Host discards
-all other catalog handles at first selection. Resume creates a fresh native stream
-generation, without catalog lookup or title/PID/window re-resolution. A viewer
-cancelled while awaiting that join cannot issue a later start. Failed or diagnostic
-suspension closes the scope instead of enabling resume. Terminal `close()` joins
-an in-flight suspension before taking the control lane. Native demand expiry,
-peer loss and load retirement still close the target permanently.
+`NativeWindowCapture` is a single-use stream over a retained selection. Its producer
+is bounded to1280×1280,1–5fps, queueDepth3, BGRA8/sRGB/SDR,8MiB raw and2MiB JPEG.
+Encoding is synchronous and latest-only, with no task per frame. Signed source
+extents and inward scalar cropping are validated before CGRect construction;
+contentRect is scaled by scaleFactor, not contentScale. Only the exact canonical
+null presenter-overlay sentinel is accepted as absent; malformed/nonempty
+presenter metadata terminates capture rather than leaking another surface.
 
-The shared Gateway viewer starts only on visible lease admission, suspends when
-its last lease closes, clears pixels immediately, and retains pending cleanup
-until actual completion. Explicit `native_capture.stop` and session/load disposal
-close the selected target and connection. Floating/sheet and scene transitions
-therefore reuse the existing iOS viewer without hidden capture or a second engine.
+`WindowCaptureStreamLifetime` owns callback admission, start/stop waits and sample/
+delegate queue drains. Abandoning a presentation waiter does not abandon native
+cleanup. An uncertain native removal cannot be turned into joined retirement by
+process death, elapsed time or an empty local cache.
 
-JavaScript owns Promises; native code owns bounded callback references, not
-opaque `napi_deferred` handles. Accepted requests and explicit close reference the
-actual Node callback handle until completion; idle clients do not keep the loop
-alive. Normal local close seals first and releases the TSFN normally, allowing
-queued data to drain before finalization. Abrupt environment/worker cleanup seals, invalidates
-and aborts; it proves **local retirement only**, leaving host peer-loss Stop and
-uncertain native resources authoritative. The ABI8 async hook is removed once on
-the Node loop by the TSFN finalizer. Node22 finalizes a TSFN before disposing
-its remaining queue with NULL env, so each payload owns its own native state and
-NULL-env delivery touches no JS or finalizer context. Retiring payloads still count
-against the environment's bounded connection admission.
+`native_capture` + `display` and the existing shared HTTP/iOS viewer remain separate
+from input. Only canonical display references on the active branch authorize
+viewing. First visible lease starts capture; last lease closes pixels and suspends
+it. Browser/native viewers share budgets and the same native layout/decode/activity
+owners. Historical installation and reconnect do no hidden work. Input coordinates
+come from Cua's own current observation, not the phone video's crop or scale.
+See the Gateway README and iOS `display-artifacts.md` for their owner contracts.
 
-Allocation failure closes native admission and notifies pending callbacks using
-a preallocated error and a terminal sentinel requiring no new payload/data object.
-Native reply exceptions do not unwind across the XPC boundary. Rejection sweeps
-clear each callback exception before notifying the remaining callbacks, then
-report the error without retrying. Callback references are consumed once and
-disposed even when JS execution is unavailable during forced teardown. Native code does not attempt to settle a destroyed JavaScript
-environment; its Promise objects remain owned by V8's normal lifetime.
+## Qualification and maintenance
 
-`addon.test.mjs` loads a separately compiled `--test` artifact that substitutes
-only the native transport edge. Actual slots, buffers, TSFNs and cleanup hooks
-cover saturation, queue-full, duplicate/delayed replies, partial initialization,
-allocation failure, actual throwing callbacks, idle exit, queued/closing forced
-exit and worker termination. Delayed delivery is explicitly observed before
-checking that old callbacks cannot revive a retired environment. The production
-artifact has no test exports. Gateway Vitest tests cover wire fences and Stop/local
-cleanup ordering; build-input Python tests cover header and manifest rejection.
-The Mac CI job discovers these offline owners. Parent-owned tests and signed
-loading/real-XPC rejection/Stop qualification remain necessary; compilation and
-prior inert-loader evidence do not qualify this asynchronous implementation.
+Focused checks cover Cua endpoint/session policy, refusal/uncertainty and images;
+real subprocess pipe/retirement ordering; host admission/capture/suspend; signed
+Node addon queue/exit/allocation paths; and mounted iOS paint/visibility/geometry.
+Live vendor-driver checks use a disposable fixture and independent app outcomes.
+They do not certify every app, OS version, locked-session use or sudden mid-action
+host death. Same-installed-host end-to-end validation remains an explicit gate.
 
-## Standalone self-window capture qualification host
-
-`TronNativeCaptureQualification` is a separate, unregistered qualification
-executable in this Swift package. It is not a second installed product, permission
-host, viewer, input backend, or Gateway integration. Its closed invocations are:
-
-- No arguments, `--help`, `-h`, and invalid arguments perform only parsing and
-  bounded text output, before even creating `NSApplication`.
-- `--preflight` checks macOS 15.2 availability and only
-  `CGPreflightScreenCaptureAccess`. It does not create a window, enumerate SCK
-  sources, start capture, or request permission. Preflight success is not capture
-  qualification or proof that another signing/launch context inherits a grant.
-- `--capture-self-window [--write-images]` creates one main-actor AppKit borderless,
-  nonactivating, non-key/main, normal-level panel containing only color markers.
-  It ignores mouse events, never activates an application, and never manipulates
-  another window. The only selection is its own window number with the retained
-  `NSRunningApplication.current`; missing launch identity fails closed. There are
-  no arbitrary PID/window/path/action/text selectors, permission requests, event
-  observers, or native input events.
-
-Capture uses the production `NativeWindowCaptureSelection.select`,
-`NativeWindowCapture.start`, `takeLatestFrame(generation:)`, and `stopAndJoin`
-APIs. The first lifetime must yield independently decoded JPEG marker patches
-for 320×200-point initial content, changed content at that same size, and a
-200×320-point resize with a third marker layout. The oracle validates the actual
-JPEG type/dimensions before allocating a bounded decode, samples four 5×5 patches,
-checks their independently specified RGB values (35/channel JPEG tolerance),
-requires the expected aspect within two pixels, unchanged dimensions across the
-content change, and transposed dimensions within two pixels across resize. It
-rejects square-canvas relabeling, stale content and inverted markers. It does not
-assume a particular display density or claim source/input coordinate authority.
-
-Explicit Stop must join without a native retirement diagnostic, and a subsequent
-same-generation read must throw exactly `stopped`, not return an empty frame or
-hide an earlier source/stream failure. A second sequential producer on the same retained own-window
-selection must first yield the resized marker image; only then does the fixture
-close. Source-unavailable or stream-failed read rejection after that close is
-recorded with its exact category, followed by joined Stop and a late read rejecting
-with that same category. Both lifetimes inspect `retirementFailure` even when
-`stopAndJoin` returns `joined`: a native Stop error followed by terminal evidence
-is retained in the report and cannot pass as a clean qualification. Failure-path
-cleanup also records that diagnostic. This proves the observed terminal behavior after controlled closure, not
-that a generic SCK stream error uniquely identifies the cause. It is not OS input
-release evidence. No capture path is duplicated or added to the production owner.
-
-The report is at most 16 KiB, with at most four measured frame records and no raw
-inventory, window titles, unrelated pixels, event payloads or underlying OS error
-logs. At most 100 candidate frames are decoded. A fixed 20-second diagnostic
-deadline or SIGINT/SIGTERM closes admission and requests Stop, but all native
-selection/start/stop awaits remain joined; neither expiry nor process death is
-success. The 50ms pull interval is only polling, never evidence of rendered content
-or retirement. Native Stop can remain pending indefinitely. If joined removal
-fails, the emitted report has `containmentRequired=true`; the app retains the exact
-failed producers and remains alive for parent-directed containment, without retry,
-restart or a timeout escape. A pending native join may produce no final report.
-
-Without `--write-images`, no frames are written. With it, only accepted marker
-JPEGs go to a fresh 0700 `/private/tmp/tron-capture-qualification.XXXXXX` directory
-created by `mkdtemp`, whose path appears in the report. Four fixed filenames use
-exclusive/no-follow 0600 opens relative to a pinned directory descriptor, at most
-2 MiB each / 8 MiB total. Existing files and directory replacement are rejected.
-Evidence is not recursively removed; the parent owns later inspection/retention.
-This is a run-owned output boundary, not a sandbox against hostile same-UID writers.
-
-Preparation reuses the observer builder's frozen-input, external-output and
-Apple-Development-signature mechanisms through a **closed** `--product capture`
-selection; `--product observer` remains the default and never starts capture.
-Preparation only (does not launch, register, install or grant anything):
+The retained `TronNativeCaptureQualification` creates its own marker window, checks
+actual decoded colors and resize geometry, joins Stop, then checks source close
+with a second stream on the same selection. It is capture-only and never inputs.
+Build without launching or changing permissions:
 
 ```sh
-packages/mac-app/native-computer-control/qualification/build-observer.sh \
-  --product capture --output <fresh-absolute-external-build-directory> \
-  --identity <APPLE_DEVELOPMENT_CERTIFICATE_SHA1>
+packages/mac-app/native-computer-control/qualification/build-capture.sh \
+  --output "$HOME/.tron/workspace/files/builds/native-capture/<new-run>"
+swift test --package-path packages/mac-app/native-computer-control
+python3 -m unittest discover -s packages/mac-app/native-computer-control/qualification -p 'test_*.py'
 ```
 
-**Parent/maintainer gate:** review exact source hashes, frozen manifest, toolchain,
-app files, selected capture bundle identifier, leaf certificate and hardened-runtime
-requirement first. Ordinary offline tests must not run either live mode. After
-separate explicit containment approval, launch the exact signed app in the
-background via Launch Services (`open -g -n -W`) with `--preflight` only, inspect
-its JSON `passed` result (not `open`'s
-status), and stop if the existing grant is ineffective. Do not grant/regrant,
-change TCC, substitute the installed app identity, or treat direct-binary/interpreter
-preflight as this app's authorization. Only a separately authorized capture launch
-may use `--capture-self-window`, also with background launch (`-g`). Require
-`passed=true`, all four marker records,
-both joins and late-read rejections, no deadline/cancellation/failure/containment,
-and the source-close reason. If cleanup stalls, preserve the exact owner and
-escalate; an external hard-kill/watchdog is not native retirement evidence.
-
-`CaptureQualificationTests` is automatically discovered by the existing SwiftPM
-CI command. It tests the actual entry router with native closures that must remain
-uncalled for help/invalid input, synthetic real JPEG positive/negative controls,
-report refusal for incomplete/expired/cancelled lifetimes, and fresh image-output
-bounds/replacement refusal. The actual qualifier Stop inspection is also exercised
-against controlled producers reporting joined-with-diagnostic and prior source
-failure; first-lifetime acceptance cannot borrow second-lifetime error categories. It never constructs the AppKit fixture, queries a
-grant, selects a window or starts SCK. These offline tests and compilation do not
-qualify live rendering, display density, permissions, resize, source-close, signal
-cleanup, WindowServer behavior or native retirement; the parent owns those gates.
-
-## Standalone native observer qualification host
-
-`native-computer-control/qualification/build-observer.sh` prepares a separate,
-Apple-Development-signed GUI `.app` containing the `TronNativeObserverQualification`
-executable. It is a preparation artifact only: it never launches, installs,
-registers, restarts, or mutates Tron.app, the Gateway, or another application.
-The generated source and signature manifests bind the app to this package's
-first-party bytes, hardened runtime, bundle identifier, certificate SHA-1 and
-Apple team requirement. The host is not a menu app, Gateway service, native input
-backend, production registration, or completed qualification claim.
-
-Help, no arguments, and invalid arguments only parse and print usage/errors. The
-single explicit `--observe` mode starts the existing `NativeEventObserver` using
-its listen-only session tap, records bounded metadata for taps owned by its own
-PID (never event payloads, text, keys, screenshots or target effects), requests
-Stop, joins the actual startup/tap/callback lifetime, and checks that the tap
-created by this run is absent after the join. A deadline or cancellation requests
-Stop but cannot make the report claim native work retired before the join. There
-is no tap restart or permission prompt. SIGINT/SIGTERM cancel the owning task,
-which still joins Stop before reporting. Unavailable permission, deadline,
-cancellation, incomplete inventory or mismatched tap metadata produce a nonzero
-exit, never an empty-set success. This is observer-retirement evidence only, not
-OS input release, application semantic effect, target identity, or Gateway health.
-
-Explicit qualification gate (after parent/maintainer artifact and containment
-review; never during ordinary package tests):
-
-```sh
-packages/mac-app/native-computer-control/qualification/build-observer.sh \
-  --output "$HOME/.tron/workspace/files/builds/native-observer/<run>" \
-  --identity <APPLE_DEVELOPMENT_CERTIFICATE_SHA1>
-RESULTS="$(mktemp -d "${TMPDIR:-/tmp}/tron-observer.XXXXXX")"
-open -g -n -W --stdout "$RESULTS/report.json" --stderr "$RESULTS/stderr.log" \
-  "$HOME/.tron/workspace/files/builds/native-observer/<run>/TronNativeObserverQualification.app" \
-  --args --observe --deadline-ms 5000
-```
-
-The preparation script defaults to the observer product; its only other selection
-is the separate capture qualification artifact described above. It freezes package
-inputs before compiling with a fresh,
-external scratch directory. Its `artifact-manifest.json` binds those exact bytes,
-the canonical Mac project and reused signing-policy source, toolchain, build
-command, signed app files and verified leaf certificate. Frozen source changes
-are rejected. It refuses existing outputs and installation/system/source trees;
-it never launches the artifact or changes a running Gateway.
-
-Use an application launch through Launch Services: direct execution of the helper
-binary can inherit different TCC responsibility and ignore the app's grant. The
-`open` exit status only covers launching/waiting, not qualification success.
-Inspect the JSON report and require `availability.available=true`,
-exactly one newly observed own-PID tap with the canonical mask/session/listen-only
-metadata, `stopJoined=true`, no deadline/cancellation/inventory error, and a final
-inventory equal to baseline. This gate requires the user to have already granted listen-event access
-to this exact signed artifact; the host does not request it. Ordinary `swift test`
-uses only the explicit fake port seam and is incapable of starting a real tap.
-
-Parent validation uses the small package (do not substitute a real native home):
-
-```sh
-swift test --package-path packages/mac-app/native-computer-control \
-  --scratch-path /tmp/tron-computer-control-build
-```
-
-The existing Mac CI job runs the offline build-input Python tests and this same
-Swift package with a three-minute step
-timeout. Interactive agent test execution is parent-owned and must use a hard
-process watchdog; continuation bugs must not stall an unattended run. Timeout is
-a failed test run, never native release evidence. Child workers do not run the
-process/crash tests.
-Each subprocess uses a uniquely named private temporary root and bounded readiness,
-output and termination waits. Early failure and missing readiness are failure
-cases, not success from a watchdog. Construction, interlock, and controlled-I/O
-lifetime evidence do not cover the future native backend, trusted host, model
-grounding, tool registration, or floating-view gates.
+Native app replacement and Gateway transitions are manual maintainer actions.
+Use the old authenticated wrapper's **Disable Helper for Update** before replacing
+an enabled helper. Uninstall drains/unregisters the helper before Gateway/files.
+`.notRegistered` is a no-op; `.notFound`/unknown cannot establish retirement and
+must not be silently treated as success. A permission-only installed build without
+that control needs an explicit maintainer bootstrap, not a compatibility bypass.
+Never delete user data, reset grants or weaken signing pins to make an update pass.

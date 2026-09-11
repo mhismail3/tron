@@ -61,7 +61,6 @@ enum HeaderIcon: Equatable, Sendable {
 enum Permission: String, CaseIterable, Sendable {
     case fullDiskAccess
     case accessibility
-    case inputMonitoring
     case screenRecording
 
     static func coreSetupSatisfied(by statuses: [Permission: PermissionStatus]) -> Bool {
@@ -74,8 +73,6 @@ enum Permission: String, CaseIterable, Sendable {
             return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!
         case .accessibility:
             return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
-        case .inputMonitoring:
-            return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!
         case .screenRecording:
             return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
         }

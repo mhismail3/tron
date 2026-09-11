@@ -97,7 +97,7 @@ activation and singleton lifetime across menu closure and login. Probes may wake
 an already registered service but never register it, request TCC, or restart the
 Gateway. Explicit uninstall first joins native retirement and unregisters that
 helper, then removes the Gateway service and local runtime files. Native retirement
-failure preserves Gateway registration and local state. The helper queries Accessibility, Input Monitoring,
+failure preserves Gateway registration and local state. The helper queries Accessibility
 and Screen Recording from its own signed process, so a wrapper Boolean or the
 Node Gateway cannot become permission authority. FDA remains the wrapper's
 existing filesystem probe.
@@ -156,7 +156,9 @@ source updates. Native client/helper changes use the manual Mac app update path.
 
 The `native_capture` tool and the shared Gateway/iOS viewer use this capture path;
 selected targets survive clean visibility suspension without retaining active
-streams. No native input backend is exposed. Building source does not update an
+streams. The separate `computer` tool uses bundled Cua Driver, directly spawned
+and retired by this same permission-bearing host. Pi owns the accepted tool await;
+Cua owns native execution, not another planner. No custom event injector is kept. Building source does not update an
 installed helper. Actual signed-peer, installed-service and real-window/mobile
 qualification remain release gates.
 

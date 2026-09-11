@@ -110,7 +110,7 @@ actor NativeHostCoordinator {
     }
 
     static var unavailable: [Permission: PermissionStatus] {
-        [.accessibility: .probeUnavailable, .inputMonitoring: .probeUnavailable, .screenRecording: .probeUnavailable]
+        [.accessibility: .probeUnavailable, .screenRecording: .probeUnavailable]
     }
 }
 
@@ -174,7 +174,7 @@ private struct NativeHostPlatform: Sendable {
             service.probePermissions { reply.resolve($0) }
             return await reply.value()
         } onCancel: { reply.resolve([:]); connection.invalidate() }
-        return [.accessibility, .inputMonitoring, .screenRecording].reduce(into: [:]) { result, permission in
+        return [.accessibility, .screenRecording].reduce(into: [:]) { result, permission in
             result[permission] = values[permission.rawValue].flatMap(PermissionStatus.init(rawValue:)) ?? .probeUnavailable
         }
     }

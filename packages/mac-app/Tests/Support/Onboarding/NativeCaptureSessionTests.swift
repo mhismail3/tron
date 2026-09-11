@@ -303,7 +303,7 @@ struct NativeCaptureSessionTests {
             sequence.catalogued()
             return [NativeCaptureTarget(applicationName: "Fixture", title: "Selected", make: { _ in sequence.make() }),
                     NativeCaptureTarget(applicationName: "Fixture", title: "Other", make: { _ in sequence.make() })]
-        })
+        }, automationEndpoint: { nil })
         let slot = NativeCaptureSlot()
         let (_, owner) = try #require(slot.attach(fence: NativeCaptureFence { true }, operations: operations))
         let (other, _) = try #require(slot.attach(fence: NativeCaptureFence { true }, operations: operations))
@@ -378,6 +378,23 @@ struct NativeCaptureSessionTests {
         #expect(status(await owner.execute(try wire.request("start", extra: ["handle": selected]))) == "stale")
     }
 
+    @Test func automationEndpointIsReadOnlyAndBoundToTheAuthenticatedSession() async throws {
+        let generation = UUID(), slot = NativeCaptureSlot()
+        let operations = NativeCaptureOperations(validate: { true }, catalog: { _ in [] },
+            automationEndpoint: { NativeAutomationEndpoint(socket: "/tmp/tron-cua-\(generation.uuidString.lowercased())/s", generation: generation) })
+        let (_, owner) = try #require(slot.attach(fence: NativeCaptureFence { true }, operations: operations))
+        let wire = try await handshake(owner)
+        let reply = await owner.execute(try wire.request("automationEndpoint"))
+        #expect(status(reply) == "automationEndpoint")
+        let object = try #require(JSONSerialization.jsonObject(with: reply.control) as? [String: Any])
+        #expect((object["generation"] as? String)?.lowercased() == generation.uuidString.lowercased())
+        #expect(reply.jpeg == nil)
+        var wrong = wire; wrong.fields["sessionID"] = UUID().uuidString
+        #expect(status(await owner.execute(try wrong.request("automationEndpoint"))) == "stale")
+        #expect(throws: (any Error).self) { try wire.request("automationEndpoint", extra: ["socket": "/forged"]) }
+        #expect(await owner.drain().joined)
+    }
+
     private func makeOwner(_ backend: CaptureBackend) -> NativeCaptureSession {
         let slot = NativeCaptureSlot()
         return slot.attach(fence: NativeCaptureFence { true }, operations: backend.operations)!.1
@@ -440,7 +457,7 @@ private actor CaptureBackend {
     func reject() { valid = false }
     private func validate() -> Bool { valid }
     nonisolated var operations: NativeCaptureOperations {
-        var operations = NativeCaptureOperations(validate: { await self.validate() }, catalog: { _ in await self.catalog() })
+        var operations = NativeCaptureOperations(validate: { await self.validate() }, catalog: { _ in await self.catalog() }, automationEndpoint: { nil })
         if let clock { operations.now = { 0 }; operations.waitUntil = { await clock.wait($0) } }
         return operations
     }

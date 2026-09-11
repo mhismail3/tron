@@ -6,9 +6,8 @@ import Testing
 struct MacPermissionProbeTests {
     @Test("GUI permission categories have distinct System Settings destinations")
     func guiPermissionSettingsDestinations() {
-        #expect(Permission.allCases.count == 4)
+        #expect(Set(Permission.allCases) == [.fullDiskAccess, .accessibility, .screenRecording])
         #expect(Permission.accessibility.systemSettingsURL.absoluteString.contains("Privacy_Accessibility"))
-        #expect(Permission.inputMonitoring.systemSettingsURL.absoluteString.contains("Privacy_ListenEvent"))
         #expect(Permission.screenRecording.systemSettingsURL.absoluteString.contains("Privacy_ScreenCapture"))
     }
 
@@ -33,14 +32,13 @@ struct MacPermissionProbeTests {
     @Test("optional native pre-consent cannot block or satisfy core setup")
     func coreSetupGate() {
         #expect(Permission.coreSetupSatisfied(by: [.fullDiskAccess: .granted]))
-        #expect(!Permission.coreSetupSatisfied(by: [.accessibility: .granted, .inputMonitoring: .granted, .screenRecording: .granted]))
+        #expect(!Permission.coreSetupSatisfied(by: [.accessibility: .granted, .screenRecording: .granted]))
         #expect(!Permission.coreSetupSatisfied(by: [.fullDiskAccess: .probeUnavailable]))
     }
 
     @Test("wrapper probe remains FDA-only")
     func wrapperProbeDoesNotClaimGuiPermission() async {
         #expect(await MacPermissionProbe.probe(.accessibility) == .probeUnavailable)
-        #expect(await MacPermissionProbe.probe(.inputMonitoring) == .probeUnavailable)
         #expect(await MacPermissionProbe.probe(.screenRecording) == .probeUnavailable)
     }
 

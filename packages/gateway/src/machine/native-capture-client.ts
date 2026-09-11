@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { basename, dirname, isAbsolute, normalize } from "node:path";
 import { openNativeCaptureTransport } from "./native-capture-transport.js";
 import type { NativeCaptureTransport } from "./native-capture-transport.js";
 
@@ -14,6 +15,7 @@ export type NativeCaptureFrame = Readonly<{
   generation: string; readSequence: number; sequence: string; width: number; height: number; jpeg: Buffer;
 }>;
 export type NativeCaptureJoin = Readonly<{ status: "joined"; diagnostic?: string }>;
+export type NativeAutomationEndpoint = Readonly<{ socket: string; generation: string }>;
 
 function record(value: unknown): RecordValue {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("Invalid native capture object");
@@ -134,6 +136,7 @@ class NativeCaptureClient {
         throw new Error(`Native capture host rejected ${operation}: ${reply.status}; remote retirement unconfirmed`);
       }
       const extra = expected === "catalog" ? ["sources"] : expected === "started" ? ["generation"] :
+        expected === "automationEndpoint" ? ["socket", "generation"] :
         operation === "pull" ? (reply.status === "empty" ? ["readSequence"] : ["readSequence", "generation", "sequence", "width", "height"]) :
         stopping && "diagnostic" in reply ? ["diagnostic"] : [];
       keys(reply, ["version", "status", "loadID", "bootID", "connectionID", "sessionID", ...(commandID ? ["commandID"] : []), ...extra]);
@@ -202,6 +205,19 @@ class NativeCaptureClient {
       this.#handles.clear();
       if (!this.#closing) { this.#closing = true; return this.#retireAfterFailure(cause); }
       throw cause;
+    } finally { this.#finishOrdinary(); }
+  }
+  async automationEndpoint(): Promise<NativeAutomationEndpoint> {
+    this.#admit();
+    try {
+      const reply = await this.#exchange("automationEndpoint", "automationEndpoint");
+      if (this.#closing) throw new Error("Native automation endpoint retired before publication");
+      const generation = uuid(reply.generation), socket = reply.socket;
+      if (typeof socket !== "string" || !isAbsolute(socket) || normalize(socket) !== socket || Buffer.byteLength(socket) >= 104
+          || /[\u0000-\u001f\u007f]/u.test(socket) || basename(socket) !== "s" || basename(dirname(socket)) !== `tron-cua-${generation}`) {
+        throw new Error("Invalid native automation socket");
+      }
+      return Object.freeze({ socket, generation });
     } finally { this.#finishOrdinary(); }
   }
   async start(handle: string, signal?: AbortSignal): Promise<void> {

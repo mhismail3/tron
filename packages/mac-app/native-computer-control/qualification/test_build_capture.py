@@ -3,25 +3,28 @@ import io
 import tempfile
 from pathlib import Path
 import unittest
-from build_observer import PRODUCTS, arguments, build_command, freeze_sources, output_path, source_inventory
+from build_capture import PRODUCT, arguments, build_command, freeze_sources, output_path, source_inventory, signing_policy
 
 
-class ObserverBuildInputTests(unittest.TestCase):
-    def test_product_selection_is_closed_and_observer_remains_default(self):
-        self.assertEqual(arguments(['--output', '/private/tmp/unused']).product, 'observer')
-        self.assertEqual(set(PRODUCTS), {'observer', 'capture'})
-        for name, executable, bundle in [
-            ('observer', 'TronNativeObserverQualification', 'com.tron.qualification.native-observer'),
-            ('capture', 'TronNativeCaptureQualification', 'com.tron.qualification.native-capture'),
-        ]:
-            self.assertEqual(arguments(['--output', '/private/tmp/unused', '--product', name]).product, name)
-            self.assertEqual(PRODUCTS[name]['bundleIdentifier'], bundle)
-            self.assertEqual(build_command('frozen', 'scratch', name), [
-                'xcrun', 'swift', 'build', '--package-path', 'frozen', '--scratch-path', 'scratch',
-                '--configuration', 'release', '--product', executable])
-        for rejected in ['TronComputerControl', '../capture', 'capture --preflight', '']:
-            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
-                arguments(['--output', '/private/tmp/unused', '--product', rejected])
+class CaptureBuildInputTests(unittest.TestCase):
+    def test_only_capture_is_built(self):
+        self.assertEqual(arguments(['--output', '/private/tmp/unused']).output, '/private/tmp/unused')
+        self.assertEqual(PRODUCT['bundleIdentifier'], 'com.tron.qualification.native-capture')
+        self.assertEqual(build_command('frozen', 'scratch'), [
+            'xcrun', 'swift', 'build', '--package-path', 'frozen', '--scratch-path', 'scratch',
+            '--configuration', 'release', '--product', 'TronNativeCaptureQualification'])
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            arguments(['--output', '/private/tmp/unused', '--product', 'observer'])
+
+    def test_signing_requires_an_existing_development_certificate(self):
+        identity = 'A' * 40
+        inventory = f'1) {identity} "Apple Development: Fixture"\n'
+        self.assertEqual(signing_policy(None, inventory, 'ABCDEFGHIJ'), identity)
+        for invalid in ['-', 'B' * 40, 'Apple Development: Fixture']:
+            with self.assertRaises(ValueError): signing_policy(invalid, inventory, 'ABCDEFGHIJ')
+        multiple = inventory + f'2) {"B" * 40} "Apple Development: Other"\n'
+        with self.assertRaises(ValueError): signing_policy(None, multiple, 'ABCDEFGHIJ')
+        self.assertEqual(signing_policy(identity, multiple, 'ABCDEFGHIJ'), identity)
 
     def test_shared_output_boundary_rejects_owned_stores(self):
         for home in ['.pi', '.tron', '.tron-dev']:
@@ -63,7 +66,7 @@ class ObserverBuildInputTests(unittest.TestCase):
             repository = root / 'repo'
             repository.mkdir()
             self.assertEqual(output_path(str(root / 'artifact'), repository), (root / 'artifact').resolve())
-            for value in ['relative', str(root), str(repository / 'artifact'), '/Applications/new-observer-build', '/Library/new-observer-build']:
+            for value in ['relative', str(root), str(repository / 'artifact'), '/Applications/new-capture-build', '/Library/new-capture-build']:
                 with self.assertRaises(ValueError):
                     output_path(value, repository)
             (root / 'alias').symlink_to('/Applications')

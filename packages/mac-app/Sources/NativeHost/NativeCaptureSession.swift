@@ -37,18 +37,19 @@ struct NativeCaptureTarget: Sendable {
 struct NativeCaptureOperations: Sendable {
     let validate: @Sendable () async -> Bool
     let catalog: @Sendable (@escaping @Sendable () -> Bool) async throws -> [NativeCaptureTarget]
+    let automationEndpoint: @Sendable () -> NativeAutomationEndpoint?
     var now: @Sendable () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }
     var waitUntil: @Sendable (UInt64) async throws -> Void = { deadline in
         let now = DispatchTime.now().uptimeNanoseconds
         if deadline > now { try await Task.sleep(nanoseconds: deadline - now) }
     }
-    static func live(peer: NativeCapturePeer) -> Self {
+    static func live(peer: NativeCapturePeer, automationEndpoint: @escaping @Sendable () -> NativeAutomationEndpoint?) -> Self {
         Self(validate: { await peer.validate() }, catalog: { admission in
             try await NativeCaptureCatalog.load(admission: admission).map { source in
                 NativeCaptureTarget(applicationName: source.applicationName, title: source.title,
                                     make: { try source.makeStream(admission: $0) })
             }
-        })
+        }, automationEndpoint: automationEndpoint)
     }
 }
 
@@ -191,6 +192,11 @@ actor NativeCaptureSession {
         do {
             switch request.operation {
             case "hello": return response(request, status: "ready")
+            case "automationEndpoint":
+                guard let endpoint = operations.automationEndpoint() else { return .error(.unavailable) }
+                return response(request, status: "automationEndpoint", fields: [
+                    "socket": endpoint.socket, "generation": endpoint.generation.uuidString,
+                ])
             case "catalog":
                 guard !catalogued, !usedStream else { return .error(.stale) }
                 catalogued = true

@@ -37,7 +37,7 @@ struct NativeHostReplyTests {
         receipts.record("notDetermined", for: .accessibility, id: id)
         #expect(receipts.cachedStatus(for: .accessibility, id: id) == "granted")
         #expect(receipts.cachedStatus(for: .screenRecording, id: id) == "probeUnavailable")
-        for _ in 0..<16 { receipts.record("notDetermined", for: .inputMonitoring, id: UUID()) }
+        for _ in 0..<16 { receipts.record("notDetermined", for: .screenRecording, id: UUID()) }
         #expect(receipts.cachedStatus(for: .accessibility, id: id) == nil)
     }
 

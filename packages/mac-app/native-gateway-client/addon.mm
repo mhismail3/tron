@@ -300,7 +300,7 @@ static napi_value request(napi_env e, napi_callback_info info) {
         id json = [NSJSONSerialization JSONObjectWithData:control options:0 error:nullptr];
         if (![json isKindOfClass:NSDictionary.class]) throw std::runtime_error("invalid capture control JSON");
         NSString *op = json[@"operation"];
-        if (![op isKindOfClass:NSString.class] || ![@[@"hello", @"catalog", @"start", @"pull", @"suspend", @"stop"] containsObject:op])
+        if (![op isKindOfClass:NSString.class] || ![@[@"hello", @"catalog", @"automationEndpoint", @"start", @"pull", @"suspend", @"stop"] containsObject:op])
             throw std::runtime_error("invalid capture operation");
         bool stop = [op isEqualToString:@"stop"] || [op isEqualToString:@"suspend"], pull = [op isEqualToString:@"pull"];
         size_t index = StopSlot; uint64_t ticket; std::shared_ptr<Transport> peer;
@@ -454,7 +454,7 @@ NAPI_MODULE_INIT() {
 #endif
         };
         check(napi_define_properties(env, exports, sizeof(methods)/sizeof(methods[0]), methods));
-        napi_value version; check(napi_create_uint32(env, 2, &version));
+        napi_value version; check(napi_create_uint32(env, 3, &version));
         napi_property_descriptor api = {"apiVersion", nullptr, nullptr, nullptr, nullptr, version, napi_enumerable, nullptr};
         check(napi_define_properties(env, exports, 1, &api));
         return exports;

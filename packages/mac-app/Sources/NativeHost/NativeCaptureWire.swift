@@ -25,7 +25,7 @@ struct NativeCaptureRequest: Decodable, Equatable, Sendable {
         if request.operation != "pull" { keys.insert("commandID") }
         if request.operation != "hello" { keys.formUnion(["bootID", "connectionID", "sessionID"]) }
         switch request.operation {
-        case "hello", "catalog", "suspend", "stop": break
+        case "hello", "automationEndpoint", "catalog", "suspend", "stop": break
         case "start": keys.insert("handle")
         case "pull": keys.formUnion(["generation", "readSequence"])
         default: throw NativeCaptureHostError.invalidRequest

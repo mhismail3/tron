@@ -54,7 +54,6 @@ struct PermissionSetupView: View {
                 Text("Grant the permissions below after the helper is enabled.")
                     .font(TronTypography.wizardCaption).foregroundStyle(.secondary)
                 permissionRow(.accessibility, title: "Accessibility", detail: "Prepares inspection and control of approved apps.")
-                permissionRow(.inputMonitoring, title: "Input Monitoring", detail: "Prepares detection of user-session input.")
                 permissionRow(.screenRecording, title: "Screen Recording", detail: "Prepares viewing of selected app windows.")
                 if serviceState == .enabled, statuses[.screenRecording] != .granted {
                     Text("Screen Recording may be listed under Tron.app in macOS Settings. If it is enabled there but not here, restart the helper, then re-check. This does not restart the Gateway.")
