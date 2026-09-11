@@ -195,6 +195,7 @@ targets:
         INFOPLIST_FILE: Sources/NativeHost/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         PRODUCT_BUNDLE_IDENTIFIER: com.tron.mac.native-host
+        TRON_CUA_DRIVER_SHA256: ${TRON_CUA_DRIVER_SHA256}
         PRODUCT_NAME: TronNativeHost
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "7"

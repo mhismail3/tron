@@ -21,14 +21,16 @@ export type CuaComputerResult = Readonly<{
   image?: { type: "image"; data: string; mimeType: "image/png" };
 }>;
 
-export function parseCuaOutput(stdout: string, endpointGeneration: string): CuaComputerResult {
+export function parseCuaOutput(stdout: string, endpointGeneration: string, kind: "observation" | "action" = "observation"): CuaComputerResult {
   if (Buffer.byteLength(stdout) > OUTPUT_LIMIT) throw new Error("Cua output exceeds bounds");
   const output: unknown = JSON.parse(stdout);
   if (!output || typeof output !== "object" || Array.isArray(output)) throw new Error("Invalid Cua result");
   const object = output as Record<string, unknown>;
   const refused = object.status === "refused" || object.status === "background_unavailable" || object.effect === "refused" || object.refusal !== undefined
     || (typeof object.code === "string" && object.activated !== true && object.effect !== "confirmed" && object.status !== "completed");
-  const uncertain = object.isError === true || object.error !== undefined || object.success === false
+  const affirmative = object.effect === "confirmed" || object.activated === true || object.success === true
+    || ["completed", "success", "confirmed"].includes(String(object.status));
+  const uncertain = (kind === "action" && !affirmative) || object.isError === true || object.error !== undefined || object.success === false
     || (typeof object.status === "string" && !["ok", "completed", "success", "activated", "passed", "matched", "verified", "confirmed", "refused"].includes(object.status))
     || ["unverifiable", "partial", "suspected_noop", "suspectedNoop"].includes(String(object.effect));
   return { status: refused ? "refused" : uncertain ? "outcomeUnknown" : "completed", output, endpointGeneration };
@@ -80,7 +82,10 @@ export class CuaComputerClient {
     }
     const foreground = arguments_.delivery_mode === "foreground" || arguments_.scope === "desktop" || target?.kind === "desktop" || tool === "bring_to_front";
     if (!observation && foreground && !this.desktopObserved) throw new Error("Inspect the full desktop for system dialogs before foreground input");
-    if (!observation && ("x" in arguments_ || "from_x" in arguments_)) {
+    if (tool === "set_window_frame" && (!this.windowReferences || pid !== this.windowReferences.pid || window !== this.windowReferences.window)) {
+      throw new Error("Window geometry requires the exact observed window");
+    }
+    if (!observation && tool !== "set_window_frame" && ("x" in arguments_ || "from_x" in arguments_)) {
       const desktop = arguments_.scope === "desktop" || target?.kind === "desktop";
       if (desktop ? !this.desktopObserved : !this.pixelObserved) throw new Error("Capture and inspect pixels before coordinate input");
       if (!desktop && (!this.windowReferences || pid !== this.windowReferences.pid || window !== this.windowReferences.window)) throw new Error("Pixel coordinates require the exact observed window");
@@ -155,7 +160,7 @@ export class CuaComputerClient {
       const { stdout } = await this.run(this.driverPath, ["call", tool, JSON.stringify(args), "--socket", endpoint.socket], {
         env: this.environment(), maxBuffer: OUTPUT_LIMIT, encoding: "utf8", windowsHide: true,
       });
-      const result = parseCuaOutput(stdout, endpoint.generation);
+      const result = parseCuaOutput(stdout, endpoint.generation, observation ? "observation" : "action");
       if (signal?.aborted || this.closed) throw new Error("Computer operation interrupted; it may have completed. Do not replay it");
       let image: CuaComputerResult["image"];
       const output = result.output as Record<string, unknown>;

@@ -8,7 +8,8 @@ mkdir -p "$TEMP/cache" "$TEMP/out" "$TEMP/untrusted"
 printf 'prior artifact' > "$TEMP/out/cua-driver"
 printf 'untrusted source' > "$TEMP/untrusted/cua-driver"
 chmod +x "$TEMP/untrusted/cua-driver"
-CACHE="$TEMP/cache/cua-driver-rs-0.28.0-darwin-universal-binary.tar.gz"
+VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$ROOT/packages/mac-app/cua-driver-release.json")"
+CACHE="$TEMP/cache/cua-driver-rs-${VERSION}-darwin-universal-binary.tar.gz"
 printf 'bad archive' > "$CACHE"
 if TRON_CUA_CACHE="$TEMP/cache" TRON_CUA_SOURCE_DIR="$TEMP/untrusted" \
   "$ROOT/packages/mac-app/scripts/ensure-cua-driver.sh" "$TEMP/out" > "$TEMP/result" 2>&1; then

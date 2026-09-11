@@ -3,6 +3,23 @@ import Testing
 
 @Suite("Embedded Cua process ownership (offline)", .serialized)
 @MainActor struct CuaProcessOwnerTests {
+    @Test func releaseDigestRejectsDifferentBytesAndSymlinks() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executable = root.appendingPathComponent("driver")
+        let expected = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824" // SHA256("hello")
+        try Data("hello".utf8).write(to: executable)
+        #expect(CuaProcessOwner.matchesRelease(executable, sha256: expected))
+        try Data("world".utf8).write(to: executable)
+        #expect(!CuaProcessOwner.matchesRelease(executable, sha256: expected))
+        #expect(!CuaProcessOwner.matchesRelease(executable, sha256: "not-a-pin"))
+        try Data("hello".utf8).write(to: executable)
+        let link = root.appendingPathComponent("link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: executable)
+        #expect(!CuaProcessOwner.matchesRelease(link, sha256: expected))
+    }
+
     @Test func rejectedSignatureNeverLaunchesChild() async throws {
         try await fixture(verified: false) { root, owner in
             try Data().write(to: root.appendingPathComponent("release"))

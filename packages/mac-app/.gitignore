@@ -1,4 +1,4 @@
-# XcodeGen-generated project; regenerate with `xcodegen generate`
+# XcodeGen-generated project; regenerate with `scripts/tron mac generate`
 TronMac.xcodeproj/
 
 # Build artifacts (including SwiftPM products and pinned native asset caches)

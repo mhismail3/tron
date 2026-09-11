@@ -23,6 +23,16 @@ function fixture() {
 }
 
 describe("browser live observation", () => {
+  it("expires viewer demand by elapsed time even when wall time moves backward", async () => {
+    const f = fixture(), lease = f.open(), socket = f.sockets[0]!;
+    socket.open(); await vi.advanceTimersByTimeAsync(1);
+    socket.frame(1); await vi.advanceTimersByTimeAsync(1);
+    expect(f.frame(lease.leaseId)).toHaveProperty("data");
+    vi.setSystemTime(Date.now() - 3_600_000);
+    await vi.advanceTimersByTimeAsync(16_001);
+    expect(() => f.frame(lease.leaseId)).toThrow(/ended/);
+    expect(socket.readyState).toBe(3);
+  });
   it("does no observation until open; shares capture, disposes on last close, and reopens the same endpoint without old pixels", async () => {
     const f = fixture();
     expect(f.sockets).toHaveLength(0);

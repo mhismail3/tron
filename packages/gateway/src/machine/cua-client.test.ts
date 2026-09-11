@@ -33,6 +33,22 @@ describe("Cua session/load adapter", () => {
     expect(f.run.mock.calls[1]![2]).not.toHaveProperty("signal"); expect(f.run.mock.calls[1]![2]).not.toHaveProperty("timeout");
     expect(() => f.client.invoke("click", { pid: 123 })).toThrow(/Observe/);
   });
+  it("does not label a marker-free action result completed", async () => {
+    const f = fixture(); await observe(f);
+    f.run.mockResolvedValueOnce({ stdout: '{}', stderr: '' });
+    expect((await f.client.invoke("click", { element_token: "s00000001:1" })).status).toBe("outcomeUnknown");
+    expect(() => f.client.invoke("click", { element_token: "s00000001:1" })).toThrow(/Observe/);
+    expect(f.run.mock.calls.filter((call) => call[1][1] === "click")).toHaveLength(1);
+    await f.client.close();
+  });
+  it("window geometry uses exact observed metadata, not screenshot-pixel admission", async () => {
+    const f = fixture(); await observe(f);
+    f.run.mockResolvedValueOnce({ stdout: '{"effect":"confirmed"}', stderr: '' });
+    expect((await f.client.invoke("set_window_frame", { pid: 123, window_id: 456, x: -100, y: 20, width: 500, height: 600 })).status).toBe("completed");
+    await observe(f);
+    expect(() => f.client.invoke("set_window_frame", { pid: 999, window_id: 456, x: 0, y: 0, width: 500, height: 600 })).toThrow(/exact observed window/);
+    await f.client.close();
+  });
   it("revives expired sessions only before observations and never replays an expired action", async () => {
     const f = fixture(); await observe(f);
     f.run.mockRejectedValueOnce(new Error("session has ended"));

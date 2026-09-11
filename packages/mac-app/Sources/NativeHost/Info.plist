@@ -24,6 +24,8 @@
     <true/>
     <key>TronSigningTeam</key>
     <string>$(DEVELOPMENT_TEAM)</string>
+    <key>TronCuaDriverSHA256</key>
+    <string>$(TRON_CUA_DRIVER_SHA256)</string>
     <key>LSBackgroundOnly</key>
     <false/>
     <key>LSMultipleInstancesProhibited</key>

@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Darwin
 import TronNativeCaptureHost
 
@@ -82,7 +83,31 @@ final class CuaProcessOwner: @unchecked Sendable {
 
     private static func signedExecutable(_ executable: URL) -> Bool {
         let requirement = "anchor apple generic and certificate leaf[subject.OU] = \"YCK386LBJ7\" and identifier \"cua-driver\""
-        return (try? NativeCodeSigning.pin(requirement, to: executable)) != nil
+        guard (try? NativeCodeSigning.pin(requirement, to: executable)) != nil,
+              let expected = Bundle.main.object(forInfoDictionaryKey: "TronCuaDriverSHA256") as? String else { return false }
+        return matchesRelease(executable, sha256: expected)
+    }
+
+    /// Expected bytes come from the helper's signed build metadata, not the
+    /// replaceable executable's adjacent manifest or its own computed CDHash.
+    static func matchesRelease(_ executable: URL, sha256 expected: String) -> Bool {
+        guard expected.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else { return false }
+        let descriptor = open(executable.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        guard descriptor >= 0 else { return false }
+        let file = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        defer { try? file.close() }
+        var info = stat()
+        guard fstat(descriptor, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
+              info.st_size > 0, info.st_size <= 128 * 1024 * 1024 else { return false }
+        do {
+            var digest = SHA256(), remaining = Int(info.st_size)
+            while remaining > 0 {
+                guard let bytes = try file.read(upToCount: min(64 * 1024, remaining)), !bytes.isEmpty else { return false }
+                digest.update(data: bytes); remaining -= bytes.count
+            }
+            guard (try file.read(upToCount: 1))?.isEmpty != false else { return false }
+            return digest.finalize().map { String(format: "%02x", $0) }.joined() == expected
+        } catch { return false }
     }
 
     func endpoint() -> NativeAutomationEndpoint? {

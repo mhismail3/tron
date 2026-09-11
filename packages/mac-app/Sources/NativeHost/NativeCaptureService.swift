@@ -8,25 +8,25 @@ public final class NativeCaptureSlot: @unchecked Sendable {
     let bootID = UUID()
     private let lock = NSLock()
     private var closed = false
-    private var handshakes: Set<UUID> = []
+    private var handshakes: [UUID: NativeCaptureHandshake] = [:]
     private var sessions: [UUID: NativeCaptureSession] = [:]
     private var streamOwner: UUID?
 
-    func beginHandshake() -> UUID? {
+    func beginHandshake(_ handshake: NativeCaptureHandshake) -> UUID? {
         lock.withLock {
             guard !closed, handshakes.count < 4, sessions.count < 4 else { return nil }
-            let id = UUID(); handshakes.insert(id); return id
+            let id = UUID(); handshakes[id] = handshake; return id
         }
     }
     func finishHandshake(_ id: UUID, fence: NativeCaptureFence, operations: NativeCaptureOperations) -> NativeCaptureSession? {
         lock.withLock {
-            guard handshakes.remove(id) != nil, !closed, sessions.count < 4 else { return nil }
+            guard handshakes[id] != nil, !closed, sessions[id] == nil, sessions.count < 4 else { return nil }
             let session = NativeCaptureSession(bootID: bootID, ownerID: id, slot: self, fence: fence, operations: operations)
             sessions[id] = session
             return session
         }
     }
-    func abandonHandshake(_ id: UUID) { lock.withLock { _ = handshakes.remove(id) } }
+    func abandonHandshake(_ id: UUID) { lock.withLock { _ = handshakes.removeValue(forKey: id) } }
     func reserveStream(_ id: UUID) -> Bool {
         lock.withLock {
             guard !closed, sessions[id] != nil, streamOwner == nil else { return false }
@@ -44,11 +44,14 @@ public final class NativeCaptureSlot: @unchecked Sendable {
         }
     }
     public func drainForServiceRetirement() async -> Bool {
-        let current = lock.withLock { closed = true; return Array(sessions.values) }
+        let (current, pending) = lock.withLock { closed = true; return (Array(sessions.values), Array(handshakes.values)) }
         for session in current { session.fence.close() }
+        for handshake in pending { handshake.retire() }
+        // Closing admission is not completion of already-running OS validation.
+        // Join both validation and its structured deadline before unregistering.
+        for handshake in pending { await handshake.join() }
         var joined = true
         for session in current { if !(await session.drain().joined) { joined = false } }
-        // Pending handshakes have no native work and cannot install after closed.
         return joined
     }
 }
@@ -73,6 +76,7 @@ final class NativeCaptureService: NSObject, TronNativeCaptureService, @unchecked
         Task { [self] in
             let value = await session.execute(request)
             let deliver = stop || session.fence.admits()
+                || (value.failure != nil && value.jpeg == nil && session.fence.admitsFailureReply())
             // No async hop after this exact delivery fence. The client must also
             // fence decode/render; a value handed to XPC cannot be revoked.
             reply(deliver ? value.control : NativeCaptureResponse.error(.stale).control, deliver ? value.jpeg : nil)
@@ -88,9 +92,26 @@ final class NativeCaptureHandshake: @unchecked Sendable {
     private let lock = NSLock()
     private var state = State.validating
     private var task: Task<Void, Never>?
+    private var installWaiters: [CheckedContinuation<Task<Void, Never>, Never>] = []
     func install(_ task: Task<Void, Never>) {
-        let cancel = lock.withLock { self.task = task; return state == .retired }
+        let (cancel, waiters) = lock.withLock {
+            precondition(self.task == nil)
+            self.task = task
+            defer { installWaiters.removeAll() }
+            return (state == .retired, installWaiters)
+        }
         if cancel { task.cancel() }
+        for waiter in waiters { waiter.resume(returning: task) }
+    }
+    func join() async {
+        let installed: Task<Void, Never> = await withCheckedContinuation { continuation in
+            let current: Task<Void, Never>? = lock.withLock {
+                if let task { return task }
+                installWaiters.append(continuation); return nil
+            }
+            if let current { continuation.resume(returning: current) }
+        }
+        await installed.value
     }
     func retire() {
         let task = lock.withLock { state = .retired; return self.task }
@@ -115,7 +136,6 @@ final class NativeCaptureHandshake: @unchecked Sendable {
             return true
         }
     }
-    func finished() { lock.withLock { task = nil } }
 }
 
 // NSXPC serializes message/handler delivery. This immutable reference only
@@ -130,34 +150,40 @@ public final class NativeCaptureListener: NSObject, NSXPCListenerDelegate {
     private let context: NativeCaptureContext
     public init(slot: NativeCaptureSlot, context: NativeCaptureContext) { self.slot = slot; self.context = context }
     public func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
-        guard let id = slot.beginHandshake() else { return false }
         let handshake = NativeCaptureHandshake()
+        guard let id = slot.beginHandshake(handshake) else { return false }
         connection.invalidationHandler = { [slot] in handshake.retire(); slot.peerLost(id) }
         connection.interruptionHandler = { [slot, weak connection] in
             handshake.retire(); slot.peerLost(id); connection?.invalidate()
         }
         let transport = NativeCaptureTransport(connection)
         let task = Task { [slot, context, transport] in
-            let deadline = Task {
-                do { try await Task.sleep(for: .seconds(15)) } catch { return }
-                if handshake.expire() { transport.connection.invalidate() }
-            }
-            defer { deadline.cancel(); handshake.finished(); slot.abandonHandshake(id) }
-            do {
-                let peer = try NativeCapturePeer(connection: transport.connection, context: context)
-                guard !Task.isCancelled else { transport.connection.invalidate(); return }
-                transport.connection.setCodeSigningRequirement(peer.codeRequirement)
-                let fence = NativeCaptureFence { peer.isCurrent() }
-                guard await peer.validate(), fence.admits(), !Task.isCancelled else { transport.connection.invalidate(); return }
-                let activated = handshake.activate {
-                    guard let session = slot.finishHandshake(id, fence: fence,
-                        operations: .live(peer: peer, automationEndpoint: context.automationEndpoint)) else { transport.connection.invalidate(); return }
-                    transport.connection.exportedInterface = NSXPCInterface(with: TronNativeCaptureService.self)
-                    transport.connection.exportedObject = NativeCaptureService(session: session)
-                    transport.connection.activate()
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    do { try await Task.sleep(for: .seconds(15)) } catch { return }
+                    if handshake.expire() { transport.connection.invalidate() }
                 }
-                if !activated { transport.connection.invalidate() }
-            } catch { transport.connection.invalidate() }
+                group.addTask {
+                    do {
+                        let peer = try NativeCapturePeer(connection: transport.connection, context: context)
+                        guard !Task.isCancelled else { transport.connection.invalidate(); return }
+                        transport.connection.setCodeSigningRequirement(peer.codeRequirement)
+                        let fence = NativeCaptureFence { peer.isCurrent() }
+                        guard await peer.validate(), fence.admits(), !Task.isCancelled else { transport.connection.invalidate(); return }
+                        let activated = handshake.activate {
+                            guard let session = slot.finishHandshake(id, fence: fence,
+                                operations: .live(peer: peer, automationEndpoint: context.automationEndpoint)) else { transport.connection.invalidate(); return }
+                            transport.connection.exportedInterface = NSXPCInterface(with: TronNativeCaptureService.self)
+                            transport.connection.exportedObject = NativeCaptureService(session: session)
+                            transport.connection.activate()
+                        }
+                        if !activated { transport.connection.invalidate() }
+                    } catch { transport.connection.invalidate() }
+                }
+                await group.next()
+                group.cancelAll()
+            }
+            slot.abandonHandshake(id)
         }
         handshake.install(task)
         return true // Remains inactive until authenticated Stable admission.

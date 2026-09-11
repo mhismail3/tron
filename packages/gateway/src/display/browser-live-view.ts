@@ -60,6 +60,8 @@ export interface BrowserLiveViewRegistration {
   loadToken: string;
   cdpUrl: string;
 }
+// Demand/diagnostic lifetimes use monotonic time; wall-clock correction must
+// not extend an abandoned viewer or manufacture expiry during a live read.
 interface Viewer { leaseId: string; viewerId: string; lastSeenAt: number; delivery?: { cancel: () => void } }
 interface View {
   registration: Registration;
@@ -246,7 +248,7 @@ export class BrowserLiveViewRegistry {
       throw new GatewayError("busy", "This browser view has reached its viewer capacity", true);
     }
     const leaseId = randomUUID();
-    view.viewers.set(leaseId, { leaseId, viewerId, lastSeenAt: Date.now() });
+    view.viewers.set(leaseId, { leaseId, viewerId, lastSeenAt: performance.now() });
     this.leases.set(leaseId, view);
     try {
       if (view.viewers.size === 1) this.start(view);
@@ -269,7 +271,7 @@ export class BrowserLiveViewRegistry {
     if (!viewer || this.leases.get(leaseId) !== view || viewer.viewerId !== viewerId) {
       throw new GatewayError("not_found", "Browser viewing has ended");
     }
-    if (Date.now() - viewer.lastSeenAt >= BROWSER_LIVE_VIEW_LEASE_IDLE_MS) {
+    if (performance.now() - viewer.lastSeenAt >= BROWSER_LIVE_VIEW_LEASE_IDLE_MS) {
       this.close(leaseId);
       throw new GatewayError("not_found", "Browser viewing has ended");
     }
@@ -278,7 +280,7 @@ export class BrowserLiveViewRegistry {
       this.failNativeView(view, "first_frame_timeout");
       throw new GatewayError("not_found", "Native capture produced no frame", false, { liveViewFailure: "first_frame_timeout" });
     }
-    viewer.lastSeenAt = Date.now();
+    viewer.lastSeenAt = performance.now();
     const delivery = { cancel };
     viewer.delivery = delivery;
     return {
@@ -355,7 +357,7 @@ export class BrowserLiveViewRegistry {
     this.nativeFailures.clear();
   }
   private expire(): void {
-    const now = Date.now();
+    const now = performance.now();
     for (const [id, failure] of this.nativeFailures) if (failure.expiresAt <= now) this.nativeFailures.delete(id);
     for (const [leaseId, view] of this.leases) {
       const viewer = view.viewers.get(leaseId);
@@ -366,7 +368,7 @@ export class BrowserLiveViewRegistry {
     const view = this.views.get(key(sessionId, viewId));
     if (!view || view.registration.generation !== generation) {
       const failure = this.nativeFailures.get(key(sessionId, viewId));
-      if (failure?.generation === generation && failure.expiresAt > Date.now()) {
+      if (failure?.generation === generation && failure.expiresAt > performance.now()) {
         throw new GatewayError("not_found", "Native live capture ended", false, { liveViewFailure: failure.reason });
       }
       throw new GatewayError("not_found", "Live view is no longer available");
@@ -429,7 +431,7 @@ export class BrowserLiveViewRegistry {
     const registration = view.registration;
     while (this.nativeFailures.size >= BROWSER_LIVE_VIEW_MAXIMUM_REGISTRATIONS) this.nativeFailures.delete(this.nativeFailures.keys().next().value!);
     this.nativeFailures.set(key(registration.sessionId, registration.viewId), {
-      generation: registration.generation, reason, expiresAt: Date.now() + 60_000,
+      generation: registration.generation, reason, expiresAt: performance.now() + 60_000,
     });
     // This requests Stop; neither the deadline nor the diagnostic proves join.
     this.retire(view);

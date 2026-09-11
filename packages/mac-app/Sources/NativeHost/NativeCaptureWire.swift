@@ -64,7 +64,8 @@ struct NativeCaptureRequest: Decodable, Equatable, Sendable {
 struct NativeCaptureResponse: Sendable {
     let control: Data
     let jpeg: Data?
+    var failure: NativeCaptureHostError? = nil
     static func error(_ error: NativeCaptureHostError) -> Self {
-        Self(control: Data("{\"version\":1,\"status\":\"\(error.rawValue)\"}".utf8), jpeg: nil)
+        Self(control: Data("{\"version\":1,\"status\":\"\(error.rawValue)\"}".utf8), jpeg: nil, failure: error)
     }
 }

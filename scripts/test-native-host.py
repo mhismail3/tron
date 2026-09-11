@@ -5,6 +5,7 @@ from pathlib import Path
 import plistlib
 import tempfile
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('native_validator', Path(__file__).with_name('validate-native-host.py'))
 validator = importlib.util.module_from_spec(spec)
@@ -15,12 +16,17 @@ class NativeCompositionTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.app = Path(self.temp.name) / 'Tron.app'
+        self.cua_bytes = b'offline Cua fixture'
+        self.pin = dict(validator.CUA_PIN, binarySHA256=hashlib.sha256(self.cua_bytes).hexdigest())
+        pin = patch.object(validator, 'CUA_PIN', self.pin)
+        pin.start(); self.addCleanup(pin.stop)
         self.agent = 'Contents/Library/LaunchAgents/' + validator.SERVICE + '.plist'
         self.put(self.agent, validator.AGENT)
         self.put('Contents/Info.plist', {'TronSigningTeam': 'EXAMPLE123'})
         self.put(validator.BUNDLE + '/Contents/Info.plist', {
             'TronSigningTeam': 'EXAMPLE123', 'CFBundleIdentifier': validator.SERVICE,
-            'CFBundleExecutable': 'TronNativeHost', 'LSUIElement': True, 'LSBackgroundOnly': False})
+            'CFBundleExecutable': 'TronNativeHost', 'LSUIElement': True, 'LSBackgroundOnly': False,
+            'TronCuaDriverSHA256': self.pin['binarySHA256']})
         executable = self.app / validator.EXECUTABLE
         executable.parent.mkdir(parents=True)
         executable.write_text('offline fixture; never executed')
@@ -29,11 +35,9 @@ class NativeCompositionTests(unittest.TestCase):
         (self.app / validator.CLIENT_INPUTS).write_text(json.dumps({
             'schema': 1, 'testOnly': False, 'inputs': {'fixture': '0' * 64}}))
         cua = self.app / validator.CUA
-        cua.write_bytes(b'offline Cua fixture'); cua.chmod(0o755)
+        cua.write_bytes(self.cua_bytes); cua.chmod(0o755)
         (self.app / 'Contents/Library/Native/cua-driver-LICENSE.txt').write_text('fixture license')
-        (self.app / validator.CUA_MANIFEST).write_text(json.dumps({
-            'version': '0.28.0', 'revision': '0' * 40, 'githubPrerelease': True, 'upstreamSigner': 'YCK386LBJ7',
-            'archiveSHA256': '0' * 64, 'binarySHA256': hashlib.sha256(cua.read_bytes()).hexdigest()}))
+        (self.app / validator.CUA_MANIFEST).write_text(json.dumps(self.pin))
 
     def tearDown(self):
         self.temp.cleanup()
@@ -57,6 +61,24 @@ class NativeCompositionTests(unittest.TestCase):
         cua.unlink(); cua.write_bytes(original); cua.chmod(0o755)
         (self.app / validator.CUA_MANIFEST).unlink()
         with self.assertRaises(FileNotFoundError): validator.validate(self.app)
+
+    def test_release_manifest_cannot_choose_its_own_pin(self):
+        for key, value in [('revision', 'f' * 40), ('archiveSHA256', 'f' * 64), ('binarySHA256', 'f' * 64)]:
+            (self.app / validator.CUA_MANIFEST).write_text(json.dumps(dict(self.pin, **{key: value})))
+            with self.assertRaisesRegex(ValueError, 'canonical release pin'):
+                validator.validate(self.app)
+        replacement = b'different executable with a matching forged manifest'
+        (self.app / validator.CUA).write_bytes(replacement)
+        (self.app / validator.CUA_MANIFEST).write_text(json.dumps(dict(self.pin, binarySHA256=hashlib.sha256(replacement).hexdigest())))
+        with self.assertRaisesRegex(ValueError, 'canonical release pin'):
+            validator.validate(self.app)
+
+    def test_helper_digest_is_sealed_from_the_same_pin(self):
+        path = self.app / validator.BUNDLE / 'Contents/Info.plist'
+        value = plistlib.loads(path.read_bytes()); value['TronCuaDriverSHA256'] = 'f' * 64
+        path.write_bytes(plistlib.dumps(value))
+        with self.assertRaisesRegex(ValueError, 'compiled Cua digest'):
+            validator.validate(self.app)
 
     def test_outer_release_product_name_cannot_replace_native_executable(self):
         executable = self.app / validator.EXECUTABLE

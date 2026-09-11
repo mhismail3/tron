@@ -133,6 +133,8 @@ retained native source/filter and exact crop, never another catalog lookup, and 
 prior join. Source loss, failed suspension, load replacement or explicit Stop ends
 the reference. Stop uses independent capacity and joins local callbacks after the
 host response; local disconnect alone never proves remote native retirement.
+Viewer idle demand and diagnostic expiry use monotonic time, so wall-clock changes
+cannot extend abandoned capture or manufacture expiry.
 Frames remain latest-only, bounded and outside JSONL/artifact caches. An asynchronous
 native-start/read failure retains only a finite reason for its exact reference,
 bounded to64 entries, reported for60 seconds, and cleared at session retirement. This lets the
@@ -152,7 +154,10 @@ private per-generation socket; Gateway receives only a read-only
 never accepts an endpoint, environment, or session from model input. Invocations
 bind the canonical session/load and require fresh observations and element
 references. Refused, background-unavailable, malformed, non-zero, or disconnected
-results are refusal or `outcomeUnknown`, never success or replay. Cua telemetry is
+results are refusal or `outcomeUnknown`, never success or replay. Marker-free action
+objects are also unknown; observation objects need no artificial success flag.
+Geometry setters use exact window metadata rather than pixel-input admission.
+Cua telemetry is
 disabled for daemon and clients. Missing Cua assets disable only this tool;
 permissions and capture remain available. Administrative history, browser,
 config, update, install, and grant surfaces are not exposed. Each extension load

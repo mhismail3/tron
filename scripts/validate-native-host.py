@@ -16,6 +16,7 @@ CLIENT = 'Contents/Library/Native/tron-native-capture.node'
 CLIENT_INPUTS = 'Contents/Library/Native/tron-native-capture.inputs.json'
 CUA = 'Contents/Library/Native/cua-driver'
 CUA_MANIFEST = 'Contents/Library/Native/cua-driver.manifest.json'
+CUA_PIN = json.loads((Path(__file__).resolve().parent.parent / 'packages/mac-app/cua-driver-release.json').read_bytes())
 AGENT = {
     'Label': SERVICE,
     'BundleProgram': EXECUTABLE,
@@ -95,13 +96,10 @@ def validate(app):
     if not 0 < cua_info.st_size <= 128 * 1024 * 1024 or not cua_info.st_mode & 0o111 or not 0 < manifest_info.st_size <= 4096:
         raise ValueError('Cua artifact outside bounds')
     metadata = json.loads(manifest.read_bytes())
-    if (not isinstance(metadata, dict) or set(metadata) != {'version', 'revision', 'githubPrerelease', 'upstreamSigner', 'archiveSHA256', 'binarySHA256'}
-            or not all(isinstance(metadata.get(key), str) for key in ('version', 'revision', 'upstreamSigner', 'archiveSHA256', 'binarySHA256'))
-            or metadata['version'] != '0.28.0' or metadata['upstreamSigner'] != 'YCK386LBJ7' or metadata['githubPrerelease'] is not True
-            or not re.fullmatch('[a-f0-9]{40}', metadata.get('revision', ''))
-            or not re.fullmatch('[a-f0-9]{64}', metadata.get('archiveSHA256', ''))
-            or not re.fullmatch('[a-f0-9]{64}', metadata.get('binarySHA256', ''))):
-        raise ValueError('Invalid pinned Cua manifest')
+    if metadata != CUA_PIN or type(metadata.get('githubPrerelease')) is not bool:
+        raise ValueError('Cua manifest differs from the canonical release pin')
+    if host.get('TronCuaDriverSHA256') != CUA_PIN['binarySHA256']:
+        raise ValueError('Native helper compiled Cua digest differs from the canonical release pin')
     digest = hashlib.sha256()
     with cua.open('rb') as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b''): digest.update(chunk)

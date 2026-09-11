@@ -61,21 +61,32 @@ struct NativeCaptureOperations: Sendable {
 /// awaiting selection/start. Stop does not depend on a caller's Task surviving.
 final class NativeCaptureFence: @unchecked Sendable {
     private let lock = NSLock()
-    private var open = true
+    private enum State { case open, producerStopped, revoked }
+    private var state = State.open
     private var producer: (any NativeCaptureProducing)?
     private let current: @Sendable () -> Bool
     init(current: @escaping @Sendable () -> Bool) { self.current = current }
     func admits() -> Bool {
-        guard lock.withLock({ open }) else { return false }
+        guard lock.withLock({ state == .open }) else { return false }
         guard current() else { close(); return false }
-        return lock.withLock { open }
+        return lock.withLock { state == .open }
     }
     func install(_ producer: any NativeCaptureProducing) {
-        let stopped = lock.withLock { self.producer = producer; return !open }
+        let stopped = lock.withLock { self.producer = producer; return state != .open }
         if stopped { producer.requestStop() }
     }
+    /// Producer failure closes pixel admission, not the authenticated request's
+    /// right to receive its finite terminal error after native cleanup joins.
+    func stopProducer() {
+        let producer = lock.withLock { if state == .open { state = .producerStopped }; return self.producer }
+        producer?.requestStop()
+    }
+    func admitsFailureReply() -> Bool {
+        guard current() else { close(); return false }
+        return lock.withLock { state != .revoked }
+    }
     func close() {
-        let producer = lock.withLock { open = false; return self.producer }
+        let producer = lock.withLock { state = .revoked; return self.producer }
         producer?.requestStop()
     }
     func releaseJoinedProducer() { lock.withLock { producer = nil } }
@@ -232,7 +243,7 @@ actor NativeCaptureSession {
                 let result = await created.start()
                 guard await admitted(request), case let .available(id) = result else {
                     if suspending { return .error(.stale) }
-                    closed = true; fence.close()
+                    closed = true; fence.stopProducer()
                     // Do not call drain from pending work: drain joins this task.
                     _ = await finishRetirement()
                     if case let .unavailable(reason) = result { return .error(.capture(reason)) }
@@ -253,7 +264,7 @@ actor NativeCaptureSession {
             default: return .error(.invalidRequest)
             }
         } catch {
-            closed = true; fence.close()
+            closed = true; fence.stopProducer()
             _ = await finishRetirement()
             return .error(.capture(error))
         }
@@ -261,7 +272,7 @@ actor NativeCaptureSession {
 
     func drain() async -> NativeCaptureRetirement {
         if let retirement { return await retirement.value }
-        closed = true; fence.close(); targets.removeAll(); demandTask?.cancel(); demandTask = nil
+        closed = true; fence.stopProducer(); targets.removeAll(); demandTask?.cancel(); demandTask = nil
         let pending = pending
         let suspension = suspension
         let task = Task { [self] in

@@ -53,6 +53,29 @@ struct BrowserLiveViewingTests {
         }
     }
 
+    @Test("same-profile socket reconnect does not replace the independent HTTP viewer", arguments: [DisplayKind.browserLive, .nativeLive])
+    func sameProfileReconnectKeepsLease(kind: DisplayKind) async throws {
+        try await withTestWatchdog {
+            let first = ScriptedGatewaySocket(), second = ScriptedGatewaySocket()
+            let probe = BrowserLiveTransportProbe(kind: kind)
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: [first, second]).factory,
+                liveViewTransport: BoundedHTTPDataTransport { request, maximum in await probe.respond(request, maximum) })
+            let profile = Self.profile("same-origin")
+            await first.enqueue(Self.hello(kind: kind))
+            _ = try await client.connectForLifecycle(profile: profile, token: "same-token")
+            let lease = try await client.openLiveView(kind: kind, viewId: "view-a", generation: "generation-a", sessionID: "session-a", profileID: profile.id)
+            await second.enqueue(Self.hello(kind: kind))
+            _ = try await client.connectForLifecycle(profile: profile, token: "same-token")
+            if case .waiting = try await lease.frame(after: 7) {} else { Issue.record("Expected the same live lease after socket replacement") }
+            await lease.close()
+            let requests = await probe.requests
+            #expect(requests.map(\.request.httpMethod) == ["POST", "GET", "DELETE"])
+            #expect(requests.allSatisfy { $0.request.url?.host == "same-origin.invalid" })
+            #expect(requests[1].request.value(forHTTPHeaderField: "X-Tron-Live-Lease") == BrowserLiveTransportProbe.leaseID)
+            await client.close()
+        }
+    }
+
     @Test("a late successful open is closed, not published, after profile replacement", arguments: [DisplayKind.browserLive, .nativeLive])
     func staleOpenIsClosed(kind: DisplayKind) async throws {
         try await withTestWatchdog {

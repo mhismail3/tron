@@ -4,7 +4,18 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 case "${1:-}" in
   ios) PROJECT_DIR="$ROOT/packages/ios-app" ;;
-  mac) PROJECT_DIR="$ROOT/packages/mac-app" ;;
+  mac)
+    PROJECT_DIR="$ROOT/packages/mac-app"
+    # Seal the canonical executor digest into the permission-bearing helper.
+    TRON_CUA_DRIVER_SHA256="$(python3 - "$PROJECT_DIR/cua-driver-release.json" <<'PY'
+import json, re, sys
+value = json.load(open(sys.argv[1]))['binarySHA256']
+assert re.fullmatch('[a-f0-9]{64}', value)
+print(value)
+PY
+)"
+    export TRON_CUA_DRIVER_SHA256
+    ;;
   *)
     echo "Usage: scripts/generate-xcode-project ios|mac [xcodegen options]" >&2
     exit 64

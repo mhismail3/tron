@@ -38,6 +38,41 @@ struct NativeCaptureSessionTests {
         #expect(await owner.drain().joined)
     }
 
+    @Test func servicePreservesFiniteCaptureFailureWithoutPublishingPixels() async throws {
+        for failure in [NativeWindowCaptureError.permissionUnavailable, .sourceUnavailable] {
+            for stage in ["start", "pull"] {
+                let backend = CaptureBackend(), owner = makeOwner(backend)
+                let wire = try await handshake(owner), selected = try handle(await owner.execute(try wire.request("catalog")))
+                backend.producer.startRelease.signal(); backend.producer.joinRelease.signal()
+                if stage == "start" { backend.producer.failStart(failure) }
+                else {
+                    _ = await owner.execute(try wire.request("start", extra: ["handle": selected]))
+                    backend.producer.failPull(failure)
+                }
+                let response = CaptureTestResponse(), service = NativeCaptureService(session: owner)
+                let fields: [String: Any] = stage == "start" ? ["handle": selected] : ["generation": backend.producer.generation.uuidString, "readSequence": 1]
+                service.executeCaptureRequest(try wire.data(stage, extra: fields)) { response.resolve(.init(control: $0, jpeg: $1)) }
+                let value = await response.value()
+                #expect(status(value) == String(describing: failure))
+                #expect(value.jpeg == nil && !owner.fence.admits())
+                #expect(await owner.drain().joined)
+            }
+        }
+    }
+
+    @Test func serviceRevocationStillFencesAPendingCaptureFailure() async throws {
+        let backend = CaptureBackend(), owner = makeOwner(backend)
+        let wire = try await handshake(owner), selected = try handle(await owner.execute(try wire.request("catalog")))
+        backend.producer.failStart(.sourceUnavailable); backend.producer.startRelease.signal()
+        let response = CaptureTestResponse(), service = NativeCaptureService(session: owner)
+        service.executeCaptureRequest(try wire.data("start", extra: ["handle": selected])) { response.resolve(.init(control: $0, jpeg: $1)) }
+        await backend.producer.joinEntered.wait()
+        owner.fence.close(); backend.producer.joinRelease.signal()
+        let value = await response.value()
+        #expect(status(value) == "stale" && value.jpeg == nil)
+        #expect(await owner.drain().joined)
+    }
+
     @Test func provenanceLossAcrossCatalogAwaitDiscardsAllHandles() async throws {
         let backend = CaptureBackend(holdCatalog: true)
         let owner = makeOwner(backend)
@@ -257,15 +292,45 @@ struct NativeCaptureSessionTests {
 
     @Test func handshakeAndConnectionBoundsAreDistinctFromStreamCapacity() throws {
         let slot = NativeCaptureSlot(), backend = CaptureBackend()
-        let pending = try (0..<4).map { _ in try #require(slot.beginHandshake()) }
-        #expect(slot.beginHandshake() == nil)
+        let pending = try (0..<4).map { _ in try #require(slot.beginHandshake(NativeCaptureHandshake())) }
+        #expect(slot.beginHandshake(NativeCaptureHandshake()) == nil)
         slot.abandonHandshake(pending[0])
-        #expect(slot.beginHandshake() != nil)
+        #expect(slot.beginHandshake(NativeCaptureHandshake()) != nil)
         #expect(!slot.reserveStream(pending[1]), "Unauthenticated handshake has no session or native reservation")
         let session = slot.finishHandshake(pending[1], fence: NativeCaptureFence { true }, operations: backend.operations)
         #expect(session != nil)
         #expect(slot.reserveStream(pending[1]))
         slot.releaseStream(pending[1])
+    }
+
+    @Test func serviceRetirementJoinsCancelledPeerValidation() async throws {
+        let slot = NativeCaptureSlot(), handshake = NativeCaptureHandshake()
+        let id = try #require(slot.beginHandshake(handshake))
+        let entered = CaptureTestLatch(), cancelled = CaptureTestLatch(), release = CaptureTestLatch(), finished = CaptureTestLatch()
+        handshake.install(Task {
+            await withTaskCancellationHandler {
+                entered.signal(); await release.wait()
+            } onCancel: { cancelled.signal() }
+            slot.abandonHandshake(id)
+        })
+        await entered.wait()
+        let retirement = Task { let joined = await slot.drainForServiceRetirement(); finished.signal(); return joined }
+        await cancelled.wait()
+        #expect(!finished.isReady)
+        #expect(slot.finishHandshake(id, fence: NativeCaptureFence { true }, operations: CaptureBackend().operations) == nil)
+        release.signal()
+        #expect(await retirement.value)
+    }
+
+    @Test func retiredHandshakeJoinsALateInstalledTask() async {
+        let handshake = NativeCaptureHandshake(), cancelled = CaptureTestLatch(), release = CaptureTestLatch(), finished = CaptureTestLatch()
+        handshake.retire()
+        let joined = Task { await handshake.join(); finished.signal() }
+        handshake.install(Task {
+            await withTaskCancellationHandler { await release.wait() } onCancel: { cancelled.signal() }
+        })
+        await cancelled.wait(); #expect(!finished.isReady)
+        release.signal(); await joined.value; #expect(finished.isReady)
     }
 
     @Test func admittedHandshakeCannotBeInvalidatedByAnAlreadyWokenDeadline() {
@@ -506,6 +571,10 @@ private final class CaptureTestProducer: NativeCaptureProducing, @unchecked Send
     private var reads = 0
     private var offered: NativeCaptureHostFrame?
     private var afterTake: (@Sendable () -> Void)?
+    private var startFailure: NativeWindowCaptureError?
+    private var pullFailure: NativeWindowCaptureError?
+    func failStart(_ failure: NativeWindowCaptureError) { lock.withLock { startFailure = failure } }
+    func failPull(_ failure: NativeWindowCaptureError) { lock.withLock { pullFailure = failure } }
     private let joined: Bool
     private let diagnostic: String?
     init(joined: Bool, diagnostic: String? = nil) { self.joined = joined; self.diagnostic = diagnostic }
@@ -514,7 +583,8 @@ private final class CaptureTestProducer: NativeCaptureProducing, @unchecked Send
     let stopEntered = CaptureTestLatch()
     func requestStop() { lock.withLock { stopped = true }; stopEntered.signal() }
     func start() async -> NativeWindowCaptureAvailability {
-        startEntered.signal(); await startRelease.wait(); return .available(generation)
+        startEntered.signal(); await startRelease.wait()
+        return lock.withLock { startFailure.map { .unavailable($0) } ?? .available(generation) }
     }
     func join() async -> NativeCaptureRetirement {
         joinEntered.signal(); await joinRelease.wait()
@@ -524,6 +594,7 @@ private final class CaptureTestProducer: NativeCaptureProducing, @unchecked Send
         lock.withLock { offered = frame; self.afterTake = afterTake }
     }
     func take(generation: UUID) throws -> NativeCaptureHostFrame? {
+        if let failure = lock.withLock({ pullFailure }) { throw failure }
         let result = lock.withLock { reads += 1; let result = (offered, afterTake); offered = nil; afterTake = nil; return result }
         result.1?()
         return result.0
@@ -532,6 +603,7 @@ private final class CaptureTestProducer: NativeCaptureProducing, @unchecked Send
 private final class CaptureTestLatch: @unchecked Sendable {
     private let lock = NSLock()
     private var ready = false
+    var isReady: Bool { lock.withLock { ready } }
     private var waiters: [CheckedContinuation<Void, Never>] = []
     func signal() {
         let waiters = lock.withLock { ready = true; defer { self.waiters.removeAll() }; return self.waiters }
@@ -547,7 +619,9 @@ private final class CaptureTestLatch: @unchecked Sendable {
 
 private extension NativeCaptureSlot {
     func attach(fence: NativeCaptureFence, operations: NativeCaptureOperations) -> (UUID, NativeCaptureSession)? {
-        guard let id = beginHandshake(), let session = finishHandshake(id, fence: fence, operations: operations) else { return nil }
+        let handshake = NativeCaptureHandshake(); handshake.install(Task {})
+        guard let id = beginHandshake(handshake), let session = finishHandshake(id, fence: fence, operations: operations) else { return nil }
+        abandonHandshake(id) // Fixture admission performs no OS validation.
         return (id, session)
     }
 }

@@ -36,8 +36,13 @@ proxy's exit with native completion.
 
 The shipped driver is pinned to Cua0.28.0, revision
 `1b50c02e2d34734f64d2d22f54eb76cc97b4a663`. GitHub marks this release prerelease.
-`ensure-cua-driver.sh` checks the archive and executable digests, both supported
-architectures, and the upstream signing identity before staging. The vendor
+`cua-driver-release.json` is the single release pin used by staging, composition
+validation and project generation. `ensure-cua-driver.sh` checks the archive and
+executable digests, both supported architectures, and the upstream signing identity
+before staging. Generation seals the expected binary digest into the helper's
+Info.plist; runtime verifies the vendor signature and that digest before launching.
+The adjacent manifest cannot choose a different release. This is installed-asset
+validation, not an atomic-launch sandbox against concurrent same-user file changes. The vendor
 signature is preserved; the outer app seals the executable and its MIT notice.
 No installer, daemon, permission request, or production update runs during staging.
 Cua is optional to ordinary Gateway startup and source-only updates; missing or
@@ -67,7 +72,10 @@ image; foreground/desktop actions additionally require full-desktop observation.
 These are admission checks, not proof that the desktop cannot change afterward.
 The agent still verifies the intended app effect and honors user takeover/Stop.
 
-Cua can exit0 with a refusal or an unverifiable result. The adapter parses these
+Window geometry commands use exact observed window metadata; their desktop-point
+coordinates are not misclassified as screenshot pixels. Cua can exit0 with a refusal
+or an unverifiable result. An action object without an affirmative outcome marker
+is also `outcomeUnknown`, while marker-free observation payloads remain valid. The adapter parses these
 outcomes: refusal is not success, and `unverifiable`/partial results remain
 `outcomeUnknown`. It never retries a mutation. Waiter cancellation does not kill
 an already-admitted CLI call; Stop prevents subsequent actions and waits for that
@@ -92,7 +100,10 @@ layer-zero windows; inactive utility/menu surfaces cannot fill the bounded list.
 Each entry includes source kind and logical width/height in points. App/title text
 is bounded display metadata, never a target re-resolution mechanism. Capture handles are not input grants.
 Four authenticated connections and four pending handshakes are bounded separately;
-only a started stream reserves the one global native-capture slot.
+only a started stream reserves the one global native-capture slot. The slot retains
+pending handshake tasks through validation and deadline completion. Service retirement
+closes admission, cancels pending validation and joins it before unregistering;
+a closed-slot check alone is not a completed admission lifetime.
 
 Control JSON is nonempty UTF-8 and at most65,536 bytes. All requests carry version1,
 operation and loadID. Except hello, they carry issued bootID/connectionID/sessionID.
@@ -181,7 +192,10 @@ viewing. First visible lease starts capture; last lease closes pixels and suspen
 it. Browser/native viewers share budgets and the same native layout/decode/activity
 owners. Historical installation and reconnect do no hidden work. Input coordinates
 come from Cua's own current observation, not the phone video's crop or scale.
-Capture failure preserves a finite cause separately from cleanup diagnostics;
+Capture failure closes producer admission separately from transport revocation.
+The service can return only a finite, pixel-free failure to the still-current peer;
+peer loss or explicit retirement continues to fence all ordinary replies. Capture
+failure preserves a finite cause separately from cleanup diagnostics;
 Gateway retains only a bounded, short-lived classification for the ended reference.
 iOS shows that safe cause, not the model's alternative text or a raw native error.
 Transient frame GETs may retry within a small fixed budget on the same lease;
