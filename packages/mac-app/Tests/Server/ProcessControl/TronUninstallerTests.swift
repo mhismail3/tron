@@ -32,7 +32,7 @@ struct TronUninstallerTests {
         #expect(FileManager.default.fileExists(atPath: setup.bearerTokenPath.path))
     }
 
-    @Test("native helper unregister failure preserves local state after gateway removal")
+    @Test("native retirement failure preserves Gateway registration and local state")
     func nativeUnregisterFailurePreservesState() async throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
@@ -41,8 +41,46 @@ struct TronUninstallerTests {
         try createFixtureFile(setup.onboardedMarkerPath, contents: "keep")
         setup.unregisterNativeHost = { throw NativeHostError.serviceUnavailable }
         let outcome = await TronUninstaller.unregisterAndClean(setup: setup)
-        #expect(manager.calls.map(\.kind) == [.unload])
+        #expect(manager.calls.isEmpty)
         if case .launchdRefused = outcome {} else { Issue.record("Native unregister failure was hidden") }
+        #expect(FileManager.default.fileExists(atPath: setup.onboardedMarkerPath.path))
+    }
+
+    @Test("uninstall waits for native retirement before touching Gateway or files")
+    func heldNativeRetirementPrecedesServiceMutation() async throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let manager = MockLaunchAgentManager()
+        let gate = NativeUninstallGate()
+        var setup = makeSetup(tmp: tmp, manager: manager)
+        try createFixtureFile(setup.onboardedMarkerPath, contents: "keep until joined")
+        setup.unregisterNativeHost = { await gate.hold() }
+        let acceptedSetup = setup
+        let work = Task { await TronUninstaller.unregisterAndClean(setup: acceptedSetup) }
+        await gate.waitUntilEntered()
+        #expect(manager.calls.isEmpty)
+        #expect(FileManager.default.fileExists(atPath: setup.onboardedMarkerPath.path))
+        await gate.release()
+        #expect(await work.value == .ok)
+        #expect(manager.calls.map(\.kind) == [.unload])
+        #expect(!FileManager.default.fileExists(atPath: setup.onboardedMarkerPath.path))
+    }
+
+    @Test("ambiguous notFound helper status preserves uninstall services and files")
+    func ambiguousNativeStatusDoesNotUninstall() async throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let manager = MockLaunchAgentManager()
+        var setup = makeSetup(tmp: tmp, manager: manager)
+        try createFixtureFile(setup.onboardedMarkerPath, contents: "preserve")
+        setup.unregisterNativeHost = {
+            try await NativeHostRetirementPolicy.drain(status: .notFound) {
+                Issue.record("Ambiguous status must not open a native drain connection")
+            }
+        }
+        let result = await TronUninstaller.unregisterAndClean(setup: setup)
+        if case .launchdRefused = result {} else { Issue.record("Ambiguous status was reported as retired") }
+        #expect(manager.calls.isEmpty)
         #expect(FileManager.default.fileExists(atPath: setup.onboardedMarkerPath.path))
     }
 
@@ -179,4 +217,19 @@ struct TronUninstallerTests {
         )
         _ = FileManager.default.createFile(atPath: path.path, contents: Data(contents.utf8))
     }
+}
+
+private actor NativeUninstallGate {
+    private var pending: CheckedContinuation<Void, Never>?
+    private var entered: CheckedContinuation<Void, Never>?
+    private var started = false
+    func hold() async {
+        started = true; entered?.resume(); entered = nil
+        await withCheckedContinuation { pending = $0 }
+    }
+    func waitUntilEntered() async {
+        if started { return }
+        await withCheckedContinuation { entered = $0 }
+    }
+    func release() { pending?.resume(); pending = nil }
 }

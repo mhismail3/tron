@@ -104,6 +104,7 @@ import type { NotificationService } from "../notifications/notification-service.
 import type { GatewayWorkHandle, GatewayWorkKind, GatewayWorkRegistry } from "./gateway-work-registry.js";
 import { createTronNotifyExtension, notifyTronAgentTerminal, type AgentTerminalOutcome } from "../notifications/tron-notify-extension.js";
 import { createTronDisplayExtension } from "../display/tron-display-extension.js";
+import { createTronNativeCaptureExtension } from "../display/tron-native-capture-extension.js";
 import { createTronScheduleExtension, type ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
@@ -1209,6 +1210,10 @@ export class RuntimeSlot {
                 internalFilesRoot: () => this.dependencies.workspace.filesRoot(),
               }),
             },
+            ...(this.dependencies.browserLiveViews ? [{
+              name: "tron-native-capture",
+              factory: createTronNativeCaptureExtension({ sessionId: () => this.id, views: this.dependencies.browserLiveViews }),
+            }] : []),
             ...(this.dependencies.scheduleToolOperations ? [{
               name: "tron-schedule",
               factory: createTronScheduleExtension({

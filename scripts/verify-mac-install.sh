@@ -46,6 +46,11 @@ else
   fail "Tron Native Host executable missing"
 fi
 verify_codesign "$NATIVE_HOST" "Tron Native Host.app"
+NATIVE_CLIENT="$APP/Contents/Library/Native/tron-native-capture.node"
+verify_codesign "$NATIVE_CLIENT" "native capture client"
+CLIENT_ARCHS="$(lipo -archs "$NATIVE_CLIENT" 2>/dev/null || true)"
+[[ "$CLIENT_ARCHS" == "x86_64 arm64" || "$CLIENT_ARCHS" == "arm64 x86_64" ]] \
+  && pass "native capture client is universal" || fail "native capture client architectures invalid"
 if python3 "$(dirname "$0")/validate-native-host.py" --app "$APP" >/dev/null 2>&1; then
   pass "native helper and Aqua Mach service composition"
 else

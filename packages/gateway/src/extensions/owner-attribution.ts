@@ -78,19 +78,12 @@ export function attributeExtensions(base: LoadExtensionsResult, browserLiveView?
   if (bashOwners.length > 0) {
     throw new GatewayError("conflict", "The bash tool name is reserved by Tron");
   }
-  const notifyOwners = base.extensions.filter((extension) => extension.tools.has("notify"));
-  if (notifyOwners.some((extension) => extension.path !== "<inline:tron-notify>")) {
-    throw new GatewayError("conflict", "The notify tool name is reserved by Tron");
-  }
-  if (notifyOwners.filter((extension) => extension.path === "<inline:tron-notify>").length > 1) {
-    throw new GatewayError("conflict", "The first-party notify tool was registered more than once");
-  }
-  const displayOwners = base.extensions.filter((extension) => extension.tools.has("display"));
-  if (displayOwners.some((extension) => extension.path !== "<inline:tron-display>")) {
-    throw new GatewayError("conflict", "The display tool name is reserved by Tron");
-  }
-  if (displayOwners.filter((extension) => extension.path === "<inline:tron-display>").length > 1) {
-    throw new GatewayError("conflict", "The first-party display tool was registered more than once");
+  for (const [tool, owner] of [["notify", "tron-notify"], ["display", "tron-display"], ["native_capture", "tron-native-capture"]] as const) {
+    const owners = base.extensions.filter((extension) => extension.tools.has(tool));
+    if (owners.some((extension) => extension.path !== `<inline:${owner}>`)) {
+      throw new GatewayError("conflict", `The ${tool} tool name is reserved by Tron`);
+    }
+    if (owners.length > 1) throw new GatewayError("conflict", `The first-party ${tool} tool was registered more than once`);
   }
   for (const extension of base.extensions) {
     for (const [event, handlers] of extension.handlers) {

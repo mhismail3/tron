@@ -38,6 +38,17 @@ that projection before a replacement is ready. The completed app uses only those
 embedded runtimes for supervised work and does not consult Homebrew, NVM, or the
 destination checkout's `.ci-tools` cache.
 
+The Mac app build compiles the universal C Node-API8 capture client and places it
+beside the helper at `Contents/Library/Native/tron-native-capture.node`, with its
+production input manifest. `native-gateway-client/build.py` checks the four
+Node22.22.0 C header SHA-256 pins and freezes its production inputs. The normal
+nested signing phase signs the client before the outer app seals it. No library
+validation entitlement is disabled. Gateway source-only updates never touch this
+Mac-owned native client; native changes require a manual Mac app update. An absent
+or incompatible client makes only capture unavailable, not the whole Gateway. See
+[direct capture client ownership](computer-control.md#direct-gateway-capture-client) for
+local-only cleanup versus remote Stop, test artifacts and qualification gates.
+
 `config/PushService.xcconfig` is the one maintainer-owned public Push service
 origin consumed by both iOS and this bundled Gateway. Development may stage an
 unconfigured **dev-channel** payload with `--allow-unconfigured-push`; push then
@@ -258,8 +269,9 @@ the display name alone or merge Debug and Stable bundle identifiers to hide rows
 
 After granting Screen Recording, macOS may restart only the wrapper while the
 native helper remains alive. If Settings shows the current Tron entry enabled but
-Tron's own row remains ungranted, explicitly restart the permission-only helper
-and re-check. Do not restart the Gateway or reset working grants as a workaround.
+Tron's own row remains ungranted, use **Permissions… → Restart Helper**, which
+joins native retirement before unregister/register, then re-check. A pending or
+failed drain is not permission to quit/kill the helper. Do not restart the Gateway or reset working grants as a workaround.
 A still-failing fresh helper requires diagnosis, not repeated permission toggles.
 
 Users who no longer use development/qualification builds can remove these old
@@ -269,6 +281,7 @@ permission-list entries through System Settings's minus control:
 - `TronMac` / `com.tron.mac.dev` (development wrapper)
 - `TronComputerUseQualification` / `com.tron.qualification.computer-use`
 - `TronNativeObserverQualification` / `com.tron.qualification.native-observer`
+- `TronNativeCaptureQualification` / `com.tron.qualification.native-capture`
 
 This revokes only those old/test grants; it is not deletion of sessions or apps.
 Keep unrelated apps and the current Stable identities. Do not use a global TCC
@@ -299,11 +312,32 @@ session JSONL, provider credentials and runtime settings stay separately under
 `~/.pi/agent` (Debug: `~/.pi/agent-dev`); do not remove those either. Application
 replacement and local settings/credential reset do not delete the internal
 workspace. See the [workspace ownership and restore contract](../../gateway/docs/internal-workspace.md).
-When replacing an already-installed app, first wait for active runs to finish,
-choose **Pause Tron** from the Mac menu bar, and quit the wrapper. Stop any
-legacy Debug SMAppService separately; Release installation never takes over or
-mutates Debug lifecycle. Then build a
-Release app with an explicit derived-data directory:
+Build and validate the replacement artifact first; source preparation does not
+require changing the running services. Before replacing an already-installed app,
+the user must complete this sequence using the **old installed wrapper**:
+
+1. Wait for active agent work to finish.
+2. Open **Permissions… → Disable Helper for Update** and wait for successful
+   native drain and unregister. A pending/failed result stops the update. Neither
+   Gateway Pause, wrapper quit, process absence nor an elapsed timer substitutes
+   for joined native retirement.
+3. Only after that succeeds, choose **Pause Tron** and quit the wrapper. Stop any
+   legacy Debug SMAppService separately; Release never takes over Debug lifecycle.
+4. Replace the application in Finder, then launch the new installed copy.
+
+Old and new wrapper/helper builds pin each other's signed code hashes. If the app
+was replaced before this drain, the new wrapper may be unable to contact the old
+helper. Do not weaken the pins, force unregister/kill surviving work, or assume
+Restart Helper repairs that mismatch. If an older installed build lacks the
+pre-update control, stop for an explicitly reviewed maintainer bootstrap based on
+that build's actual capabilities; the capture-owning sequence cannot be skipped.
+Likewise, a `.notFound`/unknown native-service status refuses drain without XPC,
+registration or Gateway/file changes. Some never-registered optional helpers can
+report `.notFound`; successful uninstall/refresh for that first-install case is
+an open availability gate, not evidence that native work has retired. Do not
+register a helper or infer absence just to bypass the refusal.
+
+Prepare a Release app with an explicit derived-data directory:
 
 ```bash
 scripts/tron mac generate
@@ -311,12 +345,13 @@ cd packages/mac-app
 xcodebuild -project TronMac.xcodeproj -scheme TronMac \
   -configuration Release -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath /tmp/tron-mac-release build
-open /tmp/tron-mac-release/Build/Products/Release/Tron.app
 ```
 
 In Finder, replace `/Applications/Tron.app` with that built `Tron.app`, then
-launch it. The existing onboarding marker keeps the wrapper in menu-bar mode;
-choose **Resume Tron** so macOS registers the new bundled LaunchAgent plist
+launch it after the old-wrapper sequence above. The existing onboarding marker
+keeps the wrapper in menu-bar mode. Explicitly enable the new native helper in
+**Permissions…** when native capture is wanted; enabling does not request new TCC
+grants. Choose **Resume Tron** so macOS registers the new bundled LaunchAgent plist
 and starts the new helper. Approve Tron Agent under System Settings → General →
 Login Items if macOS asks. Wait for the menu-bar status to report Running before
 reconnecting iOS. Pause/Resume is intentional here: it reloads the plist and

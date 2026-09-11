@@ -1,0 +1,9 @@
+{
+  "version": "22.22.0",
+  "sha256": {
+    "node_api.h": "d14db85d16f182045c42745a6e44b96e932dfe6e3bfcaac7a1096fae8412c579",
+    "node_api_types.h": "8d5d854088d5725fec9775510e0aeeeb790a41ad083c49bb721d950b86e6bd61",
+    "js_native_api.h": "c024813df81c100be91fa339b57294fbf5cca3a93b9c91775db9e886dedad114",
+    "js_native_api_types.h": "0410c31e227f81e2981363c4d543f4832ac3df785343ec64cee621742ff8a034"
+  }
+}

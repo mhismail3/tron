@@ -27,7 +27,7 @@ struct MacPermissionProbeTests {
         let root = TestTempDir.make()
         defer { TestTempDir.cleanup(root) }
         let base = try NativeHostTrust.requirement(identifier: NativeHostTrust.bundleIdentifier, team: "EXAMPLE123")
-        #expect(throws: NativeHostTrustError.self) { try NativeHostTrust.pin(base, to: root) }
+        #expect(throws: NativeCodeSigningError.self) { try NativeCodeSigning.pin(base, to: root) }
     }
 
     @Test("optional native pre-consent cannot block or satisfy core setup")

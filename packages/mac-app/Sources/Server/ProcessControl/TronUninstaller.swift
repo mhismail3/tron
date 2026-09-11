@@ -21,13 +21,15 @@ enum TronUninstaller {
                 message: "This Xcode Debug wrapper is in companion mode and cannot uninstall the production Tron Agent."
             )
         }
+        // The old authenticated wrapper must finish native retirement before
+        // changing either service; Gateway departure alone is not capture Stop.
+        do { try await setup.unregisterNativeHost() }
+        catch { return .launchdRefused(message: "Tron's native helper could not be retired. Gateway registration and local state were preserved.") }
+
         let outcome = await setup.launchAgentManager.unload(label: setup.launchAgentLabel)
         guard outcome.isSuccessfulUninstall else {
             return outcome
         }
-
-        do { try await setup.unregisterNativeHost() }
-        catch { return .launchdRefused(message: "Tron's native helper could not be unregistered. Local state was preserved.") }
 
         // Stable uninstall owns only the stable services. Developer-owned
         // Debug registration, data, credentials, and sessions are untouched.

@@ -95,8 +95,9 @@ reports enabled. Approval itself never queues a delayed TCC request: the user th
 chooses the explicit permission action. Once approved, launchd owns
 activation and singleton lifetime across menu closure and login. Probes may wake
 an already registered service but never register it, request TCC, or restart the
-Gateway. Explicit uninstall unregisters the native service before local cleanup;
-a failure preserves local state. The helper queries Accessibility, Input Monitoring,
+Gateway. Explicit uninstall first joins native retirement and unregisters that
+helper, then removes the Gateway service and local runtime files. Native retirement
+failure preserves Gateway registration and local state. The helper queries Accessibility, Input Monitoring,
 and Screen Recording from its own signed process, so a wrapper Boolean or the
 Node Gateway cannot become permission authority. FDA remains the wrapper's
 existing filesystem probe.
@@ -128,16 +129,36 @@ action available, including when only Screen Recording still reports unavailable
 Screen Recording may be attributed to the responsible outer Tron app while AX is
 attributed to the native host; macOS restarting only the outer app after a grant
 can leave the existing host with an old preflight result. Restart Helper joins
-locally accepted consent,
-unregisters before registering, stops at the first error, and never itself asks
-for TCC. It is not an automatic update/relaunch guarantee. Before adding input
+locally accepted consent and native capture retirement, unregisters before
+registering, stops at the first error, and never itself asks for TCC. **Disable
+Helper for Update** performs joined drain/unregister without re-enabling, using
+the old authenticated wrapper before application replacement. It is not an automatic update/relaunch guarantee. Before adding input
 execution, this lifecycle boundary must also join the native input owner; the
 current service has no input work. Debug/read-only wrapper modes cannot request
 permissions or activate the Stable helper. Actual signed-service TCC attribution, update/relaunch behavior
 and background approval require release qualification; the separate observation
-qualification app's grant is not assumed to transfer. The helper is deliberately limited to readiness/probes and
-explicit permission requests; it contains no tap, capture, input, tool, or Gateway
-lifecycle implementation.
+qualification app's grant is not assumed to transfer.
+
+Capture has a distinct `com.tron.mac.native-host.capture` Mach service in the same
+Aqua process. Its single shared Objective-C protocol is implemented in the inert
+`TronNativeCaptureHost` static library; only the executable starts listeners. The
+library can therefore be linked into offline tests without activating a helper.
+The capture role independently authenticates its actual XPC peer against current
+Stable job/process/payload provenance and signed Node bytes; it cannot request
+permissions or service lifecycle changes. Opaque capture-only catalogs, one native
+stream, bounded reads, demand expiry and joined retirement are specified in the
+[installed capture wire contract](computer-control.md#installed-capture-wire-contract).
+
+The API-versioned Node-API client is bundled beside the host in `Contents/Library/Native`,
+not in a Gateway payload. The Gateway's capture transport loads that fixed client
+only when requested. Its absence does not prevent ordinary Gateway startup or
+source updates. Native client/helper changes use the manual Mac app update path.
+
+The `native_capture` tool and the shared Gateway/iOS viewer use this capture path;
+selected targets survive clean visibility suspension without retaining active
+streams. No native input backend is exposed. Building source does not update an
+installed helper. Actual signed-peer, installed-service and real-window/mobile
+qualification remain release gates.
 
 ## Wizard installation
 
@@ -403,7 +424,7 @@ owner lock serializes dependency installation and bundle publication. The bundle
 is assembled and fully verified under a private source-local root; only then are
 the prior payload, launcher, and icon moved to a rollback root and the replacement
 renamed into place. Signal/error cleanup restores the prior projection, so a
-cancelled Xcode build cannot leave the source-checkout migration payload half
+cancelled Xcode build cannot leave the source-checkout prepared payload half
 written. The verification-only path remains lock-free and read-only.
 
 The same immutable runtime boundary contains the pinned universal XcodeGen

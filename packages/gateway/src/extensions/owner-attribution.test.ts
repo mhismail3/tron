@@ -22,14 +22,14 @@ describe("extension owner attribution", () => {
     expect(() => attributeExtensions({ extensions: [extension as any], errors: [], runtime: {} as any })).toThrow(/reserved/);
   });
 
-  it("rejects project tools that collide with Tron's reserved display capability", () => {
+  it.each(["display", "native_capture"])("rejects project tools that collide with Tron's reserved %s capability", (tool) => {
     const extension = {
-      path: "/project/display.ts", resolvedPath: "/project/display.ts",
-      sourceInfo: { path: "/project/display.ts", source: "project", scope: "project", origin: "top-level" },
-      handlers: new Map(), tools: new Map([["display", { definition: { execute: async () => ({ content: [] }) } }]]),
+      path: `/project/${tool}.ts`, resolvedPath: `/project/${tool}.ts`,
+      sourceInfo: { path: `/project/${tool}.ts`, source: "project", scope: "project", origin: "top-level" },
+      handlers: new Map(), tools: new Map([[tool, { definition: { execute: async () => ({ content: [] }) } }]]),
       commands: new Map(), shortcuts: new Map(), messageRenderers: new Map(), entryRenderers: new Map(),
     };
-    expect(() => attributeExtensions({ extensions: [extension as any], errors: [], runtime: {} as any })).toThrow(/display tool name is reserved/);
+    expect(() => attributeExtensions({ extensions: [extension as any], errors: [], runtime: {} as any })).toThrow(`${tool} tool name is reserved`);
   });
 
   it("resolves finalized package provenance for callbacks and tool/command lookups", async () => {

@@ -12,45 +12,6 @@ enum LaunchAgentOutcome: Equatable, Sendable {
     case unknown(message: String)
 }
 
-struct LaunchAgentRuntimeInfo: Equatable, Sendable {
-    var pid: Int?
-    var uptime: String?
-    var parentBundleIdentifier: String?
-    var parentBundleVersion: String?
-    var executablePath: String?
-    var bundleProgram: String?
-    /// Exact `ps -ww` command for the launchd-owned PID. Relative
-    /// BundleProgram metadata alone cannot prove which payload was exec'd.
-    var processCommand: String?
-    var gatewaySupervisionMarker: String?
-    var gatewayChannelMarker: String?
-    var needsLaunchConstraintRefresh: Bool
-
-    init(
-        pid: Int? = nil,
-        uptime: String? = nil,
-        parentBundleIdentifier: String? = nil,
-        parentBundleVersion: String? = nil,
-        executablePath: String? = nil,
-        bundleProgram: String? = nil,
-        processCommand: String? = nil,
-        gatewaySupervisionMarker: String? = nil,
-        gatewayChannelMarker: String? = nil,
-        needsLaunchConstraintRefresh: Bool = false
-    ) {
-        self.pid = pid
-        self.uptime = uptime
-        self.parentBundleIdentifier = parentBundleIdentifier
-        self.parentBundleVersion = parentBundleVersion
-        self.executablePath = executablePath
-        self.bundleProgram = bundleProgram
-        self.processCommand = processCommand
-        self.gatewaySupervisionMarker = gatewaySupervisionMarker
-        self.gatewayChannelMarker = gatewayChannelMarker
-        self.needsLaunchConstraintRefresh = needsLaunchConstraintRefresh
-    }
-}
-
 /// Registration decision from one status/runtime snapshot, application identity,
 /// helper presence and wrapper authority. Only real operations enter the list;
 /// execution never re-derives policy between them.

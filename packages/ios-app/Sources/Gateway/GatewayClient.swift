@@ -538,7 +538,7 @@ actor GatewayClient {
     private let uuidSource: UUIDSource
     private let frameDecoder: GatewayFrameDecoder
     private let boundedHTTPDataTransport: BoundedHTTPDataTransport
-    private let browserLiveTransport: BoundedHTTPDataTransport
+    private let liveViewTransport: BoundedHTTPDataTransport
     private let boundedHTTPUploadTransport: BoundedHTTPUploadTransport
     private let boundedHTTPFileTransport: BoundedHTTPFileTransport
     private let performanceSignposts: any PerformanceSignposting
@@ -674,7 +674,7 @@ actor GatewayClient {
         uuidSource: UUIDSource = .random,
         frameDecoder: GatewayFrameDecoder = .gateway,
         boundedHTTPDataTransport: BoundedHTTPDataTransport = .urlSession,
-        browserLiveTransport: BoundedHTTPDataTransport = .noRedirects,
+        liveViewTransport: BoundedHTTPDataTransport = .noRedirects,
         boundedHTTPUploadTransport: BoundedHTTPUploadTransport = .urlSession,
         boundedHTTPFileTransport: BoundedHTTPFileTransport = .urlSession,
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
@@ -687,7 +687,7 @@ actor GatewayClient {
         self.uuidSource = uuidSource
         self.frameDecoder = frameDecoder
         self.boundedHTTPDataTransport = boundedHTTPDataTransport
-        self.browserLiveTransport = browserLiveTransport
+        self.liveViewTransport = liveViewTransport
         self.boundedHTTPUploadTransport = boundedHTTPUploadTransport
         self.boundedHTTPFileTransport = boundedHTTPFileTransport
         self.performanceSignposts = performanceSignposts
@@ -1239,13 +1239,15 @@ actor GatewayClient {
         return value
     }
 
-    func openBrowserLiveView(
+    func openLiveView(
+        kind: DisplayKind,
         viewId: String,
         generation: String,
         sessionID: String,
         profileID: String
-    ) async throws -> BrowserLiveLease {
-        guard info?.capabilities.contains("browser-live-view.v1") == true else { throw BrowserLiveError.ended }
+    ) async throws -> LiveLease {
+        guard let capability = kind.liveViewCapability,
+              info?.capabilities.contains(capability) == true else { throw LiveError.ended }
         guard let profile, profile.id == profileID, let token,
               let url = Self.liveViewPath(viewId: viewId, sessionID: sessionID).flatMap({ profile.httpURL(path: $0) }) else { throw CancellationError() }
         try Task.checkCancellation()
@@ -1257,11 +1259,17 @@ actor GatewayClient {
         request.httpBody = body
         request.setValue(String(body.count), forHTTPHeaderField: "Content-Length")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let (data, http) = try await browserLiveTransport.data(for: request, maximumBytes: 64 * 1_024)
-        guard http.statusCode == 200, http.url == url else { throw BrowserLiveError.ended }
-        let wire = try JSONDecoder.gateway.decode(BrowserLiveLease.Wire.self, from: data)
-        guard wire.descriptor.viewId == viewId, wire.descriptor.generation == generation else { throw BrowserLiveError.invalidResponse }
-        let lease = try BrowserLiveLease(wire: wire, request: request, transport: browserLiveTransport)
+        let (data, http) = try await liveViewTransport.data(for: request, maximumBytes: 64 * 1_024)
+        guard http.statusCode == 200, http.url == url else { throw LiveError.ended }
+        let wire = try JSONDecoder.gateway.decode(LiveLease.Wire.self, from: data)
+        let lease = try LiveLease(wire: wire, request: request, transport: liveViewTransport)
+        // A valid lease from the wrong producer is never a browser/native alias.
+        // It still owns cancellation-independent cleanup at the original origin.
+        guard wire.descriptor.schema == kind.liveViewSchema,
+              wire.descriptor.viewId == viewId, wire.descriptor.generation == generation else {
+            await lease.close()
+            throw LiveError.invalidResponse
+        }
         guard !Task.isCancelled, self.profile?.id == profileID, connection?.id == connectionID else {
             await lease.close()
             throw CancellationError()

@@ -5651,18 +5651,18 @@ export default function (pi) {
     await lease.release();
   });
 
-  it("authorizes live views only from admitted display results on the exact canonical branch", async () => {
-    const fixture = await coldFixture("active-browser-display-branch");
+  it.each(["browser_live", "native_live"])("authorizes %s views only from admitted display results on the exact canonical branch", async (kind) => {
+    const fixture = await coldFixture("active-live-display-branch");
     fixture.manager.appendMessage({ role: "user", content: "root", timestamp: Date.now() });
     const root = fixture.manager.getEntries().at(-1)!;
     const result = (viewId: string, toolName = "display") => ({
       role: "toolResult" as const, toolCallId: viewId, toolName, isError: false, timestamp: Date.now(),
       content: [{ type: "text" as const, text: "Displayed" }],
       details: { display: { schema: "tron.display.v1", displayId: viewId, revision: 1,
-        title: "Browser", altText: "Browser", kind: "browser_live",
+        title: "Window", altText: "Window", kind,
         presentation: { requestedSurface: "sheet", inlineTapAction: "sheet" },
         eligibleSurfaces: ["sheet", "floating"], fallbackText: "Unavailable",
-        liveView: { schema: "tron.browser-live-view.v1", viewId, generation: "generation",
+        liveView: { schema: kind === "native_live" ? "tron.native-live-view.v1" : "tron.browser-live-view.v1", viewId, generation: "generation",
           title: "Browser", fallbackText: "Unavailable" } } },
     });
     fixture.manager.appendMessage(result("abandoned"));

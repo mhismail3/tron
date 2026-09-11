@@ -53,18 +53,7 @@ struct GatewayPayloadStore {
         versionsRoot.appendingPathComponent(version, isDirectory: true)
     }
 
-    static func channel(environment: [String: String]) -> String {
-        let value = environment[TronPaths.gatewayChannelEnv] ?? "stable"
-        return validChannel(value) ? value : "stable"
-    }
-
-    static func validChannel(_ value: String) -> Bool {
-        value == "stable" || value == "dev"
-    }
-
-    static func selected(home: URL = TronPaths.tronHome, environment: [String: String]) -> GatewayPayloadStore {
-        GatewayPayloadStore(home: home, channel: channel(environment: environment))
-    }
+    static func validChannel(_ value: String) -> Bool { value == "stable" || value == "dev" }
 
     static func validComponent(_ value: String, maximumLength: Int) -> Bool {
         guard !value.isEmpty, value.utf8.count <= maximumLength,

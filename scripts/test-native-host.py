@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 import plistlib
 import tempfile
@@ -23,6 +24,9 @@ class NativeCompositionTests(unittest.TestCase):
         executable.parent.mkdir(parents=True)
         executable.write_text('offline fixture; never executed')
         executable.chmod(0o700)
+        (self.app / validator.CLIENT).write_bytes(b'offline fixture' * 100)
+        (self.app / validator.CLIENT_INPUTS).write_text(json.dumps({
+            'schema': 1, 'testOnly': False, 'inputs': {'fixture': '0' * 64}}))
 
     def tearDown(self):
         self.temp.cleanup()
@@ -60,6 +64,25 @@ class NativeCompositionTests(unittest.TestCase):
             self.put(self.agent, altered)
             with self.assertRaises(ValueError):
                 validator.validate(self.app)
+
+    def test_capture_role_is_required_and_not_a_permission_alias(self):
+        for services in [{validator.SERVICE: True},
+                         {validator.SERVICE: True, validator.CAPTURE_SERVICE: False},
+                         {validator.SERVICE: True, validator.CAPTURE_SERVICE: 1},
+                         {validator.SERVICE: True, validator.CAPTURE_SERVICE: True, 'extra': True}]:
+            altered = dict(validator.AGENT, MachServices=services)
+            self.put(self.agent, altered)
+            with self.assertRaises(ValueError):
+                validator.validate(self.app)
+
+    def test_missing_or_test_only_client_is_rejected(self):
+        path = self.app / validator.CLIENT_INPUTS
+        path.write_text(json.dumps({'schema': 1, 'testOnly': True, 'inputs': {'fixture': '0' * 64}}))
+        with self.assertRaisesRegex(ValueError, 'production input manifest'):
+            validator.validate(self.app)
+        path.unlink()
+        with self.assertRaises(FileNotFoundError):
+            validator.validate(self.app)
 
     def test_symlink_or_wrong_team_cannot_pass(self):
         executable = self.app / validator.EXECUTABLE

@@ -18,19 +18,34 @@ enum NativeHostRegistrationPolicy {
     }
 }
 
+/// ServiceManagement status is not generic native-quiescence evidence. Only the
+/// existing no-registration policy skips a join; missing/unknown metadata refuses
+/// the operation rather than probing or implicitly enabling a helper to proceed.
+enum NativeHostRetirementPolicy {
+    static func drain(status: SMAppService.Status, join: () async throws -> Void) async throws {
+        switch status {
+        case .notRegistered: return
+        case .enabled, .requiresApproval: try await join()
+        case .notFound: throw NativeHostError.serviceUnavailable
+        @unknown default: throw NativeHostError.serviceUnavailable
+        }
+    }
+}
+
 /// Real platform operations are injected at one boundary. Tests never register
 /// services, create XPC connections or ask the operating system for consent.
 struct NativeHostOperations: Sendable {
     let state: @Sendable () async -> NativeHostServiceState
     let enable: @Sendable () async throws -> Void
     let unregister: @Sendable () async throws -> Void
+    let drain: @Sendable () async throws -> Void
     let probe: @Sendable () async -> [Permission: PermissionStatus]
     let request: @Sendable (Permission, UUID) async -> PermissionStatus
 
     static let live: Self = {
         let io = NativeHostPlatform(bundle: TronPaths.nativeHostBundle)
         return Self(state: { await io.state() }, enable: { try await io.enable() },
-                    unregister: { try await io.unregister() }, probe: { await io.probe() },
+                    unregister: { try await io.unregister() }, drain: { try await io.drain() }, probe: { await io.probe() },
                     request: { await io.request($0, id: $1) })
     }()
 }
@@ -66,9 +81,12 @@ actor NativeHostCoordinator {
             switch kind {
             case .enable: try await operations.enable()
             case .refresh:
+                try await operations.drain()
                 try await operations.unregister()
                 try await operations.enable()
-            case .unregister: try await operations.unregister()
+            case .unregister:
+                try await operations.drain()
+                try await operations.unregister()
             }
             return await operations.state()
         }
@@ -127,6 +145,21 @@ private struct NativeHostPlatform: Sendable {
         if service.status != .notRegistered { try await service.unregister() }
     }
 
+    func drain() async throws {
+        guard TronPaths.canManageLaunchAgent else { throw NativeHostError.serviceUnavailable }
+        try await NativeHostRetirementPolicy.drain(
+            status: SMAppService.agent(plistName: NativeHostTrust.launchAgentPlistName).status
+        ) {
+            let connection = try connect()
+            defer { connection.invalidate() }
+            let reply = NativeHostReply<Bool>()
+            guard let service = connection.service(onError: { reply.resolve(false) }) else { throw NativeHostError.retirementFailed }
+            service.prepareForServiceRetirement { reply.resolve($0) }
+            // No timeout, forced kill, or cancellation can stand in for native join.
+            guard await reply.value() else { throw NativeHostError.retirementFailed }
+        }
+    }
+
     func probe() async -> [Permission: PermissionStatus] {
         guard !Task.isCancelled, let connection = try? connect() else { return NativeHostCoordinator.unavailable }
         defer { connection.invalidate() }
@@ -162,7 +195,7 @@ private struct NativeHostPlatform: Sendable {
     }
 
     private func connect() throws -> NativeHostConnection {
-        let requirement = try NativeHostTrust.pin(NativeHostTrust.hostCodeSigningRequirement, to: bundle)
+        let requirement = try NativeCodeSigning.pin(NativeHostTrust.hostCodeSigningRequirement, to: bundle)
         let connection = NSXPCConnection(machServiceName: NativeHostTrust.machServiceName)
         connection.setCodeSigningRequirement(requirement)
         connection.remoteObjectInterface = NSXPCInterface(with: NativeHostPermissionService.self)
@@ -210,12 +243,13 @@ final class NativeHostReply<Value: Sendable>: @unchecked Sendable {
 }
 
 enum NativeHostError: Error, LocalizedError {
-    case bundleUnavailable, serviceUnavailable, busy
+    case bundleUnavailable, serviceUnavailable, busy, retirementFailed
     var errorDescription: String? {
         switch self {
         case .bundleUnavailable: "The bundled native helper could not be verified, or this app cannot manage it. Use the installed signed Release app."
         case .serviceUnavailable: "The native helper is unavailable. Check Tron's background-item approval in System Settings."
         case .busy: "Another native setup operation is still running. Wait for it to finish before retrying."
+        case .retirementFailed: "The native helper did not confirm capture retirement. No service changes were made. Keep the owning helper alive; use the authenticated old app to disable it before replacing Tron.app."
         }
     }
 }

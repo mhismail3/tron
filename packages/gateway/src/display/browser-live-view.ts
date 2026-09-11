@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
 import { GatewayError } from "../errors.js";
 import { observeBrowserCDP, type CapturedBrowserFrame } from "./browser-live-cdp.js";
+import { NATIVE_LIVE_VIEW_SCHEMA, nativeLiveClientFactory, observeNativeWindow, type NativeLiveClient, type NativeLiveClientFactory } from "./native-live-view.js";
+import type { NativeCaptureSource } from "../machine/native-capture-client.js";
 
 export function browserCDPEndpoint(value: string): URL {
   let endpoint: URL;
@@ -32,6 +34,21 @@ export interface BrowserLiveViewDescriptor {
   title: string;
   fallbackText: string;
 }
+export interface NativeLiveViewDescriptor extends Omit<BrowserLiveViewDescriptor, "schema"> {
+  schema: typeof NATIVE_LIVE_VIEW_SCHEMA;
+}
+export type LiveViewDescriptor = BrowserLiveViewDescriptor | NativeLiveViewDescriptor;
+interface NativeCatalog {
+  loadToken: string;
+  client: Promise<NativeLiveClient>;
+  sources: Promise<readonly NativeCaptureSource[]>;
+  close: () => Promise<void>;
+}
+interface NativeLiveViewRegistration extends Omit<BrowserLiveViewRegistration, "cdpUrl"> {
+  native: NativeCatalog;
+  handle: string;
+}
+type Registration = BrowserLiveViewRegistration | NativeLiveViewRegistration;
 export interface BrowserLiveViewRegistration {
   sessionId: string;
   viewId: string;
@@ -44,7 +61,7 @@ export interface BrowserLiveViewRegistration {
 }
 interface Viewer { leaseId: string; viewerId: string; lastSeenAt: number; delivery?: { cancel: () => void } }
 interface View {
-  registration: BrowserLiveViewRegistration;
+  registration: Registration;
   viewers: Map<string, Viewer>;
   latest: BrowserLiveViewFrame | undefined;
   observer: ReturnType<typeof observeBrowserCDP> | undefined;
@@ -63,8 +80,9 @@ function bounded(value: unknown, maximum: number): value is string {
     && !/[\u0000-\u001f\u007f]/.test(value);
 }
 
-/** Disposable observer ownership only. The provider remains the sole browser
- * authority. No registration launches, reconnects, journals or caches frames. */
+/** Shared disposable viewer ownership. The browser provider owns automation;
+ * the Native Host owns selected windows and native stream retirement. Registering
+ * a view starts neither producer. Pixels are latest-only and never journaled. */
 export class BrowserLiveViewRegistry {
   private readonly views = new Map<string, View>();
   private readonly leases = new Map<string, View>();
@@ -73,9 +91,99 @@ export class BrowserLiveViewRegistry {
   private readonly observedGenerations = new Map<string, BrowserLiveViewDescriptor>();
   private readonly activeLoadTokens = new Map<string, string>();
   private expiryTimer: NodeJS.Timeout | undefined;
+  private readonly nativeCatalogs = new Map<string, NativeCatalog>();
+  private readonly nativeRetirements = new Set<Promise<void>>();
 
   constructor(private readonly connect: (endpoint: string, maximumPayload: number) => WebSocket =
-    (endpoint, maximumPayload) => new WebSocket(endpoint, { maxPayload: maximumPayload })) {}
+    (endpoint, maximumPayload) => new WebSocket(endpoint, { maxPayload: maximumPayload }),
+    private readonly nativeFactory: NativeLiveClientFactory = nativeLiveClientFactory,
+    private readonly nativeFailure: () => void = () => console.warn("Native view ended without a clean remote retirement")) {}
+
+  async catalogNative(sessionId: string, signal?: AbortSignal): Promise<readonly NativeCaptureSource[]> {
+    signal?.throwIfAborted();
+    const loadToken = this.activeLoadTokens.get(sessionId);
+    if (!loadToken) throw new GatewayError("conflict", "Native capture load is unavailable");
+    const previous = this.nativeCatalogs.get(sessionId);
+    if (previous) { this.nativeCatalogs.delete(sessionId); this.joinNative(previous.close()); }
+    if (this.nativeCatalogs.size >= 4) throw new GatewayError("busy", "Native catalog capacity reached", true);
+    // Repeated catalog reads replace only unused handles. Wait for their local
+    // connection retirement before opening another of the four native clients.
+    const client = Promise.resolve(previous?.close()).then(() => {
+      if (this.nativeCatalogs.get(sessionId) !== entry || !this.isLoadActive(sessionId, loadToken)) {
+        throw new GatewayError("conflict", "Native catalog load ended before opening");
+      }
+      return this.nativeFactory({ canonicalSessionID: sessionId, runtimeLoadID: loadToken });
+    });
+    let closing: Promise<void> | undefined;
+    const entry: NativeCatalog = { loadToken, client, sources: client.then((value) => value.catalog()),
+      close: () => closing ??= client.then(async (value) => {
+        const result = await value.close();
+        if (result.diagnostic) throw new Error("Native capture joined with a retirement diagnostic");
+      }, () => { /* Failed open already joined its local transport cleanup. */ }) };
+    this.nativeCatalogs.set(sessionId, entry);
+    const cancel = (): void => {
+      if (this.nativeCatalogs.get(sessionId) === entry) this.nativeCatalogs.delete(sessionId);
+      this.joinNative(entry.close());
+    };
+    signal?.addEventListener("abort", cancel, { once: true });
+    try {
+      const sources = await entry.sources;
+      if (this.nativeCatalogs.get(sessionId) !== entry || !this.isLoadActive(sessionId, loadToken)) {
+        throw new GatewayError("conflict", "Native catalog load ended");
+      }
+      return sources;
+    } catch (error) {
+      if (this.nativeCatalogs.get(sessionId) === entry) this.nativeCatalogs.delete(sessionId);
+      this.joinNative(entry.close());
+      throw error;
+    } finally { signal?.removeEventListener("abort", cancel); }
+  }
+  async registerNative(sessionId: string, handle: string): Promise<NativeLiveViewDescriptor> {
+    const entry = this.nativeCatalogs.get(sessionId);
+    if (!entry) throw new GatewayError("not_found", "List native windows before selecting one");
+    const source = (await entry.sources).find((value) => value.handle === handle);
+    const current = (): boolean => this.nativeCatalogs.get(sessionId) === entry && this.isLoadActive(sessionId, entry.loadToken);
+    if (!source || !current()) throw new GatewayError("not_found", "Native window handle is unavailable");
+    // Selecting a new window replaces only this session's native view, never
+    // another session's stream or a browser provider's execution.
+    const prior: Promise<void>[] = [];
+    for (const view of this.views.values()) if (view.registration.sessionId === sessionId && "native" in view.registration) {
+      prior.push(view.registration.native.close());
+      if (view.observer) prior.push(view.observer.done);
+      this.retire(view);
+    }
+    await Promise.all(prior);
+    if (!current()) throw new GatewayError("conflict", "Native capture load ended");
+    if (this.views.size >= BROWSER_LIVE_VIEW_MAXIMUM_REGISTRATIONS) throw new GatewayError("busy", "Live view capacity reached", true);
+    const registration: NativeLiveViewRegistration = { sessionId, loadToken: entry.loadToken,
+      viewId: randomUUID(), generation: randomUUID(), title: (source.title || source.applicationName).replace(/[\u0000-\u001f\u007f]/g, " ").trim() || "Mac window",
+      handle, native: entry };
+    this.nativeCatalogs.delete(sessionId); // The view now owns the exact retained target.
+    this.views.set(key(sessionId, registration.viewId), { registration, viewers: new Map(), latest: undefined,
+      observer: undefined, epoch: 0, sequence: 0 });
+    return this.descriptor(registration);
+  }
+  async stopNative(sessionId: string): Promise<void> {
+    const closing: Promise<void>[] = [];
+    const catalog = this.nativeCatalogs.get(sessionId);
+    if (catalog) { this.nativeCatalogs.delete(sessionId); closing.push(catalog.close()); this.joinNative(catalog.close()); }
+    for (const view of this.views.values()) if (view.registration.sessionId === sessionId && "native" in view.registration) {
+      closing.push(view.registration.native.close());
+      if (view.observer) closing.push(view.observer.done);
+      this.retire(view);
+    }
+    await Promise.all(closing);
+  }
+  private joinNative(work: Promise<void>): void {
+    if (this.nativeRetirements.has(work)) return;
+    this.nativeRetirements.add(work);
+    void work.then(() => this.nativeRetirements.delete(work), () => {
+      this.nativeRetirements.delete(work); this.nativeFailure();
+    });
+  }
+  /** Local requests remain owned until they settle. A failed remote Stop is
+   * reported, not turned into proof that the Host released its resources. */
+  async joinRetirements(): Promise<void> { await Promise.allSettled([...this.nativeRetirements]); }
 
   beginSessionLoad(sessionId: string): string {
     this.retireSession(sessionId);
@@ -95,8 +203,8 @@ export class BrowserLiveViewRegistry {
     // differently. Exact endpoint/generation owns the viewer, not that alias.
     for (const view of this.views.values()) {
       const old = view.registration;
-      if (old.sessionId === registration.sessionId && old.generation === registration.generation
-        && old.cdpUrl === registration.cdpUrl) return this.descriptor(view.registration);
+      if ("cdpUrl" in old && old.sessionId === registration.sessionId && old.generation === registration.generation
+        && old.cdpUrl === registration.cdpUrl) return this.descriptor(old);
     }
     const observed = generationKey(registration.sessionId, registration.generation, registration.cdpUrl);
     if (this.observedGenerations.has(observed)) throw new GatewayError("conflict", "This browser generation has ended");
@@ -108,6 +216,7 @@ export class BrowserLiveViewRegistry {
     if (!existing && this.views.size >= BROWSER_LIVE_VIEW_MAXIMUM_REGISTRATIONS) {
       throw new GatewayError("busy", "The Gateway has reached its browser view capacity", true);
     }
+    if (existing && "native" in existing.registration) throw new GatewayError("conflict", "A native view reference cannot become a browser reference");
     if (existing) this.retire(existing);
     const descriptor = this.descriptor(registration);
     this.observedGenerations.set(observed, descriptor);
@@ -115,12 +224,12 @@ export class BrowserLiveViewRegistry {
     this.views.set(identity, view);
     return { ...descriptor };
   }
-  describe(sessionId: string, viewId: string, generation: string): BrowserLiveViewDescriptor {
+  describe(sessionId: string, viewId: string, generation: string): LiveViewDescriptor {
     return this.descriptor(this.requireView(sessionId, viewId, generation).registration);
   }
   /** Synchronous admission lets the transport couple auth/branch fences and
    * lease creation without a revocation window across an await. */
-  open(sessionId: string, viewId: string, generation: string, viewerId: string): { leaseId: string; descriptor: BrowserLiveViewDescriptor } {
+  open(sessionId: string, viewId: string, generation: string, viewerId: string): { leaseId: string; descriptor: LiveViewDescriptor } {
     if (!bounded(viewerId, 256)) throw new GatewayError("invalid_request", "Live view viewer identity is invalid");
     this.expire();
     const view = this.requireView(sessionId, viewId, generation);
@@ -191,6 +300,8 @@ export class BrowserLiveViewRegistry {
   }
   retireSession(sessionId: string): void {
     this.activeLoadTokens.delete(sessionId);
+    const catalog = this.nativeCatalogs.get(sessionId);
+    if (catalog) { this.nativeCatalogs.delete(sessionId); this.joinNative(catalog.close()); }
     for (const observed of this.observedGenerations.keys()) if (observed.startsWith(`${sessionId}\0`)) this.observedGenerations.delete(observed);
     for (const view of this.views.values()) if (view.registration.sessionId === sessionId) this.retire(view);
   }
@@ -214,12 +325,14 @@ export class BrowserLiveViewRegistry {
     const descriptor = known ?? this.descriptor(registration);
     this.observedGenerations.set(observed, descriptor);
     for (const view of this.views.values()) {
-      if (view.registration.sessionId === sessionId && view.registration.cdpUrl === cdpUrl
+      if ("cdpUrl" in view.registration && view.registration.sessionId === sessionId && view.registration.cdpUrl === cdpUrl
         && view.registration.generation === generation) this.retire(view);
     }
     return { ...descriptor };
   }
   dispose(): void {
+    for (const catalog of this.nativeCatalogs.values()) this.joinNative(catalog.close());
+    this.nativeCatalogs.clear();
     for (const view of this.views.values()) this.retire(view);
     this.activeLoadTokens.clear();
     this.observedGenerations.clear();
@@ -236,9 +349,15 @@ export class BrowserLiveViewRegistry {
     if (!view || view.registration.generation !== generation) throw new GatewayError("not_found", "Browser view is no longer available");
     return view;
   }
-  private descriptor(registration: BrowserLiveViewRegistration): BrowserLiveViewDescriptor {
-    return { schema: BROWSER_LIVE_VIEW_SCHEMA, viewId: registration.viewId, generation: registration.generation,
-      title: registration.title ?? "Browser view", fallbackText: registration.fallbackText ?? "The browser view is unavailable." };
+  private descriptor(registration: BrowserLiveViewRegistration): BrowserLiveViewDescriptor;
+  private descriptor(registration: NativeLiveViewRegistration): NativeLiveViewDescriptor;
+  private descriptor(registration: Registration): LiveViewDescriptor;
+  private descriptor(registration: Registration): LiveViewDescriptor {
+    const native = "native" in registration;
+    return { schema: native ? NATIVE_LIVE_VIEW_SCHEMA : BROWSER_LIVE_VIEW_SCHEMA,
+      viewId: registration.viewId, generation: registration.generation,
+      title: registration.title ?? (native ? "Mac window" : "Browser view"),
+      fallbackText: registration.fallbackText ?? (native ? "This Mac window view has ended. Select the window again to view it." : "The browser view is unavailable.") };
   }
   private assertRegistration(registration: BrowserLiveViewRegistration): void {
     if (!bounded(registration.sessionId, 200) || !bounded(registration.viewId, 200) || !bounded(registration.generation, 200)
@@ -252,6 +371,21 @@ export class BrowserLiveViewRegistry {
   private start(view: View): void {
     const epoch = ++view.epoch;
     const current = (): boolean => view.epoch === epoch && this.views.get(key(view.registration.sessionId, view.registration.viewId)) === view;
+    if ("native" in view.registration) {
+      const registration = view.registration;
+      let nativeObserver: ReturnType<typeof observeNativeWindow> | undefined;
+      const done = registration.native.client.then(async (client) => {
+        if (!current()) return;
+        nativeObserver = observeNativeWindow(client, registration.handle,
+          (frame) => { if (current()) view.latest = { ...frame, sequence: ++view.sequence }; });
+        await nativeObserver.done;
+      });
+      view.observer = { done, stop: () => nativeObserver?.stop() };
+      void done.then(() => { if (current()) this.retire(view); }, () => {
+        this.nativeFailure(); if (current()) this.retire(view);
+      });
+      return;
+    }
     const observer = observeBrowserCDP({
       endpoint: view.registration.cdpUrl, connect: this.connect,
       onFrame: (frame) => { if (current()) view.latest = { ...frame, sequence: ++view.sequence }; },
@@ -268,6 +402,14 @@ export class BrowserLiveViewRegistry {
   private stop(view: View): void {
     view.epoch++;
     view.observer?.stop();
+    if ("native" in view.registration && view.observer) {
+      this.joinNative(view.observer.done);
+      void view.observer.done.catch(() => {
+        // An uncertain suspend cannot leave a resumable target, even if a new
+        // viewer has already arrived while the old stream was joining.
+        if (this.views.get(key(view.registration.sessionId, view.registration.viewId)) === view) this.retire(view);
+      });
+    }
     view.observer = undefined;
     view.latest = undefined;
   }
@@ -275,5 +417,6 @@ export class BrowserLiveViewRegistry {
     for (const leaseId of view.viewers.keys()) this.close(leaseId);
     this.stop(view);
     this.views.delete(key(view.registration.sessionId, view.registration.viewId));
+    if ("native" in view.registration) this.joinNative(view.registration.native.close());
   }
 }

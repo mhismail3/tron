@@ -602,8 +602,8 @@ final class AppModel {
 
     func selectedGatewayProfileID() -> String? { lifecycle.selectedProfileID }
 
-    func openBrowserLiveView(viewId: String, generation: String, sessionID: String, profileID: String) async throws -> GatewayClient.BrowserLiveLease {
-        try await client.openBrowserLiveView(viewId: viewId, generation: generation, sessionID: sessionID, profileID: profileID)
+    func openLiveView(kind: DisplayKind, viewId: String, generation: String, sessionID: String, profileID: String) async throws -> GatewayClient.LiveLease {
+        try await client.openLiveView(kind: kind, viewId: viewId, generation: generation, sessionID: sessionID, profileID: profileID)
     }
 
     func chatMediaIdentity(blobID: String, sessionID: String? = nil) -> ChatMediaIdentity? {

@@ -11,7 +11,9 @@ struct NativeHostReplyTests {
         let values = try #require(PropertyListSerialization.propertyList(from: Data(contentsOf: url), format: nil) as? [String: Any])
         #expect(values["Label"] as? String == NativeHostTrust.machServiceName)
         #expect(values["LimitLoadToSessionType"] as? String == "Aqua")
-        #expect((values["MachServices"] as? [String: Bool]) == [NativeHostTrust.machServiceName: true])
+        #expect((values["MachServices"] as? [String: Bool]) == [
+            NativeHostTrust.machServiceName: true, NativeHostTrust.captureMachServiceName: true
+        ])
         #expect((values["AssociatedBundleIdentifiers"] as? [String]) == ["com.tron.mac"])
         let executable = NativeHostTrust.relativeBundlePath + "/Contents/MacOS/TronNativeHost"
         #expect(values["BundleProgram"] as? String == executable)

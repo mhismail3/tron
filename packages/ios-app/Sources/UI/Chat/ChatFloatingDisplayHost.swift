@@ -13,23 +13,23 @@ enum DisplayFloatingLayoutPolicy {
 
     static func panelSize(
         in container: CGSize,
-        browserLive: Bool = false,
-        browserLiveAspectRatio: CGFloat? = nil
+        live: Bool = false,
+        liveAspectRatio: CGFloat? = nil
     ) -> CGSize {
         let availableWidth = max(0, container.width - panelEdgeInset * 2)
         let availableHeight = max(0, container.height - panelEdgeInset * 2)
         let preferredWidth = max(240, container.width * 0.78)
         let width = min(420, min(availableWidth, preferredWidth))
-        guard browserLive else {
+        guard live else {
             let preferredHeight = min(320, max(200, min(container.height * 0.32, width * 0.68)))
             return CGSize(width: width, height: min(preferredHeight, availableHeight))
         }
 
-        // The provider's 4:3 launch viewport remains the pre-frame fallback.
+        // Both live producers use the same 4:3 pre-frame fallback.
         // Once a renderable frame is admitted, fit its pixels to the native
         // proposal. Controls still own a minimum panel, so extreme ratios
         // letterbox rather than shrinking the 44-point hit targets.
-        let ratio = browserLiveAspectRatio.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? (4.0 / 3.0)
+        let ratio = liveAspectRatio.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? (4.0 / 3.0)
         let fittedWidth = min(width, availableHeight * ratio)
         let fittedHeight = min(availableHeight, width / ratio)
         // Control minima bound the panel, not the image. Do not expand a wide
@@ -38,24 +38,24 @@ enum DisplayFloatingLayoutPolicy {
                       height: max(min(minimumUsableHeight, availableHeight), fittedHeight))
     }
 
-    static func matchesBrowserLiveSource(_ source: BrowserLiveFrameSource, route: DisplayRoute,
+    static func matchesLiveSource(_ source: LiveFrameSource, route: DisplayRoute,
                                          profileID: String?, surface: PresentationSurfaceToken?) -> Bool {
-        guard route.display.kind == .browserLive, let liveView = route.display.liveView else { return false }
+        guard route.display.kind.isLive, let liveView = route.display.liveView else { return false }
         return source.sessionID == route.sessionID && source.presentationIdentity == route.display.presentationIdentity
             && source.viewID == liveView.viewId && source.generation == liveView.generation
             && source.profileID == profileID && source.surface == surface
     }
 
-    static func acceptsBrowserLiveGeometry(
-        _ update: BrowserLiveFrameUpdate,
+    static func acceptsLiveGeometry(
+        _ update: LiveFrameUpdate,
         route: DisplayRoute,
         profileID: String?,
         surface: PresentationSurfaceToken?,
         allowsPublication: Bool,
-        previousSource: BrowserLiveFrameSource?
+        previousSource: LiveFrameSource?
     ) -> Bool {
         let source = update.source
-        guard matchesBrowserLiveSource(source, route: route, profileID: profileID, surface: surface) else { return false }
+        guard matchesLiveSource(source, route: route, profileID: profileID, surface: surface) else { return false }
         if let geometry = update.geometry {
             guard geometry.aspectRatio != nil, allowsPublication else { return false }
         } // A nil update retires geometry; it never admits pixels.
@@ -155,19 +155,19 @@ private struct FloatingDisplayWindow: View {
         var globalLocation: CGPoint
     }
     @State private var drag: Drag?
-    @State private var liveFrameUpdate: BrowserLiveFrameUpdate?
+    @State private var liveFrameUpdate: LiveFrameUpdate?
 
     var body: some View {
         let currentLiveAspectRatio: CGFloat? = {
             guard let update = liveFrameUpdate, let geometry = update.geometry,
-                  DisplayFloatingLayoutPolicy.matchesBrowserLiveSource(update.source, route: route,
+                  DisplayFloatingLayoutPolicy.matchesLiveSource(update.source, route: route,
                       profileID: model.selectedGatewayProfileID(), surface: surfaceToken) else { return nil }
             return geometry.aspectRatio
         }()
         let size = DisplayFloatingLayoutPolicy.panelSize(
             in: container.size,
-            browserLive: route.display.kind == .browserLive,
-            browserLiveAspectRatio: currentLiveAspectRatio
+            live: route.display.kind.isLive,
+            liveAspectRatio: currentLiveAspectRatio
         )
         let safeRect = DisplayFloatingLayoutPolicy.safeCenterRect(container: container.size, panelSize: size)
         // Held gestures render from the actual touch, not a delayed geometry
@@ -213,7 +213,7 @@ private struct FloatingDisplayWindow: View {
                     sessionID: route.sessionID,
                     display: route.display,
                     context: .floating,
-                    onBrowserLiveFrameGeometry: receiveLiveFrameGeometry
+                    onLiveFrameGeometry: receiveLiveFrameGeometry
                 )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
@@ -268,11 +268,11 @@ private struct FloatingDisplayWindow: View {
             .accessibilityLabel(accessibilityLabel)
     }
 
-    private func receiveLiveFrameGeometry(_ update: BrowserLiveFrameUpdate) {
+    private func receiveLiveFrameGeometry(_ update: LiveFrameUpdate) {
         let allowsPublication = update.source.surface.map {
             activityCoordinator?.activity(for: $0).allowsPresentationPublication == true
         } ?? false
-        guard DisplayFloatingLayoutPolicy.acceptsBrowserLiveGeometry(
+        guard DisplayFloatingLayoutPolicy.acceptsLiveGeometry(
             update, route: route, profileID: model.selectedGatewayProfileID(), surface: surfaceToken,
             allowsPublication: allowsPublication, previousSource: liveFrameUpdate?.source
         ) else { return }

@@ -13,6 +13,37 @@ struct NativeHostCoordinatorTests {
         #expect(try !NativeHostRegistrationPolicy.shouldRegister(.requiresApproval))
     }
 
+    @Test("retirement status policy never treats notFound as a joined helper")
+    func retirementStatusPolicy() async throws {
+        let fake = FakeNativeHost()
+        try await NativeHostRetirementPolicy.drain(status: .notRegistered, join: fake.operations.drain)
+        #expect(await fake.events.isEmpty)
+        await #expect(throws: NativeHostError.self) {
+            try await NativeHostRetirementPolicy.drain(status: .notFound, join: fake.operations.drain)
+        }
+        #expect(await fake.events.isEmpty)
+        try await NativeHostRetirementPolicy.drain(status: .enabled, join: fake.operations.drain)
+        try await NativeHostRetirementPolicy.drain(status: .requiresApproval, join: fake.operations.drain)
+        #expect(await fake.events == ["drain", "drain"])
+        await fake.failDrain()
+        await #expect(throws: NativeHostError.self) {
+            try await NativeHostRetirementPolicy.drain(status: .enabled, join: fake.operations.drain)
+        }
+    }
+
+    @Test("notFound retirement prevents refresh registration and native join attempts")
+    func ambiguousStatusCannotMutateService() async {
+        let fake = FakeNativeHost(), original = fake.operations
+        let operations = NativeHostOperations(state: original.state, enable: original.enable,
+            unregister: original.unregister, drain: {
+                try await NativeHostRetirementPolicy.drain(status: .notFound, join: original.drain)
+            }, probe: original.probe, request: original.request)
+        let owner = NativeHostCoordinator(operations: operations)
+        await #expect(throws: NativeHostError.self) { _ = try await owner.refresh() }
+        await #expect(throws: NativeHostError.self) { try await owner.unregister() }
+        #expect(await fake.events.isEmpty)
+    }
+
     @Test("enable errors reach the caller instead of becoming silent unavailable status")
     func enableFailureIsVisible() async {
         let fake = FakeNativeHost()
@@ -68,7 +99,7 @@ struct NativeHostCoordinatorTests {
         await fake.approve()
         let owner = NativeHostCoordinator(operations: fake.operations)
         #expect(try await owner.refresh() == .needsApproval)
-        #expect(await fake.events == ["unregister", "register"])
+        #expect(await fake.events == ["drain", "unregister", "register"])
         #expect(await fake.requestIDs.isEmpty)
     }
 
@@ -79,7 +110,7 @@ struct NativeHostCoordinatorTests {
         let owner = NativeHostCoordinator(operations: fake.operations)
         await #expect(throws: NativeHostError.self) { try await owner.refresh() }
         #expect(await owner.serviceState() == .enabled)
-        #expect(await fake.events == ["unregister"])
+        #expect(await fake.events == ["drain", "unregister"])
     }
 
     @Test("unregister errors are preserved and cannot turn enabled into absent")
@@ -90,8 +121,37 @@ struct NativeHostCoordinatorTests {
         let owner = NativeHostCoordinator(operations: fake.operations)
         await #expect(throws: NativeHostError.self) { try await owner.unregister() }
         #expect(await owner.serviceState() == .enabled)
-        #expect(await fake.events == ["unregister"])
+        #expect(await fake.events == ["drain", "unregister"])
     }
+
+    @Test("cancelled refresh waits for actual capture drain before unregister")
+    func refreshJoinsCapture() async throws {
+        let fake = FakeNativeHost()
+        await fake.approve(); await fake.pauseDrain()
+        let owner = NativeHostCoordinator(operations: fake.operations)
+        let work = Task { try await owner.refresh() }
+        _ = await fake.drainEntered.value()
+        work.cancel()
+        #expect(await fake.events == ["drain"])
+        fake.drainRelease.resolve(true)
+        _ = try await work.value
+        #expect(await fake.events == ["drain", "unregister", "register"])
+    }
+
+    @Test("failed capture drain forbids refresh and unregister")
+    func captureDrainFailure() async {
+        for refresh in [false, true] {
+            let fake = FakeNativeHost()
+            await fake.approve(); await fake.failDrain()
+            let owner = NativeHostCoordinator(operations: fake.operations)
+            await #expect(throws: NativeHostError.self) {
+                if refresh { _ = try await owner.refresh() }
+                else { try await owner.unregister() }
+            }
+            #expect(await fake.events == ["drain"])
+        }
+    }
+
 }
 
 private actor FakeNativeHost {
@@ -101,15 +161,26 @@ private actor FakeNativeHost {
     private var status = NativeHostServiceState.needsRegistration
     private var unregisterFails = false
     private var enableFails = false
+    private var drainFails = false
+    let drainEntered = NativeHostReply<Bool>()
+    let drainRelease = NativeHostReply<Bool>()
+    private var holdDrain = false
     nonisolated var operations: NativeHostOperations {
         .init(state: { await self.state() }, enable: { try await self.enable() },
-              unregister: { try await self.unregister() }, probe: { await self.probe() },
+              unregister: { try await self.unregister() }, drain: { try await self.drain() }, probe: { await self.probe() },
               request: { await self.request($0, id: $1) })
     }
     func state() -> NativeHostServiceState { status }
     func approve() { status = .enabled }
     func failUnregister() { unregisterFails = true }
     func failEnable() { enableFails = true }
+    func failDrain() { drainFails = true }
+    func pauseDrain() { holdDrain = true }
+    func drain() async throws {
+        events.append("drain"); drainEntered.resolve(true)
+        if holdDrain { _ = await drainRelease.value() }
+        if drainFails { throw NativeHostError.retirementFailed }
+    }
     func enable() throws {
         events.append("register")
         if enableFails { throw NativeHostError.serviceUnavailable }

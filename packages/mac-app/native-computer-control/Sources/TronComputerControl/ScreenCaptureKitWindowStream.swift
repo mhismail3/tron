@@ -35,7 +35,7 @@ package final class NativeWindowCaptureSelection: @unchecked Sendable {
     private let window: SCWindow
     fileprivate let filter: SCContentFilter
 
-    private init(application: NSRunningApplication, launchDate: Date,
+    internal init(application: NSRunningApplication, launchDate: Date,
                  process: WindowCaptureProcessIdentity, window: SCWindow) throws {
         self.application = application; self.launchDate = launchDate
         self.process = process; self.window = window

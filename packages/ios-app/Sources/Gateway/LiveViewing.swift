@@ -6,8 +6,8 @@ import UniformTypeIdentifiers
 /// One app-wide ImageIO slot, including retired view generations. Cancellation
 /// cannot interrupt native decoding already in progress; replacements drop the
 /// candidate (and poll the latest frame later) rather than queue or overlap it.
-actor BrowserLiveImagePreparation {
-    static let shared = BrowserLiveImagePreparation()
+actor LiveImagePreparation {
+    static let shared = LiveImagePreparation()
     private var preparing = false
 
     func prepare(_ operation: @escaping @Sendable () throws -> UIImage) async throws -> UIImage? {
@@ -34,20 +34,20 @@ actor BrowserLiveImagePreparation {
 extension GatewayClient {
     /// A disposable viewer owns its original request/credential and transport.
     /// Cleanup must not consult the subsequently selected Gateway profile.
-    actor BrowserLiveLease {
+    actor LiveLease {
         let leaseId: String
-        let descriptor: BrowserLiveViewDescriptor
+        let descriptor: LiveViewDescriptor
         private let request: URLRequest
         private let transport: BoundedHTTPDataTransport
         private var closeTask: Task<Void, Never>?
 
         struct Wire: Decodable {
             let leaseId: String
-            let descriptor: BrowserLiveViewDescriptor
+            let descriptor: LiveViewDescriptor
         }
 
         init(wire: Wire, request: URLRequest, transport: BoundedHTTPDataTransport) throws {
-            guard UUID(uuidString: wire.leaseId) != nil, wire.descriptor.isValid else { throw BrowserLiveError.invalidResponse }
+            guard UUID(uuidString: wire.leaseId) != nil, wire.descriptor.isValid else { throw LiveError.invalidResponse }
             leaseId = wire.leaseId
             descriptor = wire.descriptor
             var bound = request
@@ -60,26 +60,26 @@ extension GatewayClient {
             self.transport = transport
         }
 
-        func frame(after sequence: Int) async throws -> BrowserLiveUpdate {
+        func frame(after sequence: Int) async throws -> LiveUpdate {
             try Task.checkCancellation()
             guard closeTask == nil else { throw CancellationError() }
             var request = request
             request.url = request.url?.appendingPathComponent("frame")
             request.httpMethod = "GET"
             request.setValue(String(sequence), forHTTPHeaderField: "X-Tron-Live-After")
-            let (data, response) = try await transport.data(for: request, maximumBytes: BrowserLiveFrame.maximumEncodedBytes)
+            let (data, response) = try await transport.data(for: request, maximumBytes: LiveFrame.maximumEncodedBytes)
             try Task.checkCancellation()
             guard closeTask == nil else { throw CancellationError() }
-            guard response.url == request.url else { throw BrowserLiveError.invalidResponse }
+            guard response.url == request.url else { throw LiveError.invalidResponse }
             if response.statusCode == 204 {
                 switch response.value(forHTTPHeaderField: "X-Tron-Live-State") {
                 case "waiting": return .waiting
                 case "unchanged": return .unchanged
-                default: throw BrowserLiveError.ended
+                default: throw LiveError.ended
                 }
             }
-            guard response.statusCode == 200 else { throw BrowserLiveError.ended }
-            return .frame(try BrowserLiveFrame(data: data, response: response))
+            guard response.statusCode == 200 else { throw LiveError.ended }
+            return .frame(try LiveFrame(data: data, response: response))
         }
 
         /// Join cancellation-independent teardown. The caller may already be
@@ -99,10 +99,10 @@ extension GatewayClient {
         }
     }
 
-    enum BrowserLiveError: Error { case ended, invalidResponse }
-    enum BrowserLiveUpdate: Sendable { case waiting, unchanged, frame(BrowserLiveFrame) }
+    enum LiveError: Error { case ended, invalidResponse }
+    enum LiveUpdate: Sendable { case waiting, unchanged, frame(LiveFrame) }
 
-    struct BrowserLiveFrame: Sendable {
+    struct LiveFrame: Sendable {
         static let maximumEncodedBytes = 2 * 1_024 * 1_024
         static let maximumPixels = 4_000_000
         static let maximumEdge = 2_560
@@ -120,7 +120,7 @@ extension GatewayClient {
                   let sequence = Int(response.value(forHTTPHeaderField: "X-Tron-Live-Sequence") ?? ""),
                   width > 0, width <= Self.maximumEdge, height > 0, height <= Self.maximumEdge,
                   width * height <= Self.maximumPixels, sequence > 0, sequence <= 9_007_199_254_740_991 else {
-                throw BrowserLiveError.invalidResponse
+                throw LiveError.invalidResponse
             }
             self.data = data
             self.width = width
@@ -129,7 +129,7 @@ extension GatewayClient {
         }
 
         func decode() async throws -> UIImage? {
-            try await BrowserLiveImagePreparation.shared.prepare { try self.decodeImage() }
+            try await LiveImagePreparation.shared.prepare { try self.decodeImage() }
         }
 
         private func decodeImage() throws -> UIImage {
@@ -140,7 +140,7 @@ extension GatewayClient {
                   let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
                   (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue == width,
                   (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue == height else {
-                throw BrowserLiveError.invalidResponse
+                throw LiveError.invalidResponse
             }
             try Task.checkCancellation()
             guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
@@ -149,7 +149,7 @@ extension GatewayClient {
                 kCGImageSourceShouldCacheImmediately: true,
             ] as CFDictionary), image.width == width, image.height == height,
                   ChatMediaPolicy.decodedByteCount(bytesPerRow: image.bytesPerRow, height: image.height,
-                    maximum: Self.maximumDecodedBytes) != nil else { throw BrowserLiveError.invalidResponse }
+                    maximum: Self.maximumDecodedBytes) != nil else { throw LiveError.invalidResponse }
             try Task.checkCancellation()
             return UIImage(cgImage: image)
         }

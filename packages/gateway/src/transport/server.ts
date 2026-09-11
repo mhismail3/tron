@@ -1882,6 +1882,7 @@ export class GatewayServer {
 
   private async finishClose(): Promise<void> {
     this.options.liveViews?.dispose();
+    await this.options.liveViews?.joinRetirements();
     this.options.logger.log("info", "Closing Gateway transport", { event: "gateway.transport-closing", source: "transport" });
     clearInterval(this.heartbeat);
     for (const client of this.clients.values()) {

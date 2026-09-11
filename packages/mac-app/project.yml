@@ -25,6 +25,10 @@ settings:
     TRON_GATEWAY_PROTOCOL_VERSION: "5"
     TRON_GATEWAY_MIN_PROTOCOL_VERSION: "5"
 
+packages:
+  TronComputerControl:
+    path: native-computer-control
+
 targets:
   TronMac:
     type: application
@@ -78,6 +82,10 @@ targets:
             "$SRCROOT/../../scripts/validate-push-service-config.sh" --allow-empty "$SRCROOT/../../config/PushService.xcconfig" >/dev/null
           fi
           "$SRCROOT/scripts/ensure-gateway-bundle.sh"
+      - name: Build Native Capture Client
+        basedOnDependencyAnalysis: false
+        script: |
+          "$SRCROOT/native-gateway-client/prepare.sh"
     postBuildScripts:
       - name: Copy Bundled Login Item
         basedOnDependencyAnalysis: false
@@ -106,6 +114,8 @@ targets:
           mkdir -p "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Resources" "$DST/Native"
           ditto "$SRC" "$DST"
           ditto "$NATIVE_SRC" "$NATIVE_DST"
+          install -m 0644 "$DERIVED_FILE_DIR/tron-native-capture.node" "$DST/Native/tron-native-capture.node"
+          install -m 0644 "$DERIVED_FILE_DIR/tron-native-capture.inputs.json" "$DST/Native/tron-native-capture.inputs.json"
           # ditto/cp can fail while materializing symlinks inside a 0555 source
           # tree because they apply directory modes before populating children.
           # rsync defers final directory modes and preserves the internal links.
@@ -137,6 +147,7 @@ targets:
             # Sign the Aqua TCC host after copying it into its final nested
             # location, then the outer app seals both native compositions.
             codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$NATIVE_DST"
+            codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$DST/Native/tron-native-capture.node"
             # Native signing changes payload bytes. Recompute the selected
             # bundle fingerprint before the outer app seals its resources.
             PAYLOAD_HASHER="$DST/LoginItems/Tron Agent.app/Contents/MacOS/tron"
@@ -166,9 +177,12 @@ targets:
     type: application
     platform: macOS
     sources:
-      - path: Sources/NativeHost
-        createIntermediateGroups: true
+      - path: Sources/NativeHost/main.swift
       - path: Sources/Support/Onboarding/NativeHostProtocol.swift
+    dependencies:
+      - target: TronNativeCaptureHost
+      - package: TronComputerControl
+        product: TronComputerControl
     settings:
       base:
         INFOPLIST_FILE: Sources/NativeHost/Info.plist
@@ -179,6 +193,33 @@ targets:
         CURRENT_PROJECT_VERSION: "7"
         CODE_SIGN_STYLE: Automatic
         ENABLE_HARDENED_RUNTIME: YES
+
+  TronNativeCaptureHost:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Sources/NativeHost
+        createIntermediateGroups: true
+        excludes:
+          - main.swift
+          - Info.plist
+      - path: Sources/Support/Onboarding/NativeCodeSigning.swift
+      - path: Sources/Server/Paths/TronGatewayProfile.swift
+      - path: Sources/Server/Paths/GatewayPayloadStore.swift
+      - path: Sources/Server/Health/GatewayProtocolContract.swift
+      - path: Sources/Server/Health/StableGatewayProvenance.swift
+      - path: Sources/Server/LaunchAgent/LaunchAgentRuntimeReader.swift
+      - path: Sources/Server/ProcessControl/ServerProcessProbe.swift
+      - path: Sources/Support/Foundation/Subprocess.swift
+    dependencies:
+      - package: TronComputerControl
+        product: TronComputerControl
+    settings:
+      base:
+        PRODUCT_NAME: TronNativeCaptureHost
+        PRODUCT_MODULE_NAME: TronNativeCaptureHost
+        SKIP_INSTALL: YES
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/Support/Onboarding/NativeCaptureService.h
 
   SingleInstanceLockProbe:
     type: tool
@@ -199,8 +240,10 @@ targets:
           - Fixtures/SingleInstanceLockProbe/**
     dependencies:
       - target: TronMac
-      - target: TronNativeHost
       - target: SingleInstanceLockProbe
+      - target: TronNativeCaptureHost
+      - package: TronComputerControl
+        product: TronComputerControl
     settings:
       base:
         BUNDLE_LOADER: "$(TEST_HOST)"

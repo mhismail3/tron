@@ -13,7 +13,7 @@ struct DisplayRoute: Identifiable, Hashable, Sendable {
     var sheetPresentationID: String { "chat.display.\(id)" }
 }
 
-struct BrowserLiveFrameSource: Hashable, Sendable {
+struct LiveFrameSource: Hashable, Sendable {
     let sessionID: String?
     let profileID: String?
     let presentationIdentity: String
@@ -24,7 +24,7 @@ struct BrowserLiveFrameSource: Hashable, Sendable {
     let activityGeneration: UInt64
 }
 
-struct BrowserLiveFrameGeometry: Equatable, Sendable {
+struct LiveFrameGeometry: Equatable, Sendable {
     let width: CGFloat
     let height: CGFloat
 
@@ -35,9 +35,9 @@ struct BrowserLiveFrameGeometry: Equatable, Sendable {
     }
 }
 
-struct BrowserLiveFrameUpdate: Equatable, Sendable {
-    let source: BrowserLiveFrameSource
-    let geometry: BrowserLiveFrameGeometry?
+struct LiveFrameUpdate: Equatable, Sendable {
+    let source: LiveFrameSource
+    let geometry: LiveFrameGeometry?
 }
 
 enum DisplayPresentationCommand: Hashable, Sendable {
@@ -54,7 +54,7 @@ enum DisplayPresentationCommand: Hashable, Sendable {
 enum ToolDisplayActivation {
     static func command(for tool: ChatToolDescriptor, sessionID: String?) -> DisplayPresentationCommand? {
         guard let sessionID, let display = tool.display, !tool.isRunning,
-              !tool.error || display.kind == .browserLive else { return nil }
+              !tool.error || display.kind.isLive else { return nil }
         let route = DisplayRoute(sessionID: sessionID, display: display)
         return DisplayPresentationPolicy.activationSurface(for: display) == .floating
             ? .showFloating(route) : .showSheet(route)
@@ -345,7 +345,7 @@ struct DisplayToolView: View {
         case .pdf, .document: "doc.richtext"
         case .html, .webpage: "safari"
         case .hls: "dot.radiowaves.left.and.right"
-        case .browserLive: "rectangle.inset.filled.and.person.filled"
+        case .browserLive, .nativeLive: "rectangle.inset.filled.and.person.filled"
         case .markdown, .text, .code: "text.page"
         case nil: "rectangle.on.rectangle"
         }
@@ -439,7 +439,7 @@ enum DisplayInlineLayoutPolicy {
     static func openingViewportHeight(for kind: DisplayKind) -> CGFloat {
         switch kind {
         case .image, .video, .audio, .pdf: 220
-        case .markdown, .text, .code, .html, .document, .webpage, .hls, .browserLive: 180
+        case .markdown, .text, .code, .html, .document, .webpage, .hls, .browserLive, .nativeLive: 180
         }
     }
 }
@@ -692,7 +692,7 @@ struct DisplayArtifactContent: View {
     let sessionID: String?
     let display: DisplayProjection
     let context: DisplayRenderContext
-    var onBrowserLiveFrameGeometry: (@MainActor (BrowserLiveFrameUpdate) -> Void)? = nil
+    var onLiveFrameGeometry: (@MainActor (LiveFrameUpdate) -> Void)? = nil
 
     var body: some View {
         Group {
@@ -707,11 +707,11 @@ struct DisplayArtifactContent: View {
                 DisplayHTMLArtifactView(sessionID: sessionID, display: display)
             case .video, .audio:
                 DisplayVideoArtifactView(sessionID: sessionID, display: display)
-            case .browserLive:
-                BrowserLiveDisplayView(
+            case .browserLive, .nativeLive:
+                LiveDisplayView(
                     sessionID: sessionID,
                     display: display,
-                    onFrameGeometry: onBrowserLiveFrameGeometry
+                    onFrameGeometry: onLiveFrameGeometry
                 )
             case .webpage, .hls:
                 // Public remote content stays in Safari's isolated, explicit-
@@ -1132,7 +1132,7 @@ private struct DisplayUnavailableView: View {
     }
 }
 
-private struct BrowserLiveDisplayView: View {
+private struct LiveDisplayView: View {
     private struct Source: Hashable {
         let sessionID: String?
         let profileID: String?
@@ -1141,8 +1141,8 @@ private struct BrowserLiveDisplayView: View {
         let producerID: UUID
         let activityGeneration: UInt64
 
-        var frameSource: BrowserLiveFrameSource {
-            BrowserLiveFrameSource(
+        var frameSource: LiveFrameSource {
+            LiveFrameSource(
                 sessionID: sessionID,
                 profileID: profileID,
                 presentationIdentity: display.presentationIdentity,
@@ -1156,7 +1156,7 @@ private struct BrowserLiveDisplayView: View {
     }
     let sessionID: String?
     let display: DisplayProjection
-    var onFrameGeometry: (@MainActor (BrowserLiveFrameUpdate) -> Void)? = nil
+    var onFrameGeometry: (@MainActor (LiveFrameUpdate) -> Void)? = nil
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.tronPresentationActivity) private var presentationActivity
@@ -1167,7 +1167,7 @@ private struct BrowserLiveDisplayView: View {
     @State private var renderedSource: Source?
     @State private var admittedTaskSource: Source?
     @State private var requestID = UUID()
-    @State private var viewingActivity = BrowserLiveViewingActivity()
+    @State private var viewingActivity = LiveViewingActivity()
     @State private var producerID = UUID()
 
     var body: some View {
@@ -1193,12 +1193,15 @@ private struct BrowserLiveDisplayView: View {
             } else if rendersCurrentResult, failed {
                 DisplayUnavailableView(text: display.fallbackText)
             } else {
-                TronLoadingState(label: "Connecting to browser…", accent: .tronBlue)
+                TronLoadingState(label: display.kind == .nativeLive ? "Connecting to window…" : "Connecting to browser…", accent: .tronBlue)
             }
         }
         .accessibilityLabel(display.altText)
-        .background(BrowserLiveActivityHost(activity: viewingActivity).allowsHitTesting(false))
-        .onChange(of: scenePhase, initial: true) { _, phase in viewingActivity.scenePhaseChanged(phase) }
+        .background(LiveActivityHost(activity: viewingActivity).allowsHitTesting(false))
+        // Phase already participates in this task ID. An onChange that also
+        // increments the native generation feeds a second ID change back into
+        // the same update, so SwiftUI can suppress the final resume task. Only
+        // native transitions own that generation and its post-await fence.
         .task(id: PresentationActivityTaskID(source: source, presentationActive: active)) {
             // A cancelled task may still enter its body; it cannot supersede
             // the newer task's request fence or clear its pixels.
@@ -1207,7 +1210,7 @@ private struct BrowserLiveDisplayView: View {
             requestID = request
             if admittedTaskSource != source {
                 admittedTaskSource = source
-                onFrameGeometry?(BrowserLiveFrameUpdate(source: source.frameSource, geometry: nil))
+                onFrameGeometry?(LiveFrameUpdate(source: source.frameSource, geometry: nil))
             }
             image = nil
             failed = false
@@ -1236,9 +1239,9 @@ private struct BrowserLiveDisplayView: View {
                 && activity.allowsPresentationPublication
         }
         guard current() else { return }
-        let lease: GatewayClient.BrowserLiveLease
+        let lease: GatewayClient.LiveLease
         do {
-            lease = try await model.openBrowserLiveView(viewId: liveView.viewId, generation: liveView.generation, sessionID: sessionID, profileID: profileID)
+            lease = try await model.openLiveView(kind: source.display.kind, viewId: liveView.viewId, generation: liveView.generation, sessionID: sessionID, profileID: profileID)
         } catch {
             if current() {
                 renderedSource = source
@@ -1263,9 +1266,9 @@ private struct BrowserLiveDisplayView: View {
                                 lastSequence = frame.sequence
                                 renderedSource = source
                                 image = decoded
-                                onFrameGeometry?(BrowserLiveFrameUpdate(
+                                onFrameGeometry?(LiveFrameUpdate(
                                     source: source.frameSource,
-                                    geometry: BrowserLiveFrameGeometry(
+                                    geometry: LiveFrameGeometry(
                                         width: CGFloat(frame.width),
                                         height: CGFloat(frame.height)
                                     )
@@ -1298,13 +1301,13 @@ struct DisplaySheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var imageLeaseID = UUID()
     @State private var documentLeaseID = UUID()
-    @State private var browserDetent: PresentationDetent = .medium
+    @State private var liveDetent: PresentationDetent = .medium
 
     @ViewBuilder
     var body: some View {
-        if route.display.kind == .browserLive {
+        if route.display.kind.isLive {
             NavigationStack {
-                BrowserLiveDisplayView(sessionID: route.sessionID, display: route.display)
+                LiveDisplayView(sessionID: route.sessionID, display: route.display)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .tronTopBlurSurface()
                     .navigationTitle("")
@@ -1325,7 +1328,7 @@ struct DisplaySheet: View {
                     }
             }
             .tronTopBlur(.sheet)
-            .presentationDetents([.medium, .large], selection: $browserDetent)
+            .presentationDetents([.medium, .large], selection: $liveDetent)
             .presentationDragIndicator(.hidden)
             .tronPresentation()
         } else if (route.display.kind == .webpage || route.display.kind == .hls),

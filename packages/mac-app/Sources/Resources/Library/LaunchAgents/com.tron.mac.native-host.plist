@@ -10,6 +10,8 @@
     <dict>
         <key>com.tron.mac.native-host</key>
         <true/>
+        <key>com.tron.mac.native-host.capture</key>
+        <true/>
     </dict>
     <key>AssociatedBundleIdentifiers</key>
     <array><string>com.tron.mac</string></array>

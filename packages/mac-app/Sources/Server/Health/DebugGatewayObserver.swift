@@ -164,7 +164,7 @@ enum DebugGatewayObserver {
                 matches: selected.manifest,
                 channel: TronGatewayProfile.debug.channel
               ),
-              StableGatewayObserver.processCommand(
+              StableGatewayProvenance.processCommand(
                 processCommand,
                 owns: selected.root,
                 expectedHost: lifecycle.expectedHost,

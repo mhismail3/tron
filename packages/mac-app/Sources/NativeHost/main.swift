@@ -1,4 +1,5 @@
 import AppKit
+import TronNativeCaptureHost
 @preconcurrency import ApplicationServices
 import CoreGraphics
 import Foundation
@@ -8,6 +9,11 @@ import Darwin
 /// main queue; no permission state is shared across those queues or persisted.
 private final class NativePermissionService: NSObject, NativeHostPermissionService, @unchecked Sendable {
     private var receipts = NativePermissionRequestReceipts()
+    private let captures: NativeCaptureSlot
+    init(captures: NativeCaptureSlot) { self.captures = captures }
+    func prepareForServiceRetirement(withReply reply: @escaping @Sendable (Bool) -> Void) {
+        Task { reply(await captures.drainForServiceRetirement()) }
+    }
     func probePermissions(withReply reply: @escaping @Sendable ([String: String]) -> Void) {
         DispatchQueue.main.async { reply(Self.snapshot()) }
     }
@@ -62,9 +68,11 @@ private final class NativePermissionService: NSObject, NativeHostPermissionServi
 }
 
 private final class NativeHostDelegate: NSObject, NSXPCListenerDelegate {
-    private let service = NativePermissionService()
+    private let service: NativePermissionService
     private let requirement: String
-    init(requirement: String) { self.requirement = requirement }
+    init(requirement: String, captures: NativeCaptureSlot) {
+        self.requirement = requirement; service = NativePermissionService(captures: captures)
+    }
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
         guard connection.effectiveUserIdentifier == getuid() else { return false }
         connection.setCodeSigningRequirement(requirement)
@@ -86,19 +94,29 @@ private enum NativeHostMain {
                   parentBundle.appendingPathComponent(NativeHostTrust.relativeBundlePath).resolvingSymlinksInPath() == ownBundle else {
                 throw NativeHostTrustError.invalidIdentity
             }
-            let requirement = try NativeHostTrust.pin(NativeHostTrust.wrapperCodeSigningRequirement, to: parentBundle)
+            let requirement = try NativeCodeSigning.pin(NativeHostTrust.wrapperCodeSigningRequirement, to: parentBundle)
             let listener = NSXPCListener(machServiceName: NativeHostTrust.machServiceName)
-            let delegate = NativeHostDelegate(requirement: requirement)
+            let captures = NativeCaptureSlot()
+            let delegate = NativeHostDelegate(requirement: requirement, captures: captures)
+            guard let team = Bundle.main.object(forInfoDictionaryKey: "TronSigningTeam") as? String,
+                  team.range(of: "^[A-Z0-9]{10}$", options: .regularExpression) != nil else { throw NativeHostTrustError.invalidIdentity }
+            let teamRequirement = "anchor apple generic and certificate leaf[subject.OU] = \"\(team)\""
+            let captureListener = NSXPCListener(machServiceName: NativeHostTrust.captureMachServiceName)
+            let captureDelegate = NativeCaptureListener(slot: captures,
+                context: NativeCaptureContext(outerBundle: parentBundle, teamRequirement: teamRequirement))
+            captureListener.delegate = captureDelegate
+            captureListener.setConnectionCodeSigningRequirement(teamRequirement)
             listener.delegate = delegate
             listener.setConnectionCodeSigningRequirement(requirement)
             let app = NSApplication.shared
             app.setActivationPolicy(.accessory)
             listener.activate()
+            captureListener.activate()
             // launchd owns the service name and process singleton. Mach rights
             // are never encoded into a file, and no endpoint cleanup can race.
-            withExtendedLifetime((listener, delegate)) { app.run() }
+            withExtendedLifetime((listener, delegate, captureListener, captureDelegate)) { app.run() }
         } catch {
-            FileHandle.standardError.write(Data("Tron Native Host could not start its permission service.\n".utf8))
+            FileHandle.standardError.write(Data("Tron Native Host could not start its authenticated services.\n".utf8))
             exit(78)
         }
     }

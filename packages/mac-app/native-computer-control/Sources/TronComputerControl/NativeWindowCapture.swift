@@ -1,6 +1,6 @@
 import Foundation
 
-package enum NativeWindowCaptureError: Error, Sendable, Equatable {
+public enum NativeWindowCaptureError: Error, Sendable, Equatable {
     case invalidLimits, permissionUnavailable, processUnavailable, sourceUnavailable
     case unsupportedSystem, malformedFrame, encodingFailed, streamFailed, stopFailed, stopped
 }
@@ -22,18 +22,18 @@ package struct NativeWindowCaptureLimits: Sendable, Equatable {
 }
 
 /// This generation identifies a disposable producer, NOT a WindowServer incarnation.
-package struct NativeWindowCaptureFrame: Sendable {
-    package let generation: UUID
-    package let sequence: UInt64
-    package let jpeg: Data
+public struct NativeWindowCaptureFrame: Sendable {
+    public let generation: UUID
+    public let sequence: UInt64
+    public let jpeg: Data
     /// Actual cropped JPEG dimensions, not source-window points or input coordinates.
-    package let width: Int
-    package let height: Int
+    public let width: Int
+    public let height: Int
 }
-package enum NativeWindowCaptureAvailability: Sendable, Equatable {
+public enum NativeWindowCaptureAvailability: Sendable, Equatable {
     case available(UUID), unavailable(NativeWindowCaptureError)
 }
-package enum NativeWindowCaptureJoin: Sendable, Equatable {
+public enum NativeWindowCaptureJoin: Sendable, Equatable {
     case joined, failed(NativeWindowCaptureError)
 }
 internal enum NativeWindowCaptureOutput: Sendable {

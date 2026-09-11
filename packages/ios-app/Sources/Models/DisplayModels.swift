@@ -24,6 +24,25 @@ enum DisplayKind: String, Codable, Hashable, Sendable {
     case webpage
     case hls
     case browserLive = "browser_live"
+    case nativeLive = "native_live"
+
+    var isLive: Bool { liveViewSchema != nil }
+
+    var liveViewSchema: String? {
+        switch self {
+        case .browserLive: "tron.browser-live-view.v1"
+        case .nativeLive: "tron.native-live-view.v1"
+        default: nil
+        }
+    }
+
+    var liveViewCapability: String? {
+        switch self {
+        case .browserLive: "browser-live-view.v1"
+        case .nativeLive: "native-live-view.v1"
+        default: nil
+        }
+    }
 }
 
 struct DisplayPresentationPreference: Codable, Hashable, Sendable {
@@ -31,7 +50,7 @@ struct DisplayPresentationPreference: Codable, Hashable, Sendable {
     let inlineTapAction: DisplayInlineTapAction
 }
 
-struct BrowserLiveViewDescriptor: Codable, Hashable, Sendable {
+struct LiveViewDescriptor: Codable, Hashable, Sendable {
     let schema: String
     let viewId: String
     let generation: String
@@ -43,7 +62,8 @@ struct BrowserLiveViewDescriptor: Codable, Hashable, Sendable {
             !value.isEmpty && value.utf8.count <= maximum
                 && !value.unicodeScalars.contains { $0.value < 0x20 || $0.value == 0x7f }
         }
-        return schema == "tron.browser-live-view.v1" && bounded(viewId, 200)
+        return (schema == DisplayKind.browserLive.liveViewSchema || schema == DisplayKind.nativeLive.liveViewSchema)
+            && bounded(viewId, 200)
             && bounded(generation, 200) && bounded(title, 256) && bounded(fallbackText, 4_096)
     }
 }
@@ -69,14 +89,17 @@ struct DisplayProjection: Codable, Hashable, Sendable, Identifiable {
     let fallbackText: String
     let artifact: DisplayArtifactDescriptor?
     let remoteURL: String?
-    let liveView: BrowserLiveViewDescriptor?
+    let liveView: LiveViewDescriptor?
 
     var id: String { displayId }
 
-    /// Tool calls are chat identities; a live browser is a presentation identity.
-    /// Later actions must not reopen a window the user already dismissed.
+    /// Tool calls are chat identities; exact producer/view generations own live
+    /// presentation. Later actions cannot reopen a manually dismissed window.
     var presentationIdentity: String {
-        if let liveView { return "browser:\(liveView.viewId):\(liveView.generation)" }
+        if let liveView {
+            let producer = kind == .nativeLive ? "native" : "browser"
+            return "\(producer):\(liveView.viewId):\(liveView.generation)"
+        }
         return "\(displayId):\(revision)"
     }
 
@@ -99,7 +122,7 @@ struct DisplayProjection: Codable, Hashable, Sendable, Identifiable {
         fallbackText: String,
         artifact: DisplayArtifactDescriptor? = nil,
         remoteURL: String? = nil,
-        liveView: BrowserLiveViewDescriptor? = nil
+        liveView: LiveViewDescriptor? = nil
     ) {
         self.schema = schema
         self.displayId = displayId
@@ -131,7 +154,7 @@ struct DisplayProjection: Codable, Hashable, Sendable, Identifiable {
         fallbackText = try values.decode(String.self, forKey: .fallbackText)
         artifact = try values.decodeIfPresent(DisplayArtifactDescriptor.self, forKey: .artifact)
         remoteURL = try values.decodeIfPresent(String.self, forKey: .remoteURL)
-        liveView = try values.decodeIfPresent(BrowserLiveViewDescriptor.self, forKey: .liveView)
+        liveView = try values.decodeIfPresent(LiveViewDescriptor.self, forKey: .liveView)
 
         let expected = DisplayPresentationPolicy.eligibleSurfaces(
             for: kind,
@@ -146,8 +169,8 @@ struct DisplayProjection: Codable, Hashable, Sendable, Identifiable {
               Self.admits(fallbackText, minimum: 1, maximum: 4_096),
               eligibleSurfaces == expected,
               hasOneSource,
-              (liveView != nil) == (kind == .browserLive),
-              liveView.map(\.isValid) ?? true else {
+              (liveView != nil) == kind.isLive,
+              liveView.map({ $0.isValid && $0.schema == kind.liveViewSchema }) ?? true else {
             throw DecodingError.dataCorruptedError(
                 forKey: .schema,
                 in: values,
@@ -260,7 +283,7 @@ enum DisplayPresentationPolicy {
             [.sheet, .floating]
         case .document, .webpage, .hls:
             [.sheet]
-        case .browserLive:
+        case .browserLive, .nativeLive:
             [.sheet, .floating]
         }
     }
@@ -277,7 +300,7 @@ enum DisplayPresentationPolicy {
     static func activationSurface(for display: DisplayProjection) -> DisplaySurface {
         // Live tool taps reopen the small window; its expand control owns the
         // sheet route, including for retained descriptors created as sheets.
-        if display.kind == .browserLive { return .floating }
+        if display.kind.isLive { return .floating }
         if display.presentation.requestedSurface == .floating,
            display.eligibleSurfaces == [.sheet],
            (display.kind == .video || display.kind == .audio) {
@@ -290,7 +313,9 @@ enum DisplayPresentationPolicy {
         guard toolName == "display", let object = request?.objectValue else { return nil }
         guard let presentation = object["presentation"]?.objectValue,
               let raw = presentation["surface"]?.stringValue else {
-            return object["source"]?.objectValue?["kind"]?.stringValue == "browser_live" ? .floating : .sheet
+            let rawKind = object["source"]?.objectValue?["kind"]?.stringValue
+            let kind = rawKind.flatMap { DisplayKind(rawValue: $0) }
+            return kind?.isLive == true ? .floating : .sheet
         }
         return DisplaySurface(rawValue: raw) ?? .sheet
     }

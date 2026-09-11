@@ -7,46 +7,37 @@ import UIKit
 /// the generation also restarts a task after coalesced inactive/active transitions.
 @MainActor
 @Observable
-final class BrowserLiveViewingActivity {
+final class LiveViewingActivity {
     private(set) var generation: UInt64 = 0
-    @ObservationIgnored private weak var nativeView: BrowserLiveActivityView?
-    private var environmentSceneActive = false
+    @ObservationIgnored private weak var nativeView: LiveActivityView?
+    var allowsViewing: Bool { nativeView?.allowsViewing == true }
 
-    var allowsViewing: Bool { environmentSceneActive && nativeView?.allowsViewing == true }
-
-    func scenePhaseChanged(_ phase: ScenePhase) {
-        let active = phase == .active
-        guard active != environmentSceneActive else { return }
-        environmentSceneActive = active
-        generation &+= 1
-    }
-
-    fileprivate func mounted(_ view: BrowserLiveActivityView) {
+    fileprivate func mounted(_ view: LiveActivityView) {
         nativeView = view
         generation &+= 1
     }
 
-    fileprivate func changed(_ view: BrowserLiveActivityView) {
+    fileprivate func changed(_ view: LiveActivityView) {
         guard nativeView === view else { return }
         generation &+= 1
     }
 
-    fileprivate func retired(_ view: BrowserLiveActivityView) {
+    fileprivate func retired(_ view: LiveActivityView) {
         guard nativeView === view else { return }
         nativeView = nil
         generation &+= 1
     }
 }
 
-struct BrowserLiveActivityHost: UIViewRepresentable {
-    let activity: BrowserLiveViewingActivity
-    func makeUIView(context: Context) -> BrowserLiveActivityView { BrowserLiveActivityView(activity: activity) }
-    func updateUIView(_ uiView: BrowserLiveActivityView, context: Context) { uiView.bind(activity) }
-    static func dismantleUIView(_ uiView: BrowserLiveActivityView, coordinator: ()) { uiView.retire() }
+struct LiveActivityHost: UIViewRepresentable {
+    let activity: LiveViewingActivity
+    func makeUIView(context: Context) -> LiveActivityView { LiveActivityView(activity: activity) }
+    func updateUIView(_ uiView: LiveActivityView, context: Context) { uiView.bind(activity) }
+    static func dismantleUIView(_ uiView: LiveActivityView, coordinator: ()) { uiView.retire() }
 }
 
-final class BrowserLiveActivityView: UIView {
-    private weak var activity: BrowserLiveViewingActivity?
+final class LiveActivityView: UIView {
+    private weak var activity: LiveViewingActivity?
     private var applicationActive = false
     private var sceneActive = false
 
@@ -56,13 +47,13 @@ final class BrowserLiveActivityView: UIView {
             && window?.windowScene?.activationState == .foregroundActive
     }
 
-    init(activity: BrowserLiveViewingActivity) {
+    init(activity: LiveViewingActivity) {
         self.activity = activity
         super.init(frame: .zero)
         isUserInteractionEnabled = false
     }
 
-    fileprivate func bind(_ activity: BrowserLiveViewingActivity) {
+    fileprivate func bind(_ activity: LiveViewingActivity) {
         guard self.activity !== activity else { return }
         self.activity?.retired(self)
         self.activity = activity

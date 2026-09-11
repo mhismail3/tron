@@ -74,6 +74,51 @@ struct DisplayPresentationTests {
         }
     }
 
+    @Test("native descriptors require their own schema and producer-scoped presentation identity")
+    func nativeLiveDisplay() throws {
+        let browser = browserDisplay(id: "same-call")
+        var wire = try #require(JSONSerialization.jsonObject(with: JSONEncoder.gateway.encode(browser)) as? [String: Any])
+        wire["kind"] = "native_live"
+        // Same fields and eligibility do not make the two schemas aliases.
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder.gateway.decode(DisplayProjection.self, from: JSONSerialization.data(withJSONObject: wire))
+        }
+        var descriptor = try #require(wire["liveView"] as? [String: Any])
+        descriptor["schema"] = "tron.native-live-view.v1"
+        wire["liveView"] = descriptor
+        let native = try JSONDecoder.gateway.decode(DisplayProjection.self, from: JSONSerialization.data(withJSONObject: wire))
+        #expect(native.liveView?.viewId == browser.liveView?.viewId)
+        #expect(native.presentationIdentity == "native:view:runtime:browser")
+        #expect(browser.presentationIdentity == "browser:view:runtime:browser")
+        #expect(native.presentationIdentity != browser.presentationIdentity)
+        #expect(DisplayRoute(sessionID: "session", display: native).id != DisplayRoute(sessionID: "session", display: browser).id)
+        #expect(DisplayPresentationPolicy.eligibleSurfaces(for: .nativeLive) == [.sheet, .floating])
+        #expect(DisplayPresentationPolicy.activationSurface(for: native) == .floating)
+        #expect(ToolDisplayActivation.command(for: toolDescriptor(name: "display", display: native), sessionID: "session")
+            == .showFloating(DisplayRoute(sessionID: "session", display: native)))
+        #expect(DisplayPresentationPolicy.invocationSurface(toolName: "display", request: .object([
+            "source": .object(["kind": .string("native_live")])
+        ])) == .floating)
+        #expect(DisplayFloatingAdmissionPolicy.admission(previous: [browser], current: [browser, native], sceneActive: true,
+            presentationReady: true, allowsPresentation: true, hasFloatingDisplay: false,
+            consumedRevisionIDs: [browser.presentationIdentity]) == .present(native))
+        var tracker = DisplayFloatingCompletionTracker()
+        #expect(tracker.transition(to: [native]) == nil)
+        #expect(tracker.transition(to: nil) == nil)
+        #expect(tracker.transition(to: [native]) == nil) // history/reconnect installs do not start viewing
+
+        let surface = PresentationSurfaceToken(id: "surface", generation: UUID())
+        let oldSource = LiveFrameSource(sessionID: "session", profileID: "profile",
+            presentationIdentity: browser.presentationIdentity, viewID: "view", generation: "runtime:browser",
+            surface: surface, producerID: UUID(), activityGeneration: 1)
+        #expect(!DisplayFloatingLayoutPolicy.matchesLiveSource(oldSource,
+            route: DisplayRoute(sessionID: "session", display: native), profileID: "profile", surface: surface))
+        wire["kind"] = "browser_live"
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder.gateway.decode(DisplayProjection.self, from: JSONSerialization.data(withJSONObject: wire))
+        }
+    }
+
     @Test("browser tool actions share floating identity, sticky dismissal, and manual reopening")
     @MainActor
     func browserToolActivation() throws {
@@ -150,7 +195,7 @@ struct DisplayPresentationTests {
     @Test("browser floating content keeps the 4:3 fallback within small safe bounds")
     func browserPanelAspect() {
         for container in [CGSize(width: 390, height: 800), CGSize(width: 320, height: 160)] {
-            let size = DisplayFloatingLayoutPolicy.panelSize(in: container, browserLive: true)
+            let size = DisplayFloatingLayoutPolicy.panelSize(in: container, live: true)
             #expect(abs(size.width / size.height - 4.0 / 3.0) < 0.001)
             #expect(size.width <= container.width)
             #expect(size.height <= container.height)
@@ -161,26 +206,26 @@ struct DisplayPresentationTests {
     func browserPanelAdaptsToFrameRatio() {
         let container = CGSize(width: 390, height: 800)
         let portrait = DisplayFloatingLayoutPolicy.panelSize(
-            in: container, browserLive: true, browserLiveAspectRatio: 9.0 / 16.0
+            in: container, live: true, liveAspectRatio: 9.0 / 16.0
         )
         let wide = DisplayFloatingLayoutPolicy.panelSize(
-            in: container, browserLive: true, browserLiveAspectRatio: 32.0 / 9.0
+            in: container, live: true, liveAspectRatio: 32.0 / 9.0
         )
         let invalid = DisplayFloatingLayoutPolicy.panelSize(
-            in: container, browserLive: true, browserLiveAspectRatio: .infinity
+            in: container, live: true, liveAspectRatio: .infinity
         )
         #expect(portrait.height > portrait.width)
         #expect(wide.width > wide.height)
         #expect(portrait.width >= DisplayFloatingLayoutPolicy.minimumUsableWidth)
         #expect(wide.height >= DisplayFloatingLayoutPolicy.minimumUsableHeight)
-        #expect(invalid == DisplayFloatingLayoutPolicy.panelSize(in: container, browserLive: true))
+        #expect(invalid == DisplayFloatingLayoutPolicy.panelSize(in: container, live: true))
         for size in [portrait, wide] {
             #expect(size.width <= container.width - 16)
             #expect(size.height <= container.height - 16)
         }
         for ratio in [CGFloat(0.000001), 1_000_000] {
             let extreme = DisplayFloatingLayoutPolicy.panelSize(
-                in: CGSize(width: 1024, height: 768), browserLive: true, browserLiveAspectRatio: ratio)
+                in: CGSize(width: 1024, height: 768), live: true, liveAspectRatio: ratio)
             #expect(extreme.width >= DisplayFloatingLayoutPolicy.minimumUsableWidth && extreme.width <= 420)
             #expect(extreme.height >= DisplayFloatingLayoutPolicy.minimumUsableHeight && extreme.height <= 752)
         }
@@ -207,8 +252,8 @@ struct DisplayPresentationTests {
         let route = DisplayRoute(sessionID: "session", display: browserDisplay(id: "browser"))
         let surface = PresentationSurfaceToken(id: "surface", generation: UUID())
         let producerID = UUID()
-        func source(activityGeneration: UInt64, presentationIdentity: String, producer: UUID? = nil) -> BrowserLiveFrameSource {
-            BrowserLiveFrameSource(
+        func source(activityGeneration: UInt64, presentationIdentity: String, producer: UUID? = nil) -> LiveFrameSource {
+            LiveFrameSource(
                 sessionID: route.sessionID,
                 profileID: "profile",
                 presentationIdentity: presentationIdentity,
@@ -222,36 +267,36 @@ struct DisplayPresentationTests {
         let current = source(activityGeneration: 3, presentationIdentity: route.display.presentationIdentity)
         let stale = source(activityGeneration: 2, presentationIdentity: route.display.presentationIdentity)
         let retired = source(activityGeneration: 4, presentationIdentity: "browser:view:retired")
-        let geometry = BrowserLiveFrameGeometry(width: 1080, height: 1920)
-        let currentUpdate = BrowserLiveFrameUpdate(source: current, geometry: geometry)
-        #expect(DisplayFloatingLayoutPolicy.acceptsBrowserLiveGeometry(
+        let geometry = LiveFrameGeometry(width: 1080, height: 1920)
+        let currentUpdate = LiveFrameUpdate(source: current, geometry: geometry)
+        #expect(DisplayFloatingLayoutPolicy.acceptsLiveGeometry(
             currentUpdate, route: route, profileID: "profile", surface: surface,
             allowsPublication: true, previousSource: nil
         ))
-        #expect(!DisplayFloatingLayoutPolicy.acceptsBrowserLiveGeometry(
-            BrowserLiveFrameUpdate(source: stale, geometry: geometry), route: route,
+        #expect(!DisplayFloatingLayoutPolicy.acceptsLiveGeometry(
+            LiveFrameUpdate(source: stale, geometry: geometry), route: route,
             profileID: "profile", surface: surface, allowsPublication: true, previousSource: current
         ))
-        #expect(!DisplayFloatingLayoutPolicy.acceptsBrowserLiveGeometry(
-            BrowserLiveFrameUpdate(source: retired, geometry: geometry), route: route,
+        #expect(!DisplayFloatingLayoutPolicy.acceptsLiveGeometry(
+            LiveFrameUpdate(source: retired, geometry: geometry), route: route,
             profileID: "profile", surface: surface, allowsPublication: true, previousSource: current
         ))
-        #expect(!DisplayFloatingLayoutPolicy.acceptsBrowserLiveGeometry(
+        #expect(!DisplayFloatingLayoutPolicy.acceptsLiveGeometry(
             currentUpdate, route: route, profileID: "profile", surface: surface,
             allowsPublication: false, previousSource: nil
         ))
         for width in [CGFloat.nan, .infinity, 0, -1] {
-            #expect(!DisplayFloatingLayoutPolicy.acceptsBrowserLiveGeometry(
+            #expect(!DisplayFloatingLayoutPolicy.acceptsLiveGeometry(
                 .init(source: current, geometry: .init(width: width, height: 100)), route: route,
                 profileID: "profile", surface: surface, allowsPublication: true, previousSource: current
             ))
         }
-        #expect(!DisplayFloatingLayoutPolicy.acceptsBrowserLiveGeometry(
+        #expect(!DisplayFloatingLayoutPolicy.acceptsLiveGeometry(
             .init(source: stale, geometry: nil), route: route, profileID: "profile", surface: surface,
             allowsPublication: false, previousSource: current
         ))
         let remounted = source(activityGeneration: 1, presentationIdentity: route.display.presentationIdentity, producer: UUID())
-        #expect(DisplayFloatingLayoutPolicy.acceptsBrowserLiveGeometry(
+        #expect(DisplayFloatingLayoutPolicy.acceptsLiveGeometry(
             .init(source: remounted, geometry: geometry), route: route, profileID: "profile", surface: surface,
             allowsPublication: true, previousSource: current
         ))
@@ -448,7 +493,7 @@ struct DisplayPresentationTests {
     func squeezedPanelPlacement() {
         for browser in [false, true] {
             for container in [CGSize(width: 390, height: 80), CGSize(width: 180, height: 120), .zero] {
-                let panel = DisplayFloatingLayoutPolicy.panelSize(in: container, browserLive: browser)
+                let panel = DisplayFloatingLayoutPolicy.panelSize(in: container, live: browser)
                 #expect(panel.width <= container.width)
                 #expect(panel.height <= container.height)
                 let centers = DisplayFloatingLayoutPolicy.safeCenterRect(container: container, panelSize: panel)

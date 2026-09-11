@@ -126,6 +126,43 @@ struct SharedProtocolFixtureTests {
         }
     }
 
+    @Test("native live session and history projections admit display only, not browser or capture tool grants")
+    func nativeLiveSessionOpenAdmission() throws {
+        var result = try browserResultWire()
+        var wireDisplay = try #require(result["display"] as? [String: Any])
+        var liveView = try #require(wireDisplay["liveView"] as? [String: Any])
+        wireDisplay["kind"] = "native_live"
+        liveView["schema"] = "tron.native-live-view.v1"
+        wireDisplay["liveView"] = liveView
+        result["display"] = wireDisplay
+        result["toolName"] = "display"
+        let response = try decodeBrowserSessionOpen(result)
+        let display = try #require(response.session.transcript.first?.display)
+        #expect(display.kind == .nativeLive)
+        let cached = try JSONDecoder.gateway.decode(SessionSnapshot.self, from: JSONEncoder.gateway.encode(response.session))
+        #expect(cached == response.session)
+        let projection = ChatTranscriptProjectionKernel.cold(snapshot: cached)
+        let tools = projection.timeline.items.flatMap { item -> [ChatToolDescriptor] in
+            if case .toolRun(let run) = item { return run.tools }
+            return []
+        }
+        #expect(ToolDisplayActivation.command(for: try #require(tools.first), sessionID: cached.sessionId)
+            == .showFloating(DisplayRoute(sessionID: cached.sessionId, display: display)))
+        for tool in ["agent_browser", "native_capture", "read"] {
+            result["toolName"] = tool
+            #expect(throws: DecodingError.self) { try decodeBrowserSessionOpen(result) }
+        }
+        result["toolName"] = "display"
+        for role in ["assistant", "user"] {
+            result["role"] = role
+            #expect(throws: DecodingError.self) { try decodeBrowserSessionOpen(result) }
+        }
+        result["role"] = "toolResult"
+        result["display"] = nil
+        result["details"] = ["display": wireDisplay]
+        #expect(try decodeBrowserSessionOpen(result).session.transcript.first?.display == nil)
+    }
+
     @Test("browser display admission still rejects unrelated tools, roles, kinds and malformed sources")
     func browserSessionOpenRejections() throws {
         let wire = try browserResultWire()

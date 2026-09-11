@@ -37,6 +37,13 @@ struct PermissionSetupView: View {
                         .fixedSize()
                         .disabled(busy || !setup.canManageLaunchAgent)
                 }
+                if serviceState == .enabled {
+                    Button("Disable Helper for Update") { changeService(disable: true) }
+                        .buttonStyle(.wizardLink)
+                        .disabled(busy || !setup.canManageLaunchAgent)
+                    Text("Before replacing Tron.app, disable this helper using the current app. This joins capture before unregistering; it does not revoke permissions or stop the Gateway.")
+                        .font(TronTypography.wizardCaption).foregroundStyle(.secondary)
+                }
                 if let actionError {
                     Text(actionError)
                         .font(TronTypography.wizardCaption)
@@ -122,7 +129,7 @@ struct PermissionSetupView: View {
         }
     }
 
-    @MainActor private func changeService() {
+    @MainActor private func changeService(disable: Bool = false) {
         guard active, !busy, setup.canManageLaunchAgent else { return }
         let id = UUID(); actionID = id; probeID = UUID(); busy = true; checking = false
         actionError = nil
@@ -130,7 +137,10 @@ struct PermissionSetupView: View {
         Task { @MainActor in
             do {
                 let result: NativeHostServiceState
-                if restart { result = try await setup.refreshNativeHost() }
+                if disable {
+                    try await setup.unregisterNativeHost()
+                    result = await setup.nativeHostServiceState()
+                } else if restart { result = try await setup.refreshNativeHost() }
                 else { result = try await setup.enableNativeHost() }
                 guard active, actionID == id else { return }
                 serviceState = result

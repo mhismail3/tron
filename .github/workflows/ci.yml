@@ -257,6 +257,12 @@ jobs:
       - run: scripts/verify-ci-toolchain.sh node xcode xcodegen
       - run: python3 scripts/test-personal-info-guard.py
       - run: python3 scripts/test-native-host.py
+      - name: Test actual native capture addon ownership (offline transport only)
+        timeout-minutes: 3
+        run: |
+          python3 -m unittest discover -s packages/mac-app/native-gateway-client -p 'test_*.py'
+          python3 packages/mac-app/native-gateway-client/build.py --test --output "$RUNNER_TEMP/native-capture-test/tron-native-capture-test.node"
+          TRON_CAPTURE_TEST_ADDON="$RUNNER_TEMP/native-capture-test/tron-native-capture-test.node" node --expose-gc --test packages/mac-app/native-gateway-client/addon.test.mjs
       - name: Test native computer-control primitives (offline)
         timeout-minutes: 3
         run: |

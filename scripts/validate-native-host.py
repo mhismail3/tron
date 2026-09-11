@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Read-only native-helper composition validation; no launch/registration/TCC."""
 import argparse
+import json
 from pathlib import Path
 import plistlib
 import re
@@ -9,10 +10,13 @@ import stat
 BUNDLE = 'Contents/Library/Native/Tron Native Host.app'
 EXECUTABLE = BUNDLE + '/Contents/MacOS/TronNativeHost'
 SERVICE = 'com.tron.mac.native-host'
+CAPTURE_SERVICE = SERVICE + '.capture'
+CLIENT = 'Contents/Library/Native/tron-native-capture.node'
+CLIENT_INPUTS = 'Contents/Library/Native/tron-native-capture.inputs.json'
 AGENT = {
     'Label': SERVICE,
     'BundleProgram': EXECUTABLE,
-    'MachServices': {SERVICE: True},
+    'MachServices': {SERVICE: True, CAPTURE_SERVICE: True},
     'AssociatedBundleIdentifiers': ['com.tron.mac'],
     'LimitLoadToSessionType': 'Aqua',
     'RunAtLoad': True,
@@ -45,7 +49,7 @@ def plist(app, relative):
 def validate(app):
     app = Path(app).absolute()
     agent = plist(app, 'Contents/Library/LaunchAgents/' + SERVICE + '.plist')
-    if agent != AGENT or agent.get('RunAtLoad') is not True or agent.get('MachServices', {}).get(SERVICE) is not True:
+    if agent != AGENT or agent.get('RunAtLoad') is not True or any(agent.get('MachServices', {}).get(name) is not True for name in (SERVICE, CAPTURE_SERVICE)):
         raise ValueError('Native LaunchAgent does not match its declared Aqua Mach service')
     parent = plist(app, 'Contents/Info.plist')
     host = plist(app, BUNDLE + '/Contents/Info.plist')
@@ -67,6 +71,21 @@ def validate(app):
     _, info = regular(app, EXECUTABLE)
     if not info.st_mode & 0o111:
         raise ValueError('Native host is not executable')
+    _, client_info = regular(app, CLIENT)
+    inputs, inputs_info = regular(app, CLIENT_INPUTS)
+    if client_info.st_size < 1024 or not 0 < inputs_info.st_size <= 65536:
+        raise ValueError('Native client artifact outside size bounds')
+    with inputs.open('rb') as file:
+        data = file.read(65537)
+    if len(data) > 65536:
+        raise ValueError('Native client artifact outside size bounds')
+    metadata = json.loads(data)
+    if (not isinstance(metadata, dict) or set(metadata) != {'schema', 'testOnly', 'inputs'}
+            or metadata.get('schema') != 1 or metadata.get('testOnly') is not False
+            or not isinstance(metadata.get('inputs'), dict) or not 1 <= len(metadata['inputs']) <= 32
+            or not all(isinstance(k, str) and 0 < len(k) <= 256 and isinstance(v, str)
+                       and re.fullmatch('[a-f0-9]{64}', v) for k, v in metadata['inputs'].items())):
+        raise ValueError('Native client production input manifest is invalid')
 
 
 if __name__ == '__main__':

@@ -8,6 +8,7 @@ import { DeviceStore } from "../security/device-store.js";
 import { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { BrowserSocket, jpeg, registration } from "../../test-fixtures/browser-live.js";
 import { GatewayServer } from "./server.js";
+import type { NativeLiveClient } from "../display/native-live-view.js";
 
 const roots: string[] = [], servers: GatewayServer[] = [], requests: ClientRequest[] = [];
 afterEach(async () => {
@@ -16,27 +17,31 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
   vi.restoreAllMocks();
 });
-async function fixture() {
+async function fixture(native?: NativeLiveClient) {
   const root = await mkdtemp(join(tmpdir(), "tron-live-http-")); roots.push(root);
   const devices = new DeviceStore(root, "fixture"); await devices.initialize();
   const device = await devices.pair((await devices.ensureEnrollment()).code, "Fixture phone");
   const sockets: BrowserSocket[] = [];
-  const views = new BrowserLiveViewRegistry(() => { const socket = new BrowserSocket(); sockets.push(socket); return socket as never; });
-  views.register({ ...registration, loadToken: views.beginSessionLoad(registration.sessionId) });
+  const views = new BrowserLiveViewRegistry(() => { const socket = new BrowserSocket(); sockets.push(socket); return socket as never; },
+    native ? async () => native : undefined);
+  const loadToken = views.beginSessionLoad(registration.sessionId);
+  const descriptor = native
+    ? await views.registerNative(registration.sessionId, (await views.catalogNative(registration.sessionId))[0]!.handle)
+    : views.register({ ...registration, loadToken });
   let authorized = true;
   const server = new GatewayServer({ host: "127.0.0.1", port: 0, maxFrameBytes: 64 * 1024, devices,
     uploads: {} as never, sessions: {} as never, auth: { cancelOwner() {} } as never, service: {} as never,
     logger: { log() {} } as never, liveViews: views,
     authorizeBrowserLiveView: (session, view, generation) => authorized && session === registration.sessionId
-      && view === registration.viewId && generation === registration.generation,
+      && view === descriptor.viewId && generation === descriptor.generation,
   });
   servers.push(server); await server.listen();
   const port = (server as unknown as { server: { address(): AddressInfo } }).server.address().port;
-  return { server, views, sockets, devices, device, port, retireBranch() { authorized = false; } };
+  return { server, views, sockets, devices, device, port, descriptor, retireBranch() { authorized = false; } };
 }
 const route = `/v1/sessions/${registration.sessionId}/live-views/${registration.viewId}`;
 function send(port: number, token: string, method: string, path = route, headers: Record<string, string> = {}, hold = false) {
-  const body = method === "POST" ? JSON.stringify({ generation: registration.generation }) : undefined;
+  const body = method === "POST" ? JSON.stringify({ generation: headers["x-tron-live-generation"] ?? registration.generation }) : undefined;
   let outgoing!: ClientRequest;
   const result = new Promise<{ status: number; headers: Record<string, string | string[] | undefined>; data: Buffer }>((resolve, reject) => {
     outgoing = request({ host: "127.0.0.1", port, method, path, headers: { authorization: `Bearer ${token}`,
@@ -53,7 +58,34 @@ function send(port: number, token: string, method: string, path = route, headers
 }
 function headers(leaseId: string) { return { "x-tron-live-lease": leaseId, "x-tron-live-generation": registration.generation }; }
 
-describe("authenticated disposable browser-view HTTP", () => {
+describe("authenticated disposable live-view HTTP", () => {
+  it("delivers native JPEGs through the same authenticated route and stops on device revocation", async () => {
+    const native: NativeLiveClient = {
+      catalog: async () => [{ handle: "window", title: "Fixture", applicationName: "Fixture" }],
+      start: vi.fn(async () => {}),
+      pull: vi.fn(async () => ({ generation: "stream", sequence: "1", readSequence: 1, width: 1, height: 1, jpeg })),
+      suspend: vi.fn(async () => ({ status: "joined" as const })),
+      close: vi.fn(async () => ({ status: "joined" as const })),
+    };
+    const f = await fixture(native), path = `/v1/sessions/${registration.sessionId}/live-views/${f.descriptor.viewId}`;
+    expect(native.start).not.toHaveBeenCalled();
+    const identity = { "x-tron-live-generation": f.descriptor.generation };
+    const opened = await send(f.port, f.device.token, "POST", path, identity).result;
+    expect(opened.status).toBe(200);
+    const body = JSON.parse(opened.data.toString());
+    expect(body.descriptor.schema).toBe("tron.native-live-view.v1");
+    const leaseHeaders = { ...identity, "x-tron-live-lease": body.leaseId };
+    await vi.waitFor(async () => {
+      const frame = await send(f.port, f.device.token, "GET", `${path}/frame`, leaseHeaders).result;
+      expect(frame.status).toBe(200); expect(frame.data).toEqual(jpeg);
+      expect(frame.headers["content-type"]).toBe("image/jpeg"); expect(frame.headers["cache-control"]).toBe("no-store");
+    });
+    expect(f.sockets).toHaveLength(0);
+    await f.devices.revoke(f.device.deviceId, () => f.server.disconnectDevice(f.device.deviceId));
+    await f.views.joinRetirements(); expect(native.suspend).toHaveBeenCalled();
+    expect(native.close).not.toHaveBeenCalled(); // Selection is not active capture.
+    expect(f.views.describe(registration.sessionId, f.descriptor.viewId, f.descriptor.generation)).toEqual(f.descriptor);
+  });
   it("opens only when requested, delivers bounded fresh frames, and closes without closing browser automation", async () => {
     const f = await fixture();
     expect(f.sockets).toHaveLength(0);

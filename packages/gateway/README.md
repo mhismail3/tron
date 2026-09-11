@@ -113,6 +113,29 @@ The [native-tool settlement qualification](docs/native-tool-settlement.md) prove
 that boundary and its waiter-only negative control with a synthetic peer; it
 registers no production computer-use capability or native input path.
 
+The first-party `native_capture` tool lists bounded Mac window handles (`catalog`),
+selects one exact returned handle (`view`), or closes this session's native scopes
+(`stop`). Selection returns an opaque `native_live` source for `display`, not a
+renderer grant or pixels. Only the canonical display result on the active branch
+permits viewing. The existing live-view registry, authenticated HTTP routes and
+mobile renderer serve both producers with shared viewer/decode budgets.
+
+`machine/native-capture-client.ts` binds one connection to the canonical session
+and extension load. Import is inert; explicit catalog opens the API-versioned,
+signed `Tron.app/Contents/Library/Native/tron-native-capture.node` (API2). This Mac
+capability is optional: missing/incompatible code disables capture, not Gateway
+startup or source updates. No endpoint, credentials, process/window ID or input
+is accepted. Listing and selection start no stream. First-viewer admission starts
+capture; last-viewer retirement suspends and joins it. Reopening uses the same
+retained native window/filter, never another catalog lookup, and waits for a clean
+prior join. Source loss, failed suspension, load replacement or explicit Stop ends
+the reference. Stop uses independent capacity and joins local callbacks after the
+host response; local disconnect alone never proves remote native retirement.
+Frames remain latest-only, bounded and outside JSONL/artifact caches. Installed
+XPC and real-window/mobile qualification remain required; offline tests are not
+that evidence. See the
+[Mac wire and lifetime contract](../mac-app/docs/computer-control.md#direct-gateway-capture-client).
+
 ## Automations
 
 The Gateway is the sole scheduler and canonical owner for durable automations.
@@ -325,7 +348,7 @@ expectations, see [connection resilience and diagnosis](docs/connection-resilien
 - `GET /v1/sessions/:sessionId/display-artifacts/:id` — authenticated, session-authorized immutable display artifact with single-range resume/streaming
 - `POST /v1/sessions/:sessionId/live-views/:id` — open a disposable viewer with `{generation}`
 - `GET /v1/sessions/:sessionId/live-views/:id/frame` — latest JPEG or a body-free waiting/unchanged response
-- `DELETE /v1/sessions/:sessionId/live-views/:id` — close the exact viewer, not the browser
+- `DELETE /v1/sessions/:sessionId/live-views/:id` — close the exact viewer; last native viewer requests joined suspension, never browser automation shutdown
 - `GET /v1/socket` — authenticated protocol version 4 WebSocket
 
 Bearer admission is linearized with the paired-device document under the
@@ -481,7 +504,11 @@ only verified output. Source-only updates require the package lock and dependenc
 to match the selected validated payload exactly and reuse that payload's complete fingerprinted
 `node_modules` tree. They never invoke npm or depend on registry availability, package-manager
 shutdown, or fresh native-module signatures; dependency changes require a newly signed app or
-artifact. Artifact mode only promotes a verified candidate, and auto prefers staged artifacts
+artifact. The optional capture addon belongs to the installed Mac app beside its
+Native Host, outside the Gateway payload. Source-only updates neither require nor
+replace it; the capture loader checks its API version when explicitly opened.
+Native-client changes use a manual Mac app update. Artifact mode only promotes a
+verified candidate, and auto prefers staged artifacts
 before source. A successful RPC acknowledges helper launch, not eventual
 build or promotion success; asynchronous helper failures are reported in update progress. An old
 helper may still stage or copy a candidate, but the new `.bin/pi` runtime contract fails closed

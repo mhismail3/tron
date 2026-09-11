@@ -2,10 +2,12 @@
 
 `native-computer-control` contains unregistered construction, interlock, lifetime,
 explicitly started passive-observation, and capture-only window-stream primitives
-for the future Tron GUI capability host. `Tron.app` bundles a separate Aqua
-permission host for first-time TCC setup, but that host is only a signed
-readiness/request consumer; it does not start the observer or window stream, or
-expose input/capture tools. The package is not a production executor, focus
+for Tron's GUI capability host. `Tron.app` bundles one Aqua Native Host with
+separate permission and capture-only XPC roles. The host source connects the
+capture facade to authenticated Stable-peer requests. The separate
+`native-gateway-client` and Gateway transport supply a direct capture client;
+model-tool registration and mobile integration are not implemented. No
+observer or input backend is started by the host. The package is not an input executor, focus
 manager, AX target resolver, or proof of application effects. It does not post
 events or launch a process. The live input backend and trusted host still need
 to establish when an inert `ConstructedInputPlan` may be admitted and released.
@@ -278,10 +280,11 @@ consumption remain unqualified gates.
 
 ## Bounded capture-only window producer
 
-`NativeWindowCapture` is a single-use, unregistered ScreenCaptureKit producer,
-not native tool exposure or shared-viewer readiness. Construction is inert;
-selection and `start()` are explicit operations. Nothing connects this owner to
-the permission host, Gateway, iOS, input commands, or the browser stream.
+`NativeWindowCapture` is one single-use ScreenCaptureKit stream. Construction is
+inert; selection and `start()` are explicit operations. The Mac capture facade
+and Native Host connect this owner to the shared Gateway/iOS viewer. A retained
+selection can create a fresh stream only after its prior stream joins cleanly.
+This capture boundary supplies no native input commands.
 
 `NativeWindowCaptureSelection.select` performs one initial lookup of an explicit
 window ID for a retained `NSRunningApplication`. Public `PROC_PIDTBSDINFO` pins
@@ -382,6 +385,204 @@ native SCK teardown. The package's existing SwiftPM test target discovers all
 three suites. Parent-owned offline tests
 and later explicitly authorized signed real-stream/Stop qualification are
 required; no native capture has been qualified by construction or compilation.
+
+## Installed capture wire contract
+
+`Sources/Support/Onboarding/NativeCaptureService.h` is the single Objective-C
+protocol for the Swift host and direct Node-API client. Do not duplicate
+selectors or serialize Mach endpoints into files. The fixed Mach name is
+`com.tron.mac.native-host.capture`; permission/service-retirement RPC remains on
+its separate wrapper-only listener. A static `TronNativeCaptureHost` module owns
+the service logic; importing it starts no listener, capture or permission request.
+
+### Admission and authority
+
+The listener bounds four pending handshakes and four authenticated connections.
+Before activation, it pins the actual XPC peer's signed executable and admits it
+against current Stable launchd job, helper/parent/argument provenance, validated
+selected-or-bundled payload, kernel PID/birth/executable and audit-session facts.
+Checks cross awaited observations; timed-out/invalidated handshakes cannot
+activate later. Signing requirements also apply to subsequent messages. No caller
+PID, role, environment marker or permission Boolean is accepted as authority.
+This is distinct native-peer admission: the wrapper's existing SM/listener and
+authenticated `system.info` Running/pairing checks remain unchanged.
+
+Birth/path and SCK objects are not exec/window-incarnation proof. This boundary
+is not a sandbox against code inside the admitted Gateway. Actual signed XPC
+peer rejection, update behavior and installed-service transport still require
+qualification; typecheck, injected validation and the standalone self-window
+qualifier cannot establish those claims.
+
+Each authenticated connection has one host-issued single-use transport session.
+The Gateway must bind that connection to its canonical session/runtime load;
+host-issued UUIDs are correlation fences, not canonical Pi session identity or
+input grants. Catalog is explicit and once-only: up to32 opaque source handles
+retain initial SCK window/filter and process bindings. Application/title text is
+bounded to256 UTF-8 bytes, never used to re-resolve a target or logged as ambient
+inventory. No local picker or arbitrary model PID/window selector is part of the
+wire. Catalogs and idle connections reserve no native stream.
+
+### Closed requests and replies
+
+Control JSON is UTF-8, nonempty and at most65,536 bytes. Unknown keys/operations,
+invalid UUIDs and invalid read sequences are rejected. Version is exactly1.
+All requests carry `version`, `operation`, `loadID` (UUID). Except `hello`, they
+also carry the exact issued `bootID`, `connectionID`, `sessionID` UUIDs.
+
+| Operation | Additional request fields | Successful status / data |
+| --- | --- | --- |
+| `hello` | `commandID` UUID | `ready`, issued identities |
+| `catalog` | `commandID` UUID | `catalog`, `sources` array of handle/applicationName/title |
+| `start` | `commandID`, `handle` UUIDs | `started`, producer `generation` UUID |
+| `pull` | `generation` UUID, `readSequence` integer1…9007199254740991 | `frame` plus JPEG, or `empty`; echoes `readSequence` |
+| `suspend` | `commandID` UUID | `joined` or `retirementFailed`; clean join retains only the selected target |
+| `stop` | `commandID` UUID | `joined` or `retirementFailed`; optional bounded `diagnostic`; terminal scope retirement |
+
+Successful replies carry version/status and the exact issued identities/load.
+Control replies echo commandID. **Pulls have no commandID** (supplying one is
+invalid), use a separate strictly increasing readSequence namespace, and are
+admitted at most once. Repeated/older reads are stale; overlapping work can be
+busy. They do not enter command receipts, retain pixels for replay or permit a
+read ID to become a Stop command. Control commands retain at most64 exact typed
+request/result receipts, reserving Stop capacity; exact duplicates join/reuse the
+same result and changed payloads for an existing commandID reject.
+
+JPEG bytes are a separate optional NSData, never JSON/base64. Only `frame` carries
+JPEG: nonempty, at most2MiB, actual width/height1…1280, a matching generation and
+native `sequence` encoded as an unsigned decimal string. Native sequence and
+readSequence are different namespaces; neither is input authority. Consumers
+must validate encoded image dimensions before allocating a decode and fence all
+late data against their own exact request/source/presentation. Error replies are
+bounded `{version:1,status:...}`; statuses include invalidRequest, unauthorized,
+stale, busy, exhausted, unavailable and retirementFailed.
+
+### Native work and retirement
+
+Only start reserves the single global native stream. One accepted catalog/start
+or pull may be pending per session; the service has eight ordinary reply slots
+and two separate Stop slots, so ordinary backpressure cannot starve Stop. Valid
+start/pull refreshes a15-second monotonic demand expiry. Expiry/peer loss closes
+admission and requests Stop; it never frees capacity by elapsed time. A fresh
+session requires a fresh connection, not an automatic producer restart.
+
+Stop joins pending work and the exact producer's native retirement before freeing
+stream capacity. A joined result with a diagnostic remains joined and releases
+capacity with that diagnostic preserved; failed removal retains the producer and
+reservation. New consumers cannot acquire that reservation through service-wide
+closure or caller loss. No frames enter persistent state or command receipts.
+Clients must close unused connections so bounded inert catalogs/sessions retire.
+
+Wrapper-only **Disable Helper for Update**, refresh and uninstall close native
+admission and join it before unregistering. Uninstall does this before touching
+Gateway registration or local runtime files. Application replacement must use the
+OLD authenticated wrapper's drain/unregister first; see the [manual sequence](development.md#reinstall-a-local-release-build).
+No pin weakening, forced kill, timeout-success or old-version fallback is provided.
+
+`NativeHostRetirementPolicy` explicitly preserves the existing `.notRegistered`
+no-service case, requires an authenticated join for enabled/approval states, and
+refuses `.notFound` or unknown status without opening XPC or changing services.
+A valid never-registered optional helper can report `.notFound`, so successful
+fresh-helper uninstall/refresh remains an availability gate requiring authoritative
+bootstrap policy; enabling or inferring absence is not a retirement workaround.
+Focused policy/coordinator/uninstaller tests require that this refusal preserves
+Gateway registration and local files. A failed or wrong-pin join also fails closed.
+
+The current source connects the Mac host/client to `native_capture` and the
+existing Gateway/iOS live viewer. Native input/recovery and installed cross-process
+validation remain unfinished; building these sources is not an installed update.
+
+## Direct Gateway capture client
+
+`native-gateway-client` uses only the C Node-API8 surface and the shared capture
+header. The Mac app owns its signed `Contents/Library/Native/tron-native-capture.node`
+and build-input manifest. It is not required by Gateway payload startup or source
+updates. The Gateway loader checks `apiVersion == 2` and reports native capture
+unavailable for missing/incompatible Mac code; it does not disable other Gateway
+features or load an alternate native binary. Import only registers inert
+per-environment metadata/methods. Explicit
+`open()` accepts no arguments: the service is fixed, and Security validates
+`/Applications/Tron.app` and its exact nested Native Host against the actual signed
+Node publisher, then pins the host CDHash on the XPC connection. This is not peer
+admission by the addon signature: the host separately authenticates actual Stable
+job/process/payload/code facts. Wrapper `system.info` and pairing remain unchanged.
+No exec-incarnation, atomic process observation or sandbox claim is made.
+
+Each Node environment has four connection slots; an idle catalog does not block
+another canonical owner. Each connection is single-use and bounds four ordinary
+requests (at most one pull), one independent suspend/Stop request, and one terminal event.
+One six-entry TSFN queue covers those five request slots plus terminal delivery;
+ordinary requests cannot consume the Stop reservation. Only pulls may carry a
+JPEG on the wire, at most2MiB.
+Reply copying/parsing is preceded by control/JPEG limits. NSXPC deserialization
+itself is an OS/trusted-peer boundary, not a measured memory limit. Returned JS
+buffers are transient caller-owned values; consumers must not accumulate them.
+
+A mutex seals native callback admission against nonblocking TSFN enqueue. All
+NSXPC calls and JS work happen outside it; late reply/error blocks hold only weak
+owners and exact request tickets. Interruption closes a native terminal gate and
+invalidates immediately, without waiting for Node delivery. An already-admitted
+send can race interruption and remains uncertain; no atomic check-and-send or
+NSXPC-internal reconnect impossibility is claimed. No successor/replay is created.
+
+Gateway `openNativeCaptureClient` binds the connection to one canonical session
+and runtime load, validates exact closed reply fields/identities, retains opaque
+catalog handles, and separates monotonic disposable read IDs from native frame
+sequences. Bounded JPEG header dimensions are checked before handing out pixels;
+this does not prove decoding or rendering. `close()` shares one Stop promise,
+closes publication immediately, joins the host's pending operation and native
+retirement, then joins local transport cleanup. An ordinary error cannot retire
+transport beneath a concurrent Stop. Malformed Stop replies and cleanup failures
+reject; diagnostics and primary/cleanup errors are preserved. No native input or
+input grant is exposed.
+
+Selected-window identity and active capture have distinct lifetimes. `suspend()`
+uses the reserved control lane, requests immediate stream Stop even during start,
+then joins both the host operation and its outstanding JS callback. Only a clean
+join permits another stream for the **same retained target**; the Host discards
+all other catalog handles at first selection. Resume creates a fresh native stream
+generation, without catalog lookup or title/PID/window re-resolution. A viewer
+cancelled while awaiting that join cannot issue a later start. Failed or diagnostic
+suspension closes the scope instead of enabling resume. Terminal `close()` joins
+an in-flight suspension before taking the control lane. Native demand expiry,
+peer loss and load retirement still close the target permanently.
+
+The shared Gateway viewer starts only on visible lease admission, suspends when
+its last lease closes, clears pixels immediately, and retains pending cleanup
+until actual completion. Explicit `native_capture.stop` and session/load disposal
+close the selected target and connection. Floating/sheet and scene transitions
+therefore reuse the existing iOS viewer without hidden capture or a second engine.
+
+JavaScript owns Promises; native code owns bounded callback references, not
+opaque `napi_deferred` handles. Accepted requests and explicit close reference the
+actual Node callback handle until completion; idle clients do not keep the loop
+alive. Normal local close seals first and releases the TSFN normally, allowing
+queued data to drain before finalization. Abrupt environment/worker cleanup seals, invalidates
+and aborts; it proves **local retirement only**, leaving host peer-loss Stop and
+uncertain native resources authoritative. The ABI8 async hook is removed once on
+the Node loop by the TSFN finalizer. Node22 finalizes a TSFN before disposing
+its remaining queue with NULL env, so each payload owns its own native state and
+NULL-env delivery touches no JS or finalizer context. Retiring payloads still count
+against the environment's bounded connection admission.
+
+Allocation failure closes native admission and notifies pending callbacks using
+a preallocated error and a terminal sentinel requiring no new payload/data object.
+Native reply exceptions do not unwind across the XPC boundary. Rejection sweeps
+clear each callback exception before notifying the remaining callbacks, then
+report the error without retrying. Callback references are consumed once and
+disposed even when JS execution is unavailable during forced teardown. Native code does not attempt to settle a destroyed JavaScript
+environment; its Promise objects remain owned by V8's normal lifetime.
+
+`addon.test.mjs` loads a separately compiled `--test` artifact that substitutes
+only the native transport edge. Actual slots, buffers, TSFNs and cleanup hooks
+cover saturation, queue-full, duplicate/delayed replies, partial initialization,
+allocation failure, actual throwing callbacks, idle exit, queued/closing forced
+exit and worker termination. Delayed delivery is explicitly observed before
+checking that old callbacks cannot revive a retired environment. The production
+artifact has no test exports. Gateway Vitest tests cover wire fences and Stop/local
+cleanup ordering; build-input Python tests cover header and manifest rejection.
+The Mac CI job discovers these offline owners. Parent-owned tests and signed
+loading/real-XPC rejection/Stop qualification remain necessary; compilation and
+prior inert-loader evidence do not qualify this asynchronous implementation.
 
 ## Standalone self-window capture qualification host
 

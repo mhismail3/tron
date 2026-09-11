@@ -40,7 +40,7 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         let service = SMAppService.agent(plistName: "\(label).plist")
         let status = ExistingInstallDetector.serviceStatus(label: label)
         let runtime: LaunchAgentRuntimeInfo?
-        do { runtime = try await readRuntimeInfo(label: label) } catch {
+        do { runtime = try await LaunchAgentRuntimeReader.read(label: label) } catch {
             return .unknown(message: "Could not inspect the LaunchAgent. No registration changes were made.")
         }
         let runningParent = runtime?.parentBundleIdentifier
@@ -432,103 +432,7 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
     }
 
     func runtimeInfo(label: String) async -> LaunchAgentRuntimeInfo? {
-        try? await readRuntimeInfo(label: label)
-    }
-
-    private func readRuntimeInfo(label: String) async throws -> LaunchAgentRuntimeInfo? {
-        let result = await Subprocess.run(
-            executable: URL(fileURLWithPath: "/bin/launchctl"),
-            arguments: ["print", "gui/\(currentUID())/\(label)"],
-            policy: .observation
-        )
-        guard try Self.runtimeOutputAvailable(result) else { return nil }
-        let pid = parsePID(from: result.stdout)
-        let uptime: String?
-        let processCommand: String?
-        if let pid {
-            uptime = await ServerProcessProbe.processElapsedTime(pid: pid)
-            processCommand = await ServerProcessProbe.processCommand(pid: pid)
-        } else {
-            uptime = nil
-            processCommand = nil
-        }
-        return LaunchAgentRuntimeInfo(
-            pid: pid,
-            uptime: uptime,
-            parentBundleIdentifier: parseLaunchctlValue(
-                named: "parent bundle identifier",
-                from: result.stdout
-            ),
-            parentBundleVersion: parseLaunchctlValue(named: "parent bundle version", from: result.stdout),
-            executablePath: parseLaunchctlDictionaryValue(named: "Executable", from: result.stdout),
-            bundleProgram: parseLaunchctlProgramIdentifier(from: result.stdout),
-            processCommand: processCommand,
-            gatewaySupervisionMarker: parseLaunchctlEnvironmentValue(
-                named: TronPaths.gatewaySupervisionEnv,
-                from: result.stdout
-            ),
-            gatewayChannelMarker: parseLaunchctlEnvironmentValue(
-                named: TronPaths.gatewayChannelEnv,
-                from: result.stdout
-            ),
-            needsLaunchConstraintRefresh: result.stdout.contains("needs LWCR update")
-        )
-    }
-
-    private func parsePID(from launchctlOutput: String) -> Int? {
-        for line in launchctlOutput.split(whereSeparator: \.isNewline) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasPrefix("pid =") else { continue }
-            let digits = trimmed.drop { !$0.isNumber }.prefix { $0.isNumber }
-            return Int(digits)
-        }
-        return nil
-    }
-
-    private func parseLaunchctlValue(named key: String, from launchctlOutput: String) -> String? {
-        let prefix = "\(key) ="
-        for line in launchctlOutput.split(whereSeparator: \.isNewline) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasPrefix(prefix) else { continue }
-            let value = trimmed.dropFirst(prefix.count).trimmingCharacters(in: .whitespaces)
-            return value.isEmpty ? nil : value
-        }
-        return nil
-    }
-
-    private func parseLaunchctlEnvironmentValue(named key: String, from launchctlOutput: String) -> String? {
-        for line in launchctlOutput.split(whereSeparator: \.isNewline) {
-            let text = line.trimmingCharacters(in: .whitespaces)
-            for separator in [" => ", " = "] {
-                let prefix = "\(key)\(separator)"
-                guard text.hasPrefix(prefix) else { continue }
-                let value = text.dropFirst(prefix.count).trimmingCharacters(in: .whitespacesAndNewlines)
-                return value.isEmpty ? nil : value
-            }
-        }
-        return nil
-    }
-
-    private func parseLaunchctlProgramIdentifier(from launchctlOutput: String) -> String? {
-        guard let value = parseLaunchctlValue(named: "program identifier", from: launchctlOutput) else {
-            return nil
-        }
-        let program = value.components(separatedBy: " (mode:").first?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return program?.isEmpty == false ? program : nil
-    }
-
-    private func parseLaunchctlDictionaryValue(named key: String, from launchctlOutput: String) -> String? {
-        let prefix = "\"\(key)\" => \""
-        for line in launchctlOutput.split(whereSeparator: \.isNewline) {
-            let text = String(line)
-            guard let range = text.range(of: prefix) else { continue }
-            let remainder = text[range.upperBound...]
-            guard let end = remainder.firstIndex(of: "\"") else { continue }
-            let value = String(remainder[..<end])
-            return value.isEmpty ? nil : value
-        }
-        return nil
+        try? await LaunchAgentRuntimeReader.read(label: label)
     }
 
     private func isPortBound(_ port: Int) async throws -> Bool {
