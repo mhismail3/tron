@@ -6,11 +6,25 @@ import type { NativeCaptureTransport } from "./native-capture-transport.js";
 const CONTROL_LIMIT = 65_536;
 const JPEG_LIMIT = 2 * 1024 * 1024;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const errors = new Set(["invalidRequest", "unauthorized", "stale", "busy", "exhausted", "unavailable", "retirementFailed"]);
+const errors = new Set(["invalidRequest", "unauthorized", "stale", "busy", "exhausted", "unavailable", "retirementFailed", "permissionUnavailable", "sourceUnavailable", "streamFailed"]);
+export class NativeCaptureHostFailure extends Error {
+  constructor(readonly status: string, operation: string) {
+    super(`Native capture host rejected ${operation}: ${status}; remote retirement unconfirmed`);
+  }
+}
 type RecordValue = Record<string, unknown>;
 type Identity = { loadID: string; bootID: string; connectionID: string; sessionID: string };
 export type NativeCaptureBinding = Readonly<{ canonicalSessionID: string; runtimeLoadID: string }>;
-export type NativeCaptureSource = Readonly<{ handle: string; applicationName: string; title: string }>;
+export type NativeCaptureSource = Readonly<{ handle: string; kind: "window" | "display"; applicationName: string; title: string; width: number; height: number }>;
+export type NativeCaptureRegion = Readonly<{ x: number; y: number; width: number; height: number }>;
+export function captureRegion(value: unknown): NativeCaptureRegion {
+  const r = record(value); keys(r, ["x", "y", "width", "height"]);
+  for (const key of ["x", "y", "width", "height"] as const) {
+    if (typeof r[key] !== "number" || !Number.isFinite(r[key]) || r[key] < 0) throw new Error("Invalid native capture region");
+  }
+  if (r.width === 0 || r.height === 0) throw new Error("Native capture region must have positive extent");
+  return Object.freeze({ x: r.x as number, y: r.y as number, width: r.width as number, height: r.height as number });
+}
 export type NativeCaptureFrame = Readonly<{
   generation: string; readSequence: number; sequence: string; width: number; height: number; jpeg: Buffer;
 }>;
@@ -76,7 +90,8 @@ class NativeCaptureClient {
   #transport: NativeCaptureTransport;
   #identity: Identity | undefined;
   #generation: string | undefined;
-  #handles = new Set<string>();
+  #handles = new Map<string, NativeCaptureSource>();
+  #selection: { handle: string; region: NativeCaptureRegion | undefined } | undefined;
   #catalogued = false;
   #started = false;
   #ordinary: { done: Promise<void>; settle: () => void } | undefined;
@@ -133,7 +148,7 @@ class NativeCaptureClient {
       if (errors.has(reply.status) && Object.keys(reply).length === 2) {
         keys(reply, ["version", "status"]);
         if (jpeg) throw new Error("Native capture error carried pixels");
-        throw new Error(`Native capture host rejected ${operation}: ${reply.status}; remote retirement unconfirmed`);
+        throw new NativeCaptureHostFailure(reply.status, operation);
       }
       const extra = expected === "catalog" ? ["sources"] : expected === "started" ? ["generation"] :
         expected === "automationEndpoint" ? ["socket", "generation"] :
@@ -193,11 +208,15 @@ class NativeCaptureClient {
       if (this.#closing) throw new Error("Native capture catalog retired before publication");
       if (!Array.isArray(reply.sources) || reply.sources.length > 32) throw new Error("Invalid native capture catalog size");
       const sources = reply.sources.map((value: unknown) => {
-        const source = record(value); keys(source, ["handle", "applicationName", "title"]);
+        const source = record(value); keys(source, ["handle", "kind", "applicationName", "title", "width", "height"]);
         const handle = uuid(source.handle);
         if (this.#handles.has(handle)) throw new Error("Duplicate native capture source");
-        this.#handles.add(handle);
-        return Object.freeze({ handle, applicationName: text(source.applicationName), title: text(source.title) });
+        if (source.kind !== "window" && source.kind !== "display") throw new Error("Invalid native source kind");
+        if (typeof source.width !== "number" || !Number.isFinite(source.width) || source.width <= 0
+          || typeof source.height !== "number" || !Number.isFinite(source.height) || source.height <= 0) throw new Error("Invalid native source dimensions");
+        const entry = Object.freeze({ handle, kind: source.kind, applicationName: text(source.applicationName), title: text(source.title), width: source.width, height: source.height });
+        this.#handles.set(handle, entry);
+        return entry;
       });
       return Object.freeze(sources);
     } catch (cause) {
@@ -220,16 +239,22 @@ class NativeCaptureClient {
       return Object.freeze({ socket, generation });
     } finally { this.#finishOrdinary(); }
   }
-  async start(handle: string, signal?: AbortSignal): Promise<void> {
+  async start(handle: string, signal?: AbortSignal, region?: NativeCaptureRegion): Promise<void> {
+    region = region === undefined ? undefined : captureRegion(region);
     if (this.#suspension) await this.#suspension;
     signal?.throwIfAborted();
     this.#admit();
     try {
       handle = uuid(handle);
-      if (this.#started || !this.#handles.has(handle)) throw new Error("Native capture source unavailable or already used");
+      const source = this.#handles.get(handle);
+      if (this.#started || !source) throw new Error("Native capture source unavailable or already used");
+      if (region && (source.kind !== "display" || region.x > source.width || region.y > source.height
+        || region.width > source.width - region.x || region.height > source.height - region.y)) throw new Error("Region must stay inside its selected display");
+      if (this.#selection && (this.#selection.handle !== handle || JSON.stringify(this.#selection.region) !== JSON.stringify(region))) throw new Error("Native capture resume cannot change its selection or crop");
+      this.#selection = { handle, region };
       this.#started = true; // Never replay an uncertain start.
-      this.#handles = new Set([handle]); // Resume can only use this exact selection.
-      const reply = await this.#exchange("start", "started", { handle });
+      this.#handles = new Map([[handle, source]]); // Resume only this exact source and crop.
+      const reply = await this.#exchange("start", "started", { handle, ...(region ? { region } : {}) });
       const generation = uuid(reply.generation);
       if (this.#closing || this.#suspending) throw new Error("Native capture start retired before publication");
       this.#generation = generation;

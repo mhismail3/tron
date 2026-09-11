@@ -113,25 +113,33 @@ The [native-tool settlement qualification](docs/native-tool-settlement.md) prove
 that boundary and its waiter-only negative control with a synthetic peer; it
 registers no production computer-use capability or native input path.
 
-The first-party `native_capture` tool lists bounded Mac window handles (`catalog`),
-selects one exact returned handle (`view`), or closes this session's native scopes
-(`stop`). Selection returns an opaque `native_live` source for `display`, not a
+The first-party `native_capture` tool lists bounded visible-window and display
+handles with logical dimensions (`catalog`), selects one exact handle (`view`),
+or closes this session's native scopes (`stop`). Display handles support a whole
+display or an explicit bounded region in display-local points; window handles
+show the whole selected window. Selection returns an opaque `native_live` source for `display`, not a
 renderer grant or pixels. Only the canonical display result on the active branch
 permits viewing. The existing live-view registry, authenticated HTTP routes and
 mobile renderer serve both producers with shared viewer/decode budgets.
 
 `machine/native-capture-client.ts` binds one connection to the canonical session
 and extension load. Import is inert; explicit catalog opens the API-versioned,
-signed `Tron.app/Contents/Library/Native/tron-native-capture.node` (API3). This Mac
+signed `Tron.app/Contents/Library/Native/tron-native-capture.node` (API4). This Mac
 capability is optional: missing/incompatible code disables capture, not Gateway
 startup or source updates. No endpoint, credentials, process/window ID or input
 is accepted. Listing and selection start no stream. First-viewer admission starts
 capture; last-viewer retirement suspends and joins it. Reopening uses the same
-retained native window/filter, never another catalog lookup, and waits for a clean
+retained native source/filter and exact crop, never another catalog lookup, and waits for a clean
 prior join. Source loss, failed suspension, load replacement or explicit Stop ends
 the reference. Stop uses independent capacity and joins local callbacks after the
 host response; local disconnect alone never proves remote native retirement.
-Frames remain latest-only, bounded and outside JSONL/artifact caches. Installed
+Frames remain latest-only, bounded and outside JSONL/artifact caches. An asynchronous
+native-start/read failure retains only a finite reason for its exact reference,
+bounded to64 entries, reported for60 seconds, and cleared at session retirement. This lets the
+next frame request report a safe cause without retaining pixels or permitting
+source resurrection. Native first-frame waiting ends after10 seconds of visible
+polling even when setup/empty reads succeed; expiry requests Stop and retains
+actual native retirement, never treating the deadline as a joined resource. Installed
 XPC and real-window/mobile qualification remain required; offline tests are not
 that evidence. See the
 [Mac wire and lifetime contract](../mac-app/docs/computer-control.md#direct-gateway-capture-client).
@@ -149,7 +157,9 @@ disabled for daemon and clients. Missing Cua assets disable only this tool;
 permissions and capture remain available. Administrative history, browser,
 config, update, install, and grant surfaces are not exposed. Each extension load
 owns its binding and awaited shutdown; there is no global computer-session mirror.
-Accepted calls outlive waiter Stop without replay. Observations return bounded
+Before an explicit observation, the adapter confirms Cua's owner-bound session
+activation and discards old proofs if idle expiry required revival. It does not
+revive a session for an action or replay that action. Accepted calls outlive waiter Stop without replay. Observations return bounded
 image blocks from disposable files in an owned directory canonicalized before
 invocation (including macOS temporary-directory symlinks). Files are removed before
 publication; actions require fresh references from that load. Before foreground input, inspect the full desktop for blocking system

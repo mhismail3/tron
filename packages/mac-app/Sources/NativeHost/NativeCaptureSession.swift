@@ -30,9 +30,12 @@ extension NativeCaptureStream: NativeCaptureProducing {
     }
 }
 struct NativeCaptureTarget: Sendable {
+    let kind: NativeCaptureSource.Kind
     let applicationName: String
     let title: String
-    let make: @Sendable (@escaping @Sendable () -> Bool) throws -> any NativeCaptureProducing
+    let width: Double
+    let height: Double
+    let make: @Sendable (NativeCaptureRegion?, @escaping @Sendable () -> Bool) throws -> any NativeCaptureProducing
 }
 struct NativeCaptureOperations: Sendable {
     let validate: @Sendable () async -> Bool
@@ -46,8 +49,9 @@ struct NativeCaptureOperations: Sendable {
     static func live(peer: NativeCapturePeer, automationEndpoint: @escaping @Sendable () -> NativeAutomationEndpoint?) -> Self {
         Self(validate: { await peer.validate() }, catalog: { admission in
             try await NativeCaptureCatalog.load(admission: admission).map { source in
-                NativeCaptureTarget(applicationName: source.applicationName, title: source.title,
-                                    make: { try source.makeStream(admission: $0) })
+                NativeCaptureTarget(kind: source.kind, applicationName: source.applicationName, title: source.title,
+                                    width: source.width, height: source.height,
+                                    make: { try source.makeStream(region: $0, admission: $1) })
             }
         }, automationEndpoint: automationEndpoint)
     }
@@ -93,6 +97,8 @@ actor NativeCaptureSession {
     private var demandID = UUID()
     private var loadID: UUID?
     private var targets: [UUID: NativeCaptureTarget] = [:]
+    private struct Selection: Equatable { let handle: UUID; let region: NativeCaptureRegion? }
+    private var selection: Selection?
     private var catalogued = false
     private var producer: (any NativeCaptureProducing)?
     private var generation: UUID?
@@ -202,18 +208,26 @@ actor NativeCaptureSession {
                 catalogued = true
                 let values = try await operations.catalog { [fence] in fence.admits() }
                 guard await admitted(request), values.count <= 32 else { return .error(.stale) }
-                var entries: [[String: String]] = []
+                var entries: [[String: Any]] = []
                 for value in values {
                     let handle = UUID(); targets[handle] = value
-                    entries.append(["handle": handle.uuidString, "applicationName": NativeCaptureText.bounded(value.applicationName), "title": NativeCaptureText.bounded(value.title)])
+                    entries.append(["handle": handle.uuidString, "kind": value.kind.rawValue,
+                                    "width": value.width, "height": value.height,
+                                    "applicationName": NativeCaptureText.bounded(value.applicationName), "title": NativeCaptureText.bounded(value.title)])
                 }
                 return response(request, status: "catalog", fields: ["sources": entries])
             case "start":
                 guard !usedStream, let target = targets[request.handle!] else { return .error(.stale) }
+                let requested = Selection(handle: request.handle!, region: request.region)
+                guard selection == nil || selection == requested else { return .error(.stale) }
+                if let region = request.region {
+                    guard target.kind == .display,
+                          (try? region.rectangle(in: CGSize(width: target.width, height: target.height))) != nil else { return .error(.invalidRequest) }
+                }
                 guard slot.reserveStream(ownerID) else { return .error(.busy) }
-                ownsStream = true; usedStream = true; targets = [request.handle!: target]
+                ownsStream = true; usedStream = true; targets = [request.handle!: target]; selection = requested
                 renewDemand()
-                let created = try target.make { [fence] in fence.admits() }
+                let created = try target.make(request.region) { [fence] in fence.admits() }
                 producer = created; fence.install(created)
                 let result = await created.start()
                 guard await admitted(request), case let .available(id) = result else {
@@ -221,7 +235,8 @@ actor NativeCaptureSession {
                     closed = true; fence.close()
                     // Do not call drain from pending work: drain joins this task.
                     _ = await finishRetirement()
-                    return .error(.unavailable)
+                    if case let .unavailable(reason) = result { return .error(.capture(reason)) }
+                    return .error(.stale)
                 }
                 generation = id
                 return response(request, status: "started", fields: ["generation": id.uuidString])
@@ -240,7 +255,7 @@ actor NativeCaptureSession {
         } catch {
             closed = true; fence.close()
             _ = await finishRetirement()
-            return .error(.unavailable)
+            return .error(.capture(error))
         }
     }
 

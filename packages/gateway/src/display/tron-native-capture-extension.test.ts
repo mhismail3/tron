@@ -7,7 +7,7 @@ import { admitDisplayProjection } from "./display-contract.js";
 const registries: BrowserLiveViewRegistry[] = [];
 afterEach(async () => { for (const views of registries.splice(0)) { views.dispose(); await views.joinRetirements(); } });
 function fixture() {
-  const client = { catalog: async () => [{ handle: "exact-window", title: "Fixture", applicationName: "Fixture" }],
+  const client = { catalog: async () => [{ handle: "exact-window", kind: "window", title: "Fixture", applicationName: "Fixture", width: 1000, height: 800 }],
     start: vi.fn(async () => {}), pull: vi.fn(async () => undefined), suspend: vi.fn(async () => ({ status: "joined" as const })), close: vi.fn(async () => ({ status: "joined" as const })) };
   const views = new BrowserLiveViewRegistry(undefined, async () => client); registries.push(views); views.beginSessionLoad("session");
   const tools: Record<string, any> = {};

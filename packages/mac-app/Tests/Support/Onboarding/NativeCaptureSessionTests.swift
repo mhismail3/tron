@@ -88,7 +88,7 @@ struct NativeCaptureSessionTests {
         await backend.producer.joinEntered.wait()
         #expect(!slot.reserveStream(otherID))
         backend.producer.joinRelease.signal()
-        #expect(status(try await start.value) == "unavailable")
+        #expect(status(try await start.value) == "stale", "Lost peer authority must not be reported as source availability")
         #expect(await owner.drain().joined)
         // Explicit service drain permanently closes admission, even after join.
         #expect(await slot.drainForServiceRetirement())
@@ -301,8 +301,8 @@ struct NativeCaptureSessionTests {
         let sequence = CaptureProducerSequence([first, second])
         let operations = NativeCaptureOperations(validate: { true }, catalog: { _ in
             sequence.catalogued()
-            return [NativeCaptureTarget(applicationName: "Fixture", title: "Selected", make: { _ in sequence.make() }),
-                    NativeCaptureTarget(applicationName: "Fixture", title: "Other", make: { _ in sequence.make() })]
+            return [NativeCaptureTarget(kind: .window, applicationName: "Fixture", title: "Selected", width: 1000, height: 800, make: { _, _ in sequence.make() }),
+                    NativeCaptureTarget(kind: .window, applicationName: "Fixture", title: "Other", width: 1000, height: 800, make: { _, _ in sequence.make() })]
         }, automationEndpoint: { nil })
         let slot = NativeCaptureSlot()
         let (_, owner) = try #require(slot.attach(fence: NativeCaptureFence { true }, operations: operations))
@@ -310,7 +310,7 @@ struct NativeCaptureSessionTests {
         let wire = try await handshake(owner), catalog = await owner.execute(try wire.request("catalog"))
         let selected = try handle(catalog)
         let object = try #require(JSONSerialization.jsonObject(with: catalog.control) as? [String: Any])
-        let entries = try #require(object["sources"] as? [[String: String]])
+        let entries = try #require(object["sources"] as? [[String: Any]])
         let initial = await owner.execute(try wire.request("start", extra: ["handle": selected]))
         #expect(status(initial) == "started")
         let suspension = Task { await owner.execute(try wire.request("suspend")) }
@@ -327,6 +327,36 @@ struct NativeCaptureSessionTests {
         #expect(resumedObject["generation"] as? String == second.generation.uuidString)
         #expect(first.generation != second.generation)
         #expect(sequence.catalogs == 1 && sequence.makes == 2)
+        #expect(await owner.drain().joined)
+    }
+
+    @Test func displayCropIsBoundedAndCannotChangeWhenResumed() async throws {
+        let first = CaptureTestProducer(joined: true), second = CaptureTestProducer(joined: true)
+        first.startRelease.signal(); first.joinRelease.signal()
+        second.startRelease.signal(); second.joinRelease.signal()
+        let sequence = CaptureProducerSequence([first, second])
+        let crop = NativeCaptureRegion(x: 10, y: 20, width: 30, height: 40)
+        let operations = NativeCaptureOperations(validate: { true }, catalog: { _ in
+            [NativeCaptureTarget(kind: .display, applicationName: "Mac", title: "Display", width: 100, height: 100, make: { region, _ in
+                #expect(region == crop)
+                return sequence.make()
+            })]
+        }, automationEndpoint: { nil })
+        let slot = NativeCaptureSlot()
+        let (_, owner) = try #require(slot.attach(fence: NativeCaptureFence { true }, operations: operations))
+        let wire = try await handshake(owner), catalog = await owner.execute(try wire.request("catalog"))
+        let selected = try handle(catalog)
+        let outside: [String: Any] = ["handle": selected, "region": ["x": 99, "y": 0, "width": 2, "height": 2]]
+        #expect(status(await owner.execute(try wire.request("start", extra: outside))) == "invalidRequest")
+        #expect(sequence.makes == 0)
+        let exact: [String: Any] = ["handle": selected, "region": ["x": 10, "y": 20, "width": 30, "height": 40]]
+        #expect(status(await owner.execute(try wire.request("start", extra: exact))) == "started")
+        #expect(status(await owner.execute(try wire.request("suspend"))) == "joined")
+        let changed: [String: Any] = ["handle": selected, "region": ["x": 11, "y": 20, "width": 30, "height": 40]]
+        #expect(status(await owner.execute(try wire.request("start", extra: changed))) == "stale")
+        #expect(sequence.makes == 1)
+        #expect(status(await owner.execute(try wire.request("start", extra: exact))) == "started")
+        #expect(sequence.makes == 2)
         #expect(await owner.drain().joined)
     }
 
@@ -411,8 +441,8 @@ struct NativeCaptureSessionTests {
     }
     private func handle(_ response: NativeCaptureResponse) throws -> String {
         let object = try #require(JSONSerialization.jsonObject(with: response.control) as? [String: Any])
-        let entries = try #require(object["sources"] as? [[String: String]])
-        return try #require(entries.first?["handle"])
+        let entries = try #require(object["sources"] as? [[String: Any]])
+        return try #require(entries.first?["handle"] as? String)
     }
 }
 
@@ -464,7 +494,7 @@ private actor CaptureBackend {
     private func catalog() async -> [NativeCaptureTarget] {
         nativeCalls += 1; catalogEntered.signal()
         await catalogRelease.wait()
-        return [NativeCaptureTarget(applicationName: "Fixture", title: "Synthetic", make: { [producer] _ in producer })]
+        return [NativeCaptureTarget(kind: .window, applicationName: "Fixture", title: "Synthetic", width: 1000, height: 800, make: { [producer] _, _ in producer })]
     }
 }
 private final class CaptureTestProducer: NativeCaptureProducing, @unchecked Sendable {

@@ -13,7 +13,7 @@ const path = process.env.TRON_CAPTURE_TEST_ADDON;
 assert.ok(path?.endsWith("/tron-native-capture-test.node"));
 const nativeAddon = createRequire(import.meta.url)(path);
 assert.equal(typeof nativeAddon.testStats, "function");
-assert.equal(nativeAddon.apiVersion, 3);
+assert.equal(nativeAddon.apiVersion, 4);
 // Promises belong to JavaScript; this thin adapter retains native synchronous
 // argument rejection for the raw-API tests, but owns no native lifecycle.
 function completion(action) {

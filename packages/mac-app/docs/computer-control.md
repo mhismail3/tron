@@ -51,8 +51,10 @@ opaque references, and at most one accepted invocation. Pi remains the canonical
 session/operation owner. Its awaited `session_shutdown` event closes the bound Cua
 session before invalidating the load; no parallel session registry is introduced.
 
-Only explicit observation can establish or refresh an endpoint. Actions cannot
-silently reconnect to a successor. Caller-supplied session, endpoint, environment,
+Only explicit observation can establish or refresh an endpoint. Before that read,
+the adapter confirms Cua’s owner-bound `start_session`: an idle-expired CLI session
+may be revived, but its old observation proofs are discarded. Actions never revive
+an expired session, silently reconnect to a successor, or replay after refusal. Caller-supplied session, endpoint, environment,
 private protocol fields, and screenshot paths are refused. The adapter injects
 its load identity and bounds argument/output size, AX traversal and image bytes.
 Images are returned as actual model image blocks after bounded PNG header/size
@@ -84,9 +86,11 @@ retained SCK objects are not exec- or WindowServer-incarnation proof. This is no
 a sandbox against arbitrary code inside the admitted Gateway or the same OS user.
 
 Each connection has one issued transport session bound by the Gateway to its
-canonical session/load. Up to32 explicit capture handles retain initial SCK
-window/filter and process bindings. App/title text is bounded display metadata,
-never a target re-resolution mechanism. Capture handles are not input grants.
+canonical session/load. Up to32 opaque handles retain initial SCK window/display
+filters and identity bindings. The catalog offers connected displays and visible
+layer-zero windows; inactive utility/menu surfaces cannot fill the bounded list.
+Each entry includes source kind and logical width/height in points. App/title text
+is bounded display metadata, never a target re-resolution mechanism. Capture handles are not input grants.
 Four authenticated connections and four pending handshakes are bounded separately;
 only a started stream reserves the one global native-capture slot.
 
@@ -100,7 +104,7 @@ The service reserves two cleanup replies independently of eight ordinary replies
 | --- | --- |
 | hello | ready + issued identities |
 | catalog | bounded opaque sources |
-| start | exact handle → fresh stream generation |
+| start | exact handle and optional immutable display-local region → fresh stream generation |
 | pull | generation/readSequence → latest JPEG or empty |
 | suspend | actual stream join; only a clean join allows the retained target to resume |
 | stop | terminal scope retirement, joined or retirementFailed, optional diagnostic |
@@ -112,12 +116,19 @@ diagnostic releases capacity but is not a clean qualification result. Failed
 native retirement retains capacity. Last-viewer close suspends capture; explicit
 Stop, source loss, failed suspension and load replacement retire the reference.
 A new stream is created only for the exact retained target after the previous
-stream's clean join, never by PID/title/window lookup or uncertain-start replay.
+stream's clean join, never by PID/title/window/display lookup or uncertain-start replay.
+Display identity includes its UUID, not whichever display later becomes primary.
+A region is a positive finite rectangle within that selected display, in logical
+points from its top-left. Window handles do not accept a region. The source/crop
+is pinned on first start and checked on resume. Display resolution/rotation changes
+invalidate a cropped selection rather than widen or move the requested area;
+whole-display streaming can follow changes on that same display.
 
 ## Direct Gateway capture client
 
 The Mac-owned `Contents/Library/Native/tron-native-capture.node` uses C Node-API8,
-not V8 APIs or a relay. API3 is required for endpoint bootstrap. Import is inert;
+not V8 APIs or a relay. API4 requires typed source metadata and immutable display
+regions alongside endpoint bootstrap. Import is inert;
 explicit open validates the installed outer/helper signatures against the actual
 signed Node publisher and pins the helper CDHash on NSXPC. No alternate binary,
 endpoint, credential or code requirement is accepted from a model.
@@ -159,6 +170,11 @@ viewing. First visible lease starts capture; last lease closes pixels and suspen
 it. Browser/native viewers share budgets and the same native layout/decode/activity
 owners. Historical installation and reconnect do no hidden work. Input coordinates
 come from Cua's own current observation, not the phone video's crop or scale.
+Capture failure preserves a finite cause separately from cleanup diagnostics;
+Gateway retains only a bounded, short-lived classification for the ended reference.
+iOS shows that safe cause, not the model's alternative text or a raw native error.
+Transient frame GETs may retry within a small fixed budget on the same lease;
+admission, native start, ended sources and input are never automatically replayed.
 See the Gateway README and iOS `display-artifacts.md` for their owner contracts.
 
 ## Qualification and maintenance

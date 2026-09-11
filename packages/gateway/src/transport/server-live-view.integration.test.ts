@@ -9,6 +9,7 @@ import { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { BrowserSocket, jpeg, registration } from "../../test-fixtures/browser-live.js";
 import { GatewayServer } from "./server.js";
 import type { NativeLiveClient } from "../display/native-live-view.js";
+import { NativeCaptureHostFailure } from "../machine/native-capture-client.js";
 
 const roots: string[] = [], servers: GatewayServer[] = [], requests: ClientRequest[] = [];
 afterEach(async () => {
@@ -61,7 +62,7 @@ function headers(leaseId: string) { return { "x-tron-live-lease": leaseId, "x-tr
 describe("authenticated disposable live-view HTTP", () => {
   it("delivers native JPEGs through the same authenticated route and stops on device revocation", async () => {
     const native: NativeLiveClient = {
-      catalog: async () => [{ handle: "window", title: "Fixture", applicationName: "Fixture" }],
+      catalog: async () => [{ handle: "window", kind: "window", title: "Fixture", applicationName: "Fixture", width: 1000, height: 800 }],
       start: vi.fn(async () => {}),
       pull: vi.fn(async () => ({ generation: "stream", sequence: "1", readSequence: 1, width: 1, height: 1, jpeg })),
       suspend: vi.fn(async () => ({ status: "joined" as const })),
@@ -86,6 +87,28 @@ describe("authenticated disposable live-view HTTP", () => {
     expect(native.close).not.toHaveBeenCalled(); // Selection is not active capture.
     expect(f.views.describe(registration.sessionId, f.descriptor.viewId, f.descriptor.generation)).toEqual(f.descriptor);
   });
+  it("reports asynchronous native failure through the existing authenticated HTTP envelope without replay", async () => {
+    const native: NativeLiveClient = {
+      catalog: async () => [{ handle: "source", kind: "display", title: "Fixture", applicationName: "Mac", width: 1000, height: 800 }],
+      start: vi.fn(async () => { throw new NativeCaptureHostFailure("sourceUnavailable", "start"); }),
+      pull: vi.fn(async () => undefined),
+      suspend: vi.fn(async () => { throw new Error("private /fixture/path"); }),
+      close: vi.fn(async () => ({ status: "joined" as const })),
+    };
+    const f = await fixture(native), path = `/v1/sessions/${registration.sessionId}/live-views/${f.descriptor.viewId}`;
+    const identity = { "x-tron-live-generation": f.descriptor.generation };
+    const opened = await send(f.port, f.device.token, "POST", path, identity).result;
+    expect(opened.status).toBe(200);
+    const { leaseId } = JSON.parse(opened.data.toString());
+    await vi.waitFor(() => expect(native.close).toHaveBeenCalled());
+    const result = await send(f.port, f.device.token, "GET", `${path}/frame`, { ...identity, "x-tron-live-lease": leaseId }).result;
+    expect(result.status).toBe(404);
+    expect(JSON.parse(result.data.toString())).toEqual({ error: { code: "not_found", message: "Native live capture ended", retryable: false, details: { liveViewFailure: "source_unavailable" } } });
+    expect(result.data.toString()).not.toContain("/fixture/path");
+    expect((await send(f.port, f.device.token, "POST", path, identity).result).status).toBe(404);
+    expect(native.start).toHaveBeenCalledOnce(); expect(native.pull).not.toHaveBeenCalled();
+  });
+
   it("opens only when requested, delivers bounded fresh frames, and closes without closing browser automation", async () => {
     const f = await fixture();
     expect(f.sockets).toHaveLength(0);

@@ -1163,7 +1163,7 @@ private struct LiveDisplayView: View {
     @Environment(\.tronPresentationActivityCoordinator) private var activityCoordinator
     @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
     @State private var image: UIImage?
-    @State private var failed = false
+    @State private var failure: GatewayClient.LiveError?
     @State private var renderedSource: Source?
     @State private var admittedTaskSource: Source?
     @State private var requestID = UUID()
@@ -1190,13 +1190,13 @@ private struct LiveDisplayView: View {
                     .resizable()
                     .scaledToFit()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if rendersCurrentResult, failed {
-                DisplayUnavailableView(text: display.fallbackText)
+            } else if rendersCurrentResult, let failure {
+                DisplayUnavailableView(text: failure.message)
             } else {
                 TronLoadingState(label: display.kind == .nativeLive ? "Connecting to window…" : "Connecting to browser…", accent: .tronBlue)
             }
         }
-        .accessibilityLabel(display.altText)
+        .accessibilityLabel((rendersCurrentResult ? failure?.message : nil) ?? display.altText)
         .background(LiveActivityHost(activity: viewingActivity).allowsHitTesting(false))
         // Phase already participates in this task ID. An onChange that also
         // increments the native generation feeds a second ID change back into
@@ -1213,7 +1213,7 @@ private struct LiveDisplayView: View {
                 onFrameGeometry?(LiveFrameUpdate(source: source.frameSource, geometry: nil))
             }
             image = nil
-            failed = false
+            failure = nil
             renderedSource = nil
             guard active else { return }
             await receiveFrames(source: source, request: request)
@@ -1225,7 +1225,7 @@ private struct LiveDisplayView: View {
               let profileID = source.profileID else {
             if !Task.isCancelled, requestID == request {
                 renderedSource = source
-                failed = true
+                failure = .ended
             }
             return
         }
@@ -1245,7 +1245,7 @@ private struct LiveDisplayView: View {
         } catch {
             if current() {
                 renderedSource = source
-                failed = true
+                failure = .classify(error)
             }
             return
         }
@@ -1282,7 +1282,7 @@ private struct LiveDisplayView: View {
                 if current() {
                     renderedSource = source
                     image = nil
-                    failed = true
+                    failure = .classify(error)
                 }
             }
             if requestID == request { image = nil }

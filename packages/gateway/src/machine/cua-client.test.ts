@@ -12,8 +12,10 @@ function fixture() {
   const nativeClose = vi.fn(async () => {});
   const open = vi.fn(async () => ({ automationEndpoint: async () => endpoint, close: nativeClose }));
   const run = vi.fn(async (_path: string, args: string[], _options: unknown) => ({ stdout: JSON.stringify(args[1] === "end_session" ? { active: false } : snapshot), stderr: "" }));
-  const owner = binding(), client = new CuaComputerClient(owner, "/fixture/cua-driver", open as never, run as never);
-  return { client, owner, endpoint, open, nativeClose, run };
+  const activate = vi.fn(async () => ({ stdout: '{"active":true,"revived":false}', stderr: "" }));
+  const transport = vi.fn(async (path: string, args: string[], options: unknown) => args[1] === "start_session" ? activate() : run(path, args, options));
+  const owner = binding(), client = new CuaComputerClient(owner, "/fixture/cua-driver", open as never, transport as never);
+  return { client, owner, endpoint, open, nativeClose, run, activate, transport };
 }
 async function observe(f: ReturnType<typeof fixture>) {
   await f.client.invoke("get_window_state", { pid: 123, window_id: 456, include_screenshot: false });
@@ -30,6 +32,29 @@ describe("Cua session/load adapter", () => {
     expect(f.run.mock.calls[1]![1].slice(-2)).toEqual(["--socket", f.endpoint.socket]);
     expect(f.run.mock.calls[1]![2]).not.toHaveProperty("signal"); expect(f.run.mock.calls[1]![2]).not.toHaveProperty("timeout");
     expect(() => f.client.invoke("click", { pid: 123 })).toThrow(/Observe/);
+  });
+  it("revives expired sessions only before observations and never replays an expired action", async () => {
+    const f = fixture(); await observe(f);
+    f.run.mockRejectedValueOnce(new Error("session has ended"));
+    await expect(f.client.invoke("click", { element_token: "s00000001:1" })).rejects.toThrow(/session has ended/);
+    expect(f.transport.mock.calls.map((call) => call[1][1])).toEqual(["start_session", "get_window_state", "click"]);
+    expect(() => f.client.invoke("click", { element_token: "s00000001:1" })).toThrow(/Observe/);
+    f.activate.mockResolvedValueOnce({ stdout: '{"active":true,"revived":true}', stderr: "" });
+    await observe(f);
+    expect(f.transport.mock.calls.slice(-2).map((call) => call[1][1])).toEqual(["start_session", "get_window_state"]);
+    expect(JSON.parse(f.transport.mock.calls.at(-2)![1][2]!)).toEqual({ session: f.owner.runtimeLoadID });
+    expect(f.run.mock.calls.filter((call) => call[1][1] === "click")).toHaveLength(1);
+    await f.client.close();
+  });
+  it("does not dispatch an observation after failed or cancelled session activation", async () => {
+    const f = fixture();
+    f.activate.mockResolvedValueOnce({ stdout: '{"active":false,"code":"session_unavailable"}', stderr: "" });
+    await expect(observe(f)).rejects.toThrow(/activation was not confirmed/);
+    expect(f.run).not.toHaveBeenCalled();
+    const abort = new AbortController();
+    f.activate.mockImplementationOnce(async () => { abort.abort(); return { stdout: '{"active":true,"revived":true}', stderr: "" }; });
+    await expect(f.client.invoke("get_desktop_state", {}, abort.signal)).rejects.toThrow();
+    expect(f.run).not.toHaveBeenCalled(); await f.client.close();
   });
   it.each(["browser_click", "config", "history_enable", "run_shell", "unknown_new_tool"])("does not expose backend/admin surface %s", (tool) => {
     const f = fixture(); expect(() => f.client.invoke(tool, {})).toThrow(/not available/); expect(f.open).not.toHaveBeenCalled();

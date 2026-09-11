@@ -25,22 +25,37 @@ internal struct WindowCaptureProcessIdentity: Equatable, Sendable {
     }
 }
 
-/// Capture-only selection. SCWindow exposes no WindowServer incarnation token;
-/// neither this object nor the stream UUID can authorize NativeControlTargetBinding.
-/// The filter is retained, private, and never updated or re-resolved.
+/// Capture-only selection, never an input target. The exact SDK filter remains
+/// private and is never updated, rediscovered, or widened after selection.
 package final class NativeWindowCaptureSelection: @unchecked Sendable {
-    private let application: NSRunningApplication
-    private let launchDate: Date
-    private let process: WindowCaptureProcessIdentity
-    private let window: SCWindow
+    private enum Content {
+        case window(NSRunningApplication, Date, WindowCaptureProcessIdentity, SCWindow)
+        case display(SCDisplay, NativeCaptureDisplayIdentity)
+    }
+    private let content: Content
     fileprivate let filter: SCContentFilter
+    fileprivate let sourceRect: CGRect?
 
     internal init(application: NSRunningApplication, launchDate: Date,
                  process: WindowCaptureProcessIdentity, window: SCWindow) throws {
-        self.application = application; self.launchDate = launchDate
-        self.process = process; self.window = window
+        content = .window(application, launchDate, process, window)
+        sourceRect = nil
         filter = SCContentFilter(desktopIndependentWindow: window)
         try validate()
+    }
+
+    internal init(display: SCDisplay, identity: NativeCaptureDisplayIdentity,
+                  region: NativeCaptureRegion? = nil) throws {
+        guard display.displayID == identity.id else { throw NativeWindowCaptureError.sourceUnavailable }
+        content = .display(display, identity)
+        sourceRect = try region?.rectangle(in: CGSize(width: identity.width, height: identity.height))
+        filter = SCContentFilter(display: display, excludingWindows: [])
+        try validate()
+    }
+
+    internal func cropped(to region: NativeCaptureRegion) throws -> NativeWindowCaptureSelection {
+        guard case let .display(display, identity) = content else { throw NativeWindowCaptureError.sourceUnavailable }
+        return try Self(display: display, identity: identity, region: region)
     }
 
     /// One initial lookup only, guarded on both sides of the SDK await. No titles,
@@ -64,22 +79,30 @@ package final class NativeWindowCaptureSelection: @unchecked Sendable {
             throw NativeWindowCaptureError.processUnavailable
         }
         let matches = content.windows.filter { $0.windowID == windowID && $0.owningApplication?.processID == identity.pid }
-        guard matches.count == 1, let window = matches.first, window.windowLayer == 0,
-              window.frame.origin.x.isFinite, window.frame.origin.y.isFinite,
-              window.frame.width.isFinite, window.frame.height.isFinite,
-              window.frame.width > 0, window.frame.height > 0 else { throw NativeWindowCaptureError.sourceUnavailable }
+        guard matches.count == 1, let window = matches.first,
+              NativeCaptureCatalog.admitsWindow(layer: window.windowLayer, onScreen: window.isOnScreen, frame: window.frame) else { throw NativeWindowCaptureError.sourceUnavailable }
         return try .init(application: application, launchDate: launch, process: identity, window: window)
     }
 
     fileprivate func validate() throws {
         guard CGPreflightScreenCaptureAccess() else { throw NativeWindowCaptureError.permissionUnavailable }
-        guard !application.isTerminated, application.launchDate == launchDate,
-              application.processIdentifier == process.pid,
-              try WindowCaptureProcessIdentity.read(pid: process.pid) == process else {
-            throw NativeWindowCaptureError.processUnavailable
-        }
-        guard window.owningApplication?.processID == process.pid, filter.style == .window else {
-            throw NativeWindowCaptureError.sourceUnavailable
+        switch content {
+        case let .window(application, launchDate, process, window):
+            guard !application.isTerminated, application.launchDate == launchDate,
+                  application.processIdentifier == process.pid,
+                  try WindowCaptureProcessIdentity.read(pid: process.pid) == process else {
+                throw NativeWindowCaptureError.processUnavailable
+            }
+            guard window.owningApplication?.processID == process.pid, filter.style == .window else {
+                throw NativeWindowCaptureError.sourceUnavailable
+            }
+        case let .display(display, identity):
+            let current = try NativeCaptureDisplayIdentity.read(display.displayID)
+            // Whole-display streams can follow resolution changes. A selected
+            // area cannot silently change coordinate spaces or expand its crop.
+            guard filter.style == .display, identity.admits(current, cropped: sourceRect != nil) else {
+                throw NativeWindowCaptureError.sourceUnavailable
+            }
         }
     }
 }
@@ -95,8 +118,9 @@ internal struct ScreenCaptureKitPlatform: NativeWindowCapturePlatform {
     }
 
     // Inert configuration construction is covered offline; no native start here.
-    static func configuration(_ limits: NativeWindowCaptureLimits) -> SCStreamConfiguration {
+    static func configuration(_ limits: NativeWindowCaptureLimits, sourceRect: CGRect? = nil) -> SCStreamConfiguration {
         let config = SCStreamConfiguration()
+        if let sourceRect { config.sourceRect = sourceRect }
         config.width = limits.width; config.height = limits.height
         config.minimumFrameInterval = CMTime(value: 1, timescale: Int32(limits.framesPerSecond))
         config.queueDepth = NativeWindowCaptureLimits.queueDepth
@@ -130,7 +154,8 @@ private final class ScreenCaptureKitWindowStream: NSObject, NativeWindowCaptureS
          output: @escaping @Sendable (NativeWindowCaptureOutput) -> Void) throws {
         self.selection = selection; encoder = WindowCaptureJPEGEncoder(limits: limits); self.output = output
         super.init()
-        native = SCStream(filter: selection.filter, configuration: ScreenCaptureKitPlatform.configuration(limits), delegate: self)
+        let configuration = ScreenCaptureKitPlatform.configuration(limits, sourceRect: selection.sourceRect)
+        native = SCStream(filter: selection.filter, configuration: configuration, delegate: self)
         try native.addStreamOutput(self, type: .screen, sampleHandlerQueue: sampleQueue)
     }
 

@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserLiveViewRegistry } from "./browser-live-view.js";
+import { NativeCaptureHostFailure } from "../machine/native-capture-client.js";
 import type { NativeLiveClient } from "./native-live-view.js";
 import { jpeg } from "../../test-fixtures/browser-live.js";
 
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: unknown) => void;
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
-const source = { handle: "11111111-1111-4111-8111-111111111111", title: "Fixture window", applicationName: "Fixture" };
+const source = { handle: "11111111-1111-4111-8111-111111111111", kind: "window" as const, title: "Fixture window", applicationName: "Fixture", width: 1000, height: 800 };
 function client() {
   const value: NativeLiveClient = {
     catalog: vi.fn(async () => [source]), start: vi.fn(async () => {}),
@@ -40,13 +41,64 @@ describe("native producer through the shared live-view owner", () => {
     expect(delivery.frame).toMatchObject({ data: jpeg, sequence: 1, width: 1, height: 1 }); delivery.release();
     f.views.close(a.leaseId); expect(f.value.close).not.toHaveBeenCalled();
     f.views.close(b.leaseId); await f.views.joinRetirements();
-    expect(f.value.start).toHaveBeenCalledExactlyOnceWith(source.handle, expect.any(AbortSignal));
+    expect(f.value.start).toHaveBeenCalledExactlyOnceWith(source.handle, expect.any(AbortSignal), undefined);
     expect(f.value.suspend).toHaveBeenCalled(); expect(f.value.close).not.toHaveBeenCalled();
     const resumed = f.views.open("session", view.viewId, view.generation, "phone");
     await vi.waitFor(() => expect(f.value.start).toHaveBeenCalledTimes(2));
-    expect(f.value.start).toHaveBeenLastCalledWith(source.handle, expect.any(AbortSignal));
+    expect(f.value.start).toHaveBeenLastCalledWith(source.handle, expect.any(AbortSignal), undefined);
     f.views.close(resumed.leaseId);
     expect(f.factory).toHaveBeenCalledOnce();
+  });
+
+  it("a display region remains capture-free until viewed and resumes only its snapshotted crop", async () => {
+    const f = fixture(); f.value.catalog = vi.fn(async () => [{ ...source, kind: "display" as const }]);
+    await f.views.catalogNative("session");
+    const region = { x: 10, y: 20, width: 200, height: 150 };
+    const selecting = f.views.registerNative("session", source.handle, region); region.x = 999;
+    const view = await selecting;
+    expect(f.value.start).not.toHaveBeenCalled();
+    const lease = f.views.open("session", view.viewId, view.generation, "phone");
+    await vi.waitFor(() => expect(f.value.start).toHaveBeenCalledOnce());
+    expect(f.value.start).toHaveBeenCalledWith(source.handle, expect.any(AbortSignal), { x: 10, y: 20, width: 200, height: 150 });
+    f.views.close(lease.leaseId); await f.views.joinRetirements();
+    const resumed = f.views.open("session", view.viewId, view.generation, "phone");
+    await vi.waitFor(() => expect(f.value.start).toHaveBeenCalledTimes(2));
+    expect(f.value.start).toHaveBeenLastCalledWith(source.handle, expect.any(AbortSignal), { x: 10, y: 20, width: 200, height: 150 });
+    f.views.close(resumed.leaseId);
+  });
+
+  it.each([["sourceUnavailable", "source_unavailable"], ["permissionUnavailable", "permission_required"], ["busy", "capture_busy"]])("retains safe %s failure after asynchronous start and failed cleanup", async (status, reason) => {
+    const f = fixture();
+    f.value.start = vi.fn(async () => { throw new NativeCaptureHostFailure(status!, "start"); });
+    f.value.suspend = vi.fn(async () => { throw new Error("private cleanup path /private/fixture"); });
+    const view = await selected(f), lease = f.views.open("session", view.viewId, view.generation, "phone");
+    await vi.waitFor(() => expect(f.value.close).toHaveBeenCalled());
+    let failure: unknown;
+    try { f.views.acquireFrame("session", view.viewId, view.generation, lease.leaseId, "phone", () => {}); } catch (error) { failure = error; }
+    expect(failure).toMatchObject({ code: "not_found", retryable: false, details: { liveViewFailure: reason } });
+    expect(String(failure)).not.toContain("private");
+    f.views.retireSession("session");
+    try { f.views.describe("session", view.viewId, view.generation); } catch (error) { expect(error).not.toHaveProperty("details.liveViewFailure"); }
+    expect(f.factory).toHaveBeenCalledOnce(); expect(f.value.start).toHaveBeenCalledOnce();
+  });
+
+  it("empty native reads cannot renew first-frame waiting forever", async () => {
+    const clock = vi.spyOn(performance, "now").mockReturnValue(10);
+    try {
+      const f = fixture(); f.value.pull = vi.fn(async () => undefined);
+      const view = await selected(f), lease = f.views.open("session", view.viewId, view.generation, "phone");
+      await vi.waitFor(() => expect(f.value.pull).toHaveBeenCalled());
+      clock.mockReturnValue(5_010);
+      const waiting = f.views.acquireFrame("session", view.viewId, view.generation, lease.leaseId, "phone", () => {});
+      expect(waiting.frame).toEqual({ status: "waiting" }); waiting.release();
+      clock.mockReturnValue(10_010);
+      let error: unknown;
+      try { f.views.acquireFrame("session", view.viewId, view.generation, lease.leaseId, "phone", () => {}); } catch (failure) { error = failure; }
+      expect(error).toMatchObject({ details: { liveViewFailure: "first_frame_timeout" } });
+      await f.views.joinRetirements();
+      expect(f.value.suspend).toHaveBeenCalled(); expect(f.value.start).toHaveBeenCalledOnce();
+      expect(() => f.views.open("session", view.viewId, view.generation, "phone")).toThrow(/ended/);
+    } finally { clock.mockRestore(); }
   });
 
   it("Stop reaches the native owner during start and retains the unfinished start until its real completion", async () => {

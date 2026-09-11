@@ -1,7 +1,20 @@
 import Foundation
+import TronComputerControl
 
 enum NativeCaptureHostError: String, Error, Sendable {
     case invalidRequest, unauthorized, stale, busy, exhausted, unavailable, retirementFailed
+    case permissionUnavailable, sourceUnavailable, streamFailed
+
+    static func capture(_ error: any Error) -> Self {
+        if let error = error as? Self { return error }
+        switch error as? NativeWindowCaptureError {
+        case .permissionUnavailable: return .permissionUnavailable
+        case .sourceUnavailable, .processUnavailable: return .sourceUnavailable
+        case .stopped: return .stale
+        case .unsupportedSystem: return .unavailable
+        default: return .streamFailed
+        }
+    }
 }
 
 struct NativeCaptureRequest: Decodable, Equatable, Sendable {
@@ -16,6 +29,7 @@ struct NativeCaptureRequest: Decodable, Equatable, Sendable {
     let handle: UUID?
     let generation: UUID?
     let readSequence: UInt64?
+    var region: NativeCaptureRegion? = nil
 
     static func decode(_ data: Data) throws -> Self {
         guard !data.isEmpty, data.count <= 65_536,
@@ -26,7 +40,13 @@ struct NativeCaptureRequest: Decodable, Equatable, Sendable {
         if request.operation != "hello" { keys.formUnion(["bootID", "connectionID", "sessionID"]) }
         switch request.operation {
         case "hello", "automationEndpoint", "catalog", "suspend", "stop": break
-        case "start": keys.insert("handle")
+        case "start":
+            keys.insert("handle")
+            if request.region != nil {
+                keys.insert("region")
+                guard let region = object["region"] as? [String: Any],
+                      Set(region.keys) == Set(["x", "y", "width", "height"]) else { throw NativeCaptureHostError.invalidRequest }
+            }
         case "pull": keys.formUnion(["generation", "readSequence"])
         default: throw NativeCaptureHostError.invalidRequest
         }

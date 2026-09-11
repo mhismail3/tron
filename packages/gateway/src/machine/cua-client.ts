@@ -119,6 +119,18 @@ export class CuaComputerClient {
         this.endpoint = endpoint; this.refreshEndpoint = false;
       }
       const endpoint = this.endpoint!;
+      if (observation) {
+        // Cua expires idle CLI sessions. Only a fresh observation may revive
+        // this load's exact session; never revive or replay an input action.
+        const { stdout } = await this.run(this.driverPath, ["call", "start_session", JSON.stringify({ session: this.binding.runtimeLoadID }), "--socket", endpoint.socket],
+          { env: this.environment(), maxBuffer: OUTPUT_LIMIT, encoding: "utf8", windowsHide: true });
+        const activation = parseCuaOutput(stdout, endpoint.generation);
+        const state = activation.output as Record<string, unknown>;
+        if (activation.status !== "completed" || state.active !== true || typeof state.revived !== "boolean") throw new Error("Cua session activation was not confirmed");
+        if (state.revived) this.invalidateObservation();
+        signal?.throwIfAborted();
+        if (this.closed) throw new Error("Computer session ended during activation");
+      }
       const args: Record<string, unknown> = { ...arguments_, session: this.binding.runtimeLoadID };
       if (tool === "get_window_state") {
         for (const [field, fallback, maximum] of [["max_elements", 160, 200], ["max_depth", 12, 16]] as const) {

@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
 import { GatewayError } from "../errors.js";
 import { observeBrowserCDP, type CapturedBrowserFrame } from "./browser-live-cdp.js";
-import { NATIVE_LIVE_VIEW_SCHEMA, nativeLiveClientFactory, observeNativeWindow, type NativeLiveClient, type NativeLiveClientFactory } from "./native-live-view.js";
-import type { NativeCaptureSource } from "../machine/native-capture-client.js";
+import { NATIVE_LIVE_VIEW_SCHEMA, nativeLiveClientFactory, nativeLiveFailure, observeNativeWindow, type NativeLiveFailure, type NativeLiveClient, type NativeLiveClientFactory } from "./native-live-view.js";
+import { captureRegion, type NativeCaptureRegion, type NativeCaptureSource } from "../machine/native-capture-client.js";
 
 export function browserCDPEndpoint(value: string): URL {
   let endpoint: URL;
@@ -47,6 +47,7 @@ interface NativeCatalog {
 interface NativeLiveViewRegistration extends Omit<BrowserLiveViewRegistration, "cdpUrl"> {
   native: NativeCatalog;
   handle: string;
+  region: NativeCaptureRegion | undefined;
 }
 type Registration = BrowserLiveViewRegistration | NativeLiveViewRegistration;
 export interface BrowserLiveViewRegistration {
@@ -67,6 +68,7 @@ interface View {
   observer: ReturnType<typeof observeBrowserCDP> | undefined;
   epoch: number;
   sequence: number;
+  firstFrameDeadline?: number;
 }
 export type BrowserLiveViewFrameResult = BrowserLiveViewFrame | { status: "waiting" | "unchanged" };
 type ViewIdentity = { sessionId: string; viewId: string; generation: string };
@@ -85,6 +87,9 @@ function bounded(value: unknown, maximum: number): value is string {
  * a view starts neither producer. Pixels are latest-only and never journaled. */
 export class BrowserLiveViewRegistry {
   private readonly views = new Map<string, View>();
+  // Start can fail after POST admission succeeded. Keep only a bounded reason
+  // for the exact ended reference so the next frame GET can explain it.
+  private readonly nativeFailures = new Map<string, { generation: string; reason: NativeLiveFailure; expiresAt: number }>();
   private readonly leases = new Map<string, View>();
   // Admission reserves a retirement receipt. Never forget a closed generation
   // merely to admit another: late producer results must not resurrect it.
@@ -138,13 +143,16 @@ export class BrowserLiveViewRegistry {
       throw error;
     } finally { signal?.removeEventListener("abort", cancel); }
   }
-  async registerNative(sessionId: string, handle: string): Promise<NativeLiveViewDescriptor> {
+  async registerNative(sessionId: string, handle: string, region?: NativeCaptureRegion): Promise<NativeLiveViewDescriptor> {
+    region = region === undefined ? undefined : captureRegion(region);
     const entry = this.nativeCatalogs.get(sessionId);
     if (!entry) throw new GatewayError("not_found", "List native windows before selecting one");
     const source = (await entry.sources).find((value) => value.handle === handle);
     const current = (): boolean => this.nativeCatalogs.get(sessionId) === entry && this.isLoadActive(sessionId, entry.loadToken);
-    if (!source || !current()) throw new GatewayError("not_found", "Native window handle is unavailable");
-    // Selecting a new window replaces only this session's native view, never
+    if (!source || !current()) throw new GatewayError("not_found", "Native source handle is unavailable");
+    if (region && (source.kind !== "display" || region.x > source.width || region.y > source.height
+      || region.width > source.width - region.x || region.height > source.height - region.y)) throw new GatewayError("invalid_request", "Region must stay inside its selected display");
+    // Selecting a new source replaces only this session's native view, never
     // another session's stream or a browser provider's execution.
     const prior: Promise<void>[] = [];
     for (const view of this.views.values()) if (view.registration.sessionId === sessionId && "native" in view.registration) {
@@ -156,14 +164,15 @@ export class BrowserLiveViewRegistry {
     if (!current()) throw new GatewayError("conflict", "Native capture load ended");
     if (this.views.size >= BROWSER_LIVE_VIEW_MAXIMUM_REGISTRATIONS) throw new GatewayError("busy", "Live view capacity reached", true);
     const registration: NativeLiveViewRegistration = { sessionId, loadToken: entry.loadToken,
-      viewId: randomUUID(), generation: randomUUID(), title: (source.title || source.applicationName).replace(/[\u0000-\u001f\u007f]/g, " ").trim() || "Mac window",
-      handle, native: entry };
+      viewId: randomUUID(), generation: randomUUID(), title: `${(source.title || source.applicationName).replace(/[\u0000-\u001f\u007f]/g, " ").trim() || "Mac view"}${region ? " (area)" : ""}`.slice(0, 256),
+      handle, region, native: entry };
     this.nativeCatalogs.delete(sessionId); // The view now owns the exact retained target.
     this.views.set(key(sessionId, registration.viewId), { registration, viewers: new Map(), latest: undefined,
       observer: undefined, epoch: 0, sequence: 0 });
     return this.descriptor(registration);
   }
   async stopNative(sessionId: string): Promise<void> {
+    for (const id of this.nativeFailures.keys()) if (id.startsWith(key(sessionId, ""))) this.nativeFailures.delete(id);
     const closing: Promise<void>[] = [];
     const catalog = this.nativeCatalogs.get(sessionId);
     if (catalog) { this.nativeCatalogs.delete(sessionId); closing.push(catalog.close()); this.joinNative(catalog.close()); }
@@ -265,6 +274,10 @@ export class BrowserLiveViewRegistry {
       throw new GatewayError("not_found", "Browser viewing has ended");
     }
     if (viewer.delivery) throw new GatewayError("busy", "This viewer already has an outstanding frame response", true);
+    if (view.firstFrameDeadline !== undefined && performance.now() >= view.firstFrameDeadline && !view.latest) {
+      this.failNativeView(view, "first_frame_timeout");
+      throw new GatewayError("not_found", "Native capture produced no frame", false, { liveViewFailure: "first_frame_timeout" });
+    }
     viewer.lastSeenAt = Date.now();
     const delivery = { cancel };
     viewer.delivery = delivery;
@@ -300,12 +313,15 @@ export class BrowserLiveViewRegistry {
   }
   retireSession(sessionId: string): void {
     this.activeLoadTokens.delete(sessionId);
+    for (const id of this.nativeFailures.keys()) if (id.startsWith(key(sessionId, ""))) this.nativeFailures.delete(id);
     const catalog = this.nativeCatalogs.get(sessionId);
     if (catalog) { this.nativeCatalogs.delete(sessionId); this.joinNative(catalog.close()); }
     for (const observed of this.observedGenerations.keys()) if (observed.startsWith(`${sessionId}\0`)) this.observedGenerations.delete(observed);
     for (const view of this.views.values()) if (view.registration.sessionId === sessionId) this.retire(view);
   }
   retireView(sessionId: string, viewId: string, generation?: string): void {
+    const failure = this.nativeFailures.get(key(sessionId, viewId));
+    if (failure && (generation === undefined || failure.generation === generation)) this.nativeFailures.delete(key(sessionId, viewId));
     const view = this.views.get(key(sessionId, viewId));
     if (view && (generation === undefined || view.registration.generation === generation)) this.retire(view);
   }
@@ -336,9 +352,11 @@ export class BrowserLiveViewRegistry {
     for (const view of this.views.values()) this.retire(view);
     this.activeLoadTokens.clear();
     this.observedGenerations.clear();
+    this.nativeFailures.clear();
   }
   private expire(): void {
     const now = Date.now();
+    for (const [id, failure] of this.nativeFailures) if (failure.expiresAt <= now) this.nativeFailures.delete(id);
     for (const [leaseId, view] of this.leases) {
       const viewer = view.viewers.get(leaseId);
       if (viewer && now - viewer.lastSeenAt >= BROWSER_LIVE_VIEW_LEASE_IDLE_MS) this.close(leaseId);
@@ -346,7 +364,13 @@ export class BrowserLiveViewRegistry {
   }
   private requireView(sessionId: string, viewId: string, generation: string): View {
     const view = this.views.get(key(sessionId, viewId));
-    if (!view || view.registration.generation !== generation) throw new GatewayError("not_found", "Browser view is no longer available");
+    if (!view || view.registration.generation !== generation) {
+      const failure = this.nativeFailures.get(key(sessionId, viewId));
+      if (failure?.generation === generation && failure.expiresAt > Date.now()) {
+        throw new GatewayError("not_found", "Native live capture ended", false, { liveViewFailure: failure.reason });
+      }
+      throw new GatewayError("not_found", "Live view is no longer available");
+    }
     return view;
   }
   private descriptor(registration: BrowserLiveViewRegistration): BrowserLiveViewDescriptor;
@@ -356,8 +380,8 @@ export class BrowserLiveViewRegistry {
     const native = "native" in registration;
     return { schema: native ? NATIVE_LIVE_VIEW_SCHEMA : BROWSER_LIVE_VIEW_SCHEMA,
       viewId: registration.viewId, generation: registration.generation,
-      title: registration.title ?? (native ? "Mac window" : "Browser view"),
-      fallbackText: registration.fallbackText ?? (native ? "This Mac window view has ended. Select the window again to view it." : "The browser view is unavailable.") };
+      title: registration.title ?? (native ? "Mac view" : "Browser view"),
+      fallbackText: registration.fallbackText ?? (native ? "This Mac view has ended. Select the source again to view it." : "The browser view is unavailable.") };
   }
   private assertRegistration(registration: BrowserLiveViewRegistration): void {
     if (!bounded(registration.sessionId, 200) || !bounded(registration.viewId, 200) || !bounded(registration.generation, 200)
@@ -372,17 +396,19 @@ export class BrowserLiveViewRegistry {
     const epoch = ++view.epoch;
     const current = (): boolean => view.epoch === epoch && this.views.get(key(view.registration.sessionId, view.registration.viewId)) === view;
     if ("native" in view.registration) {
+      view.firstFrameDeadline = performance.now() + 10_000;
       const registration = view.registration;
       let nativeObserver: ReturnType<typeof observeNativeWindow> | undefined;
       const done = registration.native.client.then(async (client) => {
         if (!current()) return;
         nativeObserver = observeNativeWindow(client, registration.handle,
-          (frame) => { if (current()) view.latest = { ...frame, sequence: ++view.sequence }; });
+          (frame) => { if (current()) { view.latest = { ...frame, sequence: ++view.sequence }; delete view.firstFrameDeadline; } }, registration.region);
         await nativeObserver.done;
       });
       view.observer = { done, stop: () => nativeObserver?.stop() };
-      void done.then(() => { if (current()) this.retire(view); }, () => {
-        this.nativeFailure(); if (current()) this.retire(view);
+      void done.then(() => { if (current()) this.retire(view); }, (error: unknown) => {
+        this.nativeFailure();
+        if (current()) this.failNativeView(view, nativeLiveFailure(error));
       });
       return;
     }
@@ -399,8 +425,18 @@ export class BrowserLiveViewRegistry {
       for (const leaseId of view.viewers.keys()) this.close(leaseId);
     });
   }
+  private failNativeView(view: View, reason: NativeLiveFailure): void {
+    const registration = view.registration;
+    while (this.nativeFailures.size >= BROWSER_LIVE_VIEW_MAXIMUM_REGISTRATIONS) this.nativeFailures.delete(this.nativeFailures.keys().next().value!);
+    this.nativeFailures.set(key(registration.sessionId, registration.viewId), {
+      generation: registration.generation, reason, expiresAt: Date.now() + 60_000,
+    });
+    // This requests Stop; neither the deadline nor the diagnostic proves join.
+    this.retire(view);
+  }
   private stop(view: View): void {
     view.epoch++;
+    delete view.firstFrameDeadline;
     view.observer?.stop();
     if ("native" in view.registration && view.observer) {
       this.joinNative(view.observer.done);

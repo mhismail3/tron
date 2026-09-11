@@ -1260,7 +1260,8 @@ actor GatewayClient {
         request.setValue(String(body.count), forHTTPHeaderField: "Content-Length")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let (data, http) = try await liveViewTransport.data(for: request, maximumBytes: 64 * 1_024)
-        guard http.statusCode == 200, http.url == url else { throw LiveError.ended }
+        guard http.url == url else { throw LiveError.invalidResponse }
+        guard http.statusCode == 200 else { throw LiveError.response(data, status: http.statusCode) }
         let wire = try JSONDecoder.gateway.decode(LiveLease.Wire.self, from: data)
         let lease = try LiveLease(wire: wire, request: request, transport: liveViewTransport)
         // A valid lease from the wrong producer is never a browser/native alias.

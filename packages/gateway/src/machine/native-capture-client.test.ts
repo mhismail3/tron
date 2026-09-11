@@ -8,6 +8,7 @@ vi.mock("./native-capture-transport.js", () => ({ openNativeCaptureTransport: op
 const binding = { canonicalSessionID: "canonical-fixture-session", runtimeLoadID: randomUUID() };
 const identity = { bootID: randomUUID(), connectionID: randomUUID(), sessionID: randomUUID() };
 const handle = randomUUID();
+const source = { handle, kind: "window", applicationName: "Fixture", title: "Markers", width: 1000, height: 800 };
 const generation = randomUUID();
 type Pending = {
   request: Record<string, unknown>;
@@ -45,8 +46,8 @@ async function ready() {
 async function started() {
   const client = await ready();
   const catalog = client.catalog();
-  reply(1, "catalog", { sources: [{ handle, applicationName: "Fixture", title: "Markers" }] });
-  expect(await catalog).toEqual([{ handle, applicationName: "Fixture", title: "Markers" }]);
+  reply(1, "catalog", { sources: [source] });
+  expect(await catalog).toEqual([source]);
   const start = client.start(handle);
   reply(2, "started", { generation });
   await start;
@@ -93,6 +94,31 @@ describe("NativeCaptureClient", () => {
     const closed = client.close(); reply(7, "joined"); await closed;
   });
 
+  it("pins a display crop across suspension and snapshots caller arguments before awaiting the join", async () => {
+    const client = await ready(), catalog = client.catalog();
+    reply(1, "catalog", { sources: [{ ...source, kind: "display" }] }); await catalog;
+    const region = { x: 100, y: 50, width: 200, height: 150 };
+    const first = client.start(handle, undefined, region);
+    expect(at(2).request.region).toEqual(region); reply(2, "started", { generation }); await first;
+    const paused = client.suspend(), mutable = { ...region };
+    const resumed = client.start(handle, undefined, mutable); mutable.width = 999;
+    reply(3, "joined"); await paused; await vi.waitFor(() => expect(pending).toHaveLength(5));
+    expect(at(4).request.region).toEqual(region);
+    reply(4, "started", { generation: randomUUID() }); await resumed;
+    const pausedAgain = client.suspend(); reply(5, "joined"); await pausedAgain;
+    await expect(client.start(handle, undefined, { ...region, width: 201 })).rejects.toThrow(/cannot change/);
+    expect(pending).toHaveLength(6);
+    const closed = client.close(); reply(6, "joined"); await closed;
+  });
+
+  it.each(["window", "outside"])("refuses a %s crop before native admission", async (scenario) => {
+    const client = await ready(), catalog = client.catalog();
+    reply(1, "catalog", { sources: [{ ...source, kind: scenario === "window" ? "window" : "display" }] }); await catalog;
+    await expect(client.start(handle, undefined, { x: scenario === "window" ? 0 : 999, y: 0, width: 2, height: 2 })).rejects.toThrow(/inside its selected display/);
+    expect(pending).toHaveLength(2);
+    const closed = client.close(); reply(2, "joined"); await closed;
+  });
+
   it("a hidden viewer waiting for suspension cannot start capture after the join", async () => {
     const client = await started(), abort = new AbortController();
     const paused = client.suspend(), resumed = client.start(handle, abort.signal);
@@ -103,7 +129,7 @@ describe("NativeCaptureClient", () => {
 
   it("suspension owns a pending start's stale result without discarding the selected target", async () => {
     const client = await ready(); const catalog = client.catalog();
-    reply(1, "catalog", { sources: [{ handle, applicationName: "Fixture", title: "Fixture" }] }); await catalog;
+    reply(1, "catalog", { sources: [source] }); await catalog;
     const starting = client.start(handle), interrupted = expect(starting).rejects.toThrow("stale");
     const paused = client.suspend(); reply(3, "joined");
     at(2).resolve({ control: Buffer.from(JSON.stringify({ version: 1, status: "stale" })), jpeg: null });
@@ -150,7 +176,7 @@ describe("NativeCaptureClient", () => {
   it("Stop bypasses pending start and survives its failure until the exact remote join", async () => {
     const client = await ready();
     const catalog = client.catalog();
-    reply(1, "catalog", { sources: [{ handle, applicationName: "Fixture", title: "Markers" }] });
+    reply(1, "catalog", { sources: [source] });
     await catalog;
     const start = client.start(handle);
     const startFailure = expect(start).rejects.toThrow("uncertain");
