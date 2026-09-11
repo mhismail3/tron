@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { CuaComputerClient, parseCuaOutput } from "./cua-client.js";
 
@@ -100,6 +102,34 @@ describe("Cua session/load adapter", () => {
     expect(result.output).not.toHaveProperty("screenshot_file_path");
     f.run.mockResolvedValue({ stdout: '{"effect":"unverifiable"}', stderr: "" });
     expect((await f.client.invoke("hotkey", { pid: 123, window_id: 456, keys: ["cmd","a"], delivery_mode: "foreground" })).status).toBe("outcomeUnknown");
+  });
+  it.each(["get_desktop_state", "get_window_state"])("publishes and cleans %s screenshots under a symlinked temporary root", async (tool) => {
+    const root = await mkdtemp(join(tmpdir(), "tron-cua-path-test-"));
+    const target = join(root, "real"), alias = join(root, "alias");
+    const f = fixture(); let screenshotPath = "";
+    // Valid 1x1 PNG; the vendor canonicalizes its returned screenshot path.
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+    try {
+      await mkdir(target); await symlink(target, alias, "dir");
+      vi.stubEnv("TMPDIR", alias);
+      f.run.mockImplementation(async (_path, argv) => {
+        screenshotPath = JSON.parse(argv[2]!).screenshot_out_file;
+        await writeFile(screenshotPath, png);
+        return { stdout: JSON.stringify({ ...snapshot, screenshot_frame_valid: true, screenshot_file_path: await realpath(screenshotPath), screenshot_width: 1, screenshot_height: 1 }), stderr: "" };
+      });
+      const result = await f.client.invoke(tool, tool === "get_window_state" ? { pid: 123, window_id: 456 } : {});
+      expect(result.image?.data).toBe(png.toString("base64"));
+      expect(result.output).not.toHaveProperty("screenshot_file_path");
+      await expect(access(screenshotPath)).rejects.toThrow();
+      f.run.mockResolvedValue({ stdout: '{"effect":"unverifiable"}', stderr: "" });
+      const action = tool === "get_desktop_state"
+        ? f.client.invoke("hotkey", { pid: 123, keys: ["cmd", "a"], delivery_mode: "foreground" })
+        : f.client.invoke("click", { pid: 123, window_id: 456, x: 1, y: 1 });
+      expect((await action).status).toBe("outcomeUnknown");
+    } finally {
+      vi.unstubAllEnvs(); f.run.mockResolvedValue({ stdout: '{"active":false}', stderr: "" });
+      await f.client.close(); await rm(root, { recursive: true, force: true });
+    }
   });
   it.each([
     ['{"code":"background_unavailable"}', "refused"], ['{"refusal":{"code":"stale_element_token"},"status":"refused"}', "refused"],

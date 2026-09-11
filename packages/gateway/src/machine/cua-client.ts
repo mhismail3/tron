@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
 import { constants } from "node:fs";
-import { mkdtemp, open as openFile, rm } from "node:fs/promises";
+import { mkdtemp, open as openFile, realpath, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { openNativeCaptureClient, type NativeAutomationEndpoint, type NativeCaptureBinding } from "./native-capture-client.js";
@@ -130,6 +130,9 @@ export class CuaComputerClient {
       let imagePath: string | undefined;
       if (IMAGES.has(tool) && args.include_screenshot !== false) {
         directory = await mkdtemp(join(tmpdir(), "tron-computer-"));
+        // Cua returns canonical paths. Resolve our owned directory before
+        // dispatch so macOS /var → /private/var does not discard valid images.
+        directory = await realpath(directory);
         imagePath = join(directory, "observation.png");
         args.screenshot_out_file = imagePath;
       }

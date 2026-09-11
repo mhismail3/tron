@@ -150,8 +150,9 @@ permissions and capture remain available. Administrative history, browser,
 config, update, install, and grant surfaces are not exposed. Each extension load
 owns its binding and awaited shutdown; there is no global computer-session mirror.
 Accepted calls outlive waiter Stop without replay. Observations return bounded
-image blocks from disposable files, and actions require fresh references from
-that load. Before foreground input, inspect the full desktop for blocking system
+image blocks from disposable files in an owned directory canonicalized before
+invocation (including macOS temporary-directory symlinks). Files are removed before
+publication; actions require fresh references from that load. Before foreground input, inspect the full desktop for blocking system
 dialogs: window-only capture and ordinary-window ordering can hide macOS's separate
 direct-capture consent prompt. The agent never approves OS permissions itself.
 
