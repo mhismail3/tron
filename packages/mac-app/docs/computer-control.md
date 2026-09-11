@@ -153,7 +153,13 @@ reported as clean remote retirement.
 
 `NativeWindowCapture` is a single-use stream over a retained selection. Its producer
 is bounded to1280×1280,1–5fps, queueDepth3, BGRA8/sRGB/SDR,8MiB raw and2MiB JPEG.
-Encoding is synchronous and latest-only, with no task per frame. Signed source
+Encoding is synchronous and latest-only, with no task per frame. SCK startup/idle
+status samples are classified before complete-frame timing/readiness checks;
+terminal status samples still end the source and overlay rejection remains active.
+A rejected sample logs only bounded numeric status/buffer/geometry metadata through
+macOS unified logging (`com.tron.native-capture`, `frame-validation`), never pixels,
+window titles, target identities or arbitrary framework exception text. This is
+failure-only evidence, not a per-frame log or alternate frame store. Signed source
 extents and inward scalar cropping are validated before CGRect construction;
 contentRect is scaled by scaleFactor, not contentScale. Only the exact canonical
 null presenter-overlay sentinel is accepted as absent; malformed/nonempty

@@ -18,10 +18,29 @@ internal final class WindowCaptureJPEGEncoder {
     let limits: NativeWindowCaptureLimits
     init(limits: NativeWindowCaptureLimits) { self.limits = limits }
 
+    /// Failure-only numeric diagnostics. Never include pixels, titles, target
+    /// identities, attachment descriptions, or arbitrary framework error text.
+    static func diagnostic(_ sample: CMSampleBuffer) -> String {
+        guard CMSampleBufferIsValid(sample) else { return "valid=0" }
+        let info = (CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]])?.first ?? [:]
+        func number(_ value: Any?) -> String {
+            guard let value = value as? Double else { return "-" }
+            return String(format: "%.6g", value)
+        }
+        func rectangle(_ value: Any?) -> String {
+            guard let value else { return "-" }
+            guard let dictionary = value as? [String: Any],
+                  let rect = CGRect(dictionaryRepresentation: dictionary as CFDictionary) else { return "invalid" }
+            return [rect.origin.x, rect.origin.y, rect.size.width, rect.size.height].map { number(Double($0)) }.joined(separator: ",")
+        }
+        let pixel = CMSampleBufferGetImageBuffer(sample)
+        let layout = pixel.map { "\(CVPixelBufferGetWidth($0))x\(CVPixelBufferGetHeight($0)),stride=\(CVPixelBufferGetBytesPerRow($0)),bytes=\(CVPixelBufferGetDataSize($0)),format=\(CVPixelBufferGetPixelFormatType($0)),planes=\(CVPixelBufferGetPlaneCount($0))" } ?? "none"
+        let result = "ready=\(CMSampleBufferDataIsReady(sample)) samples=\(CMSampleBufferGetNumSamples(sample)) timeFinite=\(CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sample)).isFinite) status=\(number(info[.status])) buffer=\(layout) rect=\(rectangle(info[.contentRect])) scale=\(number(info[.scaleFactor])) contentScale=\(number(info[.contentScale])) overlay=\(rectangle(info[.presenterOverlayContentRect]))"
+        return String(result.prefix(512))
+    }
+
     func encode(_ sample: CMSampleBuffer) throws -> WindowCaptureEncodedFrame? {
-        guard CMSampleBufferIsValid(sample), CMSampleBufferDataIsReady(sample),
-              CMSampleBufferGetNumSamples(sample) == 1,
-              CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sample)).isFinite,
+        guard CMSampleBufferIsValid(sample),
               let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
               attachments.count == 1, let raw = attachments[0][.status] as? Int,
               let status = SCFrameStatus(rawValue: raw) else { throw NativeWindowCaptureError.malformedFrame }
@@ -43,11 +62,18 @@ internal final class WindowCaptureJPEGEncoder {
             }
             if rect.size.width > 0 || rect.size.height > 0 { throw NativeWindowCaptureError.sourceUnavailable }
         }
+        // Status notifications are not video frames. Startup/idle samples need
+        // not carry complete-frame timing, readiness or geometry. The overlay
+        // rejection above still applies to queued composition notifications.
         switch status {
         case .idle, .started: return nil
         case .blank, .suspended, .stopped: throw NativeWindowCaptureError.sourceUnavailable
         case .complete: break
         @unknown default: throw NativeWindowCaptureError.malformedFrame
+        }
+        guard CMSampleBufferDataIsReady(sample), CMSampleBufferGetNumSamples(sample) == 1,
+              CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sample)).isFinite else {
+            throw NativeWindowCaptureError.malformedFrame
         }
         // SCK uses CGRect's dictionary representation, not an NSValue. Match
         // Apple's Capturing Screen Content in macOS sample and the offline fixture.

@@ -80,6 +80,25 @@ final class WindowCaptureJPEGEncoderTests: XCTestCase {
         }
     }
 
+    func testControlSamplesDoNotRequireCompleteFrameTimingOrGeometry() throws {
+        let encoder = WindowCaptureJPEGEncoder(limits: try .init(width: 16, height: 16))
+        for status in [SCFrameStatus.started, .idle] {
+            for ready in [true, false] {
+                XCTAssertNil(try encoder.encode(sample(status: status.rawValue, rect: nil, scale: nil, time: .invalid, ready: ready)))
+            }
+        }
+        for status in [SCFrameStatus.blank, .suspended, .stopped] {
+            XCTAssertThrowsError(try encoder.encode(sample(status: status.rawValue, rect: nil, scale: nil, time: .invalid))) {
+                XCTAssertEqual($0 as? NativeWindowCaptureError, .sourceUnavailable)
+            }
+        }
+        for buffer in [try sample(time: .invalid), try sample(ready: false)] {
+            XCTAssertThrowsError(try encoder.encode(buffer)) {
+                XCTAssertEqual($0 as? NativeWindowCaptureError, .malformedFrame)
+            }
+        }
+    }
+
     func testMissingInvalidMetadataWrongSizeAndWrongPixelFormatAreRejected() throws {
         let malformed: [CMSampleBuffer] = [
             try sample(status: nil), try sample(status: 99), try sample(rect: nil),
@@ -167,6 +186,18 @@ final class WindowCaptureJPEGEncoderTests: XCTestCase {
         XCTAssertTrue(sink.exceeded)
     }
 
+    func testFailureDiagnosticsContainOnlyBoundedNumericMetadata() throws {
+        let diagnostics = WindowCaptureJPEGEncoder.diagnostic(try sample(overlay: "private fixture content" as NSString))
+        XCTAssertTrue(diagnostics.contains("buffer=16x16"))
+        XCTAssertTrue(diagnostics.contains("status=0"))
+        XCTAssertTrue(diagnostics.contains("overlay=invalid"))
+        XCTAssertFalse(diagnostics.contains("private fixture content"))
+        XCTAssertLessThanOrEqual(diagnostics.count, 512)
+        let invalid = try sample()
+        CMSampleBufferInvalidate(invalid)
+        XCTAssertEqual(WindowCaptureJPEGEncoder.diagnostic(invalid), "valid=0")
+    }
+
     func testInvalidatedSampleIsNotPublished() throws {
         let encoder = WindowCaptureJPEGEncoder(limits: try .init(width: 16, height: 16))
         let buffer = try sample()
@@ -201,7 +232,8 @@ final class WindowCaptureJPEGEncoderTests: XCTestCase {
     private func sample(width: Int = 16, format: OSType = kCVPixelFormatType_32BGRA,
                         status: Int? = SCFrameStatus.complete.rawValue,
                         rect: CGRect? = .init(x: 0, y: 0, width: 16, height: 16),
-                        scale: Double? = 1, redRect: CGRect? = nil, overlay: AnyObject? = nil) throws -> CMSampleBuffer {
+                        scale: Double? = 1, redRect: CGRect? = nil, overlay: AnyObject? = nil,
+                        time: CMTime = CMTime(value: 1, timescale: 1), ready: Bool = true) throws -> CMSampleBuffer {
         var pixel: CVPixelBuffer?
         XCTAssertEqual(CVPixelBufferCreate(kCFAllocatorDefault, width, 16, format, nil, &pixel), kCVReturnSuccess)
         let image = try XCTUnwrap(pixel)
@@ -219,9 +251,10 @@ final class WindowCaptureJPEGEncoderTests: XCTestCase {
         var description: CMVideoFormatDescription?
         XCTAssertEqual(CMVideoFormatDescriptionCreateForImageBuffer(allocator: kCFAllocatorDefault, imageBuffer: image,
                                                                    formatDescriptionOut: &description), noErr)
-        var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: CMTime(value: 1, timescale: 1), decodeTimeStamp: .invalid)
+        var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: time, decodeTimeStamp: .invalid)
         var buffer: CMSampleBuffer?
-        XCTAssertEqual(CMSampleBufferCreateReadyWithImageBuffer(allocator: kCFAllocatorDefault, imageBuffer: image,
+        XCTAssertEqual(CMSampleBufferCreateForImageBuffer(allocator: kCFAllocatorDefault, imageBuffer: image,
+            dataReady: ready, makeDataReadyCallback: nil, refcon: nil,
             formatDescription: try XCTUnwrap(description), sampleTiming: &timing, sampleBufferOut: &buffer), noErr)
         let result = try XCTUnwrap(buffer)
         let values = try XCTUnwrap(CMSampleBufferGetSampleAttachmentsArray(result, createIfNecessary: true))

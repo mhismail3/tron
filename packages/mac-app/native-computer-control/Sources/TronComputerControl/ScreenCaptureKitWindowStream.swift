@@ -3,6 +3,7 @@ import CoreGraphics
 import CoreMedia
 import Darwin
 import Foundation
+import os
 import ScreenCaptureKit
 
 /// Kernel launch identity, not an exec incarnation, code identity, or input grant.
@@ -142,6 +143,7 @@ internal struct ScreenCaptureKitPlatform: NativeWindowCapturePlatform {
 /// gate also joins delegate callbacks (SCK does not give them a caller queue).
 @available(macOS 15.2, *)
 private final class ScreenCaptureKitWindowStream: NSObject, NativeWindowCaptureStream, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
+    private static let logger = Logger(subsystem: "com.tron.native-capture", category: "frame-validation")
     private let lifetime = WindowCaptureStreamLifetime()
     private let sampleQueue = DispatchQueue(label: "com.tron.window-capture.samples", qos: .utility)
     private let selection: NativeWindowCaptureSelection
@@ -190,7 +192,12 @@ private final class ScreenCaptureKitWindowStream: NSObject, NativeWindowCaptureS
                 guard let frame, !lifetime.isClosed else { return }
                 try selection.validate()
                 output(.frame(jpeg: frame.jpeg, width: frame.width, height: frame.height))
-            } catch { fail(error as? NativeWindowCaptureError ?? .malformedFrame) }
+            } catch {
+                let failure = error as? NativeWindowCaptureError ?? .malformedFrame
+                let kind = selection.filter.style == .window ? "window" : "display"
+                Self.logger.error("Capture sample rejected kind=\(kind, privacy: .public) cause=\(String(describing: failure), privacy: .public) \(WindowCaptureJPEGEncoder.diagnostic(sampleBuffer), privacy: .public)")
+                fail(failure)
+            }
         }
     }
 
