@@ -1,11 +1,12 @@
 # Native computer-control foundations
 
-`native-computer-control` contains unregistered construction, interlock, lifetime
-and explicitly started passive-observation primitives for the future Tron GUI
-capability host. `Tron.app` now bundles a separate Aqua permission host for
-first-time TCC setup, but that host is only a signed readiness/request consumer;
-it does not start the passive observer or expose input/capture tools. It is not a production tool, executor, focus manager, AX target
-resolver, capture service, or proof of application effects. It does not post
+`native-computer-control` contains unregistered construction, interlock, lifetime,
+explicitly started passive-observation, and capture-only window-stream primitives
+for the future Tron GUI capability host. `Tron.app` bundles a separate Aqua
+permission host for first-time TCC setup, but that host is only a signed
+readiness/request consumer; it does not start the observer or window stream, or
+expose input/capture tools. The package is not a production executor, focus
+manager, AX target resolver, or proof of application effects. It does not post
 events or launch a process. The live input backend and trusted host still need
 to establish when an inert `ConstructedInputPlan` may be admitted and released.
 
@@ -138,7 +139,17 @@ The `NativeInputIO` protocol is deliberately narrow and has no production backen
 or success facade. A future signed GUI host must bind its target to the actual
 process/window/session generations and its scope to the real grant/source, then
 return exact operation/event tickets, dispatch acknowledgements, and post-event
-observations. Preparation and dispatch receive a live owner-admission query. The
+observations. Preparation receives the owner's complete inert packet, including each matching
+release and delay, with all non-delay tickets assigned before native work starts.
+Ticket sequence is event ordinal +1; delay gaps are intentional and stopping does
+not renumber cleanup tickets. The backend must prepare its fallible native copies,
+source, tags and matching releases for the whole packet before returning ready or
+mutating focus/input. It must not reconstruct a different plan or discover that a
+release cannot be constructed after its down was posted. Dispatch uses those exact
+preassigned tickets and original inert event references. This internal contract is
+not proof that an unimplemented native backend has prepared or released anything.
+
+Preparation and dispatch receive a live owner-admission query. The
 backend must check it after its own fallible/awaited preparation immediately
 before native mutation, as well as validating actual target and cleanup authority.
 Each query is bound to its exact in-flight native call. The owner linearizes its
@@ -182,6 +193,11 @@ manufactures that evidence. Plan delays are owned cancellable timers, not backen
 I/O, so Stop interrupts a long delay while still joining any required release.
 `completed` means the native packet and its retirement completed under this I/O
 contract; it is not an application-effect confirmation.
+
+`NativeInputLifetimeTests` checks that the complete packet and matching releases
+reach preparation before the first dispatch. Its controlled backend refuses any
+dispatched ticket/event not present in the initial packet; a leading delay tests
+that dispatch does not regenerate dense ticket sequences.
 
 This layer is controlled-I/O infrastructure, not proof of native OS effects. No
 CGEvent is posted here, and no AX, app activation, capture, tool registration,
@@ -230,7 +246,11 @@ Exact registrations and supplied literal type, flags, key/button, click state
 and position must match. Stamping clones the inert event and its source, then
 verifies the tag and expected facts by read-back. A field-only rewrite can leave
 cached source data unchanged on macOS 26.4; unsuccessful stamping returns nil.
-Original events are unchanged and nothing is posted here.
+Original events are unchanged and nothing is posted here. The offline private-source
+regression also verifies that stamped down/up copies retain one actual native state
+table ID, distinct from another source and the predefined state IDs, without
+changing the original events/source. This is construction evidence only; neither
+that test nor a currently-up source table proves native delivery or release.
 
 One pending waiter per registration is admitted; a second is rejected rather
 than overwriting its continuation. Cancellation affects only that wait and cannot
@@ -255,6 +275,214 @@ proof. The focused tests use an explicit test-only port seam and inert CGEvents;
 they do not create or start a real tap. Signed-host permission, WindowServer
 health, event delivery, physical takeover, native release, and application
 consumption remain unqualified gates.
+
+## Bounded capture-only window producer
+
+`NativeWindowCapture` is a single-use, unregistered ScreenCaptureKit producer,
+not native tool exposure or shared-viewer readiness. Construction is inert;
+selection and `start()` are explicit operations. Nothing connects this owner to
+the permission host, Gateway, iOS, input commands, or the browser stream.
+
+`NativeWindowCaptureSelection.select` performs one initial lookup of an explicit
+window ID for a retained `NSRunningApplication`. Public `PROC_PIDTBSDINFO` pins
+PID plus exact kernel start seconds/microseconds before the SDK await and checks
+that identity, the retained application's launch date/termination, and the
+existing screen-recording grant after it. The exact `SCWindow` and private
+`SCContentFilter(desktopIndependentWindow:)` are retained; no title matching,
+PID-only rebinding, filter updates, restart, or window/desktop fallback exists.
+Only a single ordinary application window (layer zero) is admitted. Ambient
+window inventory is not logged or retained. There is no permission-request API;
+preflight checks precede selection/start and frame publication. Preflight and
+SCK calls are not an atomic TCC transaction: OS consent UI behavior during a
+concurrent revocation still needs signed-host qualification.
+
+**Authority limit:** SCK exposes no WindowServer window-incarnation token. This
+selection means the exact initially selected SCK window/filter, not proof of a
+caller's historical window generation or of window-ID reuse safety inside SCK.
+Kernel launch time is process-lifetime evidence, not exec/code-signing identity.
+The producer UUID fences callbacks and consumer work only; it is not a window
+incarnation, `NativeControlTargetBinding`, or input grant. Exact input authority
+and authenticated target integration remain separate gates. macOS 15.2 or newer
+is required for SCK's window-inactive notification; older systems fail closed.
+
+The producer configures at most 1280×1280 pixels, three native queued surfaces,
+1–5 frames/second (default 5), BGRA8/sRGB/SDR, no audio, microphone, cursor,
+child-window inclusion, or window shadows. Sample admission checks status,
+timestamp, finite content rectangle/pixel density, exact canvas dimensions/format,
+row stride and an 8 MiB raw-buffer cap. Encoding is synchronous on one serial SCK
+callback queue. SCK's `minimumFrameInterval` owns cadence: a second clock/drop
+gate could discard a static window's final complete update. The ImageIO byte
+consumer refuses writes beyond 2 MiB rather than checking an unbounded allocation
+later. These are producer/work bounds, not measured RSS, CPU, energy or latency.
+
+The fixed native canvas avoids reconfiguration on resize. Each complete frame
+is cropped using SCK's dictionary `contentRect` (surface points) multiplied by
+`scaleFactor` (pixel density, 1–4), not `contentScale`. Scaled bounds must fit the
+canvas before rounding; fractional edges keep only fully contained pixels. Signed
+metadata sizes and inward extents are checked before constructing a crop: CGRect's
+width/height accessors can otherwise hide negative sizes by standardizing them.
+Out-of-bounds, empty or malformed geometry fails, never silently intersects or
+clamps. JPEG dimensions describe the actual cropped content, including resize,
+not a relabeled square canvas or source-window/input coordinates. This follows
+[Apple's window-stream guidance](https://developer.apple.com/videos/play/wwdc2022/10155/)
+and the public SDK coordinate definitions. Synthetic crop evidence still does
+not qualify real-window scale/resize behavior or viewer/input integration.
+
+Only the latest bounded JPEG is retained; `takeLatestFrame(generation:)` consumes
+it once, without a waiter list, push callbacks or Task-per-frame backlog. A slow
+consumer loses intermediate frames, never queues them. Frames are transient and
+not written to disk. Callers must not accumulate returned frames and must carry
+the producer generation through asynchronous presentation; retirement cannot
+revoke a value already handed to a caller. Process/grant validation is repeated
+at startup boundaries, on sample delivery, before publication and on pull.
+Source-inactive, blank/suspended/stopped frames, presenter effects, malformed
+samples, stream errors and unavailable identity/grants close admission, clear
+the frame and initiate teardown; no later active callback revives the source.
+Per-sample presenter-overlay metadata rejects small and large composites even
+when the effect delegate is late; malformed overlay metadata also fails closed.
+SCK's canonical absent-overlay `CGRect.null` attachment (positive infinite origins,
+zero signed size) is accepted as empty, as is finite empty geometry. Other infinite,
+NaN, negative-size or nonempty overlay values remain rejected. The live metadata
+regression protects this sentinel without relaxing captured-content bounds.
+The presenter privacy-alert setting alone does not disable composition.
+Static-source health also relies on SCK terminal notifications and on-demand
+pull validation, not a second background poll.
+
+Stop shares one cancellation-independent task: it fences publication immediately,
+waits for actual startup (including a stream handed over after Stop), awaits
+SCK stop, removes the output, drains its sample queue and joins admitted delegate
+work. The native callback gate atomically seals terminal-receipt admission when
+the last admitted callback leaves, before publishing joined completion; a late
+terminal callback cannot reopen bookkeeping after that seal.
+Startup cancellation/failure also waits for that cleanup. Callback failure
+requests teardown off the callback thread; it never self-joins. `stopAndJoin()`
+stays pending after an uncertain native stop error until the native delegate
+reports terminal evidence. `retirementFailure` exposes that error independently;
+the pending cleanup task keeps the exact stream alive without retries, a global
+registry or a self-retention cycle. Output-removal failure returns
+`.failed(.stopFailed)`, not joined, and retains the failed resource. Normal owner
+abandonment transfers its stream to the same actual native join path once, rather
+than just closing callbacks; deinitialization itself is not quiescence evidence.
+There is no timeout escape that pretends uncompleted native work ended. An OS
+failure to provide terminal evidence can leave cleanup pending indefinitely.
+
+`NativeWindowCaptureTests` uses only the internal fake platform/stream seam to
+hold creation, startup and callback join independently; it covers cancellation,
+late/foreign callbacks, failure, source/grant/process loss, abandonment, delayed
+terminal evidence, stale-pull rejection before platform probes, bounded latest
+frames and failed removal. `WindowCaptureJPEGEncoderTests` uses synthetic color
+markers, real ImageIO encoding/decoding and inert SCK configuration to cover
+format, scaled/non-origin/fractional crops, resize, final static updates and byte
+admission. `WindowCaptureStreamLifetimeTests` exercises the actual adapter's
+retirement control with only SDK stop/removal completions substituted. It covers
+terminal-before/after-waiter, uncertain Stop after an attempted start, admitted
+delegate and queued sample drains, final terminal admission sealing and failed
+removal. These tests do not query grants, enumerate/capture real windows or prove
+native SCK teardown. The package's existing SwiftPM test target discovers all
+three suites. Parent-owned offline tests
+and later explicitly authorized signed real-stream/Stop qualification are
+required; no native capture has been qualified by construction or compilation.
+
+## Standalone self-window capture qualification host
+
+`TronNativeCaptureQualification` is a separate, unregistered qualification
+executable in this Swift package. It is not a second installed product, permission
+host, viewer, input backend, or Gateway integration. Its closed invocations are:
+
+- No arguments, `--help`, `-h`, and invalid arguments perform only parsing and
+  bounded text output, before even creating `NSApplication`.
+- `--preflight` checks macOS 15.2 availability and only
+  `CGPreflightScreenCaptureAccess`. It does not create a window, enumerate SCK
+  sources, start capture, or request permission. Preflight success is not capture
+  qualification or proof that another signing/launch context inherits a grant.
+- `--capture-self-window [--write-images]` creates one main-actor AppKit borderless,
+  nonactivating, non-key/main, normal-level panel containing only color markers.
+  It ignores mouse events, never activates an application, and never manipulates
+  another window. The only selection is its own window number with the retained
+  `NSRunningApplication.current`; missing launch identity fails closed. There are
+  no arbitrary PID/window/path/action/text selectors, permission requests, event
+  observers, or native input events.
+
+Capture uses the production `NativeWindowCaptureSelection.select`,
+`NativeWindowCapture.start`, `takeLatestFrame(generation:)`, and `stopAndJoin`
+APIs. The first lifetime must yield independently decoded JPEG marker patches
+for 320×200-point initial content, changed content at that same size, and a
+200×320-point resize with a third marker layout. The oracle validates the actual
+JPEG type/dimensions before allocating a bounded decode, samples four 5×5 patches,
+checks their independently specified RGB values (35/channel JPEG tolerance),
+requires the expected aspect within two pixels, unchanged dimensions across the
+content change, and transposed dimensions within two pixels across resize. It
+rejects square-canvas relabeling, stale content and inverted markers. It does not
+assume a particular display density or claim source/input coordinate authority.
+
+Explicit Stop must join without a native retirement diagnostic, and a subsequent
+same-generation read must throw exactly `stopped`, not return an empty frame or
+hide an earlier source/stream failure. A second sequential producer on the same retained own-window
+selection must first yield the resized marker image; only then does the fixture
+close. Source-unavailable or stream-failed read rejection after that close is
+recorded with its exact category, followed by joined Stop and a late read rejecting
+with that same category. Both lifetimes inspect `retirementFailure` even when
+`stopAndJoin` returns `joined`: a native Stop error followed by terminal evidence
+is retained in the report and cannot pass as a clean qualification. Failure-path
+cleanup also records that diagnostic. This proves the observed terminal behavior after controlled closure, not
+that a generic SCK stream error uniquely identifies the cause. It is not OS input
+release evidence. No capture path is duplicated or added to the production owner.
+
+The report is at most 16 KiB, with at most four measured frame records and no raw
+inventory, window titles, unrelated pixels, event payloads or underlying OS error
+logs. At most 100 candidate frames are decoded. A fixed 20-second diagnostic
+deadline or SIGINT/SIGTERM closes admission and requests Stop, but all native
+selection/start/stop awaits remain joined; neither expiry nor process death is
+success. The 50ms pull interval is only polling, never evidence of rendered content
+or retirement. Native Stop can remain pending indefinitely. If joined removal
+fails, the emitted report has `containmentRequired=true`; the app retains the exact
+failed producers and remains alive for parent-directed containment, without retry,
+restart or a timeout escape. A pending native join may produce no final report.
+
+Without `--write-images`, no frames are written. With it, only accepted marker
+JPEGs go to a fresh 0700 `/private/tmp/tron-capture-qualification.XXXXXX` directory
+created by `mkdtemp`, whose path appears in the report. Four fixed filenames use
+exclusive/no-follow 0600 opens relative to a pinned directory descriptor, at most
+2 MiB each / 8 MiB total. Existing files and directory replacement are rejected.
+Evidence is not recursively removed; the parent owns later inspection/retention.
+This is a run-owned output boundary, not a sandbox against hostile same-UID writers.
+
+Preparation reuses the observer builder's frozen-input, external-output and
+Apple-Development-signature mechanisms through a **closed** `--product capture`
+selection; `--product observer` remains the default and never starts capture.
+Preparation only (does not launch, register, install or grant anything):
+
+```sh
+packages/mac-app/native-computer-control/qualification/build-observer.sh \
+  --product capture --output <fresh-absolute-external-build-directory> \
+  --identity <APPLE_DEVELOPMENT_CERTIFICATE_SHA1>
+```
+
+**Parent/maintainer gate:** review exact source hashes, frozen manifest, toolchain,
+app files, selected capture bundle identifier, leaf certificate and hardened-runtime
+requirement first. Ordinary offline tests must not run either live mode. After
+separate explicit containment approval, launch the exact signed app in the
+background via Launch Services (`open -g -n -W`) with `--preflight` only, inspect
+its JSON `passed` result (not `open`'s
+status), and stop if the existing grant is ineffective. Do not grant/regrant,
+change TCC, substitute the installed app identity, or treat direct-binary/interpreter
+preflight as this app's authorization. Only a separately authorized capture launch
+may use `--capture-self-window`, also with background launch (`-g`). Require
+`passed=true`, all four marker records,
+both joins and late-read rejections, no deadline/cancellation/failure/containment,
+and the source-close reason. If cleanup stalls, preserve the exact owner and
+escalate; an external hard-kill/watchdog is not native retirement evidence.
+
+`CaptureQualificationTests` is automatically discovered by the existing SwiftPM
+CI command. It tests the actual entry router with native closures that must remain
+uncalled for help/invalid input, synthetic real JPEG positive/negative controls,
+report refusal for incomplete/expired/cancelled lifetimes, and fresh image-output
+bounds/replacement refusal. The actual qualifier Stop inspection is also exercised
+against controlled producers reporting joined-with-diagnostic and prior source
+failure; first-lifetime acceptance cannot borrow second-lifetime error categories. It never constructs the AppKit fixture, queries a
+grant, selects a window or starts SCK. These offline tests and compilation do not
+qualify live rendering, display density, permissions, resize, source-close, signal
+cleanup, WindowServer behavior or native retirement; the parent owns those gates.
 
 ## Standalone native observer qualification host
 
@@ -293,7 +521,9 @@ open -g -n -W --stdout "$RESULTS/report.json" --stderr "$RESULTS/stderr.log" \
   --args --observe --deadline-ms 5000
 ```
 
-The preparation script freezes package inputs before compiling with a fresh,
+The preparation script defaults to the observer product; its only other selection
+is the separate capture qualification artifact described above. It freezes package
+inputs before compiling with a fresh,
 external scratch directory. Its `artifact-manifest.json` binds those exact bytes,
 the canonical Mac project and reused signing-policy source, toolchain, build
 command, signed app files and verified leaf certificate. Frozen source changes

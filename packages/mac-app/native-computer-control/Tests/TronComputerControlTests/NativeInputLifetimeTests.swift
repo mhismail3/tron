@@ -20,6 +20,81 @@ final class NativeInputLifetimeTests: XCTestCase {
         }
     }
 
+    func testPreparationReceivesWholePacketBeforeAnyDispatch() async throws {
+        let plan = InputPlan(actions: [.key(.init(.a, modifiers: [.shift])),
+                                       .delay(milliseconds: 0), .key(.init(.b))])
+        let transitions: [Int: NativeObservedTransition] = [
+            0: .down(.keyboard(56)), 1: .down(.keyboard(0)), 2: .up(.keyboard(0)),
+            3: .up(.keyboard(56)), 5: .down(.keyboard(11)), 6: .up(.keyboard(11))
+        ]
+        try await withFixture(configuration: .init(block: .preparationBeforeDispatch,
+                                                   transitions: transitions), plan: plan) { f in
+            try await f.waitFor(.preparationBeforeDispatch)
+            let request = await f.io.preparation()
+            let prepared = try XCTUnwrap(request)
+            let attempted = await f.io.ordinals()
+            XCTAssertTrue(attempted.isEmpty)
+            XCTAssertEqual(prepared.target, f.target)
+            XCTAssertEqual(prepared.scope, f.scope.binding)
+            XCTAssertEqual(prepared.events.map(\.event.ordinal), Array(0...6))
+            XCTAssertEqual(prepared.events.map { $0.ticket?.sequence }, [1, 2, 3, 4, nil, 6, 7])
+            XCTAssertEqual(prepared.events.compactMap { $0.event.release?.pairedInputOrdinal }, [1, 0, 5])
+            XCTAssertEqual(prepared.events.compactMap { $0.event.nativeEvent?.type },
+                           [.flagsChanged, .keyDown, .keyUp, .flagsChanged, .keyDown, .keyUp])
+            XCTAssertTrue(prepared.events.compactMap(\.ticket).allSatisfy {
+                $0.operationID == prepared.operationID && $0.target == f.target && $0.scope == f.scope.binding
+            })
+            f.gate.open()
+            let report = try await f.report()
+            XCTAssertEqual(report.outcome, .completed)
+            XCTAssertEqual(report.accounting.observedEventOrdinals, [0, 1, 2, 3, 5, 6])
+        }
+    }
+
+    func testPreparationOwnsDragReleaseAtItsFinalPositionBeforeTheDown() async throws {
+        let plan = InputPlan(actions: [.mouse(.drag(.init(
+            path: [.init(x: 10, y: 20), .init(x: 80, y: 90)], durationMilliseconds: 0)))],
+            targetBounds: .init(origin: .init(x: 0, y: 0), width: 100, height: 100))
+        let transitions: [Int: NativeObservedTransition] = [
+            0: .down(.mouseButton(.left)), 2: .none, 3: .up(.mouseButton(.left))
+        ]
+        try await withFixture(configuration: .init(block: .preparationBeforeDispatch,
+                                                   transitions: transitions), plan: plan) { f in
+            try await f.waitFor(.preparationBeforeDispatch)
+            let request = await f.io.preparation()
+            let packet = try XCTUnwrap(request).events
+            XCTAssertEqual(packet.count, 4)
+            let down = try XCTUnwrap(packet.first { $0.event.role == .mouseDown })
+            let up = try XCTUnwrap(packet.first { $0.event.role == .mouseUp })
+            XCTAssertEqual(down.event.nativeEvent?.location, CGPoint(x: 10, y: 20))
+            XCTAssertEqual(up.event.nativeEvent?.location, CGPoint(x: 80, y: 90))
+            XCTAssertEqual(up.event.release?.pairedInputOrdinal, 0)
+            XCTAssertEqual(up.ticket?.eventOrdinal, 3)
+            XCTAssertEqual(up.ticket?.sequence, 4)
+            XCTAssertTrue(f.owner.snapshot().accounting.attemptedEventOrdinals.isEmpty)
+            XCTAssertTrue(f.owner.snapshot().accounting.heldOpeningOrdinals.isEmpty)
+            f.gate.open()
+            let report = try await f.report()
+            XCTAssertEqual(report.outcome, .completed)
+            XCTAssertEqual(report.accounting.observedEventOrdinals, [0, 2, 3])
+        }
+    }
+
+    func testSkippedDelayDoesNotRenumberPreownedNativeTickets() async throws {
+        let plan = InputPlan(actions: [.delay(milliseconds: 0), .key(.init(.a))])
+        let transitions: [Int: NativeObservedTransition] = [1: .down(.keyboard(0)), 2: .up(.keyboard(0))]
+        try await withFixture(configuration: .init(transitions: transitions), plan: plan) { f in
+            let report = try await f.report()
+            // The backend refuses any event/ticket not in its original preparation.
+            // Dispatch-time counters would assign 1/2 rather than the reserved 2/3.
+            XCTAssertEqual(report.outcome, .completed)
+            XCTAssertEqual(report.accounting.observedEventOrdinals, [1, 2])
+            let tickets = await f.io.preparation()?.events.compactMap(\.ticket)
+            XCTAssertEqual(tickets?.map(\.sequence), [2, 3])
+            XCTAssertFalse(f.markerExists)
+        }
+    }
+
     func testAdmissionsExpireAtTheirOwnNativeReturnWhileOperationRemainsActive() async throws {
         try await withFixture(configuration: .init(block: .observation)) { f in
             try await f.waitFor(.observation)
@@ -356,19 +431,23 @@ private actor ControlledNativeIO: NativeInputIO {
     private var lastObservedSequence: UInt64 = 0
     private var firstAcknowledgement: NativeDispatchAcknowledgement?
     private var retainedAdmissions: [NativeInputAdmission] = []
+    private var preparedRequest: NativeInputPreparationRequest?
     init(_ configuration: IOConfiguration, gate: LifetimeGate) { self.configuration = configuration; self.gate = gate }
     func reached(_ phase: Phase) -> Bool { seen.contains(phase) }
     func ordinals() -> [Int] { submitted.map { $0.ticket.eventOrdinal } }
     func recoveries() -> Int { recoveryCount }
     func admissionsStillAllowed() -> [Bool] { retainedAdmissions.map(\.allowsDispatch) }
+    func preparation() -> NativeInputPreparationRequest? { preparedRequest }
     func setInvalidRecovery(_ value: Bool) { invalidRecovery = value }
     private func next() -> UInt64 { sequence += 1; return sequence }
     private func enter(_ phase: Phase) async {
         seen.insert(phase)
         if configuration.block == phase { await gate.wait() }
     }
-    func prepare(operationID: UUID, target: NativeControlTargetBinding, scope: NativeControlScopeBinding,
-                 admission: NativeInputAdmission) async -> NativePreparationOutcome {
+    func prepare(_ request: NativeInputPreparationRequest) async -> NativePreparationOutcome {
+        let (operationID, target, scope, admission) =
+            (request.operationID, request.target, request.scope, request.admission)
+        preparedRequest = request
         retainedAdmissions.append(admission)
         if configuration.block == .preparationBeforeDispatch { await enter(.preparationBeforeDispatch) }
         guard admission.allowsDispatch else { return .notPrepared("owner stopped before focus dispatch") }
@@ -384,6 +463,10 @@ private actor ControlledNativeIO: NativeInputIO {
     func dispatch(_ request: NativeDispatchRequest) async -> NativeDispatchOutcome {
         retainedAdmissions.append(request.admission)
         submitted.append(request)
+        guard let prepared = preparedRequest?.events.first(where: { $0.ticket == request.ticket }),
+              prepared.event.nativeEvent === request.event.nativeEvent else {
+            return .notDispatched("native event/ticket was not preowned during preparation")
+        }
         if configuration.block == .dispatchPreparation { await enter(.dispatchPreparation) }
         guard request.admission.allowsDispatch else { return .notDispatched("owner stopped before native post") }
         await enter(.dispatch)

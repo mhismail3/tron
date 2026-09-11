@@ -45,6 +45,40 @@ final class NativeEventObserverTests: XCTestCase {
         }
     }
 
+    func testStampingPreservesPrivateSourceTableWithoutMutatingOriginals() async throws {
+        try await withFixture { f in
+            let source = try XCTUnwrap(CGEventSource(stateID: .privateState))
+            let unrelated = try XCTUnwrap(CGEventSource(stateID: .privateState))
+            let sourceID = source.sourceStateID
+            XCTAssertNotEqual(sourceID, .privateState)
+            XCTAssertNotEqual(sourceID, .combinedSessionState)
+            XCTAssertNotEqual(sourceID, .hidSystemState)
+            XCTAssertNotEqual(sourceID, unrelated.sourceStateID)
+            let before = CGEventSource.keyState(sourceID, key: 0)
+            for (ordinal, down) in [true, false].enumerated() {
+                let original = try XCTUnwrap(CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: down))
+                original.flags = .maskShift
+                let type: CGEventType = down ? .keyDown : .keyUp
+                let registration = try f.observer.register(ticket: f.ticket(ordinal: ordinal),
+                    expected: .init(type: type, flags: .maskShift, keyCode: 0))
+                XCTAssertEqual(original.getIntegerValueField(.eventSourceUserData), 0)
+                let stamped = try XCTUnwrap(f.observer.stampedCopy(of: original, for: registration))
+                XCTAssertFalse(stamped === original)
+                XCTAssertEqual(stamped.type, type)
+                XCTAssertEqual(stamped.getIntegerValueField(.eventSourceStateID), Int64(sourceID.rawValue))
+                let reconstructed = try XCTUnwrap(CGEventSource(event: stamped))
+                XCTAssertEqual(reconstructed.sourceStateID, sourceID)
+                XCTAssertEqual(stamped.getIntegerValueField(.eventSourceUserData), Int64(registration.correlationTag))
+                XCTAssertEqual(original.getIntegerValueField(.eventSourceUserData), 0)
+                XCTAssertEqual(original.getIntegerValueField(.eventSourceStateID), Int64(sourceID.rawValue))
+            }
+            XCTAssertEqual(source.userData, 0)
+            // No post or tap callback occurs. This is source-copy preservation,
+            // not evidence of delivery or release of any native input.
+            XCTAssertEqual(CGEventSource.keyState(sourceID, key: 0), before)
+        }
+    }
+
     func testWrongNativeFieldsInvalidateAllPendingObservations() async throws {
         try await withFixture { f in
             let first = try f.register()

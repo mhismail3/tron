@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Freeze, build and sign a new observer qualification artifact; never launch it."""
+"""Freeze, build and sign a closed native qualification product; never launch it."""
 import argparse
 import hashlib
 import importlib.util
@@ -16,7 +16,29 @@ import subprocess
 ROOT = Path(__file__).resolve().parent.parent
 MAC = ROOT.parent
 REPO = MAC.parent.parent
-BUNDLE_ID = "com.tron.qualification.native-observer"
+PRODUCTS = {
+    "observer": {"executable": "TronNativeObserverQualification",
+                 "bundleIdentifier": "com.tron.qualification.native-observer",
+                 "displayName": "Tron Native Observer Qualification", "minimumSystem": "15.0",
+                 "schema": "tron.native-observer-qualification.artifact.v1"},
+    "capture": {"executable": "TronNativeCaptureQualification",
+                "bundleIdentifier": "com.tron.qualification.native-capture",
+                "displayName": "Tron Native Capture Qualification", "minimumSystem": "15.2",
+                "schema": "tron.native-capture-qualification.artifact.v1"},
+}
+
+
+def arguments(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", required=True)
+    parser.add_argument("--identity", help="Existing Apple Development certificate SHA-1")
+    parser.add_argument("--product", choices=tuple(PRODUCTS), default="observer")
+    return parser.parse_args(argv)
+
+
+def build_command(package, scratch, product):
+    return ["xcrun", "swift", "build", "--package-path", package, "--scratch-path", scratch,
+            "--configuration", "release", "--product", PRODUCTS[product]["executable"]]
 
 
 def digest(path):
@@ -98,10 +120,8 @@ def run(arguments, log, timeout=60):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", required=True)
-    parser.add_argument("--identity", help="Existing Apple Development certificate SHA-1")
-    args = parser.parse_args()
+    args = arguments()
+    product = PRODUCTS[args.product]
     output = output_path(args.output)
     output.mkdir(mode=0o700)  # Parent must already exist; never create installation trees.
     frozen = output / "source"
@@ -129,25 +149,24 @@ def main():
     toolchain = run(["xcrun", "swift", "--version"], output / "toolchain.log")
     xcode = run(["xcodebuild", "-version"], output / "xcode.log")
     scratch = output / "scratch"
-    command = ["xcrun", "swift", "build", "--package-path", frozen, "--scratch-path", scratch,
-               "--configuration", "release", "--product", "TronNativeObserverQualification"]
+    command = build_command(frozen, scratch, args.product)
     run(command, output / "build.log", timeout=300)
     bin_path = run(["xcrun", "swift", "build", "--package-path", frozen, "--scratch-path", scratch,
                     "--configuration", "release", "--show-bin-path"], output / "bin-path.log").strip()
     if sources != source_inventory(frozen):
         raise ValueError("Frozen package changed during compilation")
-    app = output / "TronNativeObserverQualification.app"
-    executable = app / "Contents/MacOS/TronNativeObserverQualification"
+    app = output / (product["executable"] + ".app")
+    executable = app / "Contents/MacOS" / product["executable"]
     executable.parent.mkdir(parents=True)
     shutil.copy2(Path(bin_path) / executable.name, executable)
     executable.chmod(0o755)
-    plist = {"CFBundleDisplayName": "Tron Native Observer Qualification", "CFBundleExecutable": executable.name,
-             "CFBundleIdentifier": BUNDLE_ID, "CFBundleName": executable.name, "CFBundlePackageType": "APPL",
-             "CFBundleShortVersionString": "0.1.0", "CFBundleVersion": "1", "LSMinimumSystemVersion": "15.0",
+    plist = {"CFBundleDisplayName": product["displayName"], "CFBundleExecutable": executable.name,
+             "CFBundleIdentifier": product["bundleIdentifier"], "CFBundleName": executable.name, "CFBundlePackageType": "APPL",
+             "CFBundleShortVersionString": "0.1.0", "CFBundleVersion": "1", "LSMinimumSystemVersion": product["minimumSystem"],
              "LSUIElement": True, "NSPrincipalClass": "NSApplication"}
     (app / "Contents/Info.plist").write_bytes(plistlib.dumps(plist, sort_keys=True))
     run(["/usr/bin/codesign", "--sign", identity, "--options", "runtime", "--timestamp=none", app], output / "sign.log")
-    requirement = f'identifier "{BUNDLE_ID}" and anchor apple generic and certificate leaf[subject.OU] = "{teams[0]}"'
+    requirement = f'identifier "{product["bundleIdentifier"]}" and anchor apple generic and certificate leaf[subject.OU] = "{teams[0]}"'
     run(["/usr/bin/codesign", "--verify", "--deep", "--strict", "-R", "=" + requirement, app], output / "verify.log")
     signature = run(["/usr/bin/codesign", "-d", "-r-", "--verbose=4", app], output / "signature.log")
     if "(runtime)" not in signature or "Signature=adhoc" in signature or f"TeamIdentifier={teams[0]}" not in signature:
@@ -161,7 +180,7 @@ def main():
     if any(p.is_symlink() for p in app.rglob("*")):
         raise ValueError("Unexpected link in signed artifact")
     app_files = {str(p.relative_to(app)): digest(p) for p in sorted(app.rglob("*")) if p.is_file()}
-    manifest = {"schema": "tron.native-observer-qualification.artifact.v1", "bundleIdentifier": BUNDLE_ID,
+    manifest = {"schema": product["schema"], "bundleIdentifier": product["bundleIdentifier"], "product": args.product,
                 "sources": sources, "context": context_hashes, "toolchain": toolchain, "xcode": xcode,
                 "buildCommand": [str(a) for a in command], "appFiles": app_files,
                 "signingCertificateSHA1": identity, "teamIdentifier": teams[0], "designatedRequirement": requirement,

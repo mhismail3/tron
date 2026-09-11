@@ -1,10 +1,33 @@
+import contextlib
+import io
 import tempfile
 from pathlib import Path
 import unittest
-from build_observer import freeze_sources, output_path, source_inventory
+from build_observer import PRODUCTS, arguments, build_command, freeze_sources, output_path, source_inventory
 
 
 class ObserverBuildInputTests(unittest.TestCase):
+    def test_product_selection_is_closed_and_observer_remains_default(self):
+        self.assertEqual(arguments(['--output', '/private/tmp/unused']).product, 'observer')
+        self.assertEqual(set(PRODUCTS), {'observer', 'capture'})
+        for name, executable, bundle in [
+            ('observer', 'TronNativeObserverQualification', 'com.tron.qualification.native-observer'),
+            ('capture', 'TronNativeCaptureQualification', 'com.tron.qualification.native-capture'),
+        ]:
+            self.assertEqual(arguments(['--output', '/private/tmp/unused', '--product', name]).product, name)
+            self.assertEqual(PRODUCTS[name]['bundleIdentifier'], bundle)
+            self.assertEqual(build_command('frozen', 'scratch', name), [
+                'xcrun', 'swift', 'build', '--package-path', 'frozen', '--scratch-path', 'scratch',
+                '--configuration', 'release', '--product', executable])
+        for rejected in ['TronComputerControl', '../capture', 'capture --preflight', '']:
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                arguments(['--output', '/private/tmp/unused', '--product', rejected])
+
+    def test_shared_output_boundary_rejects_owned_stores(self):
+        for home in ['.pi', '.tron', '.tron-dev']:
+            with self.subTest(home=home), self.assertRaises(ValueError):
+                output_path(str(Path.home() / home / 'workspace/state/capture-test'))
+
     def test_snapshot_records_exact_inputs_and_excludes_generated_output(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / 'package'

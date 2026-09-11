@@ -15,12 +15,12 @@ internal final class NativeInputControlScope: @unchecked Sendable {
 /// closes admission/publishes needsRecovery; it NEVER races the native call to return.
 internal final class NativeInputLifetimeOwner: @unchecked Sendable {
     private let lock = NSLock()
-    private let operationID = UUID()
+    private let operationID: UUID
     private let target: NativeControlTargetBinding
     private let controlScope: NativeInputControlScope
     private var scope: NativeControlScopeBinding { controlScope.binding }
     private let backend: any NativeInputIO
-    private let constructed: ConstructedInputPlan
+    private let plannedEvents: [NativePlannedInputEvent]
     private let lease: NativeControlInterlockLease
     private let recoveryGate = NativeRecoveryGate()
     private let ioDeadlineMilliseconds: UInt32
@@ -40,7 +40,6 @@ internal final class NativeInputLifetimeOwner: @unchecked Sendable {
     private var uncertainEvents = Set<Int>()
     private var held: [HeldInputIdentity: Int] = [:]
     private var ambiguousOpenings = Set<Int>()
-    private var nextSequence: UInt64 = 1
     private var lastBackendSequence: UInt64 = 0
     private var focusAttempted = 0
     private var focusAccepted = 0
@@ -55,7 +54,15 @@ internal final class NativeInputLifetimeOwner: @unchecked Sendable {
               (1...30_000).contains(ioDeadlineMilliseconds) else {
             throw NativeOwnerFailure.rejected("invalid or revoked native control binding")
         }
-        constructed = try InputConstructor.construct(plan, limits: limits)
+        let constructed = try InputConstructor.construct(plan, limits: limits)
+        let operationID = UUID()
+        self.operationID = operationID
+        plannedEvents = constructed.events.map { event in
+            let ticket: NativeInputEventTicket? = event.kind == .delay ? nil : .init(
+                operationID: operationID, target: target, scope: scope.binding,
+                eventOrdinal: event.ordinal, sequence: UInt64(event.ordinal) + 1)
+            return .init(event: event, ticket: ticket)
+        }
         lease = try root.acquire()
         guard !scope.isRevoked else {
             try lease.retire()
@@ -160,8 +167,8 @@ internal final class NativeInputLifetimeOwner: @unchecked Sendable {
             // effect until the backend proves either exact focus or no mutation.
             lock.withLock { focusAttempted = 1; focusUncertain = true }
             let preparation = await io { [self] callID in
-                await backend.prepare(operationID: operationID, target: target, scope: scope,
-                                      admission: admission(for: callID, isRelease: false))
+                await backend.prepare(.init(operationID: operationID, target: target, scope: scope,
+                    events: plannedEvents, admission: admission(for: callID, isRelease: false)))
             }
             switch preparation {
             case let .ready(evidence):
@@ -176,9 +183,9 @@ internal final class NativeInputLifetimeOwner: @unchecked Sendable {
         }
         if primary == nil, !isStopping() {
             lock.withLock { status = .running }
-            for event in constructed.events {
-                if isStopping(), event.kind != .matchedRelease { break }
-                do { try await process(event) } catch { primary = String(describing: error); break }
+            for planned in plannedEvents {
+                if isStopping(), planned.event.kind != .matchedRelease { break }
+                do { try await process(planned) } catch { primary = String(describing: error); break }
             }
         }
         return await settle(primary: primary)
@@ -208,7 +215,8 @@ internal final class NativeInputLifetimeOwner: @unchecked Sendable {
         }
     }
 
-    private func process(_ event: ConstructedInputEvent) async throws {
+    private func process(_ planned: NativePlannedInputEvent) async throws {
+        let event = planned.event
         if event.kind == .delay {
             await delay(milliseconds: event.delayMilliseconds ?? 0)
             return
@@ -220,9 +228,7 @@ internal final class NativeInputLifetimeOwner: @unchecked Sendable {
                 guard held[release.identity] == release.pairedInputOrdinal,
                       !ambiguousOpenings.contains(release.pairedInputOrdinal) else { return nil }
             }
-            let ticket = NativeInputEventTicket(operationID: operationID, target: target, scope: scope,
-                                                eventOrdinal: event.ordinal, sequence: nextSequence)
-            nextSequence += 1
+            guard let ticket = planned.ticket else { return nil }
             attempted.insert(event.ordinal)
             uncertainEvents.insert(event.ordinal)
             // Reserve ownership BEFORE native dispatch can start or suspend.
@@ -234,8 +240,8 @@ internal final class NativeInputLifetimeOwner: @unchecked Sendable {
         }
         guard let ticket else { return }
         let isRelease = event.kind == .matchedRelease
-        let result = await io { [self, ordinal = event.ordinal] callID in
-            let request = NativeDispatchRequest(ticket: ticket, event: constructed.events[ordinal],
+        let result = await io { [self, planned] callID in
+            let request = NativeDispatchRequest(ticket: ticket, event: planned.event,
                                                  admission: admission(for: callID, isRelease: isRelease))
             return await backend.dispatch(request)
         }
@@ -304,8 +310,8 @@ internal final class NativeInputLifetimeOwner: @unchecked Sendable {
     private func settle(primary original: String?) async -> NativeOperationReport {
         var primary = original
         lock.withLock { if primary != nil || stopRequested { status = .stopping } }
-        for event in constructed.events where event.kind == .matchedRelease {
-            do { try await process(event) } catch { primary = primary ?? String(describing: error) }
+        for planned in plannedEvents where planned.event.kind == .matchedRelease {
+            do { try await process(planned) } catch { primary = primary ?? String(describing: error) }
         }
         let request = lock.withLock { quiescenceRequestLocked() }
         let outcome = await io { [backend] _ in await backend.quiescence(request) }

@@ -53,6 +53,25 @@ internal struct NativeInputAdmission: Sendable {
     var allowsDispatch: Bool { check() }
 }
 
+/// The owner assigns tickets once, before preparation. Delays have no native
+/// ticket; skipped delays/inputs never renumber later matching release tickets.
+internal struct NativePlannedInputEvent: @unchecked Sendable {
+    let event: ConstructedInputEvent
+    let ticket: NativeInputEventTicket?
+}
+
+/// A backend prepares the ENTIRE inert packet, including matching releases,
+/// before returning ready or mutating focus/input. Event references are trusted
+/// read-only inputs: the backend retains its own fallible native copies/source.
+/// The admission expires at this prepare call's return, not at packet retirement.
+internal struct NativeInputPreparationRequest: Sendable {
+    let operationID: UUID
+    let target: NativeControlTargetBinding
+    let scope: NativeControlScopeBinding
+    let events: [NativePlannedInputEvent]
+    let admission: NativeInputAdmission
+}
+
 internal struct NativeDispatchRequest: @unchecked Sendable {
     let ticket: NativeInputEventTicket
     let event: ConstructedInputEvent
@@ -154,8 +173,7 @@ internal typealias NativeRecoveryOutcome = NativeQuiescenceOutcome
 /// implementation in this package. A signed host must implement every method
 /// with actual target/grant/session binding and native event observations.
 internal protocol NativeInputIO: Sendable {
-    func prepare(operationID: UUID, target: NativeControlTargetBinding,
-                 scope: NativeControlScopeBinding, admission: NativeInputAdmission) async -> NativePreparationOutcome
+    func prepare(_ request: NativeInputPreparationRequest) async -> NativePreparationOutcome
     func dispatch(_ request: NativeDispatchRequest) async -> NativeDispatchOutcome
     func observe(_ ticket: NativeInputEventTicket,
                  after acknowledgement: NativeDispatchAcknowledgement) async -> NativeObservationOutcome
