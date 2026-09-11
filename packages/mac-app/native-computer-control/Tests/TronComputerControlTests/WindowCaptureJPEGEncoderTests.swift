@@ -67,6 +67,43 @@ final class WindowCaptureJPEGEncoderTests: XCTestCase {
         try assertPixels(frame, red: true)
     }
 
+    func testFloatScaledWindowEdgeDoesNotRejectThePhysicalBuffer() throws {
+        // Same sizes and Float32 scaling as the installed 600-point failure.
+        // The reconstructed edge is 1280.0000667572021, not an extra pixel.
+        let contentScale = Double(Float(1280.0 / (600.0 * 2)))
+        let extent = 600 * contentScale
+        XCTAssertGreaterThan(extent * 2, 1280)
+        let encoder = WindowCaptureJPEGEncoder(limits: try .init())
+        let frame = try XCTUnwrap(encoder.encode(sample(width: 1280, height: 1280,
+            rect: CGRect(x: 0, y: 0, width: extent, height: extent), scale: 2)))
+        XCTAssertEqual(frame.width, 1280); XCTAssertEqual(frame.height, 1280)
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(frame.jpeg as CFData, nil))
+        let decoded = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(decoded.width, 1280); XCTAssertEqual(decoded.height, 1280)
+    }
+
+    func testOnlySurfaceEdgeNoiseIsNormalizedBeforeInwardCropping() throws {
+        let encoder = WindowCaptureJPEGEncoder(limits: try .init(width: 16, height: 16))
+        let noise = Double(Float(16).ulp) / 2
+        for rect in [CGRect(x: 0, y: 0, width: 16 + noise, height: 16 + noise),
+                     CGRect(x: -noise, y: -noise, width: 16 + noise, height: 16 + noise)] {
+            let frame = try XCTUnwrap(encoder.encode(sample(rect: rect)))
+            XCTAssertEqual(frame.width, 16); XCTAssertEqual(frame.height, 16)
+            try assertPixels(frame, red: true)
+        }
+    }
+
+    func testEdgeRoundoffNeverAdmitsAWholePixelOrMaterialOverflow() throws {
+        let encoder = WindowCaptureJPEGEncoder(limits: try .init(width: 16, height: 16))
+        let unit = Double(Float(16).ulp)
+        for rect in [CGRect(x: -unit * 2, y: 0, width: 16, height: 16),
+                     CGRect(x: 0, y: -unit * 2, width: 16, height: 16),
+                     CGRect(x: 0, y: 0, width: 16 + unit * 2, height: 16),
+                     CGRect(x: 0, y: 0, width: 16, height: 16 + unit * 2)] {
+            XCTAssertThrowsError(try encoder.encode(sample(rect: rect)))
+        }
+    }
+
     func testIncompleteFramesNeverEncodeAndTerminalStatusesFailClosed() throws {
         for status in [SCFrameStatus.idle, .started] {
             let encoder = WindowCaptureJPEGEncoder(limits: try .init(width: 16, height: 16))
@@ -229,18 +266,18 @@ final class WindowCaptureJPEGEncoderTests: XCTestCase {
         }
     }
 
-    private func sample(width: Int = 16, format: OSType = kCVPixelFormatType_32BGRA,
+    private func sample(width: Int = 16, height: Int = 16, format: OSType = kCVPixelFormatType_32BGRA,
                         status: Int? = SCFrameStatus.complete.rawValue,
                         rect: CGRect? = .init(x: 0, y: 0, width: 16, height: 16),
                         scale: Double? = 1, redRect: CGRect? = nil, overlay: AnyObject? = nil,
                         time: CMTime = CMTime(value: 1, timescale: 1), ready: Bool = true) throws -> CMSampleBuffer {
         var pixel: CVPixelBuffer?
-        XCTAssertEqual(CVPixelBufferCreate(kCFAllocatorDefault, width, 16, format, nil, &pixel), kCVReturnSuccess)
+        XCTAssertEqual(CVPixelBufferCreate(kCFAllocatorDefault, width, height, format, nil, &pixel), kCVReturnSuccess)
         let image = try XCTUnwrap(pixel)
         XCTAssertEqual(CVPixelBufferLockBaseAddress(image, []), kCVReturnSuccess)
         let base = try XCTUnwrap(CVPixelBufferGetBaseAddress(image))
         memset(base, 0, CVPixelBufferGetDataSize(image))
-        for y in 0..<16 {
+        for y in 0..<height {
             for x in 0..<width {
                 let red = redRect?.contains(CGPoint(x: Double(x) + 0.5, y: Double(y) + 0.5)) ?? true
                 base.advanced(by: y * CVPixelBufferGetBytesPerRow(image) + x * 4)

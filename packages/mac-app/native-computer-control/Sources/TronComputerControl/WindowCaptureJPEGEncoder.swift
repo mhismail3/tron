@@ -25,7 +25,7 @@ internal final class WindowCaptureJPEGEncoder {
         let info = (CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]])?.first ?? [:]
         func number(_ value: Any?) -> String {
             guard let value = value as? Double else { return "-" }
-            return String(format: "%.6g", value)
+            return String(format: "%.17g", value)
         }
         func rectangle(_ value: Any?) -> String {
             guard let value else { return "-" }
@@ -92,19 +92,27 @@ internal final class WindowCaptureJPEGEncoder {
         // density (scaleFactor), NOT contentScale, which would undo source scaling.
         let scaled = CGRect(x: rect.minX * scale, y: rect.minY * scale,
                             width: rect.width * scale, height: rect.height * scale)
-        guard scaled.minX >= 0, scaled.minY >= 0,
-              scaled.maxX <= Double(limits.width), scaled.maxY <= Double(limits.height) else {
+        // SCK's Float32 content scaling can reconstruct an edge a fraction of
+        // one Float ULP outside the actual surface (600pt -> 1280.000066757px).
+        // Admit only that numerical error, never a pixel or arbitrary overflow.
+        let xError = Double(Float(limits.width).ulp)
+        let yError = Double(Float(limits.height).ulp)
+        guard scaled.minX >= -xError, scaled.minY >= -yError,
+              scaled.maxX <= Double(limits.width) + xError,
+              scaled.maxY <= Double(limits.height) + yError else {
             throw NativeWindowCaptureError.malformedFrame
         }
-        // Keep only fully contained pixels at fractional edges. Reject invalid
-        // metadata before rounding: intersection/clamping would conceal bad bounds.
-        let cropWidth = floor(scaled.maxX) - ceil(scaled.minX)
-        let cropHeight = floor(scaled.maxY) - ceil(scaled.minY)
+        // Normalize accepted edge roundoff to the surface, then crop inward.
+        // Interior fractional edges keep the existing fully-contained-pixel rule.
+        let left = ceil(max(0, scaled.minX)), top = ceil(max(0, scaled.minY))
+        let right = floor(min(Double(limits.width), scaled.maxX))
+        let bottom = floor(min(Double(limits.height), scaled.maxY))
+        let cropWidth = right - left
+        let cropHeight = bottom - top
         // CGRect.width/height standardize negative sizes. Check signed extents
         // before making a rectangle, or a subpixel region can admit outside pixels.
         guard cropWidth >= 1, cropHeight >= 1 else { throw NativeWindowCaptureError.malformedFrame }
-        let crop = CGRect(x: ceil(scaled.minX), y: ceil(scaled.minY),
-                          width: cropWidth, height: cropHeight)
+        let crop = CGRect(x: left, y: top, width: cropWidth, height: cropHeight)
         let rowBytes = CVPixelBufferGetBytesPerRow(pixel)
         guard rowBytes >= limits.width * 4,
               rowBytes <= NativeWindowCaptureLimits.maximumRawBytes / limits.height,

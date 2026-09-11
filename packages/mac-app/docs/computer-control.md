@@ -161,7 +161,12 @@ macOS unified logging (`com.tron.native-capture`, `frame-validation`), never pix
 window titles, target identities or arbitrary framework exception text. This is
 failure-only evidence, not a per-frame log or alternate frame store. Signed source
 extents and inward scalar cropping are validated before CGRect construction;
-contentRect is scaled by scaleFactor, not contentScale. Only the exact canonical
+contentRect is scaled by scaleFactor, not contentScale. At a surface edge, at most
+one Float32 ULP of numerical error is accepted and normalized to the actual buffer
+before inward cropping. Larger overflow and interior fractional-pixel rules remain
+strict; this never widens the selected source or reads outside the pixel buffer.
+Failure diagnostics retain full numeric precision for these subpixel errors.
+Only the exact canonical
 null presenter-overlay sentinel is accepted as absent; malformed/nonempty
 presenter metadata terminates capture rather than leaking another surface.
 
