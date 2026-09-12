@@ -1,10 +1,89 @@
 import Foundation
+import SwiftUI
 import Testing
 import UIKit
 @testable import TronMobile
 
 @Suite("Composer resource picker")
 struct ComposerResourcePickerTests {
+    @Test("composer blur geometry reserves the measured header for both resource kinds")
+    func composerBlurGeometry() {
+        for headerHeight in [CGFloat(44), 72] {
+            #expect(ComposerResourcePanelPolicy.viewportHeight(
+                entryCount: 8,
+                keyboardVisible: false,
+                headerHeight: headerHeight
+            ) == headerHeight + 5 * ComposerResourcePanelPolicy.rowHeight)
+            #expect(headerHeight + ComposerResourcePanelPolicy.blurFadeLength > headerHeight)
+        }
+        #expect(ComposerResourcePanelPolicy.viewportHeight(
+            entryCount: 8,
+            keyboardVisible: true,
+            headerHeight: 48
+        ) == 48 + 3 * ComposerResourcePanelPolicy.rowHeight)
+        #expect(ComposerResourcePanelPolicy.viewportHeight(
+            entryCount: 8,
+            keyboardVisible: false,
+            headerHeight: -1
+        ) == 5 * ComposerResourcePanelPolicy.rowHeight)
+    }
+
+    @MainActor
+    @Test("commands and skills keep the first row clear and scroll beneath the header blur")
+    func hostedPickerHeaderAndRowGeometry() async throws {
+        for kind in [ComposerResourceEntry.Kind.command, .skill] {
+            let source: CommandInfo.Source = kind == .skill ? .skill : .prompt
+            let entries = (0..<8).compactMap {
+                ComposerResourceEntry(command: command(
+                    kind == .skill ? "skill:\(kind)-\($0)" : "\(kind)-\($0)",
+                    source: source,
+                    description: "Description"
+                ))
+            }
+            let picker = ComposerResourcePicker(
+                sessionID: nil,
+                kind: kind,
+                query: kind == .skill ? "review" : "compact",
+                entries: entries,
+                keyboardVisible: false,
+                onSelect: { _ in },
+                onDismiss: {}
+            )
+            let host = UIHostingController(rootView: picker.frame(width: 360))
+            host.view.frame = CGRect(x: 0, y: 0, width: 390, height: 420)
+            let window = UIWindow(frame: host.view.bounds)
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            host.view.layoutIfNeeded()
+            for _ in 0..<3 { await Task.yield() }
+            host.view.layoutIfNeeded()
+
+            let pickerScrollView = try #require(scrollView(in: host.view))
+            let restOffset = pickerScrollView.contentOffset.y
+            let topInset = pickerScrollView.adjustedContentInset.top
+            #expect(topInset > 0)
+            #expect(abs(restOffset + topInset) < 1)
+            #expect(pickerScrollView.contentSize.height > pickerScrollView.bounds.height)
+
+            pickerScrollView.setContentOffset(CGPoint(x: 0, y: restOffset + 24), animated: false)
+            host.view.layoutIfNeeded()
+            #expect(pickerScrollView.contentOffset.y > restOffset)
+
+            let image = UIGraphicsImageRenderer(bounds: host.view.bounds).image { _ in
+                host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+            }
+            let screenshotURL = URL(fileURLWithPath: "/tmp/tron-composer-picker-\(kind == .skill ? "skills" : "commands").png")
+            if let pngData = image.pngData() {
+                try pngData.write(to: screenshotURL)
+            }
+        }
+    }
+
     @Test("keyboard-constrained panels yield space to the existing composer")
     func keyboardConstrainedPanel() {
         #expect(ComposerResourcePanelPolicy.visibleRows(entryCount: 12, keyboardVisible: false) == 5)
@@ -330,6 +409,15 @@ struct ComposerResourcePickerTests {
         ))
         #expect(command.text == "/compact  existing")
         #expect(command.selection == NSRange(location: 9, length: 0))
+    }
+
+    @MainActor
+    private func scrollView(in root: UIView) -> UIScrollView? {
+        if let scrollView = root as? UIScrollView { return scrollView }
+        for child in root.subviews {
+            if let match = scrollView(in: child) { return match }
+        }
+        return nil
     }
 
     private func token(_ text: String, caret: Int) -> ComposerSuggestionToken? {
