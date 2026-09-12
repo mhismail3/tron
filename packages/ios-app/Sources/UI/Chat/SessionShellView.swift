@@ -297,7 +297,8 @@ struct SessionShellView: View {
                 sessionID: route.sessionID,
                 initialEditorText: route.editorText,
                 initialModel: route.initialModel,
-                onForkCreated: present
+                onForkCreated: present,
+                performanceSignposts: model.performanceSignpostsForCapture
             )
             .id(route.id)
             .tronPresentationSurface(

@@ -161,6 +161,36 @@ struct GatewayClientTransportTests {
         }
     }
 
+    @Test("opt-in capture records repeated real Gateway RPC completions")
+    func diagnosticCaptureRecordsRPCs() async throws {
+        let socket = ScriptedGatewaySocket()
+        let ids = SequenceUUIDSource([
+            UUID(uuidString: "00000000-0000-0000-0000-000000000011")!,
+            UUID(uuidString: "00000000-0000-0000-0000-000000000012")!,
+            UUID(uuidString: "00000000-0000-0000-0000-000000000013")!
+        ])
+        let client = GatewayClient(
+            socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+            uuidSource: ids.source
+        )
+        let capture = DiagnosticCaptureCoordinator()
+        await client.installDiagnosticCaptureSink(capture)
+        #expect(capture.start(duration: .seconds(30)))
+        await socket.enqueue(helloFrame())
+        _ = try await client.connect(profile: profile, token: "token")
+
+        for (index, expectedID) in ["00000000-0000-0000-0000-000000000012", "00000000-0000-0000-0000-000000000013"].enumerated() {
+            let request = Task { try await client.requestValue("session.list", EmptyParams()) }
+            try await socket.waitUntilSent(count: index + 2)
+            await socket.enqueue(responseFrame(id: expectedID, result: .array([])))
+            _ = try await valueOfOwnedTask(request)
+        }
+        let report = try #require(capture.stop())
+        #expect(report.events.filter { $0.kind == "rpc" && $0.name == "session.list" }.count == 2)
+        #expect(report.events.allSatisfy { $0.profileID == nil || $0.profileID == "machine" })
+        await client.close()
+    }
+
     @Test("typed response decoding reports the RPC method and sanitized missing-key path")
     func typedResponseDecodeDiagnostics() async throws {
         struct Response: Decodable {

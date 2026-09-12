@@ -41,11 +41,20 @@ struct PerformanceMetrics: Equatable, Sendable {
 
 struct PerformanceInterval: Sendable {
     let operation: PerformanceOperation
-    fileprivate let state: OSSignpostIntervalState?
+    let state: OSSignpostIntervalState?
+    let captureToken: UUID?
+    let captureStarted: ContinuousClock.Instant?
 
-    init(operation: PerformanceOperation, state: OSSignpostIntervalState? = nil) {
+    init(
+        operation: PerformanceOperation,
+        state: OSSignpostIntervalState? = nil,
+        captureToken: UUID? = nil,
+        captureStarted: ContinuousClock.Instant? = nil
+    ) {
         self.operation = operation
         self.state = state
+        self.captureToken = captureToken
+        self.captureStarted = captureStarted
     }
 }
 

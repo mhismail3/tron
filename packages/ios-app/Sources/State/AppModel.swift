@@ -152,6 +152,9 @@ final class AppModel {
     private let recoveryDisplayClock: MonotonicClock
     private let uuidSource: UUIDSource
     private let performanceSignposts: any PerformanceSignposting
+    let diagnosticCapture: DiagnosticCaptureCoordinator
+    var performanceSignpostsForCapture: any PerformanceSignposting { performanceSignposts }
+    var diagnosticConnectionID: Int? { gatewayConnectionID }
     private let exportArtifacts: SessionExportArtifactStore
     private let mutationExecutor: ConfirmedMutationExecutor
     private let sessionMutations: SessionMutationService
@@ -244,6 +247,11 @@ final class AppModel {
     /// never raw scene activation, a transient connected state, or reconciliation start.
     private(set) var diagnosticsReadinessGeneration = 0
     private(set) var diagnosticsAreReady = false
+    private(set) var diagnosticCaptureRevision = 0
+    var diagnosticCaptureState: DiagnosticCaptureState { diagnosticCapture.state }
+    var diagnosticCaptureReport: DiagnosticCaptureReport? {
+        diagnosticCapture.state == .completed ? diagnosticCapture.report : nil
+    }
     var commands: [CommandInfo] { sessionPresentation.commands }
     var commandCatalogTarget: SessionPresentationIdentity? { sessionPresentation.commandCatalogTarget }
     var resources: JSONValue? { sessionPresentation.resources }
@@ -389,6 +397,8 @@ final class AppModel {
             profiles.token(for: profile)
         }
         let noticeCenter = InAppNoticeCenter(clock: clock)
+        let diagnosticCapture = DiagnosticCaptureCoordinator(clock: clock)
+        let captureSignposts = DiagnosticCaptureSignposts(base: performanceSignposts, capture: diagnosticCapture)
         let recoveryBudgets = GatewayRecoveryAllowanceStore()
         let dashboardConnections = DashboardGatewayConnectionPool(clientFactory: {
             GatewayClient(diagnosticStore: diagnosticStore)
@@ -409,7 +419,7 @@ final class AppModel {
             client: client,
             lifecycle: lifecycle,
             clock: clock,
-            performanceSignposts: performanceSignposts
+            performanceSignposts: captureSignposts
         )
         let sessionMutations = SessionMutationService(
             client: client,
@@ -438,7 +448,7 @@ final class AppModel {
         )
         let sessionPresentation = SessionPresentationStore(
             client: client,
-            performanceSignposts: performanceSignposts,
+            performanceSignposts: captureSignposts,
             clock: clock
         )
         let terminal = TerminalCoordinator(
@@ -447,7 +457,7 @@ final class AppModel {
             mutationExecutor: mutationExecutor,
             uuidSource: uuidSource,
             clock: clock,
-            performanceSignposts: performanceSignposts,
+            performanceSignposts: captureSignposts,
             installedSubscriptionToken: { sessionPresentation.installedSubscriptionToken(for: $0) }
         )
         let composerDrafts = ComposerDraftCoordinator(
@@ -578,7 +588,8 @@ final class AppModel {
         self.clock = clock
         self.recoveryDisplayClock = recoveryDisplayClock
         self.uuidSource = uuidSource
-        self.performanceSignposts = performanceSignposts
+        self.performanceSignposts = captureSignposts
+        self.diagnosticCapture = diagnosticCapture
         self.exportArtifacts = exportArtifacts
         self.diagnosticStore = diagnosticStore
         self.metricKitDiagnostics = diagnosticStore.map { IOSMetricKitDiagnostics(store: $0) }
@@ -1168,6 +1179,7 @@ final class AppModel {
     }
 
     func start(sceneIsActive: Bool = true) async {
+        await client.installDiagnosticCaptureSink(diagnosticCapture)
         sceneAllowsCatalogRefresh = sceneIsActive
         pushNavigationActivationReady = sceneIsActive
         await lifecycle.start()
@@ -1449,6 +1461,12 @@ final class AppModel {
             retryBudget: DashboardCatalogRetryPolicy.maximumFailedAttempts
         )
         if let record = iosClientDiagnostics.records.first { diagnosticStore?.record(record) }
+        diagnosticCapture.recordCausal(
+            name: "catalog.\(outcome)", outcome: outcome,
+            durationMilliseconds: durationMilliseconds, count: pageCount,
+            profileID: key.profileID, connectionID: key.connectionID,
+            lifecycleGeneration: key.lifecycleGeneration, requestID: requestID
+        )
     }
 
     private func showCatalogFailure(
@@ -2161,6 +2179,34 @@ final class AppModel {
             failedProfileIDs: failedProfileIDs,
             metadata: logCaptureMetadata(records: loaded, sourceStatuses: sourceStatuses)
         )
+    }
+
+    @discardableResult
+    func startDiagnosticCapture(duration: Duration = DiagnosticCaptureCoordinator.defaultDuration) -> Bool {
+        let started = diagnosticCapture.start(
+            duration: duration,
+            profileID: profiles.selected?.id,
+            connectionID: gatewayConnectionID,
+            lifecycleGeneration: lifecycle.currentLifecycleGeneration
+        ) { [weak self] in
+            Task { @MainActor [weak self] in self?.diagnosticCaptureRevision &+= 1 }
+        }
+        diagnosticCaptureRevision &+= 1
+        return started
+    }
+
+    @discardableResult
+    func stopDiagnosticCapture() -> DiagnosticCaptureReport? {
+        let report = diagnosticCapture.stop()
+        diagnosticCaptureRevision &+= 1
+        return report
+    }
+
+    /// Exports only the immutable capture report through the existing
+    /// authenticated, connection-bound export owner.
+    func exportDiagnosticCapture() async throws -> String {
+        guard let report = diagnosticCaptureReport else { throw CancellationError() }
+        return try await exportGatewayLogs(GatewayLogExport.uploadText(report.text))
     }
 
     /// Exports the already-redacted Logs surface to the exact currently

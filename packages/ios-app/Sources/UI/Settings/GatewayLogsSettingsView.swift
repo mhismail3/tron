@@ -35,6 +35,8 @@ struct GatewayLogsSettingsView: View {
     @State private var shareSucceeded = false
     @State private var shareInFlight = false
     @State private var shareGeneration = 0
+    @State private var captureExportInFlight = false
+    @State private var captureExportGeneration = 0
     @State private var captureMetadata = GatewayLogCaptureMetadata.empty
 
     private let levels = ["all", "info", "warning", "error"]
@@ -109,6 +111,29 @@ struct GatewayLogsSettingsView: View {
                 .disabled(visibleItems.isEmpty)
                 .accessibilityLabel("Copy visible logs")
 
+                Menu {
+                    if case .capturing = model.diagnosticCaptureState {
+                        Button { stopDiagnosticCapture() } label: {
+                            Label("Stop Diagnostic Capture", systemImage: "stop.fill")
+                        }
+                    } else {
+                        Button { startDiagnosticCapture() } label: {
+                            Label("Start Diagnostic Capture", systemImage: "record.circle")
+                        }
+                    }
+                    if model.diagnosticCaptureReport != nil {
+                        Button { exportDiagnosticCapture() } label: {
+                            Label("Export Diagnostic Capture", systemImage: "waveform.path.ecg")
+                        }
+                        .disabled(captureExportInFlight)
+                    }
+                } label: {
+                    Image(systemName: "waveform.path.ecg")
+                        .font(TronTypography.buttonSM)
+                        .tronSettingsAccent()
+                }
+                .accessibilityLabel("Diagnostic Capture")
+
                 Button { beginShare() } label: {
                     Group {
                         if shareInFlight {
@@ -140,7 +165,10 @@ struct GatewayLogsSettingsView: View {
             shareGeneration &+= 1
             shareInFlight = false
             shareSucceeded = false
+            captureExportGeneration &+= 1
+            captureExportInFlight = false
         }
+        .onChange(of: model.diagnosticCaptureRevision) { _, _ in }
         .task(id: PresentationActivityTaskID(
             source: automaticLoadID,
             presentationActive: presentationActivity.allowsPresentationPublication
@@ -178,12 +206,66 @@ struct GatewayLogsSettingsView: View {
     }
 
     private var logSummary: some View {
-        Text("\(visibleItems.count) entries · Newest entries first")
+        VStack(alignment: .leading, spacing: 4) {
+            Text("\(visibleItems.count) entries · Newest entries first")
+            switch model.diagnosticCaptureState {
+            case .capturing(let elapsed, let count):
+                Text("Diagnostic Capture active · \(elapsed / 1_000)s · \(count) events")
+                    .foregroundStyle(Color.tronEmerald)
+            case .completed:
+                Text("Diagnostic Capture ready to export")
+                    .foregroundStyle(Color.tronEmerald)
+            case .idle:
+                EmptyView()
+            }
+        }
             .font(TronTypography.caption)
             .foregroundStyle(Color.tronTextMuted)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20)
             .padding(.vertical, 10)
+    }
+
+    private func startDiagnosticCapture() {
+        guard !captureExportInFlight else { return }
+        _ = model.startDiagnosticCapture()
+    }
+
+    private func stopDiagnosticCapture() {
+        _ = model.stopDiagnosticCapture()
+    }
+
+    private func exportDiagnosticCapture() {
+        guard !captureExportInFlight,
+              model.diagnosticCaptureReport != nil,
+              presentationActivity.allowsPresentationPublication else { return }
+        captureExportGeneration &+= 1
+        let generation = captureExportGeneration
+        let activity = presentationActivity
+        captureExportInFlight = true
+        Task { @MainActor in
+            defer {
+                if generation == captureExportGeneration { captureExportInFlight = false }
+            }
+            do {
+                let path = try await model.exportDiagnosticCapture()
+                guard generation == captureExportGeneration,
+                      presentationActivity == activity,
+                      activity.allowsPresentationPublication else { return }
+                UIPasteboard.general.string = path
+                model.postNotice(
+                    "Diagnostic capture path copied to clipboard",
+                    role: .success, lifetime: .standard, priority: .low
+                )
+            } catch is CancellationError {
+                return
+            } catch {
+                guard generation == captureExportGeneration,
+                      presentationActivity == activity,
+                      activity.allowsPresentationPublication else { return }
+                model.presentError(error)
+            }
+        }
     }
 
     private var emptyStateMessage: String {

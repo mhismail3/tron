@@ -89,6 +89,7 @@ final class GatewayLifecycleCoordinator {
     private var activatedConnectionID: Int?
 
     private var phase: Phase = .active(0)
+    var currentLifecycleGeneration: Int { phase.generation }
     private var completedTransitionGeneration = 0
     private var transitionWaiters: [Int: [CheckedContinuation<Void, Never>]] = [:]
     private var transitionTask: Task<Void, Never>?
