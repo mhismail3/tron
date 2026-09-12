@@ -1,5 +1,21 @@
 import Foundation
 
+enum GatewayLogShareAvailability: Equatable {
+    case available
+    case unavailable(String)
+
+    static func resolve(
+        hasVisibleLogs: Bool,
+        gatewayInfoAvailable: Bool,
+        supportsExport: Bool
+    ) -> Self {
+        guard hasVisibleLogs else { return .unavailable("No logs are available to share yet.") }
+        guard gatewayInfoAvailable else { return .unavailable("The Gateway connection is still loading. Try again shortly.") }
+        guard supportsExport else { return .unavailable("This Gateway does not support log sharing.") }
+        return .available
+    }
+}
+
 /// Copy is a bounded diagnostic projection, never a transcript or credential
 /// export. Profile labels are user-entered text, so use per-copy opaque aliases.
 enum GatewayLogExport {

@@ -3,6 +3,22 @@ import Testing
 @testable import TronMobile
 
 struct GatewayLogExportTests {
+    @Test("share availability explains empty, loading, and unsupported states")
+    func shareAvailability() {
+        #expect(GatewayLogShareAvailability.resolve(
+            hasVisibleLogs: false, gatewayInfoAvailable: true, supportsExport: true
+        ) == .unavailable("No logs are available to share yet."))
+        #expect(GatewayLogShareAvailability.resolve(
+            hasVisibleLogs: true, gatewayInfoAvailable: false, supportsExport: false
+        ) == .unavailable("The Gateway connection is still loading. Try again shortly."))
+        #expect(GatewayLogShareAvailability.resolve(
+            hasVisibleLogs: true, gatewayInfoAvailable: true, supportsExport: false
+        ) == .unavailable("This Gateway does not support log sharing."))
+        #expect(GatewayLogShareAvailability.resolve(
+            hasVisibleLogs: true, gatewayInfoAvailable: true, supportsExport: true
+        ) == .available)
+    }
+
     private func record(at date: Date = .now, message: String = "queuedBytes=44", event: String = "gateway.connection") -> GatewayProfileLogRecord {
         GatewayProfileLogRecord(profileID: "fixture:ios-client", profileLabel: "Private customer label",
             record: GatewayLogRecord(timestamp: GatewayTimestamp.preciseString(from: date), level: "warning",

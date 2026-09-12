@@ -110,17 +110,37 @@ struct GatewayLogsSettingsView: View {
                 .accessibilityLabel("Copy visible logs")
 
                 Button { beginShare() } label: {
-                    Image(systemName: shareSucceeded ? "checkmark" : "square.and.arrow.up")
-                        .font(TronTypography.buttonSM)
-                        .tronSettingsAccent()
-                        .contentTransition(.symbolEffect(.replace.downUp))
+                    Group {
+                        if shareInFlight {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: shareSucceeded ? "checkmark" : "square.and.arrow.up")
+                                .contentTransition(.symbolEffect(.replace.downUp))
+                        }
+                    }
+                    .font(TronTypography.buttonSM)
+                    .tronSettingsAccent()
                 }
-                .disabled(visibleItems.isEmpty || shareInFlight || !model.gatewaySupportsDiagnosticExport)
-                .accessibilityLabel(shareInFlight ? "Sharing logs" : model.gatewaySupportsDiagnosticExport ? "Share logs" : "Log sharing unavailable")
+                .disabled(visibleItems.isEmpty || shareInFlight)
+                .accessibilityLabel(shareInFlight ? "Sharing logs" : "Share logs")
             }
         }
         .sensoryFeedback(.success, trigger: copySucceeded)
         .sensoryFeedback(.success, trigger: shareSucceeded)
+        .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
+            guard !active else { return }
+            // The accepted export mutation continues, but this surface must
+            // not leave a stale spinner when its presentation lease retires.
+            shareGeneration &+= 1
+            shareInFlight = false
+            shareSucceeded = false
+        }
+        .onDisappear {
+            shareGeneration &+= 1
+            shareInFlight = false
+            shareSucceeded = false
+        }
         .task(id: PresentationActivityTaskID(
             source: automaticLoadID,
             presentationActive: presentationActivity.allowsPresentationPublication
@@ -221,8 +241,18 @@ struct GatewayLogsSettingsView: View {
     }
 
     private func beginShare() {
-        guard !shareInFlight, !visibleItems.isEmpty,
-              presentationActivity.allowsPresentationPublication else { return }
+        guard !shareInFlight, presentationActivity.allowsPresentationPublication else { return }
+        switch GatewayLogShareAvailability.resolve(
+            hasVisibleLogs: !visibleItems.isEmpty,
+            gatewayInfoAvailable: model.gatewayInfo != nil,
+            supportsExport: model.gatewaySupportsDiagnosticExport
+        ) {
+        case .available:
+            break
+        case .unavailable(let message):
+            model.postNotice(message, role: .error, lifetime: .standard, priority: .normal)
+            return
+        }
         shareGeneration &+= 1
         let generation = shareGeneration
         let activity = presentationActivity
@@ -234,9 +264,13 @@ struct GatewayLogsSettingsView: View {
         Task { @MainActor in
             do {
                 let path = try await model.exportGatewayLogs(text)
-                guard generation == shareGeneration,
-                      presentationActivity == activity,
-                      activity.allowsPresentationPublication else { return }
+                guard generation == shareGeneration else { return }
+                guard presentationActivity == activity,
+                      activity.allowsPresentationPublication else {
+                    shareInFlight = false
+                    shareSucceeded = false
+                    return
+                }
                 UIPasteboard.general.string = path
                 shareInFlight = false
                 shareSucceeded = true
@@ -253,12 +287,13 @@ struct GatewayLogsSettingsView: View {
             } catch is CancellationError {
                 guard generation == shareGeneration else { return }
                 shareInFlight = false
+                shareSucceeded = false
             } catch {
-                guard generation == shareGeneration,
-                      presentationActivity == activity,
-                      activity.allowsPresentationPublication else { return }
+                guard generation == shareGeneration else { return }
                 shareInFlight = false
                 shareSucceeded = false
+                guard presentationActivity == activity,
+                      activity.allowsPresentationPublication else { return }
                 model.presentError(error)
             }
         }
