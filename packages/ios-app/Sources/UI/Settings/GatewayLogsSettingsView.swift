@@ -263,7 +263,15 @@ struct GatewayLogsSettingsView: View {
                 guard generation == captureExportGeneration,
                       presentationActivity == activity,
                       activity.allowsPresentationPublication else { return }
-                model.presentError(error)
+                // Sharing is an explicit export action. Keep failures as a
+                // transient toast and never route them into the persistent
+                // diagnostic-error surface or clipboard path.
+                model.postNotice(
+                    "Diagnostic capture could not be exported. Try again.",
+                    role: .error,
+                    lifetime: .standard,
+                    priority: .normal
+                )
             }
         }
     }
@@ -376,7 +384,14 @@ struct GatewayLogsSettingsView: View {
                 shareSucceeded = false
                 guard presentationActivity == activity,
                       activity.allowsPresentationPublication else { return }
-                model.presentError(error)
+                // A failed share must not expose a persistent error sheet or
+                // mutate the clipboard; only a bounded toast is appropriate.
+                model.postNotice(
+                    "Logs could not be shared. Try again.",
+                    role: .error,
+                    lifetime: .standard,
+                    priority: .normal
+                )
             }
         }
     }

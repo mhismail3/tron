@@ -15,6 +15,22 @@ struct DiagnosticCaptureEvent: Codable, Equatable, Sendable {
     let profileID: String?
     let connectionID: Int?
     let lifecycleGeneration: Int?
+
+    var textLine: String {
+        [
+            "elapsedMs=\(elapsedMilliseconds)",
+            "kind=\(kind)",
+            "name=\(name)",
+            outcome.map { "outcome=\($0)" },
+            code.map { "code=\($0)" },
+            requestID.map { "requestID=\($0)" },
+            durationMilliseconds.map { "durationMs=\($0)" },
+            count.map { "count=\($0)" },
+            profileID.map { "profile=\($0)" },
+            connectionID.map { "connection=\($0)" },
+            lifecycleGeneration.map { "lifecycle=\($0)" }
+        ].compactMap { $0 }.joined(separator: " ")
+    }
 }
 
 struct DiagnosticCaptureReport: Codable, Equatable, Sendable {
@@ -52,20 +68,7 @@ struct DiagnosticCaptureReport: Codable, Equatable, Sendable {
         lines.append("")
         lines.append("Events")
         for event in events {
-            let fields = [
-                "elapsedMs=\(event.elapsedMilliseconds)",
-                "kind=\(event.kind)",
-                "name=\(event.name)",
-                event.outcome.map { "outcome=\($0)" },
-                event.code.map { "code=\($0)" },
-                event.requestID.map { "requestID=\($0)" },
-                event.durationMilliseconds.map { "durationMs=\($0)" },
-                event.count.map { "count=\($0)" },
-                event.profileID.map { "profile=\($0)" },
-                event.connectionID.map { "connection=\($0)" },
-                event.lifecycleGeneration.map { "lifecycle=\($0)" }
-            ].compactMap { $0 }
-            lines.append(fields.joined(separator: " "))
+            lines.append(event.textLine)
         }
         return lines.joined(separator: "\n")
     }
@@ -78,6 +81,8 @@ enum DiagnosticCaptureState: Equatable, Sendable {
 }
 
 protocol DiagnosticCaptureRPCSink: Sendable {
+    var isCapturing: Bool { get }
+
     func recordRPC(
         method: String,
         requestID: String,
@@ -95,6 +100,7 @@ protocol DiagnosticCaptureRPCSink: Sendable {
 final class DiagnosticCaptureCoordinator: DiagnosticCaptureRPCSink, @unchecked Sendable {
     static let defaultDuration = Duration.seconds(300)
     static let maximumDuration = Duration.seconds(600)
+    static let maximumDurationMilliseconds = 600_000
     static let maximumEvents = 2_000
     static let maximumBytes = 480 * 1024
 
@@ -109,6 +115,10 @@ final class DiagnosticCaptureCoordinator: DiagnosticCaptureRPCSink, @unchecked S
         var profileID: String?
         var connectionID: Int?
         var lifecycleGeneration: Int?
+        // Report text includes a summary in addition to event lines. Keeping
+        // its growth budget here makes the byte cap conservative rather than
+        // relying on an estimate of one event's stored properties.
+        var summaryNames: Set<String>
     }
 
     private let lock = NSLock()
@@ -117,6 +127,11 @@ final class DiagnosticCaptureCoordinator: DiagnosticCaptureRPCSink, @unchecked S
     private var lastReport: DiagnosticCaptureReport?
 
     init(clock: MonotonicClock = .continuous) { self.clock = clock }
+
+    var isCapturing: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return active != nil
+    }
 
     var state: DiagnosticCaptureState {
         lock.lock(); defer { lock.unlock() }
@@ -157,7 +172,8 @@ final class DiagnosticCaptureCoordinator: DiagnosticCaptureRPCSink, @unchecked S
             events: [], bytes: 0, dropped: 0, intervalTokens: [],
             profileID: profileID.map { Self.safe($0, maximum: 64) },
             connectionID: connectionID,
-            lifecycleGeneration: lifecycleGeneration.map { max(0, $0) }
+            lifecycleGeneration: lifecycleGeneration.map { max(0, $0) },
+            summaryNames: []
         )
         lastReport = nil
         lock.unlock()
@@ -226,7 +242,8 @@ final class DiagnosticCaptureCoordinator: DiagnosticCaptureRPCSink, @unchecked S
         record(DiagnosticCaptureEvent(
             elapsedMilliseconds: 0, kind: "rpc", name: Self.safe(method, maximum: 64),
             outcome: Self.safe(outcome, maximum: 32), code: code.map { Self.safe($0, maximum: 64) },
-            requestID: Self.safe(requestID, maximum: 64), durationMilliseconds: max(0, durationMilliseconds), count: 1,
+            requestID: Self.safe(requestID, maximum: 64),
+            durationMilliseconds: Self.boundedDuration(durationMilliseconds), count: 1,
             profileID: profileID.map { Self.safe($0, maximum: 64) }, connectionID: connectionID,
             lifecycleGeneration: nil
         ))
@@ -237,7 +254,7 @@ final class DiagnosticCaptureCoordinator: DiagnosticCaptureRPCSink, @unchecked S
             elapsedMilliseconds: 0, kind: "causal", name: Self.safe(name, maximum: 64),
             outcome: outcome.map { Self.safe($0, maximum: 32) }, code: nil,
             requestID: requestID.map { Self.safe($0, maximum: 64) },
-            durationMilliseconds: durationMilliseconds.map { max(0, $0) }, count: count.map { max(0, $0) },
+            durationMilliseconds: durationMilliseconds.map(Self.boundedDuration), count: count.map { max(0, $0) },
             profileID: profileID.map { Self.safe($0, maximum: 64) }, connectionID: connectionID,
             lifecycleGeneration: lifecycleGeneration.map { max(0, $0) }
         ))
@@ -247,16 +264,29 @@ final class DiagnosticCaptureCoordinator: DiagnosticCaptureRPCSink, @unchecked S
         lock.lock(); defer { lock.unlock() }
         guard var active else { return }
         guard active.events.count < Self.maximumEvents else { active.dropped += 1; self.active = active; return }
-        let size = event.name.utf8.count + 96
-        guard active.bytes + size <= Self.maximumBytes else { active.dropped += 1; self.active = active; return }
         let elapsed = elapsed(active.started)
-        active.events.append(DiagnosticCaptureEvent(
+        let admitted = DiagnosticCaptureEvent(
             elapsedMilliseconds: elapsed, kind: event.kind, name: event.name, outcome: event.outcome,
             code: event.code, requestID: event.requestID,
             durationMilliseconds: event.durationMilliseconds, count: event.count,
             profileID: event.profileID, connectionID: event.connectionID,
             lifecycleGeneration: event.lifecycleGeneration
-        ))
+        )
+        // Count the actual exported line, plus conservative room for the
+        // summary line's changing counters and fixed report headers. This is
+        // intentionally over-inclusive: a capture may stop early, never grow
+        // beyond the advertised byte limit.
+        let eventBytes = admitted.textLine.utf8.count + 1
+        let summaryBytes = active.summaryNames.contains(admitted.name) ? 24 : admitted.name.utf8.count + 96
+        let fixedReportBytes = 512
+        let size = eventBytes + summaryBytes
+        guard active.bytes + size + fixedReportBytes <= Self.maximumBytes else {
+            active.dropped += 1
+            self.active = active
+            return
+        }
+        active.summaryNames.insert(admitted.name)
+        active.events.append(admitted)
         active.bytes += size
         self.active = active
     }
@@ -267,6 +297,10 @@ final class DiagnosticCaptureCoordinator: DiagnosticCaptureRPCSink, @unchecked S
 
     private static func operationName(_ operation: PerformanceOperation) -> String {
         String(describing: operation)
+    }
+
+    private static func boundedDuration(_ value: Int) -> Int {
+        min(max(0, value), maximumDurationMilliseconds)
     }
 
     private static func safe(_ value: String, maximum: Int) -> String {

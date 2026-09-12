@@ -41,6 +41,27 @@ final class DiagnosticCaptureTests: XCTestCase {
         XCTAssertEqual(capture.stop()?.events.count, 0)
     }
 
+    func testExportTextStaysWithinByteBoundWithMaximumFields() {
+        let capture = DiagnosticCaptureCoordinator()
+        XCTAssertTrue(capture.start(duration: .seconds(30), profileID: String(repeating: "p", count: 500)))
+        for _ in 0..<DiagnosticCaptureCoordinator.maximumEvents {
+            capture.recordCausal(
+                name: String(repeating: "n", count: 500),
+                outcome: String(repeating: "o", count: 500),
+                durationMilliseconds: Int.max,
+                count: Int.max,
+                profileID: String(repeating: "p", count: 500),
+                connectionID: Int.max,
+                lifecycleGeneration: Int.max,
+                requestID: String(repeating: "r", count: 500)
+            )
+        }
+        let report = try! XCTUnwrap(capture.stop())
+
+        XCTAssertLessThanOrEqual(report.text.utf8.count, DiagnosticCaptureCoordinator.maximumBytes)
+        XCTAssertTrue(report.incomplete)
+    }
+
     func testRetiredCaptureCannotReceiveLateOperation() {
         let capture = DiagnosticCaptureCoordinator()
         XCTAssertTrue(capture.start(duration: .seconds(30)))

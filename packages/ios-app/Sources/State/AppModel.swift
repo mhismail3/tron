@@ -401,7 +401,11 @@ final class AppModel {
         let captureSignposts = DiagnosticCaptureSignposts(base: performanceSignposts, capture: diagnosticCapture)
         let recoveryBudgets = GatewayRecoveryAllowanceStore()
         let dashboardConnections = DashboardGatewayConnectionPool(clientFactory: {
-            GatewayClient(diagnosticStore: diagnosticStore)
+            GatewayClient(
+                performanceSignposts: captureSignposts,
+                diagnosticStore: diagnosticStore,
+                diagnosticCaptureSink: diagnosticCapture
+            )
         }, recoveryBudgets: recoveryBudgets)
         let lifecycle = GatewayLifecycleCoordinator(
             client: client,

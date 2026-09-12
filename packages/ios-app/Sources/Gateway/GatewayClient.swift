@@ -595,15 +595,17 @@ actor GatewayClient {
     ) {
         let duration = diagnosticMilliseconds(request.startedAt.duration(to: clock.now()))
         let code = error.map(Self.diagnosticCode)
-        diagnosticCaptureSink?.recordRPC(
-            method: request.method,
-            requestID: request.requestID,
-            outcome: outcome.rawValue,
-            code: code,
-            durationMilliseconds: duration,
-            profileID: request.profileID,
-            connectionID: request.connectionID
-        )
+        if diagnosticCaptureSink?.isCapturing == true {
+            diagnosticCaptureSink?.recordRPC(
+                method: request.method,
+                requestID: request.requestID,
+                outcome: outcome.rawValue,
+                code: code,
+                durationMilliseconds: duration,
+                profileID: request.profileID,
+                connectionID: request.connectionID
+            )
+        }
         let incidentID = outcome == .success ? nil : "rpc:\(request.requestID)"
         guard request.method == "session.list" else { return }
         diagnosticStore?.record(IOSClientDiagnosticBuffer.logRecord(GatewayRPCDiagnostic(
@@ -734,7 +736,8 @@ actor GatewayClient {
         boundedHTTPFileTransport: BoundedHTTPFileTransport = .urlSession,
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
         eventBufferPolicy: GatewayEventBufferPolicy = .default,
-        diagnosticStore: IOSClientDiagnosticStore? = nil
+        diagnosticStore: IOSClientDiagnosticStore? = nil,
+        diagnosticCaptureSink: (any DiagnosticCaptureRPCSink)? = nil
     ) {
         self.diagnosticStore = diagnosticStore
         self.socketFactory = socketFactory
@@ -746,6 +749,7 @@ actor GatewayClient {
         self.boundedHTTPUploadTransport = boundedHTTPUploadTransport
         self.boundedHTTPFileTransport = boundedHTTPFileTransport
         self.performanceSignposts = performanceSignposts
+        self.diagnosticCaptureSink = diagnosticCaptureSink
         let eventHub = GatewayEventHub(policy: eventBufferPolicy, clock: clock)
         self.eventHub = eventHub
         events = GatewayEventStream(hub: eventHub)

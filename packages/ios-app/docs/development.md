@@ -174,6 +174,23 @@ produce large traces, and it does not replace Time Profiler, SwiftUI, or
 signpost correlation. Treat its output as a bounded deep-dive and compare
 matched captures rather than enabling it during normal use.
 
+### Opt-in normal-use capture
+
+For a slowdown that only appears during real work, keep using the ordinary
+optimized app and open **Settings → Logs → Diagnostic Capture → Start** just
+before reproducing it. Stop immediately afterward, then choose **Export
+Diagnostic Capture** and share the copied path with the matching Logs export.
+The capture is local and process-lifetime only: five minutes by default, ten
+minutes maximum, 2,000 events, and 480 KiB. It records operation elapsed time,
+Gateway RPC method/request correlation, catalog results, and chat opening
+milestones; it never records prompts, transcript text, paths, credentials,
+frames, or payloads. No capture task or event retention runs while it is off.
+Use the exported timestamps and request IDs to rank the slow boundary, inspect
+that boundary in Instruments when needed, make one causal fix, and repeat the
+same interaction under matched conditions. A capture is evidence for diagnosis,
+not proof of a physical-device speedup; retain the focused regression and
+matched device measurements for that claim.
+
 Hosted tests define `HOSTED_TEST` and expose test-only helpers. A green test build
 does not prove the shipping app compiles. Changes to app views or their model APIs
 also require a non-hosted compile using the canonical device configuration:
