@@ -13,10 +13,18 @@ distributed Beta product.
 |---|---|---|---|
 | Simulator app iteration | Tron Development | Development | beta route, `com.tron.mobile.beta` |
 | Unit tests | Tron Development or Tron Device | Test | `HOSTED_TEST`, isolated test host |
-| Physical development device | Tron Device | LocalDevice | production-sandbox, `com.tron.mobile` |
+| Physical development device | Tron Device | LocalDevice | optimized development, production-sandbox, `com.tron.mobile` |
 | Device performance tests | Tron Device Performance | DevicePerformance | hosted test, production-sandbox |
 | Manual release archive | Tron Release | Release | production; archive/analyze/profile only |
 | UI validation | Tron UI Validation | Development / Test action | Development app, Test UI host |
+
+`LocalDevice` is the optimized normal-use configuration: Swift `-O` whole-module
+compilation, normal Clang optimization, testability disabled, and
+`dwarf-with-dsym` symbols, while development signing remains available for an
+explicit Instruments attachment. `Tron Device`'s Run action sets
+`debugEnabled: false`; its explicit Profile action is the only profiling action
+for the physical normal-use app. Do not create a shadow bundle or add a second
+profiling scheme.
 
 The canonical physical install pair is `Tron Device` + `LocalDevice`.
 Build role, push route, and exact Gateway protocol range are emitted into
@@ -60,6 +68,17 @@ Use `scripts/validate-ios-artifact.py` on signed products and
 `packages/ios-app/scripts/verify-archive-privacy.sh` for a manually-created
 archive. Never install Release or DevicePerformance through the ordinary helper.
 Do not archive, upload, deploy, or erase app/Keychain data.
+
+For a real slowdown, the user selects **Product → Profile** on `Tron Device` to
+open Instruments, or attaches Instruments to an already normally launched
+optimized app. Start with Time Profiler, Points of Interest, SwiftUI, and
+Concurrency/System Trace as indicated by the hypothesis; correlate existing
+bounded Logs Share diagnostics and signposts, then repeat the same interaction
+under matched conditions. Keep the matching dSYM and verify its UUID against the
+profiled app binary. This is user-owned profiling: agents may generate and
+validate source/build artifacts but must not install the app or mutate Gateway
+state. Performance Trace/processor tracing is optional hardware-assisted
+follow-up, not default telemetry; device/OS support and trace size are limits.
 
 ## Stop rules
 

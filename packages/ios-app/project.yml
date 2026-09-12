@@ -29,7 +29,12 @@ options:
         tree = ET.parse(path)
         root = tree.getroot()
         removed = ("TestAction", "LaunchAction") if name == "Tron Release" else (
-            "ProfileAction", "AnalyzeAction", "ArchiveAction"
+            # The physical device scheme profiles the optimized LocalDevice
+            # binary through Instruments. Other run/test schemes stay free of
+            # profiling/archive actions so those workflows remain explicit.
+            ("AnalyzeAction", "ArchiveAction") if name == "Tron Device" else (
+                "ProfileAction", "AnalyzeAction", "ArchiveAction"
+            )
         )
         for tag in removed:
             node = root.find(tag)
@@ -211,6 +216,9 @@ schemes:
         TronShareExtension: all
         TronMobileTests: [test]
     run:
+      config: LocalDevice
+      debugEnabled: false
+    profile:
       config: LocalDevice
     test:
       config: Test

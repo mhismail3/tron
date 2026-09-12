@@ -22,7 +22,10 @@ assert '"${CONFIGURATION:-}" == "Release"' in source
 assert 'TRON_GATEWAY_PROTOCOL_VERSION: "5"' in source
 assert 'TRON_GATEWAY_MIN_PROTOCOL_VERSION: "5"' in source
 assert 'verify-gateway-protocol-contract.py' in source
-# Release is the sole archive/analyze/profile scheme and has no run/test action.
+assert 'config: LocalDevice\n      debugEnabled: false' in source
+# Release is the sole archive/analyze scheme. The physical-device run scheme
+# also exposes an explicit Profile action, which uses optimized LocalDevice
+# settings without changing the ordinary run action.
 release = source[source.index("  Tron Release:"):]
 assert "    archive:" in release and "config: Release" in release
 assert "    run:" not in release and "    test:" not in release
@@ -33,15 +36,9 @@ for scheme in schemes[:-1]:
 expected = {
     "Development": ("com.tron.mobile.beta", "beta", "development", "development", "NO", "DEBUG TRON_DEVELOPMENT"),
     "Test": ("com.tron.mobile.testhost", "beta", "none", "none", "NO", "DEBUG HOSTED_TEST"),
-    "LocalDevice": ("com.tron.mobile", "production-sandbox", "development", "development", "YES", "DEBUG TRON_PRIVATE_VARIABLE_BLUR"),
+    "LocalDevice": ("com.tron.mobile", "production-sandbox", "development", "development", "YES", "TRON_PRIVATE_VARIABLE_BLUR"),
     "DevicePerformance": ("com.tron.mobile", "production-sandbox", "development", "development", "NO", "DEBUG HOSTED_TEST"),
     "Release": ("com.tron.mobile", "production", "production", "production", "NO", None),
-}
-expected_actions = {
-    "Tron Development": ("Development", "Test"),
-    "Tron Device": ("LocalDevice", "Test"),
-    "Tron UI Validation": ("Development", "Development"),
-    "Tron Device Performance": ("DevicePerformance", "DevicePerformance"),
 }
 for name, (bundle, route, apns, attest, blur, flags) in expected.items():
     text = (root / "Configuration" / f"{name}.xcconfig").read_text()
@@ -54,10 +51,16 @@ for name, (bundle, route, apns, attest, blur, flags) in expected.items():
         assert f"SWIFT_ACTIVE_COMPILATION_CONDITIONS = {flags}" in text, name
     else:
         assert "SWIFT_ACTIVE_COMPILATION_CONDITIONS" not in text and "TRON_PRIVATE_VARIABLE_BLUR" not in text, name
-    if name == "Release":
-        assert "SWIFT_OPTIMIZATION_LEVEL = -O" in text and "ENABLE_NS_ASSERTIONS = NO" in text
+    if name in ("LocalDevice", "Release"):
+        assert "DEBUG_INFORMATION_FORMAT = dwarf-with-dsym" in text
+        assert "SWIFT_OPTIMIZATION_LEVEL = -O" in text
+        assert "SWIFT_COMPILATION_MODE = wholemodule" in text
+        if name == "LocalDevice":
+            assert "ENABLE_TESTABILITY = NO" in text
+            assert "GCC_OPTIMIZATION_LEVEL = 3" in text
     if name == "LocalDevice":
         assert "TRON_PRIVATE_VARIABLE_BLUR=1" in text
+        assert "#include \"Debug.xcconfig\"" not in text
     if name == "DevicePerformance":
         assert "TRON_PRIVATE_VARIABLE_BLUR" not in text
     entitlements = {
@@ -110,10 +113,10 @@ for relative in ("TestPlans/UnitTests.xctestplan", "TestPlans/UIValidation.xctes
         assert f'{reference["identifier"]} /* {reference["name"]} */' in pbxproj, (relative, reference)
 
 expected_actions = {
-    "Tron Development": ("Development", "Test"),
-    "Tron Device": ("LocalDevice", "Test"),
-    "Tron UI Validation": ("Development", "Development"),
-    "Tron Device Performance": ("DevicePerformance", "DevicePerformance"),
+    "Tron Development": ("Development", "Test", False),
+    "Tron Device": ("LocalDevice", "Test", True),
+    "Tron UI Validation": ("Development", "Development", False),
+    "Tron Device Performance": ("DevicePerformance", "DevicePerformance", False),
 }
 paths = {path.stem: path for path in schemes.glob("*.xcscheme")}
 assert set(paths) == set(expected_actions) | {"Tron Release"}, sorted(paths)
@@ -128,14 +131,59 @@ for name, path in paths.items():
         run = root.find("LaunchAction")
         test = root.find("TestAction")
         assert run is not None and test is not None, path
-        assert all(root.find(tag) is None for tag in ("ArchiveAction", "AnalyzeAction", "ProfileAction")), path
-        run_config, test_config = expected_actions[name]
+        run_config, test_config, has_profile = expected_actions[name]
+        profile = root.find("ProfileAction")
+        assert (profile is not None) == has_profile, path
+        if profile is not None:
+            assert profile.get("buildConfiguration") == "LocalDevice", path
+        forbidden_actions = ("ArchiveAction", "AnalyzeAction") + (() if has_profile else ("ProfileAction",))
+        assert all(root.find(tag) is None for tag in forbidden_actions), path
         assert run.get("buildConfiguration") == run_config, path
         assert test.get("buildConfiguration") == test_config, path
+        if name == "Tron Device":
+            assert run.get("selectedDebuggerIdentifier") == "", path
+            assert run.get("selectedLauncherIdentifier") == "Xcode.IDEFoundation.Launcher.PosixSpawn", path
         plan_references = test.findall("./TestPlans/TestPlanReference")
         assert len(plan_references) == 1, path
         expected_plan = "UIValidation.xctestplan" if name == "Tron UI Validation" else "UnitTests.xctestplan"
         assert plan_references[0].get("reference", "").endswith(expected_plan), path
         assert plan_references[0].get("default") == "YES", path
 print("generated iOS scheme/test-plan action policy passed")
+PY
+
+# Show the settings Xcode will actually apply to every product built by the
+# physical-device scheme. Static xcconfig checks above cannot catch a changed
+# inheritance chain, so keep this as a cheap no-compile policy check.
+effective_settings="$generated_root/local-device-settings.txt"
+xcodebuild -showBuildSettings \
+  -project "$generated_root/TronMobile.xcodeproj" \
+  -scheme "Tron Device" -configuration LocalDevice >"$effective_settings" 2>&1
+python3 - "$effective_settings" <<'PY'
+from pathlib import Path
+import re, sys
+text = Path(sys.argv[1]).read_text()
+required = {
+    "SWIFT_OPTIMIZATION_LEVEL": "-O",
+    "SWIFT_COMPILATION_MODE": "wholemodule",
+    "GCC_OPTIMIZATION_LEVEL": "3",
+    "DEBUG_INFORMATION_FORMAT": "dwarf-with-dsym",
+    "ENABLE_TESTABILITY": "NO",
+    "ONLY_ACTIVE_ARCH": "NO",
+    "COPY_PHASE_STRIP": "NO",
+}
+blocks = re.split(r"(?=Build settings for action build and target )", text)
+seen = set()
+for block in blocks:
+    match = re.search(r"Build settings for action build and target ([^:]+):", block)
+    if not match:
+        continue
+    target = match.group(1)
+    if target not in {"TronMobile", "TronShareExtension"}:
+        continue
+    seen.add(target)
+    for key, value in required.items():
+        assert re.search(rf"^    {re.escape(key)} = {re.escape(value)}$", block, re.M), (target, key)
+    assert re.search(r"^    SWIFT_ACTIVE_COMPILATION_CONDITIONS = TRON_PRIVATE_VARIABLE_BLUR$", block, re.M), target
+assert seen == {"TronMobile", "TronShareExtension"}, seen
+print("effective LocalDevice app and extension settings policy passed")
 PY

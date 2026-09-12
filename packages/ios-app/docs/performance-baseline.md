@@ -35,8 +35,10 @@ physical memory are the more stable comparison values.
 `DevicePerformance` is a debug, `HOSTED_TEST` configuration using the provisioned app
 identity. It exists only to run the same deterministic hosted fixture on the
 pinned phone; it is not a distribution configuration, and the scheme's archive
-scheme has no archive action; Release is reserved for the separate `Tron Release`
-archive/analyze/profile scheme.
+scheme has no archive action. For normal-use profiling, use the optimized
+`Tron Device`/`LocalDevice` Profile action instead; this hosted fixture must not
+be treated as release-like device evidence. `Release` is reserved for the
+separate `Tron Release` archive/analyze/profile scheme.
 
 ## Results
 

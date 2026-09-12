@@ -1,7 +1,18 @@
-// LocalDevice.xcconfig - Debug production-sandbox build for a development device
-#include "Debug.xcconfig"
+// LocalDevice.xcconfig - Optimized production-sandbox build for a development device.
+// Keep development signing so Instruments can attach, while matching the
+// optimizer and symbol settings used by the release-like execution path.
+#include "Base.xcconfig"
 
-SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG TRON_PRIVATE_VARIABLE_BLUR
+DEBUG_INFORMATION_FORMAT = dwarf-with-dsym
+GCC_OPTIMIZATION_LEVEL = 3
+SWIFT_OPTIMIZATION_LEVEL = -O
+SWIFT_COMPILATION_MODE = wholemodule
+ENABLE_TESTABILITY = NO
+ONLY_ACTIVE_ARCH = NO
+MTL_ENABLE_DEBUG_INFO = NO
+COPY_PHASE_STRIP = NO
+
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = TRON_PRIVATE_VARIABLE_BLUR
 GCC_PREPROCESSOR_DEFINITIONS = $(inherited) TRON_PRIVATE_VARIABLE_BLUR=1
 PRODUCT_BUNDLE_IDENTIFIER = com.tron.mobile
 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon

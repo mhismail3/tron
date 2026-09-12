@@ -106,17 +106,73 @@ source files, then regenerate. Because the application uses a checked-in plist, 
 |---|---|---|---|
 | `Development` | Simulator app iteration | `com.tron.mobile.beta` | beta route, APNs sandbox |
 | `Test` | Hosted unit/UI tests | `com.tron.mobile.testhost` | no real APNs lane |
-| `LocalDevice` | Ordinary physical-device development | `com.tron.mobile` | production-sandbox route |
+| `LocalDevice` | Optimized ordinary physical-device development and profiling | `com.tron.mobile` | production-sandbox route |
 | `DevicePerformance` | Physical hosted performance fixture | `com.tron.mobile` | production-sandbox route |
 | `Release` | Manual distribution archive only | `com.tron.mobile` | production route |
 
 The corresponding schemes are `Tron Development`, `Tron Device`, `Tron UI
-Validation`, `Tron Device Performance`, and archive-only `Tron Release`. Only
-`Tron Release` contains Archive/Profile/Analyze actions. `LocalDevice` and
-`DevicePerformance` replace the same installed app identity; never run the
-performance fixture on a device another workflow owns. Runtime build role and
-push route are emitted into `Info.plist`, but the final signed entitlements and
-provisioning profile remain authoritative for Apple service environments.
+Validation`, `Tron Device Performance`, and archive-only `Tron Release`. `Tron
+Device` has the one explicit Profile action for the optimized `LocalDevice`
+binary; its ordinary Run action has `debugEnabled: false`, so a normal launch is
+not debugger-attached. `Tron Release` remains archive/analyze/profile-only and is
+not an install target for this workflow. `LocalDevice` and `DevicePerformance`
+replace the same installed app identity; never run the performance fixture on a
+device another workflow owns. Runtime build role and push route are emitted into
+`Info.plist`, but the final signed entitlements and provisioning profile remain
+authoritative for Apple service environments.
+
+`LocalDevice` deliberately uses the release-like compiler path (`-O`, whole
+module Swift compilation, normal Clang optimization, testability disabled,
+non-active-architecture-only builds) while retaining development signing and
+`dwarf-with-dsym` output. This makes ordinary use representative of the
+optimized app while preserving Instruments attachment. Do not add
+`get-task-allow` manually or strip it from the development-signed artifact.
+`Tron Device`'s Run action is only a scheme convenience; the device helper's
+launch and a launch from the device itself are not debugger sessions.
+
+### Profiling a real slowdown
+
+Use the same optimized app for the normal-use → capture → fix → repeat loop; do
+not maintain a profiling-only product or copy app state into a shadow bundle.
+The user-owned, physical-device workflow is:
+
+1. Generate the project with `scripts/tron ios generate`, select a physical
+device, and choose **Product → Profile** with scheme `Tron Device`. This uses
+`LocalDevice` and opens Instruments without changing the app's bundle, push
+route, attestation, private blur, or local state. Alternatively launch the
+already-built app normally, then attach Instruments to its process.
+2. Start with **Time Profiler** and **Points of Interest**. Correlate a single
+reproduction with Tron signposts and Logs → Share; inspect operation duration,
+waiting/serialization/transport/rendering ownership, then rank contributors
+before editing. Add **SwiftUI** to inspect body/update/layout cost and the
+**Concurrency** tools/System Trace when actor or queue contention is plausible.
+3. Stop the capture, retain the `.trace` and the bounded exported Logs file
+locally, fix one owner, and repeat the same interaction under the same device,
+thermal, cache, and Gateway conditions. Keep a focused regression test and
+record only measured improvements; simulator/debug timings are diagnostic, not
+device performance evidence.
+
+Profiles require the matching dSYM from the same build. For a prepared artifact,
+confirm UUID identity before interpreting symbols:
+
+```bash
+dwarfdump --uuid <TronMobile.app/TronMobile>
+dwarfdump --uuid <TronMobile.app.dSYM/Contents/Resources/DWARF/TronMobile>
+```
+
+The UUID printed for the app binary must also appear in its dSYM. Do not strip,
+replace, or mix dSYMs between builds. The optimized development-signed binary
+is release-like, not a distribution-signed Release archive; signing and service
+routing remain intentionally different.
+
+Apple's [Optimize SwiftUI performance with Instruments (WWDC25/306)](https://developer.apple.com/videos/play/wwdc2025/306/)
+and [Profile and optimize power usage (WWDC25/226)](https://developer.apple.com/videos/play/wwdc2025/226/)
+cover the corresponding SwiftUI and energy workflows. On-device Performance
+Trace/processor tracing is optional hardware-assisted evidence, not a default
+capture mode: availability depends on the physical Apple device and OS, it can
+produce large traces, and it does not replace Time Profiler, SwiftUI, or
+signpost correlation. Treat its output as a bounded deep-dive and compare
+matched captures rather than enabling it during normal use.
 
 Hosted tests define `HOSTED_TEST` and expose test-only helpers. A green test build
 does not prove the shipping app compiles. Changes to app views or their model APIs
@@ -129,6 +185,17 @@ scripts/tron ios generate
   -destination 'generic/platform=iOS' -derivedDataPath build/device-compile-derived-data \
   CODE_SIGNING_ALLOWED=NO)
 ```
+
+To inspect the effective optimized settings without compiling (including the
+embedded share extension), use the owning build-policy check:
+
+```bash
+packages/ios-app/scripts/test-build-matrix-policy.sh
+```
+
+The check runs `xcodebuild -showBuildSettings` for the generated `Tron Device`
+scheme and verifies both `TronMobile` and `TronShareExtension` retain `-O`, whole
+module compilation, dSYM output, and disabled testability.
 
 This compile-only check neither installs an app nor validates signing. Keep
 physical installs on `scripts/tron-ios-device`; its signed-artifact and Gateway
