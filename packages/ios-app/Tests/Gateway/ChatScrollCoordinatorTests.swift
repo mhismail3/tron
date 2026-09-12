@@ -16,6 +16,7 @@ struct ChatScrollCoordinatorTests {
     )
 
     private func admitAlignedTail(_ coordinator: ChatScrollCoordinator) {
+        coordinator.physicalTerminalRowObserved(layoutEpoch: coordinator.layoutEpoch)
         coordinator.geometryChanged(previous: .zero, current: bottom)
         coordinator.semanticFrameChanged(
             renderedID: "transcript-bottom",
@@ -1538,6 +1539,7 @@ struct ChatScrollCoordinatorTests {
             frames.releaseNext()
             let command = try await coordinator.hostedNextCommand()
             #expect(coordinator.commandApplied(command))
+            coordinator.physicalTerminalRowObserved(layoutEpoch: coordinator.layoutEpoch)
             coordinator.geometryChanged(previous: .zero, current: bottom)
             coordinator.semanticFrameChanged(
                 renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
@@ -1712,8 +1714,9 @@ struct ChatScrollCoordinatorTests {
             frame: CGRect(x: 0, y: 388, width: 100, height: 12)
         )
         coordinator.observeOpeningGeometry(bottom)
+        coordinator.physicalTerminalRowObserved(layoutEpoch: coordinator.layoutEpoch)
 
-        #expect(await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom"))
+        coordinator.requestOpeningTail(targetRenderedID: "transcript-bottom")
         #expect(coordinator.command == nil)
         #expect(coordinator.viewportMode == .pinned)
         #expect(!coordinator.hasUnreadContent)
@@ -1733,6 +1736,7 @@ struct ChatScrollCoordinatorTests {
             _ = try await coordinator.hostedNextCommand()
             #expect(coordinator.command != nil)
 
+            coordinator.physicalTerminalRowObserved(layoutEpoch: coordinator.layoutEpoch)
             coordinator.semanticFrameChanged(
                 renderedID: "transcript-bottom",
                 layoutEpoch: coordinator.layoutEpoch,
@@ -1779,6 +1783,7 @@ struct ChatScrollCoordinatorTests {
             let clock = ManualClock()
             let coordinator = ChatScrollCoordinator(clock: clock.clock, openingTailTimeout: .seconds(1))
             let task = Task { await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom") }
+            coordinator.physicalTerminalRowObserved(layoutEpoch: coordinator.layoutEpoch)
             coordinator.semanticFrameChanged(
                 renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
                 frame: CGRect(x: 0, y: 388, width: 100, height: 12)
@@ -1802,6 +1807,7 @@ struct ChatScrollCoordinatorTests {
             #expect(command.destination == .openingTail("transcript-bottom"))
             #expect(command.animation == .disabled)
             coordinator.commandApplied(command)
+            coordinator.physicalTerminalRowObserved(layoutEpoch: coordinator.layoutEpoch)
             coordinator.semanticFrameChanged(
                 renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
                 frame: CGRect(x: 0, y: 388, width: 100, height: 12)
@@ -1823,10 +1829,39 @@ struct ChatScrollCoordinatorTests {
         coordinator.cancel()
     }
 
+    @Test("known-bad eager marker cannot certify pre-materialization opening")
+    func knownBadEagerMarkerCannotCertifyPreMaterializationOpening() async throws {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.projectionInstalled(structure: ChatPhysicalRowSpineIdentity(
+            timelineIDs: ChatTranscriptIDs(canonical: ["message"], live: []),
+            runtimeIDs: [], lifecycleID: nil, queueIDs: [], aliases: [], fusion: nil,
+            hasEarlierMessages: false
+        ))
+        let underflow = ChatTranscriptGeometry(
+            offsetY: 0, contentHeight: 347, containerHeight: 400, bottomInset: 53
+        )
+        let positioning = Task {
+            await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom")
+        }
+        coordinator.geometryChanged(previous: .zero, current: underflow)
+        coordinator.semanticFrameChanged(
+            renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 335, width: 100, height: 12)
+        )
+        await Task.yield()
+        // The current marker and provisional underflow are insufficient; the
+        // opening command remains owned until the real terminal row is observed.
+        #expect(coordinator.command != nil)
+        coordinator.physicalTerminalRowObserved(layoutEpoch: coordinator.layoutEpoch)
+        #expect(await positioning.value)
+        coordinator.cancel()
+    }
+
     @Test("opening tail admits exact physical evidence in either callback order")
     func openingTailExactEvidencePermutations() async {
         let geometryFirst = ChatScrollCoordinator()
         geometryFirst.requestOpeningTail(targetRenderedID: "transcript-bottom")
+        geometryFirst.physicalTerminalRowObserved(layoutEpoch: geometryFirst.layoutEpoch)
         geometryFirst.geometryChanged(previous: .zero, current: bottom)
         geometryFirst.semanticFrameChanged(
             renderedID: "transcript-bottom", layoutEpoch: geometryFirst.layoutEpoch,
@@ -1836,6 +1871,7 @@ struct ChatScrollCoordinatorTests {
 
         let frameFirst = ChatScrollCoordinator()
         frameFirst.requestOpeningTail(targetRenderedID: "transcript-bottom")
+        frameFirst.physicalTerminalRowObserved(layoutEpoch: frameFirst.layoutEpoch)
         frameFirst.semanticFrameChanged(
             renderedID: "transcript-bottom", layoutEpoch: frameFirst.layoutEpoch,
             frame: CGRect(x: 0, y: 388, width: 100, height: 12)
@@ -1863,10 +1899,25 @@ struct ChatScrollCoordinatorTests {
             offsetY: 0, contentHeight: 500, containerHeight: 400, bottomInset: 53
         ).isNativeUnderflow)
 
+        let emptySpine = ChatScrollCoordinator()
+        emptySpine.projectionInstalled(structure: ChatPhysicalRowSpineIdentity(
+            timelineIDs: ChatTranscriptIDs(canonical: [], live: []),
+            runtimeIDs: [], lifecycleID: nil, queueIDs: [], aliases: [], fusion: nil,
+            hasEarlierMessages: false
+        ))
+        emptySpine.geometryChanged(previous: .zero, current: installedUnderflow)
+        emptySpine.semanticFrameChanged(
+            renderedID: "transcript-bottom", layoutEpoch: emptySpine.layoutEpoch,
+            frame: CGRect(x: 0, y: 335, width: 100, height: 12)
+        )
+        #expect(await emptySpine.positionOpeningTail(targetRenderedID: "transcript-bottom"))
+        emptySpine.cancel()
+
         let positioned = ChatScrollCoordinator()
         let task = Task {
             await positioned.positionOpeningTail(targetRenderedID: "transcript-bottom")
         }
+        positioned.physicalTerminalRowObserved(layoutEpoch: positioned.layoutEpoch)
         positioned.geometryChanged(previous: .zero, current: installedUnderflow)
         positioned.semanticFrameChanged(
             renderedID: "transcript-bottom", layoutEpoch: positioned.layoutEpoch,

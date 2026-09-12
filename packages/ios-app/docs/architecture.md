@@ -319,8 +319,9 @@ a marker already admitted by that current epoch; when the marker's numeric frame
 is unchanged, the mounted scroll view waits for a new physical marker callback
 instead of re-admitting the prior frame. A visible pinned presentation therefore
 requires fresh, current-layout marker proof; overflow requires alignment, while
-underflow requires the eager marker to be visible. Row existence, forced underflow
-height alone, elapsed frames, or an abandoned layout generation are not proof. Ordinary
+underflow requires the eager marker to be visible after either a current terminal
+physical-row geometry callback or an authoritative empty physical spine. Row existence,
+forced underflow height alone, elapsed frames, or an abandoned layout generation are not proof. Ordinary
 pinned resizing then belongs to the native size-change anchor. A detached reader owns one
 immutable installed render commit: direct takeover cancels pending derivation, automatic
 live projection intake stops, and only the scalar authoritative timeline generation is

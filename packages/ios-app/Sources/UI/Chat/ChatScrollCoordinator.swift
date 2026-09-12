@@ -209,6 +209,10 @@ final class ChatScrollCoordinator {
     private var geometry = ChatTranscriptGeometry.zero
     private var geometryRevision = 0
     private var installedPhysicalRowSpine: ChatPhysicalRowSpineIdentity?
+    /// A current terminal row geometry callback proves that the installed
+    /// physical spine has crossed the SwiftUI materialization boundary. The
+    /// marker alone can otherwise describe the empty pre-projection tree.
+    private var terminalPhysicalRowObservedLayoutEpoch: Int?
     /// A newly mounted non-retained tree cannot repair its placeholder geometry
     /// before ChatView installs the authoritative opening baseline.
     private var awaitingOpeningBaseline = false
@@ -360,6 +364,7 @@ final class ChatScrollCoordinator {
         physicalTailRepairBlockedUntilEvidenceRevision = nil
         physicalTailRepairAttempts = 0
         installedPhysicalRowSpine = nil
+        terminalPhysicalRowObservedLayoutEpoch = nil
         self.presentation = presentation ?? (self.presentation &+ 1)
         awaitingOpeningBaseline = !retainingVisibleViewport
         visibleOpeningRevealPending = !retainingVisibleViewport
@@ -515,6 +520,7 @@ final class ChatScrollCoordinator {
             : .changedSpine
         installedPhysicalRowSpine = structure
         advanceLayoutEpoch()
+        terminalPhysicalRowObservedLayoutEpoch = nil
         traceProjection(change, structure: structure)
         geometryRevision &+= 1
         evaluateLayoutRestoreIfReady()
@@ -525,6 +531,17 @@ final class ChatScrollCoordinator {
         geometryRevision &+= 1
         evaluateLayoutRestoreIfReady()
         evaluatePrependIfReady()
+    }
+
+    /// Records the terminal row's native geometry as proof that the current
+    /// installed physical spine is materialized. This is intentionally one
+    /// row, not a requirement that a lazy stack realize its entire transcript.
+    func physicalTerminalRowObserved(layoutEpoch: Int) {
+        guard layoutEpoch == self.layoutEpoch else { return }
+        guard terminalPhysicalRowObservedLayoutEpoch != layoutEpoch else { return }
+        terminalPhysicalRowObservedLayoutEpoch = layoutEpoch
+        geometryRevision &+= 1
+        evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
     }
 
     /// Re-evaluates only a marker that was actually admitted by the current
@@ -1606,11 +1623,15 @@ final class ChatScrollCoordinator {
             && context.targetSample!.frame.maxY > 0
             && context.targetSample!.frame.minY < geometry.containerHeight
         let underflowLayoutIsInstalled = geometry.isNativeUnderflow
-        // Underflow has legal blank space below its content, so its eager marker
-        // need only be freshly visible in the current layout. Overflow still
-        // requires exact marker alignment. Requiring marker visibility in both
-        // cases prevents a provisional height alone from exposing a blank view.
+        let hasMaterializedInstalledSpine = terminalPhysicalRowObservedLayoutEpoch == layoutEpoch
+            || installedPhysicalRowSpine?.hasNoPhysicalRows == true
+        // Underflow has legal blank space below its content, but the marker can
+        // describe the empty pre-projection tree. A current terminal-row
+        // callback proves materialization for non-empty lazy content; genuinely
+        // empty transcripts remain valid without a row callback. Overflow still
+        // requires exact marker alignment.
         let hasPhysicalTailProof = targetIsVisible
+            && hasMaterializedInstalledSpine
             && (underflowLayoutIsInstalled || openingTailEvidenceIsAligned)
         let physicallyPositioned = geometry.isPlausibleOpeningViewport
             && geometry.isAtCatchUpBoundary
@@ -1754,7 +1775,10 @@ final class ChatScrollCoordinator {
         let targetIsVisible = sample.frame.maxY > 0
             && sample.frame.minY < geometry.containerHeight
         let underflowLayoutIsInstalled = geometry.isNativeUnderflow
+        let hasMaterializedInstalledSpine = terminalPhysicalRowObservedLayoutEpoch == layoutEpoch
+            || installedPhysicalRowSpine?.hasNoPhysicalRows == true
         return targetIsVisible
+            && hasMaterializedInstalledSpine
             && (underflowLayoutIsInstalled || openingTailEvidenceIsAligned)
     }
 
@@ -2407,6 +2431,7 @@ final class ChatScrollCoordinator {
         // projection reconciliation callback still removes it when its exact
         // row disappears; dropping it here would strand the active sentinel.
         physicalTailEvidence = nil
+        terminalPhysicalRowObservedLayoutEpoch = nil
         semanticFrames.removeAll(keepingCapacity: true)
     }
 

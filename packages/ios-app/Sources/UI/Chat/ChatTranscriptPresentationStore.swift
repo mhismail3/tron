@@ -334,6 +334,14 @@ struct ChatPhysicalRowSpineIdentity: Hashable, Sendable {
     let aliases: [Alias]
     let fusion: Fusion?
     let hasEarlierMessages: Bool
+
+    /// Whether the installed projection has no physical row that a lazy stack
+    /// must materialize before its terminal marker can certify an opening.
+    var hasNoPhysicalRows: Bool {
+        timelineIDs.isEmpty && runtimeIDs.isEmpty && lifecycleID == nil
+            && queueIDs.isEmpty && aliases.isEmpty && fusion == nil
+            && !hasEarlierMessages
+    }
 }
 
 struct InstalledChatTranscript: Hashable, Sendable {

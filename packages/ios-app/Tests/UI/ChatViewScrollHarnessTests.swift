@@ -239,6 +239,28 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    @Test("opening readiness follows the installed terminal physical row")
+    func openingReadinessFollowsInstalledTerminalRow() async throws {
+        try await withTestWatchdog(timeout: .seconds(20)) {
+            try await withHarness(seed: 1_217) { harness in
+                let ready = try await harness.recorder.waitUntil { $0.observation.isReady }
+                let terminalID = harness.lastTranscriptID
+                #expect(ready.observation.projectionInstallCount > 0)
+                #expect(ready.observation.physicalRowAppearanceCounts[terminalID, default: 0] > 0)
+                #expect(ready.observation.visibleRowIDs.contains(terminalID))
+
+                // The production ChatView/ChatTranscriptScrollView path must
+                // expose the terminal row before readiness, not merely expose
+                // the eager marker from the empty pre-projection tree.
+                let samples = harness.recorder.samples
+                let firstReady = try #require(samples.firstIndex { $0.observation.isReady })
+                #expect(samples[..<firstReady].contains {
+                    $0.observation.physicalRowAppearanceCounts[terminalID, default: 0] > 0
+                })
+            }
+        }
+    }
+
     @Test("short streaming response remains above composer as it outgrows the viewport")
     func shortStreamingResponseClearsComposer() async throws {
         try await withTestWatchdog(timeout: .seconds(15)) {

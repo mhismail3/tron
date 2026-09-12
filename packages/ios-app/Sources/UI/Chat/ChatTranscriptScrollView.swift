@@ -431,7 +431,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                             stableRow(
                                 semanticID: "earlier-messages",
                                 installedTag: installed.tag,
-                                entranceState: .none
+                                entranceState: .none,
+                                isTerminalRow: physicalRows.isEmpty
                             ) {
                                 earlierRow(installed)
                                     .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
@@ -700,6 +701,13 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 ? ChatTranscriptLayoutConstants.tailAffordanceHeight : 0
         )
         .id(row.id)
+        .onAppear {
+            // onAppear is the materialization boundary for a lazy physical
+            // row. Use the mounted coordinator epoch, while semantic geometry
+            // callbacks retain their captured epoch for stale-tree rejection.
+            guard row.id == terminalPhysicalID else { return }
+            scrollCoordinator.physicalTerminalRowObserved(layoutEpoch: scrollCoordinator.layoutEpoch)
+        }
     }
 
     @ViewBuilder
@@ -940,6 +948,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         installedTag: ChatTranscriptProjectionTag?,
         entranceState: ChatTranscriptEntranceState,
         entranceKind: ChatContentEntranceKind = .assistantContent,
+        isTerminalRow: Bool = false,
         @ViewBuilder content: () -> Content
     ) -> some View {
         let rowLayoutEpoch = scrollCoordinator.layoutEpoch
@@ -962,6 +971,9 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                     layoutEpoch: sample.layoutEpoch,
                     frame: sample.frame
                 )
+                if isTerminalRow {
+                    scrollCoordinator.physicalTerminalRowObserved(layoutEpoch: rowLayoutEpoch)
+                }
                 let currentInstalled = transcriptPresentation.installed
                 let currentState = transcriptPresentation.entranceState(for: semanticID)
                 if admitsGeometryCallbacks, ChatEntranceGeometryAdmissionPolicy.admits(
