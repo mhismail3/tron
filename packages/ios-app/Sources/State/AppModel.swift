@@ -1431,12 +1431,18 @@ final class AppModel {
                                 self.catalogRefreshFailedAttempts + 1
                             )
                         }
-                        guard DashboardCatalogRetryPolicy.shouldRetry(
-                            isDirty: remainsDirty,
-                            isCurrent: true,
-                            transportFailed: result.outcome == .transportFailure,
-                            failedAttempts: self.catalogRefreshFailedAttempts
-                        ) else {
+                        // A catalog that moved during both bounded traversal
+                        // attempts is expected convergence churn, not a
+                        // request failure. Leave it retained and wait for the
+                        // next authoritative list-change event rather than
+                        // creating an unbounded self-refresh loop.
+                        guard result.genuineFailure,
+                              DashboardCatalogRetryPolicy.shouldRetry(
+                                  isDirty: remainsDirty,
+                                  isCurrent: true,
+                                  transportFailed: result.outcome == .transportFailure,
+                                  failedAttempts: self.catalogRefreshFailedAttempts
+                              ) else {
                             if result.genuineFailure,
                                self.catalogRefreshFailedAttempts >= DashboardCatalogRetryPolicy.maximumFailedAttempts {
                                 self.showCatalogFailure(ownedBy: key)

@@ -230,6 +230,9 @@ struct AppModelCatalogSyncTests {
                     listRevision: cycle * 4 + 4
                 ))
                 #expect(await loading.value == .retained)
+                // Exhausted revision churn must not leave a hidden retry lease
+                // issuing requests after the caller has completed.
+                #expect(await harness.socket.sentFrames().count == (cycle + 1) * 4 + 1)
                 #expect(harness.model.visibleNotices.isEmpty)
             }
 
