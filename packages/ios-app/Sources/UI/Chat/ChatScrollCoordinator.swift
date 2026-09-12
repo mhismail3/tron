@@ -548,20 +548,33 @@ final class ChatScrollCoordinator {
     /// installed physical spine is materialized. This is intentionally one
     /// row, not a requirement that a lazy stack realize its entire transcript.
     func physicalTerminalRowObserved(
-        physicalID: String = "transcript-bottom",
+        physicalID: String,
         layoutEpoch: Int,
-        viewportActivation: Int = 0,
-        projectionTag: ChatTranscriptProjectionTag? = nil
+        viewportActivation: Int,
+        projectionTag: ChatTranscriptProjectionTag?
     ) {
         guard admitsViewportCallback(capturedActivation: viewportActivation),
               layoutEpoch == self.layoutEpoch,
-              installedPhysicalTerminalID == nil || physicalID == installedPhysicalTerminalID,
-              installedPhysicalProjectionTag == nil || projectionTag == installedPhysicalProjectionTag else { return }
+              physicalID == installedPhysicalTerminalID,
+              projectionTag == installedPhysicalProjectionTag else { return }
         guard terminalPhysicalRowObservedLayoutEpoch != layoutEpoch else { return }
         terminalPhysicalRowObservedLayoutEpoch = layoutEpoch
         geometryRevision &+= 1
         evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
     }
+
+    #if HOSTED_TEST
+    /// Coordinator-only evidence used by non-hosted state tests. The hosted
+    /// ChatTranscriptScrollView path always supplies the exact physical ID and
+    /// projection tag through the geometry callback above.
+    func physicalTerminalRowObserved(layoutEpoch: Int) {
+        guard admitsViewportCallback(capturedActivation: viewportActivation),
+              layoutEpoch == self.layoutEpoch else { return }
+        terminalPhysicalRowObservedLayoutEpoch = layoutEpoch
+        geometryRevision &+= 1
+        evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
+    }
+    #endif
 
     /// Re-evaluates only a marker that was actually admitted by the current
     /// layout epoch. An installed projection clears semantic frames, so this
