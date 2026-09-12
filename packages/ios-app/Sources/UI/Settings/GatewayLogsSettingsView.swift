@@ -25,6 +25,7 @@ extension GatewayLogRecord {
 struct GatewayLogsSettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.scenePhase) private var scenePhase
     @State private var recordIndex = GatewayLogRecordIndex()
     @State private var selectedLog: GatewayProfileLogRecord?
     @State private var selectedLevel = "all"
@@ -38,6 +39,7 @@ struct GatewayLogsSettingsView: View {
     @State private var captureExportInFlight = false
     @State private var captureExportGeneration = 0
     @State private var captureMetadata = GatewayLogCaptureMetadata.empty
+    @State private var loadCoordinator = GatewayLogsLoadCoordinator()
 
     private let levels = ["all", "info", "warning", "error"]
 
@@ -87,6 +89,12 @@ struct GatewayLogsSettingsView: View {
             }
             .padding(.bottom, 24)
         }
+        // Native pull-to-refresh needs bounce even when there are no rows; it
+        // does not add a fake content height or change the reader's offset.
+        .scrollBounceBehavior(.always)
+        .refreshable {
+            await loadLogs(preserveExistingOnEmpty: false)
+        }
         .tronScrollEdgeChrome()
         .safeAreaInset(edge: .top, spacing: 0) {
             levelFilterBar
@@ -94,14 +102,6 @@ struct GatewayLogsSettingsView: View {
         .tronNavigationTitle("Logs", accent: .tronEmerald)
         .toolbar {
             ToolbarItemGroup(placement: .topBarLeading) {
-                Button { Task { await loadLogs(preserveExistingOnEmpty: false) } } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(TronTypography.buttonSM)
-                        .tronSettingsAccent()
-                }
-                .disabled(loading)
-                .accessibilityLabel("Refresh logs")
-
                 Button { copyVisibleLogs() } label: {
                     Image(systemName: copySucceeded ? "checkmark" : "doc.on.doc")
                         .font(TronTypography.buttonSM)
@@ -156,12 +156,19 @@ struct GatewayLogsSettingsView: View {
         .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
             guard !active else { return }
             // The accepted export mutation continues, but this surface must
-            // not leave a stale spinner when its presentation lease retires.
+            // not leave stale presentation work publishing after its lease
+            // retires. The next active task performs a fresh bounded load.
+            loadGeneration &+= 1
+            loadCoordinator.cancel()
+            loading = false
             shareGeneration &+= 1
             shareInFlight = false
             shareSucceeded = false
         }
         .onDisappear {
+            loadGeneration &+= 1
+            loadCoordinator.cancel()
+            loading = false
             shareGeneration &+= 1
             shareInFlight = false
             shareSucceeded = false
@@ -172,9 +179,26 @@ struct GatewayLogsSettingsView: View {
         .task(id: PresentationActivityTaskID(
             source: automaticLoadID,
             presentationActive: presentationActivity.allowsPresentationPublication
+                && scenePhase == .active
         )) {
-            guard presentationActivity.allowsPresentationPublication else { return }
+            guard presentationActivity.allowsPresentationPublication,
+                  scenePhase == .active else { return }
             await loadLogs(preserveExistingOnEmpty: true)
+            while !Task.isCancelled,
+                  presentationActivity.allowsPresentationPublication,
+                  scenePhase == .active {
+                // Interval is measured after the prior load settles, avoiding
+                // overlapping requests and catch-up storms after a slow read.
+                do {
+                    try await Task.sleep(for: .seconds(GatewayLogsLoadPolicy.refreshInterval))
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled,
+                      presentationActivity.allowsPresentationPublication,
+                      scenePhase == .active else { return }
+                await loadLogs(preserveExistingOnEmpty: true)
+            }
         }
         .tronManagedSheet(
             item: $selectedLog,
@@ -285,29 +309,46 @@ struct GatewayLogsSettingsView: View {
 
     private func loadLogs(preserveExistingOnEmpty: Bool) async {
         let activity = presentationActivity
-        guard activity.allowsPresentationPublication else { return }
-        loadGeneration &+= 1
-        let generation = loadGeneration
-        loading = true
+        guard activity.allowsPresentationPublication, scenePhase == .active else { return }
+        let lease = loadCoordinator.acquire()
+        let generation: Int
+        if lease.owner {
+            loadGeneration &+= 1
+            generation = loadGeneration
+            loading = true
+        } else {
+            generation = loadGeneration
+        }
         defer {
-            // A dismissed/replaced Logs surface must not clear the successor's
-            // loading state after its remote/local export settles.
-            if generation == loadGeneration, presentationActivity == activity { loading = false }
+            loadCoordinator.release(lease)
+            if lease.owner {
+                // A dismissed/replaced Logs surface must not clear the
+                // successor's loading state after its read settles.
+                if generation == loadGeneration, presentationActivity == activity {
+                    loading = false
+                }
+            }
         }
         // Publish local evidence first even when a ready socket's remote log
-        // read is stalled. Copy remains useful throughout the remote wait.
-        let local = await model.loadGatewayLogsResult(limit: 1_000, includeRemote: false)
+        // read is stalled. The coordinator shares each phase with joiners.
+        guard let local = await loadCoordinator.local(for: lease, operation: {
+            await model.loadGatewayLogsResult(limit: 1_000, includeRemote: false)
+        }) else { return }
         guard generation == loadGeneration, presentationActivity == activity,
-              activity.allowsPresentationPublication, !Task.isCancelled else { return }
+              activity.allowsPresentationPublication, scenePhase == .active,
+              !Task.isCancelled else { return }
         recordIndex = GatewayLogRecordIndex(records: GatewayLogsLoadPolicy.mergedRecords(
             current: recordIndex.records, loaded: local, preserveExistingOnEmpty: true, limit: 1_000
         ))
         captureMetadata = local.metadata
         hasLoaded = true
-        let loaded = await model.loadGatewayLogsResult(limit: 1_000)
+        guard let loaded = await loadCoordinator.remote(for: lease, operation: {
+            await model.loadGatewayLogsResult(limit: 1_000)
+        }) else { return }
         guard generation == loadGeneration,
               presentationActivity == activity,
               activity.allowsPresentationPublication,
+              scenePhase == .active,
               !Task.isCancelled else { return }
         recordIndex = GatewayLogRecordIndex(records: GatewayLogsLoadPolicy.mergedRecords(
             current: recordIndex.records,
@@ -411,7 +452,92 @@ struct GatewayLogsLoadID: Hashable {
     let isReady: Bool
 }
 
+/// Owns one in-flight Logs read across the automatic loop and pull gesture.
+/// Separate local/remote tasks preserve the fast local projection while both
+/// callers join the same underlying request rather than polling or duplicating
+/// Gateway work.
+@MainActor
+final class GatewayLogsLoadCoordinator {
+    struct Lease: Sendable {
+        fileprivate let token: UInt64
+        let owner: Bool
+    }
+
+    private var nextToken: UInt64 = 0
+    private var activeToken: UInt64?
+    private var activeUsers = 0
+    private var localTask: Task<GatewayLogsLoadResult?, Never>?
+    private var remoteTask: Task<GatewayLogsLoadResult?, Never>?
+
+    func acquire() -> Lease {
+        if let activeToken {
+            activeUsers += 1
+            return Lease(token: activeToken, owner: false)
+        }
+        nextToken &+= 1
+        activeToken = nextToken
+        activeUsers = 1
+        return Lease(token: nextToken, owner: true)
+    }
+
+    func local(
+        for lease: Lease,
+        operation: @escaping @MainActor () async -> GatewayLogsLoadResult
+    ) async -> GatewayLogsLoadResult? {
+        guard activeToken == lease.token else { return nil }
+        if localTask == nil {
+            localTask = Task { @MainActor in
+                guard !Task.isCancelled else { return nil }
+                let result = await operation()
+                return Task.isCancelled ? nil : result
+            }
+        }
+        guard let task = localTask else { return nil }
+        let result = await task.value
+        guard activeToken == lease.token, !Task.isCancelled else { return nil }
+        return result
+    }
+
+    func remote(
+        for lease: Lease,
+        operation: @escaping @MainActor () async -> GatewayLogsLoadResult
+    ) async -> GatewayLogsLoadResult? {
+        guard activeToken == lease.token else { return nil }
+        if remoteTask == nil {
+            remoteTask = Task { @MainActor in
+                guard !Task.isCancelled else { return nil }
+                let result = await operation()
+                return Task.isCancelled ? nil : result
+            }
+        }
+        guard let task = remoteTask else { return nil }
+        let result = await task.value
+        guard activeToken == lease.token, !Task.isCancelled else { return nil }
+        return result
+    }
+
+    func release(_ lease: Lease) {
+        guard activeToken == lease.token else { return }
+        activeUsers = max(0, activeUsers - 1)
+        guard activeUsers == 0 else { return }
+        activeToken = nil
+        localTask = nil
+        remoteTask = nil
+    }
+
+    func cancel() {
+        localTask?.cancel()
+        remoteTask?.cancel()
+        localTask = nil
+        remoteTask = nil
+        activeToken = nil
+        activeUsers = 0
+    }
+}
+
 enum GatewayLogsLoadPolicy {
+    static let refreshInterval: Int = 15
+
     static func mergedRecords(
         current: [GatewayProfileLogRecord],
         loaded: GatewayLogsLoadResult,

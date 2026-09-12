@@ -256,7 +256,7 @@ struct AttachmentFilePreviewSheet: View {
                     .padding(.top, preview.isTruncated ? TronSpacing.large : 0)
                 TronReadOnlyTextView(text: text)
             }
-            .tronTopBlurSurface()
+            .tronDocumentTopBlurSurface()
         case .code(let text):
             VStack(spacing: 0) {
                 truncationNotice(if: preview.isTruncated)
@@ -264,10 +264,10 @@ struct AttachmentFilePreviewSheet: View {
                     .padding(.top, preview.isTruncated ? TronSpacing.large : 0)
                 TronReadOnlyTextView(text: text, style: .code)
             }
-            .tronTopBlurSurface()
+            .tronDocumentTopBlurSurface()
         case .pdf(let preview):
             AttachmentPDFView(document: preview.document)
-                .tronTopBlurSurface()
+                .tronDocumentTopBlurSurface()
         }
     }
 

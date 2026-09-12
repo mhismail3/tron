@@ -5,6 +5,56 @@ import XCTest
 
 @MainActor
 final class SessionSheetPresentationTests: XCTestCase {
+    func testQuestionSheetStartsBelowTopBlurAtMediumAndLargeDetents() async throws {
+        let form = ExtensionFormDescriptor(
+            version: 1,
+            title: "Questions",
+            questions: [
+                ExtensionFormQuestion(
+                    id: "strategy", header: "Strategy", question: "How should we proceed?",
+                    context: "Choose an approach.",
+                    options: [ExtensionFormOption(id: "one", label: "One app", description: "Keep the current state.")],
+                    multiSelect: false, allowOther: true
+                ),
+                ExtensionFormQuestion(
+                    id: "notes", header: "Notes", question: "Anything else?",
+                    context: nil, options: [ExtensionFormOption(id: "none", label: "Nothing else")],
+                    multiSelect: false, allowOther: true
+                ),
+            ],
+            allowCancel: true
+        )
+        let interaction = ExtensionInteraction(
+            id: "question-sheet-fixture", hostEpoch: "host", presentationRevision: 1,
+            method: .form, title: "Questions", form: form
+        )
+        try await withModel { model in
+            try await self.withSheet(ExtensionFormSheet(
+                sessionID: "question-sheet-session", interaction: interaction,
+                onResolved: {}, onLocallyClosed: {}
+            ).environment(model)) { controller in
+                let sheet = try XCTUnwrap(controller.sheetPresentationController)
+                let scroll = try XCTUnwrap(self.views(of: UIScrollView.self, in: controller.view).first)
+                let navigationBar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
+                XCTAssertGreaterThanOrEqual(
+                    scroll.convert(scroll.bounds, to: controller.view).minY,
+                    navigationBar.convert(navigationBar.bounds, to: controller.view).maxY - 1,
+                    "Question content must begin below the custom navigation blur"
+                )
+                guard sheet.detents.contains(where: { $0.identifier == .large }) else { return }
+                sheet.selectedDetentIdentifier = .large
+                controller.presentationController?.containerView?.layoutIfNeeded()
+                controller.view.layoutIfNeeded()
+                XCTAssertGreaterThanOrEqual(
+                    scroll.convert(scroll.bounds, to: controller.view).minY,
+                    navigationBar.convert(navigationBar.bounds, to: controller.view).maxY - 1,
+                    "Expanding the question sheet must preserve the top clearance"
+                )
+                XCTAssertTrue(scroll.isScrollEnabled)
+            }
+        }
+    }
+
     func testServerFilterStartsMediumAndExpandsBeforeScrolling() async throws {
         for presentation in 0..<2 {
             try await withSheet(TronDashboardFilterSheet(

@@ -358,7 +358,7 @@ struct TechnicalJSONSheet: View {
         }
         // Apply the custom blur to the navigation container itself. A blur
         // attached only to the UIKit reader is clipped below the system bar.
-        .tronTopBlurSurface()
+        .tronDocumentTopBlurSurface()
         .task(id: value) {
             document = nil
             let source = value

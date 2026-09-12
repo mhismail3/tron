@@ -20,7 +20,7 @@ struct AgentInstructionsSheet: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
             }
-            .tronTopBlurSurface()
+            .tronDocumentTopBlurSurface()
         }
         .tronSettingsVisualTheme(accent: .tronSessionTeal)
         .task(id: "\(model.sessionContextRevision(for: sessionID)):\(presentationActivity.allowsPresentationPublication)") {

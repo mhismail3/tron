@@ -1363,7 +1363,7 @@ struct DisplaySheet: View {
             TronDocumentSheet(title: route.display.title) {
                 DisplayArtifactContent(sessionID: route.sessionID, display: route.display, context: .sheet)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .tronTopBlurSurface()
+                    .tronDocumentTopBlurSurface()
             }
         }
     }

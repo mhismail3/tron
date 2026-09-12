@@ -136,10 +136,22 @@ private struct TronTopBlurSurfaceModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            // UIKit readers otherwise remain confined below the navigation
-            // bar, so their first lines meet an opaque edge instead of fading
-            // beneath the shared custom blur. Extend the reader's host into
-            // the top safe area; the overlay below owns the visible chrome.
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar, .bottomBar)
+            .toolbarBackground(.clear, for: .navigationBar, .bottomBar)
+            .overlay(alignment: .top) {
+                if let style { TronTopBlurOverlay(style: style) }
+            }
+    }
+}
+
+/// Native document readers own their initial text inset and need their host to
+/// extend beneath the custom navigation blur. Keep that underlap explicit so
+/// form/detail surfaces retain SwiftUI's normal safe-area placement.
+private struct TronDocumentTopBlurSurfaceModifier: ViewModifier {
+    @Environment(\.tronTopBlurStyle) private var style
+
+    func body(content: Content) -> some View {
+        content
             .ignoresSafeArea(.container, edges: .top)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar, .bottomBar)
             .toolbarBackground(.clear, for: .navigationBar, .bottomBar)
@@ -157,6 +169,12 @@ extension View {
     /// Use for NavigationStack content without a concrete SwiftUI scroll owner.
     func tronTopBlurSurface() -> some View {
         modifier(TronTopBlurSurfaceModifier())
+    }
+
+    /// Use only when a native document reader owns its initial inset and must
+    /// scroll beneath the custom top blur after the initial position.
+    func tronDocumentTopBlurSurface() -> some View {
+        modifier(TronDocumentTopBlurSurfaceModifier())
     }
 }
 

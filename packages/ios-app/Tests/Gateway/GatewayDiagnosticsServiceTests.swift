@@ -4,6 +4,78 @@ import Testing
 
 @Suite("Gateway diagnostics boundary")
 struct GatewayDiagnosticsServiceTests {
+    @Test("logs automatic refresh uses a quiet fifteen-second cadence")
+    func logsAutomaticRefreshCadence() {
+        #expect(GatewayLogsLoadPolicy.refreshInterval == 15)
+    }
+
+    @Test("logs refresh callers join one local and remote read")
+    @MainActor
+    func logsRefreshCallersJoinOneRead() async {
+        let coordinator = GatewayLogsLoadCoordinator()
+        let owner = coordinator.acquire()
+        let gate = GatewayLogsTestGate()
+        var localCalls = 0
+        let operation: @MainActor () async -> GatewayLogsLoadResult = {
+            localCalls += 1
+            await gate.wait()
+            return GatewayLogsLoadResult(records: [], failedProfileIDs: [])
+        }
+        let first = Task { await coordinator.local(for: owner, operation: operation) }
+        await Task.yield()
+        let joiner = coordinator.acquire()
+        let second = Task { await coordinator.local(for: joiner, operation: operation) }
+        await Task.yield()
+        #expect(localCalls == 1)
+        await gate.signal()
+        #expect(await first.value != nil)
+        coordinator.release(owner)
+        // A manual caller that joined the automatic load still receives the
+        // raw result and can apply its own empty-response policy.
+        #expect(await second.value != nil)
+        coordinator.release(joiner)
+
+        // A fresh lease owns the remote phase for this independent assertion.
+        let remoteOwner = coordinator.acquire()
+        let remoteJoiner = coordinator.acquire()
+        let remoteGate = GatewayLogsTestGate()
+        var remoteCalls = 0
+        let remoteOperation: @MainActor () async -> GatewayLogsLoadResult = {
+            remoteCalls += 1
+            await remoteGate.wait()
+            return GatewayLogsLoadResult(records: [], failedProfileIDs: [])
+        }
+        let remoteFirst = Task { await coordinator.remote(for: remoteOwner, operation: remoteOperation) }
+        await Task.yield()
+        let remoteSecond = Task { await coordinator.remote(for: remoteJoiner, operation: remoteOperation) }
+        await Task.yield()
+        #expect(remoteCalls == 1)
+        await remoteGate.signal()
+        #expect(await remoteFirst.value != nil)
+        coordinator.release(remoteOwner)
+        #expect(await remoteSecond.value != nil)
+        coordinator.release(remoteJoiner)
+    }
+
+    @Test("retiring logs refresh rejects the old lease and cancels its work")
+    @MainActor
+    func retiringLogsRefreshCancelsOldLease() async {
+        let coordinator = GatewayLogsLoadCoordinator()
+        let lease = coordinator.acquire()
+        let gate = GatewayLogsTestGate()
+        let task = Task {
+            await coordinator.local(for: lease, operation: {
+                await gate.wait()
+                return GatewayLogsLoadResult(records: [], failedProfileIDs: [])
+            })
+        }
+        await Task.yield()
+        coordinator.cancel()
+        #expect(coordinator.acquire().owner)
+        await gate.signal()
+        #expect(await task.value == nil)
+    }
+
     @Test("git inspection owns its exact target and typed projection")
     func gitInspection() async throws {
         let recorder = DiagnosticsRequestRecorder(responses: [
@@ -605,6 +677,25 @@ struct GatewayDiagnosticsServiceTests {
 private struct DiagnosticsRecordedRequest: Equatable, Sendable {
     let method: String
     let params: JSONValue
+}
+
+private actor GatewayLogsTestGate {
+    private let stream: AsyncStream<Void>
+    private let continuation: AsyncStream<Void>.Continuation
+
+    init() {
+        let pair = AsyncStream<Void>.makeStream()
+        stream = pair.stream
+        continuation = pair.continuation
+    }
+
+    func wait() async {
+        _ = await stream.first(where: { _ in true })
+    }
+
+    func signal() {
+        continuation.yield(())
+    }
 }
 
 private actor DiagnosticsRequestRecorder {
