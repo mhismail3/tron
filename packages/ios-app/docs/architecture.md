@@ -156,7 +156,7 @@ after Gateway restart or idle slot retirement. Initial connection, structural an
 reconnect, creation, and deletion own dashboard convergence without a manual refresh surface. Focused and
 secondary profile owners retain an unsatisfied structural generation across responsive list failures and retry with
 a capped delay until a complete authoritative publication; epoch retirement, backgrounding, and profile removal
-cancel that lease rather than turning it into polling.
+cancel that lease rather than turning it into polling. Catalog observability stays in this same ownership path: `GatewayClient` emits bounded `gateway.rpc` records for `session.list` with the sanitized request ID, outcome, failure code, duration, and profile identity, while `AppModel` emits `gateway.catalog` admission, terminal, retry, cancellation, supersession, and warning-toast decisions with connection, lifecycle, and request generations. The existing iOS diagnostic buffer and retained Logs export bound these records to 200 entries; they contain no session content, paths, payloads, credentials, or raw errors. A successful authoritative publication clears the catalog warning through the normal notice owner rather than inventing a second health state.
 Cache/disconnect/authoritative installs and removals all
 enter that one disposable projection; hidden/local selection policy remains outside it and cannot mount a chat. Cached or stale non-idle rows present as resuming without rewriting
 the canonical phase; only a live Gateway-authoritative interrupted phase uses the amber warning.

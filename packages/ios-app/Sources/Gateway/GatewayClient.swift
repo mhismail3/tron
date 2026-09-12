@@ -507,6 +507,11 @@ actor GatewayClient {
 
     private struct PendingRequest {
         let continuation: CheckedContinuation<JSONValue, Error>
+        let method: String
+        let requestID: String
+        let startedAt: ContinuousClock.Instant
+        let profileID: String?
+        let profileLabel: String?
         let timeout: Task<Void, Never>
         var send: Task<Void, Never>?
         var transmission: GatewayRequestTransmissionState
@@ -569,6 +574,34 @@ actor GatewayClient {
     }
 
     func diagnostics() -> [GatewayConnectionDiagnostic] { connectionDiagnostics }
+
+    private func recordRPCDiagnostic(
+        request: PendingRequest,
+        outcome: GatewayRPCDiagnosticOutcome,
+        error: Error? = nil
+    ) {
+        guard request.method == "session.list" else { return }
+        let duration = diagnosticMilliseconds(request.startedAt.duration(to: clock.now()))
+        let code = error.map(Self.diagnosticCode)
+        let incidentID = outcome == .success ? nil : "rpc:\(request.requestID)"
+        diagnosticStore?.record(IOSClientDiagnosticBuffer.logRecord(GatewayRPCDiagnostic(
+            method: request.method,
+            requestID: request.requestID,
+            outcome: outcome,
+            code: code,
+            durationMilliseconds: duration,
+            timestamp: GatewayTimestamp.preciseString(from: .now),
+            profileID: request.profileID,
+            profileLabel: request.profileLabel,
+            incidentID: incidentID
+        )))
+    }
+
+    private static func diagnosticCode(_ error: Error) -> String {
+        if error is CancellationError { return "cancelled" }
+        guard let failure = error as? GatewayFailure else { return "transport" }
+        return GatewayDiagnosticFailure.normalizedCode(failure.code)
+    }
 
     private func recordDiagnostic(
         stage: GatewayConnectionDiagnosticStage,
@@ -1001,6 +1034,11 @@ actor GatewayClient {
                 }
                 current.pending[id] = PendingRequest(
                     continuation: continuation,
+                    method: method,
+                    requestID: id,
+                    startedAt: clock.now(),
+                    profileID: current.profileID,
+                    profileLabel: current.profileLabel,
                     timeout: timeoutTask,
                     send: nil,
                     transmission: .queued
@@ -1572,14 +1610,21 @@ actor GatewayClient {
         case .response(let response):
             guard let waiter = removePending(id: response.id, epochID: epochID) else { return }
             if response.ok {
+                recordRPCDiagnostic(request: waiter, outcome: .success)
                 waiter.continuation.resume(returning: response.result ?? .null)
             } else {
-                waiter.continuation.resume(throwing: response.error ?? GatewayFailure(
+                let error = response.error ?? GatewayFailure(
                     code: "invalid_response",
                     message: "Gateway returned an invalid error.",
                     retryable: false,
                     details: nil
-                ))
+                )
+                recordRPCDiagnostic(
+                    request: waiter,
+                    outcome: error.code == "invalid_response" ? .invalidResponse : .applicationFailure,
+                    error: error
+                )
+                waiter.continuation.resume(throwing: error)
             }
         case .event(let event):
             // GatewayEvent was prepared directly from the frame decoder's
@@ -1652,10 +1697,25 @@ actor GatewayClient {
         let error: Error = request.transmission.mayHaveBeenSent
             ? Self.possiblySentFailure(message: "The cancelled request may have reached the Mac.")
             : CancellationError()
-        fail(id: id, epochID: epochID, error: error)
+        fail(id: id, epochID: epochID, error: error, forcedOutcome: .cancelled)
     }
 
-    private func fail(id: String, epochID: Int, error: Error) {
+    private func fail(
+        id: String,
+        epochID: Int,
+        error: Error,
+        forcedOutcome: GatewayRPCDiagnosticOutcome? = nil
+    ) {
+        guard let epoch = connection, epoch.id == epochID,
+              let request = epoch.pending[id] else { return }
+        let outcome: GatewayRPCDiagnosticOutcome
+        if let forcedOutcome { outcome = forcedOutcome }
+        else if (error as? GatewayFailure)?.code == "replaced" { outcome = .superseded }
+        else if error is CancellationError { outcome = .cancelled }
+        else if ["timeout", "possibly_sent"].contains((error as? GatewayFailure)?.code) { outcome = .timeout }
+        else if (error as? GatewayFailure)?.code == "invalid_response" { outcome = .invalidResponse }
+        else { outcome = .transportFailure }
+        recordRPCDiagnostic(request: request, outcome: outcome, error: error)
         guard let waiter = removePending(id: id, epochID: epochID) else { return }
         waiter.continuation.resume(throwing: error)
     }
@@ -1715,9 +1775,15 @@ actor GatewayClient {
         for waiter in epoch.pending.values {
             waiter.timeout.cancel()
             waiter.send?.cancel()
-            waiter.continuation.resume(throwing: waiter.transmission.mayHaveBeenSent
+            let error: Error = waiter.transmission.mayHaveBeenSent
                 ? Self.possiblySentFailure(cause: reason)
-                : Self.definitelyNotSentFailure(cause: reason))
+                : Self.definitelyNotSentFailure(cause: reason)
+            recordRPCDiagnostic(
+                request: waiter,
+                outcome: (reason as? GatewayFailure)?.code == "replaced" ? .superseded : .transportFailure,
+                error: error
+            )
+            waiter.continuation.resume(throwing: error)
         }
         await epoch.socket.close()
         return generation == epoch.id && connection == nil

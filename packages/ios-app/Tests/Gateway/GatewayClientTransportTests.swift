@@ -1493,6 +1493,53 @@ struct GatewayClientTransportTests {
         }
     }
 
+    @Test("session list request records bounded RPC outcome with request correlation")
+    func sessionListRequestRecordsRPCDiagnostic() async throws {
+        try await withTestWatchdog {
+            let suite = "TronCatalogRPC.\(UUID())"
+            defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+            let store = IOSClientDiagnosticStore(defaults: try #require(UserDefaults(suiteName: suite)))
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                uuidSource: SequenceUUIDSource([
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000049")!,
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000050")!,
+                ]).source,
+                diagnosticStore: store
+            )
+            do {
+                await socket.enqueue(helloFrame())
+                _ = try await client.connect(profile: profile, token: "synthetic-token")
+                let request = Task { try await client.requestValue("session.list", EmptyParams()) }
+                try await socket.waitUntilSent(count: 2)
+                let frame = try JSONDecoder.gateway.decode([String: JSONValue].self, from: await socket.sentFrames()[1])
+                let requestID = try #require(frame["id"]?.stringValue)
+                await socket.enqueue(responseFrame(
+                    id: requestID,
+                    result: .object([
+                        "sessions": .array([]),
+                        "listRevision": .number(1),
+                    ])
+                ))
+                _ = try await valueOfOwnedTask(request)
+                await store.flush()
+                let records = await store.load()
+                let diagnostic = try #require(records.first { $0.record.event == "gateway.rpc" })
+                #expect(diagnostic.record.message.contains("method=session.list"))
+                #expect(diagnostic.record.message.contains("requestID=00000000-0000-0000-0000-000000000050"))
+                #expect(diagnostic.record.message.contains("outcome=success"))
+                #expect(diagnostic.record.message.contains("durationMs="))
+                #expect(!diagnostic.record.message.contains("synthetic-token"))
+                await client.close()
+            } catch {
+                await client.close()
+                await store.flush()
+                throw error
+            }
+        }
+    }
+
     @Test("transport pressure is retained without an event consumer or Logs read")
     func transportPersistsWithoutConsumer() async throws {
         try await withTestWatchdog {

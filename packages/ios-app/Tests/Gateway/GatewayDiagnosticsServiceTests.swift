@@ -292,6 +292,58 @@ struct GatewayDiagnosticsServiceTests {
         #expect((buffer.records.first?.record.timestamp.utf8.count ?? 0) <= 128)
     }
 
+    @Test("catalog diagnostics retain bounded causal fields without payloads")
+    func catalogDiagnosticsAreBoundedAndRedacted() {
+        var buffer = IOSClientDiagnosticBuffer()
+        for index in 0..<(IOSClientDiagnosticBuffer.maximumRecords + 3) {
+            buffer.recordCatalog(
+                trigger: "automatic-retry",
+                outcome: index == 0 ? "failure" : "published",
+                profileID: "stable",
+                profileLabel: "Stable",
+                connectionID: 7,
+                lifecycleGeneration: 11,
+                requestGeneration: index,
+                durationMilliseconds: 123,
+                code: "timeout",
+                reason: "current-owner",
+                level: "warning",
+                incidentID: index == 0 ? "catalog:1" : nil,
+                timestamp: "2026-08-16T01:00:\(String(format: "%02d", index % 60))Z"
+            )
+        }
+        #expect(buffer.records.count == IOSClientDiagnosticBuffer.maximumRecords)
+        let record = buffer.records[0]
+        #expect(record.record.event == "gateway.catalog")
+        #expect(record.record.message.contains("trigger=automatic-retry"))
+        #expect(record.record.message.contains("requestGeneration="))
+        #expect(record.record.message.contains("durationMs=123"))
+        #expect(!record.record.message.contains("session text"))
+        #expect(!record.record.message.contains("/private/"))
+    }
+
+    @Test("RPC diagnostics preserve request correlation without sensitive values")
+    func rpcDiagnosticsAreCorrelatedAndRedacted() {
+        let record = IOSClientDiagnosticBuffer.logRecord(GatewayRPCDiagnostic(
+            method: "session.list",
+            requestID: "request-42",
+            outcome: .timeout,
+            code: "possibly_sent",
+            durationMilliseconds: 10_001,
+            timestamp: "2026-08-16T01:00:00Z",
+            profileID: "stable",
+            profileLabel: "Stable",
+            incidentID: "rpc:request-42"
+        ))
+        #expect(record.record.event == "gateway.rpc")
+        #expect(record.record.message.contains("method=session.list"))
+        #expect(record.record.message.contains("requestID=request-42"))
+        #expect(record.record.message.contains("outcome=timeout"))
+        #expect(record.incidentID == "rpc:request-42")
+        #expect(!record.record.message.contains("session text"))
+        #expect(!record.record.message.contains("/private/"))
+    }
+
     @Test("connection diagnostics retain profile ownership and same-time sequence identity")
     func connectionDiagnosticsAreOwnedAndDistinct() {
         let first = GatewayConnectionDiagnostic(

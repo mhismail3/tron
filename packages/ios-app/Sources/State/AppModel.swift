@@ -275,6 +275,7 @@ final class AppModel {
     private struct CatalogRefreshLeaseResult: Sendable {
         let outcome: SessionCatalogRefreshOutcome
         let genuineFailure: Bool
+        let durationMilliseconds: Int
     }
 
     private struct CatalogTraversalResult: Sendable {
@@ -1354,7 +1355,7 @@ final class AppModel {
         catalogFailureOwner = key
         removeNotice(.sessionCatalogCatchUp, scope: .app)
         catalogInvalidationGeneration &+= 1
-        return await startCatalogRefresh(key: key).value.outcome
+        return await startCatalogRefresh(key: key, trigger: "manual-retry").value.outcome
     }
 
     private func prepareCatalogOwner(_ key: SessionCatalogLoadKey) {
@@ -1363,9 +1364,47 @@ final class AppModel {
         catalogFailureOwner = key
     }
 
+    private func recordCatalogDiagnostic(
+        key: SessionCatalogLoadKey,
+        trigger: String,
+        outcome: String,
+        requestGeneration: Int,
+        durationMilliseconds: Int? = nil,
+        code: String? = nil,
+        reason: String? = nil,
+        level: String = "info",
+        incidentID: String? = nil
+    ) {
+        iosClientDiagnostics.recordCatalog(
+            trigger: trigger,
+            outcome: outcome,
+            profileID: key.profileID,
+            profileLabel: profiles.selected?.label,
+            connectionID: key.connectionID,
+            lifecycleGeneration: key.lifecycleGeneration,
+            requestGeneration: requestGeneration,
+            durationMilliseconds: durationMilliseconds,
+            code: code,
+            reason: reason,
+            level: level,
+            incidentID: incidentID
+        )
+        if let record = iosClientDiagnostics.records.first { diagnosticStore?.record(record) }
+    }
+
     private func showCatalogFailure(ownedBy key: SessionCatalogLoadKey) {
         guard currentCatalogLoadKey() == key else { return }
         sessionCatalog.markLoadUnavailable()
+        recordCatalogDiagnostic(
+            key: key,
+            trigger: "warning",
+            outcome: "toast-emitted",
+            requestGeneration: catalogRefreshRequestGeneration,
+            code: "session_catalog_unavailable",
+            reason: "failure-budget-exhausted",
+            level: "warning",
+            incidentID: "catalog:\(catalogRefreshRequestGeneration)"
+        )
         let retry = InAppNoticeCenter.Action(id: "retry-session-list", title: "Retry Session List", role: .normal)
         noticeCenter.post(.init(id: uuidSource.next(),
             replacement: InAppNoticeReplacement(key: .sessionCatalogCatchUp, scope: .app), scope: .app,
@@ -1392,23 +1431,62 @@ final class AppModel {
     @discardableResult
     private func startCatalogRefresh(
         key: SessionCatalogLoadKey,
-        delay: Duration = .zero
+        delay: Duration = .zero,
+        trigger: String = "refresh"
     ) -> Task<CatalogRefreshLeaseResult, Never> {
         prepareCatalogOwner(key)
         catalogRefreshRequestGeneration &+= 1
         let requestGeneration = catalogRefreshRequestGeneration
         let task = Task<CatalogRefreshLeaseResult, Never> { @MainActor [weak self] in
             guard let self else {
-                return CatalogRefreshLeaseResult(outcome: .retained, genuineFailure: false)
+                return CatalogRefreshLeaseResult(outcome: .retained, genuineFailure: false, durationMilliseconds: 0)
             }
+            let startedAt = self.clock.now()
+            self.recordCatalogDiagnostic(
+                key: key,
+                trigger: trigger,
+                outcome: "admitted",
+                requestGeneration: requestGeneration
+            )
             do {
                 try await self.clock.sleep(delay)
             } catch {
-                return CatalogRefreshLeaseResult(outcome: .retained, genuineFailure: false)
+                self.recordCatalogDiagnostic(
+                    key: key,
+                    trigger: trigger,
+                    outcome: "cancelled",
+                    requestGeneration: requestGeneration,
+                    durationMilliseconds: diagnosticMilliseconds(startedAt.duration(to: self.clock.now())),
+                    code: "cancelled",
+                    reason: "delay-cancelled"
+                )
+                return CatalogRefreshLeaseResult(outcome: .retained, genuineFailure: false, durationMilliseconds: diagnosticMilliseconds(startedAt.duration(to: self.clock.now())))
             }
-            let result = await self.runCatalogRefreshLease(key: key, requestGeneration: requestGeneration)
+            let rawResult = await self.runCatalogRefreshLease(key: key, requestGeneration: requestGeneration)
+            let result = CatalogRefreshLeaseResult(
+                outcome: rawResult.outcome,
+                genuineFailure: rawResult.genuineFailure,
+                durationMilliseconds: diagnosticMilliseconds(startedAt.duration(to: self.clock.now()))
+            )
             if self.catalogRefreshRequestGeneration == requestGeneration,
                self.catalogRefreshKey == key {
+                let terminalOutcome: String
+                switch result.outcome {
+                case .published: terminalOutcome = "published"
+                case .retained: terminalOutcome = result.genuineFailure ? "failure" : "retained"
+                case .transportFailure: terminalOutcome = "transportFailure"
+                }
+                self.recordCatalogDiagnostic(
+                    key: key,
+                    trigger: trigger,
+                    outcome: terminalOutcome,
+                    requestGeneration: requestGeneration,
+                    durationMilliseconds: result.durationMilliseconds,
+                    code: result.genuineFailure ? (result.outcome == .transportFailure ? "transport" : "application") : nil,
+                    reason: result.genuineFailure ? "current-owner" : "superseded-or-churn",
+                    level: result.genuineFailure ? "warning" : "info",
+                    incidentID: result.genuineFailure ? "catalog:\(requestGeneration)" : nil
+                )
                 let needsFollowUp = self.catalogDeferredFollowUpKey == key
                 let remainsDirty = self.catalogSatisfiedGeneration < self.catalogInvalidationGeneration
                 self.catalogDeferredFollowUpKey = nil
@@ -1416,7 +1494,7 @@ final class AppModel {
                 self.catalogRefreshKey = nil
                 if self.currentCatalogLoadKey() == key {
                     if needsFollowUp && result.outcome == .published {
-                        _ = self.startCatalogRefresh(key: key)
+                        _ = self.startCatalogRefresh(key: key, trigger: "invalidation-follow-up")
                     } else {
                         if result.outcome == .published {
                             self.catalogRefreshFailedAttempts = 0
@@ -1452,7 +1530,8 @@ final class AppModel {
                         self.catalogRefreshRetryAttempt = min(3, self.catalogRefreshRetryAttempt + 1)
                         _ = self.startCatalogRefresh(
                             key: key,
-                            delay: Self.catalogRefreshRetryDelay(attempt: self.catalogRefreshRetryAttempt)
+                            delay: Self.catalogRefreshRetryDelay(attempt: self.catalogRefreshRetryAttempt),
+                            trigger: "automatic-retry"
                         )
                     }
                 }
@@ -1468,7 +1547,7 @@ final class AppModel {
         key: SessionCatalogLoadKey,
         requestGeneration: Int
     ) async -> CatalogRefreshLeaseResult {
-        var result = CatalogRefreshLeaseResult(outcome: .retained, genuineFailure: false)
+        var result = CatalogRefreshLeaseResult(outcome: .retained, genuineFailure: false, durationMilliseconds: 0)
         var observedGenuineFailure = false
         for traversal in 0..<2 {
             let observedInvalidation = catalogInvalidationGeneration
@@ -1476,10 +1555,11 @@ final class AppModel {
             observedGenuineFailure = observedGenuineFailure || traversalResult.genuineFailure
             result = CatalogRefreshLeaseResult(
                 outcome: traversalResult.outcome,
-                genuineFailure: observedGenuineFailure
+                genuineFailure: observedGenuineFailure,
+                durationMilliseconds: 0
             )
             guard admitsCatalogRefresh(key: key, requestGeneration: requestGeneration) else {
-                return CatalogRefreshLeaseResult(outcome: .retained, genuineFailure: false)
+                return CatalogRefreshLeaseResult(outcome: .retained, genuineFailure: false, durationMilliseconds: 0)
             }
             if result.outcome == .published {
                 catalogSatisfiedGeneration = max(catalogSatisfiedGeneration, observedInvalidation)
@@ -3723,7 +3803,7 @@ final class AppModel {
         catalogInvalidationGeneration &+= 1
         guard catalogRefreshFailedAttempts < DashboardCatalogRetryPolicy.maximumFailedAttempts,
               catalogRefreshTask == nil else { return }
-        _ = startCatalogRefresh(key: key)
+        _ = startCatalogRefresh(key: key, trigger: "list-change")
     }
 
     private func clearLiveConnectionProjection() {
