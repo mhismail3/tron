@@ -209,9 +209,12 @@ final class ChatScrollCoordinator {
     private var geometry = ChatTranscriptGeometry.zero
     private var geometryRevision = 0
     private var installedPhysicalRowSpine: ChatPhysicalRowSpineIdentity?
+    private var installedPhysicalTerminalID: String?
+    private var installedPhysicalProjectionTag: ChatTranscriptProjectionTag?
     /// A current terminal row geometry callback proves that the installed
     /// physical spine has crossed the SwiftUI materialization boundary. The
-    /// marker alone can otherwise describe the empty pre-projection tree.
+    /// callback's epoch, viewport activation, projection tag, and exact
+    /// terminal identity are checked before the marker can certify opening.
     private var terminalPhysicalRowObservedLayoutEpoch: Int?
     /// A newly mounted non-retained tree cannot repair its placeholder geometry
     /// before ChatView installs the authoritative opening baseline.
@@ -364,6 +367,8 @@ final class ChatScrollCoordinator {
         physicalTailRepairBlockedUntilEvidenceRevision = nil
         physicalTailRepairAttempts = 0
         installedPhysicalRowSpine = nil
+        installedPhysicalTerminalID = nil
+        installedPhysicalProjectionTag = nil
         terminalPhysicalRowObservedLayoutEpoch = nil
         self.presentation = presentation ?? (self.presentation &+ 1)
         awaitingOpeningBaseline = !retainingVisibleViewport
@@ -498,7 +503,13 @@ final class ChatScrollCoordinator {
         evaluatePrependIfReady()
     }
 
-    func projectionInstalled(structure: ChatPhysicalRowSpineIdentity?) {
+    func projectionInstalled(
+        structure: ChatPhysicalRowSpineIdentity?,
+        terminalPhysicalID: String? = nil,
+        projectionTag: ChatTranscriptProjectionTag? = nil
+    ) {
+        installedPhysicalTerminalID = terminalPhysicalID
+        installedPhysicalProjectionTag = projectionTag
         guard let structure else {
             installedPhysicalRowSpine = nil
             projectionInstalled()
@@ -536,8 +547,16 @@ final class ChatScrollCoordinator {
     /// Records the terminal row's native geometry as proof that the current
     /// installed physical spine is materialized. This is intentionally one
     /// row, not a requirement that a lazy stack realize its entire transcript.
-    func physicalTerminalRowObserved(layoutEpoch: Int) {
-        guard layoutEpoch == self.layoutEpoch else { return }
+    func physicalTerminalRowObserved(
+        physicalID: String = "transcript-bottom",
+        layoutEpoch: Int,
+        viewportActivation: Int = 0,
+        projectionTag: ChatTranscriptProjectionTag? = nil
+    ) {
+        guard admitsViewportCallback(capturedActivation: viewportActivation),
+              layoutEpoch == self.layoutEpoch,
+              installedPhysicalTerminalID == nil || physicalID == installedPhysicalTerminalID,
+              installedPhysicalProjectionTag == nil || projectionTag == installedPhysicalProjectionTag else { return }
         guard terminalPhysicalRowObservedLayoutEpoch != layoutEpoch else { return }
         terminalPhysicalRowObservedLayoutEpoch = layoutEpoch
         geometryRevision &+= 1

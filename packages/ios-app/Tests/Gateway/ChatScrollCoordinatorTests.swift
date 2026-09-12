@@ -1857,6 +1857,68 @@ struct ChatScrollCoordinatorTests {
         coordinator.cancel()
     }
 
+    @Test("mounted terminal row re-admits unchanged geometry only for its successor epoch")
+    func mountedTerminalRowReadmitsUnchangedGeometryForSuccessorEpoch() async throws {
+        let coordinator = ChatScrollCoordinator()
+        let firstSnapshot = try SessionScenarioBuilder(seed: 1_218)
+            .openingTail(targetEncodedBytes: 8_000)
+        let firstTag = ChatTranscriptProjectionTag(
+            snapshot: firstSnapshot, presentationGeneration: 1
+        )
+        let firstSpine = ChatPhysicalRowSpineIdentity(
+            timelineIDs: ChatTranscriptIDs(canonical: ["terminal"], live: []),
+            runtimeIDs: [], lifecycleID: nil, queueIDs: [], aliases: [], fusion: nil,
+            hasEarlierMessages: false
+        )
+        coordinator.projectionInstalled(
+            structure: firstSpine, terminalPhysicalID: "terminal", projectionTag: firstTag
+        )
+        coordinator.geometryChanged(previous: .zero, current: bottom)
+        coordinator.semanticFrameChanged(
+            renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+        )
+        coordinator.physicalTerminalRowObserved(
+            physicalID: "terminal", layoutEpoch: coordinator.layoutEpoch,
+            viewportActivation: 0, projectionTag: firstTag
+        )
+
+        let secondSnapshot = try SessionScenarioBuilder(seed: 1_219)
+            .openingTail(targetEncodedBytes: 8_000)
+        let secondTag = ChatTranscriptProjectionTag(
+            snapshot: secondSnapshot, presentationGeneration: 2
+        )
+        let secondSpine = ChatPhysicalRowSpineIdentity(
+            timelineIDs: ChatTranscriptIDs(canonical: ["older", "terminal"], live: []),
+            runtimeIDs: [], lifecycleID: nil, queueIDs: [], aliases: [], fusion: nil,
+            hasEarlierMessages: false
+        )
+        coordinator.projectionInstalled(
+            structure: secondSpine, terminalPhysicalID: "terminal", projectionTag: secondTag
+        )
+        let successorEpoch = coordinator.layoutEpoch
+        let positioning = Task {
+            await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom")
+        }
+        await Task.yield()
+        coordinator.semanticFrameChanged(
+            renderedID: "transcript-bottom", layoutEpoch: successorEpoch,
+            frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+        )
+        #expect(coordinator.command != nil)
+        coordinator.physicalTerminalRowObserved(
+            physicalID: "terminal", layoutEpoch: successorEpoch - 1,
+            viewportActivation: 0, projectionTag: firstTag
+        )
+        #expect(coordinator.command != nil)
+        coordinator.physicalTerminalRowObserved(
+            physicalID: "terminal", layoutEpoch: successorEpoch,
+            viewportActivation: 0, projectionTag: secondTag
+        )
+        #expect(await positioning.value)
+        coordinator.cancel()
+    }
+
     @Test("opening tail admits exact physical evidence in either callback order")
     func openingTailExactEvidencePermutations() async {
         let geometryFirst = ChatScrollCoordinator()

@@ -261,6 +261,33 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    @Test("mounted terminal reopens after a same-ID epoch replacement")
+    func mountedTerminalReopensAfterSameIDEpochReplacement() async throws {
+        try await withTestWatchdog(timeout: .seconds(20)) {
+            try await withHarness(seed: 1_218) { harness in
+                let initial = try await harness.recorder.waitUntil {
+                    $0.observation.isReady
+                        && $0.observation.visibleRowIDs.contains(harness.lastTranscriptID)
+                }
+                let baselineReadyCount = initial.observation.readyFrameCompletionCount
+                var replacement = harness.snapshot
+                replacement.revision += 1
+                replacement.eventSequence += 1
+                replacement.transcript[0] = try harnessMessage(id: replacement.transcript[0].id)
+                harness.replaceAuthoritativeSnapshot(replacement)
+                await harness.probe.reopenPresentation()
+
+                let reopened = try await harness.recorder.waitUntil {
+                    $0.observation.readyFrameCompletionCount > baselineReadyCount
+                        && $0.observation.isReady
+                        && $0.observation.visibleRowIDs.contains(harness.lastTranscriptID)
+                }
+                #expect(reopened.observation.geometry.isPlausibleOpeningViewport)
+                #expect(reopened.observation.visibleRowIDs.contains(harness.lastTranscriptID))
+            }
+        }
+    }
+
     @Test("short streaming response remains above composer as it outgrows the viewport")
     func shortStreamingResponseClearsComposer() async throws {
         try await withTestWatchdog(timeout: .seconds(15)) {

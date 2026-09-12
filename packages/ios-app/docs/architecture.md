@@ -320,7 +320,9 @@ is unchanged, the mounted scroll view waits for a new physical marker callback
 instead of re-admitting the prior frame. A visible pinned presentation therefore
 requires fresh, current-layout marker proof; overflow requires alignment, while
 underflow requires the eager marker to be visible after either a current terminal
-physical-row geometry callback or an authoritative empty physical spine. Row existence,
+physical-row geometry callback or an authoritative empty physical spine. The terminal
+callback is admitted only when its captured layout epoch, viewport activation, installed
+projection tag, and exact physical identity still match the mounted commit. Row existence,
 forced underflow height alone, elapsed frames, or an abandoned layout generation are not proof. Ordinary
 pinned resizing then belongs to the native size-change anchor. A detached reader owns one
 immutable installed render commit: direct takeover cancels pending derivation, automatic

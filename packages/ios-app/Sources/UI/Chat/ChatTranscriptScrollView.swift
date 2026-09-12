@@ -420,6 +420,11 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             )
         }
         let terminalPhysicalID = physicalRows?.last?.id
+        let terminalMaterializationID = terminalPhysicalID ?? installed.flatMap {
+            guard physicalRows?.isEmpty == true,
+                  ($0.sourceWindow.originalStart ?? 0) > 0 else { return nil }
+            return "earlier-messages"
+        }
         let terminalRowOwnsMaterializationTarget = terminalPhysicalID.map {
             scrollCoordinator.ownsTailMaterializationTarget(renderedID: $0)
         } == true
@@ -432,7 +437,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                                 semanticID: "earlier-messages",
                                 installedTag: installed.tag,
                                 entranceState: .none,
-                                isTerminalRow: physicalRows.isEmpty
+                                terminalPhysicalID: terminalMaterializationID
                             ) {
                                 earlierRow(installed)
                                     .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
@@ -443,6 +448,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                             physicalRowHost(
                                 row,
                                 terminalPhysicalID: terminalPhysicalID,
+                                terminalMaterializationID: terminalMaterializationID,
                                 terminalRowOwnsMaterializationTarget:
                                     terminalRowOwnsMaterializationTarget,
                                 installed: installed
@@ -677,6 +683,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     private func physicalRowHost(
         _ row: ChatPhysicalTranscriptRow,
         terminalPhysicalID: String?,
+        terminalMaterializationID: String?,
         terminalRowOwnsMaterializationTarget: Bool,
         installed: InstalledChatTranscript
     ) -> some View {
@@ -691,7 +698,11 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             },
             onPromptEntranceSettled: onEntranceSettled
         ) { displayed in
-            physicalRow(displayed, installed: installed)
+            physicalRow(
+                displayed,
+                installed: installed,
+                terminalMaterializationID: terminalMaterializationID
+            )
         }
         // The exact row target includes the complete affordance. The eager
         // marker overlaps that same empty band so both targets end identically.
@@ -701,52 +712,57 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 ? ChatTranscriptLayoutConstants.tailAffordanceHeight : 0
         )
         .id(row.id)
-        .onAppear {
-            // onAppear is the materialization boundary for a lazy physical
-            // row. Use the mounted coordinator epoch, while semantic geometry
-            // callbacks retain their captured epoch for stale-tree rejection.
-            guard row.id == terminalPhysicalID else { return }
-            scrollCoordinator.physicalTerminalRowObserved(layoutEpoch: scrollCoordinator.layoutEpoch)
-        }
     }
 
     @ViewBuilder
     private func physicalRow(
         _ row: ChatPhysicalTranscriptRow,
-        installed: InstalledChatTranscript
+        installed: InstalledChatTranscript,
+        terminalMaterializationID: String?
     ) -> some View {
         switch row.content {
         case .transcript(let item, let isCommitted):
             transcriptRow(
                 item,
                 semanticID: row.semanticID,
+                physicalID: row.id,
                 installed: installed,
-                isCommitted: isCommitted
+                isCommitted: isCommitted,
+                terminalMaterializationID: terminalMaterializationID
             )
         case .pending(let pending):
-            pendingRow(pending, renderedID: row.id, installed: installed)
+            pendingRow(
+                pending, renderedID: row.id, installed: installed,
+                terminalMaterializationID: terminalMaterializationID
+            )
         case .outgoing(let outgoing, let attachments):
             outgoingRow(
                 outgoing,
                 attachments: attachments,
                 renderedID: row.id,
-                installed: installed
+                installed: installed,
+                terminalMaterializationID: terminalMaterializationID
             )
         case .queued(let entry):
-            queuedRow(entry, renderedID: row.id, installed: installed)
+            queuedRow(
+                entry, renderedID: row.id, installed: installed,
+                terminalMaterializationID: terminalMaterializationID
+            )
         }
     }
 
     private func pendingRow(
         _ pending: ChatPendingPromptPresentation,
         renderedID: String,
-        installed: InstalledChatTranscript
+        installed: InstalledChatTranscript,
+        terminalMaterializationID: String?
     ) -> some View {
         let entranceSuppressed = transcriptPresentation.suppressesEntrances(for: installed.tag)
         return stableRow(
             semanticID: renderedID,
             installedTag: installed.tag,
-            entranceState: .none
+            entranceState: .none,
+            terminalPhysicalID: renderedID == terminalMaterializationID ? renderedID : nil
         ) {
             if pending.promptBehavior.isQueuedKind {
                 ChatQueuedMessageEntranceRow(
@@ -775,12 +791,14 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         _ outgoing: ChatOutgoingSubmissionPresentation,
         attachments: [PendingAttachment],
         renderedID: String,
-        installed: InstalledChatTranscript
+        installed: InstalledChatTranscript,
+        terminalMaterializationID: String?
     ) -> some View {
         stableRow(
             semanticID: renderedID,
             installedTag: installed.tag,
-            entranceState: .none
+            entranceState: .none,
+            terminalPhysicalID: renderedID == terminalMaterializationID ? renderedID : nil
         ) {
             ChatOutgoingSubmissionRow(
                 presentation: outgoing,
@@ -793,7 +811,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     private func queuedRow(
         _ entry: ChatQueuedMessageRenderEntry,
         renderedID: String,
-        installed: InstalledChatTranscript
+        installed: InstalledChatTranscript,
+        terminalMaterializationID: String?
     ) -> some View {
         let entranceSuppressed = transcriptPresentation.suppressesEntrances(for: installed.tag)
         let messages = installed.queuedMessages
@@ -809,7 +828,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         return stableRow(
             semanticID: renderedID,
             installedTag: installed.tag,
-            entranceState: .none
+            entranceState: .none,
+            terminalPhysicalID: renderedID == terminalMaterializationID ? renderedID : nil
         ) {
             ChatQueuedMessageEntranceRow(
                 animatesEntrance: admitsGeometryCallbacks
@@ -844,8 +864,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     private func transcriptRow(
         _ item: ChatTranscriptRenderItem,
         semanticID: String,
+        physicalID: String,
         installed: InstalledChatTranscript,
-        isCommitted: Bool
+        isCommitted: Bool,
+        terminalMaterializationID: String?
     ) -> some View {
         let kind = ChatContentEntranceKind.classify(item)
         let state: ChatTranscriptEntranceState = canonicalSubmissionIDs.contains(semanticID)
@@ -856,7 +878,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             semanticID: semanticID,
             installedTag: installed.tag,
             entranceState: state,
-            entranceKind: kind
+            entranceKind: kind,
+            terminalPhysicalID: physicalID == terminalMaterializationID ? physicalID : nil
         ) {
             if canonicalSubmissionIDs.contains(semanticID) {
                 renderRow(item, installed: installed, isCommitted: isCommitted)
@@ -948,7 +971,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         installedTag: ChatTranscriptProjectionTag?,
         entranceState: ChatTranscriptEntranceState,
         entranceKind: ChatContentEntranceKind = .assistantContent,
-        isTerminalRow: Bool = false,
+        terminalPhysicalID: String? = nil,
         @ViewBuilder content: () -> Content
     ) -> some View {
         let rowLayoutEpoch = scrollCoordinator.layoutEpoch
@@ -971,8 +994,17 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                     layoutEpoch: sample.layoutEpoch,
                     frame: sample.frame
                 )
-                if isTerminalRow {
-                    scrollCoordinator.physicalTerminalRowObserved(layoutEpoch: rowLayoutEpoch)
+                // The terminal row shares this geometry observation with
+                // semantic layout. Its captured epoch, viewport activation,
+                // installed tag, and physical ID are all validated by the
+                // coordinator before they can certify opening.
+                if let terminalPhysicalID {
+                    scrollCoordinator.physicalTerminalRowObserved(
+                        physicalID: terminalPhysicalID,
+                        layoutEpoch: sample.layoutEpoch,
+                        viewportActivation: sample.viewportActivation,
+                        projectionTag: installedTag
+                    )
                 }
                 let currentInstalled = transcriptPresentation.installed
                 let currentState = transcriptPresentation.entranceState(for: semanticID)

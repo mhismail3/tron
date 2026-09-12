@@ -821,6 +821,14 @@ struct ChatView: View {
                 canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases
             )
         } ?? []
+        let terminalPhysicalID = installed.flatMap {
+            let rows = ChatPhysicalTranscriptRowPolicy.rows(
+                installed: $0,
+                canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases
+            )
+            if let terminal = rows.last { return terminal.id }
+            return ($0.sourceWindow.originalStart ?? 0) > 0 ? "earlier-messages" : nil
+        }
         // Validate against the exact physical spine rendered by
         // ChatTranscriptScrollView. The store's canonical namespace does not
         // include display-only prompt/tool aliases, so validating it directly
@@ -840,7 +848,9 @@ struct ChatView: View {
             // installed commit changes the physical row spine. Streaming text
             // and shallow tool-state updates keep current hosts and evidence.
             scrollCoordinator.projectionInstalled(
-                structure: installed?.physicalRowSpineIdentity
+                structure: installed?.physicalRowSpineIdentity,
+                terminalPhysicalID: terminalPhysicalID,
+                projectionTag: installed?.tag
             )
         }
         if projectionLayoutChanged {
