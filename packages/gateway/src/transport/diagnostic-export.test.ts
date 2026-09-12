@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -38,6 +38,17 @@ describe("diagnostic export", () => {
     await chmod(directory, 0o755);
     await expect(exportDiagnosticSnapshot("synthetic", new Date(), directory))
       .rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("rejects a preexisting symlink before creating or following its target", async () => {
+    const directory = await root();
+    const target = join(directory, "target");
+    const link = join(directory, "diagnostics-link");
+    await mkdir(target, { recursive: true, mode: 0o700 });
+    await symlink(target, link);
+    await expect(exportDiagnosticSnapshot("synthetic", new Date(), link))
+      .rejects.toMatchObject({ code: "conflict" });
+    expect((await readdir(target))).toEqual([]);
   });
 
   it("retains only the bounded newest exports", async () => {

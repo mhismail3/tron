@@ -1956,7 +1956,7 @@ final class AppModel {
             let commandId: String
             let content: String
         }
-        struct Response: Decodable {
+        struct Response: Codable {
             let path: String
         }
         let admission = try requireCurrentGatewayConnection()

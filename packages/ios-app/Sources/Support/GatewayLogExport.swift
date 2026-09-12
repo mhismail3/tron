@@ -44,7 +44,11 @@ enum GatewayLogExport {
         guard text.utf8.count > maximumUploadBytes else { return text }
         let marker = "[diagnostic export truncated at 512 KiB]"
         let prefixLimit = maximumUploadBytes - marker.utf8.count - 1
-        let prefix = String(decoding: text.utf8.prefix(prefixLimit), as: UTF8.self)
+        // Decoding an arbitrary byte prefix can insert U+FFFD for a split
+        // multibyte scalar, making the result exceed the byte bound. Trim the
+        // decoded scalar boundary before appending the marker.
+        var prefix = String(decoding: text.utf8.prefix(prefixLimit), as: UTF8.self)
+        while prefix.utf8.count > prefixLimit { prefix.removeLast() }
         return "\(prefix)\n\(marker)"
     }
 }

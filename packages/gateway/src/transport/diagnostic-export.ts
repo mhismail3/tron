@@ -1,5 +1,7 @@
 import { chmod, lstat, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
+import type { Stats } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 
@@ -26,8 +28,14 @@ async function exportDiagnosticSnapshotImpl(
   if (Buffer.byteLength(content, "utf8") > MAX_EXPORT_BYTES) {
     throw new GatewayError("invalid_request", "Diagnostic snapshot exceeds the size limit");
   }
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  const directoryStat = await lstat(directory);
+  let directoryStat: Stats;
+  try {
+    directoryStat = await lstat(directory);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    directoryStat = await lstat(directory);
+  }
   const ownerUID = process.getuid?.();
   if (!directoryStat.isDirectory()
     || directoryStat.isSymbolicLink()
@@ -37,14 +45,22 @@ async function exportDiagnosticSnapshotImpl(
     throw new GatewayError("conflict", "Diagnostic export storage is not private", true);
   }
   await chmod(directory, 0o700);
-  const path = `${directory}/logs-${now.getTime()}-${randomUUID()}.txt`;
+  const path = join(directory, `logs-${now.getTime()}-${randomUUID()}.txt`);
   try {
     await writeFile(path, content, { encoding: "utf8", flag: "wx", mode: 0o600 });
     await chmod(path, 0o600);
     await pruneDiagnosticSnapshots(path, directory);
     return { path, exportedAt: now.toISOString() };
   } catch {
-    await rm(path, { force: true }).catch(() => {});
+    // Never unlink a replacement symlink or a file not owned by this process
+    // if exclusive creation or pruning races with another actor.
+    try {
+      const candidate = await lstat(path);
+      if (candidate.isFile() && !candidate.isSymbolicLink()
+        && (ownerUID === undefined || candidate.uid === ownerUID)) {
+        await rm(path, { force: true });
+      }
+    } catch { /* the failed write may not have created a candidate */ }
     throw new GatewayError("conflict", "Diagnostic snapshot could not be written", true);
   }
 }
@@ -54,7 +70,7 @@ async function pruneDiagnosticSnapshots(newPath: string, directory: string): Pro
   const files = await Promise.all(entries
     .filter((entry) => entry.isFile() && entry.name.startsWith("logs-") && entry.name.endsWith(".txt"))
     .map(async (entry) => {
-      const path = `${directory}/${entry.name}`;
+      const path = join(directory, entry.name);
       try { return { path, mtime: (await stat(path)).mtimeMs }; }
       catch { return undefined; }
     }));
