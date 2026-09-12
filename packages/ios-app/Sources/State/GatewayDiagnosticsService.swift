@@ -364,6 +364,11 @@ struct IOSClientDiagnosticBuffer: Sendable {
         reason: String? = nil,
         level: String = "info",
         incidentID: String? = nil,
+        requestID: String? = nil,
+        pageCount: Int? = nil,
+        revision: Int? = nil,
+        retryAttempt: Int? = nil,
+        retryBudget: Int? = nil,
         timestamp: String = GatewayTimestamp.preciseString(from: .now)
     ) {
         let ownerID = Self.boundedUTF8(profileID ?? "ios-client", maximumBytes: 256)
@@ -377,6 +382,11 @@ struct IOSClientDiagnosticBuffer: Sendable {
         if let durationMilliseconds { fields.append("durationMs=\(max(0, durationMilliseconds))") }
         if let code { fields.append("code=\(Self.boundedUTF8(code, maximumBytes: 64))") }
         if let reason { fields.append("reason=\(Self.boundedUTF8(reason, maximumBytes: 96))") }
+        if let requestID { fields.append("requestID=\(Self.boundedUTF8(requestID, maximumBytes: 128))") }
+        if let pageCount { fields.append("page=\(max(0, pageCount))") }
+        if let revision { fields.append("revision=\(revision)") }
+        if let retryAttempt { fields.append("retryAttempt=\(max(0, retryAttempt))") }
+        if let retryBudget { fields.append("retryBudget=\(max(0, retryBudget))") }
         records.insert(GatewayProfileLogRecord(
             profileID: "\(ownerID):ios-client",
             profileLabel: Self.boundedUTF8(profileLabel ?? "iOS client", maximumBytes: 512),

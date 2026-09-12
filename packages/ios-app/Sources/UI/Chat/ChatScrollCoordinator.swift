@@ -98,9 +98,11 @@ final class ChatScrollCoordinator {
 
     enum OpeningTailSettlementResult: Equatable {
         case settled
-        case failed
+        case failed([ChatInteractionTrace.OpeningFailureReason])
         case cancelled
     }
+
+    private var terminalOpeningFailureReasons: [ChatInteractionTrace.OpeningFailureReason]?
 
     private struct OpeningTailFinalWaiter {
         let id: Int
@@ -803,6 +805,9 @@ final class ChatScrollCoordinator {
     /// deadline. This is failure evidence, not a second readiness path: the
     /// physical proof below remains authoritative and unchanged.
     func openingFailureReasons() -> [ChatInteractionTrace.OpeningFailureReason] {
+        if let terminalOpeningFailureReasons {
+            return terminalOpeningFailureReasons
+        }
         var reasons: [ChatInteractionTrace.OpeningFailureReason] = []
         guard let context = openingTailPhase.context else {
             reasons.append(.projection)
@@ -1573,6 +1578,7 @@ final class ChatScrollCoordinator {
         continuation: CheckedContinuation<Bool, Never>?
     ) {
         awaitingOpeningBaseline = false
+        terminalOpeningFailureReasons = nil
         let context = OpeningTailContext(
             token: token,
             targetRenderedID: targetRenderedID,
@@ -1852,6 +1858,8 @@ final class ChatScrollCoordinator {
             // target lease, return to target-free native pinning, and let the
             // bounded physical repair owner act on any later marker evidence.
             self.openingTailPostRevealTimeoutTask = nil
+            let failureReasons = self.openingFailureReasons()
+            self.terminalOpeningFailureReasons = failureReasons
             self.openingTailFrameTaskGeneration &+= 1
             self.openingTailFrameTask?.cancel()
             self.openingTailFrameTask = nil
@@ -1863,7 +1871,7 @@ final class ChatScrollCoordinator {
                 self.openingTailContinuation = nil
                 continuation.resume(returning: false)
             }
-            self.resumeOpeningTailFinalWaiters(token: token, result: .failed)
+            self.resumeOpeningTailFinalWaiters(token: token, result: .failed(failureReasons))
             // A timeout is absence of physical proof. The outer opening owner
             // keeps the surface opaque and publishes the retryable failure;
             // never relabel this path as an opened conversation.

@@ -550,6 +550,7 @@ actor GatewayClient {
     private var connection: ConnectionEpoch?
     private var retiredLiveEvidence: [Int: GatewayLiveEvidence] = [:]
     private var connectionDiagnostics: [GatewayConnectionDiagnostic] = []
+    private var latestSessionListRequestID: String?
     private var diagnosticSequence = 0
     private var firstDiagnosticSequenceByEpisode: [String: Int] = [:]
     private let diagnosticStore: IOSClientDiagnosticStore?
@@ -574,6 +575,10 @@ actor GatewayClient {
     }
 
     func diagnostics() -> [GatewayConnectionDiagnostic] { connectionDiagnostics }
+
+    /// Joins projection-level catalog records to the request diagnostic already
+    /// owned by this actor without copying request lifecycle state into AppModel.
+    func sessionListRequestID() -> String? { latestSessionListRequestID }
 
     private func recordRPCDiagnostic(
         request: PendingRequest,
@@ -1015,6 +1020,7 @@ actor GatewayClient {
         let epochID = epoch.id
         let socket = epoch.socket
         let id = uuidSource.next().uuidString
+        if method == "session.list" { latestSessionListRequestID = id }
         let frame = GatewayRequest(id: id, method: method, params: try JSONValue.encode(params))
         let data = try JSONEncoder.gateway.encode(frame)
         return try await withTaskCancellationHandler {

@@ -1977,7 +1977,7 @@ struct ChatView: View {
                 epoch: epoch
             )
             guard completion == .ready else {
-                if completion == .positioningFailed {
+                if case .positioningFailed(let reasons) = completion {
                     let traceContext = ensureInteractionTraceContext()
                     model.chatInteractionTrace.opening(
                         .failed,
@@ -1986,7 +1986,7 @@ struct ChatView: View {
                         state: interactionTraceState()
                     )
                     model.chatInteractionTrace.openingFailure(
-                        scrollCoordinator.openingFailureReasons(),
+                        reasons,
                         context: traceContext,
                         state: interactionTraceState()
                     )
@@ -2232,7 +2232,7 @@ struct ChatView: View {
         )
         guard completion == .ready else {
             probe.recordReadyFrameCompletion()
-            if completion == .positioningFailed {
+            if case .positioningFailed(let reasons) = completion {
                 let traceContext = ensureInteractionTraceContext()
                 model.chatInteractionTrace.opening(
                     .failed,
@@ -2241,7 +2241,7 @@ struct ChatView: View {
                     state: interactionTraceState()
                 )
                 model.chatInteractionTrace.openingFailure(
-                    scrollCoordinator.openingFailureReasons(),
+                    reasons,
                     context: traceContext,
                     state: interactionTraceState()
                 )
@@ -2393,7 +2393,7 @@ struct ChatView: View {
 
     private enum PositionedOpeningCompletion: Equatable {
         case ready
-        case positioningFailed
+        case positioningFailed([ChatInteractionTrace.OpeningFailureReason])
         case discarded
     }
 
@@ -2424,7 +2424,9 @@ struct ChatView: View {
                 result: isCurrentFailure ? .failure : .discarded,
                 metrics: .none
             )
-            return isCurrentFailure ? .positioningFailed : .discarded
+            return isCurrentFailure
+                ? .positioningFailed(scrollCoordinator.openingFailureReasons())
+                : .discarded
         }
         guard !Task.isCancelled, revealPositionedTranscript(epoch: epoch) else {
             performanceSignposts.end(interval, result: .discarded, metrics: .none)
@@ -2435,9 +2437,9 @@ struct ChatView: View {
         case .cancelled:
             performanceSignposts.end(interval, result: .cancelled, metrics: .none)
             return .discarded
-        case .failed:
+        case .failed(let reasons):
             performanceSignposts.end(interval, result: .failure, metrics: .none)
-            return .positioningFailed
+            return .positioningFailed(reasons)
         case .settled:
             break
         }

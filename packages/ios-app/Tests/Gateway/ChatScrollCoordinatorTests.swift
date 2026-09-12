@@ -1613,7 +1613,12 @@ struct ChatScrollCoordinatorTests {
                 await Task.yield()
             }
             #expect(!coordinator.blocksAutomaticLiveProjectionIntake)
-            #expect(await settlement.value == .failed)
+            let settlementResult = await settlement.value
+            guard case .failed(let reasons) = settlementResult else {
+                Issue.record("expected a terminal opening failure")
+                return
+            }
+            #expect(!reasons.isEmpty)
             #expect(coordinator.canRequestHistoryPage)
             #expect(coordinator.command == nil)
         }
