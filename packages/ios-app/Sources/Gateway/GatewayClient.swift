@@ -599,6 +599,7 @@ actor GatewayClient {
             diagnosticCaptureSink?.recordRPC(
                 method: request.method,
                 requestID: request.requestID,
+                requestStartedAt: request.startedAt,
                 outcome: outcome.rawValue,
                 code: code,
                 durationMilliseconds: duration,

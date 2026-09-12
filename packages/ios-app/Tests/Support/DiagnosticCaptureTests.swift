@@ -14,7 +14,7 @@ final class DiagnosticCaptureTests: XCTestCase {
         XCTAssertTrue(capture.start(duration: .seconds(30)))
         let interval = try! XCTUnwrap(capture.beginInterval())
         capture.recordInterval(interval.0, operation: .sessionOpen, started: interval.1, result: .success, metrics: .init(itemCount: 3))
-        capture.recordRPC(method: "session.list", requestID: "opaque-id", outcome: "success", code: nil, durationMilliseconds: 23, profileID: "profile", connectionID: 7)
+        capture.recordRPC(method: "session.list", requestID: "opaque-id", requestStartedAt: interval.1, outcome: "success", code: nil, durationMilliseconds: 23, profileID: "profile", connectionID: 7)
         let report = try! XCTUnwrap(capture.stop())
 
         XCTAssertEqual(report.events.count, 2)
@@ -68,5 +68,68 @@ final class DiagnosticCaptureTests: XCTestCase {
         _ = capture.stop(reason: "background")
         capture.recordCausal(name: "sessionSync", outcome: "success", durationMilliseconds: 8)
         XCTAssertTrue(capture.report.events.isEmpty)
+    }
+
+    func testLateIntervalFromStoppedCaptureCannotEnterSuccessor() {
+        let capture = DiagnosticCaptureCoordinator()
+        XCTAssertTrue(capture.start(duration: .seconds(30)))
+        let interval = try! XCTUnwrap(capture.beginInterval())
+        _ = capture.stop(reason: "user")
+        XCTAssertTrue(capture.start(duration: .seconds(30)))
+
+        capture.recordInterval(
+            interval.0, operation: .sessionOpen, started: interval.1,
+            result: .success, metrics: .none
+        )
+
+        XCTAssertTrue(capture.report.events.isEmpty)
+        XCTAssertEqual(capture.stop()?.events.count, 0)
+    }
+
+    func testLateRPCFromBeforeCaptureCannotEnterSuccessor() {
+        let capture = DiagnosticCaptureCoordinator()
+        XCTAssertTrue(capture.start(duration: .seconds(30)))
+        let interval = try! XCTUnwrap(capture.beginInterval())
+        _ = capture.stop(reason: "user")
+        XCTAssertTrue(capture.start(duration: .seconds(30)))
+
+        capture.recordRPC(
+            method: "session.list", requestID: "old-request", requestStartedAt: interval.1,
+            outcome: "success", code: nil, durationMilliseconds: 23,
+            profileID: "old-profile", connectionID: 1
+        )
+
+        XCTAssertTrue(capture.report.events.isEmpty)
+        XCTAssertEqual(capture.stop()?.events.count, 0)
+    }
+
+    func testPendingIntervalsAreBoundedAndCountedAsDropped() {
+        let capture = DiagnosticCaptureCoordinator()
+        XCTAssertTrue(capture.start(duration: .seconds(30)))
+        for _ in 0..<DiagnosticCaptureCoordinator.maximumPendingIntervals {
+            XCTAssertNotNil(capture.beginInterval())
+        }
+        XCTAssertNil(capture.beginInterval())
+
+        XCTAssertEqual(capture.stop()?.droppedEvents, 1)
+    }
+
+    func testCanceledDeadlineCannotStopSuccessorCapture() async throws {
+        let manual = ManualClock()
+        let capture = DiagnosticCaptureCoordinator(clock: manual.clock)
+        XCTAssertTrue(capture.start(duration: .seconds(1)))
+        try await manual.waitUntilSleeping(count: 1, duration: .seconds(1))
+
+        XCTAssertTrue(capture.start(duration: .seconds(30)))
+        manual.advance(by: .seconds(1))
+        await Task.yield()
+
+        if case .capturing = capture.state {
+            // The canceled deadline belongs to the retired capture. The new
+            // capture must remain active even when the old timer was due.
+        } else {
+            XCTFail("successor capture was stopped by the retired deadline")
+        }
+        _ = capture.stop()
     }
 }

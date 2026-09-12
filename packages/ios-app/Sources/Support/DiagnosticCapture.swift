@@ -86,6 +86,7 @@ protocol DiagnosticCaptureRPCSink: Sendable {
     func recordRPC(
         method: String,
         requestID: String,
+        requestStartedAt: ContinuousClock.Instant,
         outcome: String,
         code: String?,
         durationMilliseconds: Int,
@@ -102,9 +103,11 @@ final class DiagnosticCaptureCoordinator: DiagnosticCaptureRPCSink, @unchecked S
     static let maximumDuration = Duration.seconds(600)
     static let maximumDurationMilliseconds = 600_000
     static let maximumEvents = 2_000
+    static let maximumPendingIntervals = 2_000
     static let maximumBytes = 480 * 1024
 
     private struct Active {
+        let id: UUID
         let started: ContinuousClock.Instant
         let startedText: String
         let deadline: Task<Void, Never>
@@ -158,14 +161,16 @@ final class DiagnosticCaptureCoordinator: DiagnosticCaptureRPCSink, @unchecked S
         let bounded = min(max(duration, .seconds(1)), Self.maximumDuration)
         lock.lock()
         active?.deadline.cancel()
+        let captureID = UUID()
         let started = clock.now()
         let deadline = Task { [weak self] in
             try? await self?.clock.sleep(bounded)
             guard !Task.isCancelled else { return }
-            _ = self?.stop(reason: "deadline")
+            guard self?.stop(captureID: captureID, reason: "deadline") != nil else { return }
             onDeadline?()
         }
         active = Active(
+            id: captureID,
             started: started,
             startedText: GatewayTimestamp.preciseString(from: .now),
             deadline: deadline,
@@ -182,8 +187,13 @@ final class DiagnosticCaptureCoordinator: DiagnosticCaptureRPCSink, @unchecked S
 
     @discardableResult
     func stop(reason: String = "user") -> DiagnosticCaptureReport? {
+        stop(captureID: nil, reason: reason)
+    }
+
+    private func stop(captureID: UUID?, reason: String) -> DiagnosticCaptureReport? {
         lock.lock(); defer { lock.unlock() }
-        guard let active else { return lastReport }
+        guard let active,
+              captureID == nil || active.id == captureID else { return nil }
         active.deadline.cancel()
         let report = DiagnosticCaptureReport(
             startedAt: active.startedText,
@@ -192,7 +202,7 @@ final class DiagnosticCaptureCoordinator: DiagnosticCaptureRPCSink, @unchecked S
             stopReason: Self.safe(reason, maximum: 32),
             events: active.events,
             droppedEvents: active.dropped,
-            incomplete: active.dropped > 0 || reason == "deadline"
+            incomplete: active.dropped > 0 || !active.intervalTokens.isEmpty || reason == "deadline"
         )
         self.active = nil
         lastReport = report
@@ -202,6 +212,11 @@ final class DiagnosticCaptureCoordinator: DiagnosticCaptureRPCSink, @unchecked S
     func beginInterval() -> (UUID, ContinuousClock.Instant)? {
         lock.lock(); defer { lock.unlock() }
         guard var active else { return nil }
+        guard active.intervalTokens.count < Self.maximumPendingIntervals else {
+            active.dropped += 1
+            self.active = active
+            return nil
+        }
         let token = UUID()
         active.intervalTokens.insert(token)
         self.active = active
@@ -209,44 +224,35 @@ final class DiagnosticCaptureCoordinator: DiagnosticCaptureRPCSink, @unchecked S
     }
 
     func recordInterval(_ token: UUID, operation: PerformanceOperation, started: ContinuousClock.Instant, result: PerformanceResult, metrics: PerformanceMetrics) {
-        lock.lock()
-        guard var active, active.intervalTokens.remove(token) != nil else {
-            lock.unlock()
-            return
-        }
-        let profileID = active.profileID
-        let connectionID = active.connectionID
-        let lifecycleGeneration = active.lifecycleGeneration
-        self.active = active
-        lock.unlock()
-        record(
-            DiagnosticCaptureEvent(
-                elapsedMilliseconds: 0, kind: "operation", name: Self.operationName(operation),
-                outcome: String(result.rawValue), code: nil, requestID: nil, durationMilliseconds: elapsed(started),
-                count: metrics.itemCount, profileID: profileID, connectionID: connectionID,
-                lifecycleGeneration: lifecycleGeneration
-            )
+        lock.lock(); defer { lock.unlock() }
+        guard var active, active.intervalTokens.remove(token) != nil else { return }
+        let event = DiagnosticCaptureEvent(
+            elapsedMilliseconds: 0, kind: "operation", name: Self.operationName(operation),
+            outcome: String(result.rawValue), code: nil, requestID: nil,
+            durationMilliseconds: Self.boundedDuration(elapsed(started)),
+            count: metrics.itemCount, profileID: active.profileID, connectionID: active.connectionID,
+            lifecycleGeneration: active.lifecycleGeneration
         )
+        appendLocked(event, to: &active)
+        self.active = active
     }
 
-    func recordRPC(method: String, requestID: String, outcome: String, code: String?, durationMilliseconds: Int, profileID: String?, connectionID: Int?) {
+    func recordRPC(method: String, requestID: String, requestStartedAt: ContinuousClock.Instant, outcome: String, code: String?, durationMilliseconds: Int, profileID: String?, connectionID: Int?) {
         // Request IDs are useful correlation within one export and are opaque
         // and bounded; no params, URLs, transcript data, or error text enter.
-        lock.lock()
-        if var active {
-            active.profileID = profileID.map { Self.safe($0, maximum: 64) }
-            active.connectionID = connectionID
-            self.active = active
-        }
-        lock.unlock()
-        record(DiagnosticCaptureEvent(
+        lock.lock(); defer { lock.unlock() }
+        guard var active, requestStartedAt >= active.started else { return }
+        active.profileID = profileID.map { Self.safe($0, maximum: 64) }
+        active.connectionID = connectionID
+        appendLocked(DiagnosticCaptureEvent(
             elapsedMilliseconds: 0, kind: "rpc", name: Self.safe(method, maximum: 64),
             outcome: Self.safe(outcome, maximum: 32), code: code.map { Self.safe($0, maximum: 64) },
             requestID: Self.safe(requestID, maximum: 64),
             durationMilliseconds: Self.boundedDuration(durationMilliseconds), count: 1,
             profileID: profileID.map { Self.safe($0, maximum: 64) }, connectionID: connectionID,
             lifecycleGeneration: nil
-        ))
+        ), to: &active)
+        self.active = active
     }
 
     func recordCausal(name: String, outcome: String? = nil, durationMilliseconds: Int? = nil, count: Int? = nil, profileID: String? = nil, connectionID: Int? = nil, lifecycleGeneration: Int? = nil, requestID: String? = nil) {
@@ -263,7 +269,12 @@ final class DiagnosticCaptureCoordinator: DiagnosticCaptureRPCSink, @unchecked S
     private func record(_ event: DiagnosticCaptureEvent) {
         lock.lock(); defer { lock.unlock() }
         guard var active else { return }
-        guard active.events.count < Self.maximumEvents else { active.dropped += 1; self.active = active; return }
+        appendLocked(event, to: &active)
+        self.active = active
+    }
+
+    private func appendLocked(_ event: DiagnosticCaptureEvent, to active: inout Active) {
+        guard active.events.count < Self.maximumEvents else { active.dropped += 1; return }
         let elapsed = elapsed(active.started)
         let admitted = DiagnosticCaptureEvent(
             elapsedMilliseconds: elapsed, kind: event.kind, name: event.name, outcome: event.outcome,
@@ -282,13 +293,11 @@ final class DiagnosticCaptureCoordinator: DiagnosticCaptureRPCSink, @unchecked S
         let size = eventBytes + summaryBytes
         guard active.bytes + size + fixedReportBytes <= Self.maximumBytes else {
             active.dropped += 1
-            self.active = active
             return
         }
         active.summaryNames.insert(admitted.name)
         active.events.append(admitted)
         active.bytes += size
-        self.active = active
     }
 
     private func elapsed(_ instant: ContinuousClock.Instant) -> Int {

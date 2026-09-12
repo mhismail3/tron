@@ -57,6 +57,7 @@ for name, (bundle, route, apns, attest, blur, flags) in expected.items():
         assert "SWIFT_COMPILATION_MODE = wholemodule" in text
         if name == "LocalDevice":
             assert "ENABLE_TESTABILITY = NO" in text
+            assert "ENABLE_NS_ASSERTIONS = NO" in text
             assert "GCC_OPTIMIZATION_LEVEL = 3" in text
     if name == "LocalDevice":
         assert "TRON_PRIVATE_VARIABLE_BLUR=1" in text
@@ -168,6 +169,7 @@ required = {
     "GCC_OPTIMIZATION_LEVEL": "3",
     "DEBUG_INFORMATION_FORMAT": "dwarf-with-dsym",
     "ENABLE_TESTABILITY": "NO",
+    "ENABLE_NS_ASSERTIONS": "NO",
     "ONLY_ACTIVE_ARCH": "NO",
     "COPY_PHASE_STRIP": "NO",
 }
