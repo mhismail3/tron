@@ -59,7 +59,7 @@ struct ChatNotificationView: View {
                     // Preserve the 44-point semantic row target without making
                     // its empty corners compete with the glass surface gesture.
                     .frame(minWidth: 44, minHeight: 44)
-                    .accessibilityHint("Shows the full error message")
+                    .accessibilityHint(presentation.expandsOnTruncation ? "Shows the full error message" : "Shows details")
             } else {
                 pill
             }
