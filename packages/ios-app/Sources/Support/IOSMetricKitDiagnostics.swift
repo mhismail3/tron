@@ -1,9 +1,9 @@
 import Foundation
 import MetricKit
 
-/// The small, local MetricKit adapter. It keeps only bounded summaries of
-/// system reports; raw MetricKit payloads never enter the diagnostic mailbox or
-/// the user-visible log export.
+/// The small, local MetricKit adapter. It keeps bounded, typed summaries of
+/// system reports; raw MetricKit payloads and call stacks never enter the
+/// diagnostic mailbox or the user-visible log export.
 final class IOSMetricKitDiagnostics: NSObject, MXMetricManagerSubscriber, @unchecked Sendable {
     protocol Manager: AnyObject {
         func add(_ subscriber: MXMetricManagerSubscriber)
@@ -11,13 +11,8 @@ final class IOSMetricKitDiagnostics: NSObject, MXMetricManagerSubscriber, @unche
     }
 
     private final class SystemManager: Manager {
-        func add(_ subscriber: MXMetricManagerSubscriber) {
-            MXMetricManager.shared.add(subscriber)
-        }
-
-        func remove(_ subscriber: MXMetricManagerSubscriber) {
-            MXMetricManager.shared.remove(subscriber)
-        }
+        func add(_ subscriber: MXMetricManagerSubscriber) { MXMetricManager.shared.add(subscriber) }
+        func remove(_ subscriber: MXMetricManagerSubscriber) { MXMetricManager.shared.remove(subscriber) }
     }
 
     private let store: IOSClientDiagnosticStore
@@ -32,28 +27,25 @@ final class IOSMetricKitDiagnostics: NSObject, MXMetricManagerSubscriber, @unche
         start()
     }
 
-    /// Registration is explicit so tests and a future owner can retire the
+    /// Registration is explicit so tests and the owning app can retire the
     /// subscriber without changing MetricKit collection semantics.
     func start() {
         lock.lock()
-        guard !isRegistered else {
-            lock.unlock()
-            return
-        }
-        isRegistered = true
-        lock.unlock()
+        defer { lock.unlock() }
+        guard !isRegistered else { return }
+        // Serialize the manager call with retirement. MetricKit can deliver a
+        // callback as registration changes, so publishing the state only after
+        // add/remove completes avoids a late callback observing a retired owner.
         manager.add(self)
+        isRegistered = true
     }
 
     func stop() {
         lock.lock()
-        guard isRegistered else {
-            lock.unlock()
-            return
-        }
-        isRegistered = false
-        lock.unlock()
+        defer { lock.unlock() }
+        guard isRegistered else { return }
         manager.remove(self)
+        isRegistered = false
     }
 
     func didReceive(_ payloads: [MXMetricPayload]) {
@@ -69,51 +61,108 @@ final class IOSMetricKitDiagnostics: NSObject, MXMetricManagerSubscriber, @unche
     }
 
     static func metricRecord(_ payload: MXMetricPayload) -> GatewayProfileLogRecord? {
-        let groups = metricGroupNames(payload.dictionaryRepresentation())
+        var values: [String] = [
+            "kind=daily",
+            "intervalStart=\(GatewayTimestamp.preciseString(from: payload.timeStampBegin))",
+            "intervalEnd=\(GatewayTimestamp.preciseString(from: payload.timeStampEnd))",
+            "build=\(safe(payload.metaData?.applicationBuildVersion))",
+            "appVersion=\(safe(payload.latestApplicationVersion))"
+        ]
+        if let cpu = payload.cpuMetrics {
+            values.append("cpuSeconds=\(number(cpu.cumulativeCPUTime.converted(to: .seconds).value))")
+        }
+        if let memory = payload.memoryMetrics {
+            values.append("peakMemoryBytes=\(number(memory.peakMemoryUsage.converted(to: .bytes).value))")
+            values.append("suspendedMemoryBytes=\(number(memory.averageSuspendedMemory.averageMeasurement.converted(to: .bytes).value))")
+        }
+        if let runtime = payload.applicationTimeMetrics {
+            values.append("foregroundSeconds=\(number(runtime.cumulativeForegroundTime.converted(to: .seconds).value))")
+            values.append("backgroundSeconds=\(number(runtime.cumulativeBackgroundTime.converted(to: .seconds).value))")
+        }
+        if let launch = payload.applicationLaunchMetrics {
+            values.append("launchBuckets=\(launch.histogrammedTimeToFirstDraw.totalBucketCount)")
+            values.append("resumeBuckets=\(launch.histogrammedApplicationResumeTime.totalBucketCount)")
+            values.append("extendedLaunchBuckets=\(launch.histogrammedExtendedLaunch.totalBucketCount)")
+        }
+        if let responsiveness = payload.applicationResponsivenessMetrics {
+            values.append("hangBuckets=\(responsiveness.histogrammedApplicationHangTime.totalBucketCount)")
+        }
+        if let disk = payload.diskIOMetrics {
+            values.append("diskWriteBuckets=\(disk.cumulativeLogicalWrites.converted(to: .bytes).value)")
+        }
         let begin = GatewayTimestamp.preciseString(from: payload.timeStampBegin)
         let end = GatewayTimestamp.preciseString(from: payload.timeStampEnd)
-        let groupSummary = groups.isEmpty ? "none" : groups.joined(separator: ",")
-        let message = "kind=daily intervalStart=\(begin) intervalEnd=\(end) groups=\(groupSummary)"
         return record(
             timestamp: payload.timeStampEnd,
             level: "info",
-            message: message,
+            message: values.joined(separator: " "),
             incidentID: "metric-\(begin)-\(end)"
         )
     }
 
     static func diagnosticRecord(_ payload: MXDiagnosticPayload) -> GatewayProfileLogRecord? {
-        let crash = payload.crashDiagnostics?.count ?? 0
-        let hang = payload.hangDiagnostics?.count ?? 0
-        let launch = payload.appLaunchDiagnostics?.count ?? 0
-        let cpu = payload.cpuExceptionDiagnostics?.count ?? 0
-        let disk = payload.diskWriteExceptionDiagnostics?.count ?? 0
-        let total = crash + hang + launch + cpu + disk
+        let provenance = [
+            "build=\(safe(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String))",
+            "bundle=\(safe(Bundle.main.bundleIdentifier))",
+            "os=\(safe(ProcessInfo.processInfo.operatingSystemVersionString))"
+        ].joined(separator: " ")
+        var values = ["kind=diagnostic", provenance]
+        var total = 0
+        var level = "warning"
+        if let crash = payload.crashDiagnostics, !crash.isEmpty {
+            total += crash.count
+            level = "error"
+            let first = crash[0]
+            values.append("crash=\(crash.count)")
+            if let value = first.exceptionType { values.append("exceptionType=\(value)") }
+            if let value = first.exceptionCode { values.append("exceptionCode=\(value)") }
+            if let value = first.signal { values.append("signal=\(value)") }
+            if let value = first.terminationReason { values.append("termination=\(safe(value))") }
+            values.append("callstack=present")
+        }
+        if let hang = payload.hangDiagnostics, !hang.isEmpty {
+            total += hang.count
+            values.append("hang=\(hang.count)")
+            values.append("hangSeconds=\(number(hang.reduce(0) { $0 + $1.hangDuration.converted(to: .seconds).value }))")
+            values.append("callstack=present")
+        }
+        if let launch = payload.appLaunchDiagnostics, !launch.isEmpty {
+            total += launch.count
+            values.append("launch=\(launch.count)")
+        }
+        if let cpu = payload.cpuExceptionDiagnostics, !cpu.isEmpty {
+            total += cpu.count
+            level = "error"
+            values.append("cpu=\(cpu.count)")
+            values.append("cpuSeconds=\(number(cpu.reduce(0) { $0 + $1.totalCPUTime.converted(to: .seconds).value }))")
+            values.append("sampledSeconds=\(number(cpu.reduce(0) { $0 + $1.totalSampledTime.converted(to: .seconds).value }))")
+            values.append("callstack=present")
+        }
+        if let disk = payload.diskWriteExceptionDiagnostics, !disk.isEmpty {
+            total += disk.count
+            values.append("disk=\(disk.count)")
+            values.append("diskBytes=\(number(disk.reduce(0) { $0 + $1.totalWritesCaused.converted(to: .bytes).value }))")
+            values.append("callstack=present")
+        }
         guard total > 0 else { return nil }
-        let level = crash > 0 || cpu > 0 ? "error" : "warning"
-        let categories = [
-            ("crash", crash), ("hang", hang), ("launch", launch),
-            ("cpu", cpu), ("disk", disk)
-        ].compactMap { $0.1 > 0 ? "\($0.0)=\($0.1)" : nil }
         let end = payload.timeStampEnd
         return record(
             timestamp: end,
             level: level,
-            message: "kind=diagnostic \(categories.joined(separator: " "))",
+            message: values.joined(separator: " "),
             incidentID: "diagnostic-\(GatewayTimestamp.preciseString(from: end))"
         )
     }
 
-    private static func metricGroupNames(_ dictionary: [AnyHashable: Any]) -> [String] {
-        let known = Set([
-            "applicationLaunchMetrics", "applicationResponsivenessMetrics", "cpuMetrics",
-            "diskIOMetrics", "memoryMetrics", "networkTransferMetrics", "displayMetrics",
-            "gpuMetrics", "applicationTimeMetrics", "cellularConditionMetrics"
-        ])
-        return dictionary.keys
-            .compactMap { $0 as? String }
-            .filter { known.contains($0) }
-            .sorted()
+    private static func safe(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return "unknown" }
+        return IOSClientDiagnosticBuffer.redactedMessage(value)
+            .replacingOccurrences(of: " ", with: "_")
+    }
+
+    private static func number(_ value: Double) -> String {
+        guard value.isFinite, value >= 0 else { return "unknown" }
+        return String(format: "%.3f", locale: Locale(identifier: "en_US_POSIX"), value)
     }
 
     private static func record(
@@ -128,7 +177,7 @@ final class IOSMetricKitDiagnostics: NSObject, MXMetricManagerSubscriber, @unche
             record: GatewayLogRecord(
                 timestamp: GatewayTimestamp.preciseString(from: timestamp),
                 level: level,
-                message: message,
+                message: IOSClientDiagnosticBuffer.redactedMessage(message),
                 event: "ios.metrickit",
                 source: "ios-client"
             ),
