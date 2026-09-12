@@ -314,6 +314,7 @@ interface CatalogStructureEvidence {
   identitiesByPath: ReadonlyMap<string, CatalogHeaderIdentity>;
   complete: boolean;
   unstableCanonicalFiles: boolean;
+  unstableCanonicalPaths?: ReadonlySet<string>;
 }
 
 interface CatalogAcquisitionEntry {
@@ -402,11 +403,6 @@ export class RuntimeRegistry {
    * canonical evidence still gates every publication. */
   private catalogMaterializationPromise: Promise<Awaited<ReturnType<RuntimeRegistry["materializeCatalogSnapshot"]>>> | undefined;
   private catalogMaterializationKey: string | undefined;
-  /** Last complete cut is a bounded read projection fallback for the user
-   * dashboard while a concurrent child-session write makes discovery unstable.
-   * It never substitutes for canonical reads of the all-sessions scope. */
-  private lastCatalogMaterialization: Awaited<ReturnType<RuntimeRegistry["materializeCatalogSnapshot"]>> | undefined;
-  private catalogFallbackGeneration: number | undefined;
   /** One bounded structural walk can serve catalog and acquisition callers.
    * `refresh` is reserved for a post-materialization stability check. */
   private catalogEvidencePromise: Promise<CatalogStructureEvidence> | undefined;
@@ -1064,6 +1060,7 @@ export class RuntimeRegistry {
     let traversalBytes = Buffer.byteLength(pending[0]!);
     let complete = true;
     let unstableCanonicalFiles = false;
+    const unstableCanonicalPaths = new Set<string>();
     while (pending.length > 0) {
       const candidate = pending.pop()!;
       let directory: string;
@@ -1140,7 +1137,10 @@ export class RuntimeRegistry {
             refundHeaderBytes,
             true,
           );
-          if (header.unstable) unstableCanonicalFiles = true;
+          if (header.unstable) {
+            unstableCanonicalFiles = true;
+            unstableCanonicalPaths.add(path);
+          }
           const identity = header.identity;
           if (!identity) return undefined;
           return identity.parentSessionPath
@@ -1183,6 +1183,7 @@ export class RuntimeRegistry {
       identitiesByPath,
       complete,
       unstableCanonicalFiles,
+      unstableCanonicalPaths,
     };
   }
 
@@ -1523,7 +1524,7 @@ export class RuntimeRegistry {
     // Structural materialization is the admission boundary. Live summary and
     // attention overlays are captured synchronously below, after I/O completes,
     // so ordinary heartbeat churn cannot starve catalog reads.
-    const materialized = await this.materializationForProjection(scope);
+    const materialized = await this.sharedCatalogMaterialization(scope);
     const projectionGeneration = this.catalogProjectionGeneration;
     const generation = `${materialized.listRevision}:${projectionGeneration}:${scope}`;
     const existing = this.catalogPageSources.get(generation)?.deref();
@@ -1569,7 +1570,7 @@ export class RuntimeRegistry {
     // Capture mutable overlays only after structural I/O has completed. The
     // seed construction is synchronous, making this one immutable cut without
     // rejecting it when another heartbeat arrives during discovery.
-    const materialized = await this.materializationForProjection(scope);
+    const materialized = await this.sharedCatalogMaterialization(scope);
     const projectionGeneration = this.catalogProjectionGeneration;
     const seeds = this.buildCatalogPageSeeds(materialized.infos, scope, materialized.ambiguousIDs);
     const source = this.createCatalogPageSource(`${materialized.listRevision}:${projectionGeneration}:${scope}`, materialized.listRevision, seeds);
@@ -1614,14 +1615,13 @@ export class RuntimeRegistry {
     return operation;
   }
 
-  private sharedCatalogMaterialization(): Promise<Awaited<ReturnType<RuntimeRegistry["materializeCatalogSnapshot"]>>> {
-    const key = `${this.catalogStructuralGeneration}:${this.catalogAcquisitionInvalidationGeneration}`;
+  private sharedCatalogMaterialization(scope: "user" | "all"): Promise<Awaited<ReturnType<RuntimeRegistry["materializeCatalogSnapshot"]>>> {
+    const key = `${this.catalogStructuralGeneration}:${this.catalogAcquisitionInvalidationGeneration}:${scope}`;
     if (this.catalogMaterializationPromise && this.catalogMaterializationKey === key) {
       return this.catalogMaterializationPromise;
     }
-    const operation = this.materializeCatalogSnapshot();
+    const operation = this.materializeCatalogSnapshot(scope);
     const settled = operation.then((value) => {
-      this.lastCatalogMaterialization = value;
       if (this.catalogMaterializationKey === key) {
         this.catalogMaterializationPromise = undefined;
         this.catalogMaterializationKey = undefined;
@@ -1637,28 +1637,6 @@ export class RuntimeRegistry {
     this.catalogMaterializationPromise = settled;
     this.catalogMaterializationKey = key;
     return settled;
-  }
-
-  private async materializationForProjection(
-    scope: "user" | "all",
-  ): Promise<Awaited<ReturnType<RuntimeRegistry["materializeCatalogSnapshot"]>>> {
-    try {
-      return await this.sharedCatalogMaterialization();
-    } catch (error) {
-      // Child-session creation can invalidate the structural cut while the
-      // user-scoped dashboard membership is unchanged. Retain one complete
-      // cut for that bounded projection; the next invalidation retries the
-      // authoritative scan and all-sessions/admin reads still fail closed.
-      if (scope !== "user"
-        || !(error instanceof GatewayError)
-        || error.code !== "busy"
-        || this.lastCatalogMaterialization === undefined
-        || this.catalogFallbackGeneration === this.catalogStructuralGeneration) {
-        throw error;
-      }
-      this.catalogFallbackGeneration = this.catalogStructuralGeneration;
-      return this.lastCatalogMaterialization;
-    }
   }
 
   private async loadDurableCatalogIndex(): Promise<void> {
@@ -1758,7 +1736,7 @@ export class RuntimeRegistry {
     await this.catalogMetadataIndex.save(this.catalogDirectory(), rows).catch(() => {});
   }
 
-  private async materializeCatalogSnapshot(): Promise<{
+  private async materializeCatalogSnapshot(scope: "user" | "all"): Promise<{
     infos: CatalogSessionInfo[];
     ambiguousIDs: ReadonlySet<string>;
     listRevision: number;
@@ -1783,9 +1761,9 @@ export class RuntimeRegistry {
       };
     }
 
-    let materialized = await this.timedStage("catalog.scan", () => this.scanCatalogMaterialization());
+    let materialized = await this.timedStage("catalog.scan", () => this.scanCatalogMaterialization(scope));
     if (!materialized.stable) {
-      materialized = await this.timedStage("catalog.scan-retry", () => this.scanCatalogMaterialization());
+      materialized = await this.timedStage("catalog.scan-retry", () => this.scanCatalogMaterialization(scope));
     }
     if (!materialized.stable) {
       await this.catalogAcquisitionMutex.run(() => { this.catalogAcquisitionAdmission = undefined; });
@@ -1843,7 +1821,7 @@ export class RuntimeRegistry {
     };
   }
 
-  private async scanCatalogMaterialization(): Promise<{
+  private async scanCatalogMaterialization(scope: "user" | "all"): Promise<{
     allInfos: CatalogSessionInfo[];
     ambiguousDiskIDs: Set<string>;
     after: CatalogStructureEvidence;
@@ -1866,10 +1844,42 @@ export class RuntimeRegistry {
       structuralGeneration,
       stable: invalidationGeneration === this.catalogAcquisitionInvalidationGeneration
         && structuralGeneration === this.catalogStructuralGeneration
-        && !before.unstableCanonicalFiles && !after.unstableCanonicalFiles
-        && before.digest === after.digest
-        && before.factsDigest === after.factsDigest,
+        && !this.hasRelevantUnstableFiles(before, scope)
+        && !this.hasRelevantUnstableFiles(after, scope)
+        && this.catalogEvidenceMatchesScope(before, after, scope),
     };
+  }
+
+  private catalogEvidenceMatchesScope(
+    before: CatalogStructureEvidence,
+    after: CatalogStructureEvidence,
+    scope: "user" | "all",
+  ): boolean {
+    if (scope === "all") return before.digest === after.digest && before.factsDigest === after.factsDigest;
+    let catalogRoot: string;
+    try { catalogRoot = realpathSync(this.catalogDirectory()); }
+    catch { catalogRoot = resolve(this.catalogDirectory()); }
+    const identity = (evidence: CatalogStructureEvidence) => [...evidence.identitiesByPath]
+      .filter(([path]) => this.delegatedTopologyParentPath(path, catalogRoot) === undefined)
+      .map(([path, value]) => [
+        path, value.id, value.cwd, value.fileIdentity, value.parentSessionPath ?? "",
+      ].join("\\0"))
+      .sort();
+    return JSON.stringify(identity(before)) === JSON.stringify(identity(after));
+  }
+
+  private hasRelevantUnstableFiles(
+    evidence: CatalogStructureEvidence,
+    scope: "user" | "all",
+  ): boolean {
+    if (!evidence.unstableCanonicalFiles) return false;
+    if (scope === "all" || evidence.unstableCanonicalPaths === undefined) return true;
+    let catalogRoot: string;
+    try { catalogRoot = realpathSync(this.catalogDirectory()); }
+    catch { catalogRoot = resolve(this.catalogDirectory()); }
+    return [...evidence.unstableCanonicalPaths].some((path) =>
+      this.delegatedTopologyParentPath(path, catalogRoot) === undefined,
+    );
   }
 
   private catalogIdentityFingerprint(infos: readonly CatalogSessionInfo[]): string {

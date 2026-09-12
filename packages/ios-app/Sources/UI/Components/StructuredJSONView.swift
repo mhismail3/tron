@@ -326,7 +326,6 @@ struct TechnicalJSONSheet: View {
         NavigationStack {
             ZStack {
                 TronReadOnlyTextView(text: document ?? "", style: .code)
-                    .tronTopBlurSurface()
                 if document == nil {
                     TronLoadingState(label: "Preparing JSON…", accent: accent)
                 }
@@ -357,6 +356,9 @@ struct TechnicalJSONSheet: View {
                 }
             }
         }
+        // Apply the custom blur to the navigation container itself. A blur
+        // attached only to the UIKit reader is clipped below the system bar.
+        .tronTopBlurSurface()
         .task(id: value) {
             document = nil
             let source = value
@@ -431,6 +433,7 @@ private struct JSONFieldSheet: View {
                 }
             }
         }
+        .tronTopBlurSurface()
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)

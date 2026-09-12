@@ -15,7 +15,6 @@ import type { AutomationExecutionHandle } from "../automations/automation-schedu
 import type { AutomationRecord, AutomationRun } from "../automations/types.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import type { ExtensionRunActivity, ExtensionToolOrigin, SessionProcessActivity, SessionSummaryUpdate } from "../protocol/types.js";
-import { GatewayError } from "../errors.js";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
 import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
@@ -49,6 +48,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     workRegistry?: GatewayWorkRegistry;
     phaseObserver?: (phase: "catalog-warming" | "attention-recovery") => void;
     sessionListChanged?: () => void;
+    stageTiming?: (stage: string, durationMs: number, outcome: "success" | "failure") => void;
   } = {}) {
     const root = await mkdtemp(join(tmpdir(), `tron-cold-acquire-${label}-`));
     const agentDir = join(root, "agent");
@@ -75,6 +75,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       broadcast: (_sessionId, topic, payload) => events.push({ topic, payload }),
       sessionSummaryChanged: (summary) => summaries.push(summary),
       sessionListChanged: options.sessionListChanged ?? (() => {}),
+      stageTiming: options.stageTiming,
     });
     registries.push(registry);
     const startupEvidence = options.phaseObserver
@@ -1908,24 +1909,39 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
   });
 
-  it("retains one user dashboard cut during transient child-session catalog churn", async () => {
-    const fixture = await coldFixture("user-catalog-fallback");
+  it("retains the stable user cut during a real child-session write", async () => {
+    const children: SessionManager[] = [];
+    let mutateDuringDiscovery = false;
+    let mutationCount = 0;
+    const fixture = await coldFixture("user-catalog-child-churn", {
+      stageTiming: (stage) => {
+        if (mutateDuringDiscovery && stage === "catalog.metadata-materialize") {
+          mutationCount += 1;
+          for (const child of children) {
+            child.appendMessage(fauxAssistantMessage("child registration update"));
+          }
+        }
+      },
+    });
     const first = await fixture.registry.catalog("user");
-    const internals = fixture.registry as unknown as {
-      invalidateCatalogAcquisition: () => void;
-      materializeCatalogSnapshot: () => Promise<unknown>;
-    };
-    internals.invalidateCatalogAcquisition();
-    const materialize = vi.spyOn(internals, "materializeCatalogSnapshot")
-      .mockRejectedValue(new GatewayError("busy", "Session catalog changed during discovery", true));
+    const parentFile = fixture.manager.getSessionFile()!;
+    const forksDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
+    await mkdir(forksDirectory, { recursive: true });
+    for (let index = 0; index < 2; index += 1) {
+      const child = SessionManager.forkFrom(parentFile, fixture.cwd, forksDirectory);
+      child.appendMessage(fauxAssistantMessage(`child registration ${index}`));
+      children.push(child);
+    }
+    mutateDuringDiscovery = true;
     try {
-      await expect(fixture.registry.catalog("user")).resolves.toMatchObject({
-        listRevision: first.listRevision,
-        sessions: first.sessions,
-      });
-      await expect(fixture.registry.catalog("all")).rejects.toMatchObject({ code: "busy" });
+      const userCut = await fixture.registry.catalog("user");
+      expect(mutationCount).toBeGreaterThan(0);
+      expect(userCut.sessions.map((session) => session.id)).toEqual(
+        first.sessions.map((session) => session.id),
+      );
+
     } finally {
-      materialize.mockRestore();
+      mutateDuringDiscovery = false;
     }
   });
 

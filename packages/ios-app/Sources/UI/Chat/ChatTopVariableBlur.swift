@@ -141,6 +141,7 @@ private struct TronTopBlurSurfaceModifier: ViewModifier {
             // navigation-bar boundary as an opaque horizontal edge.
             .scrollEdgeEffectStyle(.soft, for: .all)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar, .bottomBar)
+            .toolbarBackground(.clear, for: .navigationBar, .bottomBar)
             .overlay(alignment: .top) {
                 if let style { TronTopBlurOverlay(style: style) }
             }

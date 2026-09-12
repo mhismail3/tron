@@ -361,19 +361,37 @@ struct SessionProcessRow: View {
 
     private var rowContent: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(process.title)
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                     .foregroundStyle(Color.tronTextPrimary)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if let durationMs = elapsedMilliseconds {
-                    Text(SessionProcessRowPresentation.durationText(durationMs))
-                        .font(TronTypography.secondaryCodeDescription)
-                        .foregroundStyle(Color.tronTextSecondary)
-                        .monospacedDigit()
-                        .lineLimit(1)
+                if startedText != nil || elapsedMilliseconds != nil {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            if let startedText {
+                                Text(startedText)
+                                    .font(TronTypography.secondaryDescription)
+                                    .foregroundStyle(Color.tronTextSecondary)
+                                    .lineLimit(1)
+                            }
+                            if let elapsedMilliseconds {
+                                elapsedText(elapsedMilliseconds)
+                            }
+                        }
                         .fixedSize(horizontal: true, vertical: false)
+                        VStack(alignment: .trailing, spacing: 2) {
+                            if let startedText {
+                                Text(startedText)
+                                    .font(TronTypography.secondaryDescription)
+                                    .foregroundStyle(Color.tronTextSecondary)
+                            }
+                            if let elapsedMilliseconds {
+                                elapsedText(elapsedMilliseconds)
+                            }
+                        }
+                    }
                 }
                 if tone == .unsuccessful {
                     Image(systemName: "exclamationmark.circle.fill")
@@ -383,30 +401,26 @@ struct SessionProcessRow: View {
                 }
             }
 
-            if let startedText {
-                Text(startedText)
-                    .font(TronTypography.secondaryDescription)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
             ToolChipFlowLayout(spacing: 5) {
                 if !process.executionMode.displayName.isEmpty {
                     SessionProcessPill(
                         icon: process.executionMode == .asynchronous ? "arrow.triangle.branch" : "arrow.right",
-                        text: process.executionMode.displayName
+                        text: process.executionMode.displayName,
+                        accent: cardAccent
                     )
                 }
                 if let toolCount = process.toolCount {
                     SessionProcessPill(
                         icon: "wrench.and.screwdriver",
-                        text: SessionProcessRowPresentation.countLabel(toolCount, singular: "tool")
+                        text: SessionProcessRowPresentation.countLabel(toolCount, singular: "tool"),
+                        accent: cardAccent
                     )
                 }
                 if let turnCount = process.turnCount {
                     SessionProcessPill(
                         icon: "arrow.triangle.2.circlepath",
-                        text: SessionProcessRowPresentation.countLabel(turnCount, singular: "turn")
+                        text: SessionProcessRowPresentation.countLabel(turnCount, singular: "turn"),
+                        accent: cardAccent
                     )
                 }
             }
@@ -435,6 +449,15 @@ struct SessionProcessRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
+    }
+
+    private func elapsedText(_ milliseconds: Int) -> some View {
+        Text(SessionProcessRowPresentation.durationText(milliseconds))
+            .font(TronTypography.secondaryCodeDescription)
+            .foregroundStyle(Color.tronTextSecondary)
+            .monospacedDigit()
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
     }
 
     private var latestAction: String? {
@@ -498,9 +521,10 @@ enum SessionProcessPillMetrics {
 struct SessionProcessPill: View {
     let icon: String
     let text: String
+    var accent: Color = .tronSubagent
 
     var body: some View {
-        ChatCompactPillSurface(tone: .subagent, material: .flat) {
+        ChatCompactPillSurface(tone: .subagent, material: .flat, accentOverride: accent) {
             HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
                 ChatCompactPillLeadingIcon(
                     icon: icon,
@@ -512,10 +536,10 @@ struct SessionProcessPill: View {
                     height: SessionProcessPillMetrics.iconFrameSize
                 )
                 Text(text)
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption + 0.5, weight: .semibold))
                     .lineLimit(1)
             }
-            .foregroundStyle(ChatNotificationTone.subagent.primaryColor)
+            .foregroundStyle(accent)
         }
         .accessibilityHidden(true)
     }

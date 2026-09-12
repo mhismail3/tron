@@ -119,6 +119,7 @@ struct ChatCompactPillSurface<Content: View>: View {
     let tone: ChatNotificationTone
     let material: ChatNotificationMaterial
     let interactive: Bool
+    let accentOverride: Color?
     let cornerRadiusOverride: CGFloat?
     @ViewBuilder let content: Content
 
@@ -126,12 +127,14 @@ struct ChatCompactPillSurface<Content: View>: View {
         tone: ChatNotificationTone,
         material: ChatNotificationMaterial,
         interactive: Bool = false,
+        accentOverride: Color? = nil,
         cornerRadiusOverride: CGFloat? = nil,
         @ViewBuilder content: () -> Content
     ) {
         self.tone = tone
         self.material = material
         self.interactive = interactive
+        self.accentOverride = accentOverride
         self.cornerRadiusOverride = cornerRadiusOverride
         self.content = content()
     }
@@ -142,6 +145,7 @@ struct ChatCompactPillSurface<Content: View>: View {
                 ?? ChatCompactPillLayoutPolicy.cornerRadius(for: tone),
             style: .continuous
         )
+        let surfaceAccent = accentOverride ?? tone.surfaceColor
         switch material {
         case .glass:
             content
@@ -149,7 +153,7 @@ struct ChatCompactPillSurface<Content: View>: View {
                 .padding(.vertical, ChatCompactPillLayoutPolicy.verticalPadding)
                 .contentShape(shape)
                 .glassEffect(
-                    .regular.tint(tone.surfaceColor.opacity(0.18)).interactive(interactive),
+                    .regular.tint(surfaceAccent.opacity(0.18)).interactive(interactive),
                     in: shape
                 )
         case .flat:
@@ -157,8 +161,8 @@ struct ChatCompactPillSurface<Content: View>: View {
                 .padding(.horizontal, ChatCompactPillLayoutPolicy.horizontalPadding)
                 .padding(.vertical, ChatCompactPillLayoutPolicy.verticalPadding)
                 .contentShape(shape)
-                .background(tone.surfaceColor.opacity(0.10), in: shape)
-                .overlay(shape.stroke(tone.surfaceColor.opacity(0.30), lineWidth: 0.5))
+                .background(surfaceAccent.opacity(0.10), in: shape)
+                .overlay(shape.stroke(surfaceAccent.opacity(0.30), lineWidth: 0.5))
         }
     }
 }

@@ -157,6 +157,7 @@ private struct TronScrollEdgeChromeModifier: ViewModifier {
             // established translucent blur into navigation chrome.
             .scrollEdgeEffectStyle(.soft, for: .all)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar, .bottomBar)
+            .toolbarBackground(.clear, for: .navigationBar, .bottomBar)
             .overlay(alignment: .top) {
                 if let topBlurStyle {
                     TronTopBlurOverlay(style: topBlurStyle)
