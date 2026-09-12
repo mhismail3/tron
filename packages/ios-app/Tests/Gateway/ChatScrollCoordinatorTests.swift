@@ -24,6 +24,17 @@ struct ChatScrollCoordinatorTests {
         )
     }
 
+    @Test("opening failure evidence names missing physical proof without weakening readiness")
+    func openingFailureReasonsRemainActionable() {
+        let coordinator = ChatScrollCoordinator()
+        defer { coordinator.cancel() }
+        coordinator.requestOpeningTail(targetRenderedID: "transcript-bottom")
+        let reasons = coordinator.openingFailureReasons()
+        #expect(reasons.contains(.viewport))
+        #expect(reasons.contains(.markerEpoch))
+        #expect(reasons.contains(.physicalAlignment))
+    }
+
     @Test("physical tail uses the short content edge until it fills the container", arguments: [80.0, 240.0, 622.0, 647.0, 1_200.0])
     func shortContentTailBoundary(contentHeight: Double) throws {
         let coordinator = ChatScrollCoordinator()

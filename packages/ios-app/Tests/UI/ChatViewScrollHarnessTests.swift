@@ -221,6 +221,24 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    @Test("idle and streaming openings use the production ChatView settlement path")
+    func idleAndStreamingOpeningsSettle() async throws {
+        try await withTestWatchdog(timeout: .seconds(20)) {
+            try await withHarness(seed: 1_215) { harness in
+                let ready = try await harness.recorder.waitUntil { $0.observation.isReady }
+                #expect(ready.observation.visibleRowIDs.contains(harness.lastTranscriptID))
+            }
+
+            var streaming = try SessionScenarioBuilder(seed: 1_216).openingTail(targetEncodedBytes: 10_000)
+            streaming.phase = .running
+            streaming.streaming = streaming.transcript.last
+            try await withHarness(snapshot: streaming) { harness in
+                let ready = try await harness.recorder.waitUntil { $0.observation.isReady }
+                #expect(ready.observation.visibleRowIDs.contains(harness.lastTranscriptID))
+            }
+        }
+    }
+
     @Test("short streaming response remains above composer as it outgrows the viewport")
     func shortStreamingResponseClearsComposer() async throws {
         try await withTestWatchdog(timeout: .seconds(15)) {

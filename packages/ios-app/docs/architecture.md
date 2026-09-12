@@ -352,8 +352,7 @@ A gesture that begins during that correction cancels every remaining position wr
 and its final native geometry wins over the pre-load detached state. A 256-record,
 content-free in-memory chat trace correlates opening, projection-spine replacement,
 layout participants, viewport intent, explicit scroll commands, submission lifecycle,
-and thresholded geometry changes with local context/generation numbers. It emits
-automatic anomalies when a ready opening loses its installed rows or a pinned opening or
+and thresholded geometry changes with local context/generation numbers. A terminal opening deadline also emits one bounded failure snapshot naming the missing authority/projection, unapplied command, stale marker epoch, implausible or non-boundary viewport, missing physical-tail alignment, incomplete two-frame stability, inactive presentation, cancellation, or replacement category; this is evidence only and never a readiness fallback. The hosted ChatView harness exercises both idle and streaming production openings, while coordinator tests inject missing physical proof. It emits automatic anomalies when a ready opening loses its installed rows or a pinned opening or
 submission becomes substantially displaced. Under ring pressure, informational records are evicted
 before warning/error evidence; the ring remains globally bounded and becomes FIFO when every retained
 record is diagnostic priority. Records are merged into the existing Logs

@@ -21,6 +21,21 @@ final class ChatInteractionTrace: @unchecked Sendable {
         case retired
     }
 
+    enum OpeningFailureReason: String, Sendable {
+        case authority = "authority-missing"
+        case projection = "projection-missing"
+        case commandApplication = "command-not-applied"
+        case markerEpoch = "marker-epoch-stale"
+        case viewport = "viewport-not-plausible"
+        case viewportBoundary = "viewport-not-at-boundary"
+        case physicalAlignment = "physical-tail-not-aligned"
+        case frameStability = "frame-stability-incomplete"
+        case presentationInactive = "presentation-inactive"
+        case cancelled
+        case replaced
+        case unknown
+    }
+
     enum ProjectionChange: String, Sendable {
         case first
         case sameSpine = "same-spine"
@@ -191,6 +206,21 @@ final class ChatInteractionTrace: @unchecked Sendable {
             context: context,
             level: stage == .failed ? "error" : "info",
             event: "opening.\(stage.rawValue)",
+            details: values.joined(separator: " ")
+        )
+    }
+
+    func openingFailure(
+        _ reasons: [OpeningFailureReason],
+        context: Int,
+        state: State
+    ) {
+        var values = ["reasons=\(reasons.map(\.rawValue).joined(separator: ","))"]
+        appendState(state, to: &values)
+        append(
+            context: context,
+            level: "error",
+            event: "opening.failure-snapshot",
             details: values.joined(separator: " ")
         )
     }

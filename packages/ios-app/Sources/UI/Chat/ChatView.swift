@@ -1978,10 +1978,16 @@ struct ChatView: View {
             )
             guard completion == .ready else {
                 if completion == .positioningFailed {
+                    let traceContext = ensureInteractionTraceContext()
                     model.chatInteractionTrace.opening(
                         .failed,
-                        context: ensureInteractionTraceContext(),
+                        context: traceContext,
                         positioningSucceeded: false,
+                        state: interactionTraceState()
+                    )
+                    model.chatInteractionTrace.openingFailure(
+                        scrollCoordinator.openingFailureReasons(),
+                        context: traceContext,
                         state: interactionTraceState()
                     )
                     _ = sessionPresentation.open.fail(
@@ -2227,10 +2233,16 @@ struct ChatView: View {
         guard completion == .ready else {
             probe.recordReadyFrameCompletion()
             if completion == .positioningFailed {
+                let traceContext = ensureInteractionTraceContext()
                 model.chatInteractionTrace.opening(
                     .failed,
-                    context: ensureInteractionTraceContext(),
+                    context: traceContext,
                     positioningSucceeded: false,
+                    state: interactionTraceState()
+                )
+                model.chatInteractionTrace.openingFailure(
+                    scrollCoordinator.openingFailureReasons(),
+                    context: traceContext,
                     state: interactionTraceState()
                 )
                 _ = sessionPresentation.open.fail(

@@ -799,6 +799,48 @@ final class ChatScrollCoordinator {
         scheduleOpeningTailFrame()
     }
 
+    /// Returns only bounded state-machine categories at the terminal opening
+    /// deadline. This is failure evidence, not a second readiness path: the
+    /// physical proof below remains authoritative and unchanged.
+    func openingFailureReasons() -> [ChatInteractionTrace.OpeningFailureReason] {
+        var reasons: [ChatInteractionTrace.OpeningFailureReason] = []
+        guard let context = openingTailPhase.context else {
+            reasons.append(.projection)
+            return reasons
+        }
+        guard context.presentation == presentation else {
+            reasons.append(.replaced)
+            return reasons
+        }
+        if !viewportObservationActive { reasons.append(.presentationInactive) }
+        if !geometry.isValid || !geometry.isPlausibleOpeningViewport { reasons.append(.viewport) }
+        if !geometry.isAtCatchUpBoundary { reasons.append(.viewportBoundary) }
+        guard let sample = context.targetSample else {
+            reasons.append(.markerEpoch)
+            reasons.append(.physicalAlignment)
+            return reasons
+        }
+        if sample.layoutEpoch != layoutEpoch { reasons.append(.markerEpoch) }
+        let markerVisible = sample.frame.maxY > 0 && sample.frame.minY < geometry.containerHeight
+        if !markerVisible { reasons.append(.physicalAlignment) }
+        if physicalTailEvidence?.layoutEpoch != layoutEpoch
+            || !openingTailEvidenceIsAligned {
+            reasons.append(.physicalAlignment)
+        }
+        switch openingTailPhase {
+        case .positioning(let value):
+            if value.commandToken == nil || command?.token == value.commandToken {
+                reasons.append(.commandApplication)
+            }
+        case .postReveal(let value) where value.stableFrameCount < 2:
+            reasons.append(.frameStability)
+        case .positioned, .postReveal, .idle:
+            break
+        }
+        if reasons.isEmpty { reasons.append(.unknown) }
+        return reasons
+    }
+
     func waitForOpeningTailSettlement() async -> OpeningTailSettlementResult {
         guard let token = openingTailToken ?? pendingOpeningReleaseWaiterToken else {
             return .cancelled
