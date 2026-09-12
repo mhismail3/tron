@@ -103,6 +103,15 @@ struct InAppNoticeCenterTests {
         #expect(clock.activeSleeperCount() == 0)
     }
 
+    @Test("manual dismissal removes an actionable persistent notice")
+    func actionablePersistentNoticeCanBeDismissed() {
+        let center = InAppNoticeCenter()
+        let action = InAppNoticeCenter.Action(id: "retry", title: "Retry", role: .normal)
+        let id = center.post(notice("session list unavailable", actions: [action]))
+        center.dismiss(id)
+        #expect(center.notices.isEmpty)
+    }
+
     @Test("hidden automatic notices wait until foreground")
     func hiddenAutomaticNoticesWaitUntilForeground() async throws {
         let clock = ManualClock(); let center = InAppNoticeCenter(clock: clock.clock)
@@ -189,7 +198,7 @@ struct InAppNoticeCenterTests {
 @Suite("In-app notice presentation contract")
 struct InAppNoticePresentationPolicyTests {
 
-    @Test("horizontal dismissal accepts easy swipes in both directions and rejects vertical drags")
+    @Test("horizontal dismissal accepts easy swipes in both directions")
     func horizontalDismissalPolicy() {
         #expect(InAppNoticeSwipePolicy.shouldDismiss(
             translation: CGSize(width: 40, height: 4),
@@ -199,14 +208,37 @@ struct InAppNoticePresentationPolicyTests {
             translation: CGSize(width: -40, height: 4),
             predicted: CGSize(width: -52, height: 6)
         ))
-        #expect(!InAppNoticeSwipePolicy.shouldDismiss(
-            translation: CGSize(width: 20, height: -60),
-            predicted: CGSize(width: 28, height: -90)
+    }
+
+    @Test("upward dismissal accepts a deliberate drag or short flick")
+    func upwardDismissalPolicy() {
+        #expect(InAppNoticeSwipePolicy.shouldDismiss(
+            translation: CGSize(width: 2, height: -40),
+            predicted: CGSize(width: 3, height: -44)
+        ))
+        #expect(InAppNoticeSwipePolicy.shouldDismiss(
+            translation: CGSize(width: 1, height: -14),
+            predicted: CGSize(width: 2, height: -52)
         ))
         #expect(!InAppNoticeSwipePolicy.shouldDismiss(
-            translation: CGSize(width: 30, height: 2),
-            predicted: CGSize(width: 32, height: 3)
+            translation: CGSize(width: 2, height: 40),
+            predicted: CGSize(width: 3, height: 50)
         ))
+        #expect(!InAppNoticeSwipePolicy.shouldDismiss(
+            translation: CGSize(width: 20, height: -24),
+            predicted: CGSize(width: 28, height: -30)
+        ))
+        #expect(!InAppNoticeSwipePolicy.shouldDismiss(
+            translation: CGSize(width: 4, height: -20),
+            predicted: CGSize(width: 5, height: -24)
+        ))
+    }
+
+    @Test("notice top edge is stable for taller content and clears the safe area")
+    func topEdgePolicy() {
+        #expect(InAppNoticeLayout.topEdge(safeAreaTop: 59, toolbarCenterY: 81) == 67)
+        #expect(InAppNoticeLayout.topEdge(safeAreaTop: 59, toolbarCenterY: 300) == 278)
+        #expect(InAppNoticeLayout.topEdge(safeAreaTop: 59, toolbarCenterY: nil) == 67)
     }
 
 }

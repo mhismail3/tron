@@ -1249,12 +1249,9 @@ reserved for cards with an explicit action. Typed app, presentation, and exact s
 pass-through window per app scene owns `InAppNoticeHost` above app sheets, so notice coordinates never transfer into
 a presented sheet or follow its interactive drag. Content and blur modifiers do not install notice hosts. The window
 receives the existing AppModel-owned center, forwards touches outside the bounded notice region, and is retired with
-its scene; it never creates another notice store. The host discovers the foremost visible navigation bar in the scene
-and aligns the card center with that toolbar while retaining 80 points for its leading and trailing controls. Notices use
-an opaque surface backing under regular tinted Liquid Glass. Short notices are capsules; expanded notices retain soft
-32-point corners, body-scale titles, readable secondary copy, and shared inline capsule actions with 44-point targets.
-They accept input only on the foremost card, and dismiss with
-an easy horizontal swipe in either direction; vertical swipes never dismiss. Accessibility Dynamic Type uses a vertical
+its scene; it never creates another notice store. The host discovers the foremost visible navigation bar in the scene and uses the compact card height only as a toolbar reference; its top edge is clamped below the overlay window's safe-area/status region, so multiline content and accessibility-sized actions grow downward without moving the first line. It retains 80 points for its leading and trailing controls. Notices use an opaque surface backing under regular tinted Liquid Glass. Short notices are capsules; expanded notices retain soft
+32-point corners, slightly reduced title/body/action type, readable secondary copy, and shared inline capsule actions with 44-point targets.
+They accept input only on the foremost card, and dismiss with an easy horizontal swipe in either direction or an upward swipe; downward-only and ambiguous/tiny drags do not dismiss. Interaction pauses dwell timers for either gesture direction. Accessibility Dynamic Type uses a vertical
 action layout. Passive errors expire after roughly eight seconds, while action-bearing errors are persistent and expose
 native actions. Keyed restart, update, rollback, and package-progress cards refresh their short dwell when replacement
 status arrives. A session opening assigns notices to its pending presentation generation,

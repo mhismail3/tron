@@ -1670,13 +1670,17 @@ struct TronInlineActionLabel: View {
     var icon: String?
     var isWorking = false
     var accent: Color = .tronEmerald
+    /// Optional local override for surfaces whose type scale differs from the
+    /// shared compact-control default (for example, in-app notices).
+    var fontSize: CGFloat?
     @Environment(\.controlSize) private var controlSize
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
-    init(_ title: String, icon: String? = nil, isWorking: Bool = false, accent: Color = .tronEmerald) {
+    init(_ title: String, icon: String? = nil, isWorking: Bool = false, fontSize: CGFloat? = nil, accent: Color = .tronEmerald) {
         self.title = title
         self.icon = icon
         self.isWorking = isWorking
+        self.fontSize = fontSize
         self.accent = accent
     }
 
@@ -1692,7 +1696,7 @@ struct TronInlineActionLabel: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.65)
         }
-        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+        .font(TronTypography.sans(size: fontSize ?? TronTypography.sizeBodySM, weight: .semibold))
         .tronSettingsButtonForeground(resolvedAccent)
         .padding(.horizontal, 10)
         .frame(minHeight: controlSize == .small ? TronSettingsLayoutPolicy.compactPillHeight : 36)

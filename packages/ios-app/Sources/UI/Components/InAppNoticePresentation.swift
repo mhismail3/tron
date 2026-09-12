@@ -14,10 +14,12 @@ struct InAppNoticeHost: View {
             ZStack(alignment: .topLeading) {
                 InAppNoticeStack(notices: model.visibleNotices, reduceMotion: reduceMotion)
                     .frame(width: proxy.size.width)
-                    .position(
-                        x: proxy.size.width / 2,
-                        y: toolbarCenterY ?? proxy.safeAreaInsets.top + InAppNoticeLayout.fallbackToolbarHalfHeight
-                    )
+                    // Anchor by the top so multiline cards grow downward,
+                    // rather than moving their first line into the status area.
+                    .offset(y: InAppNoticeLayout.topEdge(
+                        safeAreaTop: proxy.safeAreaInsets.top,
+                        toolbarCenterY: toolbarCenterY
+                    ))
                 NoticeToolbarAlignmentReader { centerY in
                     guard toolbarCenterY.map({ abs($0 - centerY) > 0.5 }) ?? true else { return }
                     toolbarCenterY = centerY
@@ -54,21 +56,34 @@ struct InAppNoticeHost: View {
     }
 }
 
-private enum InAppNoticeLayout {
+enum InAppNoticeLayout {
     // Leaves enough room for the shell's leading/trailing toolbar controls.
     static let horizontalControlReservation: CGFloat = 80
     static let fallbackToolbarHalfHeight: CGFloat = 22
+    static let safeAreaSpacing: CGFloat = 8
+
+    /// Uses the compact card height as the toolbar reference. This stays
+    /// stable when the foremost card gains body lines or action rows.
+    static func topEdge(safeAreaTop: CGFloat, toolbarCenterY: CGFloat?) -> CGFloat {
+        let toolbarAlignedTop = (toolbarCenterY ?? safeAreaTop + fallbackToolbarHalfHeight)
+            - fallbackToolbarHalfHeight
+        return max(safeAreaTop + safeAreaSpacing, toolbarAlignedTop)
+    }
 }
 
 enum InAppNoticeSwipePolicy {
     static let dismissalDistance: CGFloat = 36
-    static let horizontalDominance: CGFloat = 1.15
+    static let directionalDominance: CGFloat = 1.15
 
     static func shouldDismiss(translation: CGSize, predicted: CGSize) -> Bool {
         let horizontal = max(abs(translation.width), abs(predicted.width))
+        let upward = max(-translation.height, -predicted.height)
         let vertical = max(abs(translation.height), abs(predicted.height))
-        return horizontal >= dismissalDistance
-            && horizontal > vertical * horizontalDominance
+        let horizontalSwipe = horizontal >= dismissalDistance
+            && horizontal > vertical * directionalDominance
+        let upwardSwipe = upward >= dismissalDistance
+            && upward > horizontal * directionalDominance
+        return horizontalSwipe || upwardSwipe
     }
 }
 
@@ -135,6 +150,7 @@ private struct InAppNoticeCard: View {
     let index: Int
     let reduceMotion: Bool
     @State private var dragX: CGFloat = 0
+    @State private var dragY: CGFloat = 0
     @GestureState private var interactionActive = false
 
     private var accent: Color {
@@ -174,12 +190,12 @@ private struct InAppNoticeCard: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 5) {
                 Text(notice.title)
-                    .font(TronTypography.body.weight(.semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody - 0.5, weight: .semibold))
                     .foregroundStyle(Color.tronTextPrimary)
                     .fixedSize(horizontal: false, vertical: true)
                 if let message = notice.message {
                     Text(message)
-                        .font(TronTypography.bodySM)
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM - 0.5))
                         .foregroundStyle(Color.tronTextSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -194,13 +210,17 @@ private struct InAppNoticeCard: View {
                             }
                         }
                     }
-                    .padding(.top, 3)
+                    // Keep the action row visually close to the copy; the
+                    // label retains its full compact-pill hit target.
+                    .padding(.top, 0)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 18)
-        .padding(.vertical, 12)
+        // Action-bearing cards use a tighter outer inset above and below the
+        // buttons without changing their accessible control geometry.
+        .padding(.vertical, notice.actions.isEmpty ? 12 : 9)
         .frame(maxWidth: 420, minHeight: 44, alignment: .leading)
         .background(
             Color.tronSurfaceElevated.opacity(index == 0 ? 0.88 : 0.76),
@@ -211,7 +231,7 @@ private struct InAppNoticeCard: View {
             in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         )
         .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .offset(x: dragX)
+        .offset(x: dragX, y: dragY)
         .simultaneousGesture(index == 0 ? swipeGesture : nil)
         .allowsHitTesting(index == 0)
         .accessibilityHidden(index != 0)
@@ -236,6 +256,7 @@ private struct InAppNoticeCard: View {
         .onChange(of: index) { _, _ in announceIfNeeded() }
         .onChange(of: notice) { _, _ in
             dragX = 0
+            dragY = 0
             announceIfNeeded()
         }
         .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
@@ -243,12 +264,15 @@ private struct InAppNoticeCard: View {
 
     @ViewBuilder
     private func actionButtons(_ axis: Axis) -> some View {
-        let layout = axis == .horizontal ? AnyLayout(HStackLayout(spacing: 10)) : AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+        let layout = axis == .horizontal
+            ? AnyLayout(HStackLayout(spacing: 8))
+            : AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
         layout {
             ForEach(notice.actions) { action in
                 Button { model.noticeCenter.performAction(action, for: notice.id) } label: {
                     TronInlineActionLabel(
                         action.title,
+                        fontSize: TronTypography.sizeBodySM - 0.5,
                         accent: action.role == .destructive ? .tronError : accent
                     )
                 }
@@ -262,11 +286,18 @@ private struct InAppNoticeCard: View {
         DragGesture(minimumDistance: 12)
             .updating($interactionActive) { _, active, _ in active = true }
             .onChanged { value in
-                guard abs(value.translation.width) > abs(value.translation.height) else {
+                let horizontal = max(abs(value.translation.width), abs(value.predictedEndTranslation.width))
+                let upward = max(-value.translation.height, -value.predictedEndTranslation.height)
+                if horizontal > upward * InAppNoticeSwipePolicy.directionalDominance {
+                    dragX = value.translation.width
+                    dragY = 0
+                } else if upward > horizontal * InAppNoticeSwipePolicy.directionalDominance {
                     dragX = 0
-                    return
+                    dragY = min(0, value.translation.height)
+                } else {
+                    dragX = 0
+                    dragY = 0
                 }
-                dragX = value.translation.width
             }
             .onEnded { value in
                 if InAppNoticeSwipePolicy.shouldDismiss(
@@ -276,8 +307,12 @@ private struct InAppNoticeCard: View {
                     model.noticeCenter.dismiss(notice.id)
                 } else if reduceMotion {
                     dragX = 0
+                    dragY = 0
                 } else {
-                    withAnimation(.smooth(duration: 0.18)) { dragX = 0 }
+                    withAnimation(.smooth(duration: 0.18)) {
+                        dragX = 0
+                        dragY = 0
+                    }
                 }
             }
     }
