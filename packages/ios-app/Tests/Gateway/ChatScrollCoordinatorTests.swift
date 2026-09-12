@@ -1471,8 +1471,8 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.hostedSemanticFrameCount == 0)
     }
 
-    @Test("same-frame marker is re-admitted after an opening layout epoch change")
-    func sameFrameMarkerRevalidatesAfterOpeningProjectionChange() async throws {
+    @Test("opening layout epoch rejects the prior marker until a current callback")
+    func staleMarkerCannotCertifyOpeningProjectionChange() async throws {
         try await withTestWatchdog { @MainActor in
             let frames = ManualViewportFrameScheduler()
             let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
@@ -1488,9 +1488,16 @@ struct ChatScrollCoordinatorTests {
             ))
             #expect(coordinator.physicalTailEvidence == nil)
             coordinator.revalidateTailMarkerAfterLayoutEpoch()
-            #expect(coordinator.physicalTailEvidence?.layoutEpoch == coordinator.layoutEpoch)
-            #expect(coordinator.physicalTailEvidence?.classification == .aligned)
+            #expect(coordinator.physicalTailEvidence == nil)
+
+            // The old marker remains in no owner after the spine advances. A
+            // reveal may observe frames, but cannot settle until a marker from
+            // the new physical layout is delivered.
             coordinator.openingRevealCompleted()
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            await Task.yield()
+            #expect(coordinator.physicalTailEvidence == nil)
             coordinator.cancel()
         }
     }

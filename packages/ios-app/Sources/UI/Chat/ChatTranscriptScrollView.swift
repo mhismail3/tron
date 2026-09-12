@@ -574,10 +574,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         }
         .onChange(of: scrollCoordinator.layoutEpoch) { _, _ in
             guard scrollCoordinator.admitsViewportCallback(capturedActivation: viewportActivation) else { return }
+            // A layout epoch retires every prior marker sample. The next
+            // physical geometry callback must re-admit the marker; reusing the
+            // old frame here can certify an empty pre-projection layout.
             scrollCoordinator.installedLayoutEpochChanged()
-            // A same-frame spine replacement may not produce another
-            // onGeometryChange callback. Re-admit that exact marker only while
-            // the coordinator owns an opening settlement.
             scrollCoordinator.revalidateTailMarkerAfterLayoutEpoch()
         }
         .task(id: lazyTailMaterializationRequest) {
