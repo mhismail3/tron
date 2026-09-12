@@ -498,6 +498,27 @@ struct ChatCompactPillTests {
         }
     }
 
+    @Test("native title measurement promotes only clipped error notices")
+    func titleMeasurementPolicy() {
+        #expect(!ChatCompactPillTitleMeasurement(renderedWidth: 180, intrinsicWidth: 180).isTruncated)
+        #expect(!ChatCompactPillTitleMeasurement(renderedWidth: 180, intrinsicWidth: 180.4).isTruncated)
+        #expect(ChatCompactPillTitleMeasurement(renderedWidth: 180, intrinsicWidth: 181).isTruncated)
+    }
+
+    @Test("truncated errors retain exact detail content before native promotion")
+    func truncatedErrorDetailPolicy() {
+        let raw = "You have hit your provider usage limit. Try again in ~1 hour."
+        let error = ChatNotificationPresentation(
+            id: "error", semanticID: nil, icon: "exclamationmark.triangle.fill",
+            title: "You have hit your provider usage limit…", detail: nil,
+            body: raw, tone: .error, material: .flat, expandsOnTruncation: true
+        )
+        #expect(error.body == raw)
+        #expect(error.expandsOnTruncation)
+        #expect(!error.hasDetailSheet)
+
+    }
+
     @Test("notification material exposes details only through glass buttons")
     func notificationDetailPolicy() {
         let flat = ChatNotificationPresentation(
@@ -517,6 +538,7 @@ struct ChatCompactPillTests {
         #expect(!flat.hasDetailSheet)
         #expect(glass.hasDetailSheet)
         #expect(!emptyGlass.hasDetailSheet)
+        #expect(glass.detailUsesGlassSurface)
     }
 
     private func historyNode(

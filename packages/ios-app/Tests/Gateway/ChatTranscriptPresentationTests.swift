@@ -1552,6 +1552,7 @@ struct ChatTranscriptPresentationTests {
         #expect(compact.id == "notification-compaction-slot-8")
         #expect(compact.material == .glass)
         #expect(compact.hasDetailSheet)
+        #expect(!compact.detailUsesGlassSurface)
         #expect(compact.tone == .accent)
         #expect(model.material == .flat)
         #expect(!model.hasDetailSheet)

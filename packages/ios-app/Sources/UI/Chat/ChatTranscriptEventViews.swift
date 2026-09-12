@@ -33,10 +33,20 @@ struct ChatNotificationView: View {
     @Environment(AppModel.self) private var model
     @State private var showingDetail = false
     @State private var detailID = UUID()
+    @State private var titleMeasurement: ChatCompactPillTitleMeasurement?
+
+    private var showsDetailAction: Bool {
+        presentation.hasDetailSheet
+            || (presentation.expandsOnTruncation && titleMeasurement?.isTruncated == true)
+    }
+
+    private var resolvedMaterial: ChatNotificationMaterial {
+        showsDetailAction ? .glass : presentation.material
+    }
 
     var body: some View {
         Group {
-            if presentation.hasDetailSheet {
+            if showsDetailAction {
                 pill
                     .chatCompactPillInteraction(
                         accessibilityLabel: accessibilityLabel,
@@ -49,6 +59,7 @@ struct ChatNotificationView: View {
                     // Preserve the 44-point semantic row target without making
                     // its empty corners compete with the glass surface gesture.
                     .frame(minWidth: 44, minHeight: 44)
+                    .accessibilityHint("Shows the full error message")
             } else {
                 pill
             }
@@ -56,6 +67,14 @@ struct ChatNotificationView: View {
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
         .contentTransition(.interpolate)
         .accessibilityLabel(accessibilityLabel)
+        .onPreferenceChange(ChatCompactPillTitleMeasurementKey.self) { measurements in
+            let rendered = measurements.first(where: { $0.renderedWidth > 0 })?.renderedWidth
+            let intrinsic = measurements.first(where: { $0.intrinsicWidth > 0 })?.intrinsicWidth
+            guard let rendered, let intrinsic else { return }
+            let next = ChatCompactPillTitleMeasurement(renderedWidth: rendered, intrinsicWidth: intrinsic)
+            guard titleMeasurement != next else { return }
+            titleMeasurement = next
+        }
         .tronManagedSheet(
             isPresented: $showingDetail,
             identity: "chat.transcript-event-detail"
@@ -65,8 +84,8 @@ struct ChatNotificationView: View {
     private var pill: some View {
         ChatCompactPillSurface(
             tone: presentation.tone,
-            material: presentation.material,
-            interactive: presentation.hasDetailSheet
+            material: resolvedMaterial,
+            interactive: showsDetailAction
         ) {
             ChatCompactPillLabel(
                 icon: presentation.icon,
@@ -96,7 +115,10 @@ struct ChatNotificationView: View {
                     if let body = presentation.body {
                         ChatPreparedMarkdownDetail(text: body, detailID: detailID)
                             .padding(14)
-                            .tronGlassSurface(accent: presentation.tone.surfaceColor, tintOpacity: 0.08)
+                            .modifier(DetailBodySurface(
+                                usesGlass: presentation.detailUsesGlassSurface,
+                                accent: presentation.tone.surfaceColor
+                            ))
                     }
                 }
                 .padding(18)
@@ -122,6 +144,20 @@ struct ChatNotificationView: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
+    }
+}
+
+private struct DetailBodySurface: ViewModifier {
+    let usesGlass: Bool
+    let accent: Color
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if usesGlass {
+            content.tronGlassSurface(accent: accent, tintOpacity: 0.08)
+        } else {
+            content
+        }
     }
 }
 
@@ -167,8 +203,10 @@ private struct ChatPreparedMarkdownDetail: View {
 struct TranscriptNotice: View {
     let title: String
     var value: String? = nil
+    var detailBody: String? = nil
     let icon: String
     let tone: ChatNotificationTone
+    var expandsOnTruncation = false
     var animatesEntrance = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var revealed: Bool
@@ -176,14 +214,18 @@ struct TranscriptNotice: View {
     init(
         title: String,
         value: String? = nil,
+        detailBody: String? = nil,
         icon: String,
         tone: ChatNotificationTone,
+        expandsOnTruncation: Bool = false,
         animatesEntrance: Bool = false
     ) {
         self.title = title
         self.value = value
+        self.detailBody = detailBody
         self.icon = icon
         self.tone = tone
+        self.expandsOnTruncation = expandsOnTruncation
         self.animatesEntrance = animatesEntrance
         _revealed = State(initialValue: !animatesEntrance)
     }
@@ -191,7 +233,8 @@ struct TranscriptNotice: View {
     var body: some View {
         ChatNotificationView(presentation: .init(
             id: "embedded-notice", semanticID: nil, icon: icon, title: title,
-            detail: value, body: nil, tone: tone, material: .flat
+            detail: value, body: detailBody, tone: tone,
+            material: .flat, expandsOnTruncation: expandsOnTruncation
         ))
         .opacity(revealed ? 1 : 0)
         .scaleEffect(revealed || reduceMotion ? 1 : 0.98)

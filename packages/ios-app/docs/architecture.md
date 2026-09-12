@@ -734,7 +734,7 @@ immutable source document and one cancellation-drained parser for the active det
 last complete document during replacement, and publishes only when the exact route, activity, and
 preparation generation remain current. Its mounted callback is diagnostic evidence of attachment, not
 proof of a rendered frame; native sheet chrome, detents, selection, and Markdown layout remain owned
-by the existing detail view. Any streaming fragment carrying a tool-call ID—including malformed text or extension content—is
+by the existing detail view. Compaction summary details keep this full Markdown content in a plain, non-glass container. Provider error footers retain their exact raw message as detail content; native title measurement promotes only a clipped footer to an interactive Liquid Glass surface, while short errors remain flat. Any streaming fragment carrying a tool-call ID—including malformed text or extension content—is
 returned to global assembly so canonical result suppression and placement remain exact.
 Assembler-emitted unique tool sites retain canonical presentation bases, call classification, group
 order, and placement facts. Runtime-only patching requires unchanged canonical source, exact streaming,

@@ -77,6 +77,23 @@ enum ChatSemanticPillRole: Hashable, Sendable {
     }
 }
 
+struct ChatCompactPillTitleMeasurement: Equatable {
+    let renderedWidth: CGFloat
+    let intrinsicWidth: CGFloat
+
+    var isTruncated: Bool {
+        intrinsicWidth > renderedWidth + 0.5
+    }
+}
+
+struct ChatCompactPillTitleMeasurementKey: PreferenceKey {
+    static let defaultValue: [ChatCompactPillTitleMeasurement] = []
+
+    static func reduce(value: inout [ChatCompactPillTitleMeasurement], nextValue: () -> [ChatCompactPillTitleMeasurement]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
 enum ChatCompactPillLayoutPolicy {
     static let horizontalPadding: CGFloat = 10
     static let verticalPadding: CGFloat = 6
@@ -348,6 +365,34 @@ struct ChatCompactPillLabel<Trailing: View>: View {
                 .foregroundStyle(tone.primaryColor)
                 .lineLimit(1)
                 .truncationMode(.tail)
+                .background {
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: ChatCompactPillTitleMeasurementKey.self,
+                            value: [ChatCompactPillTitleMeasurement(
+                                renderedWidth: proxy.size.width,
+                                intrinsicWidth: 0
+                            )]
+                        )
+                    }
+                }
+                .overlay(alignment: .leading) {
+                    Text(title)
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: titleWeight))
+                        .fixedSize(horizontal: true, vertical: false)
+                        .hidden()
+                        .background {
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: ChatCompactPillTitleMeasurementKey.self,
+                                    value: [ChatCompactPillTitleMeasurement(
+                                        renderedWidth: 0,
+                                        intrinsicWidth: proxy.size.width
+                                    )]
+                                )
+                            }
+                        }
+                }
             if let detail, !detail.isEmpty {
                 Text(detail)
                     .font(detailStyle == .summary

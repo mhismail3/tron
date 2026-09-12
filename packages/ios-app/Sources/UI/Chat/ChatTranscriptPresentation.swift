@@ -1441,6 +1441,37 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
     let body: String?
     let tone: ChatNotificationTone
     let material: ChatNotificationMaterial
+    /// Error footers can remain flat until native layout confirms their title
+    /// is clipped. Only then does the owning view promote them to a detail
+    /// action; ordinary status notifications never become interactive.
+    let expandsOnTruncation: Bool
+    /// Compaction summaries remain interactive, but their long-form sheet
+    /// content is intentionally plain rather than another glass container.
+    let detailUsesGlassSurface: Bool
+
+    init(
+        id: String,
+        semanticID: String?,
+        icon: String,
+        title: String,
+        detail: String?,
+        body: String?,
+        tone: ChatNotificationTone,
+        material: ChatNotificationMaterial,
+        expandsOnTruncation: Bool = false,
+        detailUsesGlassSurface: Bool = true
+    ) {
+        self.id = id
+        self.semanticID = semanticID
+        self.icon = icon
+        self.title = title
+        self.detail = detail
+        self.body = body
+        self.tone = tone
+        self.material = material
+        self.expandsOnTruncation = expandsOnTruncation
+        self.detailUsesGlassSurface = detailUsesGlassSurface
+    }
 
     var hasDetailSheet: Bool { material == .glass && body?.isEmpty == false }
     var showsProgress: Bool {
@@ -1486,14 +1517,18 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
                 detail: item.tokensBefore.map(ChatTokenCountPresentation.beforeCompaction),
                 body: admittedSummary,
                 tone: .accent,
-                material: admittedSummary == nil ? .flat : .glass
+                material: admittedSummary == nil ? .flat : .glass,
+                expandsOnTruncation: false,
+                detailUsesGlassSurface: false
             )
         case .branchSummary:
             return ChatNotificationPresentation(
                 id: "notification-\(item.id)", semanticID: item.id,
                 icon: "arrow.triangle.branch", title: "Branch summary",
                 detail: nil, body: admittedSummary, tone: .accent,
-                material: admittedSummary == nil ? .flat : .glass
+                material: admittedSummary == nil ? .flat : .glass,
+                expandsOnTruncation: false,
+                detailUsesGlassSurface: true
             )
         case .modelChange:
             return ChatNotificationPresentation(
