@@ -272,7 +272,17 @@ final class AppModel {
     private var extensionEditorSyncGenerations: [SessionPresentationIdentity: Int] = [:]
     private var extensionEditorOperationReceipts: [SessionPresentationIdentity: [String]] = [:]
     private var deviceLoadGeneration = 0
-    private var catalogRefreshTask: Task<SessionCatalogRefreshOutcome, Never>?
+    private struct CatalogRefreshLeaseResult: Sendable {
+        let outcome: SessionCatalogRefreshOutcome
+        let genuineFailure: Bool
+    }
+
+    private struct CatalogTraversalResult: Sendable {
+        let outcome: SessionCatalogRefreshOutcome
+        let genuineFailure: Bool
+    }
+
+    private var catalogRefreshTask: Task<CatalogRefreshLeaseResult, Never>?
     var sessionCatalogIsLoading: Bool { catalogRefreshTask != nil }
     private var catalogRefreshKey: SessionCatalogLoadKey?
     private var catalogRefreshRequestGeneration = 0
@@ -1317,11 +1327,11 @@ final class AppModel {
     @discardableResult
     func refreshSessions() async -> SessionCatalogRefreshOutcome {
         guard let task = scheduleCatalogRefresh() else { return .retained }
-        return await task.value
+        return await task.value.outcome
     }
 
     @discardableResult
-    private func scheduleCatalogRefresh() -> Task<SessionCatalogRefreshOutcome, Never>? {
+    private func scheduleCatalogRefresh() -> Task<CatalogRefreshLeaseResult, Never>? {
         guard !Task.isCancelled, let key = currentCatalogLoadKey() else { return nil }
         prepareCatalogOwner(key)
         guard catalogRefreshFailedAttempts < DashboardCatalogRetryPolicy.maximumFailedAttempts else { return nil }
@@ -1338,13 +1348,13 @@ final class AppModel {
 
     private func retryCatalog(ownedBy key: SessionCatalogLoadKey) async -> SessionCatalogRefreshOutcome {
         guard !Task.isCancelled, currentCatalogLoadKey() == key else { return .retained }
-        if let task = catalogRefreshTask, catalogRefreshKey == key { return await task.value }
+        if let task = catalogRefreshTask, catalogRefreshKey == key { return await task.value.outcome }
         catalogRefreshFailedAttempts = 0
         catalogRefreshRetryAttempt = 0
         catalogFailureOwner = key
         removeNotice(.sessionCatalogCatchUp, scope: .app)
         catalogInvalidationGeneration &+= 1
-        return await startCatalogRefresh(key: key).value
+        return await startCatalogRefresh(key: key).value.outcome
     }
 
     private func prepareCatalogOwner(_ key: SessionCatalogLoadKey) {
@@ -1383,14 +1393,20 @@ final class AppModel {
     private func startCatalogRefresh(
         key: SessionCatalogLoadKey,
         delay: Duration = .zero
-    ) -> Task<SessionCatalogRefreshOutcome, Never> {
+    ) -> Task<CatalogRefreshLeaseResult, Never> {
         prepareCatalogOwner(key)
         catalogRefreshRequestGeneration &+= 1
         let requestGeneration = catalogRefreshRequestGeneration
-        let task = Task<SessionCatalogRefreshOutcome, Never> { @MainActor [weak self] in
-            guard let self else { return SessionCatalogRefreshOutcome.retained }
-            do { try await self.clock.sleep(delay) } catch { return .retained }
-            let outcome = await self.runCatalogRefreshLease(key: key, requestGeneration: requestGeneration)
+        let task = Task<CatalogRefreshLeaseResult, Never> { @MainActor [weak self] in
+            guard let self else {
+                return CatalogRefreshLeaseResult(outcome: .retained, genuineFailure: false)
+            }
+            do {
+                try await self.clock.sleep(delay)
+            } catch {
+                return CatalogRefreshLeaseResult(outcome: .retained, genuineFailure: false)
+            }
+            let result = await self.runCatalogRefreshLease(key: key, requestGeneration: requestGeneration)
             if self.catalogRefreshRequestGeneration == requestGeneration,
                self.catalogRefreshKey == key {
                 let needsFollowUp = self.catalogDeferredFollowUpKey == key
@@ -1399,13 +1415,17 @@ final class AppModel {
                 self.catalogRefreshTask = nil
                 self.catalogRefreshKey = nil
                 if self.currentCatalogLoadKey() == key {
-                    if needsFollowUp && outcome == .published {
+                    if needsFollowUp && result.outcome == .published {
                         _ = self.startCatalogRefresh(key: key)
                     } else {
-                        if outcome == .published {
+                        if result.outcome == .published {
                             self.catalogRefreshFailedAttempts = 0
                             self.removeNotice(.sessionCatalogCatchUp, scope: .app)
-                        } else if outcome == .retained {
+                        } else if result.genuineFailure {
+                            // Only a current-owner request failure consumes the
+                            // warning budget. Stale admission, cancellation,
+                            // and revision churn intentionally retain the last
+                            // complete projection without surfacing a warning.
                             self.catalogRefreshFailedAttempts = min(
                                 DashboardCatalogRetryPolicy.maximumFailedAttempts,
                                 self.catalogRefreshFailedAttempts + 1
@@ -1414,13 +1434,14 @@ final class AppModel {
                         guard DashboardCatalogRetryPolicy.shouldRetry(
                             isDirty: remainsDirty,
                             isCurrent: true,
-                            transportFailed: outcome == .transportFailure,
+                            transportFailed: result.outcome == .transportFailure,
                             failedAttempts: self.catalogRefreshFailedAttempts
                         ) else {
-                            if self.catalogRefreshFailedAttempts >= DashboardCatalogRetryPolicy.maximumFailedAttempts {
+                            if result.genuineFailure,
+                               self.catalogRefreshFailedAttempts >= DashboardCatalogRetryPolicy.maximumFailedAttempts {
                                 self.showCatalogFailure(ownedBy: key)
                             }
-                            return outcome
+                            return result
                         }
                         self.catalogRefreshRetryAttempt = min(3, self.catalogRefreshRetryAttempt + 1)
                         _ = self.startCatalogRefresh(
@@ -1430,7 +1451,7 @@ final class AppModel {
                     }
                 }
             }
-            return outcome
+            return result
         }
         catalogRefreshKey = key
         catalogRefreshTask = task
@@ -1440,35 +1461,43 @@ final class AppModel {
     private func runCatalogRefreshLease(
         key: SessionCatalogLoadKey,
         requestGeneration: Int
-    ) async -> SessionCatalogRefreshOutcome {
-        var outcome: SessionCatalogRefreshOutcome = .retained
+    ) async -> CatalogRefreshLeaseResult {
+        var result = CatalogRefreshLeaseResult(outcome: .retained, genuineFailure: false)
+        var observedGenuineFailure = false
         for traversal in 0..<2 {
             let observedInvalidation = catalogInvalidationGeneration
-            outcome = await performCatalogTraversal(key: key, requestGeneration: requestGeneration)
-            guard admitsCatalogRefresh(key: key, requestGeneration: requestGeneration) else { return .retained }
-            if outcome == .published {
+            let traversalResult = await performCatalogTraversal(key: key, requestGeneration: requestGeneration)
+            observedGenuineFailure = observedGenuineFailure || traversalResult.genuineFailure
+            result = CatalogRefreshLeaseResult(
+                outcome: traversalResult.outcome,
+                genuineFailure: observedGenuineFailure
+            )
+            guard admitsCatalogRefresh(key: key, requestGeneration: requestGeneration) else {
+                return CatalogRefreshLeaseResult(outcome: .retained, genuineFailure: false)
+            }
+            if result.outcome == .published {
                 catalogSatisfiedGeneration = max(catalogSatisfiedGeneration, observedInvalidation)
                 catalogRefreshRetryAttempt = 0
                 catalogRefreshFailedAttempts = 0
             }
-            if outcome == .transportFailure { return outcome }
+            if result.outcome == .transportFailure { return result }
             let dirtied = catalogInvalidationGeneration > observedInvalidation
-            guard dirtied else { return outcome }
+            guard dirtied else { return result }
             if traversal == 1 {
                 // Bound immediate catch-up under an event burst. Completion
                 // hands one dirty bit to a new shared lease rather than
                 // spinning forever inside this owner.
                 catalogDeferredFollowUpKey = key
-                return outcome
+                return result
             }
         }
-        return outcome
+        return result
     }
 
     private func performCatalogTraversal(
         key: SessionCatalogLoadKey,
         requestGeneration: Int
-    ) async -> SessionCatalogRefreshOutcome {
+    ) async -> CatalogTraversalResult {
         struct Params: Encodable { let cursor: String?; let limit: Int; let scope: String }
         struct Response: Decodable {
             let sessions: [SessionSummary]
@@ -1491,7 +1520,9 @@ final class AppModel {
                 var revisionChanged = false
                 var pageCount = 0
                 repeat {
-                    guard pageCount < maximumPages else { return .retained }
+                    guard pageCount < maximumPages else {
+                        return CatalogTraversalResult(outcome: .retained, genuineFailure: true)
+                    }
                     requestedContinuation = cursor != nil
                     let response: Response = try await client.request(
                         "session.list",
@@ -1500,7 +1531,9 @@ final class AppModel {
                     )
                     pageCount += 1
                     guard admitsCatalogRefresh(key: key, requestGeneration: requestGeneration),
-                          sessionCatalog.admits(loadAdmission, key: key) else { return .retained }
+                          sessionCatalog.admits(loadAdmission, key: key) else {
+                        return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
+                    }
                     if let expectedRevision, expectedRevision != response.listRevision {
                         revisionChanged = true
                         break
@@ -1509,32 +1542,42 @@ final class AppModel {
                     guard response.sessions.count <= pageLimit,
                           all.count <= maximumItems - response.sessions.count,
                           response.sessions.allSatisfy({ seenSessionIDs.insert($0.id).inserted }) else {
-                        return .retained
+                        return CatalogTraversalResult(outcome: .retained, genuineFailure: true)
                     }
                     all.append(contentsOf: response.sessions)
                     cursor = response.nextCursor
-                    if let cursor, !seenCursors.insert(cursor).inserted { return .retained }
+                    if let cursor, !seenCursors.insert(cursor).inserted {
+                        return CatalogTraversalResult(outcome: .retained, genuineFailure: true)
+                    }
                 } while cursor != nil
 
                 if revisionChanged {
                     if revisionAttempt == 0 { continue }
-                    return .retained
+                    // A moving catalog is a benign convergence result. The
+                    // next invalidation owns the subsequent bounded refresh.
+                    return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
                 }
-                guard sessionCatalog.publishAuthoritative(all, admission: loadAdmission) else { return .retained }
+                guard sessionCatalog.publishAuthoritative(all, admission: loadAdmission) else {
+                    return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
+                }
                 reconcileSelection()
                 installSelectedDashboardCatalog()
                 scheduleCacheCheckpoint()
-                return .published
+                return CatalogTraversalResult(outcome: .published, genuineFailure: false)
             } catch is CancellationError {
-                return .retained
+                return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
             } catch let failure as GatewayFailure
                 where requestedContinuation && failure.code == "invalid_request" && revisionAttempt == 0 {
                 guard admitsCatalogRefresh(key: key, requestGeneration: requestGeneration),
-                      sessionCatalog.admits(loadAdmission, key: key) else { return .retained }
+                      sessionCatalog.admits(loadAdmission, key: key) else {
+                    return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
+                }
                 continue
             } catch {
                 guard admitsCatalogRefresh(key: key, requestGeneration: requestGeneration),
-                      sessionCatalog.admits(loadAdmission, key: key) else { return .retained }
+                      sessionCatalog.admits(loadAdmission, key: key) else {
+                    return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
+                }
                 let outcome = Self.catalogFailureOutcome(error)
                 let activeConnectionID = await client.activeConnectionID()
                 if outcome == .transportFailure,
@@ -1542,12 +1585,12 @@ final class AppModel {
                     // An RPC timeout or application-level "disconnected" error
                     // does not prove that the shared WebSocket epoch died.
                     // Transport receive failure owns epoch retirement.
-                    return .retained
+                    return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
                 }
-                return outcome
+                return CatalogTraversalResult(outcome: outcome, genuineFailure: true)
             }
         }
-        return .retained
+        return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
     }
 
     private func admitsCatalogRefresh(

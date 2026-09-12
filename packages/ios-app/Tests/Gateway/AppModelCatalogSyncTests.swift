@@ -188,6 +188,64 @@ struct AppModelCatalogSyncTests {
         }
     }
 
+    @Test("subagent-driven catalog churn never consumes the failure budget")
+    func subagentCatalogChurnDoesNotSurfaceUnavailable() async throws {
+        try await withHarness { harness in
+            harness.model.sessions = [summary(id: "retained", revision: 1)]
+            // A subagent can invalidate the Gateway's structural generation while
+            // the user-scoped lease is being read. The Gateway pins continuation
+            // pages, but this also protects iOS from a moving older peer. Three
+            // mixed-revision passes must remain benign rather than exhausting the
+            // actionable failure budget.
+            for cycle in 0..<3 {
+                await harness.model.handle(GatewayEvent(
+                    type: "event", topic: "session.listChanged", sessionId: nil,
+                    payload: .object(["source": .string("active-subagent")])
+                ))
+                let loading = Task { await harness.model.refreshSessions() }
+                let first = try await request(harness.socket, index: cycle * 4 + 1)
+                await harness.socket.enqueue(response(
+                    id: first.id,
+                    sessions: [summary(id: "partial-\(cycle)", revision: 1)],
+                    listRevision: cycle * 4 + 1,
+                    nextCursor: "cursor-\(cycle)"
+                ))
+                let continuation = try await request(harness.socket, index: cycle * 4 + 2)
+                await harness.socket.enqueue(response(
+                    id: continuation.id,
+                    sessions: [summary(id: "partial-tail-\(cycle)", revision: 1)],
+                    listRevision: cycle * 4 + 2
+                ))
+                let retryFirst = try await request(harness.socket, index: cycle * 4 + 3)
+                await harness.socket.enqueue(response(
+                    id: retryFirst.id,
+                    sessions: [summary(id: "retry-\(cycle)", revision: 1)],
+                    listRevision: cycle * 4 + 3,
+                    nextCursor: "retry-cursor-\(cycle)"
+                ))
+                let retryContinuation = try await request(harness.socket, index: cycle * 4 + 4)
+                await harness.socket.enqueue(response(
+                    id: retryContinuation.id,
+                    sessions: [summary(id: "retry-tail-\(cycle)", revision: 1)],
+                    listRevision: cycle * 4 + 4
+                ))
+                #expect(await loading.value == .retained)
+                #expect(harness.model.visibleNotices.isEmpty)
+            }
+
+            let recovery = Task { await harness.model.refreshSessions() }
+            let request = try await request(harness.socket, index: 13)
+            await harness.socket.enqueue(response(
+                id: request.id,
+                sessions: [summary(id: "recovered", revision: 1)],
+                listRevision: 20
+            ))
+            #expect(await recovery.value == .published)
+            #expect(harness.model.sessions.map(\.id) == ["recovered"])
+            #expect(harness.model.visibleNotices.isEmpty)
+        }
+    }
+
     @Test("catalog traversal rejects oversized pages and duplicate identities without publication")
     func traversalBounds() async throws {
         try await withHarness { harness in
