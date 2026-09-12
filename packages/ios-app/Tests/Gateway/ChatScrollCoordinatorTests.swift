@@ -1498,6 +1498,9 @@ struct ChatScrollCoordinatorTests {
             frames.releaseNext()
             await Task.yield()
             #expect(coordinator.physicalTailEvidence == nil)
+            let reasons = coordinator.openingFailureReasons()
+            #expect(reasons.contains(.markerEpoch))
+            #expect(reasons.contains(.frameStability))
             coordinator.cancel()
         }
     }
