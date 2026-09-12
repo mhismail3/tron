@@ -399,10 +399,12 @@ export class RuntimeRegistry {
   }>();
   private readonly mutex = new AsyncMutex();
   /** Shares one authoritative materialization across concurrent callers. The
-   * promise is disposable and keyed by the structural/invalidation generation;
-   * canonical evidence still gates every publication. */
+   * promise is disposable; canonical evidence still gates every publication.
+   * An all-scope flight can also satisfy a user-scope caller, while an all-scope
+   * caller waits for (rather than overlaps) an existing user flight. */
   private catalogMaterializationPromise: Promise<Awaited<ReturnType<RuntimeRegistry["materializeCatalogSnapshot"]>>> | undefined;
-  private catalogMaterializationKey: string | undefined;
+  private catalogMaterializationScope: "user" | "all" | undefined;
+  private catalogMaterializationGeneration: string | undefined;
   /** One bounded structural walk can serve catalog and acquisition callers.
    * `refresh` is reserved for a post-materialization stability check. */
   private catalogEvidencePromise: Promise<CatalogStructureEvidence> | undefined;
@@ -1314,7 +1316,7 @@ export class RuntimeRegistry {
     }
   }
 
-  private async sessionInfos() {
+  private async sessionInfos(scope: "user" | "all" = "all") {
     const limits = this.catalogDiscoveryLimits();
     const catalogRoot = await realpath(resolve(this.catalogDirectory())).catch(() => resolve(this.catalogDirectory()));
     const pending = [catalogRoot];
@@ -1361,7 +1363,13 @@ export class RuntimeRegistry {
 
       // RuntimeRegistry owns recursion and uses a bounded metadata scanner here;
       // the SDK list helper also builds an unused transcript-wide search string.
-      const discovered = await buildCatalogSessionInfos(files);
+      // User lists never expose delegated sessions, so their metadata is not
+      // needed to build the response. Structural evidence still walks every
+      // path and all-scope materialization remains strict over the whole tree.
+      const metadataFiles = scope === "user"
+        ? files.filter((file) => this.delegatedTopologyParentPath(file, catalogRoot) === undefined)
+        : files;
+      const discovered = await buildCatalogSessionInfos(metadataFiles);
       if (sessions.length + discovered.length > limits.maximumSessions) this.catalogCapacityExceeded();
       for (const session of discovered) {
         retainedBytes += Buffer.byteLength(JSON.stringify(session));
@@ -1594,10 +1602,13 @@ export class RuntimeRegistry {
     };
   }
 
-  private sharedCatalogSessionInfos(refresh = false): Promise<CatalogSessionInfo[]> {
-    const key = `${this.catalogStructuralGeneration}:${this.catalogAcquisitionInvalidationGeneration}:${refresh ? `refresh:${++this.catalogEvidenceRefresh}` : "current"}`;
+  private sharedCatalogSessionInfos(
+    scope: "user" | "all" = "all",
+    refresh = false,
+  ): Promise<CatalogSessionInfo[]> {
+    const key = `${this.catalogStructuralGeneration}:${this.catalogAcquisitionInvalidationGeneration}:${scope}:${refresh ? `refresh:${++this.catalogEvidenceRefresh}` : "current"}`;
     if (!refresh && this.catalogSessionInfosPromise && this.catalogSessionInfosKey === key) return this.catalogSessionInfosPromise;
-    const operation = this.sessionInfos();
+    const operation = this.sessionInfos(scope);
     this.catalogSessionInfosPromise = operation;
     this.catalogSessionInfosKey = key;
     void operation.finally(() => {
@@ -1625,28 +1636,34 @@ export class RuntimeRegistry {
     return operation;
   }
 
-  private sharedCatalogMaterialization(scope: "user" | "all"): Promise<Awaited<ReturnType<RuntimeRegistry["materializeCatalogSnapshot"]>>> {
-    const key = `${this.catalogStructuralGeneration}:${this.catalogAcquisitionInvalidationGeneration}:${scope}`;
-    if (this.catalogMaterializationPromise && this.catalogMaterializationKey === key) {
-      return this.catalogMaterializationPromise;
+  private async sharedCatalogMaterialization(
+    scope: "user" | "all",
+  ): Promise<Awaited<ReturnType<RuntimeRegistry["materializeCatalogSnapshot"]>>> {
+    const generation = `${this.catalogStructuralGeneration}:${this.catalogAcquisitionInvalidationGeneration}`;
+    const active = this.catalogMaterializationPromise;
+    if (active) {
+      // The full result contains the user result, so it is safe to share in
+      // that direction. A generation change invalidates the result even while
+      // it is in flight; wait for it to retire before starting the fresh cut so
+      // retries cannot overlap another recursive walk.
+      if (this.catalogMaterializationGeneration === generation
+        && (this.catalogMaterializationScope === "all" || scope === "user")) return active;
+      try { await active; } catch { /* the waiting caller starts the required attempt */ }
+      return this.sharedCatalogMaterialization(scope);
     }
+
     const operation = this.materializeCatalogSnapshot(scope);
-    const settled = operation.then((value) => {
-      if (this.catalogMaterializationKey === key) {
+    this.catalogMaterializationPromise = operation;
+    this.catalogMaterializationScope = scope;
+    this.catalogMaterializationGeneration = generation;
+    void operation.finally(() => {
+      if (this.catalogMaterializationPromise === operation) {
         this.catalogMaterializationPromise = undefined;
-        this.catalogMaterializationKey = undefined;
+        this.catalogMaterializationScope = undefined;
+        this.catalogMaterializationGeneration = undefined;
       }
-      return value;
-    }, (error) => {
-      if (this.catalogMaterializationKey === key) {
-        this.catalogMaterializationPromise = undefined;
-        this.catalogMaterializationKey = undefined;
-      }
-      throw error;
-    });
-    this.catalogMaterializationPromise = settled;
-    this.catalogMaterializationKey = key;
-    return settled;
+    }).catch(() => {});
+    return operation;
   }
 
   private async loadDurableCatalogIndex(): Promise<void> {
@@ -1799,6 +1816,10 @@ export class RuntimeRegistry {
       structuralGeneration: materialized.structuralGeneration,
       invalidationGeneration: materialized.invalidationGeneration,
     };
+    // A user cut can still be exact when the structural evidence contains no
+    // delegated session paths. In that case it is safe to retain as the
+    // process-wide index; otherwise the omitted delegated rows must force an
+    // all-scope materialization before indexing.
     const indexIsExact = materialized.after.complete
       && materialized.after.identitiesByPath.size === materialized.allInfos.length
       && materialized.allInfos.every((info) => {
@@ -1815,16 +1836,22 @@ export class RuntimeRegistry {
       };
     }
     // No await may separate the final generation confirmation from publication
-    // of catalog identity and its matching revision.
-    this.updateCatalogIdentity(materialized.allInfos, ambiguousIDs);
-    // Persistence is acceleration only. Failure leaves the in-memory canonical
-    // projection usable and is reported by the index owner without affecting
-    // authority or list success.
-    void this.persistDurableCatalogIndex(
-      materialized.allInfos,
-      materialized.structuralGeneration,
-      materialized.invalidationGeneration,
-    ).catch(() => {});
+    // of catalog identity and its matching revision. A user-scoped cut is only
+    // allowed to update process-wide identity when structural evidence proves
+    // it included every session; all-scope cuts update identity even when a
+    // duplicate makes the index ineligible, so live acquisition fails closed.
+    if (scope === "all" || indexIsExact) this.updateCatalogIdentity(materialized.allInfos, ambiguousIDs);
+    if (indexIsExact) {
+      // Persistence is acceleration only. Failure leaves the canonical in-memory
+      // projection usable and is reported by the index owner without affecting
+      // authority or list success. An omitted delegated cut is never exact, so
+      // it cannot make delegated sessions disappear after restart.
+      void this.persistDurableCatalogIndex(
+        materialized.allInfos,
+        materialized.structuralGeneration,
+        materialized.invalidationGeneration,
+      ).catch(() => {});
+    }
     return {
       infos: [...infos],
       ambiguousIDs,
@@ -1847,7 +1874,11 @@ export class RuntimeRegistry {
     const invalidationGeneration = this.catalogAcquisitionInvalidationGeneration;
     const structuralGeneration = this.catalogStructuralGeneration;
     const before = await this.timedStage("catalog.validate.before", () => this.sharedCatalogStructureEvidence(), stageMetadata);
-    const discoveredInfos = await this.timedStage("catalog.metadata-materialize", () => this.sharedCatalogSessionInfos(), stageMetadata);
+    const discoveredInfos = await this.timedStage(
+      "catalog.metadata-materialize",
+      () => this.sharedCatalogSessionInfos(scope),
+      stageMetadata,
+    );
     const after = await this.timedStage("catalog.validate.after", () => this.sharedCatalogStructureEvidence(true), stageMetadata);
     const allInfos = this.withCatalogEvidence(discoveredInfos, after);
     const ambiguousDiskIDs = this.diskAmbiguousSessionIDs(allInfos);

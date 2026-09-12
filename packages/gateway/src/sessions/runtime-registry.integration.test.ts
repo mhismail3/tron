@@ -243,6 +243,10 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
 
     expect((await cold.list("user")).find((session) => session.id === sessionId))
       .toMatchObject({ creationOrigin: { kind: "automation", automationId } });
+    // A user-scoped cut intentionally omits delegated metadata and is not an
+    // all-scope durable-index candidate. An administrative read establishes the
+    // complete sidecar used by the restart half of this regression.
+    await cold.list("all");
     const indexPath = join(fixture.root, "tron-cold", "gateway", "catalog-metadata-v2.json");
     await waitUntil(() => existsSync(indexPath));
     await cold.dispose();
@@ -1955,6 +1959,73 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
 
     } finally {
       mutateDuringDiscovery = false;
+    }
+  });
+
+  it("scans only canonical user metadata for a user catalog and reserves all-scope indexing", async () => {
+    const fixture = await coldFixture("user-metadata-cut");
+    const parentFile = fixture.manager.getSessionFile()!;
+    const forksDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
+    await mkdir(forksDirectory, { recursive: true });
+    const child = SessionManager.forkFrom(parentFile, fixture.cwd, forksDirectory);
+    child.appendMessage(fauxAssistantMessage("delegated body that user catalog must not materialize"));
+
+    const internals = fixture.registry as unknown as {
+      sessionInfos: (scope?: "user" | "all") => Promise<unknown[]>;
+    };
+    const scanner = vi.spyOn(internals, "sessionInfos");
+    try {
+      const user = await fixture.registry.catalog("user");
+      expect(user.sessions.map((session) => session.id)).toEqual([fixture.manager.getSessionId()]);
+      expect(scanner).toHaveBeenCalledWith("user");
+      expect(scanner).toHaveBeenCalledTimes(1);
+
+      // A user cut is deliberately not persisted as the complete sidecar. The
+      // all-scope route still discovers and retains the delegated row.
+      const all = await fixture.registry.catalog("all");
+      expect(all.sessions.map((session) => session.id)).toEqual(
+        expect.arrayContaining([fixture.manager.getSessionId(), child.getSessionId()]),
+      );
+      expect(scanner).toHaveBeenLastCalledWith("all");
+    } finally {
+      scanner.mockRestore();
+    }
+  });
+
+  it("serializes an all-scope materialization behind an active user flight", async () => {
+    const fixture = await coldFixture("catalog-flight-ownership");
+    const parentFile = fixture.manager.getSessionFile()!;
+    const forksDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
+    await mkdir(forksDirectory, { recursive: true });
+    const child = SessionManager.forkFrom(parentFile, fixture.cwd, forksDirectory);
+    child.appendMessage(fauxAssistantMessage("delegated flight fixture"));
+    const internals = fixture.registry as unknown as {
+      sessionInfos: (scope?: "user" | "all") => Promise<unknown[]>;
+    };
+    const original = internals.sessionInfos.bind(fixture.registry);
+    let entered!: () => void;
+    let release!: () => void;
+    const enteredScan = new Promise<void>((resolve) => { entered = resolve; });
+    const barrier = new Promise<void>((resolve) => { release = resolve; });
+    const scanner = vi.spyOn(internals, "sessionInfos").mockImplementation(async (scope) => {
+      if (scanner.mock.calls.length === 1) {
+        entered();
+        await barrier;
+      }
+      return original(scope);
+    });
+    try {
+      const user = fixture.registry.catalog("user");
+      await enteredScan;
+      const all = fixture.registry.catalog("all");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(scanner).toHaveBeenCalledTimes(1);
+      release();
+      await Promise.all([user, all]);
+      expect(scanner.mock.calls.map(([scope]) => scope)).toEqual(["user", "all"]);
+    } finally {
+      release();
+      scanner.mockRestore();
     }
   });
 
