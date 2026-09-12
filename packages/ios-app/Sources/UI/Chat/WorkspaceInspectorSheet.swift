@@ -440,15 +440,17 @@ struct WorkspaceInspectorSheet: View {
                         .font(TronTypography.bodySM)
                         .foregroundStyle(Color.tronTextPrimary)
                         .lineLimit(1)
-                    HStack(spacing: 6) {
-                        if let size = entry.size { Text(size.formatted(.byteCount(style: .file))) }
-                        if let change = owner.changesByPath[entry.path] {
-                            Text(changeLabel(change)).foregroundStyle(change.conflicted ? Color.tronError : Color.tronAmber)
+                    if entry.size != nil || owner.changesByPath[entry.path] != nil || entry.kind == .symlink {
+                        HStack(spacing: 6) {
+                            if let size = entry.size { Text(size.formatted(.byteCount(style: .file))) }
+                            if let change = owner.changesByPath[entry.path] {
+                                Text(changeLabel(change)).foregroundStyle(change.conflicted ? Color.tronError : Color.tronAmber)
+                            }
+                            if entry.kind == .symlink { Text("Symbolic link") }
                         }
-                        if entry.kind == .symlink { Text("Symbolic link") }
+                        .font(TronTypography.caption)
+                        .foregroundStyle(Color.tronTextMuted)
                     }
-                    .font(TronTypography.caption)
-                    .foregroundStyle(Color.tronTextMuted)
                 }
                 Spacer(minLength: 8)
             }

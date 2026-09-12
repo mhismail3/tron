@@ -1078,7 +1078,10 @@ queue projection and replacement; older count-only snapshots still open the expl
 attachment retains its exact bytes only until its frozen handoff strips them. Image and file sheets
 share the same single exact preview flight and priority work slot; full payloads never enter a second cache.
 Markdown is parsed off-main into the established immutable document, plain/code text uses the native selectable
-read-only view, and a Unicode-safe 320,000-byte prefix explicitly marks omission. PDFKit validates off-main and
+read-only view, and a Unicode-safe 320,000-byte prefix explicitly marks omission. Native selectable readers use the
+same soft scroll-edge and progressive top-blur contract as Markdown, including JSON and code sheets; the shared
+surface applies the edge effect to UIKit-backed scroll owners rather than adding a second opaque toolbar layer.
+PDFKit validates off-main and
 presents native vertically scrolling pages, capped at 512 pages. Unsupported, invalid, missing, or pathological files
 mount a concise unavailable state rather than conditional empty sheet content. Full-preview ImageIO decode applies
 orientation and downsamples before publication to at most 4,096 pixels on either axis and 64 MiB of decoded rows,
