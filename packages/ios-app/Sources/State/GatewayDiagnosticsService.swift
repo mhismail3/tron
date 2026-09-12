@@ -644,7 +644,7 @@ actor IOSClientDiagnosticStore {
         guard value.profileID.hasSuffix(":ios-client"), value.profileID.utf8.count <= 267,
               value.profileID.unicodeScalars.allSatisfy({ CharacterSet.alphanumerics.contains($0) || $0 == ":" || $0 == "_" || $0 == "-" }),
               value.profileLabel.utf8.count <= 512,
-              ["gateway.response.invalid", "gateway.connection", "gateway.client-work", "gateway.lifecycle", "gateway.rpc", "gateway.catalog"].contains(value.record.event),
+              ["gateway.response.invalid", "gateway.connection", "gateway.client-work", "gateway.lifecycle", "gateway.rpc", "gateway.catalog", "ios.metrickit"].contains(value.record.event),
               value.record.source == "ios-client",
               ["info", "warning", "error"].contains(value.record.level),
               value.record.message.utf8.count <= 2_000,

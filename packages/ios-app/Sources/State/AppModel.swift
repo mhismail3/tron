@@ -168,6 +168,7 @@ final class AppModel {
     let workspaceInspection: WorkspaceInspectionService
     @ObservationIgnored private var iosClientDiagnostics = IOSClientDiagnosticBuffer()
     private let diagnosticStore: IOSClientDiagnosticStore?
+    private let metricKitDiagnostics: IOSMetricKitDiagnostics?
     @ObservationIgnored private var eventConsumerDiagnostics: [String: GatewayEventConsumerDiagnostic] = [:]
     /// Bounded, content-free causal trace for intermittent chat viewport and
     /// opening failures. It is merged into Logs on demand and never persisted.
@@ -532,6 +533,7 @@ final class AppModel {
         self.performanceSignposts = performanceSignposts
         self.exportArtifacts = exportArtifacts
         self.diagnosticStore = diagnosticStore
+        self.metricKitDiagnostics = diagnosticStore.map { IOSMetricKitDiagnostics(store: $0) }
         dashboardConnections.delegate = self
         if let diagnosticStore {
             Task { @MainActor [weak self, diagnosticStore] in
