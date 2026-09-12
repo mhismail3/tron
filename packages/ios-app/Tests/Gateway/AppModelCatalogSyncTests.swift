@@ -6,16 +6,20 @@ import Testing
 @MainActor
 @Suite("Dashboard catalog synchronization", .serialized)
 struct AppModelCatalogSyncTests {
-    @Test("catalog invalidations and manual refresh stop after three application failures")
-    func catalogFailureAdmissionClosesEveryEntrypoint() async throws {
+    @Test("persistent catalog failures warn without retiring a responsive socket", arguments: [
+        "invalid_dashboard_catalog", "timeout", "disconnected",
+    ])
+    func catalogFailureAdmissionClosesEveryEntrypoint(code: String) async throws {
         let clock = ManualClock()
         try await withHarness(manualClock: clock) { harness in
             for index in 0..<3 {
                 let loading = Task { await harness.model.refreshSessions() }
                 let request = try await request(harness.socket, index: index + 1)
-                await harness.socket.enqueue(errorResponse(id: request.id, code: "invalid_dashboard_catalog"))
+                await harness.socket.enqueue(errorResponse(id: request.id, code: code))
                 #expect(await loading.value == .retained)
+                #expect(await harness.client.activeConnectionID() != nil)
                 if index < 2 {
+                    #expect(!harness.model.visibleNotices.contains { $0.replacement?.key == .sessionCatalogCatchUp })
                     let delay: Duration = index == 0 ? .seconds(2) : .seconds(4)
                     try await clock.waitUntilSleeping(count: 1, duration: delay)
                     clock.advance(by: delay)

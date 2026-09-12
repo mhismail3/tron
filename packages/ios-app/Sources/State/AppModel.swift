@@ -1590,8 +1590,9 @@ final class AppModel {
                    activeConnectionID == key.connectionID {
                     // An RPC timeout or application-level "disconnected" error
                     // does not prove that the shared WebSocket epoch died.
-                    // Transport receive failure owns epoch retirement.
-                    return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
+                    // It still failed this projection read: bounded catalog
+                    // retries/warnings remain independent of epoch retirement.
+                    return CatalogTraversalResult(outcome: .retained, genuineFailure: true)
                 }
                 return CatalogTraversalResult(outcome: outcome, genuineFailure: true)
             }
