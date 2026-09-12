@@ -3,6 +3,8 @@ import Foundation
 /// Copy is a bounded diagnostic projection, never a transcript or credential
 /// export. Profile labels are user-entered text, so use per-copy opaque aliases.
 enum GatewayLogExport {
+    static let maximumUploadBytes = 512 * 1024
+
     static func text(
         records: [GatewayProfileLogRecord],
         metadata: GatewayLogCaptureMetadata,
@@ -34,5 +36,15 @@ enum GatewayLogExport {
             lines.append("\(safe(row.timestamp)) [\(aliases[owner(value.profileID)]!)] [\(safe(row.level.uppercased()))] [\(safe(row.source ?? "unknown"))] [\(safe(row.event ?? "unknown"))] \(safe(row.message))")
         }
         return lines.joined(separator: "\n")
+    }
+
+    /// Keeps the export contract byte-bounded without splitting UTF-8 or
+    /// removing its identifying header.
+    static func uploadText(_ text: String) -> String {
+        guard text.utf8.count > maximumUploadBytes else { return text }
+        let marker = "[diagnostic export truncated at 512 KiB]"
+        let prefixLimit = maximumUploadBytes - marker.utf8.count - 1
+        let prefix = String(decoding: text.utf8.prefix(prefixLimit), as: UTF8.self)
+        return "\(prefix)\n\(marker)"
     }
 }

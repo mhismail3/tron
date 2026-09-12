@@ -29,6 +29,16 @@ struct GatewayLogExportTests {
         }
     }
 
+    @Test("server uploads remain UTF-8 safe and bounded")
+    func uploadBounds() {
+        let source = String(repeating: "é", count: GatewayLogExport.maximumUploadBytes)
+        let upload = GatewayLogExport.uploadText(source)
+        #expect(upload.utf8.count <= GatewayLogExport.maximumUploadBytes)
+        #expect(upload.contains("diagnostic export truncated"))
+        #expect(String(decoding: upload.data(using: .utf8)!, as: UTF8.self) == upload)
+        #expect(GatewayLogExport.uploadText("small") == "small")
+    }
+
     @Test("empty exports never reuse a prior represented range")
     func emptyRange() {
         let metadata = GatewayLogCaptureMetadata(capturedAt: "load", representedFrom: "old",

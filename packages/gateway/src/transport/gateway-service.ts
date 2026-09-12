@@ -43,6 +43,7 @@ import type { GatewayLogger } from "./logger.js";
 import type { CommandReceiptStore } from "./command-receipts.js";
 import { fitSessionSnapshot, safeJson } from "../sessions/projection.js";
 import { ModelCatalogPager } from "./model-pagination.js";
+import { exportDiagnosticSnapshot } from "./diagnostic-export.js";
 import { SessionListPaginationStore } from "./session-list-pagination.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { AsyncMutex } from "../util/async-mutex.js";
@@ -108,7 +109,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 }
 
 const restartDrainMethods = new Set([
-  "system.info", "system.logs", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.drain.status",
+  "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.drain.status",
   "device.install.config.status", "device.install.status",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
   "session.workspace.inspect", "session.workspace.list", "session.workspace.file", "session.workspace.git.diff", "session.workspace.git.history.list", "session.workspace.git.history.get", "session.workspace.git.history.diff",
@@ -248,6 +249,7 @@ export class GatewayService {
       capabilities: [
         ...(process.env.TRON_GATEWAY_SUPERVISED === "1" ? ["restart-supervised.v1"] : []),
         "sessions.v1",
+        "diagnostic-export.v1",
         "session-export.v2",
         "auth.v1",
         "settings.v1",
@@ -293,6 +295,14 @@ export class GatewayService {
         return this.info();
       case "system.logs":
         return safeJson({ records: this.dependencies.logger.recent(integer(params.limit ?? 200, "limit", 1, 1_000)) });
+      case "system.logs.export":
+        return this.mutation(client, method, params, async () => {
+          if (Object.keys(params).some((key) => !["commandId", "content"].includes(key))) {
+            throw new GatewayError("invalid_request", "Log export accepts only content and commandId");
+          }
+          const content = boundedText(params.content, "content", 512 * 1024);
+          return safeJson(await exportDiagnosticSnapshot(content));
+        });
       case "uploads.status":
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Upload status accepts no parameters");
         return safeJson(await this.dependencies.uploads.status());

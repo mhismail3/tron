@@ -32,6 +32,9 @@ struct GatewayLogsSettingsView: View {
     @State private var hasLoaded = false
     @State private var loadGeneration = 0
     @State private var copySucceeded = false
+    @State private var shareSucceeded = false
+    @State private var shareInFlight = false
+    @State private var shareGeneration = 0
     @State private var captureMetadata = GatewayLogCaptureMetadata.empty
 
     private let levels = ["all", "info", "warning", "error"]
@@ -105,9 +108,19 @@ struct GatewayLogsSettingsView: View {
                 }
                 .disabled(visibleItems.isEmpty)
                 .accessibilityLabel("Copy visible logs")
+
+                Button { beginShare() } label: {
+                    Image(systemName: shareSucceeded ? "checkmark" : "square.and.arrow.up")
+                        .font(TronTypography.buttonSM)
+                        .tronSettingsAccent()
+                        .contentTransition(.symbolEffect(.replace.downUp))
+                }
+                .disabled(visibleItems.isEmpty || shareInFlight || !model.gatewaySupportsDiagnosticExport)
+                .accessibilityLabel(shareInFlight ? "Sharing logs" : model.gatewaySupportsDiagnosticExport ? "Share logs" : "Log sharing unavailable")
             }
         }
         .sensoryFeedback(.success, trigger: copySucceeded)
+        .sensoryFeedback(.success, trigger: shareSucceeded)
         .task(id: PresentationActivityTaskID(
             source: automaticLoadID,
             presentationActive: presentationActivity.allowsPresentationPublication
@@ -204,6 +217,50 @@ struct GatewayLogsSettingsView: View {
         Task {
             try? await Task.sleep(for: .milliseconds(600))
             copySucceeded = false
+        }
+    }
+
+    private func beginShare() {
+        guard !shareInFlight, !visibleItems.isEmpty,
+              presentationActivity.allowsPresentationPublication else { return }
+        shareGeneration &+= 1
+        let generation = shareGeneration
+        let activity = presentationActivity
+        let text = GatewayLogExport.uploadText(GatewayLogExport.text(
+            records: visibleItems.map(\.record), metadata: captureMetadata
+        ))
+        shareSucceeded = false
+        shareInFlight = true
+        Task { @MainActor in
+            do {
+                let path = try await model.exportGatewayLogs(text)
+                guard generation == shareGeneration,
+                      presentationActivity == activity,
+                      activity.allowsPresentationPublication else { return }
+                UIPasteboard.general.string = path
+                shareInFlight = false
+                shareSucceeded = true
+                model.postNotice(
+                    "Log file path copied to clipboard",
+                    role: .success,
+                    lifetime: .standard,
+                    priority: .low
+                )
+                try? await Task.sleep(for: .milliseconds(700))
+                guard generation == shareGeneration,
+                      presentationActivity == activity else { return }
+                shareSucceeded = false
+            } catch is CancellationError {
+                guard generation == shareGeneration else { return }
+                shareInFlight = false
+            } catch {
+                guard generation == shareGeneration,
+                      presentationActivity == activity,
+                      activity.allowsPresentationPublication else { return }
+                shareInFlight = false
+                shareSucceeded = false
+                model.presentError(error)
+            }
         }
     }
 

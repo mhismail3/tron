@@ -1941,6 +1941,47 @@ final class AppModel {
         )
     }
 
+    /// Exports the already-redacted Logs surface to the exact currently
+    /// admitted Gateway. The connection-bound admission prevents a delayed
+    /// response from copying a path on a newly selected server.
+    var gatewaySupportsDiagnosticExport: Bool {
+        gatewayInfo?.capabilities.contains("diagnostic-export.v1") == true
+    }
+
+    func exportGatewayLogs(_ text: String) async throws -> String {
+        guard gatewaySupportsDiagnosticExport else {
+            throw GatewayFailure(code: "unsupported", message: "This Gateway does not support log sharing.", retryable: false, details: nil)
+        }
+        struct Params: Encodable {
+            let commandId: String
+            let content: String
+        }
+        struct Response: Decodable {
+            let path: String
+        }
+        let admission = try requireCurrentGatewayConnection()
+        let profileID = profiles.selected?.id
+        let commandID = uuidSource.next().uuidString
+        let response: Response = try await mutationExecutor.perform(
+            method: "system.logs.export",
+            commandID: commandID
+        ) {
+            try await self.client.request(
+                "system.logs.export",
+                Params(commandId: commandID, content: text),
+                as: Response.self,
+                timeout: .seconds(20),
+                expectedEpochID: admission.connectionID!
+            )
+        }
+        try requireConnection(admission)
+        guard profiles.selected?.id == profileID,
+              response.path.hasPrefix("/tmp/tron-diagnostics/") else {
+            throw CancellationError()
+        }
+        return response.path
+    }
+
     private func logCaptureMetadata(
         records: [GatewayProfileLogRecord],
         sourceStatuses: [String: String]

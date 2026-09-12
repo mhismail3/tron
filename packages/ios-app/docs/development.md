@@ -476,7 +476,11 @@ background retirement clears readiness before the transport changes. The visible
 structured refresh to that completion generation, generation-gates stale results, retains its last
 useful bounded rows on an automatic empty read, and merges fresh profiles with retained rows for any
 profile whose reconnect-time diagnostics request failed. Manual refresh may admit a confirmed empty
-successful result. DTO fields and per-profile failure metadata remain in the service/state boundary,
+successful result. Share exports that same redacted visible snapshot through the exact active Gateway
+using the authenticated idempotent `system.logs.export` command; the Gateway writes a private bounded
+file under `/tmp/tron-diagnostics`, and iOS copies its server-selected path only after the original
+connection admission is still current. Export failures are transient notices and never change the
+existing clipboard value. DTO fields and per-profile failure metadata remain in the service/state boundary,
 while log level color, compact metadata/date formatting, and Tron-styled loading/empty presentation remain in
 the dedicated logs UI. `WorkspaceInspectionServiceTests` own the separate session-bound
 `workspace-inspector.v1` wire, the capability-gated `workspace-history-diff.v1` commit/file request,
