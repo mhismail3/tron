@@ -7,6 +7,12 @@ export interface LogRecord {
   message: string;
   event?: string;
   source?: string;
+  /** Sanitized transport request correlation; never a session or payload ID. */
+  requestID?: string;
+  method?: string;
+  outcome?: string;
+  code?: string;
+  durationMs?: number;
 }
 
 const MAX_RECORDS = 1_000;
@@ -29,6 +35,10 @@ function boundedMessage(value: string): string {
   return `${bytes.subarray(0, MAX_MESSAGE_BYTES - 3).toString("utf8").replace(/\uFFFD$/u, "")}…`;
 }
 
+function boundedDiagnosticID(value: string): string {
+  return value.replace(/[^A-Za-z0-9._:-]/gu, "_").slice(0, 160);
+}
+
 export class GatewayLogger {
   private readonly records: LogRecord[] = [];
   private readonly path: string | undefined;
@@ -38,13 +48,18 @@ export class GatewayLogger {
     this.loadPersisted();
   }
 
-  log(level: LogRecord["level"], message: string, metadata: { event?: string; source?: string } = {}): void {
+  log(level: LogRecord["level"], message: string, metadata: { event?: string; source?: string; requestID?: string; method?: string; outcome?: string; code?: string; durationMs?: number } = {}): void {
     const record: LogRecord = {
       timestamp: new Date().toISOString(),
       level,
       message: boundedMessage(message),
       ...(metadata.event ? { event: boundedMessage(metadata.event) } : {}),
       ...(metadata.source ? { source: boundedMessage(metadata.source) } : {}),
+      ...(metadata.requestID ? { requestID: boundedDiagnosticID(metadata.requestID) } : {}),
+      ...(metadata.method ? { method: boundedMessage(metadata.method).slice(0, 160) } : {}),
+      ...(metadata.outcome ? { outcome: boundedMessage(metadata.outcome).slice(0, 64) } : {}),
+      ...(metadata.code ? { code: boundedMessage(metadata.code).slice(0, 64) } : {}),
+      ...(metadata.durationMs !== undefined ? { durationMs: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(metadata.durationMs))) } : {}),
     };
     this.records.push(record);
     if (this.records.length > MAX_RECORDS) this.records.splice(0, this.records.length - MAX_RECORDS);
@@ -74,6 +89,11 @@ export class GatewayLogger {
               message: boundedMessage(value.message),
               ...(typeof value.event === "string" ? { event: boundedMessage(value.event) } : {}),
               ...(typeof value.source === "string" ? { source: boundedMessage(value.source) } : {}),
+              ...(typeof value.requestID === "string" ? { requestID: boundedDiagnosticID(value.requestID) } : {}),
+              ...(typeof value.method === "string" ? { method: boundedMessage(value.method).slice(0, 160) } : {}),
+              ...(typeof value.outcome === "string" ? { outcome: boundedMessage(value.outcome).slice(0, 64) } : {}),
+              ...(typeof value.code === "string" ? { code: boundedMessage(value.code).slice(0, 64) } : {}),
+              ...(typeof value.durationMs === "number" ? { durationMs: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(value.durationMs))) } : {}),
             });
           } catch {
             // Ignore a partial final line or malformed historical record.

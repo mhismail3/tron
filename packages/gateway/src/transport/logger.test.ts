@@ -11,6 +11,23 @@ afterEach(() => {
 });
 
 describe("GatewayLogger", () => {
+  it("retains bounded structured request attribution without logging payloads", () => {
+    const logger = new GatewayLogger();
+    logger.log("warning", "RPC session.list completed", {
+      event: "rpc.completed", source: "transport", requestID: "id with spaces/".repeat(30),
+      method: "session.list", outcome: "timeout", code: "timeout", durationMs: 12_345.6,
+    });
+
+    const record = logger.recent(1)[0];
+    expect(record).toMatchObject({
+      event: "rpc.completed", source: "transport", method: "session.list",
+      outcome: "timeout", code: "timeout", durationMs: 12_346,
+    });
+    expect(record?.requestID).toMatch(/^[A-Za-z0-9._:/-]+$/u);
+    expect(record?.requestID?.length).toBeLessThanOrEqual(160);
+    expect(record?.message).not.toContain("id with spaces");
+  });
+
   it("redacts secrets before retaining or persisting records", () => {
     const directory = mkdtempSync(join(tmpdir(), "tron-logger-"));
     temporaryDirectories.push(directory);

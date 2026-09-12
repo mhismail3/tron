@@ -131,11 +131,15 @@ const sessions = new RuntimeRegistry({
     `Extension lifecycle artifact rejected (${reason}; owner ${owner})`,
     { event: "extension.artifact-rejected", source: "sessions" },
   ),
-  stageTiming: (stage, durationMs, outcome) => {
+  stageTiming: (stage, durationMs, outcome, metadata) => {
     if (durationMs < 250 && outcome === "success") return;
+    const context = [
+      metadata?.workID ? `workID=${metadata.workID}` : undefined,
+      metadata?.scope ? `scope=${metadata.scope}` : undefined,
+    ].filter(Boolean).join(" ");
     logger.log(
       durationMs >= 1_000 || outcome === "failure" ? "warning" : "info",
-      `Session stage ${stage} completed in ${durationMs}ms (${outcome})`,
+      `Session stage ${stage} completed in ${durationMs}ms (${outcome})${context ? ` ${context}` : ""}`,
       { event: "session.stage", source: "sessions" },
     );
   },

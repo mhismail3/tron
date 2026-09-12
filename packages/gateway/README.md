@@ -377,7 +377,7 @@ expectations, see [connection resilience and diagnosis](docs/connection-resilien
 Authenticated `system.logs.export` is a user-requested diagnostics projection: it accepts only a
 bounded already-redacted snapshot and command ID, writes a server-chosen owner-only 0600 file under
 `/tmp/tron-diagnostics` inside a 0700 directory, and retains only the newest ten exports. It never
-accepts a client filesystem path, reads session content, or creates a public upload.
+accepts a client filesystem path, reads session content, or creates a public upload. Gateway RPC diagnostics retain bounded structured `method`, `requestID`, `outcome`, `code`, and `durationMs` fields; catalog stage records additionally carry a process-local `workID` and scope so shared materialization cannot be misattributed to one caller. Request IDs are sanitized transport IDs only, and stage timing uses monotonic durations. Fast successful stages remain omitted to keep routine logging lightweight.
 
 - `GET /health` — unauthenticated readiness and compatibility metadata. The bound listener reports `starting`, `catalog-warming`, `attention-recovery`, `automation-recovery`, or `storage-warming` with HTTP 503 until all startup prerequisites complete, then reports `ok` with HTTP 200; every other HTTP route and WebSocket upgrade remains retryable `busy`/503 during warmup and does not enter session APIs.
 - `POST /v1/pair` — rate-limited one-time enrollment exchange

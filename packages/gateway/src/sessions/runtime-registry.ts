@@ -450,6 +450,7 @@ export class RuntimeRegistry {
    * generation keys immutable compact page seeds without making them catalog
    * authority. */
   private catalogProjectionGeneration = 0;
+  private catalogWorkSequence = 0;
   private readonly catalogPageSources = new Map<string, WeakRef<CatalogPageSource>>();
   private readonly pendingSlotStarts = new Map<string, Promise<RuntimeSlot>>();
   private reservedSlotStarts = 0;
@@ -484,7 +485,12 @@ export class RuntimeRegistry {
       beforeSessionDelete?: (sessionId: string) => Promise<void>;
       sessionClosed?: (sessionId: string) => void;
       catalogDiscoveryLimits?: Partial<typeof DEFAULT_CATALOG_DISCOVERY_LIMITS>;
-      stageTiming?: (stage: string, durationMs: number, outcome: "success" | "failure") => void;
+      stageTiming?: (
+        stage: string,
+        durationMs: number,
+        outcome: "success" | "failure",
+        metadata?: { workID?: string; scope?: "user" | "all" },
+      ) => void;
       machineId?: string;
       notifications?: NotificationService;
       browserLiveViews?: BrowserLiveViewRegistry;
@@ -995,14 +1001,18 @@ export class RuntimeRegistry {
     return new Set([...counts].filter(([, count]) => count > 1).map(([id]) => id));
   }
 
-  private async timedStage<T>(stage: string, operation: () => Promise<T>): Promise<T> {
+  private async timedStage<T>(
+    stage: string,
+    operation: () => Promise<T>,
+    metadata?: { workID?: string; scope?: "user" | "all" },
+  ): Promise<T> {
     const startedAt = performance.now();
     try {
       const result = await operation();
-      this.options.stageTiming?.(stage, Math.max(0, Math.round(performance.now() - startedAt)), "success");
+      this.options.stageTiming?.(stage, Math.max(0, Math.round(performance.now() - startedAt)), "success", metadata);
       return result;
     } catch (error) {
-      this.options.stageTiming?.(stage, Math.max(0, Math.round(performance.now() - startedAt)), "failure");
+      this.options.stageTiming?.(stage, Math.max(0, Math.round(performance.now() - startedAt)), "failure", metadata);
       throw error;
     }
   }
@@ -1761,9 +1771,11 @@ export class RuntimeRegistry {
       };
     }
 
-    let materialized = await this.timedStage("catalog.scan", () => this.scanCatalogMaterialization(scope));
+    const workID = `catalog-${++this.catalogWorkSequence}`;
+    const stageMetadata = { workID, scope };
+    let materialized = await this.timedStage("catalog.scan", () => this.scanCatalogMaterialization(scope, stageMetadata), stageMetadata);
     if (!materialized.stable) {
-      materialized = await this.timedStage("catalog.scan-retry", () => this.scanCatalogMaterialization(scope));
+      materialized = await this.timedStage("catalog.scan-retry", () => this.scanCatalogMaterialization(scope, stageMetadata), stageMetadata);
     }
     if (!materialized.stable) {
       await this.catalogAcquisitionMutex.run(() => { this.catalogAcquisitionAdmission = undefined; });
@@ -1821,7 +1833,10 @@ export class RuntimeRegistry {
     };
   }
 
-  private async scanCatalogMaterialization(scope: "user" | "all"): Promise<{
+  private async scanCatalogMaterialization(
+    scope: "user" | "all",
+    stageMetadata: { workID: string; scope: "user" | "all" },
+  ): Promise<{
     allInfos: CatalogSessionInfo[];
     ambiguousDiskIDs: Set<string>;
     after: CatalogStructureEvidence;
@@ -1831,9 +1846,9 @@ export class RuntimeRegistry {
   }> {
     const invalidationGeneration = this.catalogAcquisitionInvalidationGeneration;
     const structuralGeneration = this.catalogStructuralGeneration;
-    const before = await this.timedStage("catalog.validate.before", () => this.sharedCatalogStructureEvidence());
-    const discoveredInfos = await this.timedStage("catalog.metadata-materialize", () => this.sharedCatalogSessionInfos());
-    const after = await this.timedStage("catalog.validate.after", () => this.sharedCatalogStructureEvidence(true));
+    const before = await this.timedStage("catalog.validate.before", () => this.sharedCatalogStructureEvidence(), stageMetadata);
+    const discoveredInfos = await this.timedStage("catalog.metadata-materialize", () => this.sharedCatalogSessionInfos(), stageMetadata);
+    const after = await this.timedStage("catalog.validate.after", () => this.sharedCatalogStructureEvidence(true), stageMetadata);
     const allInfos = this.withCatalogEvidence(discoveredInfos, after);
     const ambiguousDiskIDs = this.diskAmbiguousSessionIDs(allInfos);
     return {

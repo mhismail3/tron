@@ -48,7 +48,12 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     workRegistry?: GatewayWorkRegistry;
     phaseObserver?: (phase: "catalog-warming" | "attention-recovery") => void;
     sessionListChanged?: () => void;
-    stageTiming?: (stage: string, durationMs: number, outcome: "success" | "failure") => void;
+    stageTiming?: (
+      stage: string,
+      durationMs: number,
+      outcome: "success" | "failure",
+      metadata?: { workID?: string; scope?: "user" | "all" },
+    ) => void;
   } = {}) {
     const root = await mkdtemp(join(tmpdir(), `tron-cold-acquire-${label}-`));
     const agentDir = join(root, "agent");
@@ -1913,8 +1918,10 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const children: SessionManager[] = [];
     let mutateDuringDiscovery = false;
     let mutationCount = 0;
+    const stageRecords: Array<{ stage: string; workID?: string; scope?: "user" | "all" }> = [];
     const fixture = await coldFixture("user-catalog-child-churn", {
-      stageTiming: (stage) => {
+      stageTiming: (stage, _durationMs, _outcome, metadata) => {
+        stageRecords.push({ stage, workID: metadata?.workID, scope: metadata?.scope });
         if (mutateDuringDiscovery && stage === "catalog.metadata-materialize") {
           mutationCount += 1;
           for (const child of children) {
@@ -1939,6 +1946,12 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       expect(userCut.sessions.map((session) => session.id)).toEqual(
         first.sessions.map((session) => session.id),
       );
+      const catalogStages = stageRecords.filter((record) => record.stage.startsWith("catalog."));
+      expect(catalogStages.length).toBeGreaterThan(0);
+      const workIDs = new Set(catalogStages.map((record) => record.workID));
+      expect(workIDs.size).toBeGreaterThan(0);
+      expect([...workIDs].every((workID) => workID !== undefined)).toBe(true);
+      expect(catalogStages.every((record) => record.scope === "user")).toBe(true);
 
     } finally {
       mutateDuringDiscovery = false;

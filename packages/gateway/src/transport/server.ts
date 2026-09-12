@@ -24,6 +24,16 @@ import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 export const MAXIMUM_REKEYED_SESSION_IDS = 64;
 export const MAXIMUM_UNANSWERED_HEARTBEATS = 3;
 
+function diagnosticRequestID(value: string): string {
+  return value.replace(/[^A-Za-z0-9._:-]/gu, "_").slice(0, 160);
+}
+
+function diagnosticErrorCode(error: unknown): string {
+  if (error instanceof GatewayError) return error.code;
+  if (error instanceof Error) return "exception";
+  return "unknown";
+}
+
 // HTTP admission is intentionally independent from route payload limits: it
 // bounds the lifetime of transport requests while UploadStore, BlobStore and
 // live-view leases retain ownership of their own staged bytes/readers/viewers.
@@ -1309,10 +1319,13 @@ export class GatewayServer {
     const admittedSubscriptionIds = new Set(connection.subscriptionTokens.keys());
     const admittedTerminalIds = new Set(connection.terminals);
     connection.requestControllers.set(frame.id, requestController);
-    this.options.logger.log("info", `RPC request ${frame.method} from client ${connection.id}`, { event: "rpc.request", source: "transport" });
+    const requestId = frame.id;
+    const diagnosticID = diagnosticRequestID(requestId);
+    this.options.logger.log("info", `RPC request ${frame.method} from client ${connection.id}`, {
+      event: "rpc.request", source: "transport", method: frame.method, requestID: diagnosticID,
+    });
     const rpcStartedAt = performance.now();
     let rpcOutcome: "success" | "failure" = "failure";
-    const requestId = frame.id;
     const synchronizationOwners: SynchronizationOwner[] = [];
     const synchronizationCompletions: SynchronizationCompletion[] = [];
     let responseAttempted = false;
@@ -1686,7 +1699,10 @@ export class GatewayServer {
       }
     } catch (error) {
       if (!requestController.signal.aborted) {
-        this.options.logger.log("error", `RPC ${frame.method} for client ${connection.id} failed: ${error instanceof Error ? error.message : String(error)}`, { event: "rpc.error", source: "transport" });
+        this.options.logger.log("error", `RPC ${frame.method} for client ${connection.id} failed`, {
+          event: "rpc.error", source: "transport", method: frame.method, requestID: diagnosticID,
+          code: diagnosticErrorCode(error), outcome: "failure",
+        });
       }
       const ownerRequestIDs = new Set([
         requestId,
@@ -1724,7 +1740,10 @@ export class GatewayServer {
       this.options.logger.log(
         durationMs >= 1_000 ? "warning" : "info",
         `RPC ${frame.method} for client ${connection.id} completed in ${durationMs}ms (${rpcOutcome})`,
-        { event: "rpc.completed", source: "transport" },
+        {
+          event: "rpc.completed", source: "transport", method: frame.method,
+          requestID: diagnosticID, outcome: rpcOutcome, durationMs,
+        },
       );
     }
   }
