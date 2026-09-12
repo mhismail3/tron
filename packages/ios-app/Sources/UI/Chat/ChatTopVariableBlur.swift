@@ -136,10 +136,11 @@ private struct TronTopBlurSurfaceModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            // Keep UIKit-backed readers on the same soft scroll-edge contract
-            // as SwiftUI ScrollViews. Without this, a reader can leave the
-            // navigation-bar boundary as an opaque horizontal edge.
-            .scrollEdgeEffectStyle(.soft, for: .all)
+            // UIKit readers otherwise remain confined below the navigation
+            // bar, so their first lines meet an opaque edge instead of fading
+            // beneath the shared custom blur. Extend the reader's host into
+            // the top safe area; the overlay below owns the visible chrome.
+            .ignoresSafeArea(.container, edges: .top)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar, .bottomBar)
             .toolbarBackground(.clear, for: .navigationBar, .bottomBar)
             .overlay(alignment: .top) {

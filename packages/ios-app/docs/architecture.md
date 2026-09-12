@@ -1081,8 +1081,10 @@ attachment retains its exact bytes only until its frozen handoff strips them. Im
 share the same single exact preview flight and priority work slot; full payloads never enter a second cache.
 Markdown is parsed off-main into the established immutable document, plain/code text uses the native selectable
 read-only view, and a Unicode-safe 320,000-byte prefix explicitly marks omission. Native selectable readers use the
-same soft scroll-edge and progressive custom top-blur contract as Markdown, including JSON and code sheets; the blur is mounted on the navigation container as well as the reader so the system bar cannot introduce a solid border. the shared
-surface applies the edge effect to UIKit-backed scroll owners rather than adding a second opaque toolbar layer.
+same progressive custom top-blur contract as Markdown, including JSON and code sheets. The UIKit reader host extends
+into the top safe area so the shared blur owns the navigation boundary and the system bar cannot introduce a solid
+border; native selection, wrapping, Dynamic Type, and bounded scrolling remain unchanged. No second opaque toolbar
+layer is added.
 PDFKit validates off-main and
 presents native vertically scrolling pages, capped at 512 pages. Unsupported, invalid, missing, or pathological files
 mount a concise unavailable state rather than conditional empty sheet content. Full-preview ImageIO decode applies

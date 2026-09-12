@@ -599,6 +599,12 @@ enum TronReadOnlyTextStyle: Equatable, Sendable {
 
 /// Native TextKit-backed document scrolling avoids asking SwiftUI to measure a
 /// multi-hundred-kilobyte selectable `Text` before a sheet can present.
+enum TronDocumentReaderLayoutPolicy {
+    /// SwiftUI's document host owns safe-area placement; UIKit must not add a
+    /// competing automatic inset that leaves a hard navigation cutoff.
+    static let contentInsetAdjustmentBehavior: UIScrollView.ContentInsetAdjustmentBehavior = .never
+}
+
 struct TronReadOnlyTextView: UIViewRepresentable {
     let text: String
     var style: TronReadOnlyTextStyle = .body
@@ -609,6 +615,11 @@ struct TronReadOnlyTextView: UIViewRepresentable {
         view.isEditable = false
         view.isSelectable = true
         view.alwaysBounceVertical = true
+        // SwiftUI's document host owns safe-area placement and the shared
+        // custom blur owns the navigation boundary. Prevent UIKit from adding
+        // a second automatic scroll inset that would leave the first lines
+        // below that boundary instead of behind the blur.
+        view.contentInsetAdjustmentBehavior = TronDocumentReaderLayoutPolicy.contentInsetAdjustmentBehavior
         view.topEdgeEffect.style = .soft
         view.bottomEdgeEffect.style = .soft
         view.leftEdgeEffect.style = .soft

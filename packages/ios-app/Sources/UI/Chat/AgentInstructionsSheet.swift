@@ -11,10 +11,6 @@ struct AgentInstructionsSheet: View {
             Group {
                 if let instructions = model.context?.objectValue?["systemPrompt"]?.stringValue {
                     TronReadOnlyTextView(text: instructions)
-                        // Native text otherwise clips at the navigation bar's
-                        // lower edge, leaving the custom blur over empty space.
-                        // UITextView's adjusted inset keeps the first line clear.
-                        .ignoresSafeArea(.container, edges: .top)
                 } else if loading {
                     TronLoadingState(label: "Loading instructions…", accent: .tronSessionTeal)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
