@@ -314,7 +314,9 @@ activation retires any target belonging to the suspended native scroll tree befo
 revalidating current marker evidence. An installed projection advances the layout epoch
 when its physical row spine changes; streaming payload and shallow tool-state updates
 retain their existing hosts and current geometry evidence. Newly admitted lazy rows retain their hidden one-shot state even when geometry admission precedes child mounting, then retire the entitlement only after local animation completion. Within an already-mounted assistant row, authoritative thinking and response content installs immediately but one bounded row-local height clips and smoothly expands ordinary growth; width changes, shrink/replacement, covered surfaces, Reduce Motion, and growth above 2,000 points install atomically rather than inheriting motion. Delayed frames from a replaced
-spine still cannot prove the new tree. A visible pinned presentation therefore
+spine still cannot prove the new tree; when the marker's numeric frame is
+unchanged, the mounted scroll view explicitly re-admits that exact marker into
+the new layout epoch before the same physical stability proof. A visible pinned presentation therefore
 requires fresh, current-layout marker proof; overflow requires alignment, while
 underflow requires the eager marker to be visible. Row existence, forced underflow
 height alone, elapsed frames, or an abandoned layout generation are not proof. Ordinary

@@ -1460,6 +1460,30 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.hostedSemanticFrameCount == 0)
     }
 
+    @Test("same-frame marker is re-admitted after an opening layout epoch change")
+    func sameFrameMarkerRevalidatesAfterOpeningProjectionChange() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualViewportFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            let positioning = Task {
+                await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom")
+            }
+            admitAlignedTail(coordinator)
+            #expect(await positioning.value)
+            coordinator.projectionInstalled(structure: ChatPhysicalRowSpineIdentity(
+                timelineIDs: ChatTranscriptIDs(canonical: ["message"], live: []),
+                runtimeIDs: [], lifecycleID: nil, queueIDs: [], aliases: [], fusion: nil,
+                hasEarlierMessages: false
+            ))
+            #expect(coordinator.physicalTailEvidence == nil)
+            coordinator.revalidateTailMarkerAfterLayoutEpoch()
+            #expect(coordinator.physicalTailEvidence?.layoutEpoch == coordinator.layoutEpoch)
+            #expect(coordinator.physicalTailEvidence?.classification == .aligned)
+            coordinator.openingRevealCompleted()
+            coordinator.cancel()
+        }
+    }
+
     @Test("materialization does not release from row evidence without an aligned marker")
     func materializationRequiresFreshAlignedMarker() async throws {
         try await withTestWatchdog { @MainActor in

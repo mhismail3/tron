@@ -402,6 +402,11 @@ export class RuntimeRegistry {
    * canonical evidence still gates every publication. */
   private catalogMaterializationPromise: Promise<Awaited<ReturnType<RuntimeRegistry["materializeCatalogSnapshot"]>>> | undefined;
   private catalogMaterializationKey: string | undefined;
+  /** Last complete cut is a bounded read projection fallback for the user
+   * dashboard while a concurrent child-session write makes discovery unstable.
+   * It never substitutes for canonical reads of the all-sessions scope. */
+  private lastCatalogMaterialization: Awaited<ReturnType<RuntimeRegistry["materializeCatalogSnapshot"]>> | undefined;
+  private catalogFallbackGeneration: number | undefined;
   /** One bounded structural walk can serve catalog and acquisition callers.
    * `refresh` is reserved for a post-materialization stability check. */
   private catalogEvidencePromise: Promise<CatalogStructureEvidence> | undefined;
@@ -1518,7 +1523,7 @@ export class RuntimeRegistry {
     // Structural materialization is the admission boundary. Live summary and
     // attention overlays are captured synchronously below, after I/O completes,
     // so ordinary heartbeat churn cannot starve catalog reads.
-    const materialized = await this.sharedCatalogMaterialization();
+    const materialized = await this.materializationForProjection(scope);
     const projectionGeneration = this.catalogProjectionGeneration;
     const generation = `${materialized.listRevision}:${projectionGeneration}:${scope}`;
     const existing = this.catalogPageSources.get(generation)?.deref();
@@ -1564,7 +1569,7 @@ export class RuntimeRegistry {
     // Capture mutable overlays only after structural I/O has completed. The
     // seed construction is synchronous, making this one immutable cut without
     // rejecting it when another heartbeat arrives during discovery.
-    const materialized = await this.sharedCatalogMaterialization();
+    const materialized = await this.materializationForProjection(scope);
     const projectionGeneration = this.catalogProjectionGeneration;
     const seeds = this.buildCatalogPageSeeds(materialized.infos, scope, materialized.ambiguousIDs);
     const source = this.createCatalogPageSource(`${materialized.listRevision}:${projectionGeneration}:${scope}`, materialized.listRevision, seeds);
@@ -1616,6 +1621,7 @@ export class RuntimeRegistry {
     }
     const operation = this.materializeCatalogSnapshot();
     const settled = operation.then((value) => {
+      this.lastCatalogMaterialization = value;
       if (this.catalogMaterializationKey === key) {
         this.catalogMaterializationPromise = undefined;
         this.catalogMaterializationKey = undefined;
@@ -1631,6 +1637,28 @@ export class RuntimeRegistry {
     this.catalogMaterializationPromise = settled;
     this.catalogMaterializationKey = key;
     return settled;
+  }
+
+  private async materializationForProjection(
+    scope: "user" | "all",
+  ): Promise<Awaited<ReturnType<RuntimeRegistry["materializeCatalogSnapshot"]>>> {
+    try {
+      return await this.sharedCatalogMaterialization();
+    } catch (error) {
+      // Child-session creation can invalidate the structural cut while the
+      // user-scoped dashboard membership is unchanged. Retain one complete
+      // cut for that bounded projection; the next invalidation retries the
+      // authoritative scan and all-sessions/admin reads still fail closed.
+      if (scope !== "user"
+        || !(error instanceof GatewayError)
+        || error.code !== "busy"
+        || this.lastCatalogMaterialization === undefined
+        || this.catalogFallbackGeneration === this.catalogStructuralGeneration) {
+        throw error;
+      }
+      this.catalogFallbackGeneration = this.catalogStructuralGeneration;
+      return this.lastCatalogMaterialization;
+    }
   }
 
   private async loadDurableCatalogIndex(): Promise<void> {

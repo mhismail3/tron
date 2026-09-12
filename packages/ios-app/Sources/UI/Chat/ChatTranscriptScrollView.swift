@@ -575,6 +575,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         .onChange(of: scrollCoordinator.layoutEpoch) { _, _ in
             guard scrollCoordinator.admitsViewportCallback(capturedActivation: viewportActivation) else { return }
             scrollCoordinator.installedLayoutEpochChanged()
+            // A same-frame spine replacement may not produce another
+            // onGeometryChange callback. Re-admit that exact marker only while
+            // the coordinator owns an opening settlement.
+            scrollCoordinator.revalidateTailMarkerAfterLayoutEpoch()
         }
         .task(id: lazyTailMaterializationRequest) {
             guard let request = lazyTailMaterializationRequest else { return }

@@ -212,6 +212,10 @@ final class ChatScrollCoordinator {
     private var awaitingOpeningBaseline = false
     private var retainedViewportReconciliationPending = false
     private var semanticFrames: [String: SemanticFrameSample] = [:]
+    /// Retained only as a same-frame re-admission bridge when a physical row
+    /// spine advances the epoch without causing SwiftUI to emit a new marker
+    /// geometry callback. A subsequent real marker callback replaces it.
+    private var retainedTailMarkerFrame: CGRect?
     private var semanticFrameRevision = 0
     private var openingTailPhase: OpeningTailPhase = .idle
     /// Extends opening ownership through the visual entrance after physical
@@ -368,6 +372,7 @@ final class ChatScrollCoordinator {
         if viewportMode == .pinned { pinnedPositionRevision &+= 1 }
         // Semantic evidence is scoped to the current presentation epoch.
         advanceLayoutEpoch()
+        retainedTailMarkerFrame = nil
         guard !retainingVisibleViewport else { return }
         isAtBottom = true
         hasUnreadContent = false
@@ -408,6 +413,9 @@ final class ChatScrollCoordinator {
             revision: semanticFrameRevision,
             frame: frame
         )
+        if renderedID == "transcript-bottom" {
+            retainedTailMarkerFrame = frame
+        }
         // Existing samples update in O(1); bounded eviction scans only when a
         // new sample exceeds capacity.
         if renderedID == "transcript-bottom",
@@ -523,6 +531,30 @@ final class ChatScrollCoordinator {
         geometryRevision &+= 1
         evaluateLayoutRestoreIfReady()
         evaluatePrependIfReady()
+    }
+
+    /// Re-admits an unchanged marker frame after an installed spine change.
+    /// SwiftUI's geometry action can omit the callback when the numeric frame
+    /// is unchanged, even though the coordinator intentionally retired the
+    /// prior epoch's evidence. This keeps the physical proof strict by
+    /// requiring the same current viewport gates and the normal two-frame
+    /// post-reveal stability check; changed frames still arrive through the
+    /// regular geometry callback.
+    func revalidateTailMarkerAfterLayoutEpoch() {
+        guard openingTailPhase.context != nil,
+              let frame = retainedTailMarkerFrame,
+              frame.width.isFinite, frame.height.isFinite,
+              frame.minY.isFinite, frame.maxY.isFinite else { return }
+        semanticFrameRevision &+= 1
+        let marker = SemanticFrameSample(
+            layoutEpoch: layoutEpoch,
+            revision: semanticFrameRevision,
+            frame: frame
+        )
+        semanticFrames["transcript-bottom"] = marker
+        refreshPhysicalTailEvidence(marker: marker)
+        updateOpeningTargetSample(marker)
+        evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
     }
 
     /// Retains evidence emitted while the opaque opening surface is mounted,
@@ -2299,6 +2331,7 @@ final class ChatScrollCoordinator {
     }
 
     private func advanceLayoutEpoch() {
+        retainedTailMarkerFrame = semanticFrames["transcript-bottom"]?.frame
         layoutEpoch &+= 1
         // A pending materialization command can outlive a projection install.
         // Rebase its evidence before application so the command cannot be

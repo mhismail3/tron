@@ -15,6 +15,7 @@ import type { AutomationExecutionHandle } from "../automations/automation-schedu
 import type { AutomationRecord, AutomationRun } from "../automations/types.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import type { ExtensionRunActivity, ExtensionToolOrigin, SessionProcessActivity, SessionSummaryUpdate } from "../protocol/types.js";
+import { GatewayError } from "../errors.js";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
 import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
@@ -1904,6 +1905,27 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       expect(internals.catalogAcquisitionAdmission).toBeUndefined();
     } finally {
       evidence.mockRestore();
+    }
+  });
+
+  it("retains one user dashboard cut during transient child-session catalog churn", async () => {
+    const fixture = await coldFixture("user-catalog-fallback");
+    const first = await fixture.registry.catalog("user");
+    const internals = fixture.registry as unknown as {
+      invalidateCatalogAcquisition: () => void;
+      materializeCatalogSnapshot: () => Promise<unknown>;
+    };
+    internals.invalidateCatalogAcquisition();
+    const materialize = vi.spyOn(internals, "materializeCatalogSnapshot")
+      .mockRejectedValue(new GatewayError("busy", "Session catalog changed during discovery", true));
+    try {
+      await expect(fixture.registry.catalog("user")).resolves.toMatchObject({
+        listRevision: first.listRevision,
+        sessions: first.sessions,
+      });
+      await expect(fixture.registry.catalog("all")).rejects.toMatchObject({ code: "busy" });
+    } finally {
+      materialize.mockRestore();
     }
   });
 
