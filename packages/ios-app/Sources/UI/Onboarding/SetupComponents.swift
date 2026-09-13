@@ -66,6 +66,9 @@ struct ProviderSetupRow: View {
     let provider: ProviderSummary
     var sessionID: String? = nil
     var usageSnapshot: ProviderUsageSnapshot? = nil
+    /// The settings provider list uses direct rows; onboarding retains its
+    /// established compact surface when it embeds this shared row.
+    var usesSurface: Bool = true
     @State private var showsConfiguration = false
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
@@ -103,14 +106,13 @@ struct ProviderSetupRow: View {
                 }
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, usesSurface ? 12 : 0)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
-        .tronScrollSurface(
-            accent: .tronEmerald,
-            cornerRadius: 12,
-            tintOpacity: provider.configured ? 0.14 : 0.08
-        )
+        .modifier(ProviderSetupRowSurfaceModifier(
+            enabled: usesSurface,
+            configured: provider.configured
+        ))
         .tronManagedSheet(
             isPresented: $showsConfiguration,
             identity: "onboarding.provider.\(provider.id)"
@@ -152,6 +154,24 @@ struct ProviderSetupRow: View {
             .layoutPriority(1)
             Spacer(minLength: 8)
             trailing()
+        }
+    }
+}
+
+private struct ProviderSetupRowSurfaceModifier: ViewModifier {
+    let enabled: Bool
+    let configured: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            content.tronScrollSurface(
+                accent: .tronEmerald,
+                cornerRadius: 12,
+                tintOpacity: configured ? 0.14 : 0.08
+            )
+        } else {
+            content
         }
     }
 }
@@ -222,8 +242,10 @@ struct ProviderConfigurationSheet: View {
                 }
             }
         }
+        // Keep this detail surface on the standard sheet material. A custom
+        // opaque background made the provider detail noticeably darker than
+        // the other settings sheets.
         .tronPresentation()
-        .tronScreenBackground()
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
@@ -254,6 +276,9 @@ struct ProviderConfigurationSheet: View {
             Task { await model.cancelAuth(operationID: operationID) }
         }
         .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
+            // Dismissing the parent behind this detail sheet retires its read,
+            // but keeps the already-authoritative same-provider snapshot in
+            // place so the third usage line does not vanish during the cover.
             guard active else { usageController.begin(); return }
         }
         .onChange(of: model.providerInvalidationGeneration) { _, _ in
@@ -308,25 +333,45 @@ struct ProviderConfigurationSheet: View {
             if model.gatewayInfo?.capabilities.contains(ProviderUsageCapability.name) != true {
                 TronSettingsCaption("Account usage is unavailable on this Gateway. Connection details remain available.")
             } else if let usage = usageController.snapshots[provider.id] {
-                HStack(alignment: .top, spacing: 8) {
-                    ProviderUsageSummaryView(snapshot: usage, detail: true)
-                    Spacer(minLength: 4)
-                    Button { usageController.begin() } label: {
-                        Image(systemName: usageController.isLoading ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(settingsTheme?.accent ?? .tronEmerald)
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .center, spacing: 8) {
+                        Text(ProviderUsagePresentation.summary(usage))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                            .foregroundStyle(Color.tronTextPrimary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityLabel("Account usage: \(ProviderUsagePresentation.summary(usage))")
+                        Spacer(minLength: 4)
+                        Button { usageController.begin() } label: {
+                            Image(systemName: usageController.isLoading ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
+                                .font(TronTypography.buttonSM)
+                                .foregroundStyle(settingsTheme?.accent ?? .tronEmerald)
+                                .frame(width: 34, height: 34)
+                        }
+                        .frame(width: 44, height: 44)
+                        .tronGlassSurface(
+                            accent: settingsTheme?.accent ?? .tronEmerald,
+                            cornerRadius: 22,
+                            tintOpacity: 0.12,
+                            interactive: true
+                        )
+                        .disabled(usageController.isLoading)
+                        .accessibilityLabel("Refresh account usage")
                     }
-                    .disabled(usageController.isLoading)
-                    .accessibilityLabel("Refresh account usage")
+                    ProviderUsageSummaryView(snapshot: usage, detail: true, includeSummary: false)
                     if usageController.didFail {
                         Text("Refresh unavailable. Showing last known usage.")
                             .font(TronTypography.caption)
                             .foregroundStyle(Color.tronTextMuted)
                     }
                 }
-                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 8)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 14)
             } else if usageController.isLoading {
                 TronLoadingState(label: "Loading account usage…", accent: .tronEmerald)
+                    .padding(.top, 8)
             } else if usageController.didFail {
                 TronSettingsCaption("Account usage is currently unavailable. Connection details remain available.")
             }

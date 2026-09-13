@@ -136,6 +136,50 @@ struct ProviderUsageReadControllerTests {
         #expect(owner.snapshots["old-account"] == nil)
     }
 
+    @Test("retiring a covered parent keeps its mounted row usage until a replacement admits")
+    func coveredParentRetainsMountedSnapshot() async throws {
+        let owner = ProviderUsageReadController()
+        await owner.read(
+            identity: identity(owner: owner, providerID: "openrouter"),
+            fetch: { response(providerID: "openrouter") }, current: { true }
+        )
+        var continuation: CheckedContinuation<ProviderUsageResponse, Error>?
+        let delayed = Task {
+            await owner.read(
+                identity: identity(owner: owner, providerID: nil),
+                fetch: { try await withCheckedThrowingContinuation { continuation = $0 } },
+                current: { true }
+            )
+        }
+        while continuation == nil { await Task.yield() }
+        owner.begin()
+        #expect(owner.snapshots["openrouter"] != nil)
+        continuation?.resume(returning: response(providerID: "stale-list"))
+        await delayed.value
+        #expect(owner.snapshots["openrouter"] != nil)
+        #expect(owner.snapshots["stale-list"] == nil)
+    }
+
+    @Test("a changed provider target rejects the old detail response")
+    func changedTargetRejectsDelayedDetail() async throws {
+        let owner = ProviderUsageReadController()
+        var currentTarget = ProviderCatalogTarget.global
+        var continuation: CheckedContinuation<ProviderUsageResponse, Error>?
+        let read = Task {
+            await owner.read(
+                identity: identity(owner: owner, providerID: "openrouter"),
+                fetch: { try await withCheckedThrowingContinuation { continuation = $0 } },
+                current: { currentTarget == .global }
+            )
+        }
+        while continuation == nil { await Task.yield() }
+        currentTarget = .session(id: "other")
+        owner.begin(clear: true)
+        continuation?.resume(returning: response(providerID: "openrouter"))
+        await read.value
+        #expect(owner.snapshots.isEmpty)
+    }
+
     @Test("an admitted empty detail result removes previous account measurements")
     func emptyDetailDoesNotRestoreOldSnapshot() async {
         let owner = ProviderUsageReadController()

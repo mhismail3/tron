@@ -120,13 +120,16 @@ enum ProviderUsagePresentation {
 struct ProviderUsageSummaryView: View {
     let snapshot: ProviderUsageSnapshot
     var detail: Bool = false
+    var includeSummary: Bool = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(ProviderUsagePresentation.summary(snapshot))
-                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(Color.tronTextPrimary)
-                .accessibilityLabel("Account usage: \(ProviderUsagePresentation.summary(snapshot))")
+            if includeSummary {
+                Text(ProviderUsagePresentation.summary(snapshot))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .accessibilityLabel("Account usage: \(ProviderUsagePresentation.summary(snapshot))")
+            }
             if detail && (snapshot.status == .available || snapshot.status == .rateLimited) {
                 ForEach(snapshot.windows) { window in
                     VStack(alignment: .leading, spacing: 4) {

@@ -33,26 +33,10 @@ struct ProvidersSettingsView: View {
                     let configured = ProviderUsageOrdering.sorted(providers.filter(\.configured))
                     let available = ProviderUsageOrdering.sorted(providers.filter { !$0.configured })
                     if !configured.isEmpty {
-                        TronSettingsGroup("Configured", accent: .tronEmerald) {
-                            ForEach(configured) { provider in
-                                ProviderSetupRow(
-                                    provider: provider,
-                                    sessionID: sessionID,
-                                    usageSnapshot: usageController.snapshots[provider.id]
-                                )
-                            }
-                        }
+                        providerSection("Configured", providers: configured, accent: .tronEmerald)
                     }
                     if !available.isEmpty {
-                        TronSettingsGroup("Available", accent: .tronSlate) {
-                            ForEach(available) { provider in
-                                ProviderSetupRow(
-                                    provider: provider,
-                                    sessionID: sessionID,
-                                    usageSnapshot: usageController.snapshots[provider.id]
-                                )
-                            }
-                        }
+                        providerSection("Available", providers: available, accent: .tronSlate)
                     }
                     if model.gatewayInfo?.capabilities.contains(ProviderUsageCapability.name) != true {
                         TronSettingsCaption("Account usage is unavailable on this Gateway.")
@@ -96,10 +80,42 @@ struct ProvidersSettingsView: View {
         }
         .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
             guard active else {
-                usageController.begin(clear: true)
+                // The parent is covered while a provider detail sheet loads.
+                // Retire its request, but keep same-target snapshots mounted so
+                // the provider row's usage line remains visually continuous.
+                usageController.begin()
                 return
             }
         }
+    }
+
+    @ViewBuilder
+    private func providerSection(
+        _ title: String,
+        providers: [ProviderSummary],
+        accent: Color
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title)
+                .font(TronTypography.sheetSectionHeader)
+                .foregroundStyle(Color.tronTextPrimary)
+                .accessibilityAddTraits(.isHeader)
+                .padding(.bottom, 6)
+            VStack(spacing: 0) {
+                ForEach(Array(providers.enumerated()), id: \.element.id) { index, provider in
+                    ProviderSetupRow(
+                        provider: provider,
+                        sessionID: sessionID,
+                        usageSnapshot: usageController.snapshots[provider.id],
+                        usesSurface: false
+                    )
+                    if index < providers.count - 1 {
+                        TronSettingsDivider(accent: accent)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func reload() {
