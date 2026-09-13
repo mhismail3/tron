@@ -1800,6 +1800,7 @@ so covered or replaced work cannot publish. Workspace folder/Go Up replacements 
 path-keyed 160ms fade at the row owner (disabled for Reduce Motion); loading, polling
 errors and stale responses are not animation triggers.
 
+Free-text settings show a muted gray `(empty)` placeholder when their value is empty; the placeholder never changes saved text, and whitespace remains an authored value.
 Context slider endpoint labels are bold monospace; Default remains purple/semibold in
 the code face. Its title and endpoint labels are white in dark mode. Custom Models uses
 the standard purple settings tint, while technical-detail rows retain their gray surface

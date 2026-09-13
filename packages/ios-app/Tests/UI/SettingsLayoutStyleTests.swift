@@ -44,6 +44,18 @@ final class SettingsLayoutStyleTests: XCTestCase {
         }
     }
 
+    func testFreeTextSettingsUseEmptyPlaceholderWithoutChangingValues() async throws {
+        for value in ["", "  ", "prefix"] {
+            try await withHost(TronTextSettingRow(icon: "chevron.left.forwardslash.chevron.right",
+                title: "Code block indent", value: .constant(value)).tronSettingsLayout(),
+                size: CGSize(width: 404, height: 80)) { host in
+                let field = try XCTUnwrap(descendants(host.view).compactMap { $0 as? UITextField }.first)
+                XCTAssertEqual(field.placeholder, "(empty)")
+                XCTAssertEqual(field.text, value, "The placeholder must not replace or trim authored text")
+            }
+        }
+    }
+
     func testSharedPillAndPlainNumericValueUseTheSettingsStandard() async throws {
         let pill = UIHostingController(rootView: TronInlineActionLabel("Extra High").tronSettingsLayout())
         pill.safeAreaRegions = []

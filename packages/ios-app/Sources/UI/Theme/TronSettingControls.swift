@@ -174,7 +174,7 @@ struct TronTextSettingRow: View {
 
     var body: some View {
         TronSettingsRow(icon: icon, title: title, subtitle: detail, accent: accent) {
-            TextField(title, text: $value)
+            TextField(title, text: $value, prompt: Text("(empty)").foregroundStyle(Color.tronTextMuted))
                 .keyboardType(keyboard)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
                 .tronInlineField(monospaced: true)
