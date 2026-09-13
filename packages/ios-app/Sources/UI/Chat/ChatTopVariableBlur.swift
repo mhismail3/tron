@@ -12,7 +12,6 @@ enum TronTopBlurStyle {
     case sheet
     case toolDetail
     case logs
-    case composer
 
     var height: CGFloat {
         switch self {
@@ -21,16 +20,6 @@ enum TronTopBlurStyle {
         case .sheet: 124
         case .toolDetail: 108
         case .logs: 184
-        // Composer panels are laid out in local panel coordinates and do not
-        // extend into the window safe area.
-        case .composer: 108
-        }
-    }
-
-    var extendsIntoSafeArea: Bool {
-        switch self {
-        case .composer: false
-        case .chat, .dashboard, .sheet, .toolDetail, .logs: true
         }
     }
 
@@ -39,20 +28,13 @@ enum TronTopBlurStyle {
         case .chat: 24
         case .dashboard: 22
         case .sheet, .toolDetail, .logs: 20
-        case .composer: 18
         }
     }
 }
 
 struct TronTopBlurOverlay: View {
     let style: TronTopBlurStyle
-    let customHeight: CGFloat?
     @Environment(\.colorScheme) private var colorScheme
-
-    init(style: TronTopBlurStyle, customHeight: CGFloat? = nil) {
-        self.style = style
-        self.customHeight = customHeight
-    }
 
     var body: some View {
         ZStack {
@@ -81,24 +63,11 @@ struct TronTopBlurOverlay: View {
             )
         }
         .frame(maxWidth: .infinity)
-        .frame(height: customHeight ?? style.height)
+        .frame(height: style.height)
         .frame(maxHeight: .infinity, alignment: .top)
-        .modifier(TronTopBlurSafeAreaModifier(enabled: style.extendsIntoSafeArea))
+        .ignoresSafeArea(edges: .top)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
-    }
-}
-
-private struct TronTopBlurSafeAreaModifier: ViewModifier {
-    let enabled: Bool
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if enabled {
-            content.ignoresSafeArea(edges: .top)
-        } else {
-            content
-        }
     }
 }
 

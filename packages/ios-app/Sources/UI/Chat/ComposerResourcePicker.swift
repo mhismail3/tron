@@ -428,23 +428,8 @@ enum ComposerCommandCompletionPolicy {
     }
 }
 
-private struct ComposerResourcePickerHeaderHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
-
 enum ComposerResourcePanelPolicy {
     static let regularVisibleRows = 5
-    static let rowHeight: CGFloat = 48
-    static let blurFadeLength: CGFloat = 52
-
-    static func viewportHeight(entryCount: Int, keyboardVisible: Bool, headerHeight: CGFloat) -> CGFloat {
-        CGFloat(visibleRows(entryCount: entryCount, keyboardVisible: keyboardVisible)) * rowHeight
-            + max(0, headerHeight)
-    }
     static let keyboardVisibleRows = 3
     static let regularEditorLines = 8
     static let panelEditorLines = 4
@@ -486,15 +471,6 @@ struct ComposerResourcePicker: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var detail: ComposerResourceEntry?
-    @State private var headerHeight: CGFloat = 0
-
-    private var resolvedHeaderHeight: CGFloat { max(0, headerHeight) }
-    private var blurHeight: CGFloat {
-        resolvedHeaderHeight + ComposerResourcePanelPolicy.blurFadeLength
-    }
-    private var panelShape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: 16, style: .continuous)
-    }
 
     private var accent: Color { kind == .skill ? Color.tronCyan : ChatSemanticPillRole.command.accent }
     private var icon: String { kind == .skill ? "sparkles" : "command" }
@@ -502,61 +478,64 @@ struct ComposerResourcePicker: View {
     private var prefix: String { kind == .skill ? "@" : "/" }
 
     var body: some View {
-        ZStack(alignment: .top) {
+        VStack(spacing: 0) {
+            HStack {
+                HStack(spacing: 5) {
+                    Image(systemName: icon)
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    Text(title)
+                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
+                    if !query.isEmpty {
+                        Text("· \"\(query)\"")
+                            .font(TronTypography.caption)
+                            .foregroundStyle(Color.tronTextSecondary)
+                    }
+                }
+                .foregroundStyle(accent)
+                Spacer()
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(TronTypography.sans(size: TronTypography.sizeXL))
+                        .foregroundStyle(Color.tronTextMuted)
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss \(title.lowercased())")
+            }
+            .padding(.leading, 14)
+            .padding(.trailing, 7)
+            .padding(.top, 6)
+
             if entries.isEmpty {
-                emptyState
-                    .padding(.top, resolvedHeaderHeight)
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                    Text("No \(title.lowercased()) found")
+                }
+                .font(TronTypography.caption)
+                .foregroundStyle(Color.tronTextSecondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
             } else {
-                ScrollView(.vertical, showsIndicators: true) {
+                ScrollView {
                     LazyVStack(spacing: 0) {
                         ForEach(entries) { entry in
                             resourceRow(entry)
                         }
                     }
-                    // The measured header remains in the viewport at rest;
-                    // after scrolling, rows naturally pass beneath the local
-                    // blur instead of meeting a hard opaque edge.
-                    .padding(.top, resolvedHeaderHeight)
                 }
                 .frame(
-                    maxHeight: ComposerResourcePanelPolicy.viewportHeight(
+                    maxHeight: CGFloat(ComposerResourcePanelPolicy.visibleRows(
                         entryCount: entries.count,
-                        keyboardVisible: keyboardVisible,
-                        headerHeight: resolvedHeaderHeight
-                    )
+                        keyboardVisible: keyboardVisible
+                    )) * 48
                 )
             }
-
-            TronTopBlurOverlay(style: .composer, customHeight: blurHeight)
-
-            pickerHeader
-                // The transparent shape keeps rows from receiving taps in the
-                // title area while leaving the close control independently
-                // interactive.
-                .contentShape(Rectangle())
-                .onTapGesture { }
-                .background {
-                    GeometryReader { proxy in
-                        Color.clear.preference(
-                            key: ComposerResourcePickerHeaderHeightKey.self,
-                            value: proxy.size.height
-                        )
-                    }
-                }
-                .zIndex(1)
         }
-        // The blur is a rectangular visual effect, so clip the complete panel
-        // contents before applying the glass rim; otherwise it paints through
-        // the rounded panel corners.
-        .clipShape(panelShape)
         .padding(.bottom, 6)
-        .onPreferenceChange(ComposerResourcePickerHeaderHeightKey.self) { measuredHeight in
-            guard measuredHeight.isFinite, measuredHeight > 0 else { return }
-            headerHeight = measuredHeight
-        }
         .glassEffect(
             .regular.tint(accent.opacity(0.15)),
-            in: panelShape
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
         )
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
@@ -571,49 +550,6 @@ struct ComposerResourcePicker: View {
                 prefix: prefix
             )
         }
-    }
-
-    @ViewBuilder
-    private var pickerHeader: some View {
-        HStack {
-            HStack(spacing: 5) {
-                Image(systemName: icon)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                Text(title)
-                    .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
-                if !query.isEmpty {
-                    Text("· \"\(query)\"")
-                        .font(TronTypography.caption)
-                        .foregroundStyle(Color.tronTextSecondary)
-                }
-            }
-            .foregroundStyle(accent)
-            Spacer()
-            Button(action: onDismiss) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(TronTypography.sans(size: TronTypography.sizeXL))
-                    .foregroundStyle(Color.tronTextMuted)
-                    .frame(width: 36, height: 36)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Dismiss \(title.lowercased())")
-        }
-        .padding(.leading, 14)
-        .padding(.trailing, 7)
-        .padding(.top, 6)
-        .accessibilityIdentifier("composer-resource-picker-header-\(kind == .skill ? "skills" : "commands")")
-    }
-
-    private var emptyState: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-            Text("No \(title.lowercased()) found")
-        }
-        .font(TronTypography.caption)
-        .foregroundStyle(Color.tronTextSecondary)
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 16)
     }
 
     private func resourceRow(_ entry: ComposerResourceEntry) -> some View {
@@ -650,7 +586,6 @@ struct ComposerResourcePicker: View {
             .buttonStyle(.plain)
             .accessibilityLabel("\(title.dropLast()), \(entry.displayName)")
             .accessibilityHint("Selects \(prefix)\(entry.displayName)")
-            .accessibilityIdentifier("composer-resource-row-\(entry.id)")
 
             Button { detail = entry } label: {
                 Image(systemName: "info.circle.fill")
@@ -661,7 +596,6 @@ struct ComposerResourcePicker: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("About \(entry.displayName)")
-            .accessibilityIdentifier("composer-resource-info-\(entry.id)")
         }
         .padding(.leading, 14)
         .padding(.trailing, 7)
