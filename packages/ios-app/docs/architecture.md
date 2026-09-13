@@ -174,7 +174,10 @@ receive input, while a transient same-profile reconnect retains the last bounded
 until its atomic replacement arrives. The Providers sheet keeps each provider in its own rounded,
 scroll-optimized row container, with Configured above Available and no enclosing section surface or
 between-row dividers. Opening a provider detail retires the covered list read without clearing its
-same-target usage projection, while profile or target changes still clear and fence old results.
+same-target usage projection, while profile or target changes still clear and fence old results. Unconfigured
+waiting forms remain swipe-dismissible; only an in-flight begin or credential clear blocks dismissal, and
+sheet disappearance cancels an auth operation admitted by that sheet (never an unrelated operation). Usage
+refresh keeps a 22-point visible glass control inside a 44-point hit target with dark-mode contrast.
 Stale operation responses are treated as a retryable no-op rather
 than a misleading broker error. Pairing pre-encodes profile metadata and uses one transactional profile
 store boundary: one cached sanitized document is loaded explicitly at init/refresh; atomic Keychain upsert succeeds before a single-document metadata commit, metadata failure

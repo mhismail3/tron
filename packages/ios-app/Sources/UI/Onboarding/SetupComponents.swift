@@ -24,6 +24,10 @@ enum ProviderConfigurationPresentation {
             : "Store the credential on the paired Mac."
     }
 
+    static func disablesInteractiveDismissal(beginningMethod: String?, clearing: Bool) -> Bool {
+        beginningMethod != nil || clearing
+    }
+
     static func automaticallyBegunMethod(for provider: ProviderSummary) -> String? {
         guard !provider.configured,
               provider.authMethods.count == 1,
@@ -156,6 +160,12 @@ struct ProviderSetupRow: View {
     }
 }
 
+enum ProviderUsageRefreshPresentation {
+    static let visibleDiameter: CGFloat = 22
+    static let hitTargetDiameter: CGFloat = 44
+    static let iconPointSize: CGFloat = 13
+}
+
 struct ProviderConfigurationSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -185,6 +195,16 @@ struct ProviderConfigurationSheet: View {
 
     private var isAutomaticallyBeginning: Bool {
         automaticMethod != nil && (!attemptedAutomaticBegin || beginningMethod != nil)
+    }
+
+    /// An owned auth operation is cancellable when the detail sheet disappears;
+    /// only the request that is still beginning or credential mutation that is
+    /// clearing may block an interactive dismissal.
+    private var disablesInteractiveDismissal: Bool {
+        ProviderConfigurationPresentation.disablesInteractiveDismissal(
+            beginningMethod: beginningMethod,
+            clearing: clearing
+        )
     }
 
     private var presentationPhase: String {
@@ -229,7 +249,7 @@ struct ProviderConfigurationSheet: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .interactiveDismissDisabled(isPresentingOwnedAuth || beginningMethod != nil)
+        .interactiveDismissDisabled(disablesInteractiveDismissal)
         .onAppear {
             if owningProfileID == nil { owningProfileID = model.profiles.selected?.id }
             beginAutomaticallyIfNeeded()
@@ -324,17 +344,19 @@ struct ProviderConfigurationSheet: View {
                         Spacer(minLength: 4)
                         Button { usageController.begin() } label: {
                             Image(systemName: usageController.isLoading ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
-                                .font(TronTypography.buttonSM)
-                                .foregroundStyle(settingsTheme?.accent ?? .tronEmerald)
-                                .frame(width: 34, height: 34)
+                                .font(.system(size: ProviderUsageRefreshPresentation.iconPointSize, weight: .semibold))
+                                .tronSettingsButtonForeground(settingsTheme?.accent ?? .tronEmerald)
+                                .frame(width: ProviderUsageRefreshPresentation.visibleDiameter, height: ProviderUsageRefreshPresentation.visibleDiameter)
+                                .tronGlassSurface(
+                                    accent: settingsTheme?.accent ?? .tronEmerald,
+                                    cornerRadius: ProviderUsageRefreshPresentation.visibleDiameter / 2,
+                                    tintOpacity: 0.12,
+                                    interactive: true
+                                )
                         }
-                        .frame(width: 44, height: 44)
-                        .tronGlassSurface(
-                            accent: settingsTheme?.accent ?? .tronEmerald,
-                            cornerRadius: 22,
-                            tintOpacity: 0.12,
-                            interactive: true
-                        )
+                        .buttonStyle(.plain)
+                        .frame(width: ProviderUsageRefreshPresentation.hitTargetDiameter, height: ProviderUsageRefreshPresentation.hitTargetDiameter)
+                        .contentShape(Rectangle())
                         .disabled(usageController.isLoading)
                         .accessibilityLabel("Refresh account usage")
                     }
@@ -442,10 +464,9 @@ struct ProviderConfigurationSheet: View {
     private func beginAutomaticallyIfNeeded() {
         guard !attemptedAutomaticBegin, let automaticMethod else { return }
         attemptedAutomaticBegin = true
-        if let currentOperationID {
-            activeOperationID = currentOperationID
-            return
-        }
+        // A pre-existing operation has no provider identity in the shared
+        // presentation state, so never adopt it as this sheet's operation.
+        guard currentOperationID == nil else { return }
         begin(automaticMethod)
     }
 
@@ -480,7 +501,9 @@ struct ProviderConfigurationSheet: View {
     }
 
     private func close() {
-        let operationID = activeOperationID ?? currentOperationID
+        // `currentOperationID` may belong to another provider sheet. Only an
+        // operation admitted by this view may be retired on close.
+        let operationID = activeOperationID
         activeOperationID = nil
         dismiss()
         guard let operationID else { return }
