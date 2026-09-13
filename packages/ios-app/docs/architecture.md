@@ -177,7 +177,7 @@ between-row dividers. Opening a provider detail retires the covered list read wi
 same-target usage projection, while profile or target changes still clear and fence old results. Unconfigured
 waiting forms remain swipe-dismissible; only an in-flight begin or credential clear blocks dismissal, and
 sheet disappearance cancels an auth operation admitted by that sheet (never an unrelated operation). Usage
-refresh keeps a 26-point visible glass control aligned to the top-right of its 44-point hit target with dark-mode contrast. Summary-only usage omits the empty detail stack and uses equal top/bottom insets; populated usage retains its full-width details and bottom spacing.
+refresh keeps a 26-point visible glass control vertically centered beside the usage title and trailing-aligned within its 44-point hit target with dark-mode contrast. Summary-only usage omits the empty detail stack and uses equal top/bottom insets; populated usage retains its full-width details and bottom spacing.
 Stale operation responses are treated as a retryable no-op rather
 than a misleading broker error. Pairing pre-encodes profile metadata and uses one transactional profile
 store boundary: one cached sanitized document is loaded explicitly at init/refresh; atomic Keychain upsert succeeds before a single-document metadata commit, metadata failure

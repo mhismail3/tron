@@ -358,7 +358,7 @@ struct ProviderConfigurationSheet: View {
                         .frame(
                             width: ProviderUsageRefreshPresentation.hitTargetDiameter,
                             height: ProviderUsageRefreshPresentation.hitTargetDiameter,
-                            alignment: .topTrailing
+                            alignment: .trailing
                         )
                         .contentShape(Rectangle())
                         .disabled(usageController.isLoading)
