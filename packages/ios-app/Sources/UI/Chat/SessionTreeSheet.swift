@@ -118,7 +118,7 @@ struct SessionTreeSheet: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: TronSpacing.md) {
-                        summary.id("history-top")
+                        summary.padding(.bottom, 12).id("history-top")
                         if !supported {
                             TronSettingsNotice(message: "Update the Mac Gateway to browse complete paged history.", accent: .tronSessionTeal)
                         } else {
@@ -204,17 +204,24 @@ struct SessionTreeSheet: View {
     }
 
     private var summary: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let snapshot = model.sessionHistoryPresentation(for: sessionID) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("\(snapshot.stats.totalMessages.formatted()) messages · \(snapshot.stats.toolCalls.formatted()) tool calls")
-                        .font(TronTypography.body.weight(.semibold))
-                    Spacer()
-                    Text(snapshot.phase.rawValue.capitalized).font(TronTypography.secondaryCodeDescription)
+        HStack(spacing: 14) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(TronTypography.body.weight(.semibold))
+                .foregroundStyle(Color.tronSessionTeal)
+                .frame(width: 28)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 12) {
+                if let snapshot = model.sessionHistoryPresentation(for: sessionID) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("\(snapshot.stats.totalMessages.formatted()) messages · \(snapshot.stats.toolCalls.formatted()) tool calls")
+                            .font(TronTypography.body.weight(.bold))
+                        Spacer()
+                        Text(snapshot.phase.rawValue.capitalized).font(TronTypography.secondaryCodeDescription)
+                    }
                 }
+                Text("Recorded activity across all branches. Tap an entry for full content; use its menu to continue, fork or bookmark.")
+                    .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
             }
-            Text("Recorded activity across all branches. Tap an entry for full content; use its menu to continue, fork or bookmark.")
-                .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
         }
         .padding(20).frame(maxWidth: .infinity, alignment: .leading)
         .tronGlassSurface(accent: .tronSessionTeal, cornerRadius: 16, tintOpacity: 0.12)

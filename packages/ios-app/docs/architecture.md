@@ -1752,7 +1752,7 @@ this revalidation never retries or replays accepted mutations. The iOS
 projection validates bounded structure and paths while tolerating additive resource
 categories and future metadata scope/origin values; its rejection copy identifies
 whether the response exceeded the 768 KiB bound or failed structural admission.
-Session History uses one prominent teal Liquid Glass summary (20-point padding, 16-point corners and body-size statistics) above flat, scroll-efficient event rows in one tagged feed, newest **recorded** entry first.
+Session History uses one prominent teal Liquid Glass summary (20-point padding, 16-point corners, a leading teal history icon and bold body-size statistics), with 12 points of additional separation above flat, scroll-efficient event rows in one tagged feed, newest **recorded** entry first.
 Canonical append order, not device timestamps, resolves ties and clock skew. Messages, tool-only/thinking
 responses, custom logs, compactions, branch summaries, model/thinking changes and bookmark receipts share
 icon-free rows with semantic color and actual content previews. There is no separate Timeline/Branches/Log
