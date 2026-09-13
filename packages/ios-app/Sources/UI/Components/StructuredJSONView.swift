@@ -62,7 +62,15 @@ struct StructuredJSONField: Identifiable, Sendable {
 
     var id: StructuredJSONPathComponent { component }
     var typeLabel: String { value.typeName }
-    var valuePreview: String { value.preview }
+    // Keep the existing bounded preview, but preserve the tail rather than
+    // discarding it before native head truncation. The complete value stays
+    // authoritative for the detail reader and copying.
+    var valuePreview: String {
+        guard let text = value.stringValue else { return value.preview }
+        let tail = text.suffix(180)
+        return (tail.startIndex > text.startIndex ? "…" : "")
+            + tail.replacingOccurrences(of: "\n", with: " ")
+    }
 
     var label: String {
         switch component {
@@ -239,6 +247,7 @@ struct TronStructuredJSONView: View {
                                         .font(TronTypography.code(size: TronTypography.sizeBodySM))
                                         .foregroundStyle(Color.tronTextSecondary)
                                         .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
+                                        .truncationMode(.head)
                                         .frame(maxWidth: .infinity, alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
                                 }
                                 .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
@@ -296,6 +305,7 @@ struct TronTechnicalJSONRow: View {
         }
         .buttonStyle(.plain)
         .tronGlassSurface(accent: accent, tintOpacity: 0.08, interactive: true)
+        .environment(\.tronSettingsVisualTheme, nil)
         .accessibilityIdentifier("technical-json-row")
         .accessibilityHint("Opens scrollable JSON details")
         .tronManagedSheet(
@@ -320,20 +330,32 @@ struct TechnicalJSONSheet: View {
     @Binding var detent: PresentationDetent
     let onEdit: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
-    @State private var document: String?
+    @State private var document: (source: JSONValue, text: String)?
+    private var currentDocument: String? { document?.source == value ? document?.text : nil }
+    @Environment(\.tronPresentationActivity) private var activity
+    @Environment(\.tronPresentationActivityCoordinator) private var activityCoordinator
+    @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
+    private var canPublish: Bool {
+        activity.allowsPresentationPublication
+            && (activityCoordinator?.activity(for: surfaceToken).allowsPresentationPublication ?? true)
+    }
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+    private var resolvedAccent: Color { settingsTheme?.accent ?? accent }
 
     var body: some View {
         NavigationStack {
             ZStack {
-                TronReadOnlyTextView(text: document ?? "", style: .code)
-                if document == nil {
+                TronReadOnlyTextView(text: currentDocument ?? "", style: .code)
+                if currentDocument == nil {
                     TronLoadingState(label: "Preparing JSON…", accent: accent)
                 }
             }
+            .tronDocumentTopBlurSurface()
+            .ignoresSafeArea(.container, edges: .bottom)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: title, accent: accent)
+                    TronSheetTitle(title: title, accent: resolvedAccent)
                 }
                 if let onEdit {
                     ToolbarItem(placement: .topBarLeading) {
@@ -343,24 +365,24 @@ struct TechnicalJSONSheet: View {
                         } label: {
                             TronToolbarTextLabel("Edit", systemImage: "pencil")
                         }
-                        .tronSettingsAccent(accent)
+                        .foregroundStyle(resolvedAccent)
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .tronSettingsAccent(accent)
+                            .foregroundStyle(resolvedAccent)
                     }
                     .accessibilityLabel("Done")
                 }
             }
         }
-        // Apply the custom blur to the navigation container itself. A blur
-        // attached only to the UIKit reader is clipped below the system bar.
-        .tronDocumentTopBlurSurface()
-        .task(id: value) {
-            document = nil
+        .task(id: PresentationActivityTaskID(source: value, presentationActive: canPublish)) {
+            guard canPublish, !Task.isCancelled else { return }
+            // Retain completed content across coverage/foregrounding: clearing
+            // native text here would discard the reader's scroll and selection.
+            guard document?.source != value else { return }
             let source = value
             let worker = Task.detached(priority: .userInitiated) { () -> String in
                 guard !Task.isCancelled else { return "" }
@@ -372,14 +394,14 @@ struct TechnicalJSONSheet: View {
             } onCancel: {
                 worker.cancel()
             }
-            guard !Task.isCancelled else { return }
-            document = rendered
+            guard !Task.isCancelled, canPublish else { return }
+            document = (source, rendered)
         }
         .accessibilityIdentifier("technical-json-sheet")
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.hidden)
-        .tint(accent)
+        .tint(resolvedAccent)
     }
 }
 

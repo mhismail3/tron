@@ -264,6 +264,84 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testManageWorkspaceRefreshWaitsForReconciledAuthorityAfterForeground() async throws {
+        let gateway = ProcessSheetGatewayFixture()
+        try await withModel(client: gateway.client) { model in
+            try await gateway.connect(model: model)
+            let snapshot = try SessionScenarioBuilder(seed: 7_841).openingTail(targetEncodedBytes: 4_096)
+            model.installHostedSubscribedSnapshot(snapshot)
+            model.beginHostedReconciliationAggregate()
+            let probe = SessionWorkspaceRefreshProbe()
+            let activity = WorkspaceRefreshActivity()
+            try await self.withSheet(WorkspaceRefreshFixture(model: model, sessionID: snapshot.sessionId,
+                                                            activity: activity, probe: probe)) { controller in
+                let initialRequestCount = await gateway.socket.sentFrames().count
+                XCTAssertEqual(initialRequestCount, 1,
+                               "Presentation activation must not inspect an unreconciled session")
+                model.completeHostedReconciliationAggregate(succeeded: true)
+                try await gateway.respond(at: 1, method: "session.workspace.inspect", result: Self.workspaceInspection)
+                await self.waitForWorkspace(probe, matching: .notRepository)
+
+                activity.value = .covered
+                model.beginHostedReconciliationAggregate()
+                // Let SwiftUI retire the presentation task before reactivation.
+                try await Task.sleep(for: .milliseconds(80))
+                activity.value = .active
+                await self.waitForWorkspace(probe, matching: .loading)
+                let waitingRequestCount = await gateway.socket.sentFrames().count
+                XCTAssertEqual(waitingRequestCount, 2)
+                model.completeHostedReconciliationAggregate(succeeded: true)
+                try await gateway.respond(at: 2, method: "session.workspace.inspect", result: Self.workspaceInspection)
+                await self.waitForWorkspace(probe, matching: .notRepository)
+                model.beginHostedReconciliationAggregate()
+                await self.waitForWorkspace(probe, matching: .loading)
+                model.completeHostedReconciliationAggregate(succeeded: true)
+                try await gateway.waitForRequest(at: 3)
+                var replacement = snapshot
+                replacement.runtimeGeneration = "replacement-runtime"
+                model.installHostedSubscribedSnapshot(replacement)
+                try await gateway.waitForRequest(at: 4)
+                try await gateway.respond(at: 3, method: "session.workspace.inspect", result: .object([:]))
+                try await Task.sleep(for: .milliseconds(80))
+                XCTAssertEqual(probe.presentation, .loading, "A retired runtime's decode failure cannot publish into its successor")
+                try await gateway.respond(at: 4, method: "session.workspace.inspect", result: Self.workspaceInspection)
+                await self.waitForWorkspace(probe, matching: .notRepository)
+                self.capture(controller, name: "manage-session-foreground-refreshed")
+            }
+            await gateway.client.close()
+        }
+    }
+
+    private static var workspaceInspection: JSONValue {
+        .object(["root": .string("/fixture"), "revision": .string("1"), "repository": .null])
+    }
+
+    private func waitForWorkspace(_ probe: SessionWorkspaceRefreshProbe,
+                                  matching value: SessionWorkspaceRowPresentation) async {
+        let changed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            MainActor.assumeIsolated { probe.presentation == value }
+        }, object: nil)
+        let result = await XCTWaiter.fulfillment(of: [changed], timeout: 2)
+        XCTAssertEqual(result, .completed, "The mounted production sheet must publish the current read without another activation")
+    }
+
+    func testFlatCompactionContainerRetainsRoundedSurface() async throws {
+        for scheme: ColorScheme in [.light, .dark] {
+            try await self.withSheet(TronDocumentSheet(title: "Context compacted") {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("24K tokens before compaction").font(TronTypography.bodySM)
+                        Text("Goal\n\nContinue the current task while retaining the established constraints.")
+                            .font(TronTypography.body).frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(14).modifier(DetailBodySurface(usesGlass: false, accent: .tronEmerald))
+                    }.padding(18)
+                }.tronScrollEdgeChrome()
+            }.preferredColorScheme(scheme)) { controller in
+                self.capture(controller, name: "flat-compaction-container-\(scheme)")
+            }
+        }
+    }
+
     func testManageSessionShowsHeaderlessSessionAndExportCards() async throws {
         var snapshot = try SessionScenarioBuilder(seed: 7_820).openingTail(targetEncodedBytes: 4_096)
         snapshot.contextUsage = ContextUsage(tokens: 157_000, contextWindow: 272_000, percent: 58)
@@ -437,6 +515,19 @@ final class SessionSheetPresentationTests: XCTestCase {
                     XCTAssertEqual(readerFrame.minY, controller.view.bounds.minY, accuracy: 1,
                                    "The reader must scroll behind the blur, not clip below the title")
                     let firstLine = reader.convert(reader.caretRect(for: reader.beginningOfDocument), to: controller.view)
+                    let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
+                    let barFrame = bar.convert(bar.bounds, to: controller.view)
+                    XCTAssertLessThanOrEqual(firstLine.minY, barFrame.maxY + 30,
+                                             "Decorative blur height must not add a second header gap")
+                    XCTAssertEqual(reader.textContainerInset.left + reader.contentInset.left, 18)
+                    for offset in [-18.0, -0.5, 0.5, 120] {
+                        reader.setContentOffset(CGPoint(x: 0, y: offset), animated: false)
+                        let nativeOffset = reader.contentOffset.y
+                        reader.setNeedsLayout()
+                        reader.layoutIfNeeded()
+                        XCTAssertEqual(reader.contentOffset.y, nativeOffset, accuracy: 0.01)
+                    }
+                    reader.setContentOffset(.zero, animated: false)
                     XCTAssertGreaterThanOrEqual(firstLine.minY, controller.view.safeAreaInsets.top,
                                                 "Opening the full-height reader must not hide its first line")
                     let blurs = self.views(of: VariableBackdropBlurView.self, in: controller.view)
@@ -807,6 +898,134 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testNestedTechnicalJSONKeepsChromeAboveItsReader() async throws {
+        for scheme: ColorScheme in [.light, .dark] {
+            let state = NestedDocumentPresentation()
+            try await withSheet(NestedDocumentFixture(presentation: state).preferredColorScheme(scheme)) { parent in
+                state.isPresented = true
+                let appeared = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    MainActor.assumeIsolated { parent.presentedViewController != nil }
+                }, object: nil)
+                let result = await XCTWaiter.fulfillment(of: [appeared], timeout: 2)
+                XCTAssertEqual(result, .completed)
+                let child = try XCTUnwrap(parent.presentedViewController)
+                if let transition = child.transitionCoordinator {
+                    await withCheckedContinuation { continuation in
+                        if !transition.animate(alongsideTransition: nil, completion: { _ in continuation.resume() }) {
+                            continuation.resume()
+                        }
+                    }
+                }
+                child.view.layoutIfNeeded()
+                let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: child.view).first)
+                self.assertToolbarPaint(.tronPurple, bar: bar, leading: false, controller: child)
+                let reader = try XCTUnwrap(self.views(of: TronDocumentTextView.self, in: child.view).first)
+                let firstLine = reader.convert(reader.caretRect(for: reader.beginningOfDocument), to: child.view)
+                let barFrame = bar.convert(bar.bounds, to: child.view)
+                XCTAssertGreaterThanOrEqual(firstLine.minY, barFrame.maxY)
+                XCTAssertLessThanOrEqual(firstLine.minY, barFrame.maxY + 30)
+                self.capture(child, name: "nested-technical-json-\(scheme)")
+            }
+        }
+    }
+
+    func testTechnicalJSONChromeAndReaderAtBothDetents() async throws {
+        for scheme: ColorScheme in [.light, .dark] {
+            for editable in [false, true] {
+                try await self.withSheet(TechnicalJSONSheet(
+                    value: .object(["items": .array((0..<80).map { .string("Item \($0)") })]),
+                    title: "Technical Details", accent: .tronSlate,
+                    detent: .constant(.medium), onEdit: editable ? {} : nil
+                ).tronSettingsVisualTheme(accent: .tronPurple).preferredColorScheme(scheme)) { controller in
+                    let reader = try XCTUnwrap(self.views(of: TronDocumentTextView.self, in: controller.view).first)
+                    let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
+                    let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                        MainActor.assumeIsolated { reader.text?.contains("Item 79") == true }
+                    }, object: nil)
+                    let loaded = await XCTWaiter.fulfillment(of: [ready], timeout: 2)
+                    XCTAssertEqual(loaded, .completed)
+                    for detent in [UISheetPresentationController.Detent.Identifier.medium, .large] {
+                        controller.sheetPresentationController?.selectedDetentIdentifier = detent
+                        controller.presentationController?.containerView?.layoutIfNeeded()
+                        controller.view.layoutIfNeeded()
+                        self.assertToolbarPaint(.tronPurple, bar: bar, leading: false, controller: controller)
+                        if editable { self.assertToolbarPaint(.tronPurple, bar: bar, leading: true, controller: controller) }
+                        let barFrame = bar.convert(bar.bounds, to: controller.view)
+                        let firstLine = reader.convert(reader.caretRect(for: reader.beginningOfDocument), to: controller.view)
+                        XCTAssertGreaterThanOrEqual(firstLine.minY, barFrame.maxY)
+                        XCTAssertLessThanOrEqual(firstLine.minY, barFrame.maxY + 30)
+                        XCTAssertEqual(self.views(of: VariableBackdropBlurView.self, in: controller.view).count, 1)
+                        for offset in [-18.0, -0.5, 0.5, 120] {
+                            reader.setContentOffset(CGPoint(x: 0, y: offset), animated: false)
+                            let nativeOffset = reader.contentOffset.y
+                            reader.setNeedsLayout(); reader.layoutIfNeeded()
+                            XCTAssertEqual(reader.contentOffset.y, nativeOffset, accuracy: 0.01)
+                        }
+                        reader.setContentOffset(.zero, animated: false)
+                        self.capture(controller, name: "technical-json-\(scheme)-\(detent.rawValue)-edit-\(editable)")
+                    }
+                }
+            }
+            try await withModel { model in
+                try await self.withSheet(CustomModelAdvancedEditorSheet(
+                    document: .constant(String(repeating: "{ \"name\": \"value\" }\n", count: 60)),
+                    target: .global, onDone: {}
+                ).environment(model).tronSettingsVisualTheme(accent: .tronPurple).preferredColorScheme(scheme)) { controller in
+                    let reader = try XCTUnwrap(self.views(of: UITextView.self, in: controller.view).first)
+                    let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
+                    XCTAssertTrue(reader.isEditable)
+                    for detent in [UISheetPresentationController.Detent.Identifier.medium, .large] {
+                        controller.sheetPresentationController?.selectedDetentIdentifier = detent
+                        controller.presentationController?.containerView?.layoutIfNeeded()
+                        controller.view.layoutIfNeeded()
+                        self.assertToolbarPaint(.tronPurple, bar: bar, leading: false, controller: controller)
+                        let frame = reader.convert(reader.bounds, to: controller.view)
+                        let barFrame = bar.convert(bar.bounds, to: controller.view)
+                        XCTAssertGreaterThanOrEqual(frame.minY, barFrame.maxY)
+                        XCTAssertLessThanOrEqual(frame.minY, barFrame.maxY + 36)
+                        reader.setContentOffset(CGPoint(x: 0, y: 100), animated: false)
+                        let nativeOffset = reader.contentOffset.y
+                        reader.setNeedsLayout(); reader.layoutIfNeeded()
+                        XCTAssertEqual(reader.contentOffset.y, nativeOffset, accuracy: 0.01)
+                        reader.setContentOffset(.zero, animated: false)
+                        self.capture(controller, name: "advanced-json-editor-\(scheme)-\(detent.rawValue)")
+                    }
+                }
+            }
+        }
+    }
+
+    func testTechnicalJSONRetainsReadingPositionAcrossActivityChanges() async throws {
+        let state = JSONReaderContinuityState()
+        try await withSheet(JSONReaderContinuityFixture(state: state)) { controller in
+            let reader = try XCTUnwrap(self.views(of: TronDocumentTextView.self, in: controller.view).first)
+            let loaded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                MainActor.assumeIsolated { reader.text.contains("last-original-item") }
+            }, object: nil)
+            let result = await XCTWaiter.fulfillment(of: [loaded], timeout: 2)
+            XCTAssertEqual(result, .completed)
+            reader.selectedRange = NSRange(location: 40, length: 8)
+            reader.setContentOffset(CGPoint(x: 0, y: 120), animated: false)
+            let offset = reader.contentOffset
+            let selection = reader.selectedRange
+            state.activity = .covered
+            try await Task.sleep(for: .milliseconds(80))
+            state.activity = .active
+            try await Task.sleep(for: .milliseconds(120))
+            XCTAssertTrue(self.views(of: TronDocumentTextView.self, in: controller.view).first === reader)
+            XCTAssertEqual(reader.selectedRange, selection)
+            XCTAssertEqual(reader.contentOffset.y, offset.y, accuracy: 0.01)
+            XCTAssertTrue(reader.text.contains("last-original-item"))
+            state.value = .object(["replacement": .string("new-source-content")])
+            let replaced = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                MainActor.assumeIsolated { reader.text.contains("new-source-content") }
+            }, object: nil)
+            let replacement = await XCTWaiter.fulfillment(of: [replaced], timeout: 2)
+            XCTAssertEqual(replacement, .completed)
+            XCTAssertFalse(reader.text.contains("last-original-item"))
+        }
+    }
+
     func testAdvancedJSONActionsMatchInheritedPurpleTheme() async throws {
         try await withSheet(TechnicalJSONSheet(
             value: .object(["providers": .object([:])]), title: "Advanced JSON", accent: .tronSlate,
@@ -820,8 +1039,11 @@ final class SessionSheetPresentationTests: XCTestCase {
     }
 
     private func capture(_ controller: UIViewController, name: String) {
-        let image = UIGraphicsImageRenderer(size: controller.view.bounds.size).image { _ in
-            controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
+        guard let window = controller.view.window else { return XCTFail("Capture requires a mounted sheet") }
+        let origin = controller.view.convert(controller.view.bounds, to: window).origin
+        let image = UIGraphicsImageRenderer(size: controller.view.bounds.size).image { context in
+            context.cgContext.translateBy(x: -origin.x, y: -origin.y)
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
         }
         let attachment = XCTAttachment(image: image)
         attachment.name = name
@@ -920,5 +1142,60 @@ private struct SheetFixture<Content: View>: View {
 
     var body: some View {
         Color.tronBackground.sheet(isPresented: $presented) { content }
+    }
+}
+
+@MainActor @Observable
+private final class JSONReaderContinuityState {
+    var activity: PresentationSurfaceActivity = .active
+    var value: JSONValue = .object(["items": .array(
+        (0..<200).map { .string("Original item \($0)") } + [.string("last-original-item")]
+    )])
+}
+
+private struct JSONReaderContinuityFixture: View {
+    let state: JSONReaderContinuityState
+    var body: some View {
+        TechnicalJSONSheet(value: state.value, title: "Technical Details", accent: .tronSlate,
+                           detent: .constant(.medium), onEdit: nil)
+            .environment(\.tronPresentationActivity, state.activity)
+    }
+}
+
+@MainActor @Observable
+private final class WorkspaceRefreshActivity {
+    var value: PresentationSurfaceActivity = .active
+}
+
+private struct WorkspaceRefreshFixture: View {
+    let model: AppModel
+    let sessionID: String
+    let activity: WorkspaceRefreshActivity
+    let probe: SessionWorkspaceRefreshProbe
+    var body: some View {
+        SessionContextSheet(sessionID: sessionID, onForkCreated: { _ in })
+            .environment(model)
+            .environment(\.tronPresentationActivity, activity.value)
+            .environment(\.sessionWorkspaceRefreshProbe, probe)
+    }
+}
+
+@MainActor @Observable
+private final class NestedDocumentPresentation {
+    var isPresented = false
+}
+
+private struct NestedDocumentFixture: View {
+    @Bindable var presentation: NestedDocumentPresentation
+    var body: some View {
+        NavigationStack {
+            Text("Resource details").navigationTitle("Resources")
+                .sheet(isPresented: $presentation.isPresented) {
+                    TechnicalJSONSheet(value: .object(["status": .string("ready")]),
+                                       title: "Technical Details", accent: .tronSlate,
+                                       detent: .constant(.medium), onEdit: nil)
+                        .tronSettingsVisualTheme(accent: .tronPurple)
+                }
+        }
     }
 }

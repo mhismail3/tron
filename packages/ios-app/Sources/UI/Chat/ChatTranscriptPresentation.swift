@@ -1408,7 +1408,7 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
     /// action; ordinary status notifications never become interactive.
     let expandsOnTruncation: Bool
     /// Compaction summaries remain interactive, but their long-form sheet
-    /// content is intentionally plain rather than another glass container.
+    /// content keeps the rounded container with flat rather than glass styling.
     let detailUsesGlassSurface: Bool
 
     init(

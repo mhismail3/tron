@@ -4,6 +4,46 @@ import XCTest
 
 @MainActor
 final class SettingsLayoutStyleTests: XCTestCase {
+    func testFlatSummaryKeepsItsContainerWithoutBackdropGlass() async throws {
+        for scheme in [ColorScheme.light, .dark] {
+            try await withHost(Text("Summary").font(TronTypography.body)
+                .frame(maxWidth: .infinity, maxHeight: .infinity).padding(14)
+                .modifier(DetailBodySurface(usesGlass: false, accent: .tronEmerald))
+                .background(Color.tronBackground), size: CGSize(width: 360, height: 120), scheme: scheme) { host in
+                XCTAssertFalse(descendants(host.view).contains { $0 is UIVisualEffectView })
+                let bitmap = image(host)
+                let inside = try pixel(bitmap, x: 5, y: 60)
+                let outside = try pixel(bitmap, x: 0, y: 0)
+                XCTAssertGreaterThan(zip(inside, outside).map { abs($0 - $1) }.reduce(0, +), 0.03,
+                                     "A flat compaction summary still needs a painted rounded container")
+                attach(bitmap, name: "flat-summary-surface-\(scheme)")
+            }
+        }
+    }
+
+    func testEmptyResolvedResourcesRetainGlassPlaceholderRows() async throws {
+        try await withHost(PackageResolvedResourcesSection(resources: .object([:]))
+            .tronPresentation().background(Color.tronBackground), size: CGSize(width: 404, height: 500)) { host in
+            let bitmap = image(host)
+            // SwiftUI glass need not expose a UIVisualEffectView. Sample the
+            // right edge, away from text/icons: three broad tinted bands prove
+            // the actual placeholder containers, unlike the old bare captions.
+            var bands = 0
+            var paintedRows = 0
+            var wasTinted = false
+            for y in 0..<500 {
+                let rgb = try pixel(bitmap, x: 396, y: CGFloat(y))
+                let tinted = (rgb.max() ?? 0) - (rgb.min() ?? 0) > 0.04
+                if tinted { paintedRows += 1 }
+                if tinted && !wasTinted { bands += 1 }
+                wasTinted = tinted
+            }
+            XCTAssertGreaterThanOrEqual(bands, 3)
+            XCTAssertGreaterThanOrEqual(paintedRows, 90)
+            attach(bitmap, name: "empty-resource-containers")
+        }
+    }
+
     func testSharedPillAndPlainNumericValueUseTheSettingsStandard() async throws {
         let pill = UIHostingController(rootView: TronInlineActionLabel("Extra High").tronSettingsLayout())
         pill.safeAreaRegions = []

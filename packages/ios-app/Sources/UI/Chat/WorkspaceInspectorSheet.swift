@@ -197,6 +197,7 @@ struct WorkspaceInspectorSheet: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var owner = WorkspaceInspectorOwner()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selectedTab: WorkspaceInspectorTab = .files
     @State private var includeHidden = false
     @State private var fileRoute: WorkspaceFileRoute?
@@ -381,11 +382,14 @@ struct WorkspaceInspectorSheet: View {
                     accent: .tronSessionTeal
                 )
             } else {
-                ForEach(entries) { entry in fileRow(entry) }
+                ForEach(entries) { entry in fileRow(entry).transition(.opacity) }
             }
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
+        // Only an admitted directory change animates rows, never loading,
+        // polling errors, or an obsolete navigation response.
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.16), value: owner.directory?.path)
     }
 
     private var fileActions: some View {

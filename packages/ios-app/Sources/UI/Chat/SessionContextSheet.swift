@@ -153,12 +153,22 @@ enum SessionWorkspaceRowPresentation: Equatable {
     }
 }
 
+private struct SessionWorkspaceRefreshIdentity: Hashable {
+    let profileID: String
+    let target: SessionPresentationIdentity
+    let runtimeGeneration: String
+    let cwd: String
+    let reconciliationGeneration: Int
+}
+
 struct SessionContextSheet: View {
     let sessionID: String
     let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.tronPresentationActivityCoordinator) private var activityCoordinator
+    @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
     @State private var destination: ManageSessionDestination?
     @State private var showRename = false
     @State private var name = ""
@@ -168,6 +178,9 @@ struct SessionContextSheet: View {
     @State private var exportTask: Task<Void, Never>?
     @State private var workspacePresentation: SessionWorkspaceRowPresentation = .loading
     @State private var workspaceLoadGeneration = 0
+    #if HOSTED_TEST
+    @Environment(\.sessionWorkspaceRefreshProbe) private var workspaceProbe
+    #endif
     @State private var capturedNoticeScope: InAppNoticeScope?
     @State private var fallbackNoticeScope = InAppNoticeScope.presentation(UUID())
     @State private var presentation: SessionContextPresentation?
@@ -258,9 +271,19 @@ struct SessionContextSheet: View {
                     .accessibilityLabel("Done")
                 }
             }
-            .task(id: "\(sessionID):\(presentation?.cwd ?? "none"):\(presentationActivity.allowsPresentationPublication)") {
-                guard presentationActivity.allowsPresentationPublication else { return }
-                await monitorWorkspace(snapshot: presentation)
+            #if HOSTED_TEST
+            .onChange(of: workspacePresentation, initial: true) { _, value in
+                workspaceProbe?.presentation = value
+            }
+            #endif
+            .task(id: PresentationActivityTaskID(
+                source: workspaceRefreshIdentity, presentationActive: workspaceSurfaceIsActive
+            )) {
+                guard let identity = workspaceRefreshIdentity else {
+                    if workspaceSurfaceIsActive { workspacePresentation = .loading }
+                    return
+                }
+                await monitorWorkspace(identity: identity)
             }
             .background {
                 if presentationActivity.allowsPresentationPublication {
@@ -683,28 +706,43 @@ struct SessionContextSheet: View {
         ) ? "Exporting" : "")
     }
 
-    private func monitorWorkspace(snapshot: SessionContextPresentation?) async {
-        guard let snapshot else { return }
+    private var workspaceSurfaceIsActive: Bool {
+        presentationActivity.allowsPresentationPublication
+            && (activityCoordinator?.activity(for: surfaceToken).allowsPresentationPublication ?? true)
+    }
+
+    private var workspaceRefreshIdentity: SessionWorkspaceRefreshIdentity? {
+        guard workspaceSurfaceIsActive,
+              model.connectionState == .connected, !model.isReconcilingForeground,
+              let profileID = model.selectedGatewayProfileID(),
+              let target = model.presentationTarget(for: sessionID),
+              model.hasMountedSessionAuthority(target),
+              let snapshot = model.sessionContextPresentation(for: sessionID) else { return nil }
+        return SessionWorkspaceRefreshIdentity(
+            profileID: profileID, target: target, runtimeGeneration: snapshot.runtimeGeneration,
+            cwd: snapshot.cwd, reconciliationGeneration: model.foregroundReconciliationGeneration
+        )
+    }
+
+    private func monitorWorkspace(identity: SessionWorkspaceRefreshIdentity) async {
         workspaceLoadGeneration &+= 1
         let generation = workspaceLoadGeneration
+        guard workspaceRefreshIdentity == identity, !Task.isCancelled else { return }
         workspacePresentation = .loading
-        while !Task.isCancelled,
-              presentationActivity.allowsPresentationPublication,
-              presentation?.cwd == snapshot.cwd {
+        // Scene activation can precede transport/subscription reconciliation.
+        // The task keys off admitted authority, so readiness restarts this read
+        // immediately instead of leaving a transient error until another wake.
+        while !Task.isCancelled, workspaceRefreshIdentity == identity {
             do {
                 let inspection = try await model.workspaceInspection.inspect(sessionID: sessionID)
-                guard generation == workspaceLoadGeneration,
-                      presentationActivity.allowsPresentationPublication,
-                      presentation?.cwd == snapshot.cwd,
-                      !Task.isCancelled else { return }
+                guard generation == workspaceLoadGeneration, !Task.isCancelled,
+                      workspaceRefreshIdentity == identity else { return }
                 workspacePresentation = SessionWorkspaceRowPresentation.resolve(inspection)
             } catch is CancellationError {
                 return
             } catch {
-                guard generation == workspaceLoadGeneration,
-                      !Task.isCancelled,
-                      presentationActivity.allowsPresentationPublication,
-                      presentation?.cwd == snapshot.cwd else { return }
+                guard generation == workspaceLoadGeneration, !Task.isCancelled,
+                      workspaceRefreshIdentity == identity else { return }
                 workspacePresentation = .failed(error.localizedDescription)
             }
             do { try await Task.sleep(for: .seconds(4)) }
@@ -760,3 +798,14 @@ struct SessionContextSheet: View {
         }
     }
 }
+
+#if HOSTED_TEST
+@MainActor @Observable
+final class SessionWorkspaceRefreshProbe {
+    var presentation: SessionWorkspaceRowPresentation = .loading
+}
+
+extension EnvironmentValues {
+    @Entry var sessionWorkspaceRefreshProbe: SessionWorkspaceRefreshProbe? = nil
+}
+#endif

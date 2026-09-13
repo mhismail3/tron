@@ -112,6 +112,7 @@ struct ContextWindowSliderEditor: View {
     @State private var progress: Double
     @State private var feedbackDetent: Int?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(request: ContextWindowSliderRequest, anchor: ConfigurationSliderRequest, source: CGRect,
@@ -158,13 +159,14 @@ struct ContextWindowSliderEditor: View {
                 ContextWindowSliderLabelsLayout(defaultProgress: request.scale.progress(for: request.scale.defaultValue)) {
                     Text(request.scale.limits.minimum.formatted())
                     Text("Default")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .font(TronTypography.code(size: TronTypography.sizeBodySM, weight: .semibold))
                         .foregroundStyle(anchor.accent)
                     Text(dynamicTypeSize.isAccessibilitySize
                          ? request.scale.limits.maximum.formatted(.number.notation(.compactName).precision(.fractionLength(0...2)))
                          : request.scale.limits.maximum.formatted())
                 }
-                .font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextSecondary)
+                .font(TronTypography.secondaryCodeDescription.weight(.bold))
+                .foregroundStyle(colorScheme == .dark ? Color.white : Color.tronTextSecondary)
                 .lineLimit(1).minimumScaleFactor(0.6).accessibilityHidden(true)
             }
         }

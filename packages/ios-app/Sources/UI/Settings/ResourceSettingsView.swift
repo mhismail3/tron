@@ -63,10 +63,10 @@ struct ResourceSettingsView: View {
         var id: String { rawValue }
         var title: String {
             switch self {
-            case .extensions: "Extension Locations"
-            case .skills: "Skill Locations"
-            case .prompts: "Prompt Locations"
-            case .themes: "Terminal Theme Locations"
+            case .extensions: "Extension"
+            case .skills: "Skill"
+            case .prompts: "Prompt"
+            case .themes: "Terminal Theme"
             case .shellPath: "Shell Executable"
             case .shellPrefix: "Shell Command Prefix"
             case .npmCommand: "Package Manager Command"

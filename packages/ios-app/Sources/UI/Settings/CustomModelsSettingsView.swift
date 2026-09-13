@@ -99,31 +99,9 @@ struct CustomModelsSettingsView: View {
     }
 
     private var advancedEditorSheet: some View {
-        NavigationStack {
-            VStack(spacing: 12) {
-                SettingsAutosaveNotice(key: .customModels(target))
-                TextEditor(text: editedAdvancedDocumentBinding)
-            }
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .tronTextEditor(monospaced: true)
-                .padding(18)
-                .tronScrollEdgeChrome()
-                .tronNavigationTitle("Advanced JSON")
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button { showingAdvanced = false } label: {
-                            Image(systemName: "checkmark")
-                                .font(TronTypography.buttonSM)
-                                .tronSettingsAccent()
-                        }
-                        .accessibilityLabel("Done")
-                    }
-                }
+        CustomModelAdvancedEditorSheet(document: editedAdvancedDocumentBinding, target: target) {
+            showingAdvanced = false
         }
-        .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
     }
 
     private var providersSection: some View {
@@ -162,7 +140,7 @@ struct CustomModelsSettingsView: View {
                 )
             }
             .buttonStyle(.plain)
-            .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.07, interactive: true)
+            .tronGlassSurface(accent: .tronPurple, interactive: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -193,7 +171,7 @@ struct CustomModelsSettingsView: View {
                 }
             } label: { TronInlineActionLabel("Configure") }
         }
-        .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.07)
+        .tronGlassSurface(accent: .tronPurple)
     }
 
     private func providerEditorSheet(_ provider: Binding<CustomModelProviderDraft>) -> some View {
@@ -476,5 +454,41 @@ extension CustomModelProviderDraft {
             guard next.id == id, let index = providers.wrappedValue.firstIndex(where: { $0.id == id }) else { return }
             providers.wrappedValue[index] = next
         })
+    }
+}
+
+/// The editor retains native TextEditor's scrolling/selection; its viewport
+/// owns blur below the navigation chrome, like the read-only JSON sheet.
+struct CustomModelAdvancedEditorSheet: View {
+    @Binding var document: String
+    let target: CustomModelTarget
+    let onDone: () -> Void
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+    private var accent: Color { settingsTheme?.accent ?? .tronPurple }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 12) {
+                SettingsAutosaveNotice(key: .customModels(target))
+                TextEditor(text: $document)
+            }
+            .autocorrectionDisabled()
+            .textInputAutocapitalization(.never)
+            .tronTextEditor(monospaced: true)
+            .padding(18)
+            .tronScrollEdgeChrome()
+            .tronNavigationTitle("Advanced JSON", accent: accent)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(action: onDone) {
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM).foregroundStyle(accent)
+                    }.accessibilityLabel("Done")
+                }
+            }
+        }
+        .tronTopBlur(.sheet)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
     }
 }

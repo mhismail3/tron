@@ -10,12 +10,9 @@ struct PackageResolvedResourcesSection: View {
         VStack(alignment: .leading, spacing: 18) {
             ForEach(presentation.categories) { category in
                 if category.items.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(category.kind.title)
-                            .font(TronTypography.sheetSectionHeader)
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .accessibilityAddTraits(.isHeader)
-                        TronSettingsCaption("No \(category.kind.title.lowercased()) are currently available.")
+                    TronSettingsGroup(category.kind.title, accent: category.kind.accent) {
+                        TronSettingsRow(icon: "tray", title: "No \(category.kind.title.lowercased()) are currently available.",
+                                        accent: category.kind.accent)
                     }
                 } else {
                     TronSettingsGroup(category.kind.title, detail: category.summary, accent: category.kind.accent) {

@@ -97,6 +97,16 @@ struct StructuredJSONPathTests {
         #expect(fields.first { $0.component == .key("missing") }?.valuePreview == "No value")
     }
 
+    @Test("table strings retain their full suffix for head truncation without changing values")
+    func completeTableValueSuffix() {
+        let raw = String(repeating: "long-prefix-", count: 30) + "important-file.json"
+        let field = StructuredJSONField(position: 0, component: .key("path"), value: .string(raw))
+        #expect(field.valuePreview.count <= 181)
+        #expect(field.valuePreview.hasPrefix("…"))
+        #expect(field.valuePreview.hasSuffix("important-file.json"))
+        #expect(field.value == .string(raw))
+    }
+
     @Test("removed or type-changed paths fail closed")
     func missingPath() {
         let path: [StructuredJSONPathComponent] = [.key("items"), .index(2)]

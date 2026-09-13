@@ -607,72 +607,43 @@ enum TronDocumentReaderLayoutPolicy {
 
 @MainActor
 final class TronDocumentTextView: UITextView {
-    /// The custom sheet blur is drawn over this viewport. Content starts below
-    /// that chrome on the initial presentation, then naturally scrolls beneath
-    /// it once the user moves the native reader.
-    var topChromeInset: CGFloat = 0 {
-        didSet { setNeedsLayout() }
-    }
     var readerInset: CGFloat = 18 {
-        didSet { setNeedsLayout() }
+        didSet { if readerInset != oldValue { setNeedsLayout() } }
     }
-    private var establishedInitialOffset = false
 
     override func layoutSubviews() {
-        super.layoutSubviews()
         applyDocumentInsets()
+        super.layoutSubviews()
     }
 
     func applyDocumentInsets() {
-        let oldInset = contentInset
-        let oldOffset = contentOffset
-        let wasAtInitialOffset = !establishedInitialOffset
-            || abs(oldOffset.y) < 1
-            || abs(oldOffset.y + oldInset.top) < 1
-        // textContainerInset places the initial glyph below the custom
-        // header. UIScrollView.contentInset remains limited to the reader's
-        // normal breathing room, so the same content can scroll beneath the
-        // blur instead of making the header gap part of the scrollable body.
-        let resolvedReaderInset = max(0, readerInset)
-        let resolvedChromeInset = max(0, topChromeInset)
-        let resolvedTextContainer = UIEdgeInsets(
-            top: resolvedChromeInset + resolvedReaderInset,
-            left: resolvedReaderInset,
-            bottom: resolvedReaderInset,
-            right: resolvedReaderInset
+        // The native navigation safe area, not the decorative blur's full fade
+        // height, owns initial glyph clearance. TextKit owns the sole horizontal
+        // and top padding; duplicating it in contentInset indents twice.
+        let inset = max(0, readerInset)
+        let resolvedText = UIEdgeInsets(
+            top: safeAreaInsets.top + inset, left: inset,
+            bottom: inset, right: inset
         )
-        if textContainerInset != resolvedTextContainer {
-            textContainerInset = resolvedTextContainer
-        }
+        if textContainerInset != resolvedText { textContainerInset = resolvedText }
         let resolvedContent = UIEdgeInsets(
-            top: resolvedReaderInset,
-            left: resolvedReaderInset,
-            bottom: max(24, resolvedReaderInset + safeAreaInsets.bottom),
-            right: resolvedReaderInset
+            top: 0, left: 0, bottom: max(24, safeAreaInsets.bottom), right: 0
         )
         if contentInset != resolvedContent { contentInset = resolvedContent }
-        let resolvedIndicators = UIEdgeInsets(
-            top: resolvedChromeInset + resolvedReaderInset,
-            left: resolvedReaderInset,
-            bottom: resolvedContent.bottom,
-            right: resolvedReaderInset
+        let indicators = UIEdgeInsets(
+            top: safeAreaInsets.top, left: 0, bottom: resolvedContent.bottom, right: 0
         )
-        if scrollIndicatorInsets != resolvedIndicators { scrollIndicatorInsets = resolvedIndicators }
-        if wasAtInitialOffset {
-            // A new UIScrollView can begin at the negative content inset edge.
-            // Normalize only that initial state; a genuinely scrolled offset
-            // survives text/font/environment updates unchanged.
-            contentOffset.y = 0
-        }
-        establishedInitialOffset = true
+        if verticalScrollIndicatorInsets != indicators { verticalScrollIndicatorInsets = indicators }
+        // Never normalize contentOffset from a layout callback. Zero and the
+        // negative inset edge are also legitimate samples during rubberbanding.
     }
+
 }
 
 struct TronReadOnlyTextView: UIViewRepresentable {
     let text: String
     var style: TronReadOnlyTextStyle = .body
     var inset: CGFloat = 18
-    @Environment(\.tronTopBlurStyle) private var topBlurStyle
 
     func makeUIView(context: Context) -> TronDocumentTextView {
         let view = TronDocumentTextView()
@@ -711,7 +682,6 @@ struct TronReadOnlyTextView: UIViewRepresentable {
         let tintColor = UIColor(Color.tronEmerald)
         if view.tintColor != tintColor { view.tintColor = tintColor }
         view.readerInset = inset
-        view.topChromeInset = topBlurStyle?.height ?? 0
         view.applyDocumentInsets()
     }
 }

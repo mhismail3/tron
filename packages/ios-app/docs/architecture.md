@@ -775,7 +775,7 @@ immutable source document and one cancellation-drained parser for the active det
 last complete document during replacement, and publishes only when the exact route, activity, and
 preparation generation remain current. Its mounted callback is diagnostic evidence of attachment, not
 proof of a rendered frame; native sheet chrome, detents, selection, and Markdown layout remain owned
-by the existing detail view. Compaction summary details keep this full Markdown content in a plain, non-glass container. Provider error footers retain their exact raw message as detail content; native title measurement promotes only a clipped footer to an interactive Liquid Glass surface, while short errors remain flat. Any streaming fragment carrying a tool-call ID—including malformed text or extension content—is
+by the existing detail view. Compaction summary details keep this full Markdown content in the original 12-point rounded container with 14-point inner padding, a flat tinted fill and border instead of Liquid Glass. Provider error footers retain their exact raw message as detail content; native title measurement promotes only a clipped footer to an interactive Liquid Glass surface, while short errors remain flat. Any streaming fragment carrying a tool-call ID—including malformed text or extension content—is
 returned to global assembly so canonical result suppression and placement remain exact.
 Assembler-emitted unique tool sites retain canonical presentation bases, call classification, group
 order, and placement facts. Runtime-only patching requires unchanged canonical source, exact streaming,
@@ -1772,12 +1772,17 @@ with file previews: large-only presentation, blue title and icon-only Done, hidd
 navigation background and bottom toolbar, a continuous document background, and the custom
 top blur supplied by the scroll owner. Native document viewports extend through the bottom
 safe area rather than ending at a blank strip; their internal insets protect the last line.
-The instructions reader also extends behind the navigation title: its native adjusted top
-inset protects the first line on opening, while scrolling lets text pass beneath the full
-custom blur rather than clipping at the bar's lower edge. Full instructions and raw technical JSON use the
+The native reader also extends behind the navigation title. Its actual UIKit navigation
+safe area plus one 18-point TextKit inset protects the first line; the decorative blur's
+full fade height is not a second header gap. Horizontal padding belongs only to TextKit,
+and native layout never normalizes `contentOffset` (near-zero values are valid bounce
+samples). Technical JSON attaches its blur to the viewport **inside** NavigationStack,
+never above the title/actions. Medium/large, light/dark and editable/read-only readers are
+covered by `SessionSheetPresentationTests`; native bounce/selection samples are covered
+by `TronReadOnlyTextViewTests`. Full instructions and raw technical JSON use the
 read-only TextKit viewer so selectable large documents lay out for their native viewport
 instead of requiring one monolithic SwiftUI `Text` to be measured before presentation.
-JSON serialization is prepared off the main actor.
+JSON serialization is prepared off the main actor and publication is fenced by the current managed activity and latest task. The completed document is keyed to its exact source and survives coverage/foregrounding without clearing native text, scroll or selection; source replacement alone prepares a new document. Table value labels use native head truncation and a bounded tail preview instead of a prefix preview, preserving the meaningful suffix without changing the underlying/copyable value or asking SwiftUI to measure an arbitrarily large field.
 Every raw technical JSON affordance is the same non-disclosing row and opens selectable,
 vertically scrollable protocol evidence in a wrapping single-column medium/large sheet;
 technical JSON never creates a horizontal viewport; selectable raw JSON uses the shared
@@ -1786,6 +1791,21 @@ use a protected title followed by a full-width selectable code value, so long ha
 cannot collapse the label column. A same-session reconnect that
 installs a replacement Gateway runtime clears every secondary projection, advances its reload revisions, and rejects both
 stale completions and stale failures by exact subscription token plus request generation.
+Manage Session's Current Branch read is keyed to live presentation activity, exact
+mounted target, profile, runtime, workspace and completed foreground reconciliation.
+Activation before reconnection stays loading; admitted authority immediately restarts
+the existing bounded inspection loop. Every response/error revalidates that identity,
+so covered or replaced work cannot publish. Workspace folder/Go Up replacements use a
+path-keyed 160ms fade at the row owner (disabled for Reduce Motion); loading, polling
+errors and stale responses are not animation triggers.
+
+Context slider endpoint labels are bold monospace; Default remains purple/semibold in
+the code face. Its title and endpoint labels are white in dark mode. Custom Models uses
+the standard purple settings tint, while technical-detail rows retain their gray surface
+independently of the destination's toolbar accent. Additional Locations uses singular
+Extension, Skill, Prompt and Terminal Theme row titles; empty resolved resource sections,
+including Themes, retain a standard Liquid Glass placeholder row.
+
 Manage Session displays the runtime-projected latest cache-hit rate—the
 same canonical formula used by the terminal footer—and never derives a ratio
 from cumulative iOS fields. Export rows keep stable format identities and surface bounded

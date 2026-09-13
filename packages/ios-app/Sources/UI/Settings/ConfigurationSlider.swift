@@ -134,6 +134,7 @@ struct ConfigurationSliderContainer<Content: View>: View {
     let finish: () -> Void
     @ViewBuilder let content: (ConfigurationSliderActions) -> Content
     @State private var expanded = false
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.tronPresentationActivity) private var activity
     @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
@@ -233,7 +234,9 @@ struct ConfigurationSliderContainer<Content: View>: View {
         .frame(maxWidth: .infinity)
     }
 
-    private var headerTitle: some View { Text(title).foregroundStyle(Color.tronTextSecondary) }
+    private var headerTitle: some View {
+        Text(title).foregroundStyle(colorScheme == .dark ? Color.white : Color.tronTextSecondary)
+    }
     private var headerValue: some View {
         Text(value).monospacedDigit().tronSettingsButtonForeground(anchor.accent)
             .lineLimit(1).minimumScaleFactor(0.7)

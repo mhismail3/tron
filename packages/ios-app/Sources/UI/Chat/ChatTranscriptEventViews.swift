@@ -147,7 +147,7 @@ struct ChatNotificationView: View {
     }
 }
 
-private struct DetailBodySurface: ViewModifier {
+struct DetailBodySurface: ViewModifier {
     let usesGlass: Bool
     let accent: Color
 
@@ -156,7 +156,10 @@ private struct DetailBodySurface: ViewModifier {
         if usesGlass {
             content.tronGlassSurface(accent: accent, tintOpacity: 0.08)
         } else {
+            let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
             content
+                .background(accent.opacity(0.10), in: shape)
+                .overlay(shape.stroke(accent.opacity(0.30), lineWidth: 0.5))
         }
     }
 }
