@@ -798,7 +798,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             semanticID: renderedID,
             installedTag: installed.tag,
             entranceState: .none,
-            terminalPhysicalID: renderedID == terminalMaterializationID ? renderedID : nil
+            terminalPhysicalID: renderedID == terminalMaterializationID ? renderedID : nil,
+            lifecycleSettlementID: renderedID
         ) {
             ChatOutgoingSubmissionRow(
                 presentation: outgoing,
@@ -972,6 +973,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         entranceState: ChatTranscriptEntranceState,
         entranceKind: ChatContentEntranceKind = .assistantContent,
         terminalPhysicalID: String? = nil,
+        lifecycleSettlementID: String? = nil,
         @ViewBuilder content: () -> Content
     ) -> some View {
         let rowLayoutEpoch = scrollCoordinator.layoutEpoch
@@ -1029,6 +1031,23 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                         animated: animated,
                         sourceOrdinal: entranceTag.timelineGeneration
                     )
+                }
+                // A lifecycle row can be fully laid out before SwiftUI delivers
+                // the animation completion. Its positive native frame is only
+                // materialization proof: current epoch/tag/row ownership and
+                // the exact transaction lease must also agree. Marker evidence
+                // still owns target release; this does not certify visual
+                // animation completion.
+                if let lifecycleSettlementID,
+                   sample.layoutEpoch == scrollCoordinator.layoutEpoch,
+                   installedTag == currentInstalled?.tag,
+                   currentInstalled?.containsPhysicalRowID(lifecycleSettlementID) == true,
+                   scrollCoordinator.materializationLayoutTransactionID(
+                       for: lifecycleSettlementID
+                   ) != nil,
+                   sample.frame.width.isFinite, sample.frame.width > 0,
+                   sample.frame.height.isFinite, sample.frame.height > 0 {
+                    onEntranceSettled(lifecycleSettlementID)
                 }
                 hostedRecorder?.updateRowFrame(
                     id: semanticID, frame: sample.frame, generation: installedTag?.timelineGeneration

@@ -859,9 +859,12 @@ struct ChatView: View {
     }
 
     private func settleTranscriptEntrance(renderedID: String) {
-        guard let generation = scrollCoordinator.layoutTransactionForSettledEntrance(
-            renderedID: renderedID
-        ) else { return }
+        guard let active = layoutTransaction.generation,
+              active.joined.contains(.transcriptGrowth),
+              !active.settled.contains(.transcriptGrowth),
+              let generation = scrollCoordinator.layoutTransactionForSettledEntrance(
+                renderedID: renderedID
+              ) else { return }
         layoutTransaction.settle(generation, source: .transcriptGrowth)
     }
 
