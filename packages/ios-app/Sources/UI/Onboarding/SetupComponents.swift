@@ -66,9 +66,6 @@ struct ProviderSetupRow: View {
     let provider: ProviderSummary
     var sessionID: String? = nil
     var usageSnapshot: ProviderUsageSnapshot? = nil
-    /// The settings provider list uses direct rows; onboarding retains its
-    /// established compact surface when it embeds this shared row.
-    var usesSurface: Bool = true
     @State private var showsConfiguration = false
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
@@ -106,13 +103,14 @@ struct ProviderSetupRow: View {
                 }
             }
         }
-        .padding(.horizontal, usesSurface ? 12 : 0)
+        .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
-        .modifier(ProviderSetupRowSurfaceModifier(
-            enabled: usesSurface,
-            configured: provider.configured
-        ))
+        .tronScrollSurface(
+            accent: .tronEmerald,
+            cornerRadius: 12,
+            tintOpacity: provider.configured ? 0.14 : 0.08
+        )
         .tronManagedSheet(
             isPresented: $showsConfiguration,
             identity: "onboarding.provider.\(provider.id)"
@@ -154,24 +152,6 @@ struct ProviderSetupRow: View {
             .layoutPriority(1)
             Spacer(minLength: 8)
             trailing()
-        }
-    }
-}
-
-private struct ProviderSetupRowSurfaceModifier: ViewModifier {
-    let enabled: Bool
-    let configured: Bool
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if enabled {
-            content.tronScrollSurface(
-                accent: .tronEmerald,
-                cornerRadius: 12,
-                tintOpacity: configured ? 0.14 : 0.08
-            )
-        } else {
-            content
         }
     }
 }

@@ -220,22 +220,23 @@ final class SettingsLayoutStyleTests: XCTestCase {
         .object(["path": .string(path), "enabled": .bool(true),
                  "metadata": .object(["source": .string(source), "scope": .string(scope), "origin": .string("package")])])
     }
-    func testProviderSettingsRowsUseFlatSheetStyle() async throws {
+    func testProviderRowsKeepLightweightIndividualSurfaces() async throws {
         let provider = ProviderSummary(
             id: "openai-codex", name: "OpenAI Codex", configured: true,
             authSource: "oauth", credentialType: "oauth", authMethods: ["oauth"], modelCount: 2
         )
         try await withHost(
-            ProviderSetupRow(provider: provider, usesSurface: false)
+            ProviderSetupRow(provider: provider)
                 .environment(\.colorScheme, .dark)
                 .tronPresentation().tronSettingsLayout(),
             size: CGSize(width: 440, height: 100)
         ) { host in
             XCTAssertFalse(
                 descendants(host.view).contains { $0 is UIVisualEffectView },
-                "Provider settings rows must not install nested glass containers"
+                "Individual provider surfaces must not add a per-row glass compositor"
             )
             XCTAssertEqual(host.view.bounds.width, 440, accuracy: 1)
+            attach(image(host), name: "provider-rounded-row")
         }
     }
 

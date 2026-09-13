@@ -171,8 +171,9 @@ Non-focused dashboard connections are independently retired or
 reconnected and never blank healthy profiles when one Mac is offline. Provider-auth prompts are
 transport-client scoped: disconnect and profile transitions retire them before a new connection can
 receive input, while a transient same-profile reconnect retains the last bounded provider/model catalog
-until its atomic replacement arrives. The Providers sheet presents configured and available catalogs as
-plain sheet-level rows; opening a provider detail retires the covered list read without clearing its
+until its atomic replacement arrives. The Providers sheet keeps each provider in its own rounded,
+scroll-optimized row container, with Configured above Available and no enclosing section surface or
+between-row dividers. Opening a provider detail retires the covered list read without clearing its
 same-target usage projection, while profile or target changes still clear and fence old results.
 Stale operation responses are treated as a retryable no-op rather
 than a misleading broker error. Pairing pre-encodes profile metadata and uses one transactional profile
