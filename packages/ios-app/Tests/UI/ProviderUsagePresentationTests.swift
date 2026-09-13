@@ -62,6 +62,29 @@ struct ProviderUsagePresentationTests {
         #expect(ProviderUsagePresentation.summary(snapshot) == "Account usage is not supported by this provider")
     }
 
+    @Test("summary-only usage omits the detail stack while genuine detail remains visible")
+    func summaryOnlyContent() {
+        #expect(!ProviderUsagePresentation.hasDetailContent(
+            ProviderUsageSnapshot(providerId: "empty", status: .available)
+        ))
+        #expect(!ProviderUsagePresentation.hasDetailContent(
+            ProviderUsageSnapshot(providerId: "unsupported", status: .unsupported,
+                windows: [UsageWindow(id: "ignored", label: "Ignored", usedPercent: 0)])
+        ))
+        #expect(ProviderUsagePresentation.hasDetailContent(
+            ProviderUsageSnapshot(providerId: "available", status: .available,
+                windows: [UsageWindow(id: "quota", label: "Quota", usedPercent: 0)])
+        ))
+        #expect(ProviderUsagePresentation.hasDetailContent(
+            ProviderUsageSnapshot(providerId: "updated", status: .available,
+                updatedAt: "2026-01-02T03:04:05.123Z")
+        ))
+        #expect(ProviderUsagePresentation.hasDetailContent(
+            ProviderUsageSnapshot(providerId: "limited", status: .rateLimited,
+                retryAt: "2026-01-02T04:04:05.123Z")
+        ))
+    }
+
     @Test("rate limits retain current status and present retry timestamp")
     func rateLimitFormatting() {
         let snapshot = ProviderUsageSnapshot(

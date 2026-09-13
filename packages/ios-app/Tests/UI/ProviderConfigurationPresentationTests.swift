@@ -31,7 +31,7 @@ struct ProviderConfigurationPresentationTests {
 
     @Test("refresh keeps a compact visible circle and a full hit target")
     func refreshGeometryAndContrast() {
-        #expect(ProviderUsageRefreshPresentation.visibleDiameter == 22)
+        #expect(ProviderUsageRefreshPresentation.visibleDiameter == 26)
         #expect(ProviderUsageRefreshPresentation.hitTargetDiameter == 44)
         #expect(ProviderUsageRefreshPresentation.iconPointSize == 13)
         #expect(TronSettingsButtonContrastPolicy.usesWhiteForeground(in: .dark))

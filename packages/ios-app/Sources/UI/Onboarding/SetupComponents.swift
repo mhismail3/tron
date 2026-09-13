@@ -161,7 +161,7 @@ struct ProviderSetupRow: View {
 }
 
 enum ProviderUsageRefreshPresentation {
-    static let visibleDiameter: CGFloat = 22
+    static let visibleDiameter: CGFloat = 26
     static let hitTargetDiameter: CGFloat = 44
     static let iconPointSize: CGFloat = 13
 }
@@ -355,12 +355,18 @@ struct ProviderConfigurationSheet: View {
                                 )
                         }
                         .buttonStyle(.plain)
-                        .frame(width: ProviderUsageRefreshPresentation.hitTargetDiameter, height: ProviderUsageRefreshPresentation.hitTargetDiameter)
+                        .frame(
+                            width: ProviderUsageRefreshPresentation.hitTargetDiameter,
+                            height: ProviderUsageRefreshPresentation.hitTargetDiameter,
+                            alignment: .topTrailing
+                        )
                         .contentShape(Rectangle())
                         .disabled(usageController.isLoading)
                         .accessibilityLabel("Refresh account usage")
                     }
-                    ProviderUsageSummaryView(snapshot: usage, detail: true, includeSummary: false)
+                    if ProviderUsagePresentation.hasDetailContent(usage) {
+                        ProviderUsageSummaryView(snapshot: usage, detail: true, includeSummary: false)
+                    }
                     if usageController.didFail {
                         Text("Refresh unavailable. Showing last known usage.")
                             .font(TronTypography.caption)
@@ -370,7 +376,7 @@ struct ProviderConfigurationSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 8)
                 .padding(.horizontal, 14)
-                .padding(.bottom, 14)
+                .padding(.bottom, ProviderUsagePresentation.hasDetailContent(usage) || usageController.didFail ? 14 : 8)
             } else if usageController.isLoading {
                 TronLoadingState(label: "Loading account usage…", accent: .tronEmerald)
                     .padding(.top, 8)

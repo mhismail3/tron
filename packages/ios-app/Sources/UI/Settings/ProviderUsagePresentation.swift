@@ -2,6 +2,13 @@ import Foundation
 import SwiftUI
 
 enum ProviderUsagePresentation {
+    /// Keep summary-only states from reserving an empty detail row and its gap.
+    static func hasDetailContent(_ snapshot: ProviderUsageSnapshot) -> Bool {
+        guard snapshot.status == .available || snapshot.status == .rateLimited else { return false }
+        return !snapshot.windows.isEmpty || !snapshot.balances.isEmpty
+            || updatedCopy(snapshot) != nil || retryCopy(snapshot) != nil
+    }
+
     static func summary(_ snapshot: ProviderUsageSnapshot) -> String {
         guard snapshot.status == .available || snapshot.status == .rateLimited else {
             return statusCopy(snapshot.status)
@@ -130,7 +137,7 @@ struct ProviderUsageSummaryView: View {
                     .foregroundStyle(Color.tronTextPrimary)
                     .accessibilityLabel("Account usage: \(ProviderUsagePresentation.summary(snapshot))")
             }
-            if detail && (snapshot.status == .available || snapshot.status == .rateLimited) {
+            if detail && ProviderUsagePresentation.hasDetailContent(snapshot) {
                 ForEach(snapshot.windows) { window in
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
