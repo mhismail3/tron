@@ -65,6 +65,7 @@ enum ProviderConfigurationPresentation {
 struct ProviderSetupRow: View {
     let provider: ProviderSummary
     var sessionID: String? = nil
+    var usageSnapshot: ProviderUsageSnapshot? = nil
     @State private var showsConfiguration = false
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
@@ -73,9 +74,59 @@ struct ProviderSetupRow: View {
     }
 
     var body: some View {
-        let rowAccent = settingsTheme?.accent
-            ?? (provider.configured ? Color.tronEmerald : Color.tronTextSecondary)
+        Group {
+            if provider.configured {
+                Button { showsConfiguration = true } label: {
+                    rowContents {
+                        Text("Details")
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                            .tronSettingsButtonForeground(settingsTheme?.accent ?? .tronEmerald)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Details for \(provider.displayName)")
+                .accessibilityValue(usageSnapshot.map { "Account usage: \(ProviderUsagePresentation.summary($0))" } ?? "Account usage unavailable")
+            } else {
+                rowContents {
+                    Button { showsConfiguration = true } label: {
+                        Text("Connect")
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                            .tronSettingsButtonForeground(settingsTheme?.accent ?? .tronEmerald)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .frame(minHeight: 44, alignment: .center)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Connect \(provider.displayName)")
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+        .tronScrollSurface(
+            accent: .tronEmerald,
+            cornerRadius: 12,
+            tintOpacity: provider.configured ? 0.14 : 0.08
+        )
+        .tronManagedSheet(
+            isPresented: $showsConfiguration,
+            identity: "onboarding.provider.\(provider.id)"
+        ) {
+            ProviderConfigurationSheet(
+                provider: provider,
+                target: providerTarget
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func rowContents<Trailing: View>(@ViewBuilder trailing: () -> Trailing) -> some View {
         HStack(alignment: .center, spacing: 10) {
+            let rowAccent = settingsTheme?.accent
+                ?? (provider.configured ? Color.tronEmerald : Color.tronTextSecondary)
             Image(systemName: provider.configured ? "checkmark.seal.fill" : "key")
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(rowAccent)
@@ -90,42 +141,27 @@ struct ProviderSetupRow: View {
                     .font(TronTypography.secondaryDescription)
                     .foregroundStyle(Color.tronTextSecondary)
                     .lineLimit(1)
+                if let usageSnapshot {
+                    Text(ProviderUsagePresentation.summary(usageSnapshot))
+                        .font(TronTypography.secondaryDescription)
+                        .foregroundStyle(usageSnapshot.status == .available ? Color.tronEmerald : Color.tronTextMuted)
+                        .lineLimit(1)
+                        .accessibilityLabel("Account usage: \(ProviderUsagePresentation.summary(usageSnapshot))")
+                }
             }
             .layoutPriority(1)
             Spacer(minLength: 8)
-            Button { showsConfiguration = true } label: {
-                Text(provider.configured ? "Configure" : "Connect")
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                .tronSettingsButtonForeground(settingsTheme?.accent ?? .tronEmerald)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-                .frame(minHeight: 44, alignment: .center)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("\(provider.configured ? "Configure" : "Connect") \(provider.displayName)")
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
-        .tronScrollSurface(
-            accent: .tronEmerald,
-            cornerRadius: 12,
-            tintOpacity: provider.configured ? 0.14 : 0.08
-        )
-        .tronManagedSheet(
-            isPresented: $showsConfiguration,
-            identity: "onboarding.provider.\(provider.id)"
-        ) {
-            ProviderConfigurationSheet(provider: provider, target: providerTarget)
+            trailing()
         }
     }
 }
 
-private struct ProviderConfigurationSheet: View {
+struct ProviderConfigurationSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     let provider: ProviderSummary
     let target: ProviderCatalogTarget
     @State private var activeOperationID: String?
@@ -133,6 +169,7 @@ private struct ProviderConfigurationSheet: View {
     @State private var beginningMethod: String?
     @State private var attemptedAutomaticBegin = false
     @State private var clearing = false
+    @State private var usageController = ProviderUsageReadController()
 
     private var currentOperationID: String? {
         model.authPrompt?.operationId ?? model.authEvent?.operationId
@@ -199,6 +236,9 @@ private struct ProviderConfigurationSheet: View {
             guard let owningProfileID, selectedProfileID != owningProfileID else { return }
             close()
         }
+        .onChange(of: model.profileRevision) { _, _ in
+            usageController.begin(clear: true)
+        }
         .onChange(of: currentOperationID) { previous, current in
             if let previous, previous == activeOperationID, current == nil {
                 activeOperationID = nil
@@ -208,9 +248,23 @@ private struct ProviderConfigurationSheet: View {
             }
         }
         .onDisappear {
+            usageController.begin()
             guard let operationID = activeOperationID else { return }
             activeOperationID = nil
             Task { await model.cancelAuth(operationID: operationID) }
+        }
+        .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
+            guard active else { usageController.begin(); return }
+        }
+        .onChange(of: model.providerInvalidationGeneration) { _, _ in
+            usageController.begin(clear: true)
+        }
+        .task(id: PresentationActivityTaskID(
+            source: "provider-usage-detail:\(target):\(provider.id):\(model.profileRevision):\(model.providerInvalidationGeneration):\(model.foregroundReconciliationGeneration):\(usageController.requestGeneration):\(model.gatewayInfo?.capabilities.contains(ProviderUsageCapability.name) == true)",
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) {
+            guard presentationActivity.allowsPresentationPublication, !Task.isCancelled else { return }
+            await loadUsage()
         }
     }
 
@@ -225,6 +279,8 @@ private struct ProviderConfigurationSheet: View {
                         accent: provider.configured ? .tronEmerald : .tronSlate
                     )
                 }
+
+                usageSection
 
                 if isPresentingOwnedAuth {
                     ProviderAuthFlowContent()
@@ -245,6 +301,70 @@ private struct ProviderConfigurationSheet: View {
         }
         .tronScrollEdgeChrome()
         .scrollDismissesKeyboard(.interactively)
+    }
+
+    @ViewBuilder private var usageSection: some View {
+        TronSettingsGroup("Account Usage", accent: .tronEmerald) {
+            if model.gatewayInfo?.capabilities.contains(ProviderUsageCapability.name) != true {
+                TronSettingsCaption("Account usage is unavailable on this Gateway. Connection details remain available.")
+            } else if let usage = usageController.snapshots[provider.id] {
+                HStack(alignment: .top, spacing: 8) {
+                    ProviderUsageSummaryView(snapshot: usage, detail: true)
+                    Spacer(minLength: 4)
+                    Button { usageController.begin() } label: {
+                        Image(systemName: usageController.isLoading ? "arrow.triangle.2.circlepath" : "arrow.clockwise")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(settingsTheme?.accent ?? .tronEmerald)
+                    }
+                    .disabled(usageController.isLoading)
+                    .accessibilityLabel("Refresh account usage")
+                    if usageController.didFail {
+                        Text("Refresh unavailable. Showing last known usage.")
+                            .font(TronTypography.caption)
+                            .foregroundStyle(Color.tronTextMuted)
+                    }
+                }
+                .padding(14)
+            } else if usageController.isLoading {
+                TronLoadingState(label: "Loading account usage…", accent: .tronEmerald)
+            } else if usageController.didFail {
+                TronSettingsCaption("Account usage is currently unavailable. Connection details remain available.")
+            }
+        }
+    }
+
+    private func loadUsage() async {
+        guard model.gatewayInfo?.capabilities.contains(ProviderUsageCapability.name) == true,
+              presentationActivity.allowsPresentationPublication,
+              !Task.isCancelled else { return }
+        let identity = ProviderUsageReadIdentity(
+            target: target,
+            providerID: provider.id,
+            profileRevision: model.profileRevision,
+            profileID: model.profiles.selected?.id,
+            invalidationGeneration: model.providerInvalidationGeneration,
+            foregroundGeneration: model.foregroundReconciliationGeneration,
+            requestGeneration: usageController.requestGeneration,
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )
+        await usageController.read(
+            identity: identity,
+            fetch: {
+                try await model.client.request(
+                    "provider.usage",
+                    ProviderUsageRequest(sessionId: target.sessionID, providerId: provider.id)
+                )
+            },
+            current: {
+                identity.target == self.target
+                    && identity.providerID == self.provider.id
+                    && identity.profileRevision == model.profileRevision
+                    && identity.profileID == model.profiles.selected?.id
+                    && identity.invalidationGeneration == model.providerInvalidationGeneration
+                    && identity.foregroundGeneration == model.foregroundReconciliationGeneration
+                    && presentationActivity.allowsPresentationPublication
+            }
+        )
     }
 
     @ViewBuilder private var connectionControls: some View {

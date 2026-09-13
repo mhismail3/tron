@@ -515,7 +515,15 @@ and duplicate compound identities. Gateway cursors bind offsets to an exact whol
 so mutation cannot mix generations. Model pickers key rows by that compound identity, so equal model
 names from distinct providers remain stable. Profile retirement synchronously discards catalogs and auth routing.
 Its forced refresh and logout commands use the shared receipt executor before reloading the
-exact captured target.
+exact captured target. Account usage is a separate bounded `provider-usage.v1` read: the Settings
+presentation requests the selected target once for its configured-first list and the existing provider
+configuration sheet requests one exact provider snapshot for detail. The projection is never merged with
+session context usage or local token totals. Capability admission avoids a failed RPC on older Gateways;
+a small ProviderUsageReadController owns latest-request admission, while profile, target, foreground,
+and managed-presentation activity fences clear or reject late account data.
+Detail does not seed data from list rows: only its own admitted read can publish measurements,
+so opening the sheet across an account change cannot resurrect an unverified list snapshot.
+Supported, unsupported, stale, rate-limited, and authentication-required statuses remain explicit.
 
 Compaction Settings consolidates automatic compaction and advanced reserve/recent controls
 formerly duplicated under Models and Defaults and Runtime Behavior. The existing scoped draft

@@ -55,6 +55,7 @@ import { AUTOMATIONS_CAPABILITY, AUTOMATIONS_TIMELINE_CAPABILITY } from "../auto
 import { AutomationPaginationStore } from "../automations/automation-pagination.js";
 import { admitsAutomationTrigger } from "../automations/automation-contract.js";
 import { validateTimelineWindow } from "../automations/automation-timeline.js";
+import { ProviderUsageOwner, PROVIDER_USAGE_CAPABILITY } from "../providers/provider-usage.js";
 
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const PROVIDER_CATALOG_MAX_ITEMS = 1_000;
@@ -173,6 +174,8 @@ export interface GatewayServiceDependencies {
   notifications?: NotificationService;
   workRegistry?: GatewayWorkRegistry;
   automations?: AutomationService;
+  /** Bounded account-usage owner; injectable for fixture transport tests. */
+  providerUsage?: ProviderUsageOwner;
 }
 
 export class GatewayService {
@@ -188,6 +191,7 @@ export class GatewayService {
   private readonly processTranscriptLeases: ProcessTranscriptLeaseStore;
   private readonly automationPages = new AutomationPaginationStore();
   private readonly workspaceInspector: WorkspaceInspectionService;
+  private readonly providerUsage: ProviderUsageOwner;
 
   constructor(private readonly dependencies: GatewayServiceDependencies) {
     this.updateService = dependencies.updateService ?? new GatewayUpdateService({
@@ -206,6 +210,7 @@ export class GatewayService {
     this.workspaceInspector = dependencies.workspaceInspector ?? new WorkspaceInspectionService(
       (data, mimeType) => dependencies.sessions.registerWorkspaceBlob(data, mimeType),
     );
+    this.providerUsage = dependencies.providerUsage ?? new ProviderUsageOwner();
   }
 
   releaseClient(clientID: string): void {
@@ -277,6 +282,7 @@ export class GatewayService {
         "context-window.v1",
         "compaction-policy.v1",
         "drain-status.v1",
+        PROVIDER_USAGE_CAPABILITY,
         ...(this.updateService.isUsable ? ["gateway-update.v1"] : []),
         ...(this.iosDeviceInstallService.isUsable ? [IOS_DEVICE_INSTALL_CAPABILITY] : []),
         ...(this.dependencies.notifications ? ["push-notifications.v1", "notification-inbox.v1"] : []),
@@ -1169,6 +1175,23 @@ export class GatewayService {
 
       case "provider.list":
         return this.providers(await this.modelRuntime(params));
+      case "provider.usage": {
+        if (Object.keys(params).some((key) => key !== "sessionId" && key !== "providerId")) {
+          throw new GatewayError("invalid_request", "Provider usage accepts only sessionId and providerId");
+        }
+        this.requireObserverAdmission(client);
+        const providerId = params.providerId === undefined ? undefined : string(params.providerId, "providerId", { max: 120 });
+        const sessionId = params.sessionId === undefined ? undefined : string(params.sessionId, "sessionId", { max: 200 });
+        if (sessionId !== undefined) {
+          const slot = await this.openedSlot(client, { sessionId });
+          const result = await this.providerUsage.read(slot.modelRuntime, providerId, client.signal);
+          this.requireObserverAdmission(client);
+          return safeJson(result);
+        }
+        const result = await this.providerUsage.read(this.dependencies.modelRuntime, providerId, client.signal);
+        this.requireObserverAdmission(client);
+        return safeJson(result);
+      }
       case "model.list":
         return this.models(await this.modelRuntime(params), params.cursor, params.limit);
       case "auth.begin": {

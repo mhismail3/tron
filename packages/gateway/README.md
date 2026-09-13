@@ -106,6 +106,20 @@ the Gateway is stopped and restarted; the runtime also snapshots the admitted
 session directory at startup so an out-of-band settings edit cannot redirect
 new work around the ownership lock.
 
+### Provider account usage
+
+`provider.usage` is the additive `provider-usage.v1` read capability. It resolves
+credentials through the selected `ModelRuntime`, and queries only exact first-party
+configurations for OpenAI Codex, OpenRouter, Kimi Coding, and Z.ai (including its
+China endpoint). Custom or overridden base URLs are reported unsupported; they are
+never sent to a first-party quota endpoint. Global reads include only configured
+supported providers, while a provider ID requests one bounded status snapshot.
+Responses contain at most 16 providers, 16 windows, and 4 balances. Successful
+observations are cached for 60 seconds and failed/rate-limited reads use bounded
+negative backoff. Cache and in-flight identity include the effective provider and
+authentication fingerprint, so logout, reauthentication, and account changes cannot
+reuse another account's usage. Raw credentials and response bodies remain local.
+
 A native executor adapter must retain its tool promise through actual native
 cleanup, not reject it when only its client waiter stops. The existing Pi/slot
 operation owner then keeps Stop and drain pending without a second work registry.

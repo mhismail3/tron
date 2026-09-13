@@ -220,6 +220,61 @@ final class SettingsLayoutStyleTests: XCTestCase {
         .object(["path": .string(path), "enabled": .bool(true),
                  "metadata": .object(["source": .string(source), "scope": .string(scope), "origin": .string("package")])])
     }
+    func testConfiguredProviderRowAndDetailSheetRenderLightDarkAndLargeText() async throws {
+        let provider = ProviderSummary(
+            id: "openai-codex", name: "OpenAI Codex", configured: true,
+            authSource: "oauth", credentialType: "oauth", authMethods: ["oauth"], modelCount: 2
+        )
+        let snapshot = ProviderUsageSnapshot(
+            providerId: "openai-codex", status: .available, source: "codex.account", scope: .account,
+            updatedAt: "2026-01-02T03:04:05.123Z",
+            windows: [
+                UsageWindow(id: "primary", label: "5h", usedPercent: 24, resetsAt: "2026-01-02T05:00:00Z", windowSeconds: 18_000),
+                UsageWindow(id: "secondary", label: "Weekly", usedPercent: 63, resetsAt: "2026-01-08T03:00:00Z", windowSeconds: 604_800)
+            ]
+        )
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let model = AppModel(client: client, cache: SnapshotCache(root: root))
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","provider-usage.v1"]}"#.utf8))
+        do {
+        try await model.connectHostedGateway(profile: GatewayProfile(id: "profile", label: "Mac", host: "gateway.test", port: 9_847,
+            machineId: "machine", deviceId: "device"), token: "token")
+        XCTAssertTrue(model.gatewayInfo?.capabilities.contains(ProviderUsageCapability.name) == true)
+        let usageResult = try JSONDecoder.gateway.decode(JSONValue.self, from: JSONEncoder.gateway.encode(ProviderUsageResponse(providers: [snapshot])))
+        for (scheme, name, typeSize) in [(ColorScheme.light, "light", DynamicTypeSize.large), (.dark, "dark", .large), (.dark, "dark-large-text", .accessibility3)] {
+            try await withHost(
+                ProviderSetupRow(provider: provider, usageSnapshot: snapshot)
+                    .environment(model).tronPresentation().tronSettingsLayout()
+                    .environment(\.dynamicTypeSize, typeSize),
+                size: CGSize(width: 440, height: 150), scheme: scheme
+            ) { host in
+                attach(image(host), name: "provider-row-\(name)")
+            }
+            let nextRequest = await socket.sentFrames().count + 1
+            try await withHost(
+                ProviderConfigurationSheet(provider: provider, target: .global)
+                    .environment(model).tronPresentation().tronSettingsLayout()
+                    .environment(\.dynamicTypeSize, typeSize),
+                size: CGSize(width: 440, height: 700), scheme: scheme
+            ) { host in
+                let usageRequest = try await request(socket, count: nextRequest)
+                XCTAssertEqual(usageRequest.method, "provider.usage")
+                await socket.enqueue(try reply(usageRequest.id, usageResult))
+                // Allow the accepted synthetic RPC to publish and lay out before capture.
+                try await Task.sleep(for: .milliseconds(350))
+                host.view.layoutIfNeeded()
+                attach(image(host), name: "provider-detail-sheet-\(name)")
+            }
+        }
+        } catch {
+            await model.teardown(); await client.close(); try? FileManager.default.removeItem(at: root)
+            throw error
+        }
+        await model.teardown(); await client.close(); try? FileManager.default.removeItem(at: root)
+    }
+
     private struct SettingsRequest: Decodable { let id: String; let method: String }
     private func request(_ socket: ScriptedGatewaySocket, count: Int) async throws -> SettingsRequest {
         do {
@@ -233,6 +288,31 @@ final class SettingsLayoutStyleTests: XCTestCase {
     }
     private func reply(_ id: String, _ result: JSONValue) throws -> Data {
         try JSONEncoder.gateway.encode(JSONValue.object(["type": .string("response"), "id": .string(id), "ok": .bool(true), "result": result]))
+    }
+
+    func testProviderUsageSummaryAndDetailRenderLightAndDarkFixtures() async throws {
+        let snapshot = ProviderUsageSnapshot(
+            providerId: "openai-codex", status: .available, source: "account", scope: .account,
+            updatedAt: "2026-01-02T03:04:05Z", stale: true,
+            windows: [
+                UsageWindow(id: "short", label: "5h", usedPercent: 24, used: 24, limit: 100, remaining: 76, unit: "requests", resetsAt: "2026-01-02T05:00:00Z", windowSeconds: 18_000),
+                UsageWindow(id: "weekly", label: "Weekly", usedPercent: 63, used: 63, limit: 100, remaining: 37, unit: "requests", windowSeconds: 604_800)
+            ],
+            balances: [UsageBalance(id: "credit", label: "Credit", amount: 12.5, currency: "USD")]
+        )
+        for (scheme, name) in [(ColorScheme.light, "light"), (.dark, "dark")] {
+            try await withHost(
+                VStack(alignment: .leading, spacing: 14) {
+                    ProviderUsageSummaryView(snapshot: snapshot)
+                    ProviderUsageSummaryView(snapshot: snapshot, detail: true)
+                }
+                .padding(16)
+                .background(Color.tronSurface),
+                size: CGSize(width: 404, height: 360), scheme: scheme
+            ) { host in
+                attach(image(host), name: "provider-usage-\(name)")
+            }
+        }
     }
 
     private func descendants(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap(descendants) }

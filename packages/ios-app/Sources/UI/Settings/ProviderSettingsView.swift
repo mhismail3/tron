@@ -11,6 +11,7 @@ struct ProvidersSettingsView: View {
     @State private var loadFailed = false
     @State private var loadGeneration = 0
     @State private var manualReloadGeneration = 0
+    @State private var usageController = ProviderUsageReadController()
 
     private var target: ProviderCatalogTarget {
         sessionID.map(ProviderCatalogTarget.session(id:)) ?? .global
@@ -29,8 +30,36 @@ struct ProvidersSettingsView: View {
                         TronSettingsCaption("No providers are available from this Gateway.")
                     }
                 } else {
-                    ForEach(providers) { provider in
-                        ProviderSetupRow(provider: provider, sessionID: sessionID)
+                    let configured = ProviderUsageOrdering.sorted(providers.filter(\.configured))
+                    let available = ProviderUsageOrdering.sorted(providers.filter { !$0.configured })
+                    if !configured.isEmpty {
+                        TronSettingsGroup("Configured", accent: .tronEmerald) {
+                            ForEach(configured) { provider in
+                                ProviderSetupRow(
+                                    provider: provider,
+                                    sessionID: sessionID,
+                                    usageSnapshot: usageController.snapshots[provider.id]
+                                )
+                            }
+                        }
+                    }
+                    if !available.isEmpty {
+                        TronSettingsGroup("Available", accent: .tronSlate) {
+                            ForEach(available) { provider in
+                                ProviderSetupRow(
+                                    provider: provider,
+                                    sessionID: sessionID,
+                                    usageSnapshot: usageController.snapshots[provider.id]
+                                )
+                            }
+                        }
+                    }
+                    if model.gatewayInfo?.capabilities.contains(ProviderUsageCapability.name) != true {
+                        TronSettingsCaption("Account usage is unavailable on this Gateway.")
+                    } else if usageController.isLoading {
+                        TronSettingsCaption("Refreshing account usage…")
+                    } else if usageController.didFail {
+                        TronSettingsCaption("Account usage is currently unavailable. Connection details remain available.")
                     }
                 }
                 if let profile = model.profiles.selected {
@@ -49,11 +78,27 @@ struct ProvidersSettingsView: View {
             }
         }
         .task(id: PresentationActivityTaskID(
-            source: "\(target):\(model.providerInvalidationGeneration):\(manualReloadGeneration):\(model.foregroundReconciliationGeneration)",
+            source: "\(target):\(model.providerInvalidationGeneration):\(manualReloadGeneration):\(model.foregroundReconciliationGeneration):\(model.profileRevision):\(usageController.requestGeneration):\(model.gatewayInfo?.capabilities.contains(ProviderUsageCapability.name) == true)",
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
-            guard presentationActivity.allowsPresentationPublication else { return }
-            await loadProviders(for: target)
+            guard presentationActivity.allowsPresentationPublication, !Task.isCancelled else { return }
+            guard await loadProviders(for: target),
+                  !Task.isCancelled,
+                  presentationActivity.allowsPresentationPublication,
+                  target == self.target else { return }
+            await loadUsage(for: target)
+        }
+        .onChange(of: model.profileRevision) { _, _ in
+            usageController.begin(clear: true)
+        }
+        .onChange(of: model.providerInvalidationGeneration) { _, _ in
+            usageController.begin(clear: true)
+        }
+        .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
+            guard active else {
+                usageController.begin(clear: true)
+                return
+            }
         }
     }
 
@@ -63,15 +108,18 @@ struct ProvidersSettingsView: View {
         manualReloadGeneration &+= 1
     }
 
-    private func loadProviders(for requestedTarget: ProviderCatalogTarget) async {
+    private func loadProviders(for requestedTarget: ProviderCatalogTarget) async -> Bool {
+        let profile = model.profileRevision
+        let profileID = model.profiles.selected?.id
         let foreground = model.foregroundReconciliationGeneration
-        guard presentationActivity.allowsPresentationPublication else { return }
+        guard presentationActivity.allowsPresentationPublication, !Task.isCancelled else { return false }
         loadGeneration &+= 1
         let generation = loadGeneration
 
         if displayedTarget != requestedTarget {
             displayedTarget = requestedTarget
             providers = []
+            usageController.reset(clear: true)
             loadFailed = false
         }
 
@@ -84,8 +132,11 @@ struct ProvidersSettingsView: View {
 
         loading = providers.isEmpty
         defer {
-            if generation == loadGeneration, foreground == model.foregroundReconciliationGeneration,
-               !Task.isCancelled,
+            if !Task.isCancelled,
+               generation == loadGeneration, profile == model.profileRevision,
+               profileID == model.profiles.selected?.id,
+               foreground == model.foregroundReconciliationGeneration,
+               requestedTarget == target,
                presentationActivity.allowsPresentationPublication {
                 loading = false
                 reloading = false
@@ -93,10 +144,13 @@ struct ProvidersSettingsView: View {
         }
 
         let succeeded = await model.refreshProviders(target: requestedTarget)
-        guard generation == loadGeneration, foreground == model.foregroundReconciliationGeneration,
+        guard !Task.isCancelled,
+              generation == loadGeneration, profile == model.profileRevision,
+              profileID == model.profiles.selected?.id,
+              foreground == model.foregroundReconciliationGeneration,
               requestedTarget == target,
               presentationActivity.allowsPresentationPublication,
-              !Task.isCancelled else { return }
+              !Task.isCancelled else { return false }
 
         if let catalog = model.providerCatalog(for: requestedTarget) {
             providers = catalog.providers
@@ -106,5 +160,40 @@ struct ProvidersSettingsView: View {
             // an empty sheet during transient reconnect/catalog invalidation.
             loadFailed = providers.isEmpty
         }
+        return true
+    }
+
+    private func loadUsage(for requestedTarget: ProviderCatalogTarget) async {
+        guard model.gatewayInfo?.capabilities.contains(ProviderUsageCapability.name) == true,
+              presentationActivity.allowsPresentationPublication,
+              requestedTarget == target,
+              !Task.isCancelled else { return }
+        let identity = ProviderUsageReadIdentity(
+            target: requestedTarget,
+            providerID: nil,
+            profileRevision: model.profileRevision,
+            profileID: model.profiles.selected?.id,
+            invalidationGeneration: model.providerInvalidationGeneration,
+            foregroundGeneration: model.foregroundReconciliationGeneration,
+            requestGeneration: usageController.requestGeneration,
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )
+        await usageController.read(
+            identity: identity,
+            fetch: {
+                try await model.client.request(
+                    "provider.usage",
+                    ProviderUsageRequest(sessionId: requestedTarget.sessionID)
+                )
+            },
+            current: {
+                requestedTarget == self.target
+                    && identity.profileRevision == model.profileRevision
+                    && identity.profileID == model.profiles.selected?.id
+                    && identity.invalidationGeneration == model.providerInvalidationGeneration
+                    && identity.foregroundGeneration == model.foregroundReconciliationGeneration
+                    && presentationActivity.allowsPresentationPublication
+            }
+        )
     }
 }
