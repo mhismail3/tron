@@ -154,7 +154,7 @@ struct StructuredJSONFields: RandomAccessCollection, Sendable {
     }
 }
 
-private struct JSONFieldSelection: Identifiable {
+struct JSONFieldSelection: Identifiable {
     let title: String
     let components: [StructuredJSONPathComponent]
 
@@ -171,6 +171,7 @@ struct TronStructuredJSONView: View {
     var path = "$"
     var accent: Color = .tronPurple
     var showsRawDisclosure = true
+    var showsSectionHeader = true
     var rootValue: JSONValue? = nil
     var pathComponents: [StructuredJSONPathComponent] = []
     @State private var selectedField: JSONFieldSelection?
@@ -202,8 +203,7 @@ struct TronStructuredJSONView: View {
             JSONFieldSheet(
                 selection: selection,
                 rootValue: authoritativeRoot,
-                accent: accent,
-                showsRawDisclosure: showsRawDisclosure
+                accent: accent
             )
         }
     }
@@ -214,9 +214,11 @@ struct TronStructuredJSONView: View {
             primitive("Empty collection")
         } else {
             VStack(alignment: .leading, spacing: TronSpacing.md) {
-                Text(title.uppercased())
-                    .font(TronTypography.sheetSectionHeader)
-                    .foregroundStyle(Color.tronTextMuted)
+                if showsSectionHeader {
+                    Text(title.uppercased())
+                        .font(TronTypography.sheetSectionHeader)
+                        .foregroundStyle(Color.tronTextMuted)
+                }
                 TronGlassCard(accent: accent) {
                     LazyVStack(spacing: 0) {
                         ForEach(fields) { field in
@@ -405,11 +407,10 @@ struct TechnicalJSONSheet: View {
     }
 }
 
-private struct JSONFieldSheet: View {
+struct JSONFieldSheet: View {
     let selection: JSONFieldSelection
     let rootValue: JSONValue
     let accent: Color
-    let showsRawDisclosure: Bool
     @Environment(\.dismiss) private var dismiss
 
     private var selectedValue: JSONValue {
@@ -419,26 +420,16 @@ private struct JSONFieldSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: TronSpacing.section) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("SELECTED FIELD")
-                            .font(TronTypography.sheetSectionHeader)
-                            .foregroundStyle(Color.tronTextMuted)
-                        Text(selection.path)
-                            .font(TronTypography.codeJSON)
-                            .foregroundStyle(Color.tronTextSecondary)
-                            .textSelection(.enabled)
-                    }
-                    TronStructuredJSONView(
-                        value: selectedValue,
-                        title: selection.title,
-                        path: selection.path,
-                        accent: accent,
-                        showsRawDisclosure: showsRawDisclosure,
-                        rootValue: rootValue,
-                        pathComponents: selection.components
-                    )
-                }
+                TronStructuredJSONView(
+                    value: selectedValue,
+                    title: selection.title,
+                    path: selection.path,
+                    accent: accent,
+                    showsRawDisclosure: false,
+                    showsSectionHeader: false,
+                    rootValue: rootValue,
+                    pathComponents: selection.components
+                )
                 .padding(18)
             }
             .tronScrollEdgeChrome()
@@ -455,7 +446,6 @@ private struct JSONFieldSheet: View {
                 }
             }
         }
-        .tronTopBlurSurface()
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)

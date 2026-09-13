@@ -995,6 +995,26 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testNestedJSONFieldSheetsKeepFieldTitlesAboveSingleBlur() async throws {
+        let root: JSONValue = .object(["mission": .object([
+            "status": .string("active"), "details": .object(["count": .number(2)])
+        ])])
+        for selection in [
+            JSONFieldSelection(title: "Mission", components: [.key("mission")]),
+            JSONFieldSelection(title: "Details", components: [.key("mission"), .key("details")])
+        ] {
+            for scheme in [ColorScheme.light, .dark] {
+                try await withSheet(JSONFieldSheet(selection: selection, rootValue: root, accent: .tronEmerald)
+                    .preferredColorScheme(scheme)) { controller in
+                    let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
+                    self.assertToolbarPaint(.tronEmerald, bar: bar, leading: false, controller: controller)
+                    XCTAssertEqual(self.views(of: VariableBackdropBlurView.self, in: controller.view).count, 1)
+                    self.capture(controller, name: "json-field-\(selection.title)-\(scheme)")
+                }
+            }
+        }
+    }
+
     func testTechnicalJSONRetainsReadingPositionAcrossActivityChanges() async throws {
         let state = JSONReaderContinuityState()
         try await withSheet(JSONReaderContinuityFixture(state: state)) { controller in

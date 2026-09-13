@@ -1783,6 +1783,7 @@ by `TronReadOnlyTextViewTests`. Full instructions and raw technical JSON use the
 read-only TextKit viewer so selectable large documents lay out for their native viewport
 instead of requiring one monolithic SwiftUI `Text` to be measured before presentation.
 JSON serialization is prepared off the main actor and publication is fenced by the current managed activity and latest task. The completed document is keyed to its exact source and survives coverage/foregrounding without clearing native text, scroll or selection; source replacement alone prepares a new document. Table value labels use native head truncation and a bounded tail preview instead of a prefix preview, preserving the meaningful suffix without changing the underlying/copyable value or asking SwiftUI to measure an arbitrarily large field.
+Nested structured JSON field sheets use the selected field name as their toolbar title, with an icon-only Done action and the value table directly below. They omit the selected-path block, repeated section heading and raw disclosure; descendants use the same presentation and retain exact root/path resolution. Their single scroll-owned blur stays inside NavigationStack, below the toolbar.
 Every raw technical JSON affordance is the same non-disclosing row and opens selectable,
 vertically scrollable protocol evidence in a wrapping single-column medium/large sheet;
 technical JSON never creates a horizontal viewport; selectable raw JSON uses the shared
@@ -1802,8 +1803,8 @@ errors and stale responses are not animation triggers.
 Context slider endpoint labels are bold monospace; Default remains purple/semibold in
 the code face. Its title and endpoint labels are white in dark mode. Custom Models uses
 the standard purple settings tint, while technical-detail rows retain their gray surface
-independently of the destination's toolbar accent. Additional Locations uses singular
-Extension, Skill, Prompt and Terminal Theme row titles; empty resolved resource sections,
+independently of the destination's toolbar accent. Additional Locations uses plural
+Extensions, Skills, Prompts and Terminal Themes row titles; empty resolved resource sections,
 including Themes, retain a standard Liquid Glass placeholder row.
 
 Manage Session displays the runtime-projected latest cache-hit rate—the
