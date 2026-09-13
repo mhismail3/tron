@@ -1291,6 +1291,31 @@ duplicate or malformed canonical entries and oversized retained metadata strings
 compaction and branch summaries may exceed one tree field because Pi owns their canonical context;
 `session.tree` validates their shape and emits only the existing 240-character bounded preview.
 Omitted older parents are valid because the bounded outline is not a canonical mirror.
+
+The mobile Session History feed instead uses `session.history.list` and `session.history.entry`
+(capability `session-history-pages.v1`). Both require a subscribed canonical session and exact
+`runtimeGeneration`; replacement rejects the read rather than silently changing its authority.
+List pages contain at most 100 previews in reverse canonical append order, including all branches and
+log/bookmark entries. Timestamps are metadata, not ordering keys. Older/newer cursors anchor an exclusive
+ordinal **and** canonical entry ID; appends preserve their position, while changed anchors fail retryably.
+There is no recent-entry completeness cap, pagination store, alternate journal, or eager body projection.
+The SDK still owns the full loaded entry set; each page scans its metadata for child/current-path facts,
+so Gateway CPU remains history-length dependent. Retained node metadata must fit 600,000 encoded bytes
+and pathological identifier/label fields fail explicitly rather than receiving ambiguous truncated IDs.
+
+Entry reads take `entryId` and a UTF-16 `offset`, return at most 24,000 UTF-16 units plus total length and
+previous/next offsets, and never split a surrogate pair. Only the selected entry is inspected. Text blocks
+are sampled without allocating another joined full message; structured tool/custom payloads are serialized
+only on explicit detail reads (their temporary serialization still scales with the selected payload).
+The separate metadata object contains bounded scalar identity/role/model/tool/branch facts and finite
+usage counters, not arbitrary tool arguments, extension payloads, or image bytes. Oversized scalar metadata
+is explicitly marked with `<field>Truncated`; content paging does not discard authored text. Images are
+identified without turning base64 into message text. Complete raw producer metadata/media remain in the
+canonical JSONL export. `history.test.ts`, `gateway-history.test.ts`, and the focused runtime registry
+integration case protect beyond-cap traversal, ordering, text/wire bounds, Unicode, subscription admission
+and runtime fencing. Using these APIs requires a user-initiated Mac Gateway update; source validation never
+transitions a running Gateway.
+
 `session.commands` preserves runtime sort order and rejects catalogs above 1,000 rows
 or 700 KiB, duplicate full `source:name` identities, empty names, invalid resource scope/origin,
 names above 512 UTF-8 bytes, or other command metadata strings above 8 KiB before generic JSON projection can truncate the response.

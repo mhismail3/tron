@@ -5,6 +5,71 @@ import XCTest
 
 @MainActor
 final class SessionSheetPresentationTests: XCTestCase {
+    func testSessionHistoryUnifiedFeedAndFullNativeEntryPreviews() async throws {
+        for scheme: ColorScheme in [.light, .dark] {
+            let gateway = ProcessSheetGatewayFixture()
+            try await withModel(client: gateway.client) { model in
+                try await gateway.connect(model: model, capabilities: ["session-history-pages.v1"])
+                var snapshot = try SessionScenarioBuilder(seed: 8_940).openingTail(targetEncodedBytes: 4_096)
+                snapshot.stats = SessionStats(userMessages: 192, assistantMessages: 192, toolCalls: 96, toolResults: 96,
+                    totalMessages: 480, tokens: snapshot.stats.tokens, latestCacheHitRate: nil, cost: 0)
+                model.installHostedSubscribedSnapshot(snapshot)
+                let identity = try XCTUnwrap(SessionHistoryReadIdentity.current(model: model, sessionID: snapshot.sessionId))
+                let rows = [
+                    SessionTreeNode(id: "response", parentId: "prompt", timestamp: "2026-01-01T10:03:00Z", kind: "message", label: nil,
+                        preview: "The focused checks passed. History now preserves the complete selected message and its original line breaks.", role: .assistant, depth: 0, childCount: 0, isCurrentPath: true),
+                    SessionTreeNode(id: "prompt", parentId: "branch", timestamp: "2026-01-01T10:02:00Z", kind: "message", label: "Review checkpoint",
+                        preview: "Keep the feed compact and make older entries easy to inspect.", role: .user, depth: 0, childCount: 1, isCurrentPath: true),
+                    SessionTreeNode(id: "branch", parentId: "tool", timestamp: "2026-01-01T10:01:00Z", kind: "branchSummary", label: nil,
+                        preview: "Continue with the simpler approach; preserve the original branch.", role: nil, depth: 0, childCount: 1, isCurrentPath: true),
+                    SessionTreeNode(id: "tool", parentId: nil, timestamp: "2026-01-01T10:00:00Z", kind: "message", label: nil,
+                        preview: "read: inspected the selected source files", role: .toolResult, depth: 0, childCount: 1, isCurrentPath: true),
+                ]
+                let response = Task {
+                    try await gateway.respond(at: 1, method: "session.history.list", result: JSONValue.encode(SessionHistoryPage(
+                        runtimeGeneration: snapshot.runtimeGeneration, nodes: rows,
+                        older: .init(ordinal: 1_101, entryId: "tool", direction: "older"), newer: nil, totalEntries: 1_105)))
+                }
+                defer { response.cancel() }
+                try await self.withSheet(SessionTreeSheet(sessionID: snapshot.sessionId, onForkCreated: { _ in }, onNavigated: {})
+                    .environment(model).preferredColorScheme(scheme)) { controller in
+                    try await response.value
+                    for _ in 0..<8 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+                    let sentCount = await gateway.socket.sentFrames().count
+                    XCTAssertEqual(sentCount, 2, "Feed does not eagerly request entry bodies")
+                    self.capture(controller, name: "session-history-medium-\(scheme)")
+                    controller.sheetPresentationController?.selectedDetentIdentifier = .large
+                    controller.presentationController?.containerView?.layoutIfNeeded()
+                    for _ in 0..<8 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+                    self.capture(controller, name: "session-history-large-\(scheme)")
+                }
+                let content = (0..<35).map { "Paragraph \($0 + 1)\nOriginal lines remain selectable. Unicode survives unchanged: café 😀.\n" }.joined(separator: "\n") + "FINAL AUTHORED LINE"
+                let details = Task {
+                    try await gateway.respond(at: 2, method: "session.history.entry", result: JSONValue.encode(SessionHistoryEntryPage(
+                        runtimeGeneration: snapshot.runtimeGeneration, entryId: "response", text: content, offset: 0,
+                        nextOffset: nil, previousOffset: nil, totalCharacters: content.utf16.count,
+                        metadata: .object(["role": .string("assistant"), "model": .string("fixture-model")]))))
+                }
+                defer { details.cancel() }
+                try await self.withSheet(HistoryEntryDetailsSheet(node: rows[0], identity: identity)
+                    .environment(model).preferredColorScheme(scheme)) { controller in
+                    try await details.value
+                    try await self.waitForRouting { self.views(of: UITextView.self, in: controller.view).contains { $0.text == content } }
+                    let reader = try XCTUnwrap(self.views(of: UITextView.self, in: controller.view).first { $0.text == content })
+                    XCTAssertTrue(reader.isSelectable && !reader.isEditable && reader.isScrollEnabled)
+                    XCTAssertTrue(reader.text.hasSuffix("FINAL AUTHORED LINE"))
+                    XCTAssertGreaterThan(reader.contentSize.height, reader.bounds.height)
+                    self.capture(controller, name: "session-history-entry-medium-\(scheme)")
+                    controller.sheetPresentationController?.selectedDetentIdentifier = .large
+                    controller.presentationController?.containerView?.layoutIfNeeded()
+                    for _ in 0..<8 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+                    self.capture(controller, name: "session-history-entry-large-\(scheme)")
+                }
+                await gateway.client.close()
+            }
+        }
+    }
+
     func testQuestionSheetStartsBelowTopBlurAtMediumAndLargeDetents() async throws {
         let form = ExtensionFormDescriptor(
             version: 1,

@@ -298,21 +298,12 @@ struct ChatCompactPillTests {
         #expect(tool.guidance == "Use exact paths.")
     }
 
-    @Test("Session History modes, fork points, and continuation impact are explicit")
+    @Test("Session History fork points and continuation impact are explicit")
     func sessionHistoryPolicy() {
         let prompt = historyNode(id: "prompt", role: .user, current: true)
         let response = historyNode(id: "response", role: .assistant, current: true)
         let earlier = historyNode(id: "earlier", role: .user, current: false)
         let earlierResponse = historyNode(id: "earlier-response", role: .assistant, current: false)
-        let bookmark = historyNode(id: "bookmark", label: "Checkpoint", role: .assistant, current: true)
-        let labelEvent = historyNode(id: "label-event", kind: "label", current: true)
-        let technical = historyNode(id: "tool", kind: "tool", role: .toolResult, current: true)
-        let nodes = [prompt, response, earlier, earlierResponse, bookmark, labelEvent, technical]
-
-        #expect(SessionHistoryPolicy.nodes(nodes, mode: .timeline).map(\.id) == ["prompt", "response", "bookmark", "label-event"])
-        #expect(SessionHistoryPolicy.nodes(nodes, mode: .branches).map(\.id) == ["earlier", "earlier-response"])
-        #expect(SessionHistoryPolicy.nodes(nodes, mode: .bookmarks).map(\.id) == ["bookmark"])
-        #expect(SessionHistoryPolicy.nodes(nodes, mode: .recentLog).count == 7)
         #expect(SessionHistoryPolicy.canNavigate(node: prompt, leafID: "response"))
         #expect(!SessionHistoryPolicy.canNavigate(node: response, leafID: "response"))
         #expect(SessionHistoryPolicy.canNavigate(node: historyNode(id: "leaf-prompt", role: .user, current: true), leafID: "leaf-prompt"))

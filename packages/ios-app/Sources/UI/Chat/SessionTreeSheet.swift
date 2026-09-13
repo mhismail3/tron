@@ -1,185 +1,93 @@
 import SwiftUI
 
-enum SessionHistoryMode: String, CaseIterable, Identifiable {
-    case timeline = "Timeline"
-    case branches = "Branches"
-    case bookmarks = "Bookmarks"
-    case recentLog = "Recent Log"
-
-    var id: String { rawValue }
-
-    var explanation: String {
-        switch self {
-        case .timeline: "Meaningful events on the current canonical path."
-        case .branches: "Available divergence and earlier-path evidence."
-        case .bookmarks: "Labeled entries across the recent projection."
-        case .recentLog: "Every projected canonical event, including technical activity."
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .timeline: "clock.arrow.circlepath"
-        case .branches: "arrow.triangle.branch"
-        case .bookmarks: "bookmark"
-        case .recentLog: "list.bullet.rectangle"
-        }
-    }
-}
-
-enum SessionForkPosition: String, Equatable, Sendable {
-    case before
-    case at
-}
-
+enum SessionForkPosition: String, Equatable, Sendable { case before, at }
 enum SessionForkChoicePolicy {
-    static func initialPosition(for _: TranscriptItem.Role?) -> SessionForkPosition {
-        // Preserve the selected canonical entry by default. Editing a user
-        // prompt remains explicit because "before" can produce an empty fork
-        // at the first prompt and intentionally excludes that prompt.
-        .at
-    }
-
-    static func supportsBefore(_ role: TranscriptItem.Role?) -> Bool {
-        role == .user
-    }
+    static func initialPosition(for _: TranscriptItem.Role?) -> SessionForkPosition { .at }
+    static func supportsBefore(_ role: TranscriptItem.Role?) -> Bool { role == .user }
 }
 
 enum SessionHistoryPolicy {
-    static func nodes(_ nodes: [SessionTreeNode], mode: SessionHistoryMode) -> [SessionTreeNode] {
-        nodes.filter { node in
-            switch mode {
-            case .timeline:
-                guard node.isCurrentPath else { return false }
-                return node.role == .user
-                    || node.role == .assistant
-                    || ["compaction", "branchSummary", "modelChange", "thinkingChange", "label"].contains(node.kind)
-            case .branches:
-                return !node.isCurrentPath || node.childCount > 1 || node.kind == "branchSummary"
-            case .bookmarks:
-                return node.label?.isEmpty == false
-            case .recentLog:
-                return true
-            }
-        }
+    static func canNavigate(node: SessionTreeNode, leafID: String?) -> Bool { node.role == .user || node.id != leafID }
+    static func leavesLaterWork(node: SessionTreeNode, leafID: String?) -> Bool { node.id != leafID }
+    static func canBookmark(_ node: SessionTreeNode) -> Bool { node.kind != "label" || node.bookmarkTargetId != nil }
+    static func bookmarkEntryID(_ node: SessionTreeNode) -> String { node.bookmarkTargetId ?? node.id }
+    static func bookmarkTitle(_ node: SessionTreeNode) -> String {
+        node.label != nil ? "Edit Bookmark" : node.kind == "label" ? "Restore Bookmark" : "Add Bookmark"
     }
-
-    static func canNavigate(node: SessionTreeNode, leafID: String?) -> Bool {
-        node.role == .user || node.id != leafID
-    }
-
-    static func leavesLaterWork(node: SessionTreeNode, leafID: String?) -> Bool {
-        node.id != leafID
-    }
-
     static func navigationTitle(for node: SessionTreeNode) -> String {
-        node.role == .user ? "Edit From This Prompt" : "Continue From Here"
+        node.role == .user ? "Edit From This Prompt" : !node.isCurrentPath || node.kind == "branchSummary" ? "Continue on Branch" : "Continue From Here"
     }
-
     static func navigationDetail(for node: SessionTreeNode) -> String {
-        node.role == .user
-            ? "Move to immediately before this prompt and restore it to the composer for editing."
-            : "Move the current session to this canonical position."
+        node.role == .user ? "Move to immediately before this prompt and restore it to the composer for editing."
+            : "Move this session to the selected canonical position. Later work remains in history."
     }
 }
 
 enum SessionHistoryPreview {
     static let maximumCharacters = 240
-
     static func preview(_ node: SessionTreeNode) -> String {
-        let value = node.kind == "thinkingChange"
-            ? ThinkingLevelPresentation.title(node.preview)
-            : node.preview
-        return plain(value.ifEmpty(node.kind.humanized))
+        plain(node.kind == "thinkingChange" ? ThinkingLevelPresentation.title(node.preview) : node.preview)
     }
-
-    static func title(_ node: SessionTreeNode) -> String {
-        node.label.map(plain) ?? preview(node)
-    }
-
+    static func title(_ node: SessionTreeNode) -> String { preview(node) }
     static func plain(_ value: String) -> String {
-        // Gateway previews are already bounded. Bound again before applying a
-        // handful of presentation-only regexes so history rows never become a
-        // second Markdown parser or scale with a malformed producer string.
         var result = String(value.prefix(1_024))
-        let replacements: [(String, String)] = [
-            (#"!\[([^\]]*)\]\([^\)]*\)"#, "$1"),
-            (#"\[([^\]]+)\]\([^\)]*\)"#, "$1"),
-            (#"(?m)^\s{0,3}(?:#{1,6}|>|[-+*]|\d+[.)])\s+"#, ""),
-            (#"~~~|```"#, ""),
-        ]
-        for (pattern, replacement) in replacements {
-            result = result.replacingOccurrences(
-                of: pattern,
-                with: replacement,
-                options: .regularExpression
-            )
-        }
-        result = result
-            .replacingOccurrences(of: "**", with: "")
-            .replacingOccurrences(of: "__", with: "")
-            .replacingOccurrences(of: "~~", with: "")
-            .replacingOccurrences(of: "`", with: "")
-            .replacingOccurrences(of: "\n", with: " ")
-            .split(whereSeparator: \.isWhitespace)
-            .joined(separator: " ")
-        if result.count > maximumCharacters {
-            result = String(result.prefix(maximumCharacters)) + "…"
-        }
-        return result
+        for (pattern, replacement) in [
+            (#"!\[([^\]]*)\]\([^\)]*\)"#, "$1"), (#"\[([^\]]+)\]\([^\)]*\)"#, "$1"),
+            (#"(?m)^\s{0,3}(?:#{1,6}|>|[-+*]|\d+[.)])\s+"#, ""), (#"~~~|```"#, "")
+        ] { result = result.replacingOccurrences(of: pattern, with: replacement, options: .regularExpression) }
+        for token in ["**", "__", "~~", "`"] { result = result.replacingOccurrences(of: token, with: "") }
+        result = result.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        return result.count > maximumCharacters ? String(result.prefix(maximumCharacters)) + "…" : result
     }
 }
 
-private struct SessionHistorySelection: Identifiable {
-    enum Action { case details, fork }
-    let id = UUID()
-    let node: SessionTreeNode
-    let action: Action
-}
-
-private struct SessionHistoryRowPresentation: Identifiable, Hashable, Sendable {
+struct SessionHistoryRowPresentation: Identifiable {
     var id: String { node.id }
     let node: SessionTreeNode
     let title: String
     let kindLabel: String
-    let relativeTimestamp: String
-    let icon: String
-
+    let timestamp: String
+    var accent: Color {
+        if node.kind == "branchSummary" || !node.isCurrentPath { return .tronPurple }
+        if node.kind == "label" || node.label != nil { return .tronAmber }
+        if node.role == .assistant { return .tronEmerald }
+        if node.role == .toolResult || node.kind == "bash" { return .tronSlate }
+        return .tronSessionTeal
+    }
     init(node: SessionTreeNode) {
         self.node = node
         title = SessionHistoryPreview.title(node)
         if node.role == .user { kindLabel = "Prompt" }
         else if node.role == .assistant { kindLabel = "Response" }
         else if node.role == .toolResult { kindLabel = "Tool result" }
-        else { kindLabel = node.kind.humanized }
-        if let date = GatewayTimestamp.parse(node.timestamp) {
-            relativeTimestamp = date.formatted(.relative(presentation: .named))
-        } else {
-            relativeTimestamp = node.timestamp
-        }
-        if node.role == .user { icon = "person.crop.circle" }
-        else if node.role == .assistant { icon = "sparkles" }
         else {
-            icon = switch node.kind {
-            case "bash": "terminal"
-            case "compaction": "arrow.down.right.and.arrow.up.left"
-            case "branchSummary": "arrow.triangle.branch"
-            case "modelChange": "cpu"
-            case "thinkingChange": "brain"
-            case "label": "bookmark"
-            default: "wrench.and.screwdriver"
+            kindLabel = switch node.kind {
+            case "branchSummary": "Branch"
+            case "label": "Bookmark"
+            case "compaction": "Compaction"
+            case "modelChange": "Model"
+            case "thinkingChange": "Thinking level"
+            case "bash": "Shell"
+            case "sessionInfo": "Session"
+            default: "Log"
             }
         }
+        timestamp = GatewayTimestamp.parse(node.timestamp)?.formatted(date: .abbreviated, time: .shortened) ?? node.timestamp
     }
 }
 
-private enum SessionHistoryCardMetrics {
-    // Match TronSettingsRow's compact settings rhythm so history cards do not
-    // grow larger than the surrounding sheets.
-    static let contentSpacing: CGFloat = TronSpacing.xl
-    static let iconWidth: CGFloat = 20
-    static let horizontalPadding: CGFloat = TronSpacing.xl
-    static let verticalPadding: CGFloat = TronSpacing.md
+private struct HistorySelection: Identifiable {
+    enum Action { case details, fork, navigate }
+    var id: String { node.id }
+    let node: SessionTreeNode
+    let action: Action
+    let identity: SessionHistoryReadIdentity
+}
+private struct HistoryLoadKey: Hashable {
+    let identity: SessionHistoryReadIdentity?
+    let active: Bool
+    let supported: Bool
+    let revision: Int
 }
 
 struct SessionTreeSheet: View {
@@ -188,783 +96,355 @@ struct SessionTreeSheet: View {
     let onNavigated: () -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var mode: SessionHistoryMode = .timeline
-    @State private var selection: SessionHistorySelection?
+    @Environment(\.tronPresentationActivity) private var activity
+    @Environment(\.tronPresentationActivityCoordinator) private var coordinator
+    @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
+    @State private var store = SessionHistoryStore()
+    @State private var selection: HistorySelection?
     @State private var labelNode: SessionTreeNode?
+    @State private var labelIdentity: SessionHistoryReadIdentity?
     @State private var label = ""
-    @State private var reloading = false
-    @State private var visibleRows: [SessionHistoryRowPresentation] = []
-    @State private var rowPreparationGeneration = 0
-    @State private var rowPreparationTask: Task<[SessionHistoryRowPresentation], Never>?
+    @State private var cursor: SessionHistoryCursor?
+    @State private var revision = 0
+    @State private var installedRevision = -1
     @State private var forkNavigation = ChatForkNavigationOwner()
+    private var active: Bool { activity.allowsPresentationPublication && (coordinator?.activity(for: surfaceToken).allowsPresentationPublication ?? true) }
+    private var identity: SessionHistoryReadIdentity? { .current(model: model, sessionID: sessionID) }
+    private var supported: Bool { model.gatewayInfo?.capabilities.contains("session-history-pages.v1") == true }
+    private var labelPresented: Binding<Bool> { Binding(get: { labelNode != nil }, set: { if !$0 { labelNode = nil } }) }
 
     var body: some View {
         NavigationStack {
-            ScrollView(.vertical, showsIndicators: true) {
-                LazyVStack(alignment: .leading, spacing: TronSpacing.md) {
-                    if let snapshot = model.sessionHistoryPresentation(for: sessionID) {
-                        runtimeSummary(snapshot)
-                    }
-                    historyOverview
-                    modeChooser
-                    if reloading && model.sessionTree.isEmpty {
-                        TronGlassCard(accent: .tronCyan) {
-                            TronLoadingState(label: "Loading recent history…")
-                                .padding(TronSpacing.xl)
-                                .frame(maxWidth: .infinity)
-                        }
-                    } else if visibleRows.isEmpty {
-                        emptyState
-                    } else {
-                        ForEach(visibleRows) { row in
-                            TreeNodeRow(
-                                row: row,
-                                leafID: model.sessionHistoryPresentation(for: sessionID)?.leafEntryId,
-                                select: {
-                                    selection = SessionHistorySelection(node: row.node, action: .details)
-                                },
-                                fork: {
-                                    selection = SessionHistorySelection(node: row.node, action: .fork)
-                                },
-                                bookmark: {
-                                    label = row.node.label ?? ""
-                                    labelNode = row.node
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: TronSpacing.md) {
+                        summary.id("history-top")
+                        if !supported {
+                            TronSettingsNotice(message: "Update the Mac Gateway to browse complete paged history.", accent: .tronSessionTeal)
+                        } else {
+                            if let error = store.error { TronSettingsNotice(message: error, retry: reload) }
+                            if store.loading { TronLoadingState(label: "Loading history…") }
+                            if let page = store.page {
+                                if page.nodes.isEmpty { TronSettingsCaption("No recorded entries.") }
+                                ForEach(page.nodes) { node in
+                                    let row = SessionHistoryRowPresentation(node: node)
+                                    SessionHistoryRow(row: row, current: node.id == model.sessionHistoryPresentation(for: sessionID)?.leafEntryId,
+                                        canAct: identity != nil && store.identity == identity,
+                                        select: { select(node, .details) }, navigate: { select(node, .navigate) },
+                                        fork: { select(node, .fork) }, bookmark: {
+                                            label = node.label ?? ""; labelIdentity = identity; labelNode = node
+                                        })
                                 }
-                            )
+                                HStack {
+                                    if let newer = page.newer { Button("Newer entries") { changePage(newer) } }
+                                    Spacer()
+                                    if let older = page.older { Button("Older entries") { changePage(older) } }
+                                }
+                                .font(TronTypography.buttonSM).disabled(store.loading)
+                                .padding(.vertical, 8)
+                                Text("\(page.nodes.count) of \(page.totalEntries.formatted()) entries · Newest recorded first")
+                                    .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted)
+                            }
                         }
                     }
+                    .padding(.horizontal, 18).padding(.vertical, 12)
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 12)
+                .tronScrollEdgeChrome()
+                .task(id: HistoryLoadKey(identity: identity, active: active, supported: supported, revision: revision)) {
+                    guard active, supported, let identity else { store.suspend(); return }
+                    guard store.identity != identity || store.page == nil || installedRevision != revision else { return }
+                    let requestedRevision = revision
+                    let changedIdentity = store.identity != identity
+                    let client = model.client
+                    let loaded = await store.load(identity: identity, cursor: changedIdentity ? nil : cursor,
+                        request: { try await client.requestValue($0, $1) },
+                        isCurrent: { active && self.identity == identity })
+                    guard loaded, !Task.isCancelled, active, self.identity == identity else { return }
+                    installedRevision = requestedRevision
+                    if changedIdentity { cursor = nil }
+                    // Only explicit page changes/reloads reset the viewport. Coverage
+                    // retains the same page and native reader position.
+                    if requestedRevision > 0 { proxy.scrollTo("history-top", anchor: .top) }
+                }
             }
-            .defaultScrollAnchor(.top)
-            .tronScrollEdgeChrome()
-            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button(action: reload) {
-                        TronToolbarTextLabel(
-                            "Reload",
-                            systemImage: "arrow.clockwise",
-                            isWorking: reloading
-                        )
-                        .tronToolbarAction(accent: .tronSessionTeal)
-                    }
-                    .disabled(reloading)
+                    Button(action: reload) { TronToolbarTextLabel("Reload", systemImage: "arrow.clockwise", isWorking: store.loading) }
+                        .disabled(store.loading || !supported || identity == nil)
                 }
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: "Session History", accent: .tronSessionTeal) }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronSessionTeal)
-                    }
-                    .accessibilityLabel("Done")
+                    Button { dismiss() } label: { Image(systemName: "checkmark").font(TronTypography.buttonSM) }.accessibilityLabel("Done")
                 }
             }
-            .task(id: "\(model.sessionStructureRevision(for: sessionID)):\(presentationActivity.allowsPresentationPublication)") {
-                guard presentationActivity.allowsPresentationPublication else { return }
-                await load()
-            }
-            .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
-                guard !active else { return }
-                rowPreparationGeneration &+= 1
-                rowPreparationTask?.cancel()
-                rowPreparationTask = nil
-            }
-            .onDisappear {
-                rowPreparationGeneration &+= 1
-                rowPreparationTask?.cancel()
-                rowPreparationTask = nil
-            }
-            .tronManagedSheet(
-                item: $selection,
-                identity: { "history.\(sessionID).\($0.id)" },
-                onDismiss: completeForkNavigationAfterSelectionDismissal
-            ) { selection in
+            .onChange(of: active) { _, active in if !active { store.suspend() } }
+            .onDisappear { store.suspend() }
+            .tronManagedSheet(item: $selection, identity: { "history.\($0.node.id)" }, onDismiss: {
+                if let route = forkNavigation.consume() { onForkCreated(route) }
+            }) { selection in
                 switch selection.action {
-                case .details:
-                    HistoryEntryDetailsSheet(
-                        sessionID: sessionID,
-                        node: selection.node,
-                        onForkCreated: stageForkNavigation,
-                        onNavigated: onNavigated
-                    )
-                case .fork:
-                    ForkConfirmationSheet(
-                        sessionID: sessionID,
-                        node: selection.node,
-                        onCreated: stageForkNavigation
-                    )
+                case .details: HistoryEntryDetailsSheet(node: selection.node, identity: selection.identity)
+                case .navigate: HistoryNavigationSheet(node: selection.node, identity: selection.identity, onNavigated: onNavigated)
+                case .fork: HistoryForkSheet(node: selection.node, identity: selection.identity) { route in
+                    forkNavigation.stage(route); self.selection = nil
+                }
                 }
             }
-            .alert("Bookmark", isPresented: labelEditorPresented) {
+            .alert("Bookmark", isPresented: labelPresented) {
                 TextField("Label", text: $label)
-                Button("Save") { saveBookmark() }
-                if labelNode?.label != nil { Button("Remove", role: .destructive) { removeBookmark() } }
+                Button("Save") { saveLabel(label) }
+                if labelNode?.label != nil { Button("Remove", role: .destructive) { saveLabel(nil) } }
                 Button("Cancel", role: .cancel) { labelNode = nil }
             }
-            .tronManagedSystemPresentation(
-                isPresented: labelEditorPresented,
-                identity: "history.bookmark"
-            )
+            .tronManagedSystemPresentation(isPresented: labelPresented, identity: "history.bookmark")
         }
-        .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
-        .tronSettingsVisualTheme(accent: .tronSessionTeal)
-        .tint(Color.tronSessionTeal)
+        .tronTopBlur(.sheet).presentationDetents([.medium, .large]).presentationDragIndicator(.hidden)
+        .tronSettingsVisualTheme(accent: .tronSessionTeal).tint(.tronSessionTeal)
     }
 
-    private func runtimeSummary(_ snapshot: SessionHistoryPresentation) -> some View {
-        HStack(alignment: .center, spacing: SessionHistoryCardMetrics.contentSpacing) {
-            runtimeIcon
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Runtime")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .multilineTextAlignment(.leading)
-                runtimeStatistics(snapshot)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            runtimePhase(snapshot)
-        }
-        .padding(.horizontal, SessionHistoryCardMetrics.horizontalPadding)
-        .padding(.vertical, SessionHistoryCardMetrics.verticalPadding)
-        .tronScrollSurface(accent: .tronAmber, tintOpacity: 0.09)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("session-history-runtime-summary")
-    }
-
-    private var runtimeIcon: some View {
-        Image(systemName: "waveform.path.ecg")
-            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-            .foregroundStyle(Color.tronAmber)
-            .frame(width: SessionHistoryCardMetrics.iconWidth, height: 20, alignment: .center)
-            .accessibilityHidden(true)
-    }
-
-    private func runtimeStatistics(_ snapshot: SessionHistoryPresentation) -> some View {
-        Text("\(snapshot.stats.totalMessages.formatted()) messages · \(snapshot.stats.toolCalls.formatted()) tool calls")
-            .font(TronTypography.secondaryDescription)
-            .foregroundStyle(Color.tronTextSecondary)
-            .multilineTextAlignment(.leading)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private func runtimePhase(_ snapshot: SessionHistoryPresentation) -> some View {
-        Text(snapshot.phase.rawValue.capitalized)
-            .font(TronTypography.secondaryCodeDescription)
-            .foregroundStyle(Color.tronTextSecondary)
-    }
-
-    private var historyOverview: some View {
-        HStack(alignment: .center, spacing: SessionHistoryCardMetrics.contentSpacing) {
-            Image(systemName: "clock.arrow.circlepath")
-                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(Color.tronCyan)
-                .frame(width: SessionHistoryCardMetrics.iconWidth, height: 20, alignment: .center)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Recent canonical history")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .multilineTextAlignment(.leading)
-                Text("Review activity, inspect branches, continue from an earlier point, or fork from an entry action. This is a bounded recent projection; JSONL Export in Manage Session provides the complete canonical audit.")
-                    .font(TronTypography.bodySM)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, SessionHistoryCardMetrics.horizontalPadding)
-        .padding(.vertical, SessionHistoryCardMetrics.verticalPadding)
-        .tronScrollSurface(accent: .tronCyan, tintOpacity: 0.09)
-    }
-
-    private var modeChooser: some View {
-        TronSettingsGroup(
-            "History View",
-            detail: mode.explanation,
-            accent: .tronCyan,
-            surfaceStyle: .scrollOptimized
-        ) {
-            Menu {
-                ForEach(SessionHistoryMode.allCases) { candidate in
-                    Button {
-                        mode = candidate
-                        Task { await installRows(for: candidate) }
-                    } label: {
-                        if mode == candidate {
-                            Label(candidate.rawValue, systemImage: "checkmark")
-                        } else {
-                            Label(candidate.rawValue, systemImage: candidate.icon)
-                        }
-                    }
-                }
-            } label: {
-                TronValueRow(
-                    icon: mode.icon,
-                    title: "Selected View",
-                    value: mode.rawValue,
-                    accent: .tronCyan
-                )
-                .contentShape(Rectangle())
-            }
-        }
-    }
-
-    private var emptyState: some View {
-        TronGlassCard(accent: .tronSlate) {
-            VStack(spacing: 10) {
-                Image(systemName: "point.3.connected.trianglepath.dotted")
-                    .font(TronTypography.sans(size: TronTypography.sizeXXL, weight: .semibold))
-                    .foregroundStyle(Color.tronTextMuted)
-                Text(model.sessionTree.isEmpty ? "History unavailable" : "No matching entries")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                Text(model.sessionTree.isEmpty
-                     ? "Reload the bounded canonical history projection."
-                     : "Choose another history view.")
-                    .font(TronTypography.bodySM)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .multilineTextAlignment(.center)
-                if model.sessionTree.isEmpty {
-                    Button("Reload History", action: reload)
-                        .buttonStyle(TronActionButtonStyle(expands: false))
+    private var summary: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let snapshot = model.sessionHistoryPresentation(for: sessionID) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("\(snapshot.stats.totalMessages.formatted()) messages · \(snapshot.stats.toolCalls.formatted()) tool calls")
+                        .font(TronTypography.bodySM.weight(.semibold))
+                    Spacer()
+                    Text(snapshot.phase.rawValue.capitalized).font(TronTypography.secondaryCodeDescription)
                 }
             }
-            .padding(TronSpacing.xl)
-            .frame(maxWidth: .infinity)
+            Text("Recorded activity across all branches. Tap an entry for full content; use its menu to continue, fork or bookmark.")
+                .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
         }
+        .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+        .tronScrollSurface(accent: .tronSessionTeal, tintOpacity: 0.09)
     }
-
-    private func load() async {
-        guard presentationActivity.allowsPresentationPublication else { return }
-        if visibleRows.isEmpty { await installRows(for: mode) }
-        reloading = true
-        defer { reloading = false }
-        await model.loadTree(sessionID: sessionID)
-        guard !Task.isCancelled,
-              presentationActivity.allowsPresentationPublication else { return }
-        await installRows(for: mode)
+    private func reload() { cursor = nil; revision &+= 1 }
+    private func changePage(_ cursor: SessionHistoryCursor) { self.cursor = cursor; revision &+= 1 }
+    private func select(_ node: SessionTreeNode, _ action: HistorySelection.Action) {
+        guard active, let identity, store.identity == identity else { return }
+        selection = HistorySelection(node: node, action: action, identity: identity)
     }
-
-    private func installRows(for requestedMode: SessionHistoryMode) async {
-        guard presentationActivity.allowsPresentationPublication else { return }
-        rowPreparationGeneration &+= 1
-        let generation = rowPreparationGeneration
-        let nodes = model.sessionTree
-        rowPreparationTask?.cancel()
-        let worker = Task.detached(priority: .userInitiated) { () -> [SessionHistoryRowPresentation] in
-            let admitted = SessionHistoryPolicy.nodes(nodes, mode: requestedMode)
-            var rows: [SessionHistoryRowPresentation] = []
-            rows.reserveCapacity(admitted.count)
-            for node in admitted {
-                guard !Task.isCancelled else { return [] }
-                rows.append(SessionHistoryRowPresentation(node: node))
-            }
-            return rows
-        }
-        rowPreparationTask = worker
-        let prepared = await withTaskCancellationHandler {
-            await worker.value
-        } onCancel: {
-            worker.cancel()
-        }
-        guard !Task.isCancelled,
-              presentationActivity.allowsPresentationPublication,
-              generation == rowPreparationGeneration,
-              requestedMode == mode else { return }
-        rowPreparationTask = nil
-        visibleRows = prepared
-    }
-
-    private func reload() {
-        guard !reloading else { return }
-        Task { await load() }
-    }
-
-    private var labelEditorPresented: Binding<Bool> {
-        Binding(
-            get: { labelNode != nil },
-            set: { if !$0 { labelNode = nil } }
-        )
-    }
-
-    private func saveBookmark() {
-        guard let node = labelNode else { return }
-        Task {
-            do { try await model.setLabel(sessionID: sessionID, entryID: node.id, label: label) }
-            catch { model.presentError(error) }
-        }
+    private func saveLabel(_ value: String?) {
+        guard let node = labelNode, SessionHistoryPolicy.canBookmark(node), let expected = labelIdentity, expected == identity else { labelNode = nil; return }
         labelNode = nil
-    }
-
-    private func stageForkNavigation(_ route: AppModel.SessionNavigationRoute) {
-        forkNavigation.stage(route)
-        selection = nil
-    }
-
-    private func completeForkNavigationAfterSelectionDismissal() {
-        guard let route = forkNavigation.consume() else { return }
-        onForkCreated(route)
-    }
-
-    private func removeBookmark() {
-        guard let node = labelNode else { return }
+        // Accepted mutations remain owned by AppModel's receipt coordinator.
         Task {
-            do { try await model.setLabel(sessionID: sessionID, entryID: node.id, label: nil) }
-            catch { model.presentError(error) }
+            guard expected == identity else { return }
+            do { try await model.setLabel(sessionID: sessionID, entryID: SessionHistoryPolicy.bookmarkEntryID(node), label: value); revision &+= 1 }
+            catch is CancellationError {} catch { model.presentError(error) }
         }
-        labelNode = nil
     }
 }
 
-private struct TreeNodeRow: View {
+struct SessionHistoryRow: View {
     let row: SessionHistoryRowPresentation
-    let leafID: String?
+    let current: Bool
+    let canAct: Bool
     let select: () -> Void
+    let navigate: () -> Void
     let fork: () -> Void
     let bookmark: () -> Void
-
-    private var node: SessionTreeNode { row.node }
-
     var body: some View {
-        HStack(alignment: .center, spacing: TronSpacing.md) {
+        HStack(spacing: 8) {
             Button(action: select) {
-                HStack(alignment: .center, spacing: SessionHistoryCardMetrics.contentSpacing) {
-                    Image(systemName: icon)
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                        .foregroundStyle(accent)
-                        .frame(width: SessionHistoryCardMetrics.iconWidth, height: 20, alignment: .center)
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text(row.title)
-                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                                .foregroundStyle(Color.tronTextPrimary)
-                                .multilineTextAlignment(.leading)
-                                .lineLimit(3)
-                            if node.id == leafID {
-                                Text("Current")
-                                    .font(TronTypography.caption2)
-                                    .foregroundStyle(Color.tronAccentText)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.tronEmerald.opacity(0.12), in: Capsule())
-                            }
-                        }
-                        HStack(spacing: 7) {
-                            Text(row.kindLabel)
-                            if node.childCount > 1 { Text("\(node.childCount) branches") }
-                            Text(row.relativeTimestamp)
-                        }
-                        .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(Color.tronTextMuted)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .frame(maxWidth: .infinity, alignment: .leading)
-
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(row.title).font(TronTypography.bodySM.weight(.semibold)).foregroundStyle(Color.tronTextPrimary).lineLimit(3)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 7) { badges; Text(row.timestamp) }
+                        VStack(alignment: .leading, spacing: 4) { badges; Text(row.timestamp) }
+                    }.font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted)
+                    if let label = row.node.label { Text(label).font(TronTypography.secondaryDescription).foregroundStyle(row.accent).lineLimit(1) }
+                }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }.buttonStyle(.plain)
             Menu {
-                Button("View Details", systemImage: "doc.text.magnifyingglass", action: select)
+                if !current || row.node.role == .user {
+                    Button(SessionHistoryPolicy.navigationTitle(for: row.node), systemImage: "arrow.turn.down.right", action: navigate)
+                }
                 Button("Fork New Session", systemImage: "arrow.triangle.branch", action: fork)
-                Button(node.label == nil ? "Add Bookmark" : "Edit Bookmark", systemImage: "bookmark", action: bookmark)
+                if SessionHistoryPolicy.canBookmark(row.node) {
+                    Button(SessionHistoryPolicy.bookmarkTitle(row.node), systemImage: "bookmark", action: bookmark)
+                }
             } label: {
-                Image(systemName: "ellipsis")
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
-                    .foregroundStyle(accent)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .accessibilityLabel("Actions for \(row.title)")
+                Image(systemName: "ellipsis").font(TronTypography.bodySM.weight(.bold)).foregroundStyle(row.accent)
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            }.disabled(!canAct).accessibilityLabel("Actions for \(row.title)")
         }
-        .padding(.horizontal, SessionHistoryCardMetrics.horizontalPadding)
-        .padding(.vertical, SessionHistoryCardMetrics.verticalPadding)
-        .tronScrollSurface(accent: accent, tintOpacity: node.id == leafID ? 0.15 : 0.07)
+        .padding(.horizontal, TronSpacing.xl).padding(.vertical, TronSpacing.md)
+        .tronScrollSurface(accent: row.accent, tintOpacity: current ? 0.15 : 0.07)
+        .environment(\.tronSettingsVisualTheme, nil)
+        .tint(row.accent)
     }
-
-    private var accent: Color { node.isCurrentPath ? .tronEmerald : .tronPurple }
-    private var icon: String { row.icon }
+    private var badges: some View {
+        HStack(spacing: 5) {
+            Text(row.kindLabel).foregroundStyle(row.accent)
+            if current { Text("Current") }
+            if !row.node.isCurrentPath { Text("Other branch") }
+            if row.node.childCount > 1 { Text("\(row.node.childCount) branches") }
+            if row.node.label != nil { Text("Bookmarked") }
+        }
+    }
 }
 
-private struct HistoryEntryDetailsSheet: View {
-    let sessionID: String
+struct HistoryEntryDetailsSheet: View {
     let node: SessionTreeNode
-    let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
-    let onNavigated: () -> Void
+    let identity: SessionHistoryReadIdentity
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var showContinue = false
-    @State private var showFork = false
-    @State private var showBookmark = false
-    @State private var label = ""
-    @State private var forkNavigation = ChatForkNavigationOwner()
-
-    private var leafID: String? { model.sessionHistoryPresentation(for: sessionID)?.leafEntryId }
-
+    @Environment(\.tronPresentationActivity) private var activity
+    @Environment(\.tronPresentationActivityCoordinator) private var coordinator
+    @Environment(\.tronPresentationSurfaceToken) private var surfaceToken
+    @State private var store = SessionHistoryEntryStore()
+    @State private var offset = 0
+    @State private var revision = 0
+    @State private var showingMetadata = false
+    private var active: Bool { activity.allowsPresentationPublication && (coordinator?.activity(for: surfaceToken).allowsPresentationPublication ?? true) }
+    private var current: Bool { SessionHistoryReadIdentity.current(model: model, sessionID: identity.target.sessionID) == identity }
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    TronSettingsGroup("Entry", detail: node.isCurrentPath ? "Current path" : "Earlier path", accent: node.isCurrentPath ? .tronEmerald : .tronPurple) {
-                        VStack(spacing: 0) {
-                            TronSettingsRow(
-                                icon: node.role == .user ? "person.crop.circle" : "clock.arrow.circlepath",
-                                title: SessionHistoryPreview.title(node),
-                                subtitle: node.timestamp,
-                                accent: node.isCurrentPath ? .tronEmerald : .tronPurple
-                            )
-                            TronSettingsDivider(accent: .tronPurple)
-                            TronSettingsRow(icon: "tag", title: "Event Type", accent: .tronPurple) {
-                                Text(node.kind.humanized).font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary)
-                            }
-                            TronSettingsDivider(accent: .tronPurple)
-                            TronSettingsRow(icon: "arrow.triangle.branch", title: "Branch Evidence", subtitle: node.childCount > 1 ? "\(node.childCount) canonical children" : "No projected divergence at this entry", accent: .tronTeal)
-                        }
-                    }
-
-                    TronSettingsGroup("Actions", accent: .tronCyan) {
-                        VStack(spacing: 0) {
-                            if SessionHistoryPolicy.canNavigate(node: node, leafID: leafID) {
-                                actionRow(
-                                    icon: "arrow.turn.down.right",
-                                    title: SessionHistoryPolicy.navigationTitle(for: node),
-                                    subtitle: SessionHistoryPolicy.navigationDetail(for: node),
-                                    accent: .tronCyan
-                                ) {
-                                    showContinue = true
-                                }
-                                TronSettingsDivider(accent: .tronCyan)
-                            }
-                            actionRow(icon: "bookmark", title: node.label == nil ? "Add Bookmark" : "Edit Bookmark", subtitle: "Attach a canonical label to this entry", accent: .tronPurple) {
-                                label = node.label ?? ""
-                                showBookmark = true
-                            }
-                            TronSettingsDivider(accent: .tronCyan)
-                            actionRow(
-                                icon: "arrow.triangle.branch",
-                                title: "Fork New Session",
-                                subtitle: node.role == .user
-                                    ? "Create a separate canonical session from this prompt"
-                                    : "Create a separate canonical session from this entry",
-                                accent: .tronTeal
-                            ) {
-                                showFork = true
-                            }
-                        }
-                    }
-                }
-                .padding(18)
+            VStack(spacing: 0) {
+                if !current { TronSettingsNotice(message: "Session changed. Reopen this entry from current history.") }
+                else if let page = store.page {
+                    TronReadOnlyTextView(text: page.text, style: node.role == .user || node.role == .assistant ? .body : .code)
+                        .id(page.offset)
+                    VStack(spacing: 8) {
+                        HStack {
+                            if let previous = page.previousOffset { Button("Previous part") { offset = previous } }
+                            Spacer()
+                            Text(page.nextOffset == nil ? "End of content" : "Content continues")
+                                .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted)
+                            Spacer()
+                            if let next = page.nextOffset { Button("Continue reading") { offset = next } }
+                        }.font(TronTypography.buttonSM).disabled(store.loading)
+                        Button("Entry information", systemImage: "info.circle") { showingMetadata = true }
+                            .font(TronTypography.buttonSM)
+                    }.padding(12)
+                } else if store.error == nil { TronLoadingState(label: "Loading entry…") }
+                if current, let error = store.error { TronSettingsNotice(message: error, retry: { revision &+= 1 }).padding(12) }
             }
-            .defaultScrollAnchor(.top)
-            .tronScrollEdgeChrome()
+            .tronDocumentTopBlurSurface()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .principal) { TronSheetTitle(title: "Entry Details", accent: .tronSessionTeal) }
+                ToolbarItem(placement: .principal) { TronSheetTitle(title: SessionHistoryRowPresentation(node: node).kindLabel, accent: .tronSessionTeal) }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: { Image(systemName: "checkmark").foregroundStyle(Color.tronSessionTeal) }
-                        .accessibilityLabel("Done")
+                    Button { dismiss() } label: { Image(systemName: "checkmark").font(TronTypography.buttonSM) }.accessibilityLabel("Done")
                 }
             }
-            .tronManagedSheet(
-                isPresented: $showContinue,
-                identity: "history.continue.\(sessionID)"
-            ) {
-                NavigationSheet(
-                    sessionID: sessionID,
-                    node: node,
-                    onNavigated: onNavigated
-                )
+            .task(id: "\(active):\(current):\(offset):\(revision)") {
+                guard active, current else { store.suspend(); return }
+                guard store.page?.offset != offset || store.error != nil else { return }
+                let client = model.client
+                await store.load(identity: identity, entryID: node.id, offset: offset,
+                    request: { try await client.requestValue($0, $1) }, isCurrent: { active && current })
             }
-            .tronManagedSheet(
-                isPresented: $showFork,
-                identity: "history.fork.\(sessionID)",
-                onDismiss: completeForkNavigationAfterConfirmationDismissal
-            ) {
-                ForkConfirmationSheet(sessionID: sessionID, node: node, onCreated: stageForkNavigation)
-            }
-            .alert("Bookmark", isPresented: $showBookmark) {
-                TextField("Label", text: $label)
-                Button("Save") { saveBookmark(label) }
-                if node.label != nil { Button("Remove", role: .destructive) { saveBookmark(nil) } }
-                Button("Cancel", role: .cancel) {}
-            }
-            .tronManagedSystemPresentation(
-                isPresented: $showBookmark,
-                identity: "history.entry-bookmark"
-            )
-        }
-        .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
-    }
-
-    private func stageForkNavigation(_ route: AppModel.SessionNavigationRoute) {
-        forkNavigation.stage(route)
-        showFork = false
-    }
-
-    private func completeForkNavigationAfterConfirmationDismissal() {
-        guard let route = forkNavigation.consume() else { return }
-        onForkCreated(route)
-    }
-
-    private func actionRow(icon: String, title: String, subtitle: String, accent: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            TronSettingsRow(icon: icon, title: title, subtitle: subtitle, accent: accent)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func saveBookmark(_ value: String?) {
-        Task {
-            do {
-                try await model.setLabel(sessionID: sessionID, entryID: node.id, label: value)
-                dismiss()
-            } catch {
-                model.presentError(error)
+            .onChange(of: active) { _, value in if !value { store.suspend() } }
+            .onDisappear { store.suspend() }
+            .tronManagedSheet(isPresented: $showingMetadata, identity: "history.entry-information") {
+                if let page = store.page {
+                    JSONFieldSheet(selection: JSONFieldSelection(title: "Entry Information", components: []),
+                                   rootValue: page.metadata, accent: .tronSessionTeal)
+                }
             }
         }
+        .tronTopBlur(.sheet).presentationDetents([.medium, .large]).presentationDragIndicator(.hidden).tint(.tronSessionTeal)
     }
 }
 
-private struct NavigationSheet: View {
+struct HistoryNavigationSheet: View {
+    let node: SessionTreeNode
+    let identity: SessionHistoryReadIdentity
+    let onNavigated: () -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    let sessionID: String
-    let node: SessionTreeNode
-    let onNavigated: () -> Void
     @State private var summarize = false
     @State private var instructions = ""
     @State private var replaceInstructions = false
     @State private var working = false
-
-    private var leafID: String? {
-        model.sessionHistoryPresentation(for: sessionID)?.leafEntryId
-    }
-
-    private var canNavigate: Bool {
-        SessionHistoryPolicy.canNavigate(node: node, leafID: leafID)
-    }
-
-    private var leavesLaterWork: Bool {
-        SessionHistoryPolicy.leavesLaterWork(node: node, leafID: leafID)
-    }
-
-    var body: some View {
-        NavigationStack {
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: 16) {
-                    selectedPoint
-                    if leavesLaterWork { leavingCurrentWorkOptions }
-                    Button(working ? "Working…" : canNavigate ? SessionHistoryPolicy.navigationTitle(for: node) : "Current Position") {
-                        navigate()
-                    }
-                    .buttonStyle(TronActionButtonStyle(role: .primary))
-                    .disabled(working || !canNavigate)
-                }
-                .padding(18)
-            }
-            .defaultScrollAnchor(.top)
-            .tronScrollEdgeChrome()
-            .navigationTitle("")
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: SessionHistoryPolicy.navigationTitle(for: node), accent: .tronSessionTeal)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark").foregroundStyle(Color.tronSessionTeal)
-                    }
-                    .accessibilityLabel("Done")
-                }
-            }
-        }
-        .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
-    }
-
-    private var selectedPoint: some View {
-        TronSettingsGroup(
-            "Selected Point",
-            detail: node.role == .user
-                ? "This prompt will return to the composer for editing."
-                : node.isCurrentPath ? "Earlier on the current path" : "On an earlier branch"
-        ) {
-            TronSettingsRow(
-                icon: node.role == .user ? "person.crop.circle" : "point.3.connected.trianglepath.dotted",
-                title: SessionHistoryPreview.title(node),
-                subtitle: node.timestamp
-            )
-        }
-    }
-
-    private var leavingCurrentWorkOptions: some View {
-        TronSettingsGroup(
-            "Leaving Later Work",
-            detail: node.isCurrentPath
-                ? "Later entries remain in history, but this becomes the active position."
-                : "The current branch remains in history while this earlier path becomes active.",
-            accent: .tronPurple
-        ) {
-            VStack(spacing: 0) {
-                TronToggleRow(icon: "text.bubble", title: "Summarize work being left", accent: .tronPurple, isOn: $summarize)
-                if summarize {
-                    TronSettingsDivider(accent: .tronPurple)
-                    VStack(spacing: 12) {
-                        TextField("Optional summary focus", text: $instructions, axis: .vertical)
-                            .lineLimit(3...7)
-                            .tronField()
-                        TronToggleRow(icon: "arrow.triangle.2.circlepath", title: "Replace default instructions", accent: .tronPurple, isOn: $replaceInstructions)
-                    }
-                    .padding(12)
-                }
-            }
-        }
-    }
-
-    private func navigate() {
-        working = true
-        Task {
-            defer { working = false }
-            do {
-                _ = try await model.navigate(
-                    sessionID: sessionID,
-                    entryID: node.id,
-                    summarize: summarize,
-                    instructions: instructions.isEmpty ? nil : instructions,
-                    replaceInstructions: replaceInstructions
-                )
-                dismiss()
-                onNavigated()
-            } catch { model.presentError(error) }
-        }
-    }
-}
-
-struct ForkConfirmationSheet: View {
-    @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
-    let sessionID: String
-    let node: SessionTreeNode
-    let onCreated: (AppModel.SessionNavigationRoute) -> Void
-    @State private var position: SessionForkPosition
-    @State private var working = false
-
-    init(
-        sessionID: String,
-        node: SessionTreeNode,
-        onCreated: @escaping (AppModel.SessionNavigationRoute) -> Void
-    ) {
-        self.sessionID = sessionID
-        self.node = node
-        self.onCreated = onCreated
-        _position = State(initialValue: SessionForkChoicePolicy.initialPosition(for: node.role))
-    }
-
+    private var current: Bool { SessionHistoryReadIdentity.current(model: model, sessionID: identity.target.sessionID) == identity }
+    private var leafID: String? { model.sessionHistoryPresentation(for: identity.target.sessionID)?.leafEntryId }
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    TronSettingsGroup(node.role == .user ? "Selected Prompt" : "Selected Entry", accent: .tronTeal) {
-                        TronSettingsRow(
-                            icon: node.role == .user ? "person.crop.circle" : "point.3.connected.trianglepath.dotted",
-                            title: SessionHistoryPreview.preview(node),
-                            subtitle: node.timestamp,
-                            accent: .tronTeal
-                        )
-                    }
-                    TronSettingsGroup("New Session", accent: .tronPurple) {
-                        VStack(spacing: 0) {
-                            if SessionForkChoicePolicy.supportsBefore(node.role) {
-                                choice(
-                                    "Fork and edit prompt",
-                                    detail: "Exclude this prompt from history and restore it to the composer.",
-                                    value: .before
-                                )
-                                TronSettingsDivider(accent: .tronPurple)
+                VStack(spacing: 16) {
+                    Text(SessionHistoryPreview.preview(node)).font(TronTypography.bodySM)
+                    Text(SessionHistoryPolicy.navigationDetail(for: node)).font(TronTypography.secondaryDescription)
+                    if SessionHistoryPolicy.leavesLaterWork(node: node, leafID: leafID) {
+                        TronSettingsGroup("Leaving Later Work", detail: "Later entries remain in history.") {
+                            VStack {
+                                TronToggleRow(icon: "text.bubble", title: "Summarize work being left", isOn: $summarize)
+                                if summarize {
+                                    TextField("Optional summary focus", text: $instructions, axis: .vertical).lineLimit(3...7).tronField()
+                                    TronToggleRow(icon: "arrow.triangle.2.circlepath", title: "Replace default instructions", isOn: $replaceInstructions)
+                                }
                             }
-                            choice(
-                                node.role == .user ? "Clone after prompt" : "Clone through this entry",
-                                detail: node.role == .user
-                                    ? "Include this prompt in the new branch."
-                                    : "Include this entry in the new session's canonical history.",
-                                value: .at
-                            )
                         }
                     }
-                    Button(working ? "Creating…" : "Create Fork") { createFork() }
+                    Button(working ? "Working…" : SessionHistoryPolicy.navigationTitle(for: node)) { navigate() }
                         .buttonStyle(TronActionButtonStyle(role: .primary))
-                        .disabled(working)
-                }
-                .padding(18)
-            }
-            .defaultScrollAnchor(.top)
-            .tronScrollEdgeChrome()
-            .navigationTitle("")
-            .toolbar {
-                ToolbarItem(placement: .principal) { TronSheetTitle(title: "Fork Session") }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: { Image(systemName: "xmark").foregroundStyle(Color.tronSessionTeal) }
-                        .accessibilityLabel("Close")
-                        .disabled(working)
-                }
-            }
-        }
-        .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
-        .interactiveDismissDisabled(working)
+                        .disabled(working || !current || !SessionHistoryPolicy.canNavigate(node: node, leafID: leafID))
+                }.padding(18)
+            }.tronScrollEdgeChrome().tronNavigationTitle(SessionHistoryPolicy.navigationTitle(for: node), accent: .tronSessionTeal)
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button { dismiss() } label: { Image(systemName: "checkmark") }.accessibilityLabel("Done") } }
+        }.tronTopBlur(.sheet).presentationDetents([.medium, .large]).presentationDragIndicator(.hidden)
     }
-
-    private func choice(
-        _ title: String,
-        detail: String,
-        value: SessionForkPosition
-    ) -> some View {
-        Button { position = value } label: {
-            TronSettingsRow(icon: position == value ? "checkmark.circle.fill" : "circle", title: title, subtitle: detail, accent: .tronPurple)
-        }
-        .buttonStyle(.plain)
-        .disabled(working)
-    }
-
-    private func createFork() {
-        guard !working else { return }
-        let requestedPosition = position
+    private func navigate() {
+        guard !working, current else { return }
         working = true
         Task {
             defer { working = false }
+            guard current else { return }
             do {
-                let route = try await model.fork(
-                    sessionID: sessionID,
-                    entryID: node.id,
-                    position: requestedPosition.rawValue
-                )
-                // Each parent stages this route through its own completed
-                // dismissal before the root navigation owner can consume it.
-                onCreated(route)
-            } catch is CancellationError {
-                // Lifecycle/profile retirement owns the route transition. It is
-                // not a user-visible fork failure and must not leak a stale toast.
-            } catch {
-                model.presentError(error)
-            }
+                _ = try await model.navigate(sessionID: identity.target.sessionID, entryID: node.id, summarize: summarize,
+                    instructions: instructions.isEmpty ? nil : instructions, replaceInstructions: replaceInstructions)
+                dismiss(); onNavigated()
+            } catch is CancellationError {} catch { model.presentError(error) }
         }
     }
 }
 
-private extension String {
-    var humanized: String {
-        replacingOccurrences(of: "([a-z])([A-Z])", with: "$1 $2", options: .regularExpression)
-            .capitalized
+struct HistoryForkSheet: View {
+    let node: SessionTreeNode
+    let identity: SessionHistoryReadIdentity
+    let onCreated: (AppModel.SessionNavigationRoute) -> Void
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @State private var position: SessionForkPosition = .at
+    @State private var working = false
+    private var current: Bool { SessionHistoryReadIdentity.current(model: model, sessionID: identity.target.sessionID) == identity }
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 16) {
+                    Text(SessionHistoryPreview.preview(node)).font(TronTypography.bodySM)
+                    TronSettingsGroup("New Session", accent: .tronPurple) {
+                        VStack {
+                            if SessionForkChoicePolicy.supportsBefore(node.role) {
+                                choice("Fork and edit prompt", detail: "Exclude this prompt and restore it to the composer.", value: .before)
+                            }
+                            choice(node.role == .user ? "Clone after prompt" : "Clone through this entry",
+                                   detail: "Include this entry in the new session's canonical history.", value: .at)
+                        }
+                    }
+                    Button(working ? "Creating…" : "Create Fork") { fork() }.buttonStyle(TronActionButtonStyle(role: .primary)).disabled(working || !current)
+                }.padding(18)
+            }.tronScrollEdgeChrome().tronNavigationTitle("Fork Session", accent: .tronSessionTeal)
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button { dismiss() } label: { Image(systemName: "checkmark") }.disabled(working).accessibilityLabel("Done") } }
+        }.tronTopBlur(.sheet).presentationDetents([.medium, .large]).presentationDragIndicator(.hidden).interactiveDismissDisabled(working)
     }
-    func ifEmpty(_ fallback: String) -> String { isEmpty ? fallback : self }
+    private func choice(_ title: String, detail: String, value: SessionForkPosition) -> some View {
+        Button { position = value } label: {
+            TronSettingsRow(icon: position == value ? "checkmark.circle.fill" : "circle", title: title, subtitle: detail, accent: .tronPurple)
+        }.buttonStyle(.plain).disabled(working)
+    }
+    private func fork() {
+        guard !working, current else { return }
+        let requested = position
+        working = true
+        Task {
+            defer { working = false }
+            guard current else { return }
+            do { onCreated(try await model.fork(sessionID: identity.target.sessionID, entryID: node.id, position: requested.rawValue)) }
+            catch is CancellationError {} catch { model.presentError(error) }
+        }
+    }
 }

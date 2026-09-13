@@ -107,6 +107,24 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
   });
 
+  it("fences canonical history reads to the exact live runtime", async () => {
+    const fixture = await coldFixture("canonical-history");
+    try {
+      const entry = fixture.manager.appendMessage({ role: "user", content: "Full selected message", timestamp: 1 });
+      const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+      const runtime = slot.snapshot().runtimeGeneration;
+      // Acquiring the SDK runtime can append model/thinking metadata after the prompt.
+      expect(slot.history(runtime).nodes.find(node => node.id === entry)).toMatchObject({ role: "user", preview: "Full selected message" });
+      expect(slot.historyDetail(runtime, entry, 0).text).toBe("Full selected message");
+      expect(() => slot.history("retired-runtime")).toThrow(/runtime changed/);
+      expect(() => slot.historyDetail("retired-runtime", entry, 0)).toThrow(/runtime changed/);
+    } finally {
+      await fixture.registry.dispose();
+      registries.splice(registries.indexOf(fixture.registry), 1);
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
   it("pages canonical extension receipts through the live session history owner", async () => {
     const fixture = await coldFixture("extension-history-pages");
     try {

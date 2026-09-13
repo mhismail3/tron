@@ -594,6 +594,7 @@ struct SessionEventEnvelope: Codable, Hashable, Sendable {
 }
 
 struct SessionTreeNode: Codable, Hashable, Identifiable, Sendable {
+    var bookmarkTargetId: String? = nil
     let id: String
     let parentId: String?
     let timestamp: String
@@ -627,6 +628,7 @@ enum SessionTreePolicy {
                   node.kind.utf8.count <= maximumStringBytes,
                   node.label.map({ !$0.isEmpty && $0.utf8.count <= maximumStringBytes }) ?? true,
                   node.preview.utf8.count <= maximumStringBytes,
+                  node.bookmarkTargetId.map({ !$0.isEmpty && $0.utf8.count <= maximumStringBytes }) ?? true,
                   node.depth >= 0,
                   node.childCount >= 0,
                   identities.insert(node.id).inserted else {

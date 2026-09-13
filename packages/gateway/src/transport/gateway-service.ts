@@ -112,6 +112,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 const restartDrainMethods = new Set([
   "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.drain.status",
   "device.install.config.status", "device.install.status",
+  "session.history.list", "session.history.entry",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
   "session.workspace.inspect", "session.workspace.list", "session.workspace.file", "session.workspace.git.diff", "session.workspace.git.history.list", "session.workspace.git.history.get", "session.workspace.git.history.diff",
   "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.abort", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel",
@@ -274,6 +275,7 @@ export class GatewayService {
         EXTENSION_ACTIVITY_HISTORY_CAPABILITY,
         PROCESS_ACTIVITY_CAPABILITY,
         PROCESS_ACTIVITY_HISTORY_CAPABILITY,
+        "session-history-pages.v1",
         PROCESS_TRANSCRIPT_CAPABILITY,
         PROCESS_TRANSCRIPT_ABORT_CAPABILITY,
         "queue-management.v1",
@@ -1120,6 +1122,24 @@ export class GatewayService {
           );
           return { updated: true };
         });
+      case "session.history.list": {
+        const slot = await this.openedSlot(client, params);
+        const runtime = string(params.runtimeGeneration, "runtimeGeneration", { max: 200 });
+        const cursor = params.cursor === undefined ? undefined : object(params.cursor, "cursor");
+        return safeJson(slot.history(runtime, cursor ? {
+          ordinal: integer(cursor.ordinal, "cursor.ordinal", 0, Number.MAX_SAFE_INTEGER),
+          entryId: string(cursor.entryId, "cursor.entryId", { max: 200 }),
+          direction: oneOf(cursor.direction, "cursor.direction", ["older", "newer"] as const),
+        } : undefined));
+      }
+      case "session.history.entry": {
+        const slot = await this.openedSlot(client, params);
+        return safeJson(slot.historyDetail(
+          string(params.runtimeGeneration, "runtimeGeneration", { max: 200 }),
+          string(params.entryId, "entryId", { max: 200 }),
+          params.offset === undefined ? 0 : integer(params.offset, "offset", 0, Number.MAX_SAFE_INTEGER),
+        ));
+      }
       case "session.tree": {
         const slot = await this.openedSlot(client, params);
         return safeJson(slot.tree());

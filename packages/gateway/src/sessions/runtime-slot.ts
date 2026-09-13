@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { historyPage, historyEntry, type HistoryCursor } from "./history.js";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
@@ -6758,6 +6759,18 @@ export class RuntimeSlot {
       return promptTokens > 0 ? (cacheRead / promptTokens) * 100 : undefined;
     }
     return undefined;
+  }
+
+  history(expectedRuntime: string, cursor?: HistoryCursor) {
+    this.assertNoTrustReload();
+    if (expectedRuntime !== this.runtimeGeneration) throw new GatewayError("conflict", "Session runtime changed. Reload history.", true);
+    return historyPage(this.runtime.session.sessionManager, this.runtimeGeneration, cursor);
+  }
+
+  historyDetail(expectedRuntime: string, entryId: string, offset: number) {
+    this.assertNoTrustReload();
+    if (expectedRuntime !== this.runtimeGeneration) throw new GatewayError("conflict", "Session runtime changed. Reload history.", true);
+    return historyEntry(this.runtime.session.sessionManager, this.runtimeGeneration, entryId, offset);
   }
 
   tree(): SessionTreeNode[] {

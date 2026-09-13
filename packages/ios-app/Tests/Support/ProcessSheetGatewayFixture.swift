@@ -12,7 +12,7 @@ final class ProcessSheetGatewayFixture {
         client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
     }
 
-    func connect(model: AppModel? = nil) async throws {
+    func connect(model: AppModel? = nil, capabilities: [String] = []) async throws {
         let connecting = Task {
             if let model { try await model.connectHostedGateway(profile: profile, token: "fixture-token") }
             else { _ = try await client.connect(profile: profile, token: "fixture-token") }
@@ -23,7 +23,7 @@ final class ProcessSheetGatewayFixture {
             "type": .string("hello"), "gatewayVersion": .string("1"), "piVersion": .string("1"),
             "protocolVersion": .number(5), "minProtocolVersion": .number(5),
             "machineId": .string("fixture"), "machineName": .string("Fixture"),
-            "gatewayChannel": .string("stable"), "capabilities": .array([]),
+            "gatewayChannel": .string("stable"), "capabilities": .array(capabilities.map(JSONValue.string)),
         ])))
         try await connecting.value
     }

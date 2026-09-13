@@ -889,6 +889,8 @@ export interface SessionSnapshot {
 
 export interface SessionTreeNode {
   id: string;
+  /** Label records act on their real canonical target, not the label receipt. */
+  bookmarkTargetId?: string;
   parentId: string | null;
   timestamp: string;
   kind: TranscriptItem["kind"] | "sessionInfo";

@@ -1752,16 +1752,37 @@ this revalidation never retries or replays accepted mutations. The iOS
 projection validates bounded structure and paths while tolerating additive resource
 categories and future metadata scope/origin values; its rejection copy identifies
 whether the response exceeded the 768 KiB bound or failed structural admission.
-Deep session history is projected as a bounded flat outline with depth, branch,
-and current-path metadata so large canonical sessions neither overflow the
-gateway stack nor exceed the mobile frame. The single History sheet explains Timeline,
-Branches, Bookmarks, and Recent Log modes, and identifies JSONL export as the complete canonical audit.
-Runtime, canonical-history, history-mode, and event cards share one icon width, content spacing, padding,
-supporting-text scale, and vertically centered icon-to-text alignment. All text blocks use the same leading
-edge; event titles intentionally use the smaller regular body style while summary and mode titles use the
-headline style. The row opens details while its uncontained ellipsis control opens the native actions
-menu. Forking is available from that menu and as the final action in Entry Details instead of occupying the
-history summary.
+Session History uses one compact summary and one tagged feed, newest **recorded** entry first.
+Canonical append order, not device timestamps, resolves ties and clock skew. Messages, tool-only/thinking
+responses, custom logs, compactions, branch summaries, model/thinking changes and bookmark receipts share
+icon-free rows with semantic color and actual content previews. There is no separate Timeline/Branches/Log
+mode or duplicated History heading. `SessionHistoryStore` retains one at-most-100-row window from
+`session.history.list`; explicit Older/Newer navigation replaces that window and resets the viewport only
+at the reader's request. Covering/revealing the sheet retains completed rows and scroll position rather
+than replaying the first page. This is bounded loading beyond the former 1,000-entry outline, not merely
+a lazy stack over a capped snapshot. A Gateway advertising `session-history-pages.v1` is required; an
+older Gateway shows an explicit update notice, not an incomplete fallback.
+
+A row opens `HistoryEntryDetailsSheet`; only its theme-matched ellipsis offers valid continuation, fork
+and bookmark commands. Prompt continuation restores the prompt for editing; branch continuation stays
+in the same canonical session. Forking opens only the new session identity returned by the existing
+mutation receipt owner—branch entry IDs never become fabricated session links. Bookmark receipt actions
+resolve the actual canonical target, and missing targets have no bookmark action. Accepted commands stay
+with AppModel's mutation/receipt coordinators, independently of disposable presentation reads.
+
+Entry content is fetched only after selection through `session.history.entry`, in at-most-24,000 UTF-16-unit
+parts with explicit Continue reading/Previous part controls. The native selectable reader preserves authored
+Unicode and line breaks; no preview or transport truncation is presented as the full body. Metadata is
+separate under Entry information; there are no duplicated mutation rows in details. Images are identified
+as attachments rather than dumped as base64. Arbitrary tool arguments/custom-log data belong in paged
+content, never an unbounded metadata side channel. Scalar metadata is bounded and marks any clipping;
+JSONL export remains the complete canonical audit, including media and producer metadata.
+Both read owners deduplicate matching requests, fence all post-await outcomes by exact profile, mounted
+target, runtime, reconciliation generation, presentation activity and latest request, and retain the last
+completed page on transient errors. Retiring activity invalidates in-flight publication. Focused
+`SessionHistoryStoreTests`, `ChatCompactPillTests`, and the production-sheet native-reader witness in
+`SessionSheetPresentationTests` cover these contracts; synthetic light/dark captures are not device or
+performance measurements.
 Gateway produces that audit from a newline-terminated canonical byte cut captured briefly under the live runtime lane.
 The bounded file copy and HTML rendering continue outside that lane, so running, retrying, compacting, and Bash-active
 sessions remain exportable while later appends are deterministically excluded. JSONL does not linearize only the active branch.
