@@ -2029,6 +2029,97 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
   });
 
+  it("uses complete headers to quarantine user IDs duplicated by delegated files", async () => {
+    const fixture = await coldFixture("user-duplicate-delegated");
+    const parentFile = fixture.manager.getSessionFile()!;
+    const forksDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
+    await mkdir(forksDirectory, { recursive: true });
+    const duplicatePath = join(forksDirectory, "duplicate.jsonl");
+    await copyFile(parentFile, duplicatePath);
+
+    const user = await fixture.registry.catalog("user");
+    expect(user.sessions.find((session) => session.id === fixture.manager.getSessionId())).toBeUndefined();
+    const allDuplicate = await fixture.registry.catalog("all");
+    expect(allDuplicate.sessions.find((session) => session.id === fixture.manager.getSessionId())).toBeUndefined();
+    await expect(fixture.registry.acquire(fixture.manager.getSessionId()))
+      .rejects.toMatchObject({ code: "conflict" });
+
+    await rm(duplicatePath);
+    const child = SessionManager.forkFrom(parentFile, fixture.cwd, forksDirectory);
+    child.appendMessage(fauxAssistantMessage("contradictory delegated header"));
+    const childFile = child.getSessionFile()!;
+    const childLines = (await readFile(childFile, "utf8")).split("\n");
+    childLines[0] = JSON.stringify({ ...JSON.parse(childLines[0]!), parentSession: join(fixture.agentDir, "sessions", "not-the-parent.jsonl") });
+    await writeFile(childFile, childLines.join("\n"));
+
+    const repairedUser = await fixture.registry.catalog("user");
+    expect(repairedUser.sessions.map((session) => session.id)).toContain(fixture.manager.getSessionId());
+    const all = await fixture.registry.catalog("all");
+    expect(all.sessions.map((session) => session.id)).not.toContain(child.getSessionId());
+  });
+
+  it("advances user catalog identity when canonical membership changes beside delegated rows", async () => {
+    const fixture = await coldFixture("user-membership-revision");
+    const parentFile = fixture.manager.getSessionFile()!;
+    const forksDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
+    await mkdir(forksDirectory, { recursive: true });
+    const child = SessionManager.forkFrom(parentFile, fixture.cwd, forksDirectory);
+    child.appendMessage(fauxAssistantMessage("delegated membership fixture"));
+
+    const initial = await fixture.registry.pageSource("user");
+    const secondDirectory = join(fixture.agentDir, "sessions", "second");
+    await mkdir(secondDirectory, { recursive: true });
+    const second = SessionManager.create(fixture.cwd, secondDirectory);
+    second.appendMessage(fauxAssistantMessage("new canonical user session"));
+    const added = await fixture.registry.pageSource("user");
+    expect(added.generation).not.toBe(initial.generation);
+    expect((await fixture.registry.catalog("user")).sessions.map((session) => session.id))
+      .toContain(second.getSessionId());
+
+    await rm(second.getSessionFile()!);
+    const removed = await fixture.registry.pageSource("user");
+    expect(removed.generation).not.toBe(added.generation);
+    expect((await fixture.registry.catalog("user")).sessions.map((session) => session.id))
+      .not.toContain(second.getSessionId());
+  });
+
+  it("makes user reads join an active all-scope flight without a parallel scan", async () => {
+    const fixture = await coldFixture("catalog-all-flight-head-of-line");
+    const parentFile = fixture.manager.getSessionFile()!;
+    const forksDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
+    await mkdir(forksDirectory, { recursive: true });
+    const child = SessionManager.forkFrom(parentFile, fixture.cwd, forksDirectory);
+    child.appendMessage(fauxAssistantMessage("slow all-scope fixture"));
+    const internals = fixture.registry as unknown as {
+      sessionInfos: (scope?: "user" | "all") => Promise<unknown[]>;
+    };
+    const original = internals.sessionInfos.bind(fixture.registry);
+    let entered!: () => void;
+    let release!: () => void;
+    const enteredScan = new Promise<void>((resolve) => { entered = resolve; });
+    const barrier = new Promise<void>((resolve) => { release = resolve; });
+    let userFinished = false;
+    const scanner = vi.spyOn(internals, "sessionInfos").mockImplementation(async (scope) => {
+      entered();
+      await barrier;
+      return original(scope);
+    });
+    try {
+      const all = fixture.registry.catalog("all");
+      await enteredScan;
+      const user = fixture.registry.catalog("user").then(() => { userFinished = true; });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(userFinished).toBe(false);
+      expect(scanner).toHaveBeenCalledTimes(1);
+      release();
+      await Promise.all([all, user]);
+      expect(scanner).toHaveBeenCalledTimes(1);
+    } finally {
+      release();
+      scanner.mockRestore();
+    }
+  });
+
   it("bounds validation reads and retained acquisition evidence before publication", async () => {
     const headerFixture = await coldFixture("header-bound");
     const headerRegistry = new RuntimeRegistry({

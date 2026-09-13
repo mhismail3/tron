@@ -444,6 +444,10 @@ export class RuntimeRegistry {
   private readonly trustReloadProjects = new Set<string>();
   private revision = 0;
   private catalogFingerprint: string | undefined;
+  // User and all-scope cuts have different membership contracts. Keeping their
+  // fingerprints separate lets a partial user cut advance its own revision
+  // without treating omitted delegated rows as a deletion from the full list.
+  private catalogUserFingerprint: string | undefined;
   private catalogAcquisitionInvalidationGeneration = 0;
   private catalogStructuralGeneration = 0;
   private catalogAcquisitionAdmission: CatalogAcquisitionAdmission | undefined;
@@ -1003,6 +1007,14 @@ export class RuntimeRegistry {
     return new Set([...counts].filter(([, count]) => count > 1).map(([id]) => id));
   }
 
+  private diskAmbiguousSessionIDsFromEvidence(evidence: CatalogStructureEvidence): Set<string> {
+    const counts = new Map<string, number>();
+    for (const identity of evidence.identitiesByPath.values()) {
+      counts.set(identity.id, (counts.get(identity.id) ?? 0) + 1);
+    }
+    return new Set([...counts].filter(([, count]) => count > 1).map(([id]) => id));
+  }
+
   private async timedStage<T>(
     stage: string,
     operation: () => Promise<T>,
@@ -1059,6 +1071,9 @@ export class RuntimeRegistry {
       invalidationGeneration: this.catalogAcquisitionInvalidationGeneration,
     };
     this.catalogFingerprint = this.catalogIdentityFingerprint(remaining);
+    this.catalogUserFingerprint = this.catalogIdentityFingerprint(
+      remaining.filter((session) => !this.delegatedSessionTopologies(remaining).has(resolve(session.path))),
+    );
     return true;
   }
 
@@ -1827,7 +1842,9 @@ export class RuntimeRegistry {
         return identity?.id === info.id && resolve(identity.cwd || process.cwd()) === resolve(info.cwd);
       });
     this.catalogStructuralIndex = indexIsExact ? index : undefined;
-    const ambiguousIDs = this.dynamicAmbiguousSessionIDs(index);
+    const ambiguousIDs = scope === "user"
+      ? this.diskAmbiguousSessionIDsFromEvidence(materialized.after)
+      : this.dynamicAmbiguousSessionIDs(index);
     const infos = index.allInfos.filter((session) => !ambiguousIDs.has(session.id));
     if (indexIsExact && admitted && this.catalogAcquisitionAdmission) {
       this.catalogAcquisitionAdmission = {
@@ -1836,11 +1853,17 @@ export class RuntimeRegistry {
       };
     }
     // No await may separate the final generation confirmation from publication
-    // of catalog identity and its matching revision. A user-scoped cut is only
-    // allowed to update process-wide identity when structural evidence proves
-    // it included every session; all-scope cuts update identity even when a
-    // duplicate makes the index ineligible, so live acquisition fails closed.
-    if (scope === "all" || indexIsExact) this.updateCatalogIdentity(materialized.allInfos, ambiguousIDs);
+    // of catalog identity and its matching revision. User cuts update only the
+    // non-delegated membership fingerprint; all-scope cuts update full identity
+    // even when a duplicate makes the index ineligible, so live acquisition
+    // fails closed.
+    if (scope === "all") this.updateCatalogIdentity(materialized.allInfos, ambiguousIDs, "all");
+    else {
+      // The partial user cut owns user membership/revision, while its complete
+      // header evidence still owns duplicate-ID quarantine. It is not eligible
+      // to populate the all-scope structural index below.
+      this.updateCatalogIdentity(materialized.allInfos, ambiguousIDs, "user");
+    }
     if (indexIsExact) {
       // Persistence is acceleration only. Failure leaves the canonical in-memory
       // projection usable and is reported by the index owner without affecting
@@ -1881,7 +1904,12 @@ export class RuntimeRegistry {
     );
     const after = await this.timedStage("catalog.validate.after", () => this.sharedCatalogStructureEvidence(true), stageMetadata);
     const allInfos = this.withCatalogEvidence(discoveredInfos, after);
-    const ambiguousDiskIDs = this.diskAmbiguousSessionIDs(allInfos);
+    // User metadata intentionally omits delegated bodies, but duplicate IDs are
+    // an admission property of the whole canonical tree. Header evidence is
+    // already complete here and must remain the source for this quarantine set.
+    const ambiguousDiskIDs = scope === "user"
+      ? this.diskAmbiguousSessionIDsFromEvidence(after)
+      : this.diskAmbiguousSessionIDs(allInfos);
     return {
       allInfos,
       ambiguousDiskIDs,
@@ -1947,13 +1975,31 @@ export class RuntimeRegistry {
       }));
   }
 
-  private updateCatalogIdentity(infos: readonly CatalogSessionInfo[], ambiguousIDs: Set<string>): void {
+  private updateCatalogIdentity(
+    infos: readonly CatalogSessionInfo[],
+    ambiguousIDs: Set<string>,
+    scope: "user" | "all" = "all",
+  ): void {
     const fingerprint = this.catalogIdentityFingerprint(infos);
-    if (this.catalogFingerprint === undefined) this.catalogFingerprint = fingerprint;
-    else if (this.catalogFingerprint !== fingerprint) {
-      this.catalogFingerprint = fingerprint;
-      this.revision += 1;
+    if (scope === "user") {
+      if (this.catalogUserFingerprint === undefined) this.catalogUserFingerprint = fingerprint;
+      else if (this.catalogUserFingerprint !== fingerprint) {
+        this.catalogUserFingerprint = fingerprint;
+        this.revision += 1;
+      }
+    } else {
+      if (this.catalogFingerprint === undefined) this.catalogFingerprint = fingerprint;
+      else if (this.catalogFingerprint !== fingerprint) {
+        this.catalogFingerprint = fingerprint;
+        this.revision += 1;
+      }
+      const delegated = this.delegatedSessionTopologies(infos);
+      this.catalogUserFingerprint = this.catalogIdentityFingerprint(
+        infos.filter((session) => !delegated.has(resolve(session.path))),
+      );
     }
+    // This set is derived from complete header evidence even for user lists, so
+    // a live slot cannot fast-path an ID duplicated by an omitted child row.
     this.ambiguousSessionIds = ambiguousIDs;
   }
 
