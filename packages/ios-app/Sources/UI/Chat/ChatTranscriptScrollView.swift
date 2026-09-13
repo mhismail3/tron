@@ -1033,10 +1033,18 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                     )
                 }
                 // A lifecycle row can be fully laid out before SwiftUI delivers
-                // the animation completion. Its positive native frame is the
-                // materialization proof needed to settle the transcript-growth
-                // participant during a resumed send.
+                // the animation completion. Its positive native frame is only
+                // materialization proof: current epoch/tag/row ownership and
+                // the exact transaction lease must also agree. Marker evidence
+                // still owns target release; this does not certify visual
+                // animation completion.
                 if let lifecycleSettlementID,
+                   sample.layoutEpoch == scrollCoordinator.layoutEpoch,
+                   installedTag == currentInstalled?.tag,
+                   currentInstalled?.containsPhysicalRowID(lifecycleSettlementID) == true,
+                   scrollCoordinator.materializationLayoutTransactionID(
+                       for: lifecycleSettlementID
+                   ) != nil,
                    sample.frame.width.isFinite, sample.frame.width > 0,
                    sample.frame.height.isFinite, sample.frame.height > 0 {
                     onEntranceSettled(lifecycleSettlementID)

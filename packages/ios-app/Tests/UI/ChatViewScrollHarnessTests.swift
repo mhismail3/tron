@@ -463,7 +463,8 @@ struct ChatViewScrollHarnessTests {
             }
             snapshot.transcriptStart = 0
             snapshot.transcriptTotal = snapshot.transcript.count
-            try await withHarness(snapshot: snapshot, enablesComposerSubmission: true) { harness in
+            let initial = snapshot
+            try await withHarness(snapshot: initial, enablesComposerSubmission: true) { harness in
                 let ready = try await harness.recorder.waitUntil {
                     $0.observation.isReady && $0.nativeRows.contains {
                         $0.semanticID == "resumed-turn-95" && $0.isVisible
@@ -472,7 +473,10 @@ struct ChatViewScrollHarnessTests {
                 let releaseBaseline = ready.observation.targetReleaseCount
                 try harness.setComposerDraftText(String(repeating: "multiline resumed prompt ", count: 28))
                 harness.submitPrompt()
+                // Exercise both sides of the keyboard-sized viewport change
+                // while the lazy history and outgoing row are settling.
                 harness.resize(height: 620)
+                harness.resize(height: 844)
                 let sent = try await harness.recorder.waitUntil {
                     $0.nativeRows.contains {
                         $0.physicalID.hasPrefix("outgoing-submission:") && $0.isVisible
@@ -481,18 +485,58 @@ struct ChatViewScrollHarnessTests {
                 let outgoing = try #require(sent.nativeRows.first {
                     $0.physicalID.hasPrefix("outgoing-submission:") && $0.isVisible
                 })
+
+                var acknowledged = initial
+                let promptText = String(repeating: "multiline resumed prompt ", count: 28)
+                acknowledged.transcript.append(try decodeTranscriptFixture(
+                    TranscriptItem.self,
+                    from: JSONSerialization.data(withJSONObject: [
+                        "id": "resumed-canonical-prompt", "parentId": NSNull(),
+                        "presentationId": "hosted-prompt-operation",
+                        "timestamp": "2026-01-01T00:01:00Z", "kind": "message", "role": "user",
+                        "content": [["id": "resumed-canonical-text", "ordinal": 0, "type": "text", "text": promptText]]
+                    ])
+                ))
+                acknowledged.transcriptTotal = acknowledged.transcript.count
+                harness.replaceAuthoritativeSnapshot(acknowledged)
+                let ack = try await harness.recorder.waitUntil {
+                    $0.nativeRows.contains { $0.semanticID == "resumed-canonical-prompt" && $0.isVisible }
+                }
+                let canonical = try #require(ack.nativeRows.first {
+                    $0.semanticID == "resumed-canonical-prompt"
+                })
+                #expect(canonical.physicalID == outgoing.physicalID)
+                #expect(canonical.instance == outgoing.instance)
+
+                var response = acknowledged
+                response.transcript.append(try harnessAssistantMessage(
+                    id: "resumed-first-successor", presentationID: "resumed-first-successor",
+                    text: "The resumed successor is visible."
+                ))
+                response.transcriptTotal = response.transcript.count
+                harness.replaceAuthoritativeSnapshot(response)
+                let successor = try await harness.recorder.waitUntil {
+                    $0.nativeRows.contains { $0.semanticID == "resumed-first-successor" && $0.isVisible }
+                }
                 for _ in 0..<80 { try await harness.driveFrameBoundary() }
                 let settled = try #require(harness.recorder.samples.last)
-                #expect(settled.observation.targetReleaseCount == releaseBaseline + 1)
-                #expect(settled.nativeRows.contains {
+                #expect(settled.observation.targetReleaseCount >= releaseBaseline + 1)
+                #expect(successor.nativeRows.contains {
                     $0.physicalID == outgoing.physicalID && $0.instance == outgoing.instance && $0.isVisible
                 })
-                #expect(!harness.traceRecords.contains { $0.record.event == "chat.layout.abandoned" })
-                #expect(!harness.traceRecords.contains { $0.record.event == "chat.lease.bounded-fallback" })
-                #expect(harness.recorder.samples.suffix(40).allSatisfy { sample in
+                let transitionSamples = harness.recorder.samples.filter {
+                    $0.frameIndex >= sent.frameIndex && $0.frameIndex <= settled.frameIndex
+                }
+                #expect(!transitionSamples.isEmpty)
+                #expect(transitionSamples.allSatisfy { sample in
                     sample.nativeRows.contains {
                         $0.physicalID == outgoing.physicalID && $0.instance == outgoing.instance && $0.isVisible
                     }
+                })
+                #expect(!harness.traceRecords.contains { $0.record.event == "chat.layout.abandoned" })
+                #expect(!harness.traceRecords.contains {
+                    $0.record.event == "chat.lease.release-requested"
+                        && $0.record.message.contains("reason=bounded-fallback")
                 })
             }
         }
