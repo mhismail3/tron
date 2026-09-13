@@ -83,6 +83,18 @@ private struct HistorySelection: Identifiable {
     let action: Action
     let identity: SessionHistoryReadIdentity
 }
+private struct HistoryPageRequest {
+    var revision = 0
+    var cursor: SessionHistoryCursor?
+    var resetsViewport = false
+
+    mutating func advance(cursor: SessionHistoryCursor?, resetsViewport: Bool) {
+        revision &+= 1
+        self.cursor = cursor
+        self.resetsViewport = resetsViewport
+    }
+}
+
 private struct HistoryLoadKey: Hashable {
     let identity: SessionHistoryReadIdentity?
     let active: Bool
@@ -104,8 +116,11 @@ struct SessionTreeSheet: View {
     @State private var labelNode: SessionTreeNode?
     @State private var labelIdentity: SessionHistoryReadIdentity?
     @State private var label = ""
-    @State private var cursor: SessionHistoryCursor?
-    @State private var revision = 0
+    @State private var pageRequest = HistoryPageRequest()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    #if HOSTED_TEST
+    @Environment(\.sessionHistoryPagingProbe) private var pagingProbe
+    #endif
     @State private var installedRevision = -1
     @State private var forkNavigation = ChatForkNavigationOwner()
     private var active: Bool { activity.allowsPresentationPublication && (coordinator?.activity(for: surfaceToken).allowsPresentationPublication ?? true) }
@@ -115,58 +130,73 @@ struct SessionTreeSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
+            ZStack {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: TronSpacing.md) {
                         summary.padding(.bottom, 12).id("history-top")
                         if !supported {
                             TronSettingsNotice(message: "Update the Mac Gateway to browse complete paged history.", accent: .tronSessionTeal)
                         } else {
-                            if let error = store.error { TronSettingsNotice(message: error, retry: reload) }
-                            if store.loading { TronLoadingState(label: "Loading history…") }
+                            if store.loading && store.page == nil { TronLoadingState(label: "Loading history…") }
                             if let page = store.page {
-                                if page.nodes.isEmpty { TronSettingsCaption("No recorded entries.") }
+                                pagingControls(page, location: "top")
                                 ForEach(page.nodes) { node in
                                     let row = SessionHistoryRowPresentation(node: node)
                                     SessionHistoryRow(row: row, current: node.id == model.sessionHistoryPresentation(for: sessionID)?.leafEntryId,
-                                        canAct: identity != nil && store.identity == identity,
+                                        canAct: active && !store.loading && identity != nil && store.identity == identity,
                                         select: { select(node, .details) }, navigate: { select(node, .navigate) },
                                         fork: { select(node, .fork) }, bookmark: {
                                             label = node.label ?? ""; labelIdentity = identity; labelNode = node
                                         })
+                                    #if HOSTED_TEST
+                                    .background {
+                                        if node.id == page.nodes.first?.id {
+                                            HistoryFirstRowMarker(entryID: node.id)
+                                        }
+                                    }
+                                    #endif
                                 }
-                                HStack {
-                                    if let newer = page.newer { Button("Newer entries") { changePage(newer) } }
-                                    Spacer()
-                                    if let older = page.older { Button("Older entries") { changePage(older) } }
-                                }
-                                .font(TronTypography.buttonSM).disabled(store.loading)
-                                .padding(.vertical, 8)
-                                Text("\(page.nodes.count) of \(page.totalEntries.formatted()) entries · Newest recorded first")
-                                    .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted)
+                                if !page.nodes.isEmpty { pagingControls(page, location: "bottom") }
                             }
                         }
                     }
                     .padding(.horizontal, 18).padding(.vertical, 12)
                 }
                 .tronScrollEdgeChrome()
-                .task(id: HistoryLoadKey(identity: identity, active: active, supported: supported, revision: revision)) {
-                    guard active, supported, let identity else { store.suspend(); return }
-                    guard store.identity != identity || store.page == nil || installedRevision != revision else { return }
-                    let requestedRevision = revision
-                    let changedIdentity = store.identity != identity
-                    let client = model.client
-                    let loaded = await store.load(identity: identity, cursor: changedIdentity ? nil : cursor,
-                        request: { try await client.requestValue($0, $1) },
-                        isCurrent: { active && self.identity == identity })
-                    guard loaded, !Task.isCancelled, active, self.identity == identity else { return }
-                    installedRevision = requestedRevision
-                    if changedIdentity { cursor = nil }
-                    // Only explicit page changes/reloads reset the viewport. Coverage
-                    // retains the same page and native reader position.
-                    if requestedRevision > 0 { proxy.scrollTo("history-top", anchor: .top) }
+                // Explicit successful batch changes create a native viewport at
+                // its initial top. A proxy targeting an unrealized lazy header
+                // immediately after an await cannot guarantee this placement.
+                .id(store.viewportGeneration)
+                .transition(.opacity)
+                .accessibilityIdentifier("session-history-viewport")
+            }
+            .animation(active && !reduceMotion ? .easeInOut(duration: 0.2) : nil, value: store.viewportGeneration)
+            .overlay(alignment: .bottom) {
+                if let error = store.error {
+                    TronSettingsNotice(message: error, retry: retryPage)
+                        .padding(14).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                        .padding(18)
                 }
             }
+            .task(id: HistoryLoadKey(identity: identity, active: active, supported: supported, revision: pageRequest.revision)) {
+                guard active, supported, let identity else { store.suspend(); return }
+                guard store.identity != identity || store.page == nil || installedRevision != pageRequest.revision else { return }
+                let request = pageRequest
+                let changedIdentity = store.identity != identity
+                let client = model.client
+                let loaded = await store.load(identity: identity, cursor: changedIdentity ? nil : request.cursor,
+                    resetViewport: changedIdentity || request.resetsViewport,
+                    request: { try await client.requestValue($0, $1) },
+                    isCurrent: { active && self.identity == identity && pageRequest.revision == request.revision })
+                guard loaded, !Task.isCancelled, active, self.identity == identity,
+                      pageRequest.revision == request.revision else { return }
+                installedRevision = request.revision
+                if changedIdentity { pageRequest.cursor = nil }
+            }
+            #if HOSTED_TEST
+            .onAppear { installPagingProbe() }
+            .onChange(of: store.viewportGeneration) { _, _ in installPagingProbe() }
+            #endif
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -203,6 +233,21 @@ struct SessionTreeSheet: View {
         .tronSettingsVisualTheme(accent: .tronSessionTeal).tint(.tronSessionTeal)
     }
 
+    private func pagingControls(_ page: SessionHistoryPage, location: String) -> some View {
+        SessionHistoryPagingControls(page: page, enabled: active && !store.loading && store.identity == identity,
+                                     location: location, select: changePage)
+    }
+
+    #if HOSTED_TEST
+    private func installPagingProbe() {
+        pagingProbe?.store = store
+        pagingProbe?.older = { if let cursor = store.page?.older { changePage(cursor) } }
+        pagingProbe?.newer = { if let cursor = store.page?.newer { changePage(cursor) } }
+        pagingProbe?.refresh = { refreshPage() }
+        pagingProbe?.retry = { retryPage() }
+    }
+    #endif
+
     private var summary: some View {
         HStack(spacing: 8) {
             Image(systemName: "clock.arrow.circlepath")
@@ -229,10 +274,27 @@ struct SessionTreeSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .tronGlassSurface(accent: .tronSessionTeal, cornerRadius: 16, tintOpacity: 0.12)
     }
-    private func reload() { cursor = nil; revision &+= 1 }
-    private func changePage(_ cursor: SessionHistoryCursor) { self.cursor = cursor; revision &+= 1 }
+    private func reload() {
+        guard active, !store.loading else { return }
+        pageRequest.advance(cursor: nil, resetsViewport: true)
+    }
+    private func changePage(_ cursor: SessionHistoryCursor) {
+        guard active, !store.loading, store.identity == identity,
+              cursor == store.page?.older || cursor == store.page?.newer else { return }
+        pageRequest.advance(cursor: cursor, resetsViewport: true)
+    }
+    private func refreshPage() {
+        // A late bookmark receipt must neither turn a pending navigation into
+        // an in-place refresh nor retry a failed cursor instead of the read page.
+        let navigating = pageRequest.revision != installedRevision && pageRequest.resetsViewport && store.error == nil
+        pageRequest.advance(cursor: navigating ? pageRequest.cursor : store.pageCursor, resetsViewport: navigating)
+    }
+    private func retryPage() {
+        guard active, !store.loading else { return }
+        pageRequest.advance(cursor: pageRequest.cursor, resetsViewport: pageRequest.resetsViewport)
+    }
     private func select(_ node: SessionTreeNode, _ action: HistorySelection.Action) {
-        guard active, let identity, store.identity == identity else { return }
+        guard active, !store.loading, let identity, store.identity == identity else { return }
         selection = HistorySelection(node: node, action: action, identity: identity)
     }
     private func saveLabel(_ value: String?) {
@@ -241,11 +303,79 @@ struct SessionTreeSheet: View {
         // Accepted mutations remain owned by AppModel's receipt coordinator.
         Task {
             guard expected == identity else { return }
-            do { try await model.setLabel(sessionID: sessionID, entryID: SessionHistoryPolicy.bookmarkEntryID(node), label: value); revision &+= 1 }
+            do {
+                try await model.setLabel(sessionID: sessionID, entryID: SessionHistoryPolicy.bookmarkEntryID(node), label: value)
+                guard expected == identity else { return }
+                refreshPage()
+            }
             catch is CancellationError {} catch { model.presentError(error) }
         }
     }
 }
+
+struct SessionHistoryPagingControls: View {
+    let page: SessionHistoryPage
+    let enabled: Bool
+    let location: String
+    let select: (SessionHistoryCursor) -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(page.rangeDescription)
+                .font(TronTypography.secondaryDescription)
+                .foregroundStyle(Color.tronTextSecondary)
+                .contentTransition(.opacity)
+                .accessibilityIdentifier("history-range-\(location)")
+            if !page.nodes.isEmpty {
+                Text("Newest recorded first")
+                    .font(TronTypography.secondaryDescription)
+                    .foregroundStyle(Color.tronTextMuted)
+            }
+            if page.older != nil || page.newer != nil {
+                HStack(spacing: 12) {
+                    if let newer = page.newer {
+                        Button { select(newer) } label: {
+                            TronInlineActionLabel("Newer entries", icon: "arrow.up", accent: .tronSessionTeal)
+                        }
+                        .accessibilityIdentifier("history-newer-\(location)")
+                        .transition(.opacity)
+                    }
+                    Spacer(minLength: 0)
+                    if let older = page.older {
+                        Button { select(older) } label: {
+                            TronInlineActionLabel("Older entries", icon: "arrow.down", accent: .tronSessionTeal)
+                        }
+                        .accessibilityIdentifier("history-older-\(location)")
+                        .transition(.opacity)
+                    }
+                }
+                .buttonStyle(.plain).disabled(!enabled)
+            }
+        }
+        .padding(.vertical, 8)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: page.rangeDescription)
+    }
+}
+
+#if HOSTED_TEST
+@MainActor
+final class SessionHistoryPagingProbe {
+    var store: SessionHistoryStore?
+    var older: (() -> Void)?
+    var newer: (() -> Void)?
+    var refresh: (() -> Void)?
+    var retry: (() -> Void)?
+}
+extension EnvironmentValues {
+    @Entry var sessionHistoryPagingProbe: SessionHistoryPagingProbe? = nil
+}
+private struct HistoryFirstRowMarker: UIViewRepresentable {
+    let entryID: String
+    func makeUIView(context: Context) -> UIView { UIView() }
+    func updateUIView(_ view: UIView, context: Context) { view.accessibilityIdentifier = "history-first-\(entryID)" }
+}
+#endif
 
 struct SessionHistoryRow: View {
     let row: SessionHistoryRowPresentation

@@ -1757,9 +1757,15 @@ Canonical append order, not device timestamps, resolves ties and clock skew. Mes
 responses, custom logs, compactions, branch summaries, model/thinking changes and bookmark receipts share
 icon-free rows with semantic color and actual content previews. There is no separate Timeline/Branches/Log
 mode or duplicated History heading. `SessionHistoryStore` retains one at-most-100-row window from
-`session.history.list`; explicit Older/Newer navigation replaces that window and resets the viewport only
-at the reader's request. Covering/revealing the sheet retains completed rows and scroll position rather
-than replaying the first page. This is bounded loading beyond the former 1,000-entry outline, not merely
+`session.history.list`. Matching teal icon pills and exact one-based canonical entry ranges appear above
+and below each batch; ranges come from admitted cursor ordinals and the response total, not a page number
+inferred from a moving head. On successful explicit Older/Newer navigation or Reload, the store commits the
+new window and a new native scroll viewport identity in one fenced MainActor turn. SwiftUI materializes the
+new lazy stack at its initial top and crossfades the batch, labels and controls; this deliberately replaces
+an unreliable immediate `scrollTo` against an unrealized header. Reduce Motion disables these transitions.
+Failed or obsolete reads never advance viewport identity. Errors overlay the retained page without moving
+its rows; Retry preserves the failed request's intent. Bookmark/label refresh and unchanged-identity
+covering/revealing retain the native viewport rather than replaying the first page. This is bounded loading beyond the former 1,000-entry outline, not merely
 a lazy stack over a capped snapshot. A Gateway advertising `session-history-pages.v1` is required; an
 older Gateway shows an explicit update notice, not an incomplete fallback.
 

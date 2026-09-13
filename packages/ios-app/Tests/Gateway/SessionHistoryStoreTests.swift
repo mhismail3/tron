@@ -101,6 +101,60 @@ struct SessionHistoryStoreTests {
         #expect(store.page?.nodes.first?.id == "100", "Failed paging does not evict the completed window")
     }
 
+    nonisolated static func window(_ range: ClosedRange<Int>, total: Int) -> SessionHistoryPage {
+        SessionHistoryPage(runtimeGeneration: "runtime", nodes: range.reversed().map { node("\($0)") },
+            older: range.lowerBound > 1 ? .init(ordinal: range.lowerBound - 1, entryId: "\(range.lowerBound)", direction: "older") : nil,
+            newer: range.upperBound < total ? .init(ordinal: range.upperBound - 1, entryId: "\(range.upperBound)", direction: "newer") : nil,
+            totalEntries: total)
+    }
+
+    @Test("range labels follow canonical ordinals through first last partial and append-shifted windows")
+    func exactRanges() throws {
+        for (range, total) in [(1894...1993, 1993), (1794...1893, 1993), (1...93, 1993), (1894...1993, 2007), (1994...2007, 2007), (1...1, 1)] {
+            let page = try Self.window(range, total: total).admitted(runtime: "runtime")
+            #expect(page.entryRange == range)
+            #expect((page.older != nil) == (range.lowerBound > 1))
+            #expect((page.newer != nil) == (range.upperBound < total))
+            #expect(page.rangeDescription == "Entries \(range.lowerBound.formatted())–\(range.upperBound.formatted()) of \(total.formatted())")
+        }
+        let empty = SessionHistoryPage(runtimeGeneration: "runtime", nodes: [], older: nil, newer: nil, totalEntries: 0)
+        #expect(try empty.admitted(runtime: "runtime").entryRange == nil)
+        #expect(empty.rangeDescription == "No recorded entries")
+        let malformed = SessionHistoryPage(runtimeGeneration: "runtime", nodes: [Self.node("10")],
+            older: .init(ordinal: 8, entryId: "10", direction: "older"), newer: nil, totalEntries: 10)
+        #expect(throws: SessionHistoryReadError.self) { try malformed.admitted(runtime: "runtime") }
+        #expect(throws: SessionHistoryReadError.self) {
+            try SessionHistoryPage(runtimeGeneration: "runtime", nodes: [], older: nil, newer: nil, totalEntries: 10).admitted(runtime: "runtime")
+        }
+    }
+
+    @Test("only successful explicit navigation advances native viewport identity")
+    func viewportCommitOwnership() async throws {
+        try await withTestWatchdog { @MainActor in
+            let store = SessionHistoryStore()
+            let initial = Self.window(101...200, total: 200)
+            #expect(await store.load(identity: Self.identity, cursor: nil,
+                request: { _, _ in try JSONValue.encode(initial) }, isCurrent: { true }))
+            #expect(store.viewportGeneration == 0)
+            let gate = HistoryRequestGate()
+            let pending = Task { await store.load(identity: Self.identity, cursor: initial.older, resetViewport: true,
+                request: gate.request, isCurrent: { true }) }
+            await gate.waitForCount(1)
+            store.suspend()
+            #expect(await store.load(identity: Self.identity, cursor: nil,
+                request: { _, _ in try JSONValue.encode(initial) }, isCurrent: { true }))
+            await gate.finish(0, value: try JSONValue.encode(Self.window(1...100, total: 200)))
+            #expect(!(await pending.value))
+            #expect(store.viewportGeneration == 0)
+            #expect(!(await store.load(identity: Self.identity, cursor: initial.older, resetViewport: true,
+                request: { _, _ in .null }, isCurrent: { true })))
+            #expect(store.viewportGeneration == 0 && store.page?.entryRange == 101...200)
+            #expect(await store.load(identity: Self.identity, cursor: initial.older, resetViewport: true,
+                request: { _, _ in try JSONValue.encode(Self.window(1...100, total: 200)) }, isCurrent: { true }))
+            #expect(store.viewportGeneration == 1 && store.page?.entryRange == 1...100)
+        }
+    }
+
     @Test("entry detail preserves Unicode text and reaches a large message tail without accumulating bodies")
     func fullDetailPages() async throws {
         let store = SessionHistoryEntryStore()

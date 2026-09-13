@@ -5,6 +5,137 @@ import XCTest
 
 @MainActor
 final class SessionSheetPresentationTests: XCTestCase {
+    func testSessionHistoryPagingStartsNewNativeBatchAtTopAndRetainsFailures() async throws {
+        for scheme: ColorScheme in [.light, .dark] {
+            let gateway = ProcessSheetGatewayFixture()
+            try await withModel(client: gateway.client) { model in
+                try await gateway.connect(model: model, capabilities: ["session-history-pages.v1"])
+                let snapshot = try SessionScenarioBuilder(seed: 8_941).openingTail(targetEncodedBytes: 4_096)
+                model.installHostedSubscribedSnapshot(snapshot)
+                let probe = SessionHistoryPagingProbe()
+                let activity = WorkspaceRefreshActivity()
+                func page(_ range: ClosedRange<Int>, total: Int = 293) throws -> JSONValue {
+                    let source = SessionHistoryStoreTests.window(range, total: total)
+                    return try JSONValue.encode(SessionHistoryPage(runtimeGeneration: snapshot.runtimeGeneration,
+                        nodes: source.nodes, older: source.older, newer: source.newer, totalEntries: total))
+                }
+                let initial = Task { try await gateway.respond(at: 1, method: "session.history.list", result: page(194...293)) }
+                defer { initial.cancel() }
+                try await self.withSheet(HistoryPagingFixture(model: model, sessionID: snapshot.sessionId,
+                    probe: probe, activity: activity).preferredColorScheme(scheme)) { controller in
+                    try await initial.value
+                    try await self.waitForRouting { probe.store?.page?.entryRange == 194...293 }
+                    let first = try await self.historyFirstRow("293", controller: controller)
+                    let original = try XCTUnwrap(self.historyScroll(containing: first))
+                    original.setContentOffset(CGPoint(x: 0, y: original.contentSize.height - original.bounds.height + original.adjustedContentInset.bottom), animated: false)
+                    for _ in 0..<5 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+                    XCTAssertGreaterThan(original.contentOffset.y, 1_000, "Start in the real native old batch, not at a synthetic policy position")
+                    XCTAssertEqual(original.contentOffset.y, original.contentSize.height - original.bounds.height + original.adjustedContentInset.bottom, accuracy: 1, "Start at the actual native bottom after lazy materialization")
+                    self.capture(controller, name: "history-paging-first-bottom-\(scheme)")
+                    let retainedOffset = original.contentOffset.y
+                    probe.older?()
+                    probe.older?() // Repeated synchronous taps must not acquire duplicate reads.
+                    try await gateway.waitForRequest(at: 2)
+                    try await gateway.respond(at: 2, method: "session.history.list", result: .null)
+                    try await self.waitForRouting { probe.store?.error != nil }
+                    XCTAssertTrue(original.window != nil)
+                    XCTAssertEqual(original.contentOffset.y, retainedOffset, accuracy: 1)
+                    XCTAssertEqual(probe.store?.page?.entryRange, 194...293)
+                    probe.refresh?()
+                    try await gateway.respond(at: 3, method: "session.history.list", result: page(194...293))
+                    try await self.waitForRouting { probe.store?.loading == false }
+                    XCTAssertNil(probe.store?.error, "A bookmark refresh must read the installed page, not the failed cursor")
+                    XCTAssertEqual(original.contentOffset.y, retainedOffset, accuracy: 1)
+                    probe.older?()
+                    try await gateway.respond(at: 4, method: "session.history.list", result: .null)
+                    try await self.waitForRouting { probe.store?.error != nil }
+                    probe.retry?()
+                    try await gateway.respond(at: 5, method: "session.history.list", result: page(94...193))
+                    let middle = try await self.historyFirstRow("193", controller: controller)
+                    let middleScroll = try XCTUnwrap(self.historyScroll(containing: middle))
+                    XCTAssertFalse(middleScroll === original)
+                    XCTAssertEqual(middleScroll.contentOffset.y + middleScroll.adjustedContentInset.top, 0, accuracy: 1)
+                    let firstRowFrame = middle.convert(middle.bounds, to: middleScroll)
+                    XCTAssertGreaterThanOrEqual(firstRowFrame.minY, middleScroll.contentOffset.y + middleScroll.adjustedContentInset.top)
+                    XCTAssertLessThanOrEqual(firstRowFrame.maxY, middleScroll.contentOffset.y + middleScroll.bounds.height - middleScroll.adjustedContentInset.bottom, "The complete new first row is natively visible")
+                    XCTAssertEqual(probe.store?.page?.entryRange, 94...193)
+                    self.capture(controller, name: "history-paging-middle-\(scheme)")
+                    // Bookmark/label refresh shares the real production refresh
+                    // entrypoint but must not replace the native viewport.
+                    middleScroll.setContentOffset(CGPoint(x: 0, y: 320), animated: false)
+                    let middleOffset = middleScroll.contentOffset.y
+                    probe.refresh?()
+                    try await gateway.respond(at: 6, method: "session.history.list", result: page(94...193))
+                    try await self.waitForRouting { probe.store?.loading == false }
+                    XCTAssertTrue(middleScroll.window != nil)
+                    XCTAssertEqual(middleScroll.contentOffset.y, middleOffset, accuracy: 1)
+                    activity.value = .covered
+                    for _ in 0..<4 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+                    activity.value = .active
+                    for _ in 0..<4 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+                    XCTAssertTrue(middleScroll.window != nil)
+                    XCTAssertEqual(middleScroll.contentOffset.y, middleOffset, accuracy: 1)
+                    let retainedRequests = await gateway.socket.sentFrames().count
+                    XCTAssertEqual(retainedRequests, 7, "Unchanged-identity reactivation does not replay a completed read")
+                    // An admitted request that loses its surface cannot move or
+                    // replace the displayed batch with its late response.
+                    probe.older?()
+                    try await gateway.waitForRequest(at: 7)
+                    activity.value = .covered
+                    for _ in 0..<4 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+                    try await gateway.respond(at: 7, method: "session.history.list", result: page(1...93))
+                    for _ in 0..<4 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+                    XCTAssertEqual(probe.store?.page?.entryRange, 94...193)
+                    XCTAssertEqual(middleScroll.contentOffset.y, middleOffset, accuracy: 1)
+                    activity.value = .active
+                    try await gateway.respond(at: 8, method: "session.history.list", result: page(1...93))
+                    let last = try await self.historyFirstRow("93", controller: controller)
+                    let lastScroll = try XCTUnwrap(self.historyScroll(containing: last))
+                    XCTAssertEqual(lastScroll.contentOffset.y + lastScroll.adjustedContentInset.top, 0, accuracy: 1)
+                    XCTAssertNil(probe.store?.page?.older)
+                    XCTAssertNotNil(probe.store?.page?.newer)
+                    self.capture(controller, name: "history-paging-last-\(scheme)")
+                    lastScroll.setContentOffset(CGPoint(x: 0, y: lastScroll.contentSize.height - lastScroll.bounds.height + lastScroll.adjustedContentInset.bottom), animated: false)
+                    for _ in 0..<5 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+                    XCTAssertEqual(lastScroll.contentOffset.y, lastScroll.contentSize.height - lastScroll.bounds.height + lastScroll.adjustedContentInset.bottom, accuracy: 1)
+                    self.capture(controller, name: "history-paging-last-bottom-\(scheme)")
+                    probe.newer?()
+                    try await gateway.respond(at: 9, method: "session.history.list", result: page(94...193))
+                    let back = try await self.historyFirstRow("193", controller: controller)
+                    let backScroll = try XCTUnwrap(self.historyScroll(containing: back))
+                    XCTAssertEqual(backScroll.contentOffset.y + backScroll.adjustedContentInset.top, 0, accuracy: 1)
+                    let requests = await gateway.socket.sentFrames().count
+                    XCTAssertEqual(requests, 10)
+                }
+                await gateway.client.close()
+            }
+        }
+    }
+
+    private func historyScroll(containing view: UIView) -> UIScrollView? {
+        var ancestor = view.superview
+        while let candidate = ancestor {
+            if let scroll = candidate as? UIScrollView { return scroll }
+            ancestor = candidate.superview
+        }
+        return nil
+    }
+
+    private func historyFirstRow(_ id: String, controller: UIViewController) async throws -> UIView {
+        // Wait for the actual new lazy row, its native scroll owner, and the
+        // completed fade. Metadata admission alone does not prove placement.
+        try await waitForRouting {
+            self.views(of: UIView.self, in: controller.view).contains {
+                guard $0.accessibilityIdentifier == "history-first-\(id)",
+                      let scroll = self.historyScroll(containing: $0) else { return false }
+                return $0.window != nil && $0.bounds.height > 0
+                    && abs(scroll.contentOffset.y + scroll.adjustedContentInset.top) <= 1
+            }
+        }
+        for _ in 0..<15 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+        return try XCTUnwrap(self.views(of: UIView.self, in: controller.view).first { $0.accessibilityIdentifier == "history-first-\(id)" })
+    }
+
     func testSessionHistoryUnifiedFeedAndFullNativeEntryPreviews() async throws {
         for scheme: ColorScheme in [.light, .dark] {
             let gateway = ProcessSheetGatewayFixture()
@@ -1250,6 +1381,19 @@ private struct JSONReaderContinuityFixture: View {
 @MainActor @Observable
 private final class WorkspaceRefreshActivity {
     var value: PresentationSurfaceActivity = .active
+}
+
+private struct HistoryPagingFixture: View {
+    let model: AppModel
+    let sessionID: String
+    let probe: SessionHistoryPagingProbe
+    let activity: WorkspaceRefreshActivity
+    var body: some View {
+        SessionTreeSheet(sessionID: sessionID, onForkCreated: { _ in }, onNavigated: {})
+            .environment(model)
+            .environment(\.sessionHistoryPagingProbe, probe)
+            .environment(\.tronPresentationActivity, activity.value)
+    }
 }
 
 private struct WorkspaceRefreshFixture: View {
