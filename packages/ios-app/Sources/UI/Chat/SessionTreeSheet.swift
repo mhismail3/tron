@@ -204,11 +204,11 @@ struct SessionTreeSheet: View {
     }
 
     private var summary: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 8) {
             Image(systemName: "clock.arrow.circlepath")
                 .font(TronTypography.body.weight(.semibold))
                 .foregroundStyle(Color.tronSessionTeal)
-                .frame(width: 28)
+                .frame(width: 20)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 12) {
                 if let snapshot = model.sessionHistoryPresentation(for: sessionID) {
@@ -223,7 +223,10 @@ struct SessionTreeSheet: View {
                     .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
             }
         }
-        .padding(20).frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, 12)
+        .padding(.trailing, 20)
+        .padding(.vertical, 20)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .tronGlassSurface(accent: .tronSessionTeal, cornerRadius: 16, tintOpacity: 0.12)
     }
     private func reload() { cursor = nil; revision &+= 1 }
