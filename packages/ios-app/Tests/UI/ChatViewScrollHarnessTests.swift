@@ -448,6 +448,56 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    @Test("resumed multiline send settles from native row geometry during keyboard resize")
+    func resumedMultilineSendSettlesDuringKeyboardResize() async throws {
+        try await withTestWatchdog(timeout: .seconds(15)) {
+            var snapshot = try SessionScenarioBuilder(seed: 1_213)
+                .openingTail(targetEncodedBytes: 10_000)
+            snapshot.acceptsQueuedPrompts = false
+            snapshot.transcript = try (0..<96).map { index in
+                try harnessRichAssistantMessage(
+                    id: "resumed-\(index)", presentationID: "resumed-turn-\(index)",
+                    thinkingLines: index.isMultiple(of: 4) ? ["Bounded resumed history."] : [],
+                    text: Array(repeating: "Variable-height resumed history must remain mounted while a prompt is sent.", count: 1 + index % 5).joined(separator: "\n\n")
+                )
+            }
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = snapshot.transcript.count
+            try await withHarness(snapshot: snapshot, enablesComposerSubmission: true) { harness in
+                let ready = try await harness.recorder.waitUntil {
+                    $0.observation.isReady && $0.nativeRows.contains {
+                        $0.semanticID == "resumed-turn-95" && $0.isVisible
+                    }
+                }
+                let releaseBaseline = ready.observation.targetReleaseCount
+                try harness.setComposerDraftText(String(repeating: "multiline resumed prompt ", count: 28))
+                harness.submitPrompt()
+                harness.resize(height: 620)
+                let sent = try await harness.recorder.waitUntil {
+                    $0.nativeRows.contains {
+                        $0.physicalID.hasPrefix("outgoing-submission:") && $0.isVisible
+                    }
+                }
+                let outgoing = try #require(sent.nativeRows.first {
+                    $0.physicalID.hasPrefix("outgoing-submission:") && $0.isVisible
+                })
+                for _ in 0..<80 { try await harness.driveFrameBoundary() }
+                let settled = try #require(harness.recorder.samples.last)
+                #expect(settled.observation.targetReleaseCount == releaseBaseline + 1)
+                #expect(settled.nativeRows.contains {
+                    $0.physicalID == outgoing.physicalID && $0.instance == outgoing.instance && $0.isVisible
+                })
+                #expect(!harness.traceRecords.contains { $0.record.event == "chat.layout.abandoned" })
+                #expect(!harness.traceRecords.contains { $0.record.event == "chat.lease.bounded-fallback" })
+                #expect(harness.recorder.samples.suffix(40).allSatisfy { sample in
+                    sample.nativeRows.contains {
+                        $0.physicalID == outgoing.physicalID && $0.instance == outgoing.instance && $0.isVisible
+                    }
+                })
+            }
+        }
+    }
+
     enum SendHistory: CaseIterable, Sendable { case short, shortToOverflow, long }
 
     @Test("short and long history preserve the mounted prompt through acknowledgement and successor", arguments: SendHistory.allCases, [false, true])
