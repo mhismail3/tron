@@ -860,45 +860,6 @@ struct ChatTranscriptGeometry: Equatable {
     }
 }
 
-/// Bridges SwiftUI's animation completion callback to the cancellable opening
-/// task. `withCheckedContinuation` alone cannot observe task cancellation, so a
-/// covered/backgrounded opening could remain leased forever after its phase had
-/// already reached `.presented`.
-@MainActor
-final class ChatOpeningAnimationWaiter {
-    private var continuation: CheckedContinuation<Bool, Never>?
-    private var resolved = false
-
-    func wait(
-        start: (@escaping (Bool) -> Void) -> Void
-    ) async -> Bool {
-        await withTaskCancellationHandler {
-            await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
-                guard !Task.isCancelled else {
-                    continuation.resume(returning: false)
-                    return
-                }
-                self.continuation = continuation
-                start { [weak self] result in
-                    self?.finish(result)
-                }
-            }
-        } onCancel: {
-            Task { @MainActor [weak self] in
-                self?.finish(false)
-            }
-        }
-    }
-
-    private func finish(_ result: Bool) {
-        guard !resolved, let continuation else { return }
-        resolved = true
-        self.continuation = nil
-        continuation.resume(returning: result)
-    }
-
-}
-
 enum ChatOpenPresentationPhase: Equatable {
     case opening
     case positioning
@@ -908,8 +869,9 @@ enum ChatOpenPresentationPhase: Equatable {
     /// Physical settlement is complete. One covered frame installs the visible
     /// entrance's initial opacity/offset without exposing intermediate layout.
     case presenting
-    /// The opening surface is fading away while the settled transcript rises
-    /// into place. Interaction remains disabled until animation completion.
+    /// The settled transcript is in its cosmetic fade/rise transaction. The
+    /// authoritative ready phase is admitted independently of animation
+    /// completion so a missing callback cannot strand the surface.
     case presented
     case ready
     case failed(String)
@@ -2245,14 +2207,12 @@ struct ChatAttachmentMenuIdentity: Hashable {
 struct ChatAttachmentMenuState: Hashable {
     let sessionID: String
     let phase: SessionPhase?
-    let isTranscriptReady: Bool
-    let isSending: Bool
+    let hasMountedAuthority: Bool
 
     var actionsEnabled: Bool {
         ChatAttachmentAvailabilityPolicy.actionsEnabled(
-            isTranscriptReady: isTranscriptReady,
             phase: phase,
-            isSending: isSending
+            hasMountedAuthority: hasMountedAuthority
         )
     }
 
@@ -2263,15 +2223,14 @@ struct ChatAttachmentMenuState: Hashable {
 
 enum ChatAttachmentAvailabilityPolicy {
     static func actionsEnabled(
-        isTranscriptReady: Bool,
         phase: SessionPhase?,
-        isSending: Bool
+        hasMountedAuthority: Bool
     ) -> Bool {
-        guard isTranscriptReady, phase != nil else { return false }
-        // Uploads stage independently of prompt transport. Keep the attachment
-        // menu enabled while a send is being acknowledged and throughout active
-        // steering; otherwise SwiftUI dims the Menu label and blocks legitimate
-        // staging even though no attachment mutation is in flight.
+        guard hasMountedAuthority, phase != nil else { return false }
+        // Uploads stage independently of prompt transport and viewport
+        // settlement. Keep the attachment menu enabled while a send is being
+        // acknowledged and throughout active steering; the upload owner still
+        // rechecks exact authority before each mutation.
         return true
     }
 }

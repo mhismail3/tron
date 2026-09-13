@@ -5,6 +5,25 @@ import Testing
 @MainActor
 @Suite("Composer Gateway capability admission", .serialized)
 struct AppModelComposerAdmissionTests {
+    @Test("only active command receipts block live composer admission", arguments: [
+        "running", "waitingForInput", "completed", "failed", "interrupted", "outcomeUnknown"
+    ])
+    func commandReceiptAdmission(lifecycle: String) async throws {
+        try await withHarness(supportsSkills: true) { model, _, target, scope in
+            var snapshot = try #require(model.authoritativeSnapshot(for: target.sessionID))
+            snapshot.transcript = try JSONDecoder.gateway.decode([TranscriptItem].self, from: Data("""
+            [{"id":"command","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"customEntry","customType":"tron.chat-invocation.v1","semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"command","origin":{"kind":"extension","ownerId":"extension:test","title":"Test","confidence":"adapter"},"invocationId":"invocation","operationId":"operation","sequence":1,"lifecycle":"\(lifecycle)","resourceInvocation":{"source":"extension","name":"test","arguments":""}}}]
+            """.utf8))
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = 1
+            model.replaceHostedAuthoritativeSnapshot(snapshot)
+            let permitsSend = !["running", "waitingForInput"].contains(lifecycle)
+            #expect(model.admitsLiveSessionCommands(target) == permitsSend)
+            #expect(model.admitsLiveSessionUploads(target))
+            #expect(model.composerDrafts.text(for: scope) == "keep this draft")
+        }
+    }
+
     @Test("unsupported skills are rejected before draft and submission mutation", arguments: [false, true])
     func unsupportedSkillRetainsDraft(explicitInvocation: Bool) async throws {
         try await withHarness(supportsSkills: false) { model, socket, target, scope in

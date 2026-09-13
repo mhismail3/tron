@@ -113,6 +113,7 @@ final class ChatScrollCoordinator {
     private struct OpeningTailContext: Equatable {
         var token: Int
         var targetRenderedID: String
+        var physicalTargetID: String
         var targetSample: SemanticFrameSample?
         var presentation: Int
         var commandToken: Int?
@@ -223,9 +224,8 @@ final class ChatScrollCoordinator {
     private var semanticFrames: [String: SemanticFrameSample] = [:]
     private var semanticFrameRevision = 0
     private var openingTailPhase: OpeningTailPhase = .idle
-    /// Extends opening ownership through the visual entrance after physical
-    /// target release. Repair, paging, submission, and live projection cannot
-    /// interleave with that bounded transition.
+    /// Extends opening ownership from physical target release through the
+    /// validated first ready frame, not through cosmetic animation completion.
     private var visibleOpeningRevealPending = false
     private var openingTailContinuation: CheckedContinuation<Bool, Never>?
     private var openingTailFinalWaiters: [OpeningTailFinalWaiter] = []
@@ -304,6 +304,20 @@ final class ChatScrollCoordinator {
     func configureInteractionTrace(_ trace: ChatInteractionTrace, context: Int) {
         interactionTrace = trace
         interactionTraceContext = context
+    }
+
+    /// Diagnostic only: distinguish actual compact completion from the shared
+    /// structural barrier's state when investigating premature target release.
+    func recordEntranceDiagnostic(
+        _ stage: ChatInteractionTrace.EntranceStage,
+        renderedID: String,
+        observedLayoutEpoch: Int
+    ) {
+        guard let interactionTrace, let context = interactionTraceContext else { return }
+        var state = traceState()
+        state.semanticRowToken = interactionTrace.identityToken(renderedID)
+        state.observedLayoutEpoch = observedLayoutEpoch
+        interactionTrace.entrance(stage, context: context, state: state)
     }
 
     var shouldShowCatchUpButton: Bool { viewportMode == .anchored }
@@ -724,11 +738,15 @@ final class ChatScrollCoordinator {
         pinAtTail()
     }
 
-    func positionOpeningTail(targetRenderedID: String?) async -> Bool {
+    func positionOpeningTail(
+        targetRenderedID: String?,
+        physicalTargetID: String?
+    ) async -> Bool {
         guard let targetRenderedID else {
             reduceViewport(.opened)
             return true
         }
+        guard let physicalTargetID else { return false }
         guard prepend == nil else { return false }
         clearOpeningTailSettlement(positioningSucceeded: false)
         visibleOpeningRevealPending = true
@@ -744,6 +762,7 @@ final class ChatScrollCoordinator {
                 beginOpeningTailSettlement(
                     token: token,
                     targetRenderedID: targetRenderedID,
+                    physicalTargetID: physicalTargetID,
                     continuation: continuation
                 )
             }
@@ -767,6 +786,7 @@ final class ChatScrollCoordinator {
         beginOpeningTailSettlement(
             token: sequence,
             targetRenderedID: targetRenderedID,
+            physicalTargetID: targetRenderedID,
             continuation: nil
         )
     }
@@ -1163,6 +1183,7 @@ final class ChatScrollCoordinator {
                     ? false
                     : existing?.layoutSettled ?? true
             )
+            traceLease(.queued, token: appliedTargetCommandToken, reason: .targetOwned)
             return true
         }
         beginTailMaterialization(
@@ -1227,6 +1248,18 @@ final class ChatScrollCoordinator {
         tailMaterialization?.layoutOwnerRenderedID == renderedID
             && (command?.origin == .tailMaterialization
                 || appliedTargetOrigin == .tailMaterialization)
+    }
+
+    /// The opening target owns the affordance band while its exact presentation
+    /// lease is installed. The marker remains measurable and authoritative, but
+    /// overlaps that band so row-target and marker-target settlement share an
+    /// identical physical bottom edge.
+    func ownsOpeningTailTarget(physicalID: String) -> Bool {
+        guard let context = openingTailPhase.context,
+              context.presentation == presentation,
+              context.physicalTargetID == physicalID else { return false }
+        return context.commandToken != nil
+            || (appliedTargetOrigin == .presentation && appliedTargetCommandToken != nil)
     }
 
     func materializationLayoutTransactionID(for renderedID: String) -> Int? {
@@ -1605,6 +1638,7 @@ final class ChatScrollCoordinator {
     private func beginOpeningTailSettlement(
         token: Int,
         targetRenderedID: String,
+        physicalTargetID: String,
         continuation: CheckedContinuation<Bool, Never>?
     ) {
         awaitingOpeningBaseline = false
@@ -1612,6 +1646,7 @@ final class ChatScrollCoordinator {
         let context = OpeningTailContext(
             token: token,
             targetRenderedID: targetRenderedID,
+            physicalTargetID: physicalTargetID,
             targetSample: semanticFrames[targetRenderedID],
             presentation: presentation,
             commandToken: nil,
@@ -1690,7 +1725,10 @@ final class ChatScrollCoordinator {
         if let commandToken = value.commandToken {
             let fresh = semanticFrameRevision > (value.commandSemanticRevision ?? semanticFrameRevision)
                 || geometryRevision > (value.commandGeometryRevision ?? geometryRevision)
-            if fresh, command?.token != commandToken { scheduleOpeningTailFrame() }
+            if fresh, command?.token != commandToken,
+               value.commandAttemptCount < Self.maximumOpeningTailCommandAttempts {
+                scheduleOpeningTailFrame()
+            }
             return
         }
         guard viewportMode == .pinned, !isUserInteracting, command == nil,
@@ -1701,7 +1739,7 @@ final class ChatScrollCoordinator {
         // when `commandApplied` confirms it crossed the native boundary.
         openingTailTimeoutTask?.cancel()
         openingTailTimeoutTask = nil
-        publish(.openingTail(value.targetRenderedID), animation: .disabled, origin: .presentation)
+        publish(.openingTail(value.physicalTargetID), animation: .disabled, origin: .presentation)
         var updated = value
         updated.commandToken = command?.token
         updated.commandSemanticRevision = semanticFrameRevision
@@ -1930,6 +1968,14 @@ final class ChatScrollCoordinator {
                 // A replacement command is pending application. It will install
                 // its own acknowledgement deadline; the outer opening task still
                 // bounds a command that never reaches that boundary.
+                return
+            }
+            guard value.commandAttemptCount < Self.maximumOpeningTailCommandAttempts else {
+                // The final native write receives one frame observation. If it
+                // did not produce physical proof, stop this acknowledgement
+                // clock; later evidence is admitted through the normal physical
+                // proof path or the outer opening deadline.
+                self.openingTailTimeoutTask = nil
                 return
             }
             let hasFreshTargetEvidence = value.targetSample.map {
@@ -2375,6 +2421,8 @@ final class ChatScrollCoordinator {
             layoutSettled: tailMaterialization?.layoutSettled,
             physicalRowToken: interactionTrace?.identityToken(tailMaterialization?.physicalTargetID),
             semanticRowToken: interactionTrace?.identityToken(tailMaterialization?.renderedID),
+            pendingPhysicalRowToken: interactionTrace?.identityToken(pendingTailMaterialization?.physicalTargetID),
+            pendingLayoutSettled: pendingTailMaterialization?.layoutSettled,
             rowMinY: tailMaterialization?.renderedID.flatMap { semanticFrames[$0]?.frame.minY },
             rowHeight: tailMaterialization?.renderedID.flatMap { semanticFrames[$0]?.frame.height }
 

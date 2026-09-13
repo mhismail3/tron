@@ -174,6 +174,7 @@ final class ChatSessionPresentation {
         // drain rather than requiring a second tap.
         if ChatOpeningAttemptPolicy.isFailed(open.phase) { return retryingFailure }
         return open.phase != .ready || modelPresentationGeneration == nil
+            || cancelledOpeningTaskGeneration == openingTaskGeneration
     }
 
     struct OpeningTaskLease {

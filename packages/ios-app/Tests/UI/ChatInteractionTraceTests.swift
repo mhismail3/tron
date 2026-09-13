@@ -123,6 +123,55 @@ struct ChatInteractionTraceTests {
         #expect(!records.contains { $0.record.message.contains("private-") || $0.record.message.contains("sensitive") })
     }
 
+    @Test("availability diagnostics explain blocked actions using only closed inputs")
+    func availabilityDiagnostics() throws {
+        let trace = ChatInteractionTrace()
+        let context = trace.beginContext(retainedPresentation: false)
+        var value = ChatInteractionTrace.Availability(
+            connected: true, reconciling: false, mountedAuthority: true,
+            projectionAvailable: true, openingTask: true, transcriptReady: false,
+            scrollAllowsSubmission: false, scrollCommand: true, submissionPending: false,
+            uploading: false, sending: false, commandReady: false, attachmentsReady: true,
+            sceneActive: true, viewportActive: true, publicationActive: true
+        )
+        trace.availability(value, context: context, blockedAction: true)
+        let blocked = try #require(trace.diagnosticRecords(limit: 1).first?.record)
+        #expect(blocked.event == "chat.composer.admission-blocked")
+        #expect(blocked.message.contains("authority=1 projection=1 openingTask=1 ready=0"))
+        #expect(blocked.message.contains("commandReady=0 attachmentsReady=1"))
+        value.openingTask = false
+        value.transcriptReady = true
+        value.scrollAllowsSubmission = true
+        value.scrollCommand = false
+        value.commandReady = true
+        trace.availability(value, context: context)
+        let ready = try #require(trace.diagnosticRecords(limit: 1).first?.record)
+        #expect(ready.event == "chat.composer.availability")
+        #expect(ready.message.contains("commandReady=1 attachmentsReady=1"))
+    }
+
+    @Test("compact and queued lease diagnostics expose ordering without exporting row IDs")
+    @MainActor
+    func compactLeaseDiagnostics() throws {
+        let trace = ChatInteractionTrace()
+        let context = trace.beginContext(retainedPresentation: false)
+        let coordinator = ChatScrollCoordinator()
+        coordinator.configureInteractionTrace(trace, context: context)
+        defer { coordinator.cancel() }
+        #expect(coordinator.discreteTailInserted(renderedID: "private-first-row"))
+        #expect(coordinator.discreteTailInserted(renderedID: "private-next-row"))
+        coordinator.recordEntranceDiagnostic(.admitted, renderedID: "private-first-row", observedLayoutEpoch: 0)
+        coordinator.recordEntranceDiagnostic(.completed, renderedID: "private-first-row", observedLayoutEpoch: 0)
+        let records = trace.diagnosticRecords(limit: 256)
+        let queued = try #require(records.first { $0.record.event == "chat.lease.queued" })
+        #expect(queued.record.message.contains("reason=target-owned"))
+        #expect(queued.record.message.contains("pendingPhysicalRow="))
+        #expect(records.contains { $0.record.event == "chat.entrance.admitted" })
+        #expect(records.first?.record.event == "chat.entrance.completed")
+        #expect(records.first?.record.message.contains("observedLayout=0") == true)
+        #expect(!records.contains { $0.record.message.contains("private-") })
+    }
+
     @Test("retirement revokes checkpoints without masking an active lost projection")
     @MainActor
     func retiredContextCannotAdmitCheckpoint() {

@@ -261,6 +261,9 @@ struct ChatComposerView: View {
             )
             .frame(width: ComposerControlMetrics.hitTarget, height: ComposerControlMetrics.hitTarget)
             .id(attachmentMenuState.identity)
+            // SwiftUI also applies enabled state to the represented UIButton;
+            // keep its environment aligned with the same authority admission.
+            .disabled(!attachmentActionsEnabled)
             .accessibilityLabel("Add attachment")
         }
         .frame(width: ComposerControlMetrics.hitTarget, height: ComposerControlMetrics.hitTarget)

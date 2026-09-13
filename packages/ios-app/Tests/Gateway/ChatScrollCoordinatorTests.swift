@@ -1478,7 +1478,7 @@ struct ChatScrollCoordinatorTests {
             let frames = ManualViewportFrameScheduler()
             let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
             let positioning = Task {
-                await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom")
+                await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom", physicalTargetID: "transcript-bottom")
             }
             admitAlignedTail(coordinator)
             #expect(await positioning.value)
@@ -1533,7 +1533,7 @@ struct ChatScrollCoordinatorTests {
             let frames = ManualViewportFrameScheduler()
             let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
             let positioning = Task {
-                await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom")
+                await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom", physicalTargetID: "transcript-bottom")
             }
             await frames.waitForRequest(count: 1)
             frames.releaseNext()
@@ -1610,7 +1610,7 @@ struct ChatScrollCoordinatorTests {
                 clock: clock.clock
             )
             let positioning = Task {
-                await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom")
+                await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom", physicalTargetID: "transcript-bottom")
             }
             admitAlignedTail(coordinator)
             #expect(await positioning.value)
@@ -1654,7 +1654,7 @@ struct ChatScrollCoordinatorTests {
                 openingTailTimeout: .seconds(1)
             )
             let positioning = Task {
-                await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom")
+                await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom", physicalTargetID: "transcript-bottom")
             }
             await frames.waitForRequest(count: 1)
             frames.releaseNext()
@@ -1677,6 +1677,52 @@ struct ChatScrollCoordinatorTests {
             #expect(repair.destination == .openingTail("transcript-bottom"))
             #expect(coordinator.viewportMode == .pinned)
 
+            positioning.cancel()
+            #expect(!(await positioning.value))
+        }
+    }
+
+    @Test("exhausted opening corrections stop observing stale evidence")
+    func openingTailStopsAfterCommandAttemptCap() async throws {
+        try await withTestWatchdog { @MainActor in
+            let clock = ManualClock()
+            let frames = ManualViewportFrameScheduler()
+            let coordinator = ChatScrollCoordinator(
+                frameScheduler: frames.scheduler,
+                clock: clock.clock,
+                openingTailTimeout: .seconds(1)
+            )
+            let positioning = Task {
+                await coordinator.positionOpeningTail(
+                    targetRenderedID: "transcript-bottom",
+                    physicalTargetID: "terminal-row"
+                )
+            }
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            var command = try await coordinator.hostedNextCommand()
+            for attempt in 0..<ChatScrollCoordinator.maximumOpeningTailCommandAttempts {
+                #expect(coordinator.commandApplied(command))
+                coordinator.semanticFrameChanged(
+                    renderedID: "transcript-bottom",
+                    layoutEpoch: coordinator.layoutEpoch,
+                    frame: CGRect(x: CGFloat(attempt), y: 100, width: 100, height: 12)
+                )
+                coordinator.geometryChanged(previous: .zero, current: away)
+                let nextRequest = frames.requestCount + 1
+                await frames.waitForRequest(count: nextRequest)
+                frames.releaseNext()
+                if attempt + 1 < ChatScrollCoordinator.maximumOpeningTailCommandAttempts {
+                    command = try await coordinator.hostedNextCommand()
+                }
+            }
+
+            let requestsAfterFinalObservation = frames.requestCount
+            try await clock.waitUntilSleeping(count: 1)
+            clock.advance(by: .seconds(1))
+            for _ in 0..<8 { await Task.yield() }
+            #expect(clock.activeSleeperCount() == 0)
+            #expect(frames.requestCount == requestsAfterFinalObservation)
             positioning.cancel()
             #expect(!(await positioning.value))
         }
@@ -1729,7 +1775,7 @@ struct ChatScrollCoordinatorTests {
             let frames = ManualViewportFrameScheduler()
             let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
             let positioning = Task {
-                await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom")
+                await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom", physicalTargetID: "transcript-bottom")
             }
             await frames.waitForRequest(count: 1)
             frames.releaseNext()
@@ -1761,7 +1807,7 @@ struct ChatScrollCoordinatorTests {
                 openingTailTimeout: .seconds(1)
             )
             let positioning = Task {
-                await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom")
+                await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom", physicalTargetID: "transcript-bottom")
             }
             await frames.waitForRequest(count: 1)
             frames.releaseNext()
@@ -1782,7 +1828,7 @@ struct ChatScrollCoordinatorTests {
         try await withTestWatchdog { @MainActor in
             let clock = ManualClock()
             let coordinator = ChatScrollCoordinator(clock: clock.clock, openingTailTimeout: .seconds(1))
-            let task = Task { await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom") }
+            let task = Task { await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom", physicalTargetID: "transcript-bottom") }
             coordinator.physicalTerminalRowObserved(layoutEpoch: coordinator.layoutEpoch)
             coordinator.semanticFrameChanged(
                 renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
@@ -1800,11 +1846,16 @@ struct ChatScrollCoordinatorTests {
         try await withTestWatchdog { @MainActor in
             let frames = ManualViewportFrameScheduler()
             let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
-            let task = Task { await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom") }
+            let task = Task {
+                await coordinator.positionOpeningTail(
+                    targetRenderedID: "transcript-bottom",
+                    physicalTargetID: "terminal-alias"
+                )
+            }
             await frames.waitForRequest(count: 1)
             frames.releaseNext()
             let command = try await coordinator.hostedNextCommand()
-            #expect(command.destination == .openingTail("transcript-bottom"))
+            #expect(command.destination == .openingTail("terminal-alias"))
             #expect(command.animation == .disabled)
             coordinator.commandApplied(command)
             coordinator.physicalTerminalRowObserved(layoutEpoch: coordinator.layoutEpoch)
@@ -1841,7 +1892,7 @@ struct ChatScrollCoordinatorTests {
             offsetY: 0, contentHeight: 347, containerHeight: 400, bottomInset: 53
         )
         let positioning = Task {
-            await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom")
+            await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom", physicalTargetID: "transcript-bottom")
         }
         coordinator.geometryChanged(previous: .zero, current: underflow)
         coordinator.semanticFrameChanged(
@@ -1898,7 +1949,7 @@ struct ChatScrollCoordinatorTests {
         )
         let successorEpoch = coordinator.layoutEpoch
         let positioning = Task {
-            await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom")
+            await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom", physicalTargetID: "transcript-bottom")
         }
         await Task.yield()
         coordinator.semanticFrameChanged(
@@ -1946,7 +1997,7 @@ struct ChatScrollCoordinatorTests {
     @Test("opening tail keeps undersized and empty transcripts bottom aligned")
     func openingTailClearsForUndersizedOrEmptyTimeline() async {
         let coordinator = ChatScrollCoordinator()
-        #expect(await coordinator.positionOpeningTail(targetRenderedID: nil))
+        #expect(await coordinator.positionOpeningTail(targetRenderedID: nil, physicalTargetID: nil))
         #expect(coordinator.command == nil)
         #expect(coordinator.viewportMode == .pinned)
 
@@ -1972,12 +2023,12 @@ struct ChatScrollCoordinatorTests {
             renderedID: "transcript-bottom", layoutEpoch: emptySpine.layoutEpoch,
             frame: CGRect(x: 0, y: 335, width: 100, height: 12)
         )
-        #expect(await emptySpine.positionOpeningTail(targetRenderedID: "transcript-bottom"))
+        #expect(await emptySpine.positionOpeningTail(targetRenderedID: "transcript-bottom", physicalTargetID: "transcript-bottom"))
         emptySpine.cancel()
 
         let positioned = ChatScrollCoordinator()
         let task = Task {
-            await positioned.positionOpeningTail(targetRenderedID: "transcript-bottom")
+            await positioned.positionOpeningTail(targetRenderedID: "transcript-bottom", physicalTargetID: "transcript-bottom")
         }
         positioned.physicalTerminalRowObserved(layoutEpoch: positioned.layoutEpoch)
         positioned.geometryChanged(previous: .zero, current: installedUnderflow)

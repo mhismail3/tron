@@ -428,6 +428,12 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         let terminalRowOwnsMaterializationTarget = terminalPhysicalID.map {
             scrollCoordinator.ownsTailMaterializationTarget(renderedID: $0)
         } == true
+        let terminalTargetID = terminalPhysicalID ?? terminalMaterializationID
+        let terminalRowOwnsOpeningTarget = terminalTargetID.map {
+            scrollCoordinator.ownsOpeningTailTarget(physicalID: $0)
+        } == true
+        let terminalRowOwnsTailAffordance = terminalRowOwnsMaterializationTarget
+            || terminalRowOwnsOpeningTarget
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -441,6 +447,9 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                             ) {
                                 earlierRow(installed)
                                     .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
+                                    .padding(.bottom, terminalMaterializationID == "earlier-messages"
+                                        && terminalRowOwnsTailAffordance
+                                        ? ChatTranscriptLayoutConstants.tailAffordanceHeight : 0)
                             }
                             .id("earlier-messages")
                         }
@@ -449,15 +458,15 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                                 row,
                                 terminalPhysicalID: terminalPhysicalID,
                                 terminalMaterializationID: terminalMaterializationID,
-                                terminalRowOwnsMaterializationTarget:
-                                    terminalRowOwnsMaterializationTarget,
+                                terminalRowOwnsTailAffordance:
+                                    terminalRowOwnsTailAffordance,
                                 installed: installed
                             )
                         }
                     }
                 }
                 tailMarker(
-                    terminalRowOwnsMaterializationTarget: terminalRowOwnsMaterializationTarget
+                    terminalRowOwnsTailAffordance: terminalRowOwnsTailAffordance
                 )
             }
             // Register the complete transcript layout once. Independent row
@@ -620,6 +629,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 isVisible: true
             )
             if animated {
+                scrollCoordinator.recordEntranceDiagnostic(
+                    .admittedFallback, renderedID: request.semanticID,
+                    observedLayoutEpoch: scrollCoordinator.layoutEpoch
+                )
                 hostedRecorder?.recordEntranceResolution(
                     animated: true,
                     sourceOrdinal: installationTag.timelineGeneration
@@ -684,7 +697,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         _ row: ChatPhysicalTranscriptRow,
         terminalPhysicalID: String?,
         terminalMaterializationID: String?,
-        terminalRowOwnsMaterializationTarget: Bool,
+        terminalRowOwnsTailAffordance: Bool,
         installed: InstalledChatTranscript
     ) -> some View {
         let entrance = promptEntrance(for: row, installed: installed)
@@ -708,7 +721,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         // marker overlaps that same empty band so both targets end identically.
         .padding(
             .bottom,
-            row.id == terminalPhysicalID && terminalRowOwnsMaterializationTarget
+            row.id == terminalPhysicalID && terminalRowOwnsTailAffordance
                 ? ChatTranscriptLayoutConstants.tailAffordanceHeight : 0
         )
         .id(row.id)
@@ -871,6 +884,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         terminalMaterializationID: String?
     ) -> some View {
         let kind = ChatContentEntranceKind.classify(item)
+        let entranceLayoutEpoch = scrollCoordinator.layoutEpoch
         let state: ChatTranscriptEntranceState = canonicalSubmissionIDs.contains(semanticID)
                 || !admitsGeometryCallbacks
             ? .none
@@ -892,6 +906,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                     kind: kind,
                     reduceMotion: reduceMotion,
                     onEntranceSettled: {
+                        scrollCoordinator.recordEntranceDiagnostic(
+                            .completed, renderedID: semanticID,
+                            observedLayoutEpoch: entranceLayoutEpoch
+                        )
                         transcriptPresentation.consumeTranscriptEntrance(id: semanticID)
                     }
                 ) {
@@ -1027,6 +1045,12 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                         installationTag: entranceTag,
                         isVisible: visible
                     )
+                    if animated {
+                        scrollCoordinator.recordEntranceDiagnostic(
+                            .admitted, renderedID: semanticID,
+                            observedLayoutEpoch: sample.layoutEpoch
+                        )
+                    }
                     hostedRecorder?.recordEntranceResolution(
                         animated: animated,
                         sourceOrdinal: entranceTag.timelineGeneration
@@ -1058,7 +1082,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             }
     }
 
-    private func tailMarker(terminalRowOwnsMaterializationTarget: Bool) -> some View {
+    private func tailMarker(terminalRowOwnsTailAffordance: Bool) -> some View {
         let rowLayoutEpoch = scrollCoordinator.layoutEpoch
         return Color.clear
             .frame(height: ChatTranscriptLayoutConstants.tailAffordanceHeight)
@@ -1087,7 +1111,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             // Keep one full-size measurable marker. While the row owns the
             // target, overlap its padding instead of splitting the affordance
             // into fractional heights that round differently at target release.
-            .padding(.top, terminalRowOwnsMaterializationTarget
+            .padding(.top, terminalRowOwnsTailAffordance
                 ? -ChatTranscriptLayoutConstants.tailAffordanceHeight : 0)
     }
 }

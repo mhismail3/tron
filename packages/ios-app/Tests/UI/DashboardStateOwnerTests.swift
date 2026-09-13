@@ -84,6 +84,21 @@ struct DashboardStateOwnerTests {
     }
 
     @MainActor
+    @Test("same-route delivery is a no-op that does not arm retirement")
+    func sameRouteDeliveryPreservesMountedRoute() {
+        var owner = SessionRouteReplacementOwner()
+        let route = AppModel.SessionNavigationRoute(sessionID: "session", editorText: "draft")
+        let token = PresentationSurfaceToken(id: "chat.session", generation: UUID())
+
+        #expect(owner.request(
+            current: route,
+            currentToken: token,
+            replacement: route
+        ) == .present(route))
+        #expect(owner.completeRetirement(routeID: route.id, token: token) == nil)
+    }
+
+    @MainActor
     @Test("session replacement pops the mounted route before admitting the fork")
     func sessionRouteReplacementWaitsForExactRetirement() throws {
         var owner = SessionRouteReplacementOwner()

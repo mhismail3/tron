@@ -341,18 +341,22 @@ struct SessionShellView: View {
         guard model.ownsNavigationRoute(route) else { return }
         navigationOwner.invalidate()
         let current = presentedSession
-        if let current,
-           let target = model.presentationTarget(for: current.sessionID) {
-            model.revokePresentationIntake(target)
-        }
-        switch routeReplacementOwner.request(
+        let action = routeReplacementOwner.request(
             current: current,
             currentToken: mountedSessionRouteToken,
             replacement: route
-        ) {
+        )
+        switch action {
         case .present(let admitted):
-            presentedSession = admitted
+            // Same-route delivery is a navigation no-op. Preserve the mounted
+            // route inputs, authority, and draft instead of replacing a value
+            // that will not receive an onDisappear/remount boundary.
+            presentedSession = current?.id == admitted.id ? current : admitted
         case .dismissCurrent:
+            if let current,
+               let target = model.presentationTarget(for: current.sessionID) {
+                model.revokePresentationIntake(target)
+            }
             var transaction = Transaction(animation: nil)
             transaction.disablesAnimations = true
             withTransaction(transaction) { presentedSession = nil }

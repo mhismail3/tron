@@ -853,8 +853,15 @@ final class AppModel {
         )
     }
 
-    /// Live commands require the exact mounted subscription and authoritative
-    /// snapshot, not merely a retained transcript or presentation lease.
+    /// Upload staging needs live mounted authority, not prompt/scroll readiness.
+    /// Accepted uploads remain with the draft coordinator across UI coverage.
+    func admitsLiveSessionUploads(_ target: SessionPresentationTarget) -> Bool {
+        connectionState == .connected
+            && !isReconcilingForeground
+            && hasMountedSessionAuthority(target)
+    }
+
+    /// Commands additionally respect the current serialized command owner.
     func admitsLiveSessionCommands(_ target: SessionPresentationTarget) -> Bool {
         guard connectionState == .connected,
               !isReconcilingForeground,
@@ -3314,7 +3321,7 @@ final class AppModel {
         data: Data,
         target: SessionPresentationTarget
     ) async throws {
-        guard admitsLiveSessionCommands(target) else { throw CancellationError() }
+        guard admitsLiveSessionUploads(target) else { throw CancellationError() }
         try await composerDrafts.upload(
             name: name,
             mimeType: mimeType,
@@ -3327,7 +3334,7 @@ final class AppModel {
         _ candidates: [ComposerAttachmentUploadCandidate],
         target: SessionPresentationTarget
     ) async throws {
-        guard admitsLiveSessionCommands(target) else { throw CancellationError() }
+        guard admitsLiveSessionUploads(target) else { throw CancellationError() }
         try await composerDrafts.uploadBatch(candidates, target: target)
     }
 
@@ -3335,7 +3342,7 @@ final class AppModel {
         _ url: URL,
         target: SessionPresentationTarget
     ) async throws {
-        guard admitsLiveSessionCommands(target) else { throw CancellationError() }
+        guard admitsLiveSessionUploads(target) else { throw CancellationError() }
         try await composerDrafts.uploadFile(url, target: target)
     }
 

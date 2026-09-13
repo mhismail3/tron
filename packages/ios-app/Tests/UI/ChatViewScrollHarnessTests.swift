@@ -248,6 +248,7 @@ struct ChatViewScrollHarnessTests {
                 #expect(ready.observation.projectionInstallCount > 0)
                 #expect(ready.observation.physicalRowAppearanceCounts[terminalID, default: 0] > 0)
                 #expect(ready.observation.visibleRowIDs.contains(terminalID))
+                #expect(abs(try harness.nativeTranscriptSignedTailError()) <= 2)
 
                 // The production ChatView/ChatTranscriptScrollView path must
                 // expose the terminal row before readiness, not merely expose
@@ -389,6 +390,7 @@ struct ChatViewScrollHarnessTests {
                                 && abs($0.tailGap - ChatTranscriptLayoutConstants.tailAffordanceHeight) <= 2
                         }
                 }
+                #expect(try harness.isAttachmentButtonEnabled())
                 let outgoing = try #require(stabilized.nativeRows.first {
                     $0.physicalID.hasPrefix(outgoingPrefix) && $0.isVisible
                 })
@@ -421,8 +423,9 @@ struct ChatViewScrollHarnessTests {
                 let sendDeltas = zip(sendOffsets, sendOffsets.dropFirst())
                     .map { $1 - $0 }
                     .filter { abs($0) > physicalPixel }
-                #expect(!(sendDeltas.contains(where: { $0 > 0 })
-                    && sendDeltas.contains(where: { $0 < 0 })),
+                let sendReversedDirection = sendDeltas.contains(where: { $0 > 0 })
+                    && sendDeltas.contains(where: { $0 < 0 })
+                #expect(!sendReversedDirection,
                     "Mounted prior-tail positions: \(sendOffsets); admitted deltas: \(sendDeltas)")
                 let samples = sendSamples.filter { $0.frameIndex >= stabilized.frameIndex }
                 let offsets = samples.compactMap { sample in
@@ -430,8 +433,9 @@ struct ChatViewScrollHarnessTests {
                 }
                 let deltas = zip(offsets, offsets.dropFirst()).map { $1 - $0 }
                     .filter { abs($0) > physicalPixel }
-                #expect(!(deltas.contains(where: { $0 > 0 })
-                    && deltas.contains(where: { $0 < 0 })))
+                let reversedDirection = deltas.contains(where: { $0 > 0 })
+                    && deltas.contains(where: { $0 < 0 })
+                #expect(!reversedDirection)
                 #expect(samples.allSatisfy { sample in
                     sample.nativeRows.contains {
                         $0.physicalID == outgoingID && $0.instance == outgoing.instance && $0.isVisible
@@ -659,6 +663,9 @@ struct ChatViewScrollHarnessTests {
             let snapshot = try SessionScenarioBuilder(seed: 1_229).openingTail(targetEncodedBytes: 10_000)
             try await withHarness(snapshot: snapshot, enablesPresentationCover: true) { harness in
                 _ = try await harness.recorder.waitUntil { $0.observation.isReady && $0.nativeGeometryMatches }
+                let authorityOpensBeforeCover = harness.traceRecords.filter {
+                    $0.record.event == "chat.opening.authority-opened"
+                }.count
                 harness.setCovered(true)
                 try await harness.waitForCoverTransition(presented: true)
                 #expect(harness.chatSurfaceActivity == .presentingDescendant)
@@ -690,6 +697,9 @@ struct ChatViewScrollHarnessTests {
                 }
                 #expect(returned.observation.projectionInstallCount == frozen.projectionInstallCount + 1)
                 #expect(abs(try harness.nativeTranscriptSignedTailError()) <= 2)
+                #expect(harness.traceRecords.filter {
+                    $0.record.event == "chat.opening.authority-opened"
+                }.count == authorityOpensBeforeCover)
             }
         }
     }
@@ -894,84 +904,361 @@ struct ChatViewScrollHarnessTests {
         #expect(probe.composerResourceSelection == nil)
     }
 
-    @Test("cancelled reveal drains and active resume re-enables the real chat surface")
-    func cancelledRevealResumesThroughReadyControls() async throws {
+    @Test("production opening releases native controls on its ready frame")
+    func openingReadyFrameReleasesNativeControls() async throws {
         try await withTestWatchdog(timeout: .seconds(20)) {
             let snapshot = try SessionScenarioBuilder(seed: 1_231).openingTail(targetEncodedBytes: 10_000)
             try await withHarness(
                 snapshot: snapshot,
                 enablesComposerSubmission: true,
-                enablesPresentationCover: true,
-                holdsOpeningRevealCompletions: true
+                enablesPresentationCover: true
             ) { harness in
-                let firstCapture = try await harness.recorder.waitUntil {
-                    $0.observation.openingRevealCompletionCaptureCount == 1
-                        && !$0.observation.isReady
-                }
-                #expect(!firstCapture.observation.isReady)
-                harness.setCovered(true)
-                try await harness.waitForCoverTransition(presented: true)
-                harness.setCovered(false)
-                try await harness.waitForCoverTransition(presented: false)
-
-                // A second captured callback proves the old opening lease
-                // drained and the active surface started a successor attempt.
                 _ = try await harness.recorder.waitUntil {
-                    $0.observation.openingRevealCompletionCaptureCount == 2
-                        && !$0.observation.isReady
-                }
-                harness.releaseOpeningRevealCompletion()
-                try await DisplayFrameScheduler.displayLink.nextFrame()
-                #expect(!harness.probeObservation.isReady)
-
-                harness.releaseOpeningRevealCompletion()
-                let ready = try await harness.recorder.waitUntil {
                     $0.observation.isReady
                         && $0.observation.readyFrameCompletionCount >= 1
                         && $0.nativeGeometryMatches
                 }
-                #expect(ready.observation.openingRevealCompletionCaptureCount == 2)
                 #expect(try harness.isAttachmentButtonEnabled())
                 #expect(try harness.isNativeTranscriptInteractionEnabled())
                 #expect(abs(try harness.nativeTranscriptSignedTailError()) <= 2)
+            }
+        }
+    }
 
-                // The same production readiness gate now admits send. This
-                // would be rejected while the successor is still presented.
-                try harness.setComposerDraftText("resumed send")
-                harness.submitPrompt()
-                let sent = try await harness.recorder.waitUntil {
-                    $0.observation.isReady
-                        && $0.nativeRows.contains {
-                            $0.physicalID.hasPrefix("outgoing-submission:") && $0.isVisible
-                        }
+    @Test("final opening frame cannot publish behind a managed cover")
+    func coveredFinalOpeningFrame() async throws {
+        try await withTestWatchdog(timeout: .seconds(20)) { @MainActor in
+            let gate = OpeningFrameGate()
+            defer { gate.release() }
+            let snapshot = try SessionScenarioBuilder(seed: 1_251).openingTail(targetEncodedBytes: 10_000)
+            try await withHarness(snapshot: snapshot, displayFrameScheduler: gate.scheduler,
+                                  enablesComposerSubmission: true, enablesPresentationCover: true, usesRealOpening: true) { harness in
+                gate.condition = { [.presented, .ready].contains(harness.probe.openingPhase?() ?? .opening) }
+                try await gate.waitUntilHeld()
+                #expect(harness.probe.readyPublicationCount == 0)
+                let target = harness.currentTarget
+                harness.setCovered(true)
+                try await harness.waitForCoverTransition(presented: true)
+                gate.release()
+                try await harness.waitForOpeningAttemptCompletion(1)
+                #expect(harness.probe.readyPublicationCount == 0)
+                #expect(harness.probe.extensionPublicationAllowed?() == false)
+                #expect(harness.currentTarget == target)
+                #expect(!harness.rpcMethods.contains("session.close"))
+                harness.setCovered(false)
+                try await harness.waitForCoverTransition(presented: false)
+                _ = try await harness.recorder.waitUntil { _ in harness.probe.readyPublicationCount == 1 }
+                #expect(harness.currentTarget == target)
+                #expect(harness.rpcMethods.filter { $0 == "session.open" }.count == 1)
+            }
+        }
+    }
+
+    enum OpeningDeadlineOwner: CaseIterable { case current, replacedRuntime, coveredAfterFailure }
+
+    @Test("real opening deadline failures publish only for their current live owner", arguments: OpeningDeadlineOwner.allCases)
+    func openingDeadlineRevalidatesOwner(owner: OpeningDeadlineOwner) async throws {
+        try await withTestWatchdog(timeout: .seconds(15)) { @MainActor in
+            let frames = OpeningFrameGate()
+            let returned = OpeningSettlementReturnGate()
+            defer { frames.release(); returned.release() }
+            let snapshot = try SessionScenarioBuilder(seed: 1_254).openingTail(targetEncodedBytes: 10_000)
+            try await withHarness(snapshot: snapshot, displayFrameScheduler: frames.scheduler,
+                                  enablesComposerSubmission: true, enablesPresentationCover: true, usesRealOpening: true) { harness in
+                frames.condition = { harness.probe.openingPhase?() == .revealing }
+                harness.probe.openingSettlementReturned = { await returned.hold($0) }
+                try await frames.waitUntilHeld()
+                let target = try #require(harness.currentTarget)
+                var next = snapshot
+                if owner == .replacedRuntime {
+                    next.runtimeGeneration += "-replacement"
+                    next.revision += 1
+                    next.eventSequence += 1
+                    harness.replaceAuthoritativeSnapshot(next)
+                    #expect(harness.currentTarget == target)
                 }
-                #expect(sent.observation.isReady)
-                #expect(!sent.observation.geometry.isPastBottomEdge)
-                #expect(sent.nativeRows.contains {
-                    $0.physicalID.hasPrefix("outgoing-submission:") && $0.isVisible
-                })
+                // The production two-second post-reveal deadline runs while
+                // its real display-frame dependency is held, producing failure.
+                try await returned.waitUntilHeld()
+                guard case .failed(let reasons) = returned.result else {
+                    Issue.record("Expected the actual post-reveal deadline failure")
+                    return
+                }
+                #expect(reasons.contains(.frameStability))
+                if owner == .coveredAfterFailure {
+                    harness.setCovered(true)
+                    try await harness.waitForCoverTransition(presented: true)
+                }
+                harness.probe.openingSettlementReturned = nil
+                returned.release() // Ignores cancellation: failure was already produced.
+                frames.release()
+                try await harness.waitForOpeningAttemptCompletion(1)
+                let failures = harness.traceRecords.filter { $0.record.event == "chat.opening.failed" }
+                if owner == .current {
+                    #expect(failures.count == 1)
+                    #expect(ChatOpeningAttemptPolicy.isFailed(harness.probe.openingPhase?() ?? .opening))
+                    #expect(harness.currentTarget == nil)
+                    #expect(harness.probe.readyPublicationCount == 0)
+                    #expect(harness.rpcMethods.filter { $0 == "session.close" }.count == 1)
+                    return
+                }
+                #expect(failures.isEmpty)
+                #expect(!ChatOpeningAttemptPolicy.isFailed(harness.probe.openingPhase?() ?? .opening))
+                #expect(harness.currentTarget == target)
+                #expect(!harness.rpcMethods.contains("session.close"))
+                if owner == .coveredAfterFailure {
+                    #expect(harness.probe.readyPublicationCount == 0)
+                    #expect(harness.probe.extensionPublicationAllowed?() == false)
+                    harness.setCovered(false)
+                    try await harness.waitForCoverTransition(presented: false)
+                }
+                _ = try await harness.recorder.waitUntil { _ in harness.probe.readyPublicationCount == 1 }
+                #expect(harness.probe.installedRuntime?() == next.runtimeGeneration)
+                #expect(harness.currentTarget == target)
+                #expect(harness.rpcMethods.filter { $0 == "session.open" }.count == 1)
+                #expect(!harness.rpcMethods.contains("session.close"))
+            }
+        }
+    }
 
-                // Exercise the mounted native scroll surface after readiness;
-                // a projection-only oracle would not prove this interaction.
-                try harness.displaceNativeTranscriptFromTail(by: 180)
-                let bottom = sent.observation.geometry
-                let away = ChatTranscriptGeometry(
-                    offsetY: max(0, bottom.offsetY - 180),
-                    contentHeight: bottom.contentHeight,
-                    containerHeight: bottom.containerHeight,
-                    bottomInset: bottom.bottomInset
-                )
+    @Test("same-target runtime replacement invalidates every unfinished opening cut", arguments: [false, true])
+    func runtimeReplacementDuringOpening(finalFrame: Bool) async throws {
+        try await withTestWatchdog(timeout: .seconds(20)) { @MainActor in
+            let gate = OpeningFrameGate()
+            defer { gate.release() }
+            let snapshot = try SessionScenarioBuilder(seed: 1_252).openingTail(targetEncodedBytes: 10_000)
+            try await withHarness(snapshot: snapshot, displayFrameScheduler: gate.scheduler,
+                                  enablesComposerSubmission: true, enablesPresentationCover: true, usesRealOpening: true) { harness in
+                gate.condition = {
+                    let phase = harness.probe.openingPhase?() ?? .opening
+                    return finalFrame ? [.presented, .ready].contains(phase) : phase == .revealing
+                }
+                try await gate.waitUntilHeld()
+                let target = harness.currentTarget
+                var next = snapshot
+                next.runtimeGeneration += "-new-runtime"
+                next.revision += 1
+                next.eventSequence += 1
+                harness.replaceAuthoritativeSnapshot(next) // does NOT replace target generation
+                #expect(harness.currentTarget == target)
+                gate.release()
+                let ready = try await harness.recorder.waitUntil { _ in harness.probe.readyPublicationCount > 0 }
+                #expect(harness.probe.installedRuntime?() == next.runtimeGeneration)
+                #expect(harness.currentTarget == target)
+                #expect(harness.rpcMethods.filter { $0 == "session.open" }.count == 1)
+                #expect(ready.nativeRows.contains { $0.isVisible })
+            }
+        }
+    }
+
+    @Test("cancelled detached replacement keeps authority independent of its old display cut", arguments: [false, true], [false, true])
+    func cancelledDetachedReplacement(background: Bool, revoke: Bool) async throws {
+        try await withTestWatchdog(timeout: .seconds(20)) { @MainActor in
+            let gate = OpeningFrameGate()
+            defer { gate.release() }
+            let snapshot = try SessionScenarioBuilder(seed: 1_253).openingTail(targetEncodedBytes: 10_000)
+            try await withHarness(snapshot: snapshot, displayFrameScheduler: gate.scheduler,
+                                  enablesComposerSubmission: true, enablesPresentationCover: true, usesRealOpening: true) { harness in
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady }
+                try harness.setComposerText("keep detached draft")
+                let draft = try harness.composerTextAndSelection()
+                let bottom = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_000, containerHeight: 400)
+                let away = ChatTranscriptGeometry(offsetY: 300, contentHeight: 1_000, containerHeight: 400)
                 harness.drivePhase(from: .idle, to: .interacting, geometry: bottom)
                 harness.driveNativeOwnership(true)
                 harness.driveGeometry(previous: bottom, current: away)
                 harness.drivePhase(from: .interacting, to: .idle, geometry: away)
-                let displaced = try await harness.recorder.waitUntil {
-                    $0.observation.isReady
-                        && $0.observation.isDetached
-                        && $0.observation.geometry.distanceFromBottom > 100
+                harness.driveNativeOwnership(false)
+                let baseline = harness.probeObservation.projectionInstallCount
+                gate.condition = { harness.probe.extensionPublicationAllowed?() == false && harness.probe.openingPhase?() == .ready }
+                var next = snapshot
+                next.runtimeGeneration += "-replacement"
+                harness.installReplacementAuthority(next)
+                try await gate.waitUntilHeld()
+                let target = harness.currentTarget
+                if background { harness.setScenePhase(.background) }
+                else {
+                    harness.setCovered(true)
+                    try await harness.waitForCoverTransition(presented: true)
                 }
-                #expect(displaced.observation.isReady)
-                #expect(try harness.nativeTranscriptDistanceFromTail() > 100)
+                if revoke { harness.revokeTarget() }
+                gate.release()
+                try await harness.waitForOpeningAttemptCompletion(2)
+                #expect(harness.probe.readyPublicationCount == 1)
+                #expect(harness.probeObservation.projectionInstallCount == baseline)
+                #expect(harness.probe.installedRuntime?() == snapshot.runtimeGeneration)
+                let after = try harness.composerTextAndSelection()
+                #expect(after.text == draft.text && after.selection == draft.selection && after.identity == draft.identity)
+                let image = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { _ in }
+                if revoke {
+                    #expect(!harness.admitsUploads)
+                    await harness.probe.importCameraImage?(image)
+                    harness.probe.submitPrompt()
+                    #expect(harness.uploads.calls == 0)
+                    #expect(harness.currentSubmission == nil)
+                    return
+                }
+                #expect(harness.currentTarget == target)
+                #expect(!harness.rpcMethods.contains("session.close"))
+                if background { harness.setScenePhase(.active) }
+                else {
+                    harness.setCovered(false)
+                    try await harness.waitForCoverTransition(presented: false)
+                }
+                _ = try await harness.recorder.waitUntil { _ in harness.probe.readyPublicationCount == 2 }
+                #expect(harness.probeObservation.isDetached)
+                #expect(harness.probeObservation.projectionInstallCount == baseline)
+                #expect(harness.admitsUploads)
+                await harness.probe.importCameraImage?(image)
+                #expect(harness.uploads.calls == 1)
+                #expect(harness.currentAttachments.map(\.gatewayUploadID) == ["fixture-upload-1"])
+                harness.probe.submitPrompt()
+                _ = try await harness.recorder.waitUntil { _ in harness.currentSubmission != nil }
+                #expect(harness.currentSubmission?.target == target)
+            }
+        }
+    }
+
+    @Test("production unfinished opening retains its exact subscription across cover and settles an accepted upload once")
+    func unfinishedCoveredOpeningResumesAuthority() async throws {
+        try await withTestWatchdog(timeout: .seconds(20)) {
+            let snapshot = try SessionScenarioBuilder(seed: 1_232).openingTail(targetEncodedBytes: 10_000)
+            try await withHarness(snapshot: snapshot, enablesComposerSubmission: true,
+                                  enablesPresentationCover: true, usesRealOpening: true) { harness in
+                let installed = try await harness.recorder.waitUntil {
+                    $0.observation.projectionInstallCount > 0 && !$0.observation.isReady
+                }
+                let target = try #require(harness.currentTarget)
+                #expect(harness.currentAuthorityIsMounted)
+                #expect(harness.rpcMethods.filter { $0 == "session.open" }.count == 1)
+                harness.uploads.hold = true
+                let image = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { _ in UIColor.red.setFill(); UIRectFill(CGRect(x: 0, y: 0, width: 4, height: 4)) }
+                let upload = Task { await harness.probe.importCameraImage?(image) }
+                _ = try await harness.recorder.waitUntil { _ in harness.uploads.calls == 1 }
+                harness.setCovered(true)
+                try await harness.waitForCoverTransition(presented: true)
+                #expect(harness.currentTarget == target)
+                #expect(harness.currentAuthorityIsMounted)
+                #expect(harness.rpcMethods.filter { $0 == "session.close" }.isEmpty)
+                harness.uploads.release()
+                await upload.value
+                #expect(harness.currentAttachments.map(\.gatewayUploadID) == ["fixture-upload-1"])
+                harness.setCovered(false)
+                try await harness.waitForCoverTransition(presented: false)
+                let ready = try await harness.recorder.waitUntil {
+                    $0.observation.isReady && $0.nativeGeometryMatches
+                        && $0.observation.readyFrameCompletionCount >= 2
+                }
+                #expect(ready.observation.projectionInstallCount == installed.observation.projectionInstallCount)
+                #expect(harness.currentTarget == target)
+                #expect(harness.rpcMethods.filter { $0 == "session.open" }.count == 1)
+                #expect(harness.uploads.calls == 1)
+                harness.uploads.hold = false
+                await harness.probe.importCameraImage?(image)
+                #expect(harness.uploads.calls == 2)
+                #expect(harness.currentAttachments.map(\.gatewayUploadID) == ["fixture-upload-1", "fixture-upload-2"])
+                #expect(harness.traceRecords.contains {
+                    $0.record.event == "chat.composer.availability"
+                        && $0.record.message.contains("openingTask=1")
+                })
+                #expect(harness.traceRecords.contains {
+                    $0.record.event == "chat.composer.availability"
+                        && $0.record.message.contains("viewportActive=0 publicationActive=0")
+                })
+                #expect(harness.traceRecords.contains { $0.record.event == "chat.opening.visible-reveal-began" })
+                #expect(harness.traceRecords.contains { $0.record.event == "chat.opening.ready-frame-awaited" })
+                #expect(try harness.isAttachmentButtonEnabled())
+                #expect(try harness.isNativeTranscriptInteractionEnabled())
+                #expect(abs(try harness.nativeTranscriptSignedTailError()) <= 2)
+                harness.removeChatRoute()
+                _ = try await harness.recorder.waitUntil { _ in harness.rpcMethods.contains("session.close") }
+                #expect(harness.rpcMethods.filter { $0 == "session.close" }.count == 1)
+                #expect(!harness.currentAuthorityIsMounted)
+            }
+        }
+    }
+
+    @Test("cancelled native appearance transition preserves the committed chat subscription and draft identity")
+    func cancelledAppearanceTransitionPreservesAuthority() async throws {
+        try await withTestWatchdog(timeout: .seconds(20)) {
+            let snapshot = try SessionScenarioBuilder(seed: 1_235).openingTail(targetEncodedBytes: 10_000)
+            try await withHarness(snapshot: snapshot, enablesComposerSubmission: true,
+                                  enablesPresentationCover: true, usesRealOpening: true) { harness in
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady }
+                try harness.setComposerText("cancelled back draft")
+                let draft = try harness.composerTextAndSelection()
+                let target = try #require(harness.currentTarget)
+                await harness.cancelNativeAppearanceTransition()
+                #expect(harness.currentTarget == target)
+                #expect(harness.currentAuthorityIsMounted)
+                #expect(harness.rpcMethods.filter { $0 == "session.close" }.isEmpty)
+                let after = try harness.composerTextAndSelection()
+                #expect(after.text == draft.text)
+                #expect(after.selection == draft.selection)
+                #expect(after.identity == draft.identity)
+            }
+        }
+    }
+
+    @Test("attachment picker action rejects disconnected and revoked current targets", arguments: [true, false])
+    func attachmentActionRejectsRetiredAuthority(disconnect: Bool) async throws {
+        try await withTestWatchdog(timeout: .seconds(20)) {
+            let snapshot = try SessionScenarioBuilder(seed: 1_233).openingTail(targetEncodedBytes: 10_000)
+            try await withHarness(snapshot: snapshot, enablesComposerSubmission: true, enablesPresentationCover: true, usesRealOpening: true) { harness in
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady }
+                if disconnect { await harness.disconnectTransport() } else { harness.revokeTarget() }
+                #expect(!harness.admitsUploads)
+                let image = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { _ in }
+                await harness.probe.importCameraImage?(image)
+                #expect(harness.uploads.calls == 0)
+                #expect(harness.currentAttachments.isEmpty)
+                try await DisplayFrameScheduler.displayLink.nextFrame()
+                #expect(try !harness.isAttachmentButtonEnabled())
+            }
+        }
+    }
+
+    @Test("detached display retention admits send on the replacement current authority without a viewport event", arguments: [false, true])
+    func detachedReplacementAdmitsCurrentTarget(replaceWhileCovered: Bool) async throws {
+        try await withTestWatchdog(timeout: .seconds(20)) {
+            let snapshot = try SessionScenarioBuilder(seed: 1_234).openingTail(targetEncodedBytes: 10_000)
+            try await withHarness(snapshot: snapshot, enablesComposerSubmission: true, enablesPresentationCover: true, usesRealOpening: true) { harness in
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady && $0.observation.readyFrameCompletionCount == 1 }
+                let oldTarget = try #require(harness.currentTarget)
+                let bottom = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_000, containerHeight: 400)
+                let away = ChatTranscriptGeometry(offsetY: 300, contentHeight: 1_000, containerHeight: 400)
+                harness.drivePhase(from: .idle, to: .interacting, geometry: bottom)
+                harness.driveNativeOwnership(true)
+                harness.driveGeometry(previous: bottom, current: away)
+                harness.drivePhase(from: .interacting, to: .idle, geometry: away)
+                harness.driveNativeOwnership(false)
+                let baseline = harness.probeObservation.projectionInstallCount
+                var replacement = snapshot
+                replacement.runtimeGeneration += "-replacement"
+                replacement.revision += 1
+                replacement.eventSequence = 1
+                if replaceWhileCovered {
+                    harness.setCovered(true)
+                    try await harness.waitForCoverTransition(presented: true)
+                }
+                harness.installReplacementAuthority(replacement)
+                if replaceWhileCovered {
+                    harness.setCovered(false)
+                    try await harness.waitForCoverTransition(presented: false)
+                }
+                _ = try await harness.recorder.waitUntil { $0.observation.readyFrameCompletionCount == 2 }
+                #expect(harness.currentTarget != oldTarget)
+                #expect(harness.currentAuthorityIsMounted)
+                #expect(harness.probeObservation.isDetached)
+                #expect(harness.probeObservation.projectionInstallCount == baseline)
+                #expect(try harness.isAttachmentButtonEnabled())
+                try harness.setComposerDraftText("detached replacement send")
+                try await DisplayFrameScheduler.displayLink.nextFrame()
+                harness.probe.submitPrompt()
+                _ = try await harness.recorder.waitUntil { _ in harness.currentSubmission != nil }
+                #expect(harness.currentSubmission?.outgoingText == "detached replacement send")
+                #expect(harness.probeObservation.isDetached)
+                #expect(harness.probeObservation.projectionInstallCount == baseline)
             }
         }
     }
@@ -988,13 +1275,7 @@ struct ChatViewScrollHarnessTests {
         #expect(probe.observation.rowFrames.count == 256)
         #expect(probe.observation.semanticFrameCallbackCount == 300)
 
-        probe.holdOpeningRevealCompletionsForTesting()
-        for index in 0..<300 {
-            #expect(probe.captureOpeningRevealCompletionForTesting({}) == (index < 2))
-        }
-        #expect(probe.observation.openingRevealCompletionCaptureCount == 2)
-        #expect(probe.observation.openingRevealCompletionOverflowCount == 298)
-        probe.discardOpeningRevealCompletionsForTesting()
+
     }
 
     @Test("hosted probe counts semantic remounts across projection installs")
@@ -1138,8 +1419,15 @@ struct ChatViewScrollHarnessTests {
         try await withTestWatchdog(timeout: .seconds(10)) {
             let builder = SessionScenarioBuilder(seed: 1_204)
             var snapshot = try builder.openingTail(targetEncodedBytes: 10_000)
-            snapshot.transcript = try (0..<ChatTranscriptPageRequest.maximumItemCount).map {
-                try harnessMessage(id: "long-opening-\($0)")
+            snapshot.transcript = try (0..<275).map { index in
+                let lineCount = [1, 3, 12, 2, 6][index % 5]
+                let text = Array(repeating: "mixed opening row \(index)", count: lineCount)
+                    .joined(separator: "\\n")
+                return try harnessAssistantMessage(
+                    id: "long-opening-\(index)",
+                    presentationID: "long-opening-\(index)",
+                    text: text
+                )
             }
             snapshot.transcriptStart = 0
             snapshot.transcriptTotal = snapshot.transcript.count
@@ -1155,6 +1443,7 @@ struct ChatViewScrollHarnessTests {
                 #expect(firstReady.observation.geometry.distanceFromBottom
                     <= ChatTranscriptGeometry.catchUpDistance)
                 #expect(firstReady.nativeGeometryMatches)
+                #expect(abs(try harness.nativeTranscriptSignedTailError()) <= 2)
                 #expect(!firstReady.observation.visibleRowIDs.isEmpty)
                 #expect(harness.recorder.samples.filter(\.observation.isReady).allSatisfy {
                     !$0.observation.visibleRowIDs.isEmpty
@@ -1387,6 +1676,9 @@ struct ChatViewScrollHarnessTests {
     }
 
     @Test("agent response and compaction settlement retain mounted physical rows")
+    // Installation can precede this generation's native visibility callbacks.
+    // Assert the rendered row only after a nonempty viewport observation, not
+    // the deliberately cleared evidence in the intermediate install frame.
     func unifiedResponseAndNotificationSettlement() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
             try await withHarness(seed: 1_190) { harness in
@@ -1416,6 +1708,7 @@ struct ChatViewScrollHarnessTests {
                     $0.observation.projectionInstallCount > installBaseline
                         && $0.observation.animatedEntranceCount == entranceBaseline + 1
                         && $0.observation.rowFrames["turn-agent"] != nil
+                        && !$0.observation.visibleRowIDs.isEmpty
                 }
                 #expect(revealed.observation.automaticScrollCommandCount == automaticScrollBaseline)
                 #expect(revealed.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
@@ -1440,6 +1733,7 @@ struct ChatViewScrollHarnessTests {
                 let settled = try await harness.recorder.waitUntil {
                     $0.observation.projectionInstallCount > revealed.observation.projectionInstallCount
                         && $0.observation.rowFrames["turn-agent"] != nil
+                        && !$0.observation.visibleRowIDs.isEmpty
                 }
                 #expect(settled.observation.animatedEntranceCount == entranceBaseline + 1)
                 #expect(settled.observation.tailMaterializationCommandCount == materializationBaseline + 2)
@@ -1460,6 +1754,7 @@ struct ChatViewScrollHarnessTests {
                             == compacting.eventSequence
                         && ($0.observation.scrollSettledDistance ?? .infinity)
                             <= ChatTranscriptGeometry.catchUpDistance
+                        && !$0.observation.visibleRowIDs.isEmpty
                 }
                 #expect(progress.observation.animatedEntranceCount >= entranceBaseline + 1)
                 #expect(try harness.nativeTranscriptDistanceFromTail() <= 2)
@@ -1602,6 +1897,8 @@ struct ChatViewScrollHarnessTests {
     }
 
     @Test("real tool group topology inserts one chip under native viewport pinning")
+    // Chip topology commits and native visibility observations are separate
+    // frame boundaries; neither a cached row rect nor installation proves both.
     func toolGroupTopologySettlement() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
             try await withHarness(seed: 1_194) { harness in
@@ -1623,6 +1920,7 @@ struct ChatViewScrollHarnessTests {
                 _ = try await harness.recorder.waitUntil {
                     $0.observation.projectionInstallCount >= installBaseline + 1
                         && $0.observation.rowFrames["tool-run-group-one"] != nil
+                        && !$0.observation.visibleRowIDs.isEmpty
                 }
 
                 var grouped = first
@@ -1635,6 +1933,7 @@ struct ChatViewScrollHarnessTests {
                 let settled = try await harness.recorder.waitUntil {
                     $0.observation.projectionInstallCount >= installBaseline + 2
                         && $0.observation.rowFrames["tool-run-group-one"] != nil
+                        && !$0.observation.visibleRowIDs.isEmpty
                 }
 
                 #expect(settled.observation.rowFrames["tool-run-group-two"] == nil)
@@ -1672,6 +1971,7 @@ struct ChatViewScrollHarnessTests {
                         && $0.observation.installedProjectionRowCount >= 4
                         && ($0.observation.scrollSettledDistance ?? .infinity)
                             <= ChatTranscriptGeometry.catchUpDistance
+                        && !$0.observation.visibleRowIDs.isEmpty
                 }
                 #expect(distinct.observation.toolChipSamples.contains {
                     $0.runID == "tool-run-group-one" && $0.transitionToken == 1
@@ -2070,7 +2370,8 @@ struct ChatViewScrollHarnessTests {
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
         enablesComposerSubmission: Bool = false,
         enablesPresentationCover: Bool = false,
-        holdsOpeningRevealCompletions: Bool = false,
+        installsSubscribedSnapshot: Bool = true,
+        usesRealOpening: Bool = false,
         operation: @escaping @MainActor @Sendable (ChatViewScrollHarness) async throws -> Void
     ) async throws {
         let harness: ChatViewScrollHarness
@@ -2079,14 +2380,14 @@ struct ChatViewScrollHarnessTests {
                 snapshot: snapshot,
                 displayFrameScheduler: displayFrameScheduler,
                 enablesPresentationCover: enablesPresentationCover,
-                holdsOpeningRevealCompletions: holdsOpeningRevealCompletions
+                usesRealOpening: usesRealOpening
             )
         } else {
             harness = try ChatViewScrollHarness(
                 snapshot: snapshot,
                 displayFrameScheduler: displayFrameScheduler,
                 enablesPresentationCover: enablesPresentationCover,
-                holdsOpeningRevealCompletions: holdsOpeningRevealCompletions
+                installsSubscribedSnapshot: installsSubscribedSnapshot || enablesPresentationCover
             )
         }
         do {
@@ -2263,11 +2564,15 @@ final class ChatViewScrollHarness {
         let model: AppModel
         let socket: ScriptedGatewaySocket?
         let profile: GatewayProfile?
+        fileprivate let uploads: HostedUploadReceipt
     }
 
     private let model: AppModel
     private let client: GatewayClient
     private let socket: ScriptedGatewaySocket?
+    fileprivate let uploads: HostedUploadReceipt
+    private var rpcTask: Task<Void, Never>?
+    private(set) var rpcMethods: [String] = []
     private let suiteName: String
     private let cacheRoot: URL
     private let defaults: UserDefaults
@@ -2280,7 +2585,7 @@ final class ChatViewScrollHarness {
         displayFrameScheduler: DisplayFrameScheduler,
         performanceSignposts: (any PerformanceSignposting)? = nil,
         enablesPresentationCover: Bool = false,
-        holdsOpeningRevealCompletions: Bool = false
+        installsSubscribedSnapshot: Bool = true
     ) throws {
         let dependencies = try Self.makeDependencies(enablesComposerSubmission: false)
         try self.init(
@@ -2288,9 +2593,8 @@ final class ChatViewScrollHarness {
             displayFrameScheduler: displayFrameScheduler,
             performanceSignposts: performanceSignposts,
             dependencies: dependencies,
-            installsSubscribedSnapshot: false,
-            enablesPresentationCover: enablesPresentationCover,
-            holdsOpeningRevealCompletions: holdsOpeningRevealCompletions
+            installsSubscribedSnapshot: installsSubscribedSnapshot,
+            enablesPresentationCover: enablesPresentationCover
         )
     }
 
@@ -2299,7 +2603,7 @@ final class ChatViewScrollHarness {
         displayFrameScheduler: DisplayFrameScheduler,
         performanceSignposts: (any PerformanceSignposting)? = nil,
         enablesPresentationCover: Bool = false,
-        holdsOpeningRevealCompletions: Bool = false
+        usesRealOpening: Bool = false
     ) async throws -> ChatViewScrollHarness {
         let dependencies = try makeDependencies(enablesComposerSubmission: true)
         guard let socket = dependencies.socket, let profile = dependencies.profile else {
@@ -2311,15 +2615,17 @@ final class ChatViewScrollHarness {
                 profile: profile,
                 token: "hosted-token"
             )
-            return try ChatViewScrollHarness(
+            let harness = try ChatViewScrollHarness(
                 snapshot: snapshot,
                 displayFrameScheduler: displayFrameScheduler,
                 performanceSignposts: performanceSignposts,
                 dependencies: dependencies,
                 installsSubscribedSnapshot: true,
                 enablesPresentationCover: enablesPresentationCover,
-                holdsOpeningRevealCompletions: holdsOpeningRevealCompletions
+                usesRealOpening: usesRealOpening
             )
+            if usesRealOpening { await harness.startRPCResponder() }
+            return harness
         } catch {
             await dependencies.model.teardown()
             await dependencies.client.close()
@@ -2366,11 +2672,14 @@ final class ChatViewScrollHarness {
         let composerSend: ComposerSendOperation? = enablesComposerSubmission
             ? hostedSend
             : nil
+        let uploads = HostedUploadReceipt()
         let model = AppModel(
             client: client,
             profiles: GatewayProfileStore(defaults: defaults),
             cache: SnapshotCache(root: cacheRoot),
-            composerSend: composerSend
+            composerUpload: { _, _, data in try await uploads.upload(data) },
+            composerSend: composerSend,
+            composerDraftStore: ComposerDraftStore(root: cacheRoot.appending(path: "drafts"))
         )
         return Dependencies(
             suiteName: suiteName,
@@ -2379,7 +2688,8 @@ final class ChatViewScrollHarness {
             client: client,
             model: model,
             socket: socket,
-            profile: profile
+            profile: profile,
+            uploads: uploads
         )
     }
 
@@ -2390,7 +2700,7 @@ final class ChatViewScrollHarness {
         dependencies: Dependencies,
         installsSubscribedSnapshot: Bool,
         enablesPresentationCover: Bool = false,
-        holdsOpeningRevealCompletions: Bool = false
+        usesRealOpening: Bool = false
     ) throws {
         self.snapshot = snapshot
         transcriptIDs = Set(snapshot.transcript.map(\.id)).union(["transcript-bottom"])
@@ -2404,24 +2714,31 @@ final class ChatViewScrollHarness {
         client = dependencies.client
         model = dependencies.model
         socket = dependencies.socket
+        uploads = dependencies.uploads
         guard model.authoritativeSnapshot(for: snapshot.sessionId) == nil else {
             throw HarnessError.invalidAuthorityBoundary
         }
         // Hosted presentation generations are authoritative and need not match
         // ChatOpenPresentationState's local opening epoch.
         model.invalidateHostedPendingPresentation()
-        if installsSubscribedSnapshot {
+        if usesRealOpening {
+            // No hosted authority: ChatView must call AppModel/session.open.
+        } else if installsSubscribedSnapshot {
             model.installHostedSubscribedSnapshot(snapshot, token: "hosted-session-token")
         } else {
             model.installHostedAuthoritativeSnapshot(snapshot)
         }
-        guard model.authoritativeSnapshot(for: snapshot.sessionId) == snapshot else {
+        guard usesRealOpening || model.authoritativeSnapshot(for: snapshot.sessionId) == snapshot else {
             throw HarnessError.invalidAuthorityBoundary
         }
 
         let probe = ChatHostedProbe()
-        if holdsOpeningRevealCompletions {
-            probe.holdOpeningRevealCompletionsForTesting()
+        if !usesRealOpening {
+            probe.fixtureOpenPresentation = { [model] in
+                guard let target = model.presentationTarget(for: snapshot.sessionId),
+                      model.hasMountedSessionAuthority(target) else { throw CancellationError() }
+                return target.generation
+            }
         }
         self.probe = probe
         let sessionID = snapshot.sessionId
@@ -2437,7 +2754,8 @@ final class ChatViewScrollHarness {
             .environment(model)
         )
         hostingController = UIHostingController(rootView: enablesPresentationCover
-            ? AnyView(HarnessManagedSurface(content: root, cover: cover)) : root)
+            ? AnyView(HarnessManagedSurface(content: root, cover: cover))
+            : AnyView(root.environment(\.scenePhase, .active)))
         guard let windowScene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else {
             throw HarnessError.missingWindowScene
         }
@@ -2460,11 +2778,78 @@ final class ChatViewScrollHarness {
         recorder.start()
     }
 
+    private func startRPCResponder() async {
+        guard let socket else { return }
+        rpcTask = Task { @MainActor [weak self] in
+            var index = 1 // connection hello is the sole non-RPC frame
+            do {
+                while !Task.isCancelled {
+                    try await socket.waitUntilSent(count: index + 1)
+                    let request = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[index])
+                    index += 1
+                    guard let self,
+                          let method = request.objectValue?["method"]?.stringValue,
+                          let id = request.objectValue?["id"]?.stringValue else { continue }
+                    rpcMethods.append(method)
+                    let result: JSONValue
+                    switch method {
+                    case "session.open":
+                        result = .object([
+                            "session": try JSONValue.encode(snapshot),
+                            "syncToken": .string("fixture-sync-\(index)"),
+                            "subscriptionToken": .string("fixture-subscription-\(index)"),
+                            "completionRevision": .number(0),
+                        ])
+                    case "session.sync": result = .object(["synchronized": .bool(true)])
+                    case "session.close": result = .object(["closed": .bool(true)])
+                    case "session.commands": result = .object(["commands": .array([])])
+                    case "session.attention.read":
+                        result = .object(["completionRevision": .number(0), "attentionRevision": .number(0), "isUnread": .bool(false)])
+                    default:
+                        await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                            "type": .string("response"), "id": .string(id), "ok": .bool(false),
+                            "error": .object(["code": .string("fixture_unsupported"), "message": .string(method), "retryable": .bool(false)])
+                        ])))
+                        continue
+                    }
+                    await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                        "type": .string("response"), "id": .string(id), "ok": .bool(true), "result": result
+                    ])))
+                }
+            } catch is CancellationError {} catch { Issue.record("Fake Gateway responder: \(error)") }
+        }
+    }
+
+    func waitForOpeningAttemptCompletion(_ count: Int) async throws {
+        while probe.observation.readyFrameCompletionCount < count {
+            try await DisplayFrameScheduler.displayLink.nextFrame()
+        }
+    }
+
+    var currentTarget: SessionPresentationIdentity? { model.mountedPresentationTarget }
+    var currentAuthorityIsMounted: Bool { currentTarget.map(model.hasMountedSessionAuthority) ?? false }
+    var currentSubmission: ComposerSubmissionSnapshot? {
+        currentTarget.flatMap { model.composerDrafts.outgoingSubmission(for: $0) }
+    }
+    var currentAttachments: [PendingAttachment] {
+        currentTarget.map { model.composerDrafts.pendingAttachments(for: $0) } ?? []
+    }
+    func revokeTarget() { if let currentTarget { model.revokePresentationIntake(currentTarget) } }
+    var admitsUploads: Bool { currentTarget.map(model.admitsLiveSessionUploads) ?? false }
+    func disconnectTransport() async { await model.enteredBackground().value }
+    func cancelNativeAppearanceTransition() async {
+        hostingController.beginAppearanceTransition(false, animated: true)
+        try? await DisplayFrameScheduler.displayLink.nextFrame()
+        hostingController.beginAppearanceTransition(true, animated: true)
+        hostingController.endAppearanceTransition()
+        try? await DisplayFrameScheduler.displayLink.nextFrame()
+    }
+
+    func removeChatRoute() { hostingController.rootView = AnyView(EmptyView()) }
+
     func setCovered(_ value: Bool) { cover.presented = value }
     func setScenePhase(_ phase: ScenePhase) { cover.scenePhase = phase }
-    func releaseOpeningRevealCompletion() {
-        probe.releaseOpeningRevealCompletionForTesting()
-    }
+
     var chatSurfaceActivity: PresentationSurfaceActivity { cover.coordinator.activity(for: cover.rootToken) }
     var coverTransitionSettled: Bool {
         guard let presented = hostingController.presentedViewController else { return false }
@@ -2520,8 +2905,12 @@ final class ChatViewScrollHarness {
         model.replaceHostedAuthoritativeSnapshot(snapshot)
     }
 
+    func installReplacementAuthority(_ snapshot: SessionSnapshot) {
+        model.installHostedSubscribedSnapshot(snapshot, token: "replacement-token")
+    }
+
     func reopenWithAuthoritativeSnapshot(_ snapshot: SessionSnapshot) async {
-        model.installHostedAuthoritativeSnapshot(snapshot)
+        model.installHostedSubscribedSnapshot(snapshot, token: "replacement-token")
         await probe.reopenPresentation()
     }
 
@@ -2733,6 +3122,7 @@ final class ChatViewScrollHarness {
     }
 
     func close() async {
+        uploads.release()
         if hostingController.presentedViewController != nil {
             await withCheckedContinuation { continuation in
                 hostingController.dismiss(animated: false) { continuation.resume() }
@@ -2740,6 +3130,8 @@ final class ChatViewScrollHarness {
         }
         retireHostedView()
         await model.teardown()
+        rpcTask?.cancel()
+        await rpcTask?.value
         await client.close()
         retireStorage()
     }
@@ -2927,4 +3319,71 @@ enum HarnessError: Error {
     case missingWindowScene
     case missingComposer
     case coverTransitionDidNotSettle
+}
+
+@MainActor
+private final class HostedUploadReceipt {
+    private(set) var calls = 0
+    private var continuation: CheckedContinuation<String, Error>?
+    var hold = false
+
+    func upload(_ data: Data) async throws -> String {
+        #expect(!data.isEmpty)
+        calls += 1
+        if hold {
+            return try await withCheckedThrowingContinuation { continuation = $0 }
+        }
+        return "fixture-upload-\(calls)"
+    }
+
+    func release() {
+        continuation?.resume(returning: "fixture-upload-\(calls)")
+        continuation = nil
+    }
+}
+
+@MainActor
+private final class OpeningSettlementReturnGate {
+    private(set) var result: ChatScrollCoordinator.OpeningTailSettlementResult?
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func hold(_ result: ChatScrollCoordinator.OpeningTailSettlementResult) async {
+        self.result = result
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func waitUntilHeld() async throws {
+        while continuation == nil { try await DisplayFrameScheduler.displayLink.nextFrame() }
+    }
+
+    func release() {
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+@MainActor
+private final class OpeningFrameGate {
+    var condition: (() -> Bool)?
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var consumed = false
+    var scheduler: DisplayFrameScheduler {
+        DisplayFrameScheduler { [self] in
+            if !consumed, condition?() == true {
+                consumed = true
+                // Intentionally ignore cancellation: prove the production
+                // continuation rejects a late frame from its retired owner.
+                await withCheckedContinuation { continuation = $0 }
+            } else {
+                try await DisplayFrameScheduler.displayLink.nextFrame()
+            }
+        }
+    }
+    func waitUntilHeld() async throws {
+        while continuation == nil { try await DisplayFrameScheduler.displayLink.nextFrame() }
+    }
+    func release() {
+        continuation?.resume()
+        continuation = nil
+    }
 }

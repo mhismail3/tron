@@ -1147,42 +1147,42 @@ struct ChatTranscriptPresentationTests {
         #expect(UserPromptPresentationPolicy.visibleText("visible") == "visible")
     }
 
-    @Test("attachment menu availability is session scoped and independent of draft text")
+    @Test("attachment menu availability requires authority, not transcript settlement")
     func attachmentAvailability() {
+        #expect(ChatAttachmentAvailabilityPolicy.actionsEnabled(
+            phase: .idle, hasMountedAuthority: true
+        ))
         #expect(!ChatAttachmentAvailabilityPolicy.actionsEnabled(
-            isTranscriptReady: false, phase: .idle, isSending: false
+            phase: nil, hasMountedAuthority: true
         ))
         #expect(!ChatAttachmentAvailabilityPolicy.actionsEnabled(
-            isTranscriptReady: true, phase: nil, isSending: false
+            phase: .idle, hasMountedAuthority: false
         ))
         #expect(ChatAttachmentAvailabilityPolicy.actionsEnabled(
-            isTranscriptReady: true, phase: .running, isSending: false
+            phase: .running, hasMountedAuthority: true
         ))
         #expect(ChatAttachmentAvailabilityPolicy.actionsEnabled(
-            isTranscriptReady: true, phase: .idle, isSending: true
+            phase: .idle, hasMountedAuthority: true
         ))
         #expect(ChatAttachmentAvailabilityPolicy.actionsEnabled(
-            isTranscriptReady: true, phase: .idle, isSending: false
-        ))
-        #expect(ChatAttachmentAvailabilityPolicy.actionsEnabled(
-            isTranscriptReady: true, phase: .interrupted, isSending: false
+            phase: .interrupted, hasMountedAuthority: true
         ))
 
         let running = ChatAttachmentMenuState(
             sessionID: "session", phase: .running,
-            isTranscriptReady: true, isSending: false
+            hasMountedAuthority: true
         )
         let compacting = ChatAttachmentMenuState(
             sessionID: "session", phase: .compacting,
-            isTranscriptReady: true, isSending: false
+            hasMountedAuthority: true
         )
         let idle = ChatAttachmentMenuState(
             sessionID: "session", phase: .idle,
-            isTranscriptReady: true, isSending: false
+            hasMountedAuthority: true
         )
         let anotherIdle = ChatAttachmentMenuState(
             sessionID: "another-session", phase: .idle,
-            isTranscriptReady: true, isSending: false
+            hasMountedAuthority: true
         )
         #expect(running.actionsEnabled)
         #expect(idle.actionsEnabled)
@@ -1240,69 +1240,6 @@ struct ChatTranscriptPresentationTests {
         #expect(!staleReadyEpoch)
         #expect(ready)
         #expect(state.phase == .ready)
-    }
-
-    @MainActor
-    @Test("cancelled reveal callback drains a presented phase without reviving its epoch")
-    func cancelledRevealCallbackDrains() async {
-        let waiter = ChatOpeningAnimationWaiter()
-        let box = ChatOpeningAnimationTestBox()
-        let epoch = box.state.begin()
-        let baselineInstalled = box.state.installAuthoritativeBaseline(
-            sessionID: "session-a", epoch: epoch
-        )
-        let positioned = box.state.beginPositionedReveal(sessionID: "session-a", epoch: epoch)
-        let settled = box.state.installSettledViewport(sessionID: "session-a", epoch: epoch)
-        #expect(baselineInstalled)
-        #expect(positioned)
-        #expect(settled)
-
-        var opening: Task<Bool, Never>!
-        await withCheckedContinuation { started in
-            opening = Task { @MainActor in
-                await waiter.wait { finish in
-                    box.completion = finish
-                    // SwiftUI changes the phase in the animation body, before its
-                    // logically-complete callback can run.
-                    _ = box.state.beginVisibleReveal(sessionID: "session-a", epoch: epoch)
-                    started.resume()
-                }
-            }
-        }
-        #expect(box.completion != nil)
-        #expect(box.state.phase == .presented)
-
-        opening.cancel()
-        #expect(await opening.value == false)
-        let replacementEpoch = box.state.begin()
-        box.completion?(true)
-        #expect(box.state.epoch == replacementEpoch)
-        #expect(box.state.phase == .opening)
-    }
-
-    @MainActor
-    @Test("reveal callback resolves once and preserves its completion result")
-    func revealCallbackSingleResolution() async {
-        let waiter = ChatOpeningAnimationWaiter()
-        let box = ChatOpeningAnimationTestBox()
-        var opening: Task<Bool, Never>!
-        await withCheckedContinuation { started in
-            opening = Task { @MainActor in
-                await waiter.wait { finish in
-                    box.completion = finish
-                    started.resume()
-                }
-            }
-        }
-        box.completion?(true)
-        box.completion?(false)
-        #expect(await opening.value)
-
-        let rejected = await ChatOpeningAnimationWaiter().wait { finish in
-            finish(false)
-            finish(true)
-        }
-        #expect(!rejected)
     }
 
     @Test("stale presentation callbacks cannot fail a newer opening epoch")
@@ -2734,10 +2671,4 @@ struct ChatTranscriptPresentationTests {
         }
         """.utf8))
     }
-}
-
-@MainActor
-private final class ChatOpeningAnimationTestBox {
-    var state = ChatOpenPresentationState(sessionID: "session-a")
-    var completion: ((Bool) -> Void)?
 }

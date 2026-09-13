@@ -16,6 +16,8 @@ final class ChatInteractionTrace: @unchecked Sendable {
         case positioningBegan = "positioning-began"
         case positioningEnded = "positioning-ended"
         case revealBegan = "reveal-began"
+        case visibleRevealBegan = "visible-reveal-began"
+        case readyFrameAwaited = "ready-frame-awaited"
         case readyFrame = "ready-frame"
         case failed
         case retired
@@ -55,6 +57,12 @@ final class ChatInteractionTrace: @unchecked Sendable {
         case checkpoint
     }
 
+    enum EntranceStage: String, Sendable {
+        case admitted
+        case admittedFallback = "admitted-fallback"
+        case completed
+    }
+
     enum CommandStage: String, Sendable {
         case issued
         case applied
@@ -64,6 +72,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
     }
 
     enum LeaseStage: String, Sendable {
+        case queued
         case releaseRequested = "release-requested"
         case releaseReady = "release-ready"
         case released
@@ -74,6 +83,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
     }
 
     enum LeaseReason: String, Sendable {
+        case targetOwned = "target-owned"
         case displacement
         case incompleteEvidence = "incomplete-evidence"
         case boundedFallback = "bounded-fallback"
@@ -106,9 +116,31 @@ final class ChatInteractionTrace: @unchecked Sendable {
         case openingViewportDisplaced = "opening-viewport-displaced"
     }
 
+    /// Closed, content-free inputs explain a disabled control without logging
+    /// the command, draft, provider error, or canonical session identity.
+    struct Availability: Equatable, Sendable {
+        var connected: Bool
+        var reconciling: Bool
+        var mountedAuthority: Bool
+        var projectionAvailable: Bool
+        var openingTask: Bool
+        var transcriptReady: Bool
+        var scrollAllowsSubmission: Bool
+        var scrollCommand: Bool
+        var submissionPending: Bool
+        var uploading: Bool
+        var sending: Bool
+        var commandReady: Bool
+        var attachmentsReady: Bool
+        var sceneActive: Bool
+        var viewportActive: Bool
+        var publicationActive: Bool
+    }
+
     struct State: Equatable, Sendable {
         var presentationEpoch: Int?
         var layoutEpoch: Int?
+        var observedLayoutEpoch: Int?
         var layoutGeneration: Int?
         var canonicalRows: Int?
         var runtimeRows: Int?
@@ -139,6 +171,8 @@ final class ChatInteractionTrace: @unchecked Sendable {
         /// Local bounded identity ordinals, not IDs or reversible hashes.
         var physicalRowToken: Int?
         var semanticRowToken: Int?
+        var pendingPhysicalRowToken: Int?
+        var pendingLayoutSettled: Bool?
         var rowMinY: CGFloat?
         var rowHeight: CGFloat?
 
@@ -225,6 +259,32 @@ final class ChatInteractionTrace: @unchecked Sendable {
         )
     }
 
+    func availability(
+        _ value: Availability,
+        context: Int,
+        blockedAction: Bool = false,
+        state: State = .empty
+    ) {
+        let flags: [(String, Bool)] = [
+            ("connected", value.connected), ("reconciling", value.reconciling),
+            ("authority", value.mountedAuthority), ("projection", value.projectionAvailable),
+            ("openingTask", value.openingTask), ("ready", value.transcriptReady),
+            ("scrollAllowsSubmission", value.scrollAllowsSubmission), ("scrollCommand", value.scrollCommand),
+            ("submissionPending", value.submissionPending), ("uploading", value.uploading),
+            ("sending", value.sending), ("commandReady", value.commandReady),
+            ("attachmentsReady", value.attachmentsReady), ("sceneActive", value.sceneActive),
+            ("viewportActive", value.viewportActive), ("publicationActive", value.publicationActive)
+        ]
+        var values = flags.map { "\($0.0)=\(Self.bit($0.1))" }
+        appendState(state, to: &values)
+        append(
+            context: context,
+            level: "info",
+            event: blockedAction ? "composer.admission-blocked" : "composer.availability",
+            details: values.joined(separator: " ")
+        )
+    }
+
     func projection(
         _ change: ProjectionChange,
         context: Int,
@@ -261,6 +321,12 @@ final class ChatInteractionTrace: @unchecked Sendable {
             event: "submission.\(stage.rawValue)",
             details: values.joined(separator: " ")
         )
+    }
+
+    func entrance(_ stage: EntranceStage, context: Int, state: State) {
+        var values: [String] = []
+        appendState(state, to: &values)
+        append(context: context, level: "info", event: "entrance.\(stage.rawValue)", details: values.joined(separator: " "))
     }
 
     func viewportTransition(
@@ -449,6 +515,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
     private func appendState(_ state: State, to values: inout [String]) {
         if let value = state.presentationEpoch { values.append("presentation=\(value)") }
         if let value = state.layoutEpoch { values.append("layout=\(value)") }
+        if let value = state.observedLayoutEpoch { values.append("observedLayout=\(value)") }
         if let value = state.layoutGeneration { values.append("layoutGeneration=\(value)") }
         if let value = state.canonicalRows { values.append("canonicalRows=\(value)") }
         if let value = state.runtimeRows { values.append("runtimeRows=\(value)") }
@@ -459,7 +526,10 @@ final class ChatInteractionTrace: @unchecked Sendable {
         if let value = state.isPositionedByUser { values.append("userPosition=\(Self.bit(value))") }
         if let value = state.distanceFromBottom { values.append("bottom=\(Self.scalar(value))") }
         if let value = state.offsetY { values.append("offset=\(Self.scalar(value))") }
-        if let value = state.contentHeight { values.append("content=\(Self.scalar(value))") }
+        if let value = state.contentHeight {
+            values.append("content=\(Self.scalar(value))")
+            values.append("geometrySource=swiftui")
+        }
         if let value = state.containerHeight { values.append("container=\(Self.scalar(value))") }
         if let value = state.bottomInset { values.append("inset=\(Self.scalar(value))") }
         if let value = state.isPastBottomEdge { values.append("pastBottom=\(Self.bit(value))") }
@@ -476,6 +546,8 @@ final class ChatInteractionTrace: @unchecked Sendable {
         if let value = state.layoutSettled { values.append("layoutSettled=\(Self.bit(value))") }
         if let value = state.physicalRowToken { values.append("physicalRow=\(value)") }
         if let value = state.semanticRowToken { values.append("semanticRow=\(value)") }
+        if let value = state.pendingPhysicalRowToken { values.append("pendingPhysicalRow=\(value)") }
+        if let value = state.pendingLayoutSettled { values.append("pendingLayoutSettled=\(Self.bit(value))") }
         if let value = state.rowMinY { values.append("rowY=\(Self.scalar(value))") }
         if let value = state.rowHeight { values.append("rowHeight=\(Self.scalar(value))") }
     }
