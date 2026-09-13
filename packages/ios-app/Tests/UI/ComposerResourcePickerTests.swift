@@ -8,6 +8,7 @@ import UIKit
 struct ComposerResourcePickerTests {
     @Test("composer blur geometry reserves the measured header for both resource kinds")
     func composerBlurGeometry() {
+        #expect(ComposerResourcePanelPolicy.blurFadeLength == 52)
         for headerHeight in [CGFloat(44), 72] {
             #expect(ComposerResourcePanelPolicy.viewportHeight(
                 entryCount: 8,
@@ -80,6 +81,74 @@ struct ComposerResourcePickerTests {
             let screenshotURL = URL(fileURLWithPath: "/tmp/tron-composer-picker-\(kind == .skill ? "skills" : "commands").png")
             if let pngData = image.pngData() {
                 try pngData.write(to: screenshotURL)
+            }
+        }
+    }
+
+    @MainActor
+    @Test("commands and skills clip the blur at rounded corners for empty and short panels")
+    func hostedPickerBlurCornerClipping() async throws {
+        let background = [0.93, 0.04, 0.08]
+        for kind in [ComposerResourceEntry.Kind.command, .skill] {
+            for scheme in [ColorScheme.light, .dark] {
+                for variant in ["empty", "short"] {
+                    let source: CommandInfo.Source = kind == .skill ? .skill : .prompt
+                    let entries: [ComposerResourceEntry] = variant == "empty"
+                        ? []
+                        : [ComposerResourceEntry(command: command(
+                            kind == .skill ? "skill:short" : "short",
+                            source: source,
+                            description: "Short description"
+                        ))].compactMap { $0 }
+                    let picker = ComposerResourcePicker(
+                        sessionID: nil,
+                        kind: kind,
+                        query: "",
+                        entries: entries,
+                        keyboardVisible: false,
+                        onSelect: { _ in },
+                        onDismiss: {}
+                    )
+                    .environment(\.colorScheme, scheme)
+                    let root = ZStack(alignment: .top) {
+                        Color(red: background[0], green: background[1], blue: background[2])
+                        picker.frame(width: 360, alignment: .top)
+                    }
+                    .frame(width: 390, height: 220, alignment: .top)
+                    let host = UIHostingController(rootView: root)
+                    host.view.frame = CGRect(x: 0, y: 0, width: 390, height: 220)
+                    host.view.backgroundColor = UIColor(red: background[0], green: background[1], blue: background[2], alpha: 1)
+                    host.view.isOpaque = true
+                    host.overrideUserInterfaceStyle = scheme == .dark ? .dark : .light
+                    let window = UIWindow(frame: host.view.bounds)
+                    window.rootViewController = host
+                    window.makeKeyAndVisible()
+
+                    host.view.layoutIfNeeded()
+                    for _ in 0..<3 { await Task.yield() }
+                    host.view.layoutIfNeeded()
+                    let image = UIGraphicsImageRenderer(bounds: host.view.bounds).image { _ in
+                        host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+                    }
+                    window.isHidden = true
+                    window.rootViewController = nil
+                    let name = kind == .skill ? "skills" : "commands"
+                    let suffix = scheme == .dark ? "dark" : "light"
+                    let screenshotURL = URL(fileURLWithPath: "/tmp/tron-composer-picker-\(name)-\(variant)-\(suffix).png")
+                    if let pngData = image.pngData() {
+                        try pngData.write(to: screenshotURL)
+                    }
+
+                    // The picker is 360 points wide inside the 390-point host,
+                    // so x=15 is its leading edge. Find its top from the actual
+                    // rendered transition rather than assuming a window inset.
+                    let panelTop = try firstPaintedY(image, background: background)
+                    let outside = try pixel(image, x: 1, y: panelTop + 1)
+                    let corner = try pixel(image, x: 16, y: panelTop + 1)
+                    let interior = try pixel(image, x: 200, y: panelTop + 1)
+                    #expect(colorDistance(corner, outside) < 0.12)
+                    #expect(colorDistance(interior, outside) > 0.2)
+                }
             }
         }
     }
@@ -418,6 +487,42 @@ struct ComposerResourcePickerTests {
             if let match = scrollView(in: child) { return match }
         }
         return nil
+    }
+
+    private func pixel(_ image: UIImage, x: CGFloat, y: CGFloat) throws -> [Double] {
+        let bitmap = try #require(image.cgImage)
+        let pixelX = min(max(Int(x * image.scale), 0), bitmap.width - 1)
+        let pixelY = min(max(Int(y * image.scale), 0), bitmap.height - 1)
+        let point = try #require(bitmap.cropping(to: CGRect(x: pixelX, y: pixelY, width: 1, height: 1)))
+        var values = [UInt8](repeating: 0, count: 4)
+        values.withUnsafeMutableBytes { buffer in
+            let context = CGContext(
+                data: buffer.baseAddress,
+                width: 1,
+                height: 1,
+                bitsPerComponent: 8,
+                bytesPerRow: 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )!
+            context.draw(point, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        }
+        return values.prefix(3).map { Double($0) / 255 }
+    }
+
+    private func colorDistance(_ lhs: [Double], _ rhs: [Double]) -> Double {
+        zip(lhs, rhs).reduce(0) { partial, pair in
+            partial + (pair.0 - pair.1) * (pair.0 - pair.1)
+        }.squareRoot()
+    }
+
+    private func firstPaintedY(_ image: UIImage, background: [Double]) throws -> CGFloat {
+        for y in 0..<220 {
+            if colorDistance(try pixel(image, x: 200, y: CGFloat(y)), background) > 0.12 {
+                return CGFloat(y)
+            }
+        }
+        throw CocoaError(.fileReadCorruptFile)
     }
 
     private func token(_ text: String, caret: Int) -> ComposerSuggestionToken? {

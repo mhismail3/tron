@@ -439,7 +439,7 @@ private struct ComposerResourcePickerHeaderHeightKey: PreferenceKey {
 enum ComposerResourcePanelPolicy {
     static let regularVisibleRows = 5
     static let rowHeight: CGFloat = 48
-    static let blurFadeLength: CGFloat = 56
+    static let blurFadeLength: CGFloat = 52
 
     static func viewportHeight(entryCount: Int, keyboardVisible: Bool, headerHeight: CGFloat) -> CGFloat {
         CGFloat(visibleRows(entryCount: entryCount, keyboardVisible: keyboardVisible)) * rowHeight
@@ -492,6 +492,9 @@ struct ComposerResourcePicker: View {
     private var blurHeight: CGFloat {
         resolvedHeaderHeight + ComposerResourcePanelPolicy.blurFadeLength
     }
+    private var panelShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+    }
 
     private var accent: Color { kind == .skill ? Color.tronCyan : ChatSemanticPillRole.command.accent }
     private var icon: String { kind == .skill ? "sparkles" : "command" }
@@ -542,6 +545,10 @@ struct ComposerResourcePicker: View {
                 }
                 .zIndex(1)
         }
+        // The blur is a rectangular visual effect, so clip the complete panel
+        // contents before applying the glass rim; otherwise it paints through
+        // the rounded panel corners.
+        .clipShape(panelShape)
         .padding(.bottom, 6)
         .onPreferenceChange(ComposerResourcePickerHeaderHeightKey.self) { measuredHeight in
             guard measuredHeight.isFinite, measuredHeight > 0 else { return }
@@ -549,7 +556,7 @@ struct ComposerResourcePicker: View {
         }
         .glassEffect(
             .regular.tint(accent.opacity(0.15)),
-            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            in: panelShape
         )
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
