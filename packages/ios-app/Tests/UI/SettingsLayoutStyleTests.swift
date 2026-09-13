@@ -44,6 +44,24 @@ final class SettingsLayoutStyleTests: XCTestCase {
         }
     }
 
+    func testCodeBlockIndentPresetsKeepExactWhitespaceAndDefault() {
+        let baseline = RuntimeBehaviorDraft()
+        XCTAssertEqual(baseline.codeIndent, "  ")
+        XCTAssertEqual(CodeBlockIndentOption.allCases.map(\.rawValue), ["", "  ", "    ", "        ", "\t"])
+        XCTAssertEqual(CodeBlockIndentOption.twoSpaces.label, "2 spaces (Default)")
+        for option in CodeBlockIndentOption.allCases {
+            var draft = baseline
+            draft.codeIndent = option.rawValue
+            let expected: JSONValue = option == .twoSpaces ? .object([:])
+                : .object(["markdown": .object(["codeBlockIndent": .string(option.rawValue)])])
+            XCTAssertEqual(draft.patch(comparedTo: baseline), expected)
+        }
+        var custom = baseline
+        custom.codeIndent = "   "
+        XCTAssertEqual(custom.patch(comparedTo: custom), .object([:]),
+                       "Opening the preset selector must not silently rewrite a saved custom indent")
+    }
+
     func testFreeTextSettingsUseEmptyPlaceholderWithoutChangingValues() async throws {
         for value in ["", "  ", "prefix"] {
             try await withHost(TronTextSettingRow(icon: "chevron.left.forwardslash.chevron.right",

@@ -1,5 +1,23 @@
 import SwiftUI
 
+enum CodeBlockIndentOption: String, CaseIterable {
+    case none = ""
+    case twoSpaces = "  "
+    case fourSpaces = "    "
+    case eightSpaces = "        "
+    case tab = "\t"
+
+    var label: String {
+        switch self {
+        case .none: "None"
+        case .twoSpaces: "2 spaces (Default)"
+        case .fourSpaces: "4 spaces"
+        case .eightSpaces: "8 spaces"
+        case .tab: "1 tab"
+        }
+    }
+}
+
 struct RuntimeBehaviorDraft: Equatable {
     var transport = "auto"
     var steeringMode = "one-at-a-time"
@@ -22,7 +40,7 @@ struct RuntimeBehaviorDraft: Equatable {
     var installTelemetry = true
     var analytics = false
     var mermaid = "final"
-    var codeIndent = "  "
+    var codeIndent = CodeBlockIndentOption.twoSpaces.rawValue
     var anthropicWarning = true
 
     func patch(comparedTo baseline: Self) -> JSONValue {
@@ -156,8 +174,21 @@ struct RuntimeBehaviorSettingsView: View {
                             Button("While streaming") { editing.update { $0.mermaid = "streaming" } }
                         }
                         TronSettingsDivider(accent: .tronPurple)
-                        TronTextSettingRow(icon: "chevron.left.forwardslash.chevron.right", title: "Code block indent",
-                                           value: editing.codeIndent, accent: .tronPurple)
+                        choiceRow("chevron.left.forwardslash.chevron.right", "Code block indent",
+                                  CodeBlockIndentOption(rawValue: draft.codeIndent)?.label ?? "Custom",
+                                  accent: .tronPurple) {
+                            ForEach(CodeBlockIndentOption.allCases, id: \.self) { option in
+                                Button {
+                                    editing.update { $0.codeIndent = option.rawValue }
+                                } label: {
+                                    if draft.codeIndent == option.rawValue {
+                                        Label(option.label, systemImage: "checkmark")
+                                    } else {
+                                        Text(option.label)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 TronSettingsGroup("Privacy and Warnings", accent: .tronSlate, surfaceStyle: .scrollOptimized) {
