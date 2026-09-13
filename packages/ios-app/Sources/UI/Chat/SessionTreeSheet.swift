@@ -204,11 +204,11 @@ struct SessionTreeSheet: View {
     }
 
     private var summary: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             if let snapshot = model.sessionHistoryPresentation(for: sessionID) {
                 HStack(alignment: .firstTextBaseline) {
                     Text("\(snapshot.stats.totalMessages.formatted()) messages · \(snapshot.stats.toolCalls.formatted()) tool calls")
-                        .font(TronTypography.bodySM.weight(.semibold))
+                        .font(TronTypography.body.weight(.semibold))
                     Spacer()
                     Text(snapshot.phase.rawValue.capitalized).font(TronTypography.secondaryCodeDescription)
                 }
@@ -216,8 +216,8 @@ struct SessionTreeSheet: View {
             Text("Recorded activity across all branches. Tap an entry for full content; use its menu to continue, fork or bookmark.")
                 .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
         }
-        .padding(14).frame(maxWidth: .infinity, alignment: .leading)
-        .tronScrollSurface(accent: .tronSessionTeal, tintOpacity: 0.09)
+        .padding(20).frame(maxWidth: .infinity, alignment: .leading)
+        .tronGlassSurface(accent: .tronSessionTeal, cornerRadius: 16, tintOpacity: 0.12)
     }
     private func reload() { cursor = nil; revision &+= 1 }
     private func changePage(_ cursor: SessionHistoryCursor) { self.cursor = cursor; revision &+= 1 }
