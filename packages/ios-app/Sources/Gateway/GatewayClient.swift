@@ -624,8 +624,17 @@ actor GatewayClient {
 
     private static func diagnosticCode(_ error: Error) -> String {
         if error is CancellationError { return "cancelled" }
-        guard let failure = error as? GatewayFailure else { return "transport" }
-        return GatewayDiagnosticFailure.normalizedCode(failure.code)
+        if let failure = error as? GatewayFailure {
+            return GatewayDiagnosticFailure.normalizedCode(failure.code)
+        }
+        // Local send-state wrappers retain the actual bounded failure code.
+        // Treating them as an untyped transport error loses request-timeout
+        // evidence and makes catalog failures appear application-originated.
+        if let failure = (error as? GatewayDefinitelyNotSentError)?.failure
+            ?? (error as? GatewayPossiblySentError)?.failure {
+            return GatewayDiagnosticFailure.normalizedCode(failure.code)
+        }
+        return "transport"
     }
 
     private func recordDiagnostic(

@@ -812,6 +812,46 @@ struct GatewayClientTransportTests {
         }
     }
 
+    @Test("request timeout diagnostics retain local send-state failure code")
+    func requestTimeoutDiagnosticCode() async throws {
+        try await withTestWatchdog {
+            let clock = ManualClock()
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                clock: clock.clock,
+                uuidSource: SequenceUUIDSource([
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000023")!,
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000024")!,
+                ]).source
+            )
+            let capture = DiagnosticCaptureCoordinator(clock: clock.clock)
+            await client.installDiagnosticCaptureSink(capture)
+            #expect(capture.start(duration: .seconds(30)))
+            await socket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "token")
+
+            let request = Task { try await client.requestValue("session.list", EmptyParams(), timeout: .seconds(5)) }
+            defer { request.cancel() }
+            try await socket.waitUntilSent(count: 2)
+            try await clock.waitUntilSleeping(count: 2)
+            clock.advance(by: .seconds(5))
+            do {
+                _ = try await valueOfOwnedTask(request)
+                Issue.record("request unexpectedly succeeded")
+            } catch is GatewayPossiblySentError {}
+            await Task.yield()
+
+            let report = try #require(capture.stop())
+            let rpcEvents = report.events.filter { event in
+                event.kind == "rpc" && event.name == "session.list"
+            }
+            let rpc = try #require(rpcEvents.first)
+            #expect(rpc.code == "possibly_sent")
+            await client.close()
+        }
+    }
+
     @Test("transport pings precede the Gateway heartbeat and an enqueue failure retires the epoch")
     func deterministicLivenessTiming() async throws {
         try await withTestWatchdog {

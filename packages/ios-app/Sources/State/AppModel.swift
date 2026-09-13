@@ -1846,8 +1846,10 @@ final class AppModel {
 
     private static func catalogFailureOutcome(_ error: Error) -> SessionCatalogRefreshOutcome {
         if error is CancellationError { return .retained }
-        if let failure = error as? GatewayFailure,
-           ["disconnected", "closed", "replaced", "timeout"].contains(failure.code) {
+        if let failure = (error as? GatewayFailure)
+            ?? (error as? GatewayDefinitelyNotSentError)?.failure
+            ?? (error as? GatewayPossiblySentError)?.failure,
+           ["disconnected", "closed", "replaced", "timeout", "possibly_sent"].contains(failure.code) {
             return .transportFailure
         }
         if error is URLError { return .transportFailure }
@@ -1858,7 +1860,9 @@ final class AppModel {
 
     private static func catalogFailureDetails(_ error: Error) -> (code: String, reason: String) {
         if error is CancellationError { return ("cancelled", "task-cancelled") }
-        if let failure = error as? GatewayFailure {
+        if let failure = (error as? GatewayFailure)
+            ?? (error as? GatewayDefinitelyNotSentError)?.failure
+            ?? (error as? GatewayPossiblySentError)?.failure {
             let code = GatewayDiagnosticFailure.normalizedCode(failure.code)
             return (code, "gateway-\(code)")
         }
