@@ -301,10 +301,13 @@ export class PushRegistry {
       return json({ error: "invalid_authentication_headers" }, 401);
     }
     const grant = this.grant(grantId);
-    if (!grant || grant.enabled !== 1 || !(await verifyGrantSignature({
-      secret: grant.secret, method: "POST", path: "/v3/notifications", timestamp, requestId, body, provided: signature,
-    }))) return json({ error: "invalid_signature" }, 401);
-    const bodyHash = await sha256Hex(body);
+    const authentication = grant && grant.enabled === 1
+      ? await verifyGrantSignature({
+        secret: grant.secret, method: "POST", path: "/v3/notifications", timestamp, requestId, body, provided: signature,
+      })
+      : undefined;
+    if (!grant || grant.enabled !== 1 || !authentication) return json({ error: "invalid_signature" }, 401);
+    const bodyHash = authentication.bodyHash;
     const installation = await this.beginDispatch(requestId, grant.grant_id, bodyHash);
     if (installation instanceof Response) return installation;
 
@@ -335,9 +338,10 @@ export class PushRegistry {
     // Opaque missing grants are an idempotent terminal revoke, including after
     // bounded disabled-record pruning.
     if (!grant) return json({ error: "not_found" }, 404);
-    if (!(await verifyGrantSignature({
+    const authentication = await verifyGrantSignature({
       secret: grant.secret, method: "DELETE", path, timestamp, requestId, body, provided: signature,
-    }))) return json({ error: "invalid_signature" }, 401);
+    });
+    if (!authentication) return json({ error: "invalid_signature" }, 401);
     this.state.storage.sql.exec("UPDATE grants SET enabled = 0, updated_at = ? WHERE grant_id = ?", epochSeconds(), grantId);
     return json({ version: 1, revoked: true });
   }

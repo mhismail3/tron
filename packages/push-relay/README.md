@@ -95,6 +95,10 @@ POST
 <SHA256_HEX_OF_EXACT_BODY>
 ```
 
+Authentication returns the digest of those exact raw body bytes to receipt
+admission, so the signed body identity and persisted idempotency identity cannot
+diverge or require a second body hash.
+
 The exact bounded body is:
 
 ```json

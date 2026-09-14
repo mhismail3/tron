@@ -25,6 +25,6 @@ describe("shared push v3 protocol fixture", () => {
       body: new TextEncoder().encode(value.notification.bodyUTF8),
       provided: value.notification.signatureHex,
       nowSeconds: Number(value.notification.timestamp),
-    })).resolves.toBe(true);
+    })).resolves.toEqual({ bodyHash: value.notification.bodyHashHex });
   });
 });

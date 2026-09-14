@@ -172,6 +172,20 @@ describe("v3 Worker boundary", () => {
     expect(response.status).toBe(413);
   });
 
+  test("does not create a receipt for an unauthenticated notification", async () => {
+    await initializeAndSeed();
+    const request = await signedNotification({ requestId: "unauthenticated-request-0001" });
+    const headers = new Headers(request.headers);
+    headers.set("x-tron-signature", "0".repeat(64));
+    const response = await SELF.fetch("https://push.test/v3/notifications", { ...request, headers });
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "invalid_signature" });
+    const receipts = await runInDurableObject(stub(), async (_instance: PushRegistry, state) =>
+      state.storage.sql.exec<{ count: number }>("SELECT COUNT(*) AS count FROM relay_requests").one().count,
+    );
+    expect(receipts).toBe(0);
+  });
+
   test("replays a terminal APNs outcome without a second provider send", async () => {
     await initializeAndSeed();
     const providerFetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(null, { status: 200, headers: { "apns-id": "provider-id" } }));

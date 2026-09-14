@@ -655,10 +655,18 @@ export class AutomationScheduler {
 
   private arm(): void {
     if (!this.started || !this.admissionOpen || this.timer) return;
-    const retryTimes = this.store.snapshot().flatMap((record) => record.currentRun?.retryAt ? [Date.parse(record.currentRun.retryAt)] : []);
-    const dueTimes = this.store.snapshot().flatMap((record) => record.activation === "enabled" && record.nextOccurrenceAt
-      ? [Date.parse(record.nextOccurrenceAt)] : []);
-    const nearest = [...retryTimes, ...dueTimes].sort((left, right) => left - right)[0];
+    const records = this.store.snapshot();
+    let nearest: number | undefined;
+    for (const record of records) {
+      if (record.currentRun?.retryAt) {
+        const retryAt = Date.parse(record.currentRun.retryAt);
+        if (nearest === undefined || retryAt < nearest) nearest = retryAt;
+      }
+      if (record.activation === "enabled" && record.nextOccurrenceAt) {
+        const nextOccurrenceAt = Date.parse(record.nextOccurrenceAt);
+        if (nearest === undefined || nextOccurrenceAt < nearest) nearest = nextOccurrenceAt;
+      }
+    }
     const now = this.now();
     const requestedDelay = nearest === undefined ? MAXIMUM_TIMER_DELAY_MS : nearest - now;
     const delay = Math.max(0, Math.min(MAXIMUM_TIMER_DELAY_MS, Math.max(requestedDelay, this.nextScanNotBefore - now)));

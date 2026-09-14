@@ -202,7 +202,9 @@ daily/weekly triggers. Calendar gaps advance to the first valid local minute and
 repeated local minutes choose the earlier instant. Misfire policy is `latest` or
 `skip`; overlap policy is `skip` or one `queueLatest` occurrence. Catch-up,
 history, dispatch batches, timers, prompts, storage, and concurrency are all
-bounded. Recurrence advances from intended schedule time rather than completion
+bounded. Scheduler timer arming derives the earliest retry or enabled occurrence
+from one owned catalog snapshot, without sharing that read across durable writes
+or dispatch. Recurrence advances from intended schedule time rather than completion
 time, and clock movement cannot recreate an already-recorded occurrence.
 
 An Automation target is exactly one existing persisted user session or one
