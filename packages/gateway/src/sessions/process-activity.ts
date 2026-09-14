@@ -101,6 +101,10 @@ function boundedDurationMs(value: number | undefined, startedAt?: string, termin
 }
 
 function extensionState(value: unknown): SessionProcessState {
+  // Producer `partial` means useful work needs attention; the existing native
+  // process enum has no partial member, so expose it as unsuccessful/attention
+  // rather than claiming completion or keeping the process live forever.
+  if (value === "partial") return "failed";
   return value === "queued" || value === "running" || value === "paused"
     || value === "completed" || value === "failed" || value === "stopped"
     || value === "rejected" || value === "unknown" ? value : "unknown";

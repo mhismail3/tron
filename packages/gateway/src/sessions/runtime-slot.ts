@@ -84,7 +84,7 @@ import {
 import type { ForkBoundaryAnchor } from "./fork-boundary.js";
 import { RunMarkerCompletionConflictError, type RunMarkerEvidence, type RunMarkerStore } from "./run-markers.js";
 import { attributeExtensions, attributedCommandOwner, attributedToolOwner, currentExtensionOwner, currentInvocationContext, trustedExtensionOriginKind, withInvocationContext } from "../extensions/owner-attribution.js";
-import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasObservedPausedProcessTerminal, hasStructuredExtensionRunActivity, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
+import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasObservedPausedProcessTerminal, hasStructuredExtensionRunActivity, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection } from "./invocation-receipts.js";
@@ -1468,6 +1468,10 @@ export class RuntimeSlot {
       ? wrapper.details as Record<string, unknown> : wrapper;
     const declaredRun = [root?.runId, root?.asyncId]
       .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
+    const embeddedHeader = root?.lifecycleProjection !== undefined
+      && root.lifecycleProjection !== null
+      && typeof root.lifecycleProjection === "object"
+      && !Array.isArray(root.lifecycleProjection);
     // Exact producer run ownership is established before a child path can
     // enrich the already tool-owned activity. Generic nested records cannot
     // nominate arbitrary sessions.
@@ -1482,7 +1486,7 @@ export class RuntimeSlot {
       const recoverySessionOwner = identityStrategy === "piArtifact"
         ? (record as Record<PropertyKey, unknown>)[RECOVERY_SESSION_OWNER]
         : undefined;
-      const sessionOwnerId = [recoverySessionOwner, record.runId, progress?.runId]
+      const sessionOwnerId = [recoverySessionOwner, embeddedHeader ? record.sessionOwnerId : undefined, record.runId, progress?.runId]
         .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
       const rawLabel = [progress?.agent, record.agent]
         .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
@@ -1811,9 +1815,20 @@ export class RuntimeSlot {
       bytes: bounded.omittedBytes,
       reason: bounded.hitCount && bounded.hitBytes ? "countAndBytes" as const : bounded.hitCount ? "count" as const : "bytes" as const,
     } : undefined;
+    const extensionChildOmissions = [...this.extensionActivities.values()].reduce<{ children: number; byteLimitExceeded: boolean } | undefined>((total, activity) => {
+      const current = activity.lifecycleOmissions;
+      if (!current) return total;
+      return {
+        children: (total?.children ?? 0) + current.children,
+        byteLimitExceeded: Boolean(total?.byteLimitExceeded || current.byteLimitExceeded),
+      };
+    }, undefined);
     return {
       activities: bounded.activities,
-      overview: processOverview(visible, this.processRevision, this.processAsOf, omissions),
+      overview: {
+        ...processOverview(visible, this.processRevision, this.processAsOf, omissions),
+        ...(extensionChildOmissions ? { extensionChildOmissions } : {}),
+      },
     };
   }
 
@@ -3563,10 +3578,13 @@ export class RuntimeSlot {
     const opened = await this.openOwnedExtensionArtifact(asyncDir, "status.json");
     if (!opened) return undefined;
     try {
-      const buffer = Buffer.alloc(MAX_EXTENSION_ARTIFACT_BYTES + 1);
-      const { bytesRead } = await opened.handle.read(buffer, 0, buffer.length, 0);
-      const bytes = buffer.subarray(0, bytesRead);
-      const lifecycleHeader = parseExtensionLifecycleProjectionHeader(bytes);
+      // Modern status files are admitted from a small first-property read. The
+      // larger legacy read below occurs only after the first key is proven not
+      // to be lifecycleProjection, preserving the old header-less fallback.
+      const headerBuffer = Buffer.alloc(MAX_EXTENSION_LIFECYCLE_HEADER_BYTES);
+      const { bytesRead: headerBytesRead } = await opened.handle.read(headerBuffer, 0, headerBuffer.length, 0);
+      const headerBytes = headerBuffer.subarray(0, headerBytesRead);
+      const lifecycleHeader = parseExtensionLifecycleProjectionHeader(headerBytes);
       if (lifecycleHeader !== undefined) {
         const projection = inspectExtensionLifecycleProjection(lifecycleHeader);
         if (!projection) return undefined;
@@ -3576,7 +3594,10 @@ export class RuntimeSlot {
       }
       // A first lifecycleProjection key marks a modern artifact even when its
       // value is truncated or malformed; do not fall back to report parsing.
-      if (hasExtensionLifecycleProjectionProperty(bytes)) return undefined;
+      if (hasExtensionLifecycleProjectionProperty(headerBytes)) return undefined;
+      const buffer = Buffer.alloc(MAX_EXTENSION_ARTIFACT_BYTES + 1);
+      const { bytesRead } = await opened.handle.read(buffer, 0, buffer.length, 0);
+      const bytes = buffer.subarray(0, bytesRead);
       if (bytesRead > MAX_EXTENSION_ARTIFACT_BYTES) {
         return this.readOversizedTerminalExtensionArtifact(asyncDir, bytes.subarray(0, MAX_EXTENSION_ARTIFACT_BYTES), opened.directory);
       }
@@ -4201,7 +4222,7 @@ export class RuntimeSlot {
       // duplicate canonical runId or either mismatch fails closed.
       if (canonical?.ambiguous || (canonical?.toolCallId && canonical.toolCallId !== toolCallId)
         || !ownership || ownership.toolCallId !== toolCallId) {
-        this.warnExtensionArtifact("ownership-mismatch", `${runId}\0${toolCallId}`);
+          this.warnExtensionArtifact("ownership-mismatch", `${runId}\0${toolCallId}`);
         return;
       }
       if (ownership.asyncDir) {
@@ -4224,7 +4245,7 @@ export class RuntimeSlot {
         useArtifactStartedAt: false,
       });
       if (!normalized) {
-        this.warnExtensionArtifact("invalid-timestamp", `${runId}\0${toolCallId}`);
+          this.warnExtensionArtifact("invalid-timestamp", `${runId}\0${toolCallId}`);
         return;
       }
       const { status: artifactState, updatedAt, completedAt, durationMs } = normalized;

@@ -117,15 +117,77 @@ export function parseExtensionLifecycleProjectionHeader(bytes: Uint8Array): unkn
   return headerJSON(bytes.subarray(valueStart, valueEnd));
 }
 
+const lifecycleProjectionStates = new Set(["queued", "running", "complete", "failed", "partial", "paused", "stopped", "rejected"]);
+const lifecycleProjectionNodeKeys = new Set(["id", "kind", "label", "state", "startedAt", "updatedAt", "endedAt", "sessionFile", "sessionOwnerId", "activity", "hostStep", "children"]);
+const lifecycleProjectionActivityKeys = new Set(["state", "currentTool", "lastActivityAt", "currentToolStartedAt", "turnCount", "toolCount"]);
+const lifecycleProjectionHostKeys = new Set(["kind", "provider", "role", "state", "verdict", "reasonCode", "detail", "target", "stale", "report"]);
+
+function boundedProjectionTime(value: unknown): boolean {
+  return value === undefined || Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function boundedProjectionString(value: unknown, maximumBytes: number, required = false): boolean {
+  return typeof value === "string" && (!required || value.length > 0) && Buffer.byteLength(value) <= maximumBytes && !/[\0]/u.test(value);
+}
+
+function validProjectionHost(value: unknown): boolean {
+  const host = record(value);
+  if (!host || [...Object.keys(host)].some((key) => !lifecycleProjectionHostKeys.has(key))) return false;
+  return (host.kind === "command" || host.kind === "ci" || host.kind === "gate")
+    && (host.state === "pending" || host.state === "running" || host.state === "done" || host.state === "error" || host.state === "cancelled")
+    && (host.verdict === undefined || host.verdict === "pass" || host.verdict === "fail" || host.verdict === "inconclusive")
+    && (host.stale === undefined || typeof host.stale === "boolean")
+    && (host.provider === undefined || boundedProjectionString(host.provider, 160))
+    && (host.role === undefined || boundedProjectionString(host.role, 160))
+    && (host.reasonCode === undefined || boundedProjectionString(host.reasonCode, 160))
+    && (host.detail === undefined || boundedProjectionString(host.detail, 2_048))
+    && (host.target === undefined || boundedProjectionString(host.target, 512))
+    && (host.report === undefined || boundedProjectionString(host.report, 512));
+}
+
+function validProjectionActivity(value: unknown): boolean {
+  const activity = record(value);
+  if (!activity || [...Object.keys(activity)].some((key) => !lifecycleProjectionActivityKeys.has(key))) return false;
+  return (activity.state === undefined || boundedProjectionString(activity.state, 160))
+    && (activity.currentTool === undefined || boundedProjectionString(activity.currentTool, 160))
+    && boundedProjectionTime(activity.lastActivityAt) && boundedProjectionTime(activity.currentToolStartedAt)
+    && (activity.turnCount === undefined || Number.isSafeInteger(activity.turnCount) && (activity.turnCount as number) >= 0)
+    && (activity.toolCount === undefined || Number.isSafeInteger(activity.toolCount) && (activity.toolCount as number) >= 0);
+}
+
+function validProjectionNode(value: unknown, depth: number, runId: string, root: boolean): boolean {
+  const node = record(value);
+  if (!node || [...Object.keys(node)].some((key) => !lifecycleProjectionNodeKeys.has(key))) return false;
+  if (!boundedProjectionString(node.id, 160, true) || !boundedProjectionString(node.label, 160, true)
+    || typeof node.kind !== "string" || !["subagent", "workflow", "step", "host-step"].includes(node.kind)
+    || typeof node.state !== "string" || !lifecycleProjectionStates.has(node.state)
+    || !boundedProjectionTime(node.startedAt) || !boundedProjectionTime(node.updatedAt) || !boundedProjectionTime(node.endedAt)
+    || (node.sessionFile !== undefined && (!boundedProjectionString(node.sessionFile, 4_096, true) || typeof node.sessionFile !== "string" || !node.sessionFile.startsWith("/")))
+    || (node.sessionOwnerId !== undefined && !boundedProjectionString(node.sessionOwnerId, 256, true))
+    || (node.activity !== undefined && !validProjectionActivity(node.activity))
+    || (node.hostStep !== undefined && (node.kind !== "host-step" || !validProjectionHost(node.hostStep)))) return false;
+  if (root && (node.id !== runId || node.kind === "host-step" || node.startedAt === undefined || node.updatedAt === undefined)) return false;
+  if (terminalLifecycleStates.has(extensionLifecycleState(node.state)) && node.endedAt === undefined) return false;
+  if (node.children !== undefined) {
+    if (!Array.isArray(node.children) || node.children.length > 32 || depth >= MAX_DEPTH) return false;
+    if (!node.children.every((child) => validProjectionNode(child, depth + 1, runId, false))) return false;
+  }
+  return true;
+}
+
 function validLifecycleProjection(value: unknown): value is ExtensionLifecycleProjection {
   const source = record(value);
   const caps = record(source?.caps);
   const omitted = record(source?.omitted);
   const root = record(source?.root);
-  if (source?.version !== 1 || typeof source.runId !== "string" || !text(source.runId, 256)
-    || !Number.isSafeInteger(source.generatedAt) || (source.generatedAt as number) < 0 || !caps || !omitted || !root) return false;
+  if (!source || [...Object.keys(source)].some((key) => !["version", "runId", "toolCallId", "sessionId", "generatedAt", "caps", "omitted", "root"].includes(key))) return false;
+  if (source.version !== 1 || !boundedProjectionString(source.runId, 256, true)
+    || (source.toolCallId !== undefined && !boundedProjectionString(source.toolCallId, 256, true))
+    || (source.sessionId !== undefined && !boundedProjectionString(source.sessionId, 256, true))
+    || !Number.isSafeInteger(source.generatedAt) || (source.generatedAt as number) < 0 || !caps || !omitted || !root
+    || !validProjectionNode(root, 0, source.runId as string, true)) return false;
   const capValues = [caps.maxRuns, caps.maxChildrenPerNode, caps.maxDepth, caps.maxStringLength, caps.maxSerializedBytes];
-  if (capValues.some((value) => !Number.isSafeInteger(value) || (value as number) < 0 || (value as number) > MAX_EXTENSION_LIFECYCLE_HEADER_BYTES * 8)) return false;
+  if (capValues.some((entry) => !Number.isSafeInteger(entry) || (entry as number) < 0 || (entry as number) > MAX_EXTENSION_LIFECYCLE_HEADER_BYTES * 8)) return false;
   return Number.isSafeInteger(omitted.runs) && (omitted.runs as number) >= 0
     && Number.isSafeInteger(omitted.children) && (omitted.children as number) >= 0
     && typeof omitted.byteLimitExceeded === "boolean";
@@ -138,23 +200,35 @@ export function inspectExtensionLifecycleProjection(value: unknown): ExtensionLi
 export function lifecycleProjectionArtifact(projection: ExtensionLifecycleProjection): Record<string, unknown> {
   const root = projection.root;
   const activity = record(root.activity);
-  const children = Array.isArray(root.children) ? root.children : [];
-  const steps = children.map((child) => {
-    const node = record(child);
-    if (!node) return child;
+  const projectionNodeArtifact = (value: unknown): unknown => {
+    const node = record(value);
+    if (!node) return value;
+    const nodeActivity = record(node.activity);
     return {
       id: node.id,
+      runId: node.id,
       agent: node.label,
       state: node.state,
       status: node.state,
       updatedAt: node.updatedAt,
       startedAt: node.startedAt,
       endedAt: node.endedAt,
-      activity: node.activity,
-      children: node.children,
+      sessionFile: node.sessionFile,
+      sessionOwnerId: node.sessionOwnerId,
+      ...(nodeActivity ? {
+        activityState: nodeActivity.state,
+        currentTool: nodeActivity.currentTool,
+        currentToolStartedAt: nodeActivity.currentToolStartedAt,
+        lastActivityAt: nodeActivity.lastActivityAt,
+        turnCount: nodeActivity.turnCount,
+        toolCount: nodeActivity.toolCount,
+      } : {}),
+      ...(Array.isArray(node.children) ? { children: node.children.map(projectionNodeArtifact) } : {}),
       hostStep: node.hostStep,
     };
-  });
+  };
+  const children = Array.isArray(root.children) ? root.children : [];
+  const steps = children.map(projectionNodeArtifact);
   return {
     lifecycleArtifactVersion: 3,
     runId: projection.runId,
@@ -164,12 +238,18 @@ export function lifecycleProjectionArtifact(projection: ExtensionLifecycleProjec
     mode: root.kind,
     startedAt: root.startedAt,
     lastUpdate: root.updatedAt,
+    ...(root.endedAt !== undefined ? {
+      endedAt: root.endedAt,
+      completedAt: root.endedAt,
+      ...(typeof root.startedAt === "number" && typeof root.endedAt === "number" && root.endedAt >= root.startedAt ? { durationMs: root.endedAt - root.startedAt } : {}),
+    } : {}),
     ...(activity?.state ? { activityState: activity.state } : {}),
     ...(activity?.currentTool ? { currentTool: activity.currentTool } : {}),
     ...(activity?.currentToolStartedAt ? { currentToolStartedAt: activity.currentToolStartedAt } : {}),
     ...(activity?.lastActivityAt ? { lastActivityAt: activity.lastActivityAt } : {}),
-    ...(activity?.turnCount ? { turnCount: activity.turnCount } : {}),
-    ...(activity?.toolCount ? { toolCount: activity.toolCount } : {}),
+    ...(activity?.turnCount !== undefined ? { turnCount: activity.turnCount } : {}),
+    ...(activity?.toolCount !== undefined ? { toolCount: activity.toolCount } : {}),
+    ...(projection.omitted.children > 0 || projection.omitted.byteLimitExceeded ? { lifecycleOmissions: { children: projection.omitted.children, byteLimitExceeded: projection.omitted.byteLimitExceeded } } : {}),
     steps,
     lifecycleProjection: projection,
   };
@@ -255,16 +335,16 @@ function producerTime(value: unknown): string | undefined {
 }
 
 function status(value: unknown, fallback: ExtensionRunStatus): ExtensionRunStatus {
-  if (value === "failed") return "failed";
+  if (value === "failed" || value === "partial") return "failed";
   if (value === "completed" || value === "complete" || value === "stopped" || value === "rejected") return "completed";
   if (value === "running" || value === "pending" || value === "detached" || value === "paused" || value === "queued") return "running";
   return fallback;
 }
 
 const lifecycleStates = new Set<ExtensionRunLifecycleState>([
-  "queued", "running", "paused", "completed", "failed", "stopped", "rejected", "unknown",
+  "queued", "running", "paused", "partial", "completed", "failed", "stopped", "rejected", "unknown",
 ]);
-export const terminalLifecycleStates = new Set<ExtensionRunLifecycleState>(["completed", "failed", "stopped", "rejected"]);
+export const terminalLifecycleStates = new Set<ExtensionRunLifecycleState>(["completed", "failed", "partial", "stopped", "rejected"]);
 export const EXTENSION_LIFECYCLE_ARTIFACT_VERSION = 3;
 
 export type ExtensionArtifactRejectionReason =
@@ -419,7 +499,7 @@ export function normalizeExtensionArtifact(
   const lifecycleState = extensionLifecycleState(value.state ?? value.status);
   if (lifecycleState === "unknown") return undefined;
   const terminal = terminalLifecycleStates.has(lifecycleState);
-  const status = lifecycleState === "failed" ? "failed" : terminal ? "completed" : "running";
+  const status = lifecycleState === "failed" || lifecycleState === "partial" ? "failed" : terminal ? "completed" : "running";
   const artifactStartedAt = value.startedAt === undefined ? undefined : isoTime(value.startedAt);
   const artifactUpdatedAt = value.lastUpdate === undefined ? undefined : isoTime(value.lastUpdate);
   const endedAtAlias = value.endedAt === undefined ? undefined : isoTime(value.endedAt);
@@ -475,7 +555,9 @@ function lifecycleFrom(
   return {
     version: 1,
     state,
-    attention: priorTerminal ? (prior?.attention ?? "none") : attention(details?.attention ?? details?.attentionState),
+    attention: priorTerminal
+      ? (prior?.attention ?? "none")
+      : state === "partial" ? "needsAttention" : attention(details?.attention ?? details?.attentionState),
     sequence: Math.max(0, Number.isSafeInteger(base.sequence) ? base.sequence! : (prior?.sequence ?? 0)),
     observedAt: base.observedAt ?? prior?.observedAt ?? base.updatedAt,
     ...(producerUpdatedAt ? { producerUpdatedAt } : {}),
@@ -552,7 +634,8 @@ function child(
   const source = record(value);
   if (!source) return undefined;
   const progress = progressRecord(source);
-  const label = text(progress?.agent ?? source.agent, 256) ?? `Child ${index + 1}`;
+  const sourceActivity = record(source.activity);
+  const label = text(progress?.agent ?? source.agent ?? source.label, 256) ?? `Child ${index + 1}`;
   const nestedValues = Array.isArray(source.children)
     ? source.children
     : Array.isArray(source.steps) ? source.steps : [];
@@ -564,12 +647,12 @@ function child(
     fallbackStatus === "failed" ? "failed" : fallbackStatus === "completed" ? "completed" : "running");
   const childAttention = attention(progress?.attention ?? progress?.attentionState ?? source.attention ?? source.attentionState);
   const task = text(progress?.task ?? source.task ?? source.description ?? source.summary, 2_048);
-  const lastActivityAt = isoTime(progress?.lastActivityAt ?? source.lastActivityAt ?? source.updatedAt);
-  const currentTool = text(progress?.currentTool ?? source.currentTool, 256);
-  const currentToolStartedAt = isoTime(progress?.currentToolStartedAt ?? source.currentToolStartedAt);
-  const currentPath = displayPath(progress?.currentPath ?? source.currentPath);
-  const toolCount = number(progress?.toolCount ?? source.toolCount);
-  const turnCount = number(progress?.turnCount ?? source.turnCount);
+  const lastActivityAt = isoTime(progress?.lastActivityAt ?? source.lastActivityAt ?? sourceActivity?.lastActivityAt ?? source.updatedAt);
+  const currentTool = text(progress?.currentTool ?? source.currentTool ?? sourceActivity?.currentTool, 256);
+  const currentToolStartedAt = isoTime(progress?.currentToolStartedAt ?? source.currentToolStartedAt ?? sourceActivity?.currentToolStartedAt);
+  const currentPath = displayPath(progress?.currentPath ?? source.currentPath ?? sourceActivity?.currentPath);
+  const toolCount = number(progress?.toolCount ?? source.toolCount ?? sourceActivity?.toolCount);
+  const turnCount = number(progress?.turnCount ?? source.turnCount ?? sourceActivity?.turnCount);
   const durationMs = number(progress?.durationMs ?? source.durationMs);
   const recentOutput = output(
     progress?.recentOutput
@@ -840,6 +923,12 @@ export function projectExtensionRunActivity(
     ...(turnCount === undefined ? {} : { turnCount: Math.max(0, Math.round(turnCount)) }),
     ...(durationMs === undefined ? {} : { durationMs: Math.max(0, Math.round(durationMs)) }),
     ...(recentOutput ? { output: recentOutput } : {}),
+    ...((() => {
+      const omission = record(details?.lifecycleOmissions);
+      return omission && Number.isSafeInteger(omission.children) && (omission.children as number) >= 0 && typeof omission.byteLimitExceeded === "boolean"
+        ? { lifecycleOmissions: { children: omission.children as number, byteLimitExceeded: omission.byteLimitExceeded } }
+        : {};
+    })()),
     children: children.length > 0 ? children : previous?.children ?? [],
     lifecycle: lifecycleFrom(details, {
       status: activityStatus,

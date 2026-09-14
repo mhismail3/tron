@@ -275,7 +275,7 @@ export type ExtensionRunStatus = "running" | "completed" | "failed";
 
 /** Rich lifecycle state. `status` remains the coarse compatibility field above. */
 export type ExtensionRunLifecycleState =
-  | "queued" | "running" | "paused" | "completed" | "failed" | "stopped" | "rejected" | "unknown";
+  | "queued" | "running" | "paused" | "partial" | "completed" | "failed" | "stopped" | "rejected" | "unknown";
 export type ExtensionRunAttention = "none" | "activeLongRunning" | "needsAttention";
 export type ExtensionRunVisibility = "current" | "recent" | "historical" | "unknown";
 
@@ -362,6 +362,8 @@ export interface ExtensionRunActivity {
   children: ExtensionRunChild[];
   /** Additive rich lifecycle projection; absent on old Gateway snapshots. */
   lifecycle?: ExtensionRunLifecycle;
+  /** Exact bounded child omission reported by the producer header. */
+  lifecycleOmissions?: { children: number; byteLimitExceeded: boolean };
 }
 
 export interface ExtensionActivityDelta {
@@ -429,6 +431,8 @@ export interface SessionProcessOverview {
   visibility: "hidden" | "active" | "recent";
   nearestExpiry?: string;
   omissions?: { count: number; bytes: number; reason: "count" | "bytes" | "countAndBytes" };
+  /** Child omissions are distinct from Gateway row-cap omissions. */
+  extensionChildOmissions?: { children: number; byteLimitExceeded: boolean };
 }
 
 export interface SessionProcessDelta {

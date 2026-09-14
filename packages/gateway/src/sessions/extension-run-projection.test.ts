@@ -20,7 +20,7 @@ describe("lifecycleProjection header", () => {
     generatedAt: 10,
     caps: { maxRuns: 1, maxChildrenPerNode: 8, maxDepth: 3, maxStringLength: 160, maxSerializedBytes: 32_768 },
     omitted: { runs: 0, children: 1, byteLimitExceeded: false },
-    root: { id: "run-1", kind: "workflow", label: "workflow", state: "running", children: [{ id: "host", kind: "host-step", label: "CI", state: "complete", hostStep: { kind: "ci", state: "done", provider: "github", verdict: "pass" } }] },
+    root: { id: "run-1", kind: "workflow", label: "workflow", state: "running", startedAt: 1, updatedAt: 2, children: [{ id: "host", kind: "host-step", label: "CI", state: "running", updatedAt: 2, hostStep: { kind: "ci", state: "running", provider: "github" } }] },
   } as const;
 
   it("parses only a complete first property and preserves host metadata", () => {
@@ -28,16 +28,25 @@ describe("lifecycleProjection header", () => {
     const parsed = parseExtensionLifecycleProjectionHeader(bytes);
     expect(inspectExtensionLifecycleProjection(parsed)).toEqual(projection);
     expect(hasExtensionLifecycleProjectionProperty(bytes)).toBe(true);
-    expect(lifecycleProjectionArtifact(projection).steps[0]).toMatchObject({ hostStep: { provider: "github", verdict: "pass" } });
+    expect(lifecycleProjectionArtifact(projection).steps[0]).toMatchObject({ hostStep: { provider: "github" } });
   });
 
-  it("rejects truncated or non-first lifecycle headers without legacy parsing", () => {
+  it("rejects truncated, non-first, and malformed lifecycle headers without legacy parsing", () => {
     const truncated = Buffer.from('{"lifecycleProjection":{"version":1,"runId":"run-1"');
     expect(parseExtensionLifecycleProjectionHeader(truncated)).toBeUndefined();
     expect(hasExtensionLifecycleProjectionProperty(truncated)).toBe(true);
     const later = Buffer.from(JSON.stringify({ state: "complete", lifecycleProjection: projection }));
     expect(parseExtensionLifecycleProjectionHeader(later)).toBeUndefined();
     expect(hasExtensionLifecycleProjectionProperty(later)).toBe(false);
+    expect(inspectExtensionLifecycleProjection({ ...projection, root: { ...projection.root, children: [{ foo: "fake" }] } })).toBeUndefined();
+    expect(inspectExtensionLifecycleProjection({ ...projection, root: { ...projection.root, activity: { currentTool: 42 } } })).toBeUndefined();
+    expect(inspectExtensionLifecycleProjection({ ...projection, root: { ...projection.root, children: [{ ...projection.root.children[0], hostStep: { kind: "ci", state: "done", provider: "github", extra: true } }] } })).toBeUndefined();
+  });
+
+  it("maps producer partial state to failed with honest attention", () => {
+    const partial = { state: "partial", startedAt: 1, lastUpdate: 3, endedAt: 2 };
+    const activity = projectExtensionRunActivity(partial, { ...base, status: "failed", authoritativeStatus: false });
+    expect(activity).toMatchObject({ status: "failed", lifecycle: { state: "partial", attention: "needsAttention" } });
   });
 });
 
