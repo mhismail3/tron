@@ -920,7 +920,10 @@ client refreshes its explicitly scoped canonical projection. `session.create` ac
 optional source-control strategy. The Gateway admits only exact mode-specific objects and
 rejects unknown or cross-mode fields before constructing the internal request. `existingCheckout`
 passes the selected directory through unchanged; `newBranchWorktree` creates a managed Git worktree on a new branch from `HEAD` or
-a validated committed base ref; and `existingBranchWorktree` creates a managed worktree from
+a validated committed base ref. Read-only `git.inspect` includes up to 200 local branch choices
+with worktree occupancy and 100 recent commits reachable from refs; these are bounded UI hints,
+not permission to create a checkout, and creation revalidates current Git state.
+`existingBranchWorktree` creates a managed worktree from
 an existing local branch. Git arguments are passed without a shell, branch/ref inputs are
 validated, implicit-`HEAD` creation refuses dirty checkouts, and a worktree is removed again
 if session creation fails. Managed worktree roots and repository directories are created and

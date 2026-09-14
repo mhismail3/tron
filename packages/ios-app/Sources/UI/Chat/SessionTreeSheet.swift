@@ -440,7 +440,6 @@ struct HistoryEntryDetailsSheet: View {
     @State private var store = SessionHistoryEntryStore()
     @State private var offset = 0
     @State private var revision = 0
-    @State private var showingMetadata = false
     private var active: Bool { activity.allowsPresentationPublication && (coordinator?.activity(for: surfaceToken).allowsPresentationPublication ?? true) }
     private var current: Bool { SessionHistoryReadIdentity.current(model: model, sessionID: identity.target.sessionID) == identity }
     var body: some View {
@@ -450,18 +449,17 @@ struct HistoryEntryDetailsSheet: View {
                 else if let page = store.page {
                     TronReadOnlyTextView(text: page.text, style: node.role == .user || node.role == .assistant ? .body : .code)
                         .id(page.offset)
-                    VStack(spacing: 8) {
+                    // Paging remains available only for bounded multipart entries.
+                    if page.previousOffset != nil || page.nextOffset != nil {
                         HStack {
                             if let previous = page.previousOffset { Button("Previous part") { offset = previous } }
                             Spacer()
-                            Text(page.nextOffset == nil ? "End of content" : "Content continues")
-                                .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted)
-                            Spacer()
                             if let next = page.nextOffset { Button("Continue reading") { offset = next } }
-                        }.font(TronTypography.buttonSM).disabled(store.loading)
-                        Button("Entry information", systemImage: "info.circle") { showingMetadata = true }
-                            .font(TronTypography.buttonSM)
-                    }.padding(12)
+                        }
+                        .font(TronTypography.buttonSM)
+                        .disabled(store.loading)
+                        .padding(12)
+                    }
                 } else if store.error == nil { TronLoadingState(label: "Loading entry…") }
                 if current, let error = store.error { TronSettingsNotice(message: error, retry: { revision &+= 1 }).padding(12) }
             }
@@ -482,12 +480,6 @@ struct HistoryEntryDetailsSheet: View {
             }
             .onChange(of: active) { _, value in if !value { store.suspend() } }
             .onDisappear { store.suspend() }
-            .tronManagedSheet(isPresented: $showingMetadata, identity: "history.entry-information") {
-                if let page = store.page {
-                    JSONFieldSheet(selection: JSONFieldSelection(title: "Entry Information", components: []),
-                                   rootValue: page.metadata, accent: .tronSessionTeal)
-                }
-            }
         }
         .tronTopBlur(.sheet).presentationDetents([.medium, .large]).presentationDragIndicator(.hidden).tint(.tronSessionTeal)
     }

@@ -85,6 +85,7 @@ struct CanonicalResourceChip: View, Equatable {
             tone: tone,
             material: .glass,
             interactive: detailEntry != nil,
+            accentOverride: CanonicalResourceChipPresentation.accent(for: resource),
             cornerRadiusOverride: ChatToolChipShapePolicy.cornerRadius
         ) {
             ChatCompactPillLabel(
@@ -93,7 +94,8 @@ struct CanonicalResourceChip: View, Equatable {
                 detail: CanonicalResourceChipPresentation.kindTitle(for: resource),
                 tone: tone,
                 iconSize: ChatCompactPillLayoutPolicy.toolIconSize,
-                titleWeight: .bold
+                titleWeight: .bold,
+                foregroundOverride: resource.source == .skill ? CanonicalResourceChipPresentation.accent(for: resource) : nil
             )
         }
         .chatCompactPillInteraction(

@@ -920,6 +920,7 @@ struct ComposerResourceChip: View {
             tone: tone,
             material: .glass,
             interactive: true,
+            accentOverride: accent,
             cornerRadiusOverride: ChatToolChipShapePolicy.cornerRadius
         ) {
             HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
@@ -930,7 +931,8 @@ struct ComposerResourceChip: View {
                             title: resource.friendlyName,
                             tone: tone,
                             iconSize: TronTypography.sizeBody,
-                            titleWeight: .bold
+                            titleWeight: .bold,
+                            foregroundOverride: resource.source == .skill ? accent : nil
                         )
                         ComposerResourceBadges(
                             origin: resource.resourceOrigin, scope: resource.resourceScope,

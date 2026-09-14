@@ -13,6 +13,20 @@ struct GitInspection: Equatable, Sendable {
     let isRepository: Bool
     let branch: String?
     let isDirty: Bool
+    var branches: [Branch] = []
+    var commits: [Commit] = []
+
+    struct Branch: Equatable, Sendable, Identifiable {
+        let name: String
+        let checkedOut: Bool
+        var id: String { name }
+    }
+
+    struct Commit: Equatable, Sendable, Identifiable {
+        let oid: String
+        let subject: String
+        var id: String { oid }
+    }
 }
 
 struct GatewayLogRecord: Identifiable, Hashable, Codable, Sendable {
@@ -708,7 +722,17 @@ struct GatewayDiagnosticsService: Sendable {
         return GitInspection(
             isRepository: object?["isRepository"]?.boolValue == true,
             branch: object?["branch"]?.stringValue,
-            isDirty: object?["dirty"]?.boolValue ?? false
+            isDirty: object?["dirty"]?.boolValue ?? false,
+            branches: (object?["branches"]?.arrayValue ?? []).compactMap { value in
+                guard let name = value.objectValue?["name"]?.stringValue,
+                      let checkedOut = value.objectValue?["checkedOut"]?.boolValue else { return nil }
+                return GitInspection.Branch(name: name, checkedOut: checkedOut)
+            },
+            commits: (object?["commits"]?.arrayValue ?? []).compactMap { value in
+                guard let oid = value.objectValue?["oid"]?.stringValue,
+                      let subject = value.objectValue?["subject"]?.stringValue else { return nil }
+                return GitInspection.Commit(oid: oid, subject: subject)
+            }
         )
     }
 

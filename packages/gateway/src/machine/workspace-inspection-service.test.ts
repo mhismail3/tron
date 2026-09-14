@@ -58,6 +58,32 @@ describe("WorkspaceInspectionService", () => {
     });
   });
 
+  it("offers committed bases and marks branches occupied by any worktree", async () => {
+    const root = await repository();
+    await git(root, "branch", "available");
+    const sibling = await mkdtemp(join(tmpdir(), "tron-worktree-choice-"));
+    roots.push(sibling);
+    await git(root, "worktree", "add", "-b", "occupied", join(sibling, "checkout"));
+    const before = await git(root, "status", "--porcelain");
+    const inspection = await inspectGitPath(root);
+    expect(inspection.branches).toEqual(expect.arrayContaining([
+      { name: "available", checkedOut: false },
+      { name: "occupied", checkedOut: true },
+      { name: "feature/workspace.inspector", checkedOut: true },
+    ]));
+    expect(inspection.commits).toEqual([{ oid: await git(root, "rev-parse", "HEAD"), subject: "base" }]);
+    expect(await git(root, "status", "--porcelain")).toBe(before);
+    await git(root, "checkout", "--detach");
+    expect((await inspectGitPath(root)).branches).toContainEqual({ name: "feature/workspace.inspector", checkedOut: false });
+  });
+
+  it("offers no refs for an unborn repository", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-unborn-choice-"));
+    roots.push(root);
+    await git(root, "init", "-q");
+    expect(await inspectGitPath(root)).toMatchObject({ isRepository: true, branches: [], commits: [] });
+  });
+
   it("keeps listing and file reads inside the workspace without following symbolic links", async () => {
     const root = await repository();
     await mkdir(join(root, "Sources"));

@@ -398,13 +398,37 @@ function revisionFor(root: string, repository: WorkspaceRepositoryInspection | u
   return createHash("sha256").update(JSON.stringify({ root, repository })).digest("base64url");
 }
 
-export async function inspectGitPath(path: string): Promise<{ isRepository: boolean; branch?: string; dirty?: boolean }> {
+export async function inspectGitPath(path: string): Promise<{
+  isRepository: boolean;
+  branch?: string;
+  dirty?: boolean;
+  branches?: Array<{ name: string; checkedOut: boolean }>;
+  commits?: Array<{ oid: string; subject: string }>;
+}> {
   const repository = await statusInspection(path);
   if (!repository) return { isRepository: false };
+  // These are bounded selection hints, not checkout authority. Creation still
+  // validates the selected ref and worktree occupancy against current Git state.
+  const refs = await runGit(repository.root, [
+    "for-each-ref", "--count=200", "--sort=refname", "--format=%(refname:lstrip=2)%00%(if)%(worktreepath)%(then)true%(else)false%(end)", "refs/heads",
+  ]);
+  const branches = refs.stdout.toString("utf8").trimEnd().split("\n").filter(Boolean).map((line) => {
+    const [name, worktree] = line.split("\0");
+    return { name: name!, checkedOut: worktree === "true" };
+  });
+  const history = repository.unborn ? undefined : await runGit(repository.root, [
+    "log", "--all", "--max-count=100", "--format=%H%x00%s",
+  ]);
+  const commits = (history?.stdout.toString("utf8") ?? "").trimEnd().split("\n").filter(Boolean).map((line) => {
+    const [oid, subject] = line.split("\0");
+    return { oid: oid!, subject: subject ?? "" };
+  });
   return {
     isRepository: true,
     ...(repository.branch ? { branch: repository.branch } : {}),
     dirty: repository.dirty,
+    branches,
+    commits,
   };
 }
 

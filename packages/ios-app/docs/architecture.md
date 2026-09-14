@@ -1793,13 +1793,14 @@ Gateway produces that audit from a newline-terminated canonical byte cut capture
 The bounded file copy and HTML rendering continue outside that lane, so running, retrying, compacting, and Bash-active
 sessions remain exportable while later appends are deterministically excluded. JSONL does not linearize only the active branch.
 Agent Instructions presents only the complete assembled `systemPrompt` from the existing
-subscription-scoped context projection. There is no intervening summary, accounting,
+subscription-scoped context projection, rendered with the shared `TronMarkdownView` block renderer
+(headings, lists, tables, quotes, and code) in a selectable scroll surface. There is no intervening summary, accounting,
 capabilities inventory, or Read Full Instructions navigation step. It shares `TronDocumentSheet`
 with file previews: large-only presentation, blue title and icon-only Done, hidden native
 navigation background and bottom toolbar, a continuous document background, and the custom
-top blur supplied by the scroll owner. Native document viewports extend through the bottom
+top blur supplied by the scroll owner. Plain file-preview native document viewports extend through the bottom
 safe area rather than ending at a blank strip; their internal insets protect the last line.
-The native reader also extends behind the navigation title. Its actual UIKit navigation
+The plain native reader also extends behind the navigation title. Its actual UIKit navigation
 safe area plus one 18-point TextKit inset protects the first line; the decorative blur's
 full fade height is not a second header gap. Horizontal padding belongs only to TextKit,
 and native layout never normalizes `contentOffset` (near-zero values are valid bounce

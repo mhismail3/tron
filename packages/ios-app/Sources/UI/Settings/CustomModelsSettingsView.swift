@@ -187,10 +187,10 @@ struct CustomModelsSettingsView: View {
                         TronTextSettingRow(icon: "network", title: "Base URL", value: editedProviderBinding(provider.baseURL, providerID: providerID), keyboard: .URL)
                     }
                 }
-                TronSettingsGroup("Models", detail: "One model ID per line. These appear in model selection.") {
+                TronSettingsGroup("Models", detail: "One model ID per line. These appear in model selection.", surfaceStyle: .uncontained) {
                     TextField("Model IDs", text: editedProviderBinding(provider.models, providerID: providerID), axis: .vertical)
                         .lineLimit(2...8).textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .tronField(monospaced: true, compact: true).padding(14)
+                        .tronField(monospaced: true, compact: true)
                 }
                 TronSettingsGroup("Protocol") {
                     TronSelectionRow(icon: "network", title: "API Format", value: apiTitle(api.wrappedValue)) {

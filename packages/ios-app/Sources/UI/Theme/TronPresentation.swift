@@ -1238,6 +1238,7 @@ struct TronGlassCard<Content: View>: View {
 }
 
 enum TronSettingsGroupSurfaceStyle: Equatable, Sendable {
+    case uncontained
     case glass
     case scrollOptimized
 }
@@ -1280,6 +1281,8 @@ struct TronSettingsGroup<Content: View>: View {
                 }
             }
             switch surfaceStyle {
+            case .uncontained:
+                content
             case .glass:
                 TronGlassCard(accent: settingsTheme?.accent ?? accent) { content }
             case .scrollOptimized:

@@ -124,6 +124,7 @@ struct ChatCompactPillSurface<Content: View>: View {
     let interactive: Bool
     let accentOverride: Color?
     let cornerRadiusOverride: CGFloat?
+    let verticalPadding: CGFloat
     @ViewBuilder let content: Content
 
     init(
@@ -132,6 +133,7 @@ struct ChatCompactPillSurface<Content: View>: View {
         interactive: Bool = false,
         accentOverride: Color? = nil,
         cornerRadiusOverride: CGFloat? = nil,
+        verticalPadding: CGFloat = ChatCompactPillLayoutPolicy.verticalPadding,
         @ViewBuilder content: () -> Content
     ) {
         self.tone = tone
@@ -139,6 +141,7 @@ struct ChatCompactPillSurface<Content: View>: View {
         self.interactive = interactive
         self.accentOverride = accentOverride
         self.cornerRadiusOverride = cornerRadiusOverride
+        self.verticalPadding = verticalPadding
         self.content = content()
     }
 
@@ -153,7 +156,7 @@ struct ChatCompactPillSurface<Content: View>: View {
         case .glass:
             content
                 .padding(.horizontal, ChatCompactPillLayoutPolicy.horizontalPadding)
-                .padding(.vertical, ChatCompactPillLayoutPolicy.verticalPadding)
+                .padding(.vertical, verticalPadding)
                 .contentShape(shape)
                 .glassEffect(
                     .regular.tint(surfaceAccent.opacity(0.18)).interactive(interactive),
@@ -162,7 +165,7 @@ struct ChatCompactPillSurface<Content: View>: View {
         case .flat:
             content
                 .padding(.horizontal, ChatCompactPillLayoutPolicy.horizontalPadding)
-                .padding(.vertical, ChatCompactPillLayoutPolicy.verticalPadding)
+                .padding(.vertical, verticalPadding)
                 .contentShape(shape)
                 .background(surfaceAccent.opacity(0.10), in: shape)
                 .overlay(shape.stroke(surfaceAccent.opacity(0.30), lineWidth: 0.5))
@@ -332,6 +335,7 @@ struct ChatCompactPillLabel<Trailing: View>: View {
     let progressOffsetX: CGFloat
     let titleWeight: Font.Weight
     let detailStyle: ChatCompactPillDetailStyle
+    let foregroundOverride: Color?
     @ViewBuilder let trailing: Trailing
 
     init(
@@ -344,6 +348,7 @@ struct ChatCompactPillLabel<Trailing: View>: View {
         progressOffsetX: CGFloat = 0,
         titleWeight: Font.Weight = .bold,
         detailStyle: ChatCompactPillDetailStyle = .status,
+        foregroundOverride: Color? = nil,
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.icon = icon
@@ -355,6 +360,7 @@ struct ChatCompactPillLabel<Trailing: View>: View {
         self.progressOffsetX = progressOffsetX
         self.titleWeight = titleWeight
         self.detailStyle = detailStyle
+        self.foregroundOverride = foregroundOverride
         self.trailing = trailing()
     }
 
@@ -362,14 +368,14 @@ struct ChatCompactPillLabel<Trailing: View>: View {
         HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
             ChatCompactPillLeadingIcon(
                 icon: icon,
-                accent: tone.primaryColor,
+                accent: foregroundOverride ?? tone.primaryColor,
                 showsProgress: showsProgress,
                 iconSize: iconSize,
                 progressOffsetX: progressOffsetX
             )
             Text(title)
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: titleWeight))
-                .foregroundStyle(tone.primaryColor)
+                .foregroundStyle(foregroundOverride ?? tone.primaryColor)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .background {
@@ -406,7 +412,7 @@ struct ChatCompactPillLabel<Trailing: View>: View {
                         ? TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium)
                         : TronTypography.code(size: TronTypography.sizeCaption, weight: .semibold))
                     .foregroundStyle(detailStyle == .summary
-                        ? Color.tronTextSecondary : tone.secondaryColor)
+                        ? Color.tronTextSecondary : (foregroundOverride ?? tone.secondaryColor))
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
@@ -427,7 +433,8 @@ extension ChatCompactPillLabel where Trailing == EmptyView {
         iconSize: CGFloat = ChatCompactPillLayoutPolicy.standardIconSize,
         progressOffsetX: CGFloat = 0,
         titleWeight: Font.Weight = .bold,
-        detailStyle: ChatCompactPillDetailStyle = .status
+        detailStyle: ChatCompactPillDetailStyle = .status,
+        foregroundOverride: Color? = nil
     ) {
         self.init(
             icon: icon,
@@ -439,6 +446,7 @@ extension ChatCompactPillLabel where Trailing == EmptyView {
             progressOffsetX: progressOffsetX,
             titleWeight: titleWeight,
             detailStyle: detailStyle,
+            foregroundOverride: foregroundOverride,
             trailing: { EmptyView() }
         )
     }

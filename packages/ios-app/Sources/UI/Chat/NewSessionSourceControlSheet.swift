@@ -58,38 +58,48 @@ struct NewSessionSourceControlSheet: View {
                         TronSettingsGroup(
                             selection.mode == .newBranchWorktree ? "New Branch" : "Existing Branch",
                             detail: branchDetail,
-                            accent: .tronTeal
+                            accent: .tronTeal,
+                            surfaceStyle: .uncontained
                         ) {
                             VStack(alignment: .leading, spacing: 10) {
-                                TextField(
-                                    selection.mode == .newBranchWorktree ? "feature/my-work" : "Branch name",
-                                    text: branchBinding
-                                )
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .tronField(
-                                    monospaced: true,
-                                    compact: true,
-                                    surfaceTint: Color.tronTeal.opacity(0.10),
-                                    border: Color.tronTeal.opacity(0.30)
-                                )
-
                                 if selection.mode == .newBranchWorktree {
-                                    TextField(
-                                        "Start from current commit",
-                                        text: baseBinding
-                                    )
-                                    .textInputAutocapitalization(.never)
-                                    .autocorrectionDisabled()
-                                    .tronField(
-                                        monospaced: true,
-                                        compact: true,
-                                        surfaceTint: Color.tronTeal.opacity(0.10),
-                                        border: Color.tronTeal.opacity(0.30)
-                                    )
+                                    TextField("feature/my-work", text: branchBinding)
+                                        .textInputAutocapitalization(.never)
+                                        .autocorrectionDisabled()
+                                        .tronField(
+                                            monospaced: true,
+                                            compact: true,
+                                            surfaceTint: Color.tronTeal.opacity(0.10),
+                                            border: Color.tronTeal.opacity(0.30)
+                                        )
+
+                                    TronSelectionRow(icon: "arrow.triangle.branch", title: "Start From", value: selection.base ?? "Current commit") {
+                                        Button("Current commit") { selection.base = nil }
+                                        Section("Local branches") {
+                                            ForEach(inspection?.branches ?? []) { branch in
+                                                Button(branch.name) { selection.base = "refs/heads/\(branch.name)" }
+                                            }
+                                        }
+                                        Section("Recent commits") {
+                                            ForEach(inspection?.commits ?? []) { commit in
+                                                Button("\(commit.oid.prefix(8)) · \(commit.subject)") { selection.base = commit.oid }
+                                            }
+                                        }
+                                    }
+                                    .tronGlassSurface(accent: .tronTeal)
+                                } else {
+                                    TronSelectionRow(icon: "arrow.triangle.branch", title: "Branch", value: selection.branch ?? "Choose a branch") {
+                                        ForEach(inspection?.branches ?? []) { branch in
+                                            Button(branch.checkedOut ? "\(branch.name) · Already checked out" : branch.name) {
+                                                selection.branch = branch.name
+                                            }
+                                            .disabled(branch.checkedOut)
+                                        }
+                                    }
+                                    .disabled(inspection?.branches.contains(where: { !$0.checkedOut }) != true)
+                                    .tronGlassSurface(accent: .tronTeal)
                                 }
                             }
-                            .padding(12)
                         }
                     }
 
@@ -135,9 +145,11 @@ struct NewSessionSourceControlSheet: View {
     private var branchDetail: String {
         switch selection.mode {
         case .newBranchWorktree:
-            return "A new worktree is created outside the checkout. Leave the base empty to use the current commit when clean."
+            return "Name the new branch, then choose its starting point. Lists show up to 200 local branches and 100 recent commits. Current commit requires a clean checkout."
         case .existingBranchWorktree:
-            return "The branch must exist locally and not already be checked out by another worktree."
+            return inspection?.branches.contains(where: { !$0.checkedOut }) == true
+                ? "Choose a local branch not already checked out by another worktree."
+                : "No available local branches in this inspection. Choose New Branch or reload the workspace."
         case .existingCheckout:
             return ""
         }
@@ -150,29 +162,22 @@ struct NewSessionSourceControlSheet: View {
         )
     }
 
-    private var baseBinding: Binding<String> {
-        Binding(
-            get: { selection.base ?? "" },
-            set: { selection.base = $0.isEmpty ? nil : $0 }
-        )
-    }
-
     private func choose(_ mode: SessionSourceControlMode) {
         guard mode == .existingCheckout || inspection?.isRepository == true else { return }
-        let currentBranch = inspection?.branch
         switch mode {
         case .existingCheckout:
             selection = .existing
         case .newBranchWorktree:
             selection = SessionSourceControlSelection(
                 mode: mode,
-                branch: selection.branch,
+                branch: selection.mode == .newBranchWorktree ? selection.branch : nil,
                 base: selection.base
             )
         case .existingBranchWorktree:
             selection = SessionSourceControlSelection(
                 mode: mode,
-                branch: selection.branch ?? currentBranch,
+                branch: inspection?.branches.first(where: { !$0.checkedOut && $0.name == selection.branch })?.name
+                    ?? inspection?.branches.first(where: { !$0.checkedOut })?.name,
                 base: nil
             )
         }

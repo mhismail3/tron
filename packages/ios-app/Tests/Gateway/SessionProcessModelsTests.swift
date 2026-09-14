@@ -93,6 +93,20 @@ struct SessionProcessModelsTests {
         }
     }
 
+    @Test("history timestamps use terminal time only, never start or observation time")
+    func historyCompletedTimestamp() throws {
+        let now = try #require(GatewayTimestamp.parse("2026-01-01T14:00:00Z"))
+        let zone = try #require(TimeZone(secondsFromGMT: 0))
+        let process = makeProcess(state: .completed, terminalAt: "2026-01-01T13:45:00Z")
+        let text = try #require(SessionProcessRowPresentation.completedText(for: process, relativeTo: now,
+            locale: Locale(identifier: "en_US_POSIX"), timeZone: zone))
+        #expect(text.hasPrefix("1:45"))
+        #expect(text.contains("PM"))
+        #expect(SessionProcessRowPresentation.completedText(for: makeProcess(state: .completed)) == nil)
+        #expect(SessionProcessRowPresentation.completedText(for: makeProcess(state: .running, terminalAt: "2026-01-01T13:45:00Z")) == nil)
+        #expect(SessionProcessRowPresentation.completedText(for: makeProcess(state: .completed, terminalAt: "malformed")) == nil)
+    }
+
     @Test("running counters advance from receipt uptime without comparing Mac and iPhone clocks")
     func liveElapsedCounter() throws {
         let now = try #require(GatewayTimestamp.parse("2026-01-01T00:00:10Z"))

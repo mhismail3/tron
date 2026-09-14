@@ -108,7 +108,7 @@ export class FilesystemService {
     return realpath(target);
   }
 
-  async inspectGit(path: string): Promise<{ isRepository: boolean; branch?: string; dirty?: boolean }> {
+  async inspectGit(path: string): ReturnType<typeof inspectGitPath> {
     return inspectGitPath(await this.canonical(path));
   }
 }

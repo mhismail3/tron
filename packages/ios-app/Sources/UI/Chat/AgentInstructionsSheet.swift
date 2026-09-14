@@ -5,12 +5,18 @@ struct AgentInstructionsSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var loading = true
+    @State private var loadingRequest: UUID?
 
     var body: some View {
         TronDocumentSheet(title: "Agent Instructions") {
             Group {
                 if let instructions = model.context?.objectValue?["systemPrompt"]?.stringValue {
-                    TronReadOnlyTextView(text: instructions)
+                    ScrollView {
+                        TronMarkdownView(text: instructions, streaming: false)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(18)
+                    }
                 } else if loading {
                     TronLoadingState(label: "Loading instructions…", accent: .tronSessionTeal)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -20,14 +26,18 @@ struct AgentInstructionsSheet: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
             }
-            .tronDocumentTopBlurSurface()
+            .tronScrollEdgeChrome()
         }
         .tronSettingsVisualTheme(accent: .tronSessionTeal)
         .task(id: "\(model.sessionContextRevision(for: sessionID)):\(presentationActivity.allowsPresentationPublication)") {
             guard presentationActivity.allowsPresentationPublication else { return }
+            let request = UUID()
+            loadingRequest = request
             loading = true
-            defer { loading = false }
             await model.loadContext(sessionID: sessionID)
+            guard !Task.isCancelled, loadingRequest == request,
+                  presentationActivity.allowsPresentationPublication else { return }
+            loading = false
         }
     }
 }

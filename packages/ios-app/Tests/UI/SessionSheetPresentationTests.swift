@@ -685,15 +685,16 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
-    func testDocumentReaderKeepsFullSelectableInstructions() async throws {
+    func testPlainDocumentReaderKeepsFullSelectableContent() async throws {
         let instructions = String(repeating: "Read the complete instructions.\n", count: 2_000) + "END OF INSTRUCTIONS"
         try await withModel { model in
             model.installHostedSecondaryProjection(
                 context: .object(["systemPrompt": .string(instructions)]), tree: [], commands: [], resources: nil
             )
             for scheme: ColorScheme in [.light, .dark] {
-                try await self.withSheet(AgentInstructionsSheet(sessionID: "document-fixture")
-                    .environment(model).preferredColorScheme(scheme)) { controller in
+                try await self.withSheet(TronDocumentSheet(title: "Document") {
+                    TronReadOnlyTextView(text: instructions).tronDocumentTopBlurSurface()
+                }.environment(model).preferredColorScheme(scheme)) { controller in
                     let reader = try XCTUnwrap(self.views(of: UITextView.self, in: controller.view).first)
                     XCTAssertEqual(reader.text, instructions)
                     XCTAssertTrue(reader.isSelectable)
@@ -746,6 +747,56 @@ final class SessionSheetPresentationTests: XCTestCase {
                     attachment.lifetime = .keepAlways
                     self.add(attachment)
                 }
+            }
+        }
+    }
+
+    func testProjectResourceDetailsOverrideOverviewTheme() async throws {
+        try await withModel { model in
+            for kind in ProjectResourceKind.allCases {
+                let selection = ProjectResourceSelection(kind: kind, title: "Review Resource", value: .object([
+                    "description": .string("A resource for reviewing changes."),
+                    "scope": .string("project"),
+                    "tools": .array([.string("review")]),
+                ]))
+                try await self.withSheet(ProjectResourceDetailSheet(sessionID: "resource-fixture", selection: selection, onDone: {})
+                    .environment(model).tronSettingsVisualTheme(accent: .tronSessionTeal)) { controller in
+                    let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
+                    self.assertToolbarPaint(kind.accent, bar: bar, leading: false, controller: controller)
+                    self.capture(controller, name: "project-detail-\(kind.key)")
+                }
+            }
+        }
+    }
+
+    func testWorktreeSelectionUsesOnlyOneEditableNewName() async throws {
+        let inspection = GitInspection(isRepository: true, branch: "main", isDirty: false,
+            branches: [.init(name: "main", checkedOut: true), .init(name: "feature/review", checkedOut: false)],
+            commits: [.init(oid: String(repeating: "a", count: 40), subject: "Prepare review")])
+        for mode: SessionSourceControlMode in [.newBranchWorktree, .existingBranchWorktree] {
+            try await withSheet(NewSessionSourceControlSheet(
+                selection: .constant(.init(mode: mode, branch: mode == .newBranchWorktree ? "feature/new" : "feature/review", base: nil)),
+                inspection: inspection, inspectionFailed: false
+            ).preferredColorScheme(.dark)) { controller in
+                XCTAssertEqual(self.views(of: UITextField.self, in: controller.view).count,
+                               mode == .newBranchWorktree ? 1 : 0,
+                               "Only a newly authored branch name is free text; existing refs use choices")
+                self.capture(controller, name: "worktree-choices-\(mode)")
+            }
+        }
+    }
+
+    func testInstructionsRenderMarkdownBlocks() async throws {
+        let instructions = "# Project Rules\n\nUse **focused tests** and `git diff`.\n\n- Preserve user data\n- Read the owning docs\n\n```swift\nlet safe = true\n```\n\n> Review before delivery."
+        try await withModel { model in
+            model.installHostedSecondaryProjection(
+                context: .object(["systemPrompt": .string(instructions)]), tree: [], commands: [], resources: nil
+            )
+            try await self.withSheet(AgentInstructionsSheet(sessionID: "document-fixture").environment(model)) { controller in
+                XCTAssertFalse(self.views(of: UIScrollView.self, in: controller.view).isEmpty)
+                XCTAssertFalse(self.views(of: TronDocumentTextView.self, in: controller.view).contains { $0.text == instructions },
+                               "Instructions must use block markdown, not the plain document reader")
+                self.capture(controller, name: "instructions-markdown")
             }
         }
     }
@@ -992,7 +1043,8 @@ final class SessionSheetPresentationTests: XCTestCase {
         let processes = [SessionProcessLifecycleState.running, .completed, .failed].map { state in
             SessionProcessActivity(
                 processId: state.rawValue, kind: .subagent, executionMode: .asynchronous, source: .delegatedAgent,
-                lifecycle: SessionProcessLifecycle(state: state, sequence: 1, observedAt: "2026-01-01T00:00:02Z"),
+                lifecycle: SessionProcessLifecycle(state: state, sequence: 1, observedAt: "2026-01-01T00:00:02Z",
+                    terminalAt: state == .running ? nil : GatewayTimestamp.string(from: .now)),
                 visibility: state == .running ? .active : .recent,
                 startedAt: GatewayTimestamp.string(from: .now.addingTimeInterval(-42)),
                 title: state.displayName, currentTool: "read", outputTail: "Reviewing the selected files.",

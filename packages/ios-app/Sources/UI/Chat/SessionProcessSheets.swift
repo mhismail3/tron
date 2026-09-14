@@ -372,7 +372,7 @@ struct SessionProcessRow: View {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             if let startedText {
                                 Text(startedText)
-                                    .font(TronTypography.secondaryDescription)
+                                    .font(TronTypography.secondaryCodeDescription)
                                     .foregroundStyle(Color.tronTextSecondary)
                                     .lineLimit(1)
                             }
@@ -384,7 +384,7 @@ struct SessionProcessRow: View {
                         VStack(alignment: .trailing, spacing: 2) {
                             if let startedText {
                                 Text(startedText)
-                                    .font(TronTypography.secondaryDescription)
+                                    .font(TronTypography.secondaryCodeDescription)
                                     .foregroundStyle(Color.tronTextSecondary)
                             }
                             if let elapsedMilliseconds {
@@ -485,7 +485,9 @@ struct SessionProcessRow: View {
     }
 
     private var startedText: String? {
-        guard style == .activity else { return nil }
+        if style == .history {
+            return SessionProcessRowPresentation.completedText(for: process, relativeTo: now)
+        }
         return SessionProcessRowPresentation.startedText(for: process, relativeTo: now)
     }
 
@@ -524,11 +526,11 @@ struct SessionProcessPill: View {
     var accent: Color = .tronSubagent
 
     var body: some View {
-        ChatCompactPillSurface(tone: .subagent, material: .flat, accentOverride: accent) {
+        ChatCompactPillSurface(tone: .subagent, material: .flat, accentOverride: accent, verticalPadding: 3) {
             HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
                 ChatCompactPillLeadingIcon(
                     icon: icon,
-                    accent: ChatNotificationTone.subagent.primaryColor,
+                    accent: accent,
                     iconSize: ChatCompactPillLayoutPolicy.standardIconSize
                 )
                 .frame(
@@ -580,6 +582,16 @@ enum SessionProcessRowPresentation {
     ) -> String? {
         ToolInvocationTimestamp.text(for: process.startedAt, relativeTo: now, locale: locale, timeZone: timeZone)
             .map { "Started \($0)" }
+    }
+
+    static func completedText(
+        for process: SessionProcessActivity,
+        relativeTo now: Date = .now,
+        locale: Locale = .current,
+        timeZone: TimeZone = .current
+    ) -> String? {
+        guard !process.lifecycle.state.isActive else { return nil }
+        return ToolInvocationTimestamp.text(for: process.lifecycle.terminalAt, relativeTo: now, locale: locale, timeZone: timeZone)
     }
 
     static func elapsedMilliseconds(

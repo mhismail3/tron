@@ -83,6 +83,12 @@ struct GatewayDiagnosticsServiceTests {
                 "isRepository": .bool(true),
                 "branch": .string("main"),
                 "dirty": .bool(true),
+                "branches": .array([
+                    .object(["name": .string("main"), "checkedOut": .bool(true)]),
+                    .object(["name": .string("feature"), "checkedOut": .bool(false)]),
+                    .object(["name": .string("malformed")]),
+                ]),
+                "commits": .array([.object(["oid": .string("abc123"), "subject": .string("Initial commit")])]),
             ]),
         ])
         let service = GatewayDiagnosticsService(request: { method, params in
@@ -90,7 +96,9 @@ struct GatewayDiagnosticsServiceTests {
         })
 
         let inspection = try await service.inspectGit(path: "/workspace/project")
-        #expect(inspection == GitInspection(isRepository: true, branch: "main", isDirty: true))
+        #expect(inspection == GitInspection(isRepository: true, branch: "main", isDirty: true,
+            branches: [.init(name: "main", checkedOut: true), .init(name: "feature", checkedOut: false)],
+            commits: [.init(oid: "abc123", subject: "Initial commit")]))
         #expect(await recorder.requests == [DiagnosticsRecordedRequest(
             method: "git.inspect",
             params: .object(["path": .string("/workspace/project")])

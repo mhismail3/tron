@@ -405,7 +405,7 @@ struct ProjectResourcesView: View {
     }
 }
 
-private struct ProjectResourceDetailSheet: View {
+struct ProjectResourceDetailSheet: View {
     let sessionID: String
     let selection: ProjectResourceSelection
     let onDone: () -> Void
@@ -494,8 +494,7 @@ private struct ProjectResourceDetailSheet: View {
 
                     TronTechnicalJSONRow(
                         value: selection.value,
-                        sheetTitle: "\(selection.title) JSON",
-                        accent: selection.kind.accent
+                        sheetTitle: "\(selection.title) JSON"
                     )
                 }
                 .padding(18)
@@ -519,6 +518,7 @@ private struct ProjectResourceDetailSheet: View {
             }
             .tint(selection.kind.accent)
         }
+        .tronSettingsVisualTheme(accent: selection.kind.accent)
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
