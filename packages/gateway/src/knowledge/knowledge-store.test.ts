@@ -70,11 +70,13 @@ describe("KnowledgeStore", () => {
 
   it("publishes observation coverage with its group and recovers failed coverage", async () => {
     const { store } = await fixture();
-    const failed = await store.setCoverage({ commandId: command("coverage-failed"), coverage: {
+    const config = await store.config().catch(() => ({ ...DEFAULT_KNOWLEDGE_CONFIG }));
+    const configured = await store.configure(command("coverage-config"), { ...config, eligibility: { ...config.eligibility, sessionIds: ["session-1"] } });
+    const failed = await store.setCoverage({ commandId: command("coverage-failed"), expectedConfigRevision: configured.revision, coverage: {
       id: "coverage-1", range: { sessionId: "session-1", fromEntryId: "entry-1", toEntryId: "entry-1", entryIds: ["entry-1"], entryDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }, disposition: "failed", groupRevisionIds: [],
     }});
     expect((await store.coverage("coverage-1"))?.disposition).toBe("failed");
-    const published = await store.publishObservationGroup({ commandId: command("coverage-recover"), expectedCoverageRevision: failed.coverage.revisionId, coverage: {
+    const published = await store.publishObservationGroup({ commandId: command("coverage-recover"), expectedConfigRevision: configured.revision, expectedCoverageRevision: failed.coverage.revisionId, coverage: {
       id: "coverage-1", range: failed.coverage.range, disposition: "observed",
     }, records: [observation("session-1", "entry-1")] });
     expect(published.coverage.groupRevisionIds).toEqual([published.records[0]!.revisionId]);
@@ -146,16 +148,36 @@ describe("KnowledgeStore", () => {
     const fresh = await fixture();
     await fresh.store.setScopeExclusion(command("scope-exclude"), { sessionId: "excluded-session" }, true, "user excluded session");
     const range = { sessionId: "excluded-session", fromEntryId: "entry-1", toEntryId: "entry-1", entryIds: ["entry-1"], entryDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" };
-    await expect(fresh.store.publishObservationGroup({ commandId: command("late-publication"), coverage: { id: "late", range, disposition: "observed" }, records: [observation("excluded-session", "entry-1")] })).rejects.toThrow("excluded");
+    await expect(fresh.store.publishObservationGroup({ commandId: command("late-publication"), expectedConfigRevision: 0, coverage: { id: "late", range, disposition: "observed" }, records: [observation("excluded-session", "entry-1")] })).rejects.toThrow("excluded");
     await fresh.workspace.dispose();
   });
 
-  it("reflects exact source record revisions within one session input identity", async () => {
+  it("reflects exact successive source revisions into one session-local derivative", async () => {
     const { store } = await fixture();
-    const published = await store.publishObservationGroup({ commandId: command("reflect-source"), coverage: { id: "reflect-coverage", range: observation("reflect-session", "entry-1").content.range, disposition: "observed" }, records: [observation("reflect-session", "entry-1")] });
-    const reflected = await store.reflect(command("reflect-command"), "reflect-session", [published.records[0]!.revisionId], "bounded handoff");
-    expect(reflected.record.provenance.evidence).toEqual([{ recordId: published.records[0]!.id, revisionId: published.records[0]!.revisionId }]);
-    expect(reflected.record.relations).toEqual([{ type: "derivedFrom", recordId: published.records[0]!.id, revisionId: published.records[0]!.revisionId }]);
+    const config = await store.config().catch(() => ({ ...DEFAULT_KNOWLEDGE_CONFIG }));
+    const configured = await store.configure(command("reflect-config"), { ...config, eligibility: { ...config.eligibility, sessionIds: ["reflect-session"] } });
+    const first = await store.publishObservationGroup({ commandId: command("reflect-source-1"), expectedConfigRevision: configured.revision, coverage: { id: "reflect-coverage-1", range: observation("reflect-session", "entry-1").content.range, disposition: "observed" }, records: [observation("reflect-session", "entry-1")] });
+    const secondDraft = observation("reflect-session", "entry-2");
+    secondDraft.content.range.entryDigest = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const second = await store.publishObservationGroup({ commandId: command("reflect-source-2"), expectedConfigRevision: configured.revision, coverage: { id: "reflect-coverage-2", range: secondDraft.content.range, disposition: "observed" }, records: [secondDraft] });
+    const reflected = await store.reflect(command("reflect-command-1"), "reflect-session", [first.records[0]!.revisionId], "bounded handoff");
+    const replaced = await store.reflect(command("reflect-command-2"), "reflect-session", [first.records[0]!.revisionId, second.records[0]!.revisionId], "new bounded handoff");
+    expect(replaced.record.id).toBe(reflected.record.id);
+    expect(replaced.record.revisionId).not.toBe(reflected.record.revisionId);
+    expect(replaced.record.provenance.evidence).toEqual([
+      { recordId: first.records[0]!.id, revisionId: first.records[0]!.revisionId },
+      { recordId: second.records[0]!.id, revisionId: second.records[0]!.revisionId },
+    ]);
+    await store.setExclusion(command("reflect-exclude"), first.records[0]!.id, true, first.records[0]!.revisionId, "excluded evidence");
+    await expect(store.reflect(command("reflect-command-3"), "reflect-session", [first.records[0]!.revisionId], "must fail")).rejects.toThrow("excluded");
+  });
+
+  it("does not replace terminal coverage with a fake disposition", async () => {
+    const { store } = await fixture();
+    const config = await store.config().catch(() => ({ ...DEFAULT_KNOWLEDGE_CONFIG }));
+    const configured = await store.configure(command("terminal-config"), { ...config, eligibility: { ...config.eligibility, sessionIds: ["session-1"] } });
+    const published = await store.publishObservationGroup({ commandId: command("terminal-publish"), expectedConfigRevision: configured.revision, coverage: { id: "terminal", range: observation("session-1", "terminal-entry").content.range, disposition: "observed" }, records: [observation("session-1", "terminal-entry")] });
+    await expect(store.setCoverage({ commandId: command("terminal-fake"), expectedConfigRevision: configured.revision, expectedRevision: published.coverage.revisionId, coverage: { id: "terminal", range: published.coverage.range, disposition: "empty", groupRevisionIds: [] } })).rejects.toThrow("Terminal");
   });
 
   it("keeps observation disabled until an explicit model is configured", async () => {

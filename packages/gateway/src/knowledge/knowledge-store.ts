@@ -52,12 +52,16 @@ export class KnowledgeStoreError extends Error {
 
 export interface ObservationGroupInput {
   commandId: string;
+  /** Configuration revision captured before model inference. */
+  expectedConfigRevision: number;
   expectedCoverageRevision?: string;
   coverage: Omit<ObservationCoverage, "schemaVersion" | "revisionId" | "groupRevisionIds" | "recordedAt"> & { disposition: "observed" | "empty" | "excluded" };
   records: Array<KnowledgeRecordDraft & { kind: "observation" }>;
 }
 export interface CoverageUpdateInput {
   commandId: string;
+  /** Configuration revision captured before background inference. */
+  expectedConfigRevision: number;
   expectedRevision?: string;
   coverage: Omit<ObservationCoverage, "schemaVersion" | "revisionId" | "recordedAt">;
 }
@@ -352,14 +356,36 @@ export class KnowledgeStore {
     return { record, stateRevision: state.stateRevision + 1 };
   }
   private excludedRange(state: KnowledgeState, range: ObservationRange): boolean {
-    const eligibility = state.config.eligibility; if (eligibility.excludedSessionIds.includes(range.sessionId) || (eligibility.sessionIds.length > 0 && !eligibility.sessionIds.includes(range.sessionId))) return true;
-    if (range.projectId && (eligibility.excludedProjectIds.includes(range.projectId) || (eligibility.projectIds.length > 0 && !eligibility.projectIds.includes(range.projectId)))) return true;
+    const eligibility = state.config.eligibility;
+    // An empty allowlist is intentionally unconfigured, never an all-session
+    // grant. Session or project selection admits the range; exclusions win.
+    if (eligibility.sessionIds.length === 0 && eligibility.projectIds.length === 0) return true;
+    if (eligibility.excludedSessionIds.includes(range.sessionId) || !eligibility.sessionIds.includes(range.sessionId)
+      && (!range.projectId || !eligibility.projectIds.includes(range.projectId))) return true;
+    if (range.projectId && eligibility.excludedProjectIds.includes(range.projectId)) return true;
     return scopeKey(range).some(key => state.scopeExclusions[key]?.excluded);
+  }
+
+  /** Shared privacy predicate for recall/display owners. A historical record
+   * remains stored for audit until forgotten, but excluded scope is not usable
+   * evidence and must be filtered before presentation or model boundaries. */
+  async scopeExcluded(scope: { sessionId?: string; branchId?: string; projectId?: string }): Promise<boolean> {
+    const paths = await this.paths(false);
+    const state = (await this.load(paths, false)).state;
+    const keys = scope.sessionId
+      ? [scope.branchId ? `branch:${scope.sessionId}:${scope.branchId}` : `session:${scope.sessionId}`]
+      : scope.projectId ? [`project:${scope.projectId}`] : [];
+    return keys.some(key => state.scopeExclusions[key]?.excluded)
+      || (scope.sessionId ? state.config.eligibility.excludedSessionIds.includes(scope.sessionId) : false)
+      || (scope.projectId ? state.config.eligibility.excludedProjectIds.includes(scope.projectId) : false);
   }
   async publishObservationGroup(input: ObservationGroupInput): Promise<{ records: KnowledgeRecord[]; coverage: ObservationCoverage; stateRevision: number }> {
     return this.mutate("knowledge.observation.publish", input.commandId, input, async (state, paths) => {
+      if (input.expectedConfigRevision !== undefined && state.config.revision !== input.expectedConfigRevision) throw conflict("Observation configuration changed while inference was running");
       if (this.excludedRange(state, input.coverage.range)) throw conflict("Observation range is excluded"); const prior = state.coverage[input.coverage.id];
-      if (prior && input.expectedCoverageRevision !== prior.revisionId) throw conflict("Observation coverage revision is stale"); if (!prior && input.expectedCoverageRevision !== undefined) throw conflict("Observation coverage does not exist"); if (prior?.disposition === "observed") throw conflict("Successful observation coverage cannot regress");
+      if (prior && !sameRange(prior.range, input.coverage.range)) throw conflict("Observation coverage identity changed");
+      if (prior && input.expectedCoverageRevision !== prior.revisionId) throw conflict("Observation coverage revision is stale"); if (!prior && input.expectedCoverageRevision !== undefined) throw conflict("Observation coverage does not exist");
+      if (prior && ["observed", "empty", "excluded"].includes(prior.disposition)) throw conflict("Terminal observation coverage cannot be replaced");
       const records: KnowledgeRecord[] = [];
       for (const draft of input.records) { if (!sameRange(draft.content.range, input.coverage.range)) throw invalid("Observation record range does not match coverage"); const result = await this.putRecord(state, paths, draft); records.push(result.record); }
       if (input.coverage.disposition === "observed" && records.length === 0) throw invalid("Observed coverage requires an observation record");
@@ -370,26 +396,54 @@ export class KnowledgeStore {
   }
   async setCoverage(input: CoverageUpdateInput): Promise<{ coverage: ObservationCoverage; stateRevision: number }> {
     return this.mutate("knowledge.observation.coverage", input.commandId, input, async (state, paths) => {
-      if (this.excludedRange(state, input.coverage.range)) throw conflict("Observation range is excluded"); const current = state.coverage[input.coverage.id];
-      if (input.expectedRevision !== undefined && current?.revisionId !== input.expectedRevision) throw conflict("Observation coverage revision is stale"); if (current?.disposition === "observed" && input.coverage.disposition !== "observed") throw conflict("Successful observation coverage cannot regress");
-      if (input.coverage.disposition === "observed") { if (!input.coverage.groupRevisionIds.length) throw invalid("Observed coverage requires committed group records"); for (const revision of input.coverage.groupRevisionIds) { const found = Object.entries(state.records).find(([, head]) => head.revisionIds.includes(revision)); if (!found || !(await this.readRecord(paths, found[0], revision)).kind) throw invalid("Observed coverage references an unknown record revision"); } }
+      if (input.expectedConfigRevision !== undefined && state.config.revision !== input.expectedConfigRevision) throw conflict("Observation configuration changed while inference was running");
+      if (this.excludedRange(state, input.coverage.range) && input.coverage.disposition !== "excluded") throw conflict("Observation range is excluded"); const current = state.coverage[input.coverage.id];
+      if (current && !sameRange(current.range, input.coverage.range)) throw conflict("Observation coverage identity changed");
+      if (input.expectedRevision !== undefined && current?.revisionId !== input.expectedRevision) throw conflict("Observation coverage revision is stale");
+      if (current && ["observed", "empty", "excluded"].includes(current.disposition)) {
+        if (current.disposition !== input.coverage.disposition || current.groupRevisionIds.join("\0") !== input.coverage.groupRevisionIds.join("\0")) throw conflict("Terminal observation coverage cannot be replaced");
+        return { coverage: current, stateRevision: state.stateRevision };
+      }
+      if (input.coverage.disposition === "observed") {
+        if (!input.coverage.groupRevisionIds.length) throw invalid("Observed coverage requires committed group records");
+        for (const revision of input.coverage.groupRevisionIds) {
+          const found = Object.entries(state.records).find(([, head]) => head.revisionIds.includes(revision));
+          if (!found) throw invalid("Observed coverage references an unknown record revision");
+          const record = await this.readRecord(paths, found[0], revision);
+          if (record.kind !== "observation" || !sameRange(record.content.range, input.coverage.range)) throw invalid("Observed coverage references a record from another input range");
+        }
+      }
       const coverage: ObservationCoverage = { ...input.coverage, schemaVersion: KNOWLEDGE_SCHEMA_VERSION, revisionId: revisionId(), recordedAt: now() }; validateCoverage(coverage); state.coverage[coverage.id] = coverage; return { coverage, stateRevision: state.stateRevision + 1 };
     });
   }
   async reflect(commandId: string, sessionId: string, sourceRevisionIds: string[], text: string): Promise<KnowledgeMutationResult> {
-    safeId(sessionId, "session id"); if (!text || text.length > 30_000 || sourceRevisionIds.length > 100) throw invalid("Reflection is bounded");
+    safeId(sessionId, "session id");
+    if (!text || text.length > 30_000 || sourceRevisionIds.length === 0 || sourceRevisionIds.length > 100 || new Set(sourceRevisionIds).size !== sourceRevisionIds.length) throw invalid("Reflection is bounded and requires distinct source revisions");
     return this.mutate("knowledge.reflect", commandId, { sessionId, sourceRevisionIds, text }, async (state, paths) => {
-      const evidence: KnowledgeEvidenceRef[] = []; const relations: KnowledgeRecord["relations"] = []; let branchId: string | undefined; let digest: string | undefined;
+      const evidence: KnowledgeEvidenceRef[] = []; const relations: KnowledgeRecord["relations"] = []; let branchId: string | undefined;
+      const sources: KnowledgeRecord[] = [];
       for (const revision of sourceRevisionIds) {
         let source: KnowledgeRecord | undefined;
         for (const [id, head] of Object.entries(state.records)) if (head.revisionIds.includes(revision)) { source = await this.readRecord(paths, id, revision); break; }
         if (!source || source.kind !== "observation" || source.content.range.sessionId !== sessionId) throw invalid("Reflection source is not an observation in this session");
-        if (branchId !== undefined && branchId !== source.content.range.branchId) throw invalid("Reflection sources must share a branch"); branchId = source.content.range.branchId;
-        if (digest !== undefined && digest !== source.content.range.entryDigest) throw invalid("Reflection sources must share bounded input identity"); digest = source.content.range.entryDigest;
-        evidence.push({ recordId: source.id, revisionId: source.revisionId }); relations.push({ type: "derivedFrom", recordId: source.id, revisionId: source.revisionId });
+        if (state.suppressions[source.id]?.excluded || this.excludedRange(state, source.content.range)) throw conflict("Reflection source is excluded");
+        if (branchId !== undefined && branchId !== source.content.range.branchId) throw invalid("Reflection sources must share a branch");
+        branchId = source.content.range.branchId;
+        sources.push(source);
+        evidence.push({ recordId: source.id, revisionId: source.revisionId });
+        relations.push({ type: "derivedFrom", recordId: source.id, revisionId: source.revisionId });
       }
-      const record: KnowledgeRecordDraft & { kind: "note" } = { kind: "note", scope: "personal", provenance: { actor: "agent", sessionId, ...(branchId === undefined ? {} : { branchId }), evidence }, relations, content: { title: "Session reflection", body: text, role: "synthesis", confirmed: false } };
-      return this.putRecord(state, paths, record);
+      // The derivative identity is session/branch-local, while its provenance
+      // digest changes with the exact captured record/revision set. Replacing
+      // the derivative therefore preserves history and never absorbs later
+      // observations that were not in this request.
+      const sourceSet = sources.map(source => `${source.id}:${source.revisionId}`).sort();
+      const sourceSetDigest = createHash("sha256").update(JSON.stringify(sourceSet)).digest("hex");
+      const reflectionId = `reflection-${createHash("sha256").update(`${sessionId}\0${branchId ?? ""}`).digest("hex").slice(0, 48)}`;
+      const existing = state.records[reflectionId] ? await this.currentRecord(state, paths, reflectionId) : null;
+      if (existing && existing.kind !== "note") throw conflict("Reflection identity is occupied by another record kind");
+      const record: KnowledgeRecordDraft & { kind: "note" } = { id: reflectionId, ...(existing ? { createdAt: existing.createdAt } : {}), kind: "note", scope: "personal", provenance: { actor: "agent", source: `reflection:${sourceSetDigest}`, sessionId, ...(branchId === undefined ? {} : { branchId }), evidence }, relations, content: { title: "Session reflection", body: text, role: "synthesis", confirmed: false } };
+      return this.putRecord(state, paths, record, existing?.revisionId);
     });
   }
   async correct(commandId: string, recordId: string, expectedRevision: string, replacement: KnowledgeRecordDraft, relation: KnowledgeRecord["relations"][number]): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.correction", commandId, { recordId, expectedRevision, replacement, relation }, async (state, paths) => { const current = await this.currentRecord(state, paths, recordId); if (!current || current.revisionId !== expectedRevision) throw conflict("Knowledge record revision is stale"); if (relation.recordId !== recordId || relation.revisionId !== expectedRevision || (relation.type !== "corrects" && relation.type !== "supersedes")) throw invalid("Correction relation must identify the replaced revision"); return this.putRecord(state, paths, { ...replacement, id: recordId, createdAt: current.createdAt, relations: [...replacement.relations, relation] }, expectedRevision); }); }
@@ -419,6 +473,19 @@ export class KnowledgeStore {
   }
   private async recordObjectHashes(paths: StorePaths, id: string, revision: string): Promise<string[]> { return recordObjectHashes(await this.readRecord(paths, id, revision)); }
   async coverage(id: string): Promise<ObservationCoverage | null> { safeId(id, "coverage id"); const paths = await this.paths(false); return (await this.load(paths, false)).state.coverage[id] ?? null; }
+
+  /** Read committed coverage identities for recovery. The observation owner
+   * uses these manifests to advance only beyond an exact covered prefix after
+   * restart or changed coalescing boundaries. */
+  async observationCoverageForScope(sessionId: string, branchId?: string, projectId?: string): Promise<ObservationCoverage[]> {
+    safeId(sessionId, "session id");
+    if (branchId !== undefined) safeId(branchId, "branch id");
+    if (projectId !== undefined) safeId(projectId, "project id");
+    const paths = await this.paths(false); const state = (await this.load(paths, false)).state;
+    return Object.values(state.coverage).filter(coverage => coverage.range.sessionId === sessionId
+      && coverage.range.branchId === branchId && coverage.range.projectId === projectId
+      && ["observed", "empty", "excluded"].includes(coverage.disposition));
+  }
 }
 
 function scrubReferences(record: KnowledgeRecord, forgottenId: string): KnowledgeRecord | null {

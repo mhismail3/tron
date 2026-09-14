@@ -74,6 +74,7 @@ import {
 } from "./catalog-metadata-index.js";
 import { branchFromParsedSession } from "./session-branch.js";
 import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-boundary.js";
+import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 
 const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
 /** A read-only child observer may page only canonical sessions that fit this
@@ -423,6 +424,7 @@ export class RuntimeRegistry {
   private readonly exports: BlobStore;
   private readonly displayArtifacts: DisplayArtifactStore;
   private readonly workspace: TronWorkspace;
+  private knowledgeService: KnowledgeService | undefined;
   private readonly markers: RunMarkerStore;
   private readonly extensionActivityRecency = new ExtensionActivityRecency();
   private readonly processActivityRecency = new ProcessActivityRecency();
@@ -541,6 +543,15 @@ export class RuntimeRegistry {
     return this.revision;
   }
 
+  /** Shared workspace owner for capability stores; callers must not construct a
+   * second workspace authority for the same Tron installation. */
+  knowledgeWorkspace(): TronWorkspace { return this.workspace; }
+
+  setKnowledgeService(service: KnowledgeService): void {
+    if (this.knowledgeService && this.knowledgeService !== service) throw new Error("Knowledge service is already installed");
+    this.knowledgeService = service;
+  }
+
   get administrativeWorkRegistry(): GatewayWorkRegistry { return this.workRegistry; }
 
   async initialize(onPhase?: (phase: "catalog-warming" | "attention-recovery") => void): Promise<void> {
@@ -638,6 +649,11 @@ export class RuntimeRegistry {
         this.options.sessionListChanged();
       },
       settled: (sessionId: string) => { this.interrupted.delete(sessionId); },
+      turnSettled: (sessionId: string, entries: readonly import("@earendil-works/pi-coding-agent").FileEntry[], outcome: "completed" | "failed" | "interrupted" | "outcomeUnknown", completionId?: string) => {
+        // Admission is intentionally detached from canonical terminal receipt
+        // settlement: model/storage latency cannot hold the foreground lane.
+        this.knowledgeService?.observe({ sessionId, entries, outcome, ...(completionId ? { completionId } : {}) });
+      },
       assistantResponseCompleted: async (
         sessionId: string,
         completion: CanonicalAssistantCompletion,
@@ -938,6 +954,7 @@ export class RuntimeRegistry {
       ...(this.options.notifications ? { notifications: this.options.notifications } : {}),
       ...(this.options.extensionArtifactWarning ? { extensionArtifactWarning: this.options.extensionArtifactWarning } : {}),
       ...(this.options.scheduleToolOperations ? { scheduleToolOperations: this.options.scheduleToolOperations } : {}),
+      ...(this.knowledgeService ? { knowledge: this.knowledgeService } : {}),
       resolveForkBoundary: (manager: SessionManager) => this.resolveForkBoundary(manager),
       ...(this.options.stageTiming ? {
         runtimeDisposalTimedOut: (graceMs: number) => this.options.stageTiming!("runtime.dispose-timeout", graceMs, "failure"),

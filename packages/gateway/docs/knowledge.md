@@ -45,9 +45,10 @@ The exported types in `src/knowledge/knowledge-contract.ts` define schema v1.
 Sources, observations, and notes have stable IDs and immutable revision IDs.
 Every observation range includes ordered canonical entry IDs and an entry
  digest supplied by the session owner, plus optional branch/project identity.
-Coverage must repeat that exact range and digest. Successful coverage cannot
-regress, and `observed` cannot be fabricated without committed observation
-revisions. Session-entry evidence is represented by a typed
+Coverage must repeat that exact range and digest and cannot be rebound to
+another input. Terminal `observed`, `empty`, and `excluded` dispositions are
+immutable; pending/failed work can recover, while `observed` cannot be
+fabricated without committed observation revisions. Session-entry evidence is represented by a typed
 `sessionEntry` citation; record evidence names the exact record revision.
 
 Mutations serialize per workspace and require stable command IDs with exact
@@ -60,16 +61,29 @@ Shared objects remain only while referenced by retained revisions.
 
 Observation eligibility and exclusion are prospective and revision-checked:
 configuration carries a monotonic revision and explicit session/project
-allowlists and exclusions; `setScopeExclusion()` fences session, branch, or
-project publication even if a late worker generated a new record ID.
+allowlists and exclusions. Empty allowlists select no scope. `setScopeExclusion()`
+fences session, branch, or project publication even if a late worker generated
+a new record ID; `scopeExcluded()` is the shared privacy predicate for
+presentation/recall owners. Background publication supplies the captured config
+revision, so disabled/re-enabled or changed-scope workers cannot publish late.
 
-`reflect()` accepts bounded observation revision IDs from one session and one
-branch/input digest. It creates a session-local synthesis note with exact
-record-and-revision provenance and `derivedFrom` relations; it never uses a
-revision ID as a record ID and never changes observation history.
+`reflect()` accepts a non-empty bounded set of observation revision IDs from
+one session and one branch, including successive input digests. It replaces a
+session/branch-local synthesis derivative by stable identity while preserving
+immutable prior revisions, and stores an exact digest of the captured
+record/revision set plus `derivedFrom` relations. Excluded source records or
+ranges cannot be reflected.
 
 The typed action surface remains the shared Gateway/agent/native DTO. Reads
 return state revisions, and recall distinguishes no-match from unavailable
-store errors. Observation defaults to disabled and the store never chooses a
-provider or model silently. Connector/import DTOs are operation shapes; their
-network/account implementations belong to later owners.
+store errors. Observation defaults to disabled and the store never chooses a provider or model silently. Connector/import DTOs are
+operation shapes; their network/account implementations belong to later owners.
+The Gateway registers `knowledge.v1` typed RPC handlers and a bounded first-party
+`knowledge` retrieval tool. The tool performs explicit search/recall/read/list
+only; retrieved text is evidence, not authorization. A prospective
+`KnowledgeObservationService` coalesces terminal turns (including no-tool,
+failed, and interrupted turns), omits thinking/attachment bodies, uses one
+pinned `ModelRuntime` adapter (the configured model is an explicit
+`provider/model` value), and keeps model/storage latency outside foreground
+settlement. Connector/import calls fail as unsupported until their
+named extension seam is installed.

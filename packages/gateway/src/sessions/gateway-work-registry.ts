@@ -13,6 +13,7 @@ export const gatewayWorkKinds = [
   "administrative-provider-package-operation",
   "automation-dispatch",
   "automation-terminal-persistence",
+  "knowledge-observation",
 ] as const;
 
 export type GatewayWorkKind = typeof gatewayWorkKinds[number];

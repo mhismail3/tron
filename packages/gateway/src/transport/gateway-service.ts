@@ -56,6 +56,8 @@ import { AutomationPaginationStore } from "../automations/automation-pagination.
 import { admitsAutomationTrigger } from "../automations/automation-contract.js";
 import { validateTimelineWindow } from "../automations/automation-timeline.js";
 import { ProviderUsageOwner, PROVIDER_USAGE_CAPABILITY } from "../providers/provider-usage.js";
+import type { KnowledgeService } from "../knowledge/knowledge-service.js";
+import type { KnowledgeAction } from "../knowledge/knowledge-contract.js";
 
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const PROVIDER_CATALOG_MAX_ITEMS = 1_000;
@@ -118,6 +120,7 @@ const restartDrainMethods = new Set([
   "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.abort", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
   "automation.status", "automation.list", "automation.get", "automation.schedule.preview", "automation.timeline.list", "automation.run.list", "automation.run.get", "automation.run.cancel", "automation.run.resolve",
+  "knowledge.status", "knowledge.list", "knowledge.read", "knowledge.search", "knowledge.recall",
 ]);
 
 export interface ClientContext {
@@ -175,6 +178,7 @@ export interface GatewayServiceDependencies {
   notifications?: NotificationService;
   workRegistry?: GatewayWorkRegistry;
   automations?: AutomationService;
+  knowledge?: KnowledgeService;
   /** Bounded account-usage owner; injectable for fixture transport tests. */
   providerUsage?: ProviderUsageOwner;
 }
@@ -289,6 +293,7 @@ export class GatewayService {
         ...(this.iosDeviceInstallService.isUsable ? [IOS_DEVICE_INSTALL_CAPABILITY] : []),
         ...(this.dependencies.notifications ? ["push-notifications.v1", "notification-inbox.v1"] : []),
         ...(this.dependencies.automations?.status().ready ? [AUTOMATIONS_CAPABILITY, AUTOMATIONS_TIMELINE_CAPABILITY] : []),
+        ...(this.dependencies.knowledge ? ["knowledge.v1"] : []),
       ],
     };
   }
@@ -301,6 +306,30 @@ export class GatewayService {
     switch (method) {
       case "system.info":
         return this.info();
+      case "knowledge.status":
+      case "knowledge.list":
+      case "knowledge.read":
+      case "knowledge.search":
+      case "knowledge.recall": {
+        const knowledge = this.requireKnowledge();
+        return safeJson(await knowledge.invoke({ operation: method, request: params } as KnowledgeAction));
+      }
+      case "knowledge.config":
+      case "knowledge.source.capture":
+      case "knowledge.note.create":
+      case "knowledge.note.update":
+      case "knowledge.reflect":
+      case "knowledge.correction":
+      case "knowledge.forget":
+      case "knowledge.exclusion":
+      case "knowledge.connector.configure":
+      case "knowledge.connector.status":
+      case "knowledge.connector.run":
+      case "knowledge.import.dry-run":
+      case "knowledge.import.run": {
+        const knowledge = this.requireKnowledge();
+        return this.mutation(client, method, params, async () => safeJson(await knowledge.invoke({ operation: method, request: params } as KnowledgeAction)));
+      }
       case "system.logs":
         return safeJson({ records: this.dependencies.logger.recent(integer(params.limit ?? 200, "limit", 1, 1_000)) });
       case "system.logs.export":
@@ -1558,6 +1587,11 @@ export class GatewayService {
     if (["starting", "building", "staging", "draining", "promoting", "restart", "rollback", "rollback-requested", "restart-requested"].includes(status.state)) {
       throw new GatewayError("busy", "Wait for the active Gateway update or rollback to finish before installing iOS", true);
     }
+  }
+
+  private requireKnowledge(): KnowledgeService {
+    if (!this.dependencies.knowledge) throw new GatewayError("unsupported", "Knowledge is unavailable in this Gateway build");
+    return this.dependencies.knowledge;
   }
 
   private requireAutomations(): AutomationService {

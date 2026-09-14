@@ -115,6 +115,7 @@ import { createTronCoreExtension } from "../workspace/tron-core-extension.js";
 import { admitToolDisplayProjection, displayArtifactIDs } from "../display/display-contract.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
+import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 
 // A lifecycle header is trusted only after RuntimeSlot has parsed and schema-
 // admitted the first property from the exact-owned status file. A payload key
@@ -282,6 +283,9 @@ export interface RuntimeSlotHooks {
   summaryChanged: (summary: SessionSummaryUpdate) => void;
   changed: (sessionId: string) => void;
   settled: (sessionId: string) => void;
+  /** Fire-and-forget canonical observation admission after Pi has appended the
+   * terminal turn. Implementations must never delay foreground settlement. */
+  turnSettled?: (sessionId: string, entries: readonly FileEntry[], outcome: "completed" | "failed" | "interrupted" | "outcomeUnknown", completionId?: string) => void;
   assistantResponseCompleted: (
     sessionId: string,
     completion: CanonicalAssistantCompletion,
@@ -314,6 +318,8 @@ export interface RuntimeSlotDependencies {
   displayArtifacts: DisplayArtifactStore;
   /** Disposable observer registrations; browser state remains provider-owned. */
   browserLiveViews?: BrowserLiveViewRegistry;
+  /** Optional bounded observational memory owner. */
+  knowledge?: KnowledgeService;
   workspace: TronWorkspace;
   markers: RunMarkerStore;
   extensionActivityRecency: ExtensionActivityRecency;
@@ -1223,7 +1229,7 @@ export class RuntimeSlot {
                 || (event.reason !== "manual" && this.activeOperationId !== undefined && this.abortedOperations.has(this.activeOperationId)),
               () => { this.revision += 1; this.publishSnapshot(); },
             ) },
-            { name: "tron-core", factory: createTronCoreExtension(this.dependencies.workspace) },
+            { name: "tron-core", factory: createTronCoreExtension(this.dependencies.workspace, this.dependencies.knowledge) },
             {
               name: "tron-display",
               factory: createTronDisplayExtension({
@@ -2802,6 +2808,10 @@ export class RuntimeSlot {
         const terminalErrorCode = terminalLifecycle === "interrupted"
           ? (settledOperationId && this.abortedOperations.has(settledOperationId) ? "user-abort" : "agent-aborted")
           : terminalLifecycle === "failed" ? "agent-error" : undefined;
+        if (settledOperationId) {
+          const completionId = this.pendingAssistantCompletion?.id;
+          this.hooks.turnSettled?.(this.id, this.canonicalSessionEntries(), terminalLifecycle, completionId);
+        }
         this.activeOperationId = undefined;
         this.ownToolSegment(undefined);
         this.operation = this.compactionOperation;

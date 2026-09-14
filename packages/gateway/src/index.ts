@@ -31,6 +31,9 @@ import { AutomationService } from "./automations/automation-service.js";
 import { GatewayAutomationExecutor } from "./automations/automation-executor.js";
 import { GatewayScheduleToolOperations } from "./automations/automation-tool-operations.js";
 import { BrowserLiveViewRegistry } from "./display/browser-live-view.js";
+import { KnowledgeStore } from "./knowledge/knowledge-store.js";
+import { KnowledgeService } from "./knowledge/knowledge-service.js";
+import { KnowledgeObservationService, ModelRuntimeObservationModel, modelForConfig } from "./knowledge/knowledge-observation.js";
 
 const config = await loadConfig();
 const configuredSessionDir = SettingsManager.create(process.cwd(), config.agentDir, { projectTrusted: false }).getSessionDir();
@@ -144,6 +147,19 @@ const sessions = new RuntimeRegistry({
     );
   },
 });
+const knowledgeStore = new KnowledgeStore(sessions.knowledgeWorkspace());
+const knowledge = new KnowledgeService(
+  knowledgeStore,
+  new KnowledgeObservationService(
+    knowledgeStore,
+    (knowledgeConfig) => {
+      const model = modelForConfig(modelRuntime, knowledgeConfig.observation.model);
+      return model ? new ModelRuntimeObservationModel(modelRuntime, model) : undefined;
+    },
+    workRegistry,
+  ),
+);
+sessions.setKnowledgeService(knowledge);
 const terminal = new TerminalService(
   config.terminalReplayBytes,
   (terminalId, topic, payload) => transport?.broadcastTerminal(terminalId, topic, payload),
@@ -236,6 +252,7 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
     }
     terminal.dispose();
     notifications.dispose();
+    knowledge.dispose();
     await automations.dispose();
     await sessions.dispose();
     // The retained pi-coding-agent session exposes no disposal API on the
@@ -306,6 +323,7 @@ const service = new GatewayService({
   notifications,
   workRegistry,
   automations,
+  knowledge,
 });
 transport = new GatewayServer({
   host: config.host,
