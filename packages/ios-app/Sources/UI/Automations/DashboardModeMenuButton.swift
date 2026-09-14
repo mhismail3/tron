@@ -4,6 +4,7 @@ import UIKit
 enum DashboardMode: String, CaseIterable, Identifiable {
     case sessions = "Sessions"
     case automations = "Automations"
+    case knowledge = "Knowledge"
 
     var id: String { rawValue }
 
@@ -11,6 +12,7 @@ enum DashboardMode: String, CaseIterable, Identifiable {
         switch self {
         case .sessions: "bubble.left.and.bubble.right"
         case .automations: "clock.badge.checkmark"
+        case .knowledge: "book.closed"
         }
     }
 
@@ -18,6 +20,7 @@ enum DashboardMode: String, CaseIterable, Identifiable {
         switch self {
         case .sessions: .tronEmerald
         case .automations: .tronAutomation
+        case .knowledge: .tronCyan
         }
     }
 }

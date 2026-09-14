@@ -2015,3 +2015,18 @@ publication and preserved staged skill, then verifies current reconciliation on
 uncover plus retained native draft text/selection and tail geometry.
 These hosted scene inputs do not certify physical lock/unlock behavior.
 The stack is never persisted and is not a second state authority.
+
+## Knowledge projection
+
+`KnowledgeRPCClient` is the typed iOS consumer of the Gateway Knowledge contract. It
+uses the existing confirmed-mutation receipt owner for every change and bounds
+search, pages, connector runs, and imports before exposing them to SwiftUI.
+`KnowledgeDashboardView` presents All Knowledge (including All Links), filters by
+record kind and Personal/Research scope, and loads detail evidence on demand.
+Observation configuration requires an explicitly selected existing model and at
+least one prospective session or project scope; an empty allowlist remains
+ineligible and exclusions are evaluated by the Gateway. Editable current interests are persisted in the Gateway configuration and do not enable observation; source triage is an explicit `knowledge.source.triage` mutation that resolves those interests server-side. Connector status reports
+unconfigured or writes-disabled integrations honestly, while legacy import is a
+Gateway-owned dry-run followed by explicit plan-hash confirmation. Starting a
+session from an entry pins the originating Gateway and opens the existing New Session sheet for workspace/model/trust choices, then seeds only an unsent draft;
+no prompt is replayed or automatically sent.

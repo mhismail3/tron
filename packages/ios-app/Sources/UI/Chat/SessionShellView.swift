@@ -66,6 +66,8 @@ struct SessionShellView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dashboardMode: DashboardMode = .sessions
     @State private var showNewSession = false
+    @State private var knowledgeDraftText: String?
+    @State private var knowledgeDraftIdentity: KnowledgePresentationIdentity?
     @State private var newSessionDetent: PresentationDetent = .medium
     @State private var showSettings = false
     @State private var search = ""
@@ -111,7 +113,11 @@ struct SessionShellView: View {
                 isPresented: $showNewSession,
                 identity: "dashboard.new-session"
             ) {
-                NewSessionSheet(onCreated: present)
+                NewSessionSheet(initialDraftText: knowledgeDraftText, pinnedProfileID: knowledgeDraftIdentity?.profileID) { route in
+                    knowledgeDraftText = nil
+                    knowledgeDraftIdentity = nil
+                    present(route)
+                }
                     .tronTopBlur(.sheet)
                     .presentationDetents([.medium, .large], selection: $newSessionDetent)
                     .presentationDragIndicator(.hidden)
@@ -159,7 +165,7 @@ struct SessionShellView: View {
                 identity: "dashboard.rename-confirmation"
             )
             .onChange(of: model.profiles.selected?.id, initial: true) { previousProfileID, profileID in
-                if previousProfileID != profileID { routeReplacementOwner.invalidate() }
+                if previousProfileID != profileID { routeReplacementOwner.invalidate(); knowledgeDraftText = nil; knowledgeDraftIdentity = nil }
                 var route = presentedSession
                 profileRouteOwner.reconcile(
                     profileID: profileID,
@@ -232,6 +238,11 @@ struct SessionShellView: View {
                 onOpenSettings: { showSettings = true },
                 onOpenSession: openAutomationSession
             )
+        case .knowledge:
+            KnowledgeDashboardView(
+                onSelectDashboard: selectDashboard,
+                onOpenDraft: openKnowledgeDraft
+            )
         }
     }
 
@@ -240,6 +251,17 @@ struct SessionShellView: View {
             get: { automationPreferences.value },
             set: { automationPreferences.set($0) }
         )
+    }
+
+    private func openKnowledgeDraft(_ record: KnowledgeRecord) {
+        let identity = model.knowledgePresentationIdentity
+        guard identity.profileID != nil else { return }
+        knowledgeDraftIdentity = identity
+        let evidence = record.provenance.evidence.first.map { ref in
+            ref.sessionEntry.map { "Source session \($0.sessionId), entry \($0.entryId)" } ?? "Source record \(ref.recordId ?? "object")"
+        } ?? "No source citation"
+        knowledgeDraftText = "Retained Knowledge: \(record.title)\n\n\(record.summary)\n\nRevision: \(record.revisionId) · \(evidence)"
+        showNewSession = true
     }
 
     private func selectDashboard(_ mode: DashboardMode) {

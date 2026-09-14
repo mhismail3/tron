@@ -110,6 +110,10 @@ final class AppModel {
             self.gatewayLifecycleGeneration = gatewayLifecycleGeneration
         }
 
+        func withEditorText(_ text: String?) -> SessionNavigationRoute {
+            SessionNavigationRoute(sessionID: sessionID, editorText: text, initialModel: initialModel, gatewayProfileID: gatewayProfileID, gatewayLifecycleGeneration: gatewayLifecycleGeneration)
+        }
+
         func withInitialModel(_ model: ModelRef?) -> SessionNavigationRoute {
             SessionNavigationRoute(
                 sessionID: sessionID,
@@ -155,6 +159,9 @@ final class AppModel {
     let diagnosticCapture: DiagnosticCaptureCoordinator
     var performanceSignpostsForCapture: any PerformanceSignposting { performanceSignposts }
     var diagnosticConnectionID: Int? { gatewayConnectionID }
+    var knowledgePresentationIdentity: KnowledgePresentationIdentity {
+        KnowledgePresentationIdentity(profileID: lifecycle.selectedProfileID, lifecycleGeneration: lifecycle.generationAdmission?.generation, connectionID: gatewayConnectionID)
+    }
     private let exportArtifacts: SessionExportArtifactStore
     private let mutationExecutor: ConfirmedMutationExecutor
     private let sessionMutations: SessionMutationService
@@ -188,6 +195,8 @@ final class AppModel {
     private var sessionCatalog = SessionCatalogCoordinator()
     private let dashboardConnections: DashboardGatewayConnectionPool
     let automationCatalog: AutomationCatalogCoordinator
+    /// Typed access to Gateway-owned Knowledge; no records are persisted here.
+    let knowledge: KnowledgeRPCClient
     private var dashboardSessionsByProfile: [String: [SessionSummary]] = [:]
     private var dashboardStatesByProfile: [String: DashboardServerConnectionState] = [:]
     private var dashboardCacheLoadGeneration = 0
@@ -537,6 +546,13 @@ final class AppModel {
             }
         })
         let workspaceInspection = WorkspaceInspectionService(client: client)
+        let knowledge = KnowledgeRPCClient(
+            request: { method, params, timeout in
+                try await client.requestValue(method, params, timeout: timeout)
+            },
+            mutationExecutor: mutationExecutor,
+            uuidSource: uuidSource
+        )
         let chatMedia = ChatMediaLoader(
             fetch: { identity in
                 let value = try await client.blob(
@@ -568,6 +584,7 @@ final class AppModel {
         self.noticeCenter = noticeCenter
         self.dashboardConnections = dashboardConnections
         self.automationCatalog = automationCatalog
+        self.knowledge = knowledge
         self.mutationExecutor = mutationExecutor
         self.sessionMutations = sessionMutations
         self.sessionImports = SessionImportCoordinator(
