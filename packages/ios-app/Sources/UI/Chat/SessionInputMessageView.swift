@@ -87,7 +87,7 @@ struct AutomationPromptMessageView: View {
         .padding(.top, ChatPromptContainerStyle.topPadding)
         .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
         .modifier(UserPromptGlassModifier(accent: .tronAutomation))
-        .modifier(ChatMessageActionsPopover(text: promptText ?? ""))
+        .modifier(ChatMessageCopyMenu(text: promptText ?? ""))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilitySummary)
     }

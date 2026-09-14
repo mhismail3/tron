@@ -1178,44 +1178,85 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
-    func testMessageActionsOpenCopyOnlyPopoverAndCopyExactText() async throws {
-        let text = "  Original input\nwith Unicode 👋  "
+    func testNativeCopyMenuIsExplicitAndKeepsItsOpeningText() async throws {
+        let text = "  Copy exactly\n👋 café  "
         let previousClipboard = UIPasteboard.general.items
         defer { UIPasteboard.general.items = previousClipboard }
-        for scheme: ColorScheme in [.light, .dark] {
-            let probe = ChatMessageActionsProbe()
-            let source = MessagePopoverSource(text: text)
-            try await withSheet(MessagePopoverFixture(source: source)
-                .environment(\.chatMessageActionsProbe, probe)
-                .preferredColorScheme(scheme)) { controller in
-                    try XCTUnwrap(probe.open)()
-                    for _ in 0..<60 {
-                        if controller.presentedViewController != nil && probe.actions["Copy"] != nil { break }
-                        try await DisplayFrameScheduler.displayLink.nextFrame()
-                    }
-                    let popover = try XCTUnwrap(controller.presentedViewController)
-                    XCTAssertNotNil(popover.popoverPresentationController)
-                    XCTAssertEqual(Set(probe.actions.keys), ["Copy"])
-                    XCTAssertTrue(self.views(of: UIView.self, in: popover.view).flatMap(\.interactions)
-                        .compactMap { $0 as? UIContextMenuInteraction }.isEmpty)
-                    for _ in 0..<20 { try await DisplayFrameScheduler.displayLink.nextFrame() }
-                    self.capture(controller, name: "copy-only-message-popover-\(scheme)")
-                    source.text = "A later row update must not change an open Copy action"
-                    for _ in 0..<8 { try await DisplayFrameScheduler.displayLink.nextFrame() }
-                    try XCTUnwrap(probe.actions["Copy"])()
-                    XCTAssertEqual(UIPasteboard.general.string, text)
-                    for _ in 0..<60 {
-                        if controller.presentedViewController == nil { break }
-                        try await DisplayFrameScheduler.displayLink.nextFrame()
-                    }
-                    XCTAssertNil(controller.presentedViewController, "Copy dismisses its own popover")
+        try await withSheet(UserPromptText(text: text).padding(16)
+            .modifier(UserPromptGlassModifier()).modifier(ChatMessageCopyMenu(text: text))) { controller in
+                let owner = try XCTUnwrap(self.views(of: UIView.self, in: controller.view).flatMap(\.interactions)
+                    .compactMap { ($0 as? UIContextMenuInteraction)?.delegate as? ChatMessageContextMenuOwner }.first)
+                let menu = try XCTUnwrap(owner.makeMenu())
+                XCTAssertEqual(menu.children.map(\.title), ["Copy"])
+                let copy = try XCTUnwrap(menu.children.first as? UIAction)
+                owner.text = "Updated input must not replace an open menu"
+                self.performMenuAction(copy)
+                XCTAssertEqual(UIPasteboard.general.string, text)
+                XCTAssertEqual(menu.children.count, 1)
+                owner.text = ""
+                XCTAssertNil(owner.makeMenu(), "An attachment-only bubble must not offer an empty menu")
+            }
+    }
+
+    func testNativeMenuPreservesShortAndWrappedBubbleMeasurement() async throws {
+        for text in ["Short prompt", String(repeating: "A wrapped prompt preserves native layout and spacing. ", count: 20)] {
+            var sizes: [CGSize] = []
+            for native in [false, true] {
+                let bubble = UserPromptText(text: text)
+                    .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
+                    .padding(.top, ChatPromptContainerStyle.topPadding)
+                    .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
+                    .modifier(UserPromptGlassModifier())
+                try await withSheet(ScrollView {
+                    Group {
+                        if native { bubble.modifier(ChatMessageCopyMenu(text: text)) }
+                        else { bubble }
+                    }.frame(width: 300)
+                }) { controller in
+                    let label = try XCTUnwrap(self.views(of: UILabel.self, in: controller.view).first { $0.text == text })
+                    sizes.append(label.bounds.size)
                 }
-            XCTAssertNil(probe.open, "Removing the source releases its presentation action")
-            XCTAssertTrue(probe.actions.isEmpty)
+            }
+            XCTAssertEqual(sizes[0].width, sizes[1].width, accuracy: 1)
+            XCTAssertEqual(sizes[0].height, sizes[1].height, accuracy: 1)
         }
     }
 
-    func testOutgoingAndQueuedActionsDoNotInstallSystemContextMenus() async throws {
+    func testNativeQueueMenuRevalidatesActionsAndSourceIdentity() async throws {
+        try await withSheet(Text("Queue menu lifecycle")) { controller in
+            let owner = ChatMessageContextMenuOwner()
+            let source = UIView()
+            controller.view.addSubview(source)
+            owner.attach(to: source)
+            owner.mutationIdentity = "queue-a"
+            var selected: [String] = []
+            owner.actions = [.init(id: .moveEarlier, title: "Move earlier", icon: "arrow.up", perform: { selected.append("original") })]
+            let menu = try XCTUnwrap(owner.makeMenu())
+            let move = try XCTUnwrap(menu.children.first as? UIAction)
+            owner.actions = []
+            self.performMenuAction(move)
+            XCTAssertTrue(selected.isEmpty, "Busy/read-only queues revoke actions already shown")
+            owner.actions = [.init(id: .moveEarlier, title: "Move earlier", icon: "arrow.up", perform: { selected.append("current") })]
+            self.performMenuAction(move)
+            XCTAssertEqual(selected, ["current"], "Use the current admitted command, not a retained old callback")
+            owner.mutationIdentity = "queue-b"
+            self.performMenuAction(move)
+            XCTAssertEqual(selected, ["current"])
+            owner.mutationIdentity = "queue-a"
+            source.removeFromSuperview()
+            owner.retire()
+            self.performMenuAction(move)
+            XCTAssertEqual(selected, ["current"], "Retired sources cannot mutate a queue")
+        }
+    }
+
+    private func performMenuAction(_ action: UIAction) {
+        let control = UIControl()
+        control.addAction(action, for: .touchUpInside)
+        control.sendActions(for: .touchUpInside)
+    }
+
+    func testOutgoingAndQueuedCopyMenusRetainOneNativeOwner() async throws {
         let arguments = "  Copy this exact input\nnot the template. 👋  "
         let resource = ComposerResourceInvocation(source: .prompt, name: "review", arguments: arguments)
         for behavior: String? in [nil, "steer", "followUp"] {
@@ -1226,58 +1267,32 @@ final class SessionSheetPresentationTests: XCTestCase {
                 presentation: .init(snapshot: submission, transportActive: true), attachments: [])) { controller in
                 let interactions = self.views(of: UIView.self, in: controller.view).flatMap(\.interactions)
                     .compactMap { $0 as? UIContextMenuInteraction }
-                XCTAssertTrue(interactions.isEmpty)
+                XCTAssertEqual(interactions.count, 1)
                 XCTAssertTrue(self.views(of: UILabel.self, in: controller.view).contains { $0.text == arguments })
+                try self.assertMessageMenuOpens(in: controller, text: arguments)
             }
         }
         let message = SessionSnapshot.QueuedMessage(id: "copy-queue", behavior: .steer,
             text: "Expanded template", attachmentCount: 0, resourceInvocation: resource)
         for availability: QueuedMessageManagementAvailability in [.available, .requiresGatewayUpdate, .invalidProjection] {
             for mutating in [false, true] {
-                let probe = ChatMessageActionsProbe()
-                var moves: [Int] = []
                 try await withSheet(QueuedMessageRow(message: message, position: 2, total: 3,
                     managementAvailability: availability, isMutating: mutating,
                     onEdit: { XCTFail("Long-press registration must not edit") },
                     onClear: { XCTFail("Long-press registration must not clear") },
                     canMoveEarlier: true, canMoveLater: true,
-                    onMove: { moves.append($0) })
-                    .environment(\.chatMessageActionsProbe, probe)) { controller in
+                    onMove: { _ in XCTFail("Long-press registration must not reorder") })) { controller in
                     let interactions = self.views(of: UIView.self, in: controller.view).flatMap(\.interactions)
                         .compactMap { $0 as? UIContextMenuInteraction }
-                    XCTAssertTrue(interactions.isEmpty, "Queue actions must not restore the Siri-injecting context menu")
+                    XCTAssertEqual(interactions.count, 1, "Copy must join the queue menu, never shadow its management actions")
                     XCTAssertTrue(self.views(of: UILabel.self, in: controller.view).contains { $0.text == arguments })
-                    try XCTUnwrap(probe.open)()
-                    for _ in 0..<60 {
-                        if probe.actions["Copy"] != nil { break }
-                        try await DisplayFrameScheduler.displayLink.nextFrame()
-                    }
-                    let manageable = availability == .available && !mutating
-                    let expected: Set<String> = manageable ? ["Copy", "Move earlier", "Move later", "Clear entire queue"] : ["Copy"]
-                    XCTAssertEqual(Set(probe.actions.keys), expected)
-                    XCTAssertTrue(moves.isEmpty)
-                    if manageable {
-                        try XCTUnwrap(probe.actions["Move earlier"])()
-                        XCTAssertEqual(moves, [-1])
-                    }
+                    try self.assertMessageMenuOpens(in: controller, text: arguments)
                 }
             }
         }
     }
 
-    func testEmptyReadOnlyMessageDoesNotOpenAPopover() async throws {
-        let probe = ChatMessageActionsProbe()
-        try await withSheet(Text("Attachment-only surface")
-            .modifier(ChatMessageActionsPopover(text: ""))
-            .environment(\.chatMessageActionsProbe, probe)) { controller in
-                try XCTUnwrap(probe.open)()
-                for _ in 0..<8 { try await DisplayFrameScheduler.displayLink.nextFrame() }
-                XCTAssertNil(controller.presentedViewController)
-                XCTAssertTrue(probe.actions.isEmpty)
-            }
-    }
-
-    func testPendingPromptActionsDoNotInstallSystemContextMenus() async throws {
+    func testPendingPromptCopyMenuUsesNativeInteractionAcrossCardStates() async throws {
         let arguments = "  Preserve whitespace\n\tand Unicode: café 👋  "
         for behavior: SessionSnapshot.QueuedMessage.Behavior? in [nil, .steer, .followUp] {
             let pending = SessionSnapshot.PendingPrompt(
@@ -1288,10 +1303,11 @@ final class SessionSheetPresentationTests: XCTestCase {
             try await withSheet(ChatPendingPromptRow(presentation: .init(snapshot: pending, isCompacting: false))) { controller in
                 let interactions = self.views(of: UIView.self, in: controller.view).flatMap(\.interactions)
                     .compactMap { $0 as? UIContextMenuInteraction }
-                XCTAssertTrue(interactions.isEmpty)
+                XCTAssertEqual(interactions.count, 1, "One native menu belongs to the bounded message surface")
                 let texts = self.views(of: UILabel.self, in: controller.view).compactMap(\.text)
                 XCTAssertTrue(texts.contains(arguments))
                 XCTAssertFalse(texts.contains(pending.text))
+                try self.assertMessageMenuOpens(in: controller, text: arguments)
             }
         }
         let empty = SessionSnapshot.PendingPrompt(id: "copy-empty", createdAt: nil, behavior: nil,
@@ -1336,7 +1352,8 @@ final class SessionSheetPresentationTests: XCTestCase {
                     XCTAssertEqual(item.content, [content])
                     let interactions = self.views(of: UIView.self, in: controller.view).flatMap(\.interactions)
                         .compactMap { $0 as? UIContextMenuInteraction }
-                    XCTAssertTrue(interactions.isEmpty, "Canonical user text must not install a system context menu")
+                    XCTAssertEqual(interactions.count, 1, "Canonical user text must expose one native Copy menu")
+                    try self.assertMessageMenuOpens(in: controller, text: bound ? resource.arguments : expanded)
                 }
             }
         }
@@ -1656,23 +1673,24 @@ final class SessionSheetPresentationTests: XCTestCase {
         if let failure { throw failure }
     }
 
+    private func assertMessageMenuOpens(in controller: UIViewController, text: String) throws {
+        let interaction = try XCTUnwrap(views(of: UIView.self, in: controller.view).flatMap(\.interactions)
+            .compactMap { $0 as? UIContextMenuInteraction }.first)
+        let owner = try XCTUnwrap(interaction.view)
+        let label = try XCTUnwrap(views(of: UILabel.self, in: controller.view).first { $0.text == text })
+        // UIKit asks the delegate in the interaction owner's coordinate space,
+        // which can be a shared hosting view rather than the bubble itself.
+        let point = label.convert(CGPoint(x: label.bounds.midX, y: min(label.bounds.midY, 10)), to: owner)
+        XCTAssertTrue(owner.isUserInteractionEnabled)
+        let hit = controller.view.hitTest(owner.convert(point, to: controller.view), with: nil)
+        XCTAssertTrue(hit === owner || hit?.isDescendant(of: owner) == true,
+                      "Menu owner: \(owner); actual hit: \(String(describing: hit))")
+        XCTAssertNotNil(interaction.delegate?.contextMenuInteraction(interaction, configurationForMenuAtLocation: point),
+                        "Registration alone is insufficient: pressing the visible text must produce a native menu")
+    }
+
     private func views<T: UIView>(of type: T.Type, in root: UIView) -> [T] {
         ((root as? T).map { [$0] } ?? []) + root.subviews.flatMap { views(of: type, in: $0) }
-    }
-}
-
-@MainActor @Observable
-private final class MessagePopoverSource {
-    var text: String
-    init(text: String) { self.text = text }
-}
-
-private struct MessagePopoverFixture: View {
-    let source: MessagePopoverSource
-    var body: some View {
-        UserPromptText(text: source.text)
-            .padding(16).modifier(UserPromptGlassModifier())
-            .modifier(ChatMessageActionsPopover(text: source.text))
     }
 }
 

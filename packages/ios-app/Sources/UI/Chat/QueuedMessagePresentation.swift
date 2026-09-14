@@ -436,25 +436,25 @@ struct QueuedMessageRow: View {
         // a large queued prompt arrives causes a visible container flash.
         card.fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: UserPromptTextLayoutPolicy.maximumWidth, alignment: .trailing)
-        .modifier(ChatMessageActionsPopover(
-            text: displayText,
-            hasAdditionalActions: isManageable && !isMutating && (canMoveEarlier || canMoveLater || total > 1)
-        ) {
-            if isManageable && !isMutating {
-                if canMoveEarlier {
-                    ChatMessagePopoverAction(title: "Move earlier", icon: "arrow.up") { onMove(-1) }
-                }
-                if canMoveLater {
-                    ChatMessagePopoverAction(title: "Move later", icon: "arrow.down") { onMove(1) }
-                }
-                if total > 1 {
-                    ChatMessagePopoverAction(title: "Clear entire queue", icon: "trash.slash", role: .destructive, action: onClear)
-                }
-            }
-        })
+        .modifier(ChatMessageCopyMenu(text: displayText, mutationIdentity: message.id, actions: menuActions))
         .frame(maxWidth: .infinity, alignment: .trailing)
         .accessibilityElement(children: .contain)
         .accessibilityHint(isManageable ? "" : readOnlyExplanation)
+    }
+
+    private var menuActions: [ChatMessageMenuAction] {
+        guard isManageable && !isMutating else { return [] }
+        var actions: [ChatMessageMenuAction] = []
+        if canMoveEarlier {
+            actions.append(.init(id: .moveEarlier, title: "Move earlier", icon: "arrow.up", perform: { onMove(-1) }))
+        }
+        if canMoveLater {
+            actions.append(.init(id: .moveLater, title: "Move later", icon: "arrow.down", perform: { onMove(1) }))
+        }
+        if total > 1 {
+            actions.append(.init(id: .clearQueue, title: "Clear entire queue", icon: "trash.slash", destructive: true, perform: { onClear() }))
+        }
+        return actions
     }
 
     private var card: some View {
