@@ -25,6 +25,7 @@ struct ChatForkNavigationOwner {
 struct ChatRoutes: ViewModifier {
     let sessionID: String
     let projectCWD: String?
+    let initialHistoryEntryID: String?
     let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
     @Binding var showContext: Bool
     @Binding var showSettings: Bool
@@ -61,7 +62,7 @@ struct ChatRoutes: ViewModifier {
                 identity: "chat.\(sessionID).context",
                 onDismiss: completeForkNavigationAfterContextDismissal
             ) {
-                SessionContextSheet(sessionID: sessionID) { route in
+                SessionContextSheet(sessionID: sessionID, initialHistoryEntryID: initialHistoryEntryID) { route in
                     forkNavigation.stage(route)
                     showContext = false
                 }

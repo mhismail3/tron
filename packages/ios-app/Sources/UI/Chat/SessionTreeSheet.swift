@@ -104,6 +104,7 @@ private struct HistoryLoadKey: Hashable {
 
 struct SessionTreeSheet: View {
     let sessionID: String
+    let initialEntryID: String?
     let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
     let onNavigated: () -> Void
     @Environment(AppModel.self) private var model
@@ -122,7 +123,16 @@ struct SessionTreeSheet: View {
     @Environment(\.sessionHistoryPagingProbe) private var pagingProbe
     #endif
     @State private var installedRevision = -1
+    @State private var initialEntryResolved = false
     @State private var forkNavigation = ChatForkNavigationOwner()
+
+    init(sessionID: String, initialEntryID: String? = nil, onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void, onNavigated: @escaping () -> Void) {
+        self.sessionID = sessionID
+        self.initialEntryID = initialEntryID
+        self.onForkCreated = onForkCreated
+        self.onNavigated = onNavigated
+    }
+
     private var active: Bool { activity.allowsPresentationPublication && (coordinator?.activity(for: surfaceToken).allowsPresentationPublication ?? true) }
     private var identity: SessionHistoryReadIdentity? { .current(model: model, sessionID: sessionID) }
     private var supported: Bool { model.gatewayInfo?.capabilities.contains("session-history-pages.v1") == true }
@@ -139,6 +149,9 @@ struct SessionTreeSheet: View {
                         } else {
                             if store.loading && store.page == nil { TronLoadingState(label: "Loading history…") }
                             if let page = store.page {
+                                if let initialEntryID, !initialEntryResolved, !page.nodes.contains(where: { $0.id == initialEntryID }) {
+                                    TronSettingsNotice(message: "The cited entry is not in this bounded history page. Use Older entries to locate it; no evidence was substituted.", accent: .tronSessionTeal)
+                                }
                                 pagingControls(page, location: "top")
                                 ForEach(page.nodes) { node in
                                     let row = SessionHistoryRowPresentation(node: node)
@@ -192,6 +205,7 @@ struct SessionTreeSheet: View {
                       pageRequest.revision == request.revision else { return }
                 installedRevision = request.revision
                 if changedIdentity { pageRequest.cursor = nil }
+                resolveInitialEntryIfPresent()
             }
             #if HOSTED_TEST
             .onAppear { installPagingProbe() }
@@ -237,6 +251,14 @@ struct SessionTreeSheet: View {
         }
         .tronTopBlur(.sheet).presentationDetents([.medium, .large]).presentationDragIndicator(.hidden)
         .tronSettingsVisualTheme(accent: .tronSessionTeal).tint(.tronSessionTeal)
+    }
+
+    private func resolveInitialEntryIfPresent() {
+        guard let initialEntryID, !initialEntryResolved, let page = store.page,
+              let node = page.nodes.first(where: { $0.id == initialEntryID }),
+              let identity, store.identity == identity, active else { return }
+        initialEntryResolved = true
+        select(node, .details)
     }
 
     private func pagingControls(_ page: SessionHistoryPage, location: String) -> some View {

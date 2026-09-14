@@ -92,26 +92,34 @@ final class AppModel {
         let sessionID: String
         let editorText: String?
         let initialModel: ModelRef?
+        /// Optional exact history entry requested by an evidence citation. It
+        /// is route identity so a second citation cannot reuse a mounted chat.
+        let initialHistoryEntryID: String?
         fileprivate let gatewayProfileID: String?
         fileprivate let gatewayLifecycleGeneration: Int?
-        var id: String { gatewayProfileID.map { "\($0):\(sessionID)" } ?? sessionID }
+        var id: String {
+            let base = gatewayProfileID.map { "\($0):\(sessionID)" } ?? sessionID
+            return initialHistoryEntryID.map { "\(base):history:\($0)" } ?? base
+        }
 
         init(
             sessionID: String,
             editorText: String?,
             initialModel: ModelRef? = nil,
+            initialHistoryEntryID: String? = nil,
             gatewayProfileID: String? = nil,
             gatewayLifecycleGeneration: Int? = nil
         ) {
             self.sessionID = sessionID
             self.editorText = editorText
             self.initialModel = initialModel
+            self.initialHistoryEntryID = initialHistoryEntryID
             self.gatewayProfileID = gatewayProfileID
             self.gatewayLifecycleGeneration = gatewayLifecycleGeneration
         }
 
         func withEditorText(_ text: String?) -> SessionNavigationRoute {
-            SessionNavigationRoute(sessionID: sessionID, editorText: text, initialModel: initialModel, gatewayProfileID: gatewayProfileID, gatewayLifecycleGeneration: gatewayLifecycleGeneration)
+            SessionNavigationRoute(sessionID: sessionID, editorText: text, initialModel: initialModel, initialHistoryEntryID: initialHistoryEntryID, gatewayProfileID: gatewayProfileID, gatewayLifecycleGeneration: gatewayLifecycleGeneration)
         }
 
         func withInitialModel(_ model: ModelRef?) -> SessionNavigationRoute {
@@ -119,6 +127,7 @@ final class AppModel {
                 sessionID: sessionID,
                 editorText: editorText,
                 initialModel: model,
+                initialHistoryEntryID: initialHistoryEntryID,
                 gatewayProfileID: gatewayProfileID,
                 gatewayLifecycleGeneration: gatewayLifecycleGeneration
             )
@@ -2730,12 +2739,13 @@ final class AppModel {
     /// Opens an authoritative session returned by an Automation run. The
     /// profile is part of the route identity because the same session ID may
     /// exist on multiple Gateways; no dashboard cache lookup is used here.
-    func navigationRoute(profileID: String, sessionID: String) async throws -> SessionNavigationRoute {
+    func navigationRoute(profileID: String, sessionID: String, historyEntryID: String? = nil) async throws -> SessionNavigationRoute {
         let owner = try await activateDashboardProfile(profileID)
         guard !sessionID.isEmpty else { throw CancellationError() }
         return SessionNavigationRoute(
             sessionID: sessionID,
             editorText: nil,
+            initialHistoryEntryID: historyEntryID,
             gatewayProfileID: owner.profileID,
             gatewayLifecycleGeneration: owner.lifecycleGeneration
         )

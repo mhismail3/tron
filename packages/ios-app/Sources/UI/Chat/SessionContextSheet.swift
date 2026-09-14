@@ -163,6 +163,7 @@ private struct SessionWorkspaceRefreshIdentity: Hashable {
 
 struct SessionContextSheet: View {
     let sessionID: String
+    let initialHistoryEntryID: String?
     let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -190,6 +191,12 @@ struct SessionContextSheet: View {
     @State private var sliderPresentation = ConfigurationSliderPresentation()
     @State private var settingContextWindow = false
     @State private var forkNavigation = ChatForkNavigationOwner()
+
+    init(sessionID: String, initialHistoryEntryID: String? = nil, onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void) {
+        self.sessionID = sessionID
+        self.initialHistoryEntryID = initialHistoryEntryID
+        self.onForkCreated = onForkCreated
+    }
 
     private var presentationSource: SessionContextPresentation? {
         model.sessionContextPresentation(for: sessionID)
@@ -312,6 +319,7 @@ struct SessionContextSheet: View {
                     case .history:
                         SessionTreeSheet(
                             sessionID: sessionID,
+                            initialEntryID: initialHistoryEntryID,
                             onForkCreated: handleForkCreated,
                             onNavigated: handleNavigation
                         )
@@ -350,6 +358,11 @@ struct SessionContextSheet: View {
         .tint(Color.tronEmerald)
         .tronConfigurationSliderHost(sliderPresentation)
         .onAppear {
+            if initialHistoryEntryID != nil, destination == nil {
+                // Evidence routes enter the same managed history owner as a
+                // user-opened session; they never issue an ad-hoc history RPC.
+                destination = .history
+            }
             if capturedNoticeScope == nil {
                 capturedNoticeScope = model.presentationTarget(for: sessionID).map {
                     .session(id: $0.sessionID, generation: $0.generation)

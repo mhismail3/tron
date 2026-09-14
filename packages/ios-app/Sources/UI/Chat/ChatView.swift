@@ -7,6 +7,7 @@ struct ChatView: View {
     let sessionID: String
     private let initialEditorText: String?
     private let initialModel: ModelRef?
+    private let initialHistoryEntryID: String?
     private let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
     private let displayFrameScheduler: DisplayFrameScheduler
     private let performanceSignposts: any PerformanceSignposting
@@ -60,6 +61,7 @@ struct ChatView: View {
         sessionID: String,
         initialEditorText: String? = nil,
         initialModel: ModelRef? = nil,
+        initialHistoryEntryID: String? = nil,
         onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
         hostedProbe: ChatHostedProbe? = nil,
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
@@ -68,6 +70,7 @@ struct ChatView: View {
         self.sessionID = sessionID
         self.initialEditorText = initialEditorText
         self.initialModel = initialModel
+        self.initialHistoryEntryID = initialHistoryEntryID
         self._initialModelSettled = State(initialValue: initialModel == nil)
         self.onForkCreated = onForkCreated
         self.hostedProbe = hostedProbe
@@ -87,6 +90,7 @@ struct ChatView: View {
         sessionID: String,
         initialEditorText: String? = nil,
         initialModel: ModelRef? = nil,
+        initialHistoryEntryID: String? = nil,
         onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared
@@ -94,6 +98,7 @@ struct ChatView: View {
         self.sessionID = sessionID
         self.initialEditorText = initialEditorText
         self.initialModel = initialModel
+        self.initialHistoryEntryID = initialHistoryEntryID
         self._initialModelSettled = State(initialValue: initialModel == nil)
         self.onForkCreated = onForkCreated
         self.displayFrameScheduler = displayFrameScheduler
@@ -155,6 +160,7 @@ struct ChatView: View {
         .modifier(ChatRoutes(
             sessionID: sessionID,
             projectCWD: model.sessionContextPresentation(for: sessionID)?.cwd,
+            initialHistoryEntryID: initialHistoryEntryID,
             onForkCreated: onForkCreated,
             showContext: $sessionPresentation.showContext,
             showSettings: $sessionPresentation.showSettings,

@@ -276,8 +276,10 @@ struct SessionShellView: View {
         let navigationIntent = navigationOwner.begin()
         Task { @MainActor in
             defer { openingSessionID = nil }
+            guard openingSessionID == "knowledge:\(profileID):\(sessionID):\(entryID)",
+                  model.knowledgePresentationIdentity.profileID == profileID else { return }
             do {
-                let route = try await model.navigationRoute(profileID: profileID, sessionID: sessionID)
+                let route = try await model.navigationRoute(profileID: profileID, sessionID: sessionID, historyEntryID: entryID)
                 guard navigationOwner.admit(navigationIntent), model.ownsNavigationRoute(route) else { return }
                 dashboardMode = .sessions
                 present(route)
@@ -332,6 +334,7 @@ struct SessionShellView: View {
                 sessionID: route.sessionID,
                 initialEditorText: route.editorText,
                 initialModel: route.initialModel,
+                initialHistoryEntryID: route.initialHistoryEntryID,
                 onForkCreated: present,
                 performanceSignposts: model.performanceSignpostsForCapture
             )

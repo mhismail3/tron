@@ -54,13 +54,6 @@ final class KnowledgeModelsTests: XCTestCase {
                     "offset": .number(Double(offset)), "nextOffset": offset == 0 ? .number(5) : .null,
                     "base64": .string(bytes)
                 ])
-            case "session.history.entry":
-                return .object([
-                    "runtimeGeneration": .string("runtime-1"), "entryId": .string("entry-1"),
-                    "text": .string("exact canonical text"), "offset": .number(0),
-                    "nextOffset": .null, "previousOffset": .null, "totalCharacters": .number(19),
-                    "metadata": .object(["role": .string("user")])
-                ])
             default:
                 throw GatewayFailure(code: "unexpected", message: method, retryable: false, details: nil)
             }
@@ -78,9 +71,24 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertEqual(Data(base64Encoded: first.base64).flatMap { String(data: $0, encoding: .utf8) }, "first")
         XCTAssertEqual(Data(base64Encoded: second.base64).flatMap { String(data: $0, encoding: .utf8) }, "second")
         XCTAssertEqual(requests.compactMap { $0.1.objectValue?["offset"]?.intValue }, [0, 5])
-        let entry = try await client.readSessionEntry(sessionID: "session-1", entryID: "entry-1")
-        XCTAssertEqual(entry.text, "exact canonical text")
-        XCTAssertEqual(entry.metadata["role"], JSONValue.string("user"))
+    }
+
+    @MainActor
+    func testCoverageReadExposesPendingFailedAndUnavailableCuts() async throws {
+        let client = KnowledgeRPCClient(request: { method, _, _ in
+            XCTAssertEqual(method, "knowledge.observation.coverage")
+            return .object([
+                "coverage": .array([
+                    .object(["schemaVersion": .number(1), "id": .string("cut-pending"), "revisionId": .string("r1"), "range": .object(["sessionId": .string("session-1"), "fromEntryId": .string("e1"), "toEntryId": .string("e1"), "entryIds": .array([.string("e1")]), "entryDigest": .string(String(repeating: "a", count: 64))]), "disposition": .string("pending"), "groupRevisionIds": .array([]), "recordedAt": .string("2026-01-01T00:00:00Z"), "reason": .string("observer-admitted")]),
+                    .object(["schemaVersion": .number(1), "id": .string("cut-failed"), "revisionId": .string("r2"), "range": .object(["sessionId": .string("session-1"), "fromEntryId": .string("e2"), "toEntryId": .string("e2"), "entryIds": .array([.string("e2")]), "entryDigest": .string(String(repeating: "b", count: 64))]), "disposition": .string("failed"), "groupRevisionIds": .array([]), "recordedAt": .string("2026-01-01T00:00:01Z")])
+                ]),
+                "stateRevision": .number(8), "nextCursor": .null
+            ])
+        })
+        let page = try await client.coverage(limit: 100)
+        XCTAssertEqual(page.coverage.map(\.disposition), [.pending, .failed])
+        XCTAssertEqual(page.stateRevision, 8)
+        XCTAssertNil(page.nextCursor)
     }
 
     func testCataloguePaginationAllowsListContinuationButNotSearchPages() {
@@ -112,6 +120,8 @@ final class KnowledgeModelsTests: XCTestCase {
         let plan = KnowledgeImportPlan(operation: "dry-run", source: "synthetic", planHash: "plan", planned: 120, selected: 50, imported: 0, resumed: 0, skipped: 0, failed: 0, completed: false, progress: KnowledgeImportProgress(completed: 0, remaining: 50, total: 50), mappings: [], warnings: [])
         let result = KnowledgeImportResult(operation: "run", source: "synthetic", planHash: "plan", planned: 120, selected: 50, imported: 50, resumed: 0, skipped: 0, failed: 0, completed: true, progress: KnowledgeImportProgress(completed: 50, remaining: 0, total: 50), mappings: [], warnings: [])
         XCTAssertEqual(KnowledgeImportPresentationPolicy.completionMessage(plan: plan, result: result, offset: 0), "Batch complete (through 50 of 120); inspect the next batch to continue.")
+        let failed = KnowledgeImportResult(operation: "run", source: "synthetic", planHash: "plan", planned: 120, selected: 50, imported: 49, resumed: 0, skipped: 0, failed: 1, completed: false, progress: KnowledgeImportProgress(completed: 49, remaining: 1, total: 50), mappings: [], warnings: [])
+        XCTAssertTrue(KnowledgeImportPresentationPolicy.completionMessage(plan: plan, result: failed, offset: 0).contains("incomplete"))
     }
 
     func testSourceAndNoteUseTheCommonDiscriminatedContentShape() throws {
@@ -137,5 +147,21 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertEqual(sourceContent.identity?.itemId, "item")
         XCTAssertEqual(sourceContent.assessment?.evidenceQuality, .high)
         XCTAssertEqual(sourceContent.origins?.first?.annotation, "saved")
+    }
+
+    func testSourceCorrectionPreservesCapturedRepresentationAndAttributesNewRevisionToUser() throws {
+        let source = KnowledgeRecord(
+            schemaVersion: 1, id: "source-1", revisionId: "revision-4", kind: .source, scope: .research,
+            createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+            provenance: KnowledgeProvenance(actor: .connector, source: "raindrop", sessionId: nil, branchId: nil, invocationId: "invoke-1", evidence: []), temporal: nil, relations: [],
+            content: .source(KnowledgeSourceContent(title: "Captured", uri: "https://example.com", text: "original readable text", object: KnowledgeObjectRef(hash: String(repeating: "c", count: 64), mediaType: "text/plain", bytes: 21), mediaType: "text/plain", captureDisposition: .complete, annotations: nil, sourcePublishedAt: nil, capturedAt: "2026-01-01T00:00:00Z", origin: "connector", origins: nil, identity: nil, assessment: nil))
+        )
+        guard case .source(let corrected) = KnowledgeCorrectionPolicy.content(for: source, replacementText: "the corrected interpretation") else { return XCTFail("Expected source correction") }
+        XCTAssertEqual(corrected.text, "original readable text")
+        XCTAssertEqual(corrected.object?.hash, String(repeating: "c", count: 64))
+        XCTAssertEqual(corrected.annotations?.last?.text, "User correction: the corrected interpretation")
+        XCTAssertEqual(KnowledgeCorrectionPolicy.provenance(for: source).actor, .user)
+        XCTAssertEqual(KnowledgeCorrectionPolicy.provenance(for: source).source, "ios-correction")
+        XCTAssertEqual(KnowledgeCorrectionPolicy.provenance(for: source).evidence.last?.revisionId, "revision-4")
     }
 }

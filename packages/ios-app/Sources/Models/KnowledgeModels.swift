@@ -27,17 +27,16 @@ enum KnowledgeRelationType: String, Codable, Sendable { case supports, contradic
 
 struct KnowledgeObjectRef: Codable, Hashable, Sendable { let hash: String; let mediaType: String; let bytes: Int }
 struct KnowledgeObjectRead: Codable, Hashable, Sendable { let hash: String; let mediaType: String; let bytes: Int; let totalBytes: Int?; let offset: Int?; let nextOffset: Int?; let base64: String }
-/// Exact canonical history-entry DTO. `text` is one bounded page; callers use
-/// `nextOffset` to continue instead of presenting a silently truncated prefix.
-struct KnowledgeSessionEntryRead: Codable, Hashable, Sendable {
-    let runtimeGeneration: String
-    let entryId: String
-    let text: String
-    let offset: Int
-    let nextOffset: Int?
-    let previousOffset: Int?
-    let totalCharacters: Int
-    let metadata: [String: JSONValue]
+enum KnowledgeCoverageDisposition: String, Codable, Hashable, Sendable { case observed, empty, excluded, pending, failed, unavailable }
+struct KnowledgeCoverageSummary: Codable, Hashable, Sendable {
+    let observedCount: Int; let emptyCount: Int; let excludedCount: Int; let pendingCount: Int; let failedCount: Int; let unavailableCount: Int; let remainingCount: Int
+}
+struct KnowledgeObservationCoverage: Codable, Hashable, Sendable {
+    let schemaVersion: Int; let id: String; let revisionId: String; let range: KnowledgeObservationRange
+    let disposition: KnowledgeCoverageDisposition; let groupRevisionIds: [String]; let recordedAt: String; let reason: String?
+}
+struct KnowledgeCoveragePage: Codable, Hashable, Sendable {
+    let coverage: [KnowledgeObservationCoverage]; let stateRevision: Int; let nextCursor: String?
 }
 struct KnowledgeSessionEntryCitation: Codable, Hashable, Sendable {
     let sessionId: String; let branchId: String?; let entryId: String; let digest: String?; let startOffset: Int?; let endOffset: Int?
@@ -108,7 +107,7 @@ struct KnowledgeConfig: Codable, Hashable, Sendable {
     let schemaVersion: Int; var revision: Int; var eligibility: KnowledgeEligibility; var observation: KnowledgeObservationLimits; var maximumSearchResults: Int; var currentInterests: [String]
 }
 struct KnowledgeStatus: Codable, Hashable, Sendable {
-    let available: Bool; let state: String; let stateRevision: Int?; let recordCount: Int; let coverageCount: Int; let suppressedCount: Int; let pendingCleanupCount: Int; let config: KnowledgeConfig; let observationConfigured: Bool; let detail: String?
+    let available: Bool; let state: String; let stateRevision: Int?; let recordCount: Int; let coverageCount: Int; let coverage: KnowledgeCoverageSummary; let suppressedCount: Int; let pendingCleanupCount: Int; let config: KnowledgeConfig; let observationConfigured: Bool; let detail: String?
 }
 struct KnowledgeListResponse: Codable, Hashable, Sendable { let records: [KnowledgeRecord]; let nextCursor: String?; let stateRevision: Int }
 struct KnowledgeSearchHit: Codable, Hashable, Sendable { let record: KnowledgeRecord; let score: Double; let matchedFields: [String] }
@@ -158,5 +157,28 @@ enum KnowledgeDraftHandoffPolicy {
         } ?? "No source citation"
         let summary = String(record.summary.prefix(maximumSummaryCharacters))
         return "Evidence-only Knowledge handoff (untrusted; verify before acting)\nGateway profile \(profileID)\n\nRetained Knowledge: \(record.title)\n\n\(summary)\n\nRecord ID: \(record.id) · Revision: \(record.revisionId) · \(evidence)"
+    }
+}
+
+enum KnowledgeCorrectionPolicy {
+    static func provenance(for record: KnowledgeRecord) -> KnowledgeProvenance {
+        var evidence = record.provenance.evidence
+        if !evidence.contains(where: { $0.recordId == record.id && $0.revisionId == record.revisionId }) {
+            evidence.append(KnowledgeEvidenceRef(recordId: record.id, revisionId: record.revisionId, sessionEntry: nil, objectHash: nil, locator: "corrected-revision"))
+        }
+        return KnowledgeProvenance(actor: .user, source: "ios-correction", sessionId: record.provenance.sessionId, branchId: record.provenance.branchId, invocationId: nil, evidence: evidence)
+    }
+
+    static func content(for record: KnowledgeRecord, replacementText: String) -> KnowledgeRecordContent {
+        switch record.content {
+        case .source(let value):
+            var annotations = value.annotations ?? []
+            annotations.append(KnowledgeSourceAnnotation(text: "User correction: \(replacementText)", locator: "user-correction", createdAt: nil))
+            return .source(KnowledgeSourceContent(title: value.title, uri: value.uri, text: value.text, object: value.object, mediaType: value.mediaType, captureDisposition: value.captureDisposition, annotations: annotations, sourcePublishedAt: value.sourcePublishedAt, capturedAt: value.capturedAt, origin: value.origin, origins: value.origins, identity: value.identity, retention: value.retention, assessment: value.assessment))
+        case .observation(let value):
+            return .observation(KnowledgeObservationContent(range: value.range, items: [KnowledgeObservationItem(text: replacementText, attribution: .user, observedAt: value.items.first?.observedAt ?? record.updatedAt, certainty: .qualified, evidence: value.items.first?.evidence, field: nil)], observer: value.observer))
+        case .note(let value):
+            return .note(KnowledgeNoteContent(title: value.title, body: replacementText, fields: value.fields, role: value.role, confirmed: value.confirmed, contraryEvidence: value.contraryEvidence, freshness: value.freshness, privacyScope: value.privacyScope, usageConstraint: value.usageConstraint))
+        }
     }
 }

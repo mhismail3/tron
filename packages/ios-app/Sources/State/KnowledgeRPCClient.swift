@@ -29,7 +29,18 @@ final class KnowledgeRPCClient {
 
     func status() async throws -> KnowledgeStatus {
         let value: KnowledgeStatus = try await request("knowledge.status")
-        guard value.recordCount >= 0, value.coverageCount >= 0, value.suppressedCount >= 0, value.pendingCleanupCount >= 0 else { throw invalidResponse() }
+        guard value.recordCount >= 0, value.coverageCount >= 0, value.suppressedCount >= 0, value.pendingCleanupCount >= 0,
+              value.coverage.observedCount >= 0, value.coverage.emptyCount >= 0,
+              value.coverage.excludedCount >= 0, value.coverage.pendingCount >= 0,
+              value.coverage.failedCount >= 0, value.coverage.unavailableCount >= 0,
+              value.coverage.remainingCount >= 0,
+              value.coverage.remainingCount == value.coverage.pendingCount + value.coverage.failedCount + value.coverage.unavailableCount else { throw invalidResponse() }
+        return value
+    }
+    func coverage(cursor: String? = nil, limit: Int = 50) async throws -> KnowledgeCoveragePage {
+        struct Params: Encodable { let cursor: String?; let limit: Int }
+        let value: KnowledgeCoveragePage = try await request("knowledge.observation.coverage", Params(cursor: cursor, limit: min(100, max(1, limit))))
+        guard value.coverage.count <= 100, value.nextCursor != cursor else { throw invalidResponse() }
         return value
     }
     func list(kind: KnowledgeRecordKind? = nil, scope: KnowledgeScope? = nil, cursor: String? = nil, limit: Int = 50) async throws -> KnowledgeListResponse {
@@ -47,17 +58,10 @@ final class KnowledgeRPCClient {
     func read(id: String, revisionID: String? = nil) async throws -> KnowledgeRecord? {
         struct Params: Encodable { let id: String; let revisionId: String?; let includeSuppressed: Bool }
         let value: JSONValue = try await request("knowledge.read", Params(id: id, revisionId: revisionID, includeSuppressed: false))
-        if value == .null { return nil }; return try value.decode(KnowledgeRecord.self)
-    }
-    func readSessionEntry(sessionID: String, entryID: String, offset: Int = 0) async throws -> KnowledgeSessionEntryRead {
-        let requestedOffset = max(0, offset)
-        let params: JSONValue = .object(["sessionId": .string(sessionID), "entryId": .string(entryID), "offset": .number(Double(requestedOffset))])
-        let value: KnowledgeSessionEntryRead = try await request("session.history.entry", params, timeout: .seconds(20))
-        guard value.entryId == entryID, value.offset == requestedOffset,
-              value.totalCharacters >= value.offset,
-              value.text.count <= 20_000,
-              value.nextOffset.map({ $0 > value.offset && $0 <= value.totalCharacters }) ?? true else { throw invalidResponse() }
-        return value
+        if value == .null { return nil }
+        let record = try value.decode(KnowledgeRecord.self)
+        guard record.id == id, revisionID == nil || record.revisionId == revisionID else { throw invalidResponse() }
+        return record
     }
     func readObject(_ reference: KnowledgeObjectRef, offset: Int = 0) async throws -> KnowledgeObjectRead? {
         struct Params: Encodable { let hash: String; let bytes: Int; let mediaType: String; let offset: Int }
@@ -65,7 +69,9 @@ final class KnowledgeRPCClient {
         if value == .null { return nil }
         let object = try value.decode(KnowledgeObjectRead.self)
         guard object.hash == reference.hash, object.bytes <= 512_000, object.base64.count <= 700_000,
-              object.offset == max(0, offset), object.totalBytes == reference.bytes else { throw invalidResponse() }
+              object.offset != nil, object.totalBytes != nil,
+              object.offset == max(0, offset), object.totalBytes == reference.bytes,
+              object.nextOffset == nil || (object.nextOffset! > object.offset! && object.nextOffset! <= object.totalBytes!) else { throw invalidResponse() }
         return object
     }
     func configure(_ config: KnowledgeConfig) async throws -> KnowledgeConfig {
@@ -121,7 +127,13 @@ final class KnowledgeRPCClient {
     }
     func importRun(source: String, planHash: String, limit: Int = 50, offset: Int = 0) async throws -> KnowledgeImportResult {
         struct Params: Encodable { let source: String; let expectedPlanHash: String; let limit: Int; let offset: Int }
-        return try await mutate("knowledge.import.run", parameters: Params(source: String(source.prefix(4_096)), expectedPlanHash: planHash, limit: min(100, max(1, limit)), offset: max(0, offset)))
+        let requestedLimit = min(100, max(1, limit))
+        let result: KnowledgeImportResult = try await mutate("knowledge.import.run", parameters: Params(source: String(source.prefix(4_096)), expectedPlanHash: planHash, limit: requestedLimit, offset: max(0, offset)))
+        guard result.source == String(source.prefix(4_096)), result.planHash == planHash,
+              result.selected >= 0, result.selected <= requestedLimit,
+              result.imported >= 0, result.resumed >= 0, result.skipped >= 0, result.failed >= 0,
+              result.imported + result.resumed + result.skipped + result.failed <= result.selected else { throw invalidResponse() }
+        return result
     }
 
     private func needsSelectedGateway() -> GatewayFailure { GatewayFailure(code: "needs_server", message: "Select this Gateway before changing Knowledge.", retryable: false, details: nil) }
