@@ -285,7 +285,7 @@ export interface RuntimeSlotHooks {
   settled: (sessionId: string) => void;
   /** Fire-and-forget canonical observation admission after Pi has appended the
    * terminal turn. Implementations must never delay foreground settlement. */
-  turnSettled?: (sessionId: string, entries: readonly FileEntry[], outcome: "completed" | "failed" | "interrupted" | "outcomeUnknown", completionId?: string) => void;
+  turnSettled?: (sessionId: string, entries: readonly FileEntry[], outcome: "completed" | "failed" | "interrupted" | "outcomeUnknown", completionId?: string, branchId?: string) => void;
   assistantResponseCompleted: (
     sessionId: string,
     completion: CanonicalAssistantCompletion,
@@ -2810,7 +2810,7 @@ export class RuntimeSlot {
           : terminalLifecycle === "failed" ? "agent-error" : undefined;
         if (settledOperationId) {
           const completionId = this.pendingAssistantCompletion?.id;
-          this.hooks.turnSettled?.(this.id, this.canonicalSessionEntries(), terminalLifecycle, completionId);
+          this.hooks.turnSettled?.(this.id, this.canonicalSessionEntries(), terminalLifecycle, completionId, this.runtime.session.sessionManager.getLeafId() ?? "root");
         }
         this.activeOperationId = undefined;
         this.ownToolSegment(undefined);

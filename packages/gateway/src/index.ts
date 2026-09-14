@@ -32,7 +32,7 @@ import { GatewayAutomationExecutor } from "./automations/automation-executor.js"
 import { GatewayScheduleToolOperations } from "./automations/automation-tool-operations.js";
 import { BrowserLiveViewRegistry } from "./display/browser-live-view.js";
 import { KnowledgeStore } from "./knowledge/knowledge-store.js";
-import { KnowledgeService } from "./knowledge/knowledge-service.js";
+import { KnowledgeService, ModelRuntimeKnowledgeModel } from "./knowledge/knowledge-service.js";
 import { KnowledgeObservationService, ModelRuntimeObservationModel, modelForConfig } from "./knowledge/knowledge-observation.js";
 
 const config = await loadConfig();
@@ -158,6 +158,11 @@ const knowledge = new KnowledgeService(
     },
     workRegistry,
   ),
+  {},
+  (knowledgeConfig) => {
+    const model = modelForConfig(modelRuntime, knowledgeConfig.observation.model);
+    return model ? new ModelRuntimeKnowledgeModel(modelRuntime, model) : undefined;
+  },
 );
 sessions.setKnowledgeService(knowledge);
 const terminal = new TerminalService(

@@ -66,6 +66,22 @@ describe("KnowledgeObservationService", () => {
     await new Promise(resolve => setTimeout(resolve, 25));
   });
 
+  it("does not replay a committed second chunk when a later snapshot includes all chunks", async () => {
+    const infer = vi.fn(async (input) => output.replace("planned for Friday", input.sourceText.includes("entry-3") ? "the date is still Friday" : "planned for Friday"));
+    const { store, observer } = await fixture({ infer });
+    observer.admit({ sessionId: "session-1", entries: [entries[0], entries[1]], outcome: "completed" });
+    await waitFor(() => infer.mock.calls.length === 1);
+    const third = { type: "message", id: "entry-3", timestamp: "2026-01-01T00:00:03Z", message: { role: "user", content: "The date is still Friday." } } as const;
+    observer.admit({ sessionId: "session-1", entries: [entries[0], entries[1], third], outcome: "completed" });
+    await waitFor(() => infer.mock.calls.length === 2);
+    observer.admit({ sessionId: "session-1", entries: [entries[0], entries[1], third], outcome: "completed" });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(infer).toHaveBeenCalledTimes(2);
+    expect(infer.mock.calls[1]?.[0].sourceText).toContain("The date is still Friday");
+    observer.dispose();
+    await new Promise(resolve => setTimeout(resolve, 25));
+  });
+
   it("treats empty allowlists as an excluded, incomplete scope", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-observer-scope-")); roots.push(root);
     const workspace = new TronWorkspace(join(root, "home")); workspaces.push(workspace);

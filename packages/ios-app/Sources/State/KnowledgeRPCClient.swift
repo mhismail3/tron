@@ -57,6 +57,10 @@ final class KnowledgeRPCClient {
         struct Params: Encodable { let expectedRevision: String?; let record: KnowledgeRecordDraft }
         return try await mutate("knowledge.source.capture", parameters: Params(expectedRevision: expectedRevision, record: record))
     }
+    func captureURL(url: String, title: String, scope: KnowledgeScope) async throws -> KnowledgeMutationResult {
+        struct Params: Encodable { let url: String; let scope: KnowledgeScope; let title: String }
+        return try await mutate("knowledge.source.capture", parameters: Params(url: url, scope: scope, title: title))
+    }
     func createNote(_ record: KnowledgeRecordDraft) async throws -> KnowledgeMutationResult {
         struct Params: Encodable { let record: KnowledgeRecordDraft }
         return try await mutate("knowledge.note.create", parameters: Params(record: record))
@@ -81,9 +85,9 @@ final class KnowledgeRPCClient {
         struct Params: Encodable { let recordId: String?; let sessionId: String?; let branchId: String?; let projectId: String?; let expectedRevision: String?; let excluded: Bool; let reason: String? }
         return try await mutate("knowledge.exclusion", parameters: Params(recordId: recordID, sessionId: sessionID, branchId: branchID, projectId: projectID, expectedRevision: expectedRevision, excluded: excluded, reason: reason))
     }
-    func reflect(sessionID: String, sourceRevisionIDs: [String], text: String) async throws -> KnowledgeMutationResult {
-        struct Params: Encodable { let sessionId: String; let sourceRevisionIds: [String]; let text: String }
-        return try await mutate("knowledge.reflect", parameters: Params(sessionId: sessionID, sourceRevisionIds: Array(sourceRevisionIDs.prefix(100)), text: String(text.prefix(20_000))))
+    func reflect(sessionID: String, sourceRevisionIDs: [String]) async throws -> KnowledgeMutationResult {
+        struct Params: Encodable { let sessionId: String; let sourceRevisionIds: [String] }
+        return try await mutate("knowledge.reflect", parameters: Params(sessionId: sessionID, sourceRevisionIds: Array(sourceRevisionIDs.prefix(100))))
     }
     func connectorStatus(_ connector: String) async throws -> KnowledgeConnectorStatus {
         struct Params: Encodable { let connector: String }; return try await request("knowledge.connector.status", Params(connector: connector))

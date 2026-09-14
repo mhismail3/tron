@@ -98,7 +98,12 @@ Capture quality is explicit (`complete`, `partial`, `metadata-only`,
 Connector captures may include opaque provider/account/item identity and
 multiple `origins`; these fields contain no credentials. Source capture uses
 manual redirects, public-DNS destination checks, owner-bounded response bytes,
-and script/style-free extraction. URL diagnostics are redacted.
+and script/style-free extraction. The URL-shaped `knowledge.source.capture`
+operation enters this owner; callers do not publish fetched text directly.
+URL diagnostics are redacted.
+
+`knowledge.source.triage` reads persisted current interests and publishes a
+separate source derivative only after the retained source is available.
 
 `NoteContent` supports structured field values with exact evidence revisions,
 validity, explicit confirmation, privacy scope, freshness, corrections,

@@ -75,7 +75,19 @@ function isPrivateAddress(address: string): boolean {
   }
   if (isIP(normalized) === 6) {
     const value = normalized.split("%")[0] ?? "";
-    return value === "::1" || value === "::" || value.startsWith("fc") || value.startsWith("fd") || value.startsWith("fe8") || value.startsWith("fe9") || value.startsWith("fea") || value.startsWith("feb") || value.startsWith("ff") || value.startsWith("::ffff:127.") || value.startsWith("::ffff:10.") || value.startsWith("::ffff:192.168.");
+    const halves = value.split("::");
+    const left = halves[0] ? halves[0].split(":").filter(Boolean) : [];
+    const right = halves[1] ? halves[1].split(":").filter(Boolean) : [];
+    const groups = halves.length === 2 ? [...left, ...Array(8 - left.length - right.length).fill("0"), ...right] : value.split(":");
+    const words = groups.map(group => Number.parseInt(group || "0", 16));
+    const mapped = words.length === 8 && words.slice(0, 5).every(word => word === 0) && words[5] === 0xffff;
+    if (mapped) {
+      const a = (words[6]! >> 8) & 0xff; const b = words[6]! & 0xff;
+      const c = (words[7]! >> 8) & 0xff; const d = words[7]! & 0xff;
+      return isPrivateAddress(`${a}.${b}.${c}.${d}`);
+    }
+    const first = words[0] ?? 0;
+    return value === "::1" || value === "::" || (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80 || (first & 0xff00) === 0xff00;
   }
   return true;
 }

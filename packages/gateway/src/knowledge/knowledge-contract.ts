@@ -295,11 +295,26 @@ export interface KnowledgeRecallResponse {
   availability: "available" | "no-match";
 }
 
-export interface KnowledgeSourceCaptureRequest {
+export interface KnowledgeSourceRecordCaptureRequest {
   commandId: string;
   expectedRevision?: string;
   record: KnowledgeRecordDraft & { kind: "source" };
 }
+
+/** URL capture is fetched by the Gateway source owner; callers never submit
+ * fetched text as if it were canonical evidence. */
+export interface KnowledgeSourceURLCaptureRequest {
+  commandId: string;
+  url: string;
+  scope: KnowledgeScope;
+  title?: string;
+  annotations?: SourceContent["annotations"];
+  identity?: SourceIdentity;
+  origin?: SourceOriginKind;
+  expectedRevision?: string;
+}
+
+export type KnowledgeSourceCaptureRequest = KnowledgeSourceRecordCaptureRequest | KnowledgeSourceURLCaptureRequest;
 
 export interface KnowledgeNoteMutationRequest {
   commandId: string;
@@ -338,7 +353,7 @@ export interface KnowledgeReflectRequest {
   commandId: string;
   sessionId: string;
   sourceRevisionIds: string[];
-  text: string;
+  expectedConfigRevision?: number;
 }
 
 export interface KnowledgeTriageRequest {

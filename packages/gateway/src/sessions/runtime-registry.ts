@@ -649,10 +649,10 @@ export class RuntimeRegistry {
         this.options.sessionListChanged();
       },
       settled: (sessionId: string) => { this.interrupted.delete(sessionId); },
-      turnSettled: (sessionId: string, entries: readonly import("@earendil-works/pi-coding-agent").FileEntry[], outcome: "completed" | "failed" | "interrupted" | "outcomeUnknown", completionId?: string) => {
+      turnSettled: (sessionId: string, entries: readonly import("@earendil-works/pi-coding-agent").FileEntry[], outcome: "completed" | "failed" | "interrupted" | "outcomeUnknown", completionId?: string, branchId?: string) => {
         // Admission is intentionally detached from canonical terminal receipt
         // settlement: model/storage latency cannot hold the foreground lane.
-        this.knowledgeService?.observe({ sessionId, entries, outcome, ...(completionId ? { completionId } : {}) });
+        this.knowledgeService?.observe({ sessionId, entries, outcome, ...(completionId ? { completionId } : {}), ...(branchId ? { branchId } : {}) });
       },
       assistantResponseCompleted: async (
         sessionId: string,

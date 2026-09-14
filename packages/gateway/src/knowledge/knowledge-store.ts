@@ -366,7 +366,29 @@ export class KnowledgeStore {
     for (const record of selected) citations.push(...record.provenance.evidence, ...(record.kind === "observation" ? record.content.items.flatMap(item => item.evidence ?? []) : []));
     return { records: selected, citations, stateRevision: state.stateRevision, availability: selected.length ? "available" : "no-match" };
   }
-  async captureSource(request: KnowledgeSourceCaptureRequest): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.source.capture", request.commandId, request, async (state, paths) => this.putRecord(state, paths, request.record, request.expectedRevision)); }
+  /** Resolve exact observation revisions for the Reflector without exposing a
+   * second search/index authority. The caller still publishes through reflect,
+   * which revalidates session, branch, suppression, and revision identity. */
+  async observationRevisions(sessionId: string, revisionIds: string[]): Promise<KnowledgeRecord[]> {
+    safeId(sessionId, "session id");
+    const paths = await this.paths(false);
+    const state = (await this.load(paths, false)).state;
+    const wanted = new Set(revisionIds);
+    const records: KnowledgeRecord[] = [];
+    for (const [id, head] of Object.entries(state.records)) {
+      for (const revisionId of head.revisionIds) {
+        if (!wanted.has(revisionId)) continue;
+        const record = await this.readRecord(paths, id, revisionId);
+        if (record.kind === "observation" && record.content.range.sessionId === sessionId && !state.suppressions[id]?.excluded && !state.suppressions[id]?.forgotten) records.push(record);
+      }
+    }
+    return records;
+  }
+
+  async captureSource(request: KnowledgeSourceCaptureRequest): Promise<KnowledgeMutationResult> {
+    if (!("record" in request)) throw invalid("URL source capture must be handled by the source capture owner");
+    return this.mutate("knowledge.source.capture", request.commandId, request, async (state, paths) => this.putRecord(state, paths, request.record, request.expectedRevision));
+  }
   async createNote(request: KnowledgeNoteMutationRequest & { recordId?: never }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.create", request.commandId, request, async (state, paths) => this.putRecord(state, paths, request.record)); }
   async updateNote(request: KnowledgeNoteMutationRequest & { recordId: string }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.update", request.commandId, request, async (state, paths) => { const current = await this.currentRecord(state, paths, request.recordId); if (!current || current.kind !== "note") throw conflict("Knowledge note does not exist"); if (request.expectedRevision !== current.revisionId) throw conflict("Knowledge note revision is stale"); return this.putRecord(state, paths, { ...request.record, id: request.recordId, createdAt: current.createdAt }, request.expectedRevision); }); }
   private async currentRecord(state: KnowledgeState, paths: StorePaths, id: string): Promise<KnowledgeRecord | null> { const head = state.records[id]; return head ? this.readRecord(paths, id, head.latestRevisionId) : null; }

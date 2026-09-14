@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { KnowledgeStore } from "./knowledge-store.js";
-import { captureSource } from "./source-capture.js";
+import { captureSource, isPrivateAddress } from "./source-capture.js";
 import { createSemanticNote, correctSemanticNote, readCitedSourceObject, supersedeSemanticNote, updateSemanticNote } from "./semantic-notes.js";
 
 const homes: string[] = [];
@@ -18,6 +18,11 @@ afterEach(async () => { await Promise.all(homes.splice(0).map(home => rm(home, {
 const publicResolver = async () => ["93.184.216.34"];
 
 describe("safe source capture", () => {
+  it("rejects hexadecimal IPv4-mapped private IPv6 destinations", () => {
+    expect(isPrivateAddress("::ffff:7f00:1")).toBe(true);
+    expect(isPrivateAddress("::ffff:c0a8:101")).toBe(true);
+    expect(isPrivateAddress("2001:db8::1")).toBe(false);
+  });
   it("retains raw bytes separately from readable extraction and deduplicates normalized URLs", async () => {
     const { store } = await fixture();
     const fetcher = async () => new Response("<html><title>Useful</title><script>evil()</script><body>Hello <b>world</b></body></html>", { headers: { "content-type": "text/html; charset=utf-8" } });

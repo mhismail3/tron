@@ -128,6 +128,28 @@ function sourceDigest(entries: readonly ObservationSourceEntry[]): string {
 function rangeID(range: ObservationRange): string { return `coverage-${hash(JSON.stringify(range))}`; }
 function commandID(prefix: string, range: ObservationRange): string { return `${prefix}-${hash(JSON.stringify(range)).slice(0, 48)}`; }
 
+async function inferBounded(model: ObservationModel, input: Omit<ObservationModelInput, "signal">, signal: AbortSignal, timeoutMs: number, maxAttempts: number): Promise<string> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const controller = new AbortController();
+    const abort = () => controller.abort(signal.reason);
+    if (signal.aborted) throw new Error("Observer was cancelled");
+    signal.addEventListener("abort", abort, { once: true });
+    const timer = setTimeout(() => controller.abort(new Error("Observer model timeout")), timeoutMs);
+    timer.unref?.();
+    try {
+      return await model.infer({ ...input, signal: controller.signal });
+    } catch (error) {
+      lastError = error;
+      if (signal.aborted) throw error;
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Observer model failed");
+}
+
 function parseModelOutput(raw: string, range: ObservationRange, fallbackAt: string): Array<{ text: string; attribution: "user" | "assistant" | "tool" | "system" | "unknown"; observedAt: string; certainty: "certain" | "qualified" | "uncertain" }> {
   if (raw.length > MAX_OUTPUT_TEXT) throw new Error("Observer output exceeded its hard bound");
   let value: unknown;
@@ -208,11 +230,19 @@ export class KnowledgeObservationService {
     // canonical snapshot from replaying old entries when chunking changes or
     // the process restarts with an empty in-memory cursor.
     const projectedIds = projected.map(entry => entry.id);
-    const coveredPrefix = committed.reduce((maximum, coverage) => {
-      const ids = coverage.range.entryIds;
-      if (ids.length > projectedIds.length || ids.some((entry, index) => projectedIds[index] !== entry)) return maximum;
-      return Math.max(maximum, ids.length);
-    }, 0);
+    // Recover contiguous committed chunks, not just the longest chunk whose
+    // start matches. A later full snapshot must not replay its second chunk.
+    let coveredPrefix = 0;
+    while (coveredPrefix < projectedIds.length) {
+      const match = committed.find(coverage => {
+        const ids = coverage.range.entryIds;
+        if (ids.length === 0 || coveredPrefix + ids.length > projectedIds.length) return false;
+        if (ids.some((entry, index) => projectedIds[coveredPrefix + index] !== entry)) return false;
+        return coverage.disposition === "observed" || coverage.disposition === "empty";
+      });
+      if (!match) break;
+      coveredPrefix += match.range.entryIds.length;
+    }
     const pendingProjected = projected.slice(coveredPrefix);
     if (pendingProjected.length === 0) return;
     const range: ObservationRange = {
@@ -242,7 +272,7 @@ export class KnowledgeObservationService {
       work = this.workRegistry?.begin({ kind: "knowledge-observation", sessionId: settlement.sessionId, hostEpoch: this.workRegistry.runtimeEpoch, cancellation: () => operationAbort.abort() });
       const model = typeof this.model === "function" ? this.model(config) : this.model;
       if (!model) throw new Error("No explicitly configured observation model");
-      const raw = await model.infer({ sessionId: settlement.sessionId, range, sourceText: `${sourceText}\n[terminal outcome: ${settlement.outcome}]`, outcome: settlement.outcome, signal: operationSignal, maxOutputChars: config.observation.maxOutputChars });
+      const raw = await inferBounded(model, { sessionId: settlement.sessionId, range, sourceText: `${sourceText}\n[terminal outcome: ${settlement.outcome}]`, outcome: settlement.outcome, maxOutputChars: config.observation.maxOutputChars }, operationSignal, config.observation.timeoutMs, config.observation.maxAttempts);
       const items = parseModelOutput(raw, range, fallbackAt);
       if (items.length === 0) {
         await this.store.setCoverage({ commandId: commandID("knowledge-empty", range), expectedConfigRevision: config.revision, ...(expectedRevision ? { expectedRevision } : {}), coverage: { id, range, disposition: "empty", groupRevisionIds: [], reason: "no-substantive-observation" } });

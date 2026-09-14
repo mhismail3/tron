@@ -316,6 +316,7 @@ export class GatewayService {
       }
       case "knowledge.config":
       case "knowledge.source.capture":
+      case "knowledge.source.triage":
       case "knowledge.note.create":
       case "knowledge.note.update":
       case "knowledge.reflect":
