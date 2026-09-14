@@ -47,6 +47,62 @@ struct GatewayPayloadStoreTests {
         }
     }
 
+    @Test("incremental fingerprint matches an independent oracle for Unicode, links, empty and large files")
+    func fingerprintOracle() throws {
+        let temporary = try TemporaryPayloadDirectory()
+        defer { temporary.cleanup() }
+        let root = temporary.root.appendingPathComponent("oracle", isDirectory: true)
+        try makePayload(
+            root: root,
+            channel: "dev",
+            version: "oracle",
+            fingerprint: String(repeating: "a", count: 64),
+            additionalFiles: [
+                ("app/empty-名", Data()),
+                ("runtime/large-🙂", Data(repeating: 0xA5, count: 2 * 1024 * 1024)),
+            ],
+            additionalSymlinks: [("app/dist/link-ユ", "index.js")]
+        )
+        let manifestURL = root.appendingPathComponent("manifest.json")
+        let manifest = try JSONDecoder().decode(GatewayPayloadManifest.self, from: Data(contentsOf: manifestURL))
+        let expected = try independentPayloadFingerprint(root)
+        #expect(manifest.payloadFingerprint == expected)
+        try rewriteManifest(manifest, at: manifestURL)
+        guard case .success = GatewayPayloadValidator.validate(payloadRoot: root, expectedChannel: "dev") else {
+            Issue.record("the incremental validator disagrees with the independent fingerprint oracle")
+            return
+        }
+
+        let changed = root.appendingPathComponent("app/empty-名")
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: changed.path)
+        try Data("changed".utf8).write(to: changed)
+        try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: changed.path)
+        guard case .failure(.identityMismatch("payload fingerprint")) = GatewayPayloadValidator.validate(
+            payloadRoot: root,
+            expectedChannel: "dev"
+        ) else {
+            Issue.record("changed bytes were not reflected in the fingerprint")
+            return
+        }
+
+        // Remove the link as well so validation reaches the required-file
+        // boundary instead of correctly rejecting a dangling symlink first.
+        // Published payload directories are read-only, so briefly open this
+        // fixture's parent for the deliberate mutation and restore its mode.
+        let dist = root.appendingPathComponent("app/dist", isDirectory: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dist.path)
+        try FileManager.default.removeItem(at: root.appendingPathComponent("app/dist/link-ユ"))
+        try FileManager.default.removeItem(at: root.appendingPathComponent("app/dist/index.js"))
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: dist.path)
+        guard case .failure(.incomplete("app/dist/index.js")) = GatewayPayloadValidator.validate(
+            payloadRoot: root,
+            expectedChannel: "dev"
+        ) else {
+            Issue.record("a missing regular file did not fail closed")
+            return
+        }
+    }
+
     @Test("payload validation rejects internal directory symlinks")
     func rejectsDirectorySymlinks() throws {
         let temporary = try TemporaryPayloadDirectory()
@@ -415,19 +471,21 @@ struct GatewayPayloadStoreTests {
         nodeVersion: String = "22",
         sourceRevision: String = "test-revision",
         runtimeEpoch: String = "test-epoch",
-        pushConfiguration: String? = nil
+        pushConfiguration: String? = nil,
+        additionalFiles: [(String, Data)] = [],
+        additionalSymlinks: [(String, String)] = []
     ) throws {
         let fm = FileManager.default
-        let files = [
-            "app/dist/index.js": Data(repeating: 0x2f, count: 1_024),
-            "app/package.json": Data("{}".utf8),
-            "app/package-lock.json": Data("{}".utf8),
-            "app/PushService.xcconfig": Data((pushConfiguration ?? (channel == "dev"
+        let files: [(String, Data)] = [
+            ("app/dist/index.js", Data(repeating: 0x2f, count: 1_024)),
+            ("app/package.json", Data("{}".utf8)),
+            ("app/package-lock.json", Data("{}".utf8)),
+            ("app/PushService.xcconfig", Data((pushConfiguration ?? (channel == "dev"
                 ? "TRON_PUSH_SERVICE_ORIGIN =\n"
-                : "TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test\n")).utf8),
-            "app/scripts/ensure-node-pty-helper.mjs": Data("// helper".utf8),
-            "app/scripts/gateway-payload-deploy.mjs": Data("// update helper".utf8),
-        ]
+                : "TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test\n")).utf8)),
+            ("app/scripts/ensure-node-pty-helper.mjs", Data("// helper".utf8)),
+            ("app/scripts/gateway-payload-deploy.mjs", Data("// update helper".utf8)),
+        ] + additionalFiles
         for (relative, data) in files {
             let url = root.appendingPathComponent(relative)
             try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -467,6 +525,11 @@ struct GatewayPayloadStoreTests {
                 atPath: aliasDirectory.appendingPathComponent("pi").path,
                 withDestinationPath: GatewayPayloadStore.piAliasTarget
             )
+        }
+        for (relative, destination) in additionalSymlinks {
+            let link = root.appendingPathComponent(relative, isDirectory: false)
+            try fm.createDirectory(at: link.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try fm.createSymbolicLink(atPath: link.path, withDestinationPath: destination)
         }
         var lines = Data()
         let resolvedRoot = root.resolvingSymlinksInPath().standardizedFileURL
@@ -519,6 +582,41 @@ struct GatewayPayloadStoreTests {
             }
         }
         try fm.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root.path)
+    }
+
+    private func independentPayloadFingerprint(_ root: URL) throws -> String {
+        let fm = FileManager.default
+        let resolvedRoot = root.resolvingSymlinksInPath().standardizedFileURL
+        func relativePath(_ url: URL) -> String {
+            String(url.standardizedFileURL.path.dropFirst(resolvedRoot.path.count + 1))
+        }
+        let files: [(String, URL, String?)] = fm.enumerator(
+            at: root,
+            includingPropertiesForKeys: nil
+        )!
+            .compactMap { $0 as? URL }
+            .compactMap { url in
+                let relative = relativePath(url)
+                guard relative.hasPrefix("app/") || relative.hasPrefix("runtime/") else { return nil }
+                var info = stat()
+                guard lstat(url.path, &info) == 0 else { return nil }
+                if (info.st_mode & S_IFMT) == S_IFLNK {
+                    return (relative, url, try? fm.destinationOfSymbolicLink(atPath: url.path))
+                }
+                return (info.st_mode & S_IFMT) == S_IFREG ? (relative, url, nil) : nil
+            }
+            .sorted { Data($0.0.utf8).lexicographicallyPrecedes(Data($1.0.utf8)) }
+        var lines = Data()
+        for (relative, url, linkTarget) in files {
+            if let linkTarget {
+                let digest = SHA256.hash(data: Data((linkTarget + "\n").utf8)).map { String(format: "%02x", $0) }.joined()
+                lines.append(contentsOf: Data("symlink:\(digest)  \(relative)\n".utf8))
+            } else {
+                let digest = SHA256.hash(data: try Data(contentsOf: url)).map { String(format: "%02x", $0) }.joined()
+                lines.append(contentsOf: Data("\(digest)  \(relative)\n".utf8))
+            }
+        }
+        return SHA256.hash(data: lines).map { String(format: "%02x", $0) }.joined()
     }
 
     private func rewriteManifest(_ manifest: GatewayPayloadManifest, at url: URL) throws {

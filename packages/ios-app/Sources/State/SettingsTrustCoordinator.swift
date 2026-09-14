@@ -52,10 +52,17 @@ final class SettingsTrustCoordinator {
         }
     }
 
+    private struct SettingsLoadToken {
+        let profileGeneration: Int
+        let target: SettingsTarget
+        let targetGeneration: Int
+    }
+
     private struct SettingsLoadAdmission: Equatable {
         let profileGeneration: Int
         let target: SettingsTarget
         let targetGeneration: Int
+        let connection: GatewayConnectionAdmission
     }
 
     private let client: GatewayClient
@@ -95,17 +102,27 @@ final class SettingsTrustCoordinator {
     @discardableResult
     func refreshSettings(target: SettingsTarget) async -> Bool {
         guard !Task.isCancelled else { return false }
-        let admission = beginSettingsLoad(target: target)
+        // Claim this target before awaiting the client actor so a newer read
+        // cannot be ordered behind an older read that is still capturing its epoch.
+        let token = beginSettingsLoad(target: target)
+        let connection = await client.activeConnectionAdmission()
+        let admission = SettingsLoadAdmission(
+            profileGeneration: token.profileGeneration,
+            target: token.target,
+            targetGeneration: token.targetGeneration,
+            connection: connection
+        )
         do {
             let value = try await client.requestValue(
                 "settings.get",
-                SettingsGetParams(cwd: target.cwd, scope: target.scope.rawValue)
+                SettingsGetParams(cwd: target.cwd, scope: target.scope.rawValue),
+                expectedConnection: connection
             )
-            guard admits(admission) else { return false }
+            guard await admits(admission) else { return false }
             settingsByTarget[target] = value
             return true
         } catch {
-            guard admits(admission) else { return false }
+            guard await admits(admission) else { return false }
             delegate?.settingsTrustCoordinatorSurface(error)
             return false
         }
@@ -171,19 +188,29 @@ final class SettingsTrustCoordinator {
         settingsByTarget.removeAll()
     }
 
-    private func beginSettingsLoad(target: SettingsTarget) -> SettingsLoadAdmission {
+    private func beginSettingsLoad(target: SettingsTarget) -> SettingsLoadToken {
         let targetGeneration = (settingsLoadGenerationByTarget[target] ?? 0) &+ 1
         settingsLoadGenerationByTarget[target] = targetGeneration
-        return SettingsLoadAdmission(
+        return SettingsLoadToken(
             profileGeneration: profileGeneration,
             target: target,
             targetGeneration: targetGeneration
         )
     }
 
-    private func admits(_ admission: SettingsLoadAdmission) -> Bool {
-        !Task.isCancelled && profileGeneration == admission.profileGeneration
-            && settingsLoadGenerationByTarget[admission.target] == admission.targetGeneration
+    private func admits(_ admission: SettingsLoadAdmission) async -> Bool {
+        guard !Task.isCancelled,
+              profileGeneration == admission.profileGeneration,
+              settingsLoadGenerationByTarget[admission.target] == admission.targetGeneration else {
+            return false
+        }
+        let currentConnection = await client.activeConnectionAdmission()
+        guard !Task.isCancelled,
+              profileGeneration == admission.profileGeneration,
+              settingsLoadGenerationByTarget[admission.target] == admission.targetGeneration else {
+            return false
+        }
+        return currentConnection == admission.connection
     }
 
     private func requireProfile(_ admittedProfileGeneration: Int) throws {

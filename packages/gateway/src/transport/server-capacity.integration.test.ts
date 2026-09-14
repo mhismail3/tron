@@ -158,12 +158,20 @@ describe("WebSocket connection and outbound capacity", () => {
     socket.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
     await waitUntil(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.handshake"));
 
+    const prepareBroadcastFrame = vi.spyOn(gateway as any, "prepareBroadcastFrame");
+    const sendOutcome = vi.spyOn(gateway as any, "sendOutcome");
     const payload = "x".repeat(512 * 1_024);
     for (let sequence = 1; sequence <= 6; sequence += 1) {
       gateway.broadcast("test.large", { sequence, payload });
     }
     await waitUntil(() => sequences.length === 6);
     expect(sequences).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(prepareBroadcastFrame).toHaveBeenCalledTimes(6);
+    const broadcastFrames = sendOutcome.mock.calls
+      .filter(([, value]) => (value as { topic?: string })?.topic === "test.large")
+      .map(([, , prepared]) => prepared);
+    expect(broadcastFrames).toHaveLength(6);
+    expect(broadcastFrames).toEqual(prepareBroadcastFrame.mock.results.map((result) => result.value));
     expect(socket.readyState).toBe(WebSocket.OPEN);
     expect(logger.log.mock.calls.some((call) => call[2]?.event === "connection.outbound-capacity")).toBe(false);
     socket.close(1000);

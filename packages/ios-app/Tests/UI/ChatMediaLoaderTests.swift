@@ -158,6 +158,30 @@ struct ChatMediaLoaderTests {
         #expect(loader.metrics().thumbnailFlights == 0)
     }
 
+    @Test("a cancelled thumbnail consumer releases a completed flight without a follow-up")
+    func cancelledThumbnailConsumer() async throws {
+        let fixture = try SessionScenarioBuilder(seed: 6_302).generatedImageFixture(
+            format: .png,
+            pixelWidth: 64,
+            pixelHeight: 64,
+            orientation: .up
+        )
+        let gate = MediaFetchGate(payload: .init(data: fixture.encodedData, mimeType: "image/png"))
+        let loader = ChatMediaLoader(
+            fetch: { identity in try await gate.fetch(identity) },
+            admits: { _ in true }
+        )
+        let identity = mediaIdentity(blobID: "cancelled-consumer")
+        let first = Task { try await loader.thumbnail(for: identity) }
+        await gate.waitForStarts(1)
+        first.cancel()
+        await gate.release()
+        await #expect(throws: CancellationError.self) { try await first.value }
+        // No later request is needed to retire the completed shared flight.
+        #expect(loader.metrics().thumbnailFlights == 0)
+        #expect(loader.metrics().thumbnailCount == 0)
+    }
+
     @Test("the 33rd distinct thumbnail flight is rejected without starting work")
     func flightCapacity() async throws {
         let fixture = try SessionScenarioBuilder(seed: 6_310).generatedImageFixture(

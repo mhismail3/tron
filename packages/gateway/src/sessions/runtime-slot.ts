@@ -75,6 +75,7 @@ import {
   projectToolResult,
   projectTranscriptPage,
   canonicalToolResultCallIDs,
+  canonicalToolResultCallIDsFromBranch,
   projectTree,
   toolSegmentId,
   safeJson,
@@ -5174,7 +5175,11 @@ export class RuntimeSlot {
         );
       })()
       : undefined;
-    const canonicalTranscriptPage = this.transcriptPage();
+    // One synchronous branch cut supplies both the bounded page and the
+    // paged-out tool-result ownership check. Neither projection is cached; Pi
+    // remains authoritative and the cut is discarded after this snapshot.
+    const canonicalBranch = session.sessionManager.getBranch();
+    const canonicalTranscriptPage = this.transcriptPage(undefined, undefined, undefined, undefined, canonicalBranch);
     const liveCommand = this.pendingExtensionCommand;
     const liveCommandLifecycle = this.ui.presentation.state().pendingInteractions.length > 0
       ? "waitingForInput" as const
@@ -5189,9 +5194,10 @@ export class RuntimeSlot {
               : item),
         }
       : canonicalTranscriptPage;
-    // transcriptPage is intentionally bounded; use the full canonical branch
-    // for ownership so paged-out results cannot leave a duplicate runtime row.
-    const canonicalToolResultIDs = canonicalToolResultCallIDs(session.sessionManager);
+    // transcriptPage is intentionally bounded; use the same full canonical
+    // branch cut for ownership so paged-out results cannot leave a duplicate
+    // runtime row.
+    const canonicalToolResultIDs = canonicalToolResultCallIDsFromBranch(canonicalBranch);
     const queuedItems = this.projectedQueue();
     const processProjection = this.currentProcessProjection();
     const acceptsQueuedPrompts = session.isStreaming && !this.isAgentAdmissionSettling;
@@ -5285,6 +5291,7 @@ export class RuntimeSlot {
     expectedNextEntryId?: string,
     expectedRuntimeGeneration?: string,
     expectedLeafEntryId?: string,
+    branchCut?: import("@earendil-works/pi-coding-agent").SessionEntry[],
   ): TranscriptPage {
     this.assertNoTrustReload();
     if (expectedRuntimeGeneration !== undefined && expectedRuntimeGeneration !== this.runtimeGeneration) {
@@ -5307,6 +5314,7 @@ export class RuntimeSlot {
           this.toolLabels(),
           this.bashMetadata,
           this.forkBoundary,
+          branchCut,
         ),
         runtimeGeneration: this.runtimeGeneration,
         ...(leafEntryId ? { leafEntryId } : {}),

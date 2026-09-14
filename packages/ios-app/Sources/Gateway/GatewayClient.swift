@@ -71,6 +71,13 @@ struct GatewayEventBufferPolicy: Sendable {
     static let `default` = Self(maximumEvents: 1_024, maximumBytes: 2 * 1_024 * 1_024)
 }
 
+/// A snapshot of the Gateway transport epoch, including the disconnected state.
+/// Optional reads use this value so a request captured while offline cannot
+/// attach itself to a later connection.
+struct GatewayConnectionAdmission: Equatable, Sendable {
+    let connectionID: Int?
+}
+
 enum GatewayEventAdmissionReason: String, Sendable, Equatable {
     case countLimit = "count_limit"
     case byteLimit = "byte_limit"
@@ -565,6 +572,10 @@ actor GatewayClient {
 
     func activeConnectionID() -> Int? { connection?.id }
 
+    func activeConnectionAdmission() -> GatewayConnectionAdmission {
+        GatewayConnectionAdmission(connectionID: connection?.id)
+    }
+
     func liveEvidence(connectionID: Int) -> GatewayLiveEvidence? {
         if let epoch = connection, epoch.id == connectionID {
             return GatewayLiveEvidence(
@@ -1019,7 +1030,12 @@ actor GatewayClient {
         _ params: P,
         timeout: Duration = .seconds(30)
     ) async throws -> JSONValue {
-        try await requestValue(method, params, timeout: timeout, expectedEpochID: nil)
+        try await requestValue(
+            method,
+            params,
+            timeout: timeout,
+            epochExpectation: .current
+        )
     }
 
     func request<P: Encodable, R: Decodable>(
@@ -1038,15 +1054,74 @@ actor GatewayClient {
         return try GatewayResponseDecoding.decode(value, as: responseType, method: method)
     }
 
+    func request<P: Encodable, R: Decodable>(
+        _ method: String,
+        _ params: P,
+        as responseType: R.Type = R.self,
+        timeout: Duration = .seconds(30),
+        expectedConnection: GatewayConnectionAdmission
+    ) async throws -> R {
+        let value = try await requestValue(
+            method,
+            params,
+            timeout: timeout,
+            expectedConnection: expectedConnection
+        )
+        return try GatewayResponseDecoding.decode(value, as: responseType, method: method)
+    }
+
+    func requestValue<P: Encodable>(
+        _ method: String,
+        _ params: P,
+        timeout: Duration = .seconds(30),
+        expectedEpochID: Int
+    ) async throws -> JSONValue {
+        try await requestValue(
+            method,
+            params,
+            timeout: timeout,
+            epochExpectation: .id(expectedEpochID)
+        )
+    }
+
+    func requestValue<P: Encodable>(
+        _ method: String,
+        _ params: P,
+        timeout: Duration = .seconds(30),
+        expectedConnection: GatewayConnectionAdmission
+    ) async throws -> JSONValue {
+        try await requestValue(
+            method,
+            params,
+            timeout: timeout,
+            epochExpectation: .admission(expectedConnection)
+        )
+    }
+
+    private enum EpochExpectation {
+        case current
+        case id(Int)
+        case admission(GatewayConnectionAdmission)
+    }
+
     private func requestValue<P: Encodable>(
         _ method: String,
         _ params: P,
         timeout: Duration,
-        expectedEpochID: Int?
+        epochExpectation: EpochExpectation
     ) async throws -> JSONValue {
-        guard let epoch = connection, epoch.info != nil, epoch.eventsActivated,
-              expectedEpochID == nil || expectedEpochID == epoch.id else {
+        guard let epoch = connection, epoch.info != nil, epoch.eventsActivated else {
             throw Self.definitelyNotSentFailure()
+        }
+        switch epochExpectation {
+        case .current:
+            break
+        case .id(let expectedEpochID):
+            guard expectedEpochID == epoch.id else { throw Self.definitelyNotSentFailure() }
+        case .admission(let expectedConnection):
+            guard expectedConnection.connectionID == epoch.id else {
+                throw Self.definitelyNotSentFailure()
+            }
         }
         let epochID = epoch.id
         let socket = epoch.socket

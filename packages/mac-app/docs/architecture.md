@@ -168,7 +168,9 @@ qualification remain release gates.
 and its stage progress through completion. Duplicate clicks share accepted work;
 Back/forward navigation, step remounts and cancelled view waiters neither cancel
 nor replay it. `InstallStep` renders that shared progress and owns only disposable
-status presentation. This is an in-process lifetime, not a durable installation
+status presentation. Its status ping carries an exact latest-request fence through
+cancellation, including late success and failure, so a remounted step cannot
+publish an older result. This is an in-process lifetime, not a durable installation
 queue across wrapper termination. Failures stop later stages; retry remains an
 explicit user action against fresh validation and ServiceManagement state.
 
@@ -189,8 +191,11 @@ RFC3339 expiration timestamp with or without fractional seconds.
 `gateway/local-auth.json`, retains the exact Stable admission, and repeats the
 ping/admission immediately before reading the current enrollment file. Any
 process, payload, or authenticated runtime transition clears the pairing
-presentation. The wrapper accepts the Gateway's RFC3339 credential timestamp
-with or without fractional seconds, then emits:
+presentation. Pairing refreshes carry an exact latest-request fence through all
+awaited admission, probe, and QR stages; cancellation or retirement cannot
+publish a stale payload, failure, loading state, or cached host. The wrapper
+accepts the Gateway's RFC3339 credential timestamp with or without fractional
+seconds, then emits:
 
 ```text
 tron://pair?host=<tailscale>&port=<port>&code=<one-time>&label=<mac>
@@ -385,7 +390,10 @@ internal symlink under `app/` and `runtime/`; links must resolve to regular
 files inside those same fingerprinted subtrees. Directory links and links into
 unfingerprinted root content are rejected so executable bytes cannot sit outside
 traversal, while each admitted link's path and exact
-target text remain covered by the deterministic fingerprint. The runtime `node` and technical `pi` aliases are stronger required entries:
+target text remain covered by the deterministic fingerprint. Swift validation
+computes the same byte-ordered line stream incrementally, retaining full read,
+ordering, and fail-closed checks without buffering the complete stream. The
+runtime `node` and technical `pi` aliases are stronger required entries:
 every validator requires exact relative target text and exact resolution to the
 corresponding architecture runtime or payload CLI. Manifest schema 1 retains
 its historical `dependencyTreeCoverage` string so the immediately preceding

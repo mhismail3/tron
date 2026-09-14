@@ -593,26 +593,6 @@ export async function clearPendingAttempt(paths, identity, allowConsumedCommitte
   });
 }
 
-export async function confirmAndClearPendingAttempt(
-  paths,
-  target,
-  manifest,
-  oldEpoch,
-  options,
-  readHealth = health,
-) {
-  const selected = await currentSelection(paths);
-  if (!selected || selected.version !== target.version || selected.payloadFingerprint !== target.payloadFingerprint) {
-    throw new Error("candidate selection changed before startup commit");
-  }
-  const confirmed = await readHealth(options.host, options.port, Math.min(2_000, options.timeoutMs));
-  if (!healthMatchesCandidate(confirmed, manifest, oldEpoch)) {
-    throw new Error("candidate identity changed before startup commit");
-  }
-  await clearPendingAttempt(paths, target, true);
-  return confirmed;
-}
-
 async function captureSelectionState(paths) {
   const read = async (path) => {
     try {
@@ -891,15 +871,6 @@ async function gitRevision(cwd) {
     const { promisify } = await import("node:util");
     return (await promisify(execFile)("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" })).stdout.trim() || "unknown";
   } catch { return "unknown"; }
-}
-
-export function sourceBuildCommands(sourceRoot, compilerOutput = "<private-output>") {
-  const gatewayRoot = join(sourceRoot, "packages", "gateway");
-  return [{
-    tool: process.execPath,
-    args: [join(gatewayRoot, "node_modules", "typescript", "bin", "tsc"), "-p", join(gatewayRoot, "tsconfig.json"), "--outDir", compilerOutput],
-    cwd: gatewayRoot,
-  }];
 }
 
 async function copyTrustedSourceScripts(sourceRoot, candidateRoot) {
@@ -1332,23 +1303,6 @@ export async function kickstartStableSupervisor(
 function sameProcess(left, right) {
   return left !== undefined && right !== undefined
     && left.pid === right.pid && left.startIdentity === right.startIdentity;
-}
-
-export async function verifyReplacementIdentity({
-  oldProcess,
-  expected,
-  oldEpoch,
-  requireEpochChange = true,
-  readListener,
-  readHealth,
-}) {
-  const before = await readListener();
-  if (!before || sameProcess(before, oldProcess)) return undefined;
-  const value = await readHealth();
-  const after = await readListener();
-  if (!sameProcess(before, after)
-    || !healthMatchesCandidate(value, expected, oldEpoch, requireEpochChange)) return undefined;
-  return { process: after, health: value };
 }
 
 export async function waitForReplacement({

@@ -11,6 +11,7 @@ struct InstallStep: View {
     @Environment(\.environmentSetup) private var setup
 
     @State private var installStatusText: String?
+    @State private var statusRefreshFence = WizardPresentationRequestFence()
 
     var body: some View {
         VStack(alignment: .leading, spacing: InstallStepLayout.sectionSpacing) {
@@ -41,11 +42,19 @@ struct InstallStep: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .animation(WizardLayout.transitionAnimation, value: installIsComplete)
         .task(id: state.installOutcome) {
+            let request = statusRefreshFence.begin()
             guard installIsComplete else {
-                installStatusText = nil
+                if statusRefreshFence.accepts(request) {
+                    installStatusText = nil
+                }
                 return
             }
-            await refreshInstallStatus()
+            await refreshInstallStatus(request: request)
+        }
+        .onDisappear {
+            // Status is disposable presentation work. Retire its lease so a
+            // late ping cannot publish into a remounted or replaced step.
+            statusRefreshFence.retire()
         }
     }
 
@@ -246,10 +255,13 @@ struct InstallStep: View {
         .wizardGlassCard()
     }
 
-    private func refreshInstallStatus() async {
+    private func refreshInstallStatus(request: UInt64) async {
+        guard statusRefreshFence.accepts(request), !Task.isCancelled else { return }
         installStatusText = "Checking..."
         let token = setup.readBearerToken()
-        switch await setup.pingServer(token) {
+        let result = await setup.pingServer(token)
+        guard statusRefreshFence.accepts(request), !Task.isCancelled else { return }
+        switch result {
         case .success(let info) where info.gatewayChannel == setup.profile.channel:
             installStatusText = "Running on port \(setup.serverPort)"
         case .success:

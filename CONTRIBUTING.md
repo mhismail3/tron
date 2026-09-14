@@ -141,11 +141,14 @@ iteration proceeds on `9848`.
 ```bash
 scripts/tron-ios-test build
 scripts/tron-ios-test run --only-testing TronMobileTests/<OwningSuite>
+python3 scripts/test-ios-test-infrastructure.py
 ```
 
 The canonical runner reuses products for nearby owners and preserves bounded
-logs/results on its exact repository-owned test simulator. Run
-`scripts/tron-ios-test checkpoint` only after focused owners pass. See
+logs/results on its exact repository-owned test simulator. A successful run must
+also contain an extracted XCTest summary proving at least one executed,
+non-skipped passing test; process failures and timeouts retain their original
+status. Run `scripts/tron-ios-test checkpoint` only after focused owners pass. See
 `packages/ios-app/docs/development.md` for status, cleanup, and diagnostics. Development is the simulator app,
 Test is the explicit `HOSTED_TEST` host, LocalDevice is the canonical physical
 device install, DevicePerformance is test-only, and Release is archive-only.

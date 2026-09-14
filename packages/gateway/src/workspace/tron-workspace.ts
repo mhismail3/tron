@@ -127,8 +127,10 @@ export class TronWorkspace {
     this.closed = true;
     await this.initialization;
     const release = this.release;
-    this.release = undefined;
     this.identity = undefined;
     await release?.();
+    // Keep the release callback until it has retired successfully so a
+    // registry retry can prove the workspace lock was actually released.
+    if (this.release === release) this.release = undefined;
   }
 }

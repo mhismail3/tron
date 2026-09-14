@@ -18,8 +18,6 @@ import {
   loadRollbackTarget,
   validateApplyRequest,
   applyPayload,
-  sourceBuildCommands,
-  validateUpdateConfigDocument,
   validatePushServiceConfigurationText,
   validatePayload,
   payloadFingerprint,
@@ -34,14 +32,12 @@ import {
   healthMatchesCandidate,
   stableSupervisorKickstartSpec,
   kickstartStableSupervisor,
-  verifyReplacementIdentity,
   waitForReplacement,
   waitForDrainedReplacement,
   restoreAndVerifyReplacement,
   waitForDrainCompletion,
   captureLocalProcess,
   captureLocalListenerProcess,
-  confirmAndClearPendingAttempt,
   verifyIdempotentPromotion,
   requireBundledPayload,
   resolveRecoveryPayload,
@@ -754,19 +750,6 @@ test("preflight imports candidate protocol values and rejects incompatible range
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("trusted source policy is stored-only and source commands are bounded", async () => {
-  const sourceRoot = join(tmpdir(), "trusted-gateway-source");
-  const config = { schema: 1, kind: "tron-gateway-update-config", sourceRoot, updatedAt: "2026-04-27T00:00:00Z" };
-  assert.equal(validateUpdateConfigDocument(config), true);
-  assert.equal(validateUpdateConfigDocument({ ...config, sourceRoot: "relative" }), false);
-  const commands = sourceBuildCommands(sourceRoot);
-  assert.equal(commands.length, 1);
-  assert.equal(commands[0].tool, process.execPath);
-  assert.equal(commands[0].args[0], join(sourceRoot, "packages", "gateway", "node_modules", "typescript", "bin", "tsc"));
-  assert.deepEqual(commands[0].args.slice(1, 3), ["-p", join(sourceRoot, "packages", "gateway", "tsconfig.json")]);
-  assert.equal(commands[0].cwd, join(sourceRoot, "packages", "gateway"));
-});
-
 test("Debug handoff pins authenticated dev-channel pre/post identity to the selected manifest", () => {
   const manifest = { payloadFingerprint: "a".repeat(64), sourceRevision: "revision-1", runtimeEpoch: "epoch-1" };
   const info = { gatewayChannel: "dev", buildFingerprint: manifest.payloadFingerprint, sourceRevision: manifest.sourceRevision, runtimeEpoch: manifest.runtimeEpoch };
@@ -996,26 +979,34 @@ test("replacement waits for coherent new process and kickstarts only with an exp
   assert.equal(launches, 0);
 });
 
-test("same or unstable listener and stale health cannot satisfy replacement", async () => {
+test("foreign listeners and stale health cannot satisfy replacement", async () => {
   const oldProcess = { pid: 10, startIdentity: "old" };
   const expected = { payloadFingerprint: "a".repeat(64), sourceRevision: "revision", runtimeEpoch: "new-epoch" };
   const stale = { buildFingerprint: expected.payloadFingerprint, sourceRevision: expected.sourceRevision, runtimeEpoch: "old-epoch" };
-  assert.equal(await verifyReplacementIdentity({
-    oldProcess, expected, oldEpoch: "old-epoch",
+  let now = 0;
+  await assert.rejects(waitForReplacement({
+    oldProcess, expected, oldEpoch: "old-epoch", timeoutMs: 500, naturalGraceMs: 0,
     readListener: async () => oldProcess,
     readHealth: async () => stale,
-  }), undefined);
+    launchSupervisor: async () => assert.fail("the old listener must not be kickstarted"),
+    now: () => now,
+    sleep: async (milliseconds) => { now += milliseconds; },
+  }), /coherent replacement/);
 
+  now = 0;
   let reads = 0;
-  assert.equal(await verifyReplacementIdentity({
-    oldProcess, expected, oldEpoch: "old-epoch",
-    readListener: async () => (++reads === 1
+  await assert.rejects(waitForReplacement({
+    oldProcess, expected, oldEpoch: "old-epoch", timeoutMs: 500, naturalGraceMs: 0,
+    readListener: async () => (++reads % 2 === 1
       ? { pid: 11, startIdentity: "one" }
       : { pid: 12, startIdentity: "two" }),
     readHealth: async () => ({ ...stale, runtimeEpoch: expected.runtimeEpoch }),
-  }), undefined);
+    launchSupervisor: async () => assert.fail("an unstable listener must not be kickstarted"),
+    now: () => now,
+    sleep: async (milliseconds) => { now += milliseconds; },
+  }), /coherent replacement/);
 
-  let now = 0;
+  now = 0;
   let foreignError;
   try {
     await waitForReplacement({
@@ -1105,44 +1096,6 @@ test("recovery coordinates an existing restored listener and fails closed on unk
     },
     expected, oldEpoch: "candidate-epoch", timeoutMs: 500,
   }), /coherent replacement/);
-});
-
-test("committed marker consumed by launcher requires exact selection and live identity revalidation", async () => {
-  const root = await mkdtemp(join(tmpdir(), "tron-pending-interleave-"));
-  try {
-    const store = await paths(root);
-    await mkdir(store.channelRoot, { recursive: true });
-    const target = selection("candidate", "b".repeat(64));
-    const manifest = {
-      ...target, sourceRevision: "tested-revision", runtimeEpoch: "candidate-epoch",
-    };
-    await writeFile(store.current, `${JSON.stringify(target)}\n`);
-    await writeFile(store.pending, `${JSON.stringify({
-      schema: 1, kind: "tron-gateway-pending-attempt", channel: "stable", attempt: "committed",
-      version: target.version, payloadFingerprint: target.payloadFingerprint,
-      previousVersion: "old", previousFingerprint: "a".repeat(64),
-    })}\n`);
-    // The launcher consumes the committed marker before the helper clears it.
-    await rm(store.pending);
-    const confirmed = await confirmAndClearPendingAttempt(
-      store, target, manifest, "old-epoch",
-      { host: "127.0.0.1", port: 9847, timeoutMs: 2_000 },
-      async () => ({
-        buildFingerprint: manifest.payloadFingerprint,
-        sourceRevision: manifest.sourceRevision,
-        runtimeEpoch: manifest.runtimeEpoch,
-      }),
-    );
-    assert.equal(confirmed.runtimeEpoch, manifest.runtimeEpoch);
-    await assert.rejects(confirmAndClearPendingAttempt(
-      store, target, manifest, "old-epoch",
-      { host: "127.0.0.1", port: 9847, timeoutMs: 2_000 },
-      async () => ({
-        buildFingerprint: "c".repeat(64), sourceRevision: manifest.sourceRevision,
-        runtimeEpoch: manifest.runtimeEpoch,
-      }),
-    ), /identity changed/);
-  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("promotion readiness requires exact candidate epoch and an epoch transition", () => {

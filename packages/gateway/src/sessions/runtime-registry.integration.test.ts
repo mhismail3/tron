@@ -8391,6 +8391,74 @@ export default function (pi) {
     expect(slot.isDisposed).toBe(true);
   });
 
+  it("retries registry disposal after a transient slot failure without duplicating shared cleanup", async () => {
+    const fixture = await coldFixture("registry-dispose-retry");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const originalShutdown = slot.shutdown.bind(slot);
+    const shutdown = vi.spyOn(slot, "shutdown")
+      .mockRejectedValueOnce(new Error("injected slot shutdown failure"))
+      .mockImplementation(originalShutdown);
+    const internals = fixture.registry as unknown as {
+      blobs: { dispose: () => Promise<void> };
+      exports: { dispose: () => Promise<void> };
+      workspace: { dispose: () => Promise<void> };
+      slots: Map<string, unknown>;
+    };
+    const disposeCalls = {
+      blobs: 0,
+      exports: 0,
+      workspace: 0,
+    };
+    for (const [name, store] of Object.entries({
+      blobs: internals.blobs,
+      exports: internals.exports,
+      workspace: internals.workspace,
+    }) as Array<[keyof typeof disposeCalls, { dispose: () => Promise<void> }]>) {
+      const originalDispose = store.dispose.bind(store);
+      vi.spyOn(store, "dispose").mockImplementation(async () => {
+        disposeCalls[name] += 1;
+        await originalDispose();
+      });
+    }
+
+    const first = fixture.registry.dispose();
+    const concurrent = fixture.registry.dispose();
+    await expect(first).rejects.toThrow("One or more session runtimes failed");
+    await expect(concurrent).rejects.toThrow("One or more session runtimes failed");
+    expect(shutdown).toHaveBeenCalledTimes(1);
+    expect(internals.slots.get(slot.id)).toBe(slot);
+    await fixture.registry.dispose();
+    expect(shutdown).toHaveBeenCalledTimes(2);
+    expect(internals.slots.has(slot.id)).toBe(false);
+    expect(disposeCalls).toEqual({ blobs: 1, exports: 1, workspace: 1 });
+  });
+
+  it("retries only failed shared-store disposal after partial cleanup", async () => {
+    const fixture = await coldFixture("registry-shared-dispose-retry");
+    const internals = fixture.registry as unknown as {
+      blobs: { dispose: () => Promise<void> };
+      exports: { dispose: () => Promise<void> };
+      workspace: { dispose: () => Promise<void> };
+    };
+    const originalBlobDispose = internals.blobs.dispose.bind(internals.blobs);
+    const originalExportsDispose = internals.exports.dispose.bind(internals.exports);
+    const originalWorkspaceDispose = internals.workspace.dispose.bind(internals.workspace);
+    const blobs = vi.spyOn(internals.blobs, "dispose")
+      .mockRejectedValueOnce(new Error("injected blob cleanup failure"))
+      .mockImplementation(originalBlobDispose);
+    const exports = vi.spyOn(internals.exports, "dispose").mockImplementation(originalExportsDispose);
+    const workspace = vi.spyOn(internals.workspace, "dispose").mockImplementation(originalWorkspaceDispose);
+
+    await expect(fixture.registry.dispose()).rejects.toThrow("injected blob cleanup failure");
+    expect(blobs).toHaveBeenCalledTimes(1);
+    expect(exports).toHaveBeenCalledTimes(1);
+    expect(workspace).toHaveBeenCalledTimes(1);
+    await fixture.registry.dispose();
+    expect(blobs).toHaveBeenCalledTimes(2);
+    expect(exports).toHaveBeenCalledTimes(1);
+    expect(workspace).toHaveBeenCalledTimes(1);
+  });
+
   it("scopes extension shutdown to the owning runtime slot", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-extension-scoped-shutdown-"));
     const agentDir = join(root, "agent");

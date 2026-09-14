@@ -161,6 +161,66 @@ describe("AutomationScheduler", () => {
     expect(cancel).toHaveBeenCalledWith("user-cancelled");
   });
 
+  it("arms from one catalog snapshot while preserving the bounded deadline", async () => {
+    const now = Date.parse("2026-01-01T00:00:00Z");
+    const root = await mkdtemp(join(tmpdir(), "tron-automation-arm-"));
+    const store = new AutomationStore(root, { now: () => now });
+    await store.initialize();
+    await store.create({
+      name: "Future", activation: "enabled", target: { kind: "existingSession", sessionId: "session-one" },
+      trigger: { kind: "once", at: "2026-01-01T00:10:00.000Z" },
+      action: { kind: "sessionPrompt", text: "Review" }, provenance: { kind: "local" },
+    });
+    const snapshot = vi.spyOn(store, "snapshot");
+    const setTimer = vi.fn(() => ({ unref() {} }) as unknown as NodeJS.Timeout);
+    const scheduler = new AutomationScheduler(store, { start: vi.fn() } as unknown as AutomationExecutor, {
+      now: () => now, hostEpoch: "epoch-one", setTimer, clearTimer: () => {},
+    });
+
+    scheduler.start();
+    await scheduler.scan();
+
+    expect(snapshot).toHaveBeenCalledTimes(3);
+    expect(setTimer).toHaveBeenCalledWith(expect.any(Function), 60_000);
+  });
+
+  it("arms for the earliest retry or occurrence deadline", async () => {
+    const now = Date.parse("2026-01-01T00:00:00Z");
+    const root = await mkdtemp(join(tmpdir(), "tron-automation-arm-deadlines-"));
+    const store = new AutomationStore(root, { now: () => now });
+    await store.initialize();
+    const record = await store.create({
+      name: "Retry", activation: "enabled", target: { kind: "existingSession", sessionId: "session-one" },
+      trigger: { kind: "once", at: "2026-01-01T00:00:50.000Z" },
+      action: { kind: "sessionPrompt", text: "Review" }, provenance: { kind: "local" },
+    });
+    await store.mutateState(record.id, (current) => ({
+      ...current,
+      currentRun: {
+        runId: "10000000-0000-4000-8000-000000000011",
+        occurrenceId: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        automationRevision: current.revision,
+        scheduledFor: "2026-01-01T00:00:30.000Z",
+        triggerSnapshot: current.trigger,
+        actionSnapshot: current.action,
+        targetSnapshot: current.target,
+        executionSessionId: "session-one",
+        state: "waiting",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        retryAt: "2026-01-01T00:00:30.000Z",
+        preAdmissionAttemptCount: 0,
+        operationId: "automation:10000000-0000-4000-8000-000000000011",
+      },
+    }));
+    const setTimer = vi.fn(() => ({ unref() {} }) as unknown as NodeJS.Timeout);
+    const scheduler = new AutomationScheduler(store, { start: vi.fn() } as unknown as AutomationExecutor, {
+      now: () => now, hostEpoch: "epoch-one", setTimer, clearTimer: () => {},
+    });
+
+    scheduler.start();
+    await eventually(() => expect(setTimer).toHaveBeenCalledWith(expect.any(Function), 30_000));
+  });
+
   it("does not replay an admitted run when recovery has no terminal proof", async () => {
     const now = Date.parse("2026-01-01T00:10:30Z");
     const root = await mkdtemp(join(tmpdir(), "tron-automation-recovery-"));

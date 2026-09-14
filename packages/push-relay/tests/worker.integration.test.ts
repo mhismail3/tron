@@ -172,6 +172,20 @@ describe("v3 Worker boundary", () => {
     expect(response.status).toBe(413);
   });
 
+  test("does not create a receipt for an unauthenticated notification", async () => {
+    await initializeAndSeed();
+    const request = await signedNotification({ requestId: "unauthenticated-request-0001" });
+    const headers = new Headers(request.headers);
+    headers.set("x-tron-signature", "0".repeat(64));
+    const response = await SELF.fetch("https://push.test/v3/notifications", { ...request, headers });
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "invalid_signature" });
+    const receipts = await runInDurableObject(stub(), async (_instance: PushRegistry, state) =>
+      state.storage.sql.exec<{ count: number }>("SELECT COUNT(*) AS count FROM relay_requests").one().count,
+    );
+    expect(receipts).toBe(0);
+  });
+
   test("replays a terminal APNs outcome without a second provider send", async () => {
     await initializeAndSeed();
     const providerFetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(null, { status: 200, headers: { "apns-id": "provider-id" } }));
@@ -272,9 +286,9 @@ describe("v3 Worker boundary", () => {
     let bodyHashes = 0;
     vi.spyOn(crypto.subtle, "digest").mockImplementation(async (algorithm, data) => {
       const result = await digest(algorithm, data);
-      // HMAC authenticates the first body hash. The second precedes durable
-      // dispatch admission; freeze there without bypassing real authentication.
-      if (new TextDecoder().decode(data) === notification.body && ++bodyHashes === 2) {
+      // Freeze after authentication's single body hash, without bypassing
+      // the real admission boundary.
+      if (new TextDecoder().decode(data) === notification.body && ++bodyHashes === 1) {
         entered.resolve();
         await release.promise;
       }
@@ -288,7 +302,7 @@ describe("v3 Worker boundary", () => {
         expect(registered.status).toBe(201);
         release.resolve();
         expect(await (await pending).json()).toMatchObject({ status: "accepted_by_apns" });
-        expect(bodyHashes).toBe(2);
+        expect(bodyHashes).toBe(1);
         expect(providerFetch.mock.calls.map(([url]) => url)).toEqual([
           `https://api.sandbox.push.apple.com/3/device/${replacementToken}`,
         ]);

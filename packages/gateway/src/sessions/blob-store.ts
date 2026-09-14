@@ -85,7 +85,7 @@ export class BlobStore {
   private initialization?: Promise<void>;
   private initialized = false;
   private disposed = false;
-  private disposeTask?: Promise<void>;
+  private disposeTask: Promise<void> | undefined;
 
   constructor(
     private readonly limits: BlobStoreLimits = defaultLimits,
@@ -390,8 +390,16 @@ export class BlobStore {
     if (this.disposeTask) return this.disposeTask;
     this.disposed = true;
     const task = this.finishDispose();
-    this.disposeTask = task;
-    return task;
+    let tracked!: Promise<void>;
+    tracked = task.catch((error) => {
+      // A failed retirement must not poison the memoized operation: the
+      // registry owns retry admission and needs the next attempt to rerun the
+      // actual cleanup rather than observe the same rejected promise forever.
+      if (this.disposeTask === tracked) this.disposeTask = undefined;
+      throw error;
+    });
+    this.disposeTask = tracked;
+    return tracked;
   }
 
   private async finishDispose(): Promise<void> {

@@ -7,6 +7,15 @@ export interface BufferedSessionEvent {
   payload: JsonValue;
 }
 
+/** Immutable operation-local encoding retained with a quarantined event. */
+export interface BufferedSessionEncoding {
+  readonly encoded: string;
+  readonly bytes: number;
+  readonly output: string;
+  readonly outputBytes: number;
+  readonly fallback: boolean;
+}
+
 export interface SessionSyncBaseline {
   runtimeGeneration: string;
   eventSequence: number;
@@ -16,6 +25,7 @@ interface Synchronization {
   requestId: string;
   baseline?: SessionSyncBaseline;
   events: BufferedSessionEvent[];
+  encodings: WeakMap<BufferedSessionEvent, BufferedSessionEncoding>;
   bufferedBytes: number;
   overflowed: boolean;
 }
@@ -39,10 +49,12 @@ export const MAX_BUFFERED_SYNC_EVENTS = 1_024;
  */
 export const MAX_BUFFERED_SYNC_BYTES = 1_048_576;
 
-function serializedBytes(event: BufferedSessionEvent): number | undefined {
+function serializedEvent(event: BufferedSessionEvent): BufferedSessionEncoding | undefined {
   try {
     const encoded = JSON.stringify(event);
-    return encoded === undefined ? undefined : Buffer.byteLength(encoded, "utf8");
+    if (encoded === undefined) return undefined;
+    const bytes = Buffer.byteLength(encoded, "utf8");
+    return { encoded, bytes, output: encoded, outputBytes: bytes, fallback: false };
   } catch {
     return undefined;
   }
@@ -64,12 +76,20 @@ function sequence(event: BufferedSessionEvent): SessionSyncBaseline | undefined 
  */
 export class SessionSyncBarrier {
   private synchronization: Synchronization | undefined;
+  private committedEncodings: WeakMap<BufferedSessionEvent, BufferedSessionEncoding> | undefined;
 
   constructor(private readonly byteBudget?: SessionSynchronizationByteBudget) {}
 
   begin(requestId: string): void {
     if (this.synchronization) throw new Error("session synchronization is already in progress");
-    this.synchronization = { requestId, events: [], bufferedBytes: 0, overflowed: false };
+    this.committedEncodings = undefined;
+    this.synchronization = {
+      requestId,
+      events: [],
+      encodings: new WeakMap(),
+      bufferedBytes: 0,
+      overflowed: false,
+    };
   }
 
   establish(snapshot: SessionSnapshot): void {
@@ -81,13 +101,15 @@ export class SessionSyncBarrier {
     };
   }
 
-  offer(event: BufferedSessionEvent): BufferedSessionEvent | undefined {
+  offer(event: BufferedSessionEvent, encoding?: BufferedSessionEncoding | null): BufferedSessionEvent | undefined {
     const synchronization = this.synchronization;
     if (!synchronization) return event;
     if (synchronization.overflowed) return undefined;
 
-    const bytes = serializedBytes(event);
-    if (bytes === undefined
+    const serialized = encoding === null ? undefined : encoding ?? serializedEvent(event);
+    const bytes = serialized?.bytes;
+    if (serialized === undefined
+        || bytes === undefined
         || bytes > MAX_BUFFERED_SYNC_BYTES
         || synchronization.events.length >= MAX_BUFFERED_SYNC_EVENTS
         || synchronization.bufferedBytes > MAX_BUFFERED_SYNC_BYTES - bytes
@@ -97,8 +119,14 @@ export class SessionSyncBarrier {
       return undefined;
     }
     synchronization.events.push(event);
+    synchronization.encodings.set(event, serialized);
     synchronization.bufferedBytes += bytes;
     return undefined;
+  }
+
+  /** Take the operation-local encoding after commit; it is not retained by the barrier. */
+  takeEncoding(event: BufferedSessionEvent): BufferedSessionEncoding | undefined {
+    return (this.synchronization?.encodings ?? this.committedEncodings)?.get(event);
   }
 
   /** Replace an overflowed quarantine with a bounded recovery quarantine. */
@@ -106,7 +134,14 @@ export class SessionSyncBarrier {
     const synchronization = this.synchronization;
     if (!synchronization || synchronization.requestId !== requestId || !synchronization.overflowed) return false;
     this.discard(synchronization);
-    this.synchronization = { requestId, events: [], bufferedBytes: 0, overflowed: false };
+    this.committedEncodings = undefined;
+    this.synchronization = {
+      requestId,
+      events: [],
+      encodings: new WeakMap(),
+      bufferedBytes: 0,
+      overflowed: false,
+    };
     return true;
   }
 
@@ -136,6 +171,7 @@ export class SessionSyncBarrier {
       throw new Error("session synchronization baseline was not established");
     }
     this.releaseBytes(synchronization);
+    this.committedEncodings = synchronization.encodings;
     const baseline = synchronization.baseline;
     return {
       events: synchronization.events.filter((event) => {

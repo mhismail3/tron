@@ -16,7 +16,7 @@ import type { AuthBroker } from "../admin/auth-broker.js";
 import type { GatewayLogger } from "./logger.js";
 import { GatewayService, type ClientContext } from "./gateway-service.js";
 import { MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
-import { SessionSyncBarrier, type BufferedSessionEvent } from "./session-sync.js";
+import { SessionSyncBarrier, type BufferedSessionEncoding, type BufferedSessionEvent } from "./session-sync.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 
 // Retain only recent former IDs while an active subscription is rekeyed. Older
@@ -271,9 +271,10 @@ export class OrderedOutboundQueue {
     private readonly maximumFrames = 4_096,
   ) {}
 
-  enqueue(encoded: string): boolean {
+  enqueue(frame: string | { readonly encoded: string; readonly bytes: number }): boolean {
     if (this.retired) return false;
-    const bytes = Buffer.byteLength(encoded, "utf8");
+    const encoded = typeof frame === "string" ? frame : frame.encoded;
+    const bytes = typeof frame === "string" ? Buffer.byteLength(encoded, "utf8") : frame.bytes;
     if (this.frames.length - this.head >= this.maximumFrames
       || bytes > this.maximumBytes || this.queuedBytes > this.maximumBytes - bytes) {
       const snapshot = this.snapshot();
@@ -422,11 +423,18 @@ function sendJson(response: ServerResponse, status: number, value: unknown): voi
   response.end(data);
 }
 
-export function encodeOutboundFrame(value: unknown, maximum: number): string | undefined {
+interface PreparedOutboundFrame extends BufferedSessionEncoding {
+  readonly nodes?: number;
+}
+
+function prepareOutboundFrame(value: unknown, maximum: number): PreparedOutboundFrame | undefined {
   const encoded = JSON.stringify(value);
-  const bytes = Buffer.byteLength(encoded);
+  if (encoded === undefined) return undefined;
+  const bytes = Buffer.byteLength(encoded, "utf8");
   const nodes = jsonNodeCount(value);
-  if (bytes <= maximum && nodes <= GATEWAY_JSON_MAXIMUM_NODES) return encoded;
+  if (bytes <= maximum && nodes <= GATEWAY_JSON_MAXIMUM_NODES) {
+    return { encoded, bytes, output: encoded, outputBytes: bytes, fallback: false, nodes };
+  }
   const structural = nodes > GATEWAY_JSON_MAXIMUM_NODES
     ? { nodeCountAtLeast: nodes, maximumNodes: GATEWAY_JSON_MAXIMUM_NODES } : {};
   const frame = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
@@ -449,7 +457,15 @@ export function encodeOutboundFrame(value: unknown, maximum: number): string | u
         payload: { reason: "oversized projection", bytes, maximum, ...structural },
       };
   const fallback = JSON.stringify(replacement);
-  return Buffer.byteLength(fallback) <= maximum ? fallback : undefined;
+  if (fallback === undefined) return undefined;
+  const outputBytes = Buffer.byteLength(fallback, "utf8");
+  return outputBytes <= maximum
+    ? { encoded, bytes, output: fallback, outputBytes, fallback: true, nodes }
+    : undefined;
+}
+
+export function encodeOutboundFrame(value: unknown, maximum: number): string | undefined {
+  return prepareOutboundFrame(value, maximum)?.output;
 }
 
 async function* completeRequestBody(request: IncomingMessage): AsyncGenerator<Buffer> {
@@ -676,6 +692,9 @@ export class GatewayServer {
 
   broadcastSession(sessionId: string, topic: string, payload: JsonValue): void {
     const event: BufferedSessionEvent = { type: "event", topic, sessionId, payload };
+    // Prepare once for this broadcast operation. Each connection still owns
+    // admission, queue accounting, revocation, and write-failure isolation.
+    const prepared = this.prepareBroadcastFrame(event);
     for (const client of this.clients.values()) {
       if (!client.ready || !client.subscriptionTokens.has(sessionId)) continue;
       // While a synchronization quarantine owns this session's catch-up, its
@@ -683,14 +702,16 @@ export class GatewayServer {
       // after the acknowledgement. Sending it here as well would deliver every
       // in-window event twice and break the client's contiguous replay.
       const barrier = client.synchronizations.get(sessionId)?.barrier;
-      const deliverable = barrier ? barrier.offer(event) : event;
-      if (deliverable) this.send(client, deliverable);
+      const deliverable = barrier ? barrier.offer(event, prepared ?? null) : event;
+      if (deliverable) this.sendOutcome(client, deliverable, prepared ?? null);
     }
   }
 
   broadcast(topic: string, payload: JsonValue): void {
+    const event = { type: "event" as const, topic, payload };
+    const prepared = this.prepareBroadcastFrame(event);
     for (const client of this.clients.values()) {
-      if (client.ready) this.send(client, { type: "event", topic, payload });
+      if (client.ready) this.sendOutcome(client, event, prepared ?? null);
     }
   }
 
@@ -1682,7 +1703,10 @@ export class GatewayServer {
             },
           });
           if (recoveryOutcome === "sent") {
-            for (const event of recovered.events) this.send(connection, event);
+            for (const event of recovered.events) {
+              const preparedEvent = active.barrier.takeEncoding(event);
+              this.sendOutcome(connection, event, preparedEvent);
+            }
           } else {
             // Both an encoded fallback and a failed write are resync paths.
             // The fallback already carries the notice; a failed write gets a
@@ -1694,7 +1718,10 @@ export class GatewayServer {
           const completed = active.barrier.commit(completion.syncToken);
           clearTimeout(active.timeout);
           connection.synchronizations.delete(completion.sessionId);
-          for (const event of completed.events) this.send(connection, event);
+          for (const event of completed.events) {
+            const preparedEvent = active.barrier.takeEncoding(event);
+            this.sendOutcome(connection, event, preparedEvent);
+          }
         }
       }
     } catch (error) {
@@ -1752,6 +1779,20 @@ export class GatewayServer {
     return this.sendOutcome(connection, value) === "sent";
   }
 
+  private prepareBroadcastFrame(value: unknown): PreparedOutboundFrame | null {
+    try {
+      return prepareOutboundFrame(value, this.options.maxFrameBytes) ?? null;
+    } catch {
+      // Broadcast preparation is outside the per-connection failure boundary;
+      // retain the old isolated failure behavior without allowing one malformed
+      // producer value to abort the fanout loop.
+      this.options.logger.log("error", "Outbound projection encoding failed", {
+        event: "connection.projection-rejected", source: "transport",
+      });
+      return null;
+    }
+  }
+
   private closeRevokedConnectionAfterResponse(connection: Connection): void {
     if (!connection.revoked || !connection.revokeResponseQueued || connection.revokeCloseScheduled) return;
     connection.revokeCloseScheduled = true;
@@ -1775,7 +1816,11 @@ export class GatewayServer {
     connection.outbound.whenIdle(() => requestClose(false));
   }
 
-  private sendOutcome(connection: Connection, value: unknown): "sent" | "fallback" | "failed" {
+  private sendOutcome(
+    connection: Connection,
+    value: unknown,
+    prepared?: PreparedOutboundFrame | null,
+  ): "sent" | "fallback" | "failed" {
     if (connection.closeInitiated || connection.socket.readyState !== WebSocket.OPEN) return "failed";
     if (connection.revoked) {
       const frame = value as { type?: unknown; id?: unknown };
@@ -1788,32 +1833,25 @@ export class GatewayServer {
           || !connection.inFlight.has(frame.id)) return "failed";
     }
     try {
-      const direct = JSON.stringify(value);
-      if (direct === undefined) return "failed";
-      const bytes = Buffer.byteLength(direct, "utf8");
-      const nodes = jsonNodeCount(value);
-      const fits = bytes <= this.options.maxFrameBytes && nodes <= GATEWAY_JSON_MAXIMUM_NODES;
-      if (!fits) {
-        const frame = value as { type?: unknown; topic?: unknown };
-        const type = frame?.type === "response" ? "response" : frame?.type === "event" ? "event" : "other";
-        const topic = typeof frame?.topic === "string"
-          && ["session.snapshot", "session.rebaseline", "session.progress", "session.summary"].includes(frame.topic)
-          ? frame.topic : "other";
-        this.options.logger.log("warning", `Outbound projection exceeded frame limit (type=${type} topic=${topic} bytes=${bytes} maximumBytes=${this.options.maxFrameBytes} nodeCountAtLeast=${nodes} maximumNodes=${GATEWAY_JSON_MAXIMUM_NODES}; ${this.pressureDiagnostic()})`, {
+      const frame = prepared === undefined ? prepareOutboundFrame(value, this.options.maxFrameBytes) : prepared;
+      if (!frame) return "failed";
+      if (frame.fallback) {
+        const valueFrame = value as { type?: unknown; topic?: unknown };
+        const type = valueFrame?.type === "response" ? "response" : valueFrame?.type === "event" ? "event" : "other";
+        const topic = typeof valueFrame?.topic === "string"
+          && ["session.snapshot", "session.rebaseline", "session.progress", "session.summary"].includes(valueFrame.topic)
+          ? valueFrame.topic : "other";
+        this.options.logger.log("warning", `Outbound projection exceeded frame limit (type=${type} topic=${topic} bytes=${frame.bytes} maximumBytes=${this.options.maxFrameBytes} nodeCountAtLeast=${frame.nodes ?? "unknown"} maximumNodes=${GATEWAY_JSON_MAXIMUM_NODES}; ${this.pressureDiagnostic()})`, {
           event: "connection.projection-rejected", source: "transport",
         });
       }
-      const encoded = fits
-        ? direct
-        : encodeOutboundFrame(value, this.options.maxFrameBytes);
-      if (!encoded) return "failed";
 
       // Enqueue acceptance is the ordering boundary. The connection-local
       // writer hands exactly one encoded frame to ws at a time, preserving a
       // response before its synchronization suffix without manufacturing
       // transport pressure from concurrent bounded RPC completions.
-      if (!connection.outbound.enqueue(encoded)) return "failed";
-      return encoded === direct ? "sent" : "fallback";
+      if (!connection.outbound.enqueue({ encoded: frame.output, bytes: frame.outputBytes })) return "failed";
+      return frame.fallback ? "fallback" : "sent";
     } catch {
       // Never log the exception or payload: serialization errors can contain
       // producer content. Failure must still be observable without killing the

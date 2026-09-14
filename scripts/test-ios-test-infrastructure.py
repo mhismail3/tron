@@ -53,6 +53,8 @@ if command == 'create':
     path.write_text(json.dumps(doc)); print(udid); raise SystemExit(0)
 if command in ('boot', 'shutdown', 'delete'):
     udid = args[1]
+    if command == 'shutdown' and os.environ.get('FAKE_DEVELOPMENT_ON_SHUTDOWN'):
+        Path(os.environ['FAKE_DEVELOPMENT_ON_SHUTDOWN']).write_text(udid + '\\n')
     found = False
     for runtime, devices in doc['devices'].items():
         for device in list(devices):
@@ -94,9 +96,11 @@ raise SystemExit(2)
             "--development-state", str(self.development),
         ]
 
-    def invoke(self, action: str, *, name: str = "Tron iOS Tests") -> subprocess.CompletedProcess[str]:
+    def invoke(self, action: str, *, name: str = "Tron iOS Tests", development_on_shutdown: bool = False) -> subprocess.CompletedProcess[str]:
         environment = os.environ.copy()
         environment.update({"TRON_IOS_XCRUN": str(self.fake_xcrun), "FAKE_SIMCTL_INVENTORY": str(self.inventory_path)})
+        if development_on_shutdown:
+            environment["FAKE_DEVELOPMENT_ON_SHUTDOWN"] = str(self.development)
         return subprocess.run(self.command(action, name=name), env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     def owned_marker(self, udid: str = UDID_A, *, runtime: str = RUNTIME_ID, name: str = "Tron iOS Tests") -> dict[str, object]:
@@ -184,6 +188,57 @@ raise SystemExit(2)
         self.assertEqual(result.returncode, 66)
         self.assertIn("Development simulator", result.stderr)
 
+    def test_direct_delete_refuses_development_overlap_before_delete(self) -> None:
+        _, device = self.device(UDID_A, state="Booted")
+        self.write_inventory(devices={RUNTIME_ID: [device]})
+        self.marker.write_text(json.dumps(self.owned_marker()))
+        self.development.unlink(missing_ok=True)
+        result = self.invoke("delete", development_on_shutdown=True)
+        self.assertEqual(result.returncode, 66)
+        self.assertIn("remembered Development", result.stderr)
+        after = json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID]
+        self.assertEqual(len(after), 1)
+        self.assertEqual(after[0]["udid"], UDID_A)
+        self.assertEqual(after[0]["state"], "Shutdown")
+        self.assertTrue(self.marker.exists())
+
+    def test_stale_recovery_refuses_development_overlap_before_delete(self) -> None:
+        old_runtime = "com.apple.CoreSimulator.SimRuntime.iOS-26-1"
+        _, device = self.device(UDID_A, runtime=old_runtime, state="Booted")
+        self.write_inventory(devices={old_runtime: [device], RUNTIME_ID: []})
+        self.marker.write_text(json.dumps(self.owned_marker(runtime=old_runtime)))
+        self.development.unlink(missing_ok=True)
+        result = self.invoke("provision", development_on_shutdown=True)
+        self.assertEqual(result.returncode, 66)
+        self.assertIn("remembered Development", result.stderr)
+        after = json.loads(self.inventory_path.read_text())["devices"][old_runtime]
+        self.assertEqual(len(after), 1)
+        self.assertEqual(after[0]["udid"], UDID_A)
+        self.assertEqual(after[0]["state"], "Shutdown")
+        self.assertTrue(self.marker.exists())
+
+    def test_empty_or_unreadable_development_marker_fails_closed(self) -> None:
+        _, device = self.device(UDID_A)
+        self.write_inventory(devices={RUNTIME_ID: [device]})
+        self.marker.write_text(json.dumps(self.owned_marker()))
+        for value in ("", "not-a-udid\n", "-" * 36, UDID_A + "\nextra\n"):
+            with self.subTest(value=value):
+                self.development.write_text(value)
+                before = self.inventory_path.read_text()
+                result = self.invoke("delete")
+                self.assertEqual(result.returncode, 66)
+                self.assertIn("Development simulator marker", result.stderr)
+                self.assertEqual(self.inventory_path.read_text(), before)
+                self.assertTrue(self.marker.exists())
+        self.development.unlink()
+        self.development.mkdir()
+        before = self.inventory_path.read_text()
+        result = self.invoke("delete")
+        self.assertEqual(result.returncode, 66)
+        self.assertIn("unreadable", result.stderr)
+        self.assertEqual(self.inventory_path.read_text(), before)
+        self.assertTrue(self.marker.exists())
+
     def test_cleanup_requires_marker_and_current_identity_ownership(self) -> None:
         with self.subTest("changed simulator identity"):
             _, changed = self.device(UDID_A, name="Changed Identity")
@@ -204,6 +259,142 @@ raise SystemExit(2)
             self.assertEqual(result.returncode, 66)
             self.assertIn("refusing unowned simulator marker", result.stderr)
             self.assertEqual(json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID], [device])
+
+
+class RunnerFixture(unittest.TestCase):
+    """Exercise the production runner with only synthetic xcode/simctl tools."""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.bin = self.root / "bin"
+        self.bin.mkdir()
+        self.xcrun = self.bin / "xcrun"
+        self.xcrun.write_text("""#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+args = sys.argv[1:]
+inventory_path = Path(os.environ['FAKE_SIMULATOR_INVENTORY'])
+doc = json.loads(inventory_path.read_text()) if inventory_path.exists() else {'devices': {}}
+if args[:2] == ['simctl', 'list'] and args[2:] == ['--json']:
+    print(json.dumps(doc)); raise SystemExit(0)
+if args[:2] == ['simctl', 'list']:
+    print('== Runtimes ==\\niOS 26.5 - com.apple.CoreSimulator.SimRuntime.iOS-26-5'); raise SystemExit(0)
+if args[:1] == ['simctl'] and args[1:2] == ['create']:
+    _, name, device_type, runtime = args[1:]
+    udid = 'AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA'
+    doc.setdefault('devices', {}).setdefault(runtime, []).append({'name': name, 'udid': udid, 'state': 'Shutdown', 'isAvailable': True, 'deviceTypeIdentifier': device_type})
+    inventory_path.write_text(json.dumps(doc)); print(udid); raise SystemExit(0)
+if args[:1] == ['simctl'] and args[1:2] in (['boot'], ['shutdown'], ['delete']):
+    command, udid = args[1:3]
+    for devices in doc.get('devices', {}).values():
+        for device in list(devices):
+            if device.get('udid') == udid:
+                if command == 'delete': devices.remove(device)
+                else: device['state'] = 'Booted' if command == 'boot' else 'Shutdown'
+    inventory_path.write_text(json.dumps(doc)); raise SystemExit(0)
+if args[:2] == ['simctl', 'bootstatus']:
+    raise SystemExit(0)
+if args[:2] == ['xcresulttool', 'get']:
+    if os.environ.get('FAKE_SUMMARY_MODE') == 'extract-failure': raise SystemExit(9)
+    if os.environ.get('FAKE_SUMMARY_MODE') == 'missing': raise SystemExit(9)
+    print(os.environ.get('FAKE_SUMMARY', '{}')); raise SystemExit(0)
+print('unexpected xcrun arguments', args, file=sys.stderr); raise SystemExit(2)
+""")
+        self.xcrun.chmod(0o755)
+        self.simulator_inventory = self.root / "simulator.json"
+        self.simulator_inventory.write_text(json.dumps({
+            "runtimes": [{"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-26-5", "version": "26.5", "platform": "iOS", "buildversion": "23C54", "isAvailable": True}],
+            "devicetypes": [{"identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro", "name": "iPhone 17 Pro", "isAvailable": True}],
+            "devices": {"com.apple.CoreSimulator.SimRuntime.iOS-26-5": []},
+        }))
+        xcodebuild = self.bin / "xcodebuild"
+        xcodebuild.write_text("""#!/usr/bin/env bash
+set -euo pipefail
+if [[ \"${1:-}\" == -version ]]; then echo 'Xcode 26.6'; exit 0; fi
+bundle=''
+for ((i=1; i<=$#; i++)); do
+  if [[ \"${!i}\" == -resultBundlePath ]]; then j=$((i + 1)); bundle=\"${!j}\"; fi
+done
+if [[ \" $* \" == *' test-without-building '* ]]; then
+  if [[ \"${FAKE_RUNNER_MODE:-success}\" != missing-bundle && -n \"$bundle\" ]]; then mkdir -p \"$bundle\"; fi
+  if [[ \"${FAKE_RUNNER_MODE:-success}\" == timeout ]]; then sleep 30; fi
+  exit \"${FAKE_XCODE_STATUS:-0}\"
+fi
+if [[ \" $* \" == *' build-for-testing '* ]]; then
+  for ((i=1; i<=$#; i++)); do
+    if [[ \"${!i}\" == -derivedDataPath ]]; then j=$((i + 1)); mkdir -p \"${!j}/Build/Products\"; fi
+  done
+  exit 0
+fi
+exit 0
+""")
+        xcodebuild.chmod(0o755)
+        xcodegen = self.bin / "xcodegen"
+        xcodegen.write_text("#!/usr/bin/env bash\necho 2.45.3\n")
+        xcodegen.chmod(0o755)
+        presets = self.bin / "share/xcodegen/SettingPresets/Platforms"
+        presets.mkdir(parents=True)
+        (self.bin / "share/xcodegen/SettingPresets/base.yml").write_text("base\n")
+        (presets / "iOS.yml").write_text("ios\n")
+        (presets / "macOS.yml").write_text("mac\n")
+        self.derived = self.root / "derived"
+        self.results = self.root / "results"
+        self.state = self.root / "state"
+        (self.derived / "Build/Products").mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def invoke(self, *, summary: str = '{"passedTests":1,"failedTests":0,"skippedTests":0,"totalTestCount":1}', mode: str = "success", xcode_status: int = 0) -> subprocess.CompletedProcess[str]:
+        environment = os.environ.copy()
+        environment.update({
+            "PATH": f"{self.bin}:{environment['PATH']}",
+            "TRON_IOS_XCRUN": str(self.xcrun),
+            "FAKE_SIMULATOR_INVENTORY": str(self.simulator_inventory),
+            "TRON_IOS_SIMULATOR_STATE_DIR": str(self.root / "development-state"),
+            "TRON_IOS_TEST_STATE_DIR": str(self.state),
+            "TRON_IOS_TEST_DERIVED_DATA": str(self.derived),
+            "TRON_IOS_TEST_RESULTS_DIR": str(self.results),
+            "TRON_IOS_TEST_FOCUSED_TIMEOUT_SECONDS": "0.4",
+            "TRON_IOS_TEST_FOCUSED_NO_OUTPUT_SECONDS": "1",
+            "TRON_IOS_TEST_LOCK_HELD": "0",
+            "FAKE_SUMMARY": summary,
+            "FAKE_SUMMARY_MODE": mode,
+            "FAKE_RUNNER_MODE": mode,
+            "FAKE_XCODE_STATUS": str(xcode_status),
+        })
+        return subprocess.run([str(ROOT / "scripts/tron-ios-test"), "run"], env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def test_summary_validation_requires_real_passing_count(self) -> None:
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = self.invoke(summary='{"passedTests":2,"failedTests":0,"skippedTests":1,"totalTestCount":3}')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = self.invoke(summary='{"passedTests":0,"failedTests":0,"skippedTests":1,"totalTestCount":1}')
+        self.assertEqual(result.returncode, 65, result.stderr)
+        result = self.invoke(summary='{"passedTests":0,"failedTests":0,"skippedTests":0,"totalTestCount":0}')
+        self.assertEqual(result.returncode, 65, result.stderr)
+        result = self.invoke(summary='not-json')
+        self.assertEqual(result.returncode, 65, result.stderr)
+
+    def test_summary_extraction_failure_is_not_success(self) -> None:
+        result = self.invoke(mode="extract-failure")
+        self.assertEqual(result.returncode, 65, result.stderr)
+        latest = (self.results / "latest").resolve()
+        summary = json.loads((latest / "summary.json").read_text())
+        self.assertEqual(summary["error"], "xcresult summary extraction failed")
+        self.assertTrue((latest / "summary-extraction.log").exists())
+        result = self.invoke(mode="missing-bundle")
+        self.assertEqual(result.returncode, 65, result.stderr)
+        latest = (self.results / "latest").resolve()
+        self.assertEqual(json.loads((latest / "summary.json").read_text())["error"], "xcresult result bundle is missing")
+
+    def test_process_failure_and_timeout_take_precedence(self) -> None:
+        result = self.invoke(summary='{"passedTests":1,"failedTests":0,"skippedTests":0,"totalTestCount":1}', xcode_status=7)
+        self.assertEqual(result.returncode, 65, result.stderr)
+        result = self.invoke(mode="timeout")
+        self.assertEqual(result.returncode, 75, result.stderr)
 
 
 class ProcessFixture(unittest.TestCase):

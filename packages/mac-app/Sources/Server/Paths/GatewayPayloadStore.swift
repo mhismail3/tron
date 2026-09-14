@@ -505,23 +505,70 @@ enum GatewayPayloadValidator {
     /// regular-file `sha256  path\\n` or symlink `symlink:sha256(target + LF)  path\\n` line,
     /// then SHA-256 of the complete line stream.
     private static func payloadFingerprint(_ root: URL, fileManager: FileManager) -> String? {
-        var files: [(String, URL, String?)] = []
+        var files: [FingerprintFile] = []
         for prefix in ["app", "runtime"] {
-            guard collectRegularFiles(root.appendingPathComponent(prefix, isDirectory: true), relativePrefix: prefix, root: root, files: &files) else { return nil }
+            guard collectRegularFiles(
+                root.appendingPathComponent(prefix, isDirectory: true),
+                relativePrefix: prefix,
+                root: root,
+                fileManager: fileManager,
+                files: &files
+            ) else { return nil }
         }
-        files.sort { Data($0.0.utf8).lexicographicallyPrecedes(Data($1.0.utf8)) }
-        var lines = Data()
-        for (relativePath, url, linkTarget) in files {
-            if let linkTarget {
-                let targetDigest = SHA256.hash(data: Data((linkTarget + "\n").utf8)).map { String(format: "%02x", $0) }.joined()
-                lines.append(contentsOf: Data("symlink:\(targetDigest)  \(relativePath)\n".utf8))
+        // `sort` in hash-gateway-payload.sh is byte ordered under LC_ALL=C.
+        // Keep each UTF-8 key from the traversal instead of rebuilding it for
+        // every comparison.
+        files.sort { $0.sortKey.lexicographicallyPrecedes($1.sortKey) }
+        var lineHasher = SHA256()
+        for file in files {
+            let digest: [UInt8]
+            if let linkTarget = file.linkTarget {
+                lineHasher.update(data: Data("symlink:".utf8))
+                digest = Array(SHA256.hash(data: Data((linkTarget + "\n").utf8)))
             } else {
-                guard let data = try? Data(contentsOf: url) else { return nil }
-                let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-                lines.append(contentsOf: Data("\(digest)  \(relativePath)\n".utf8))
+                guard let fileDigest = digestFile(at: file.url) else { return nil }
+                digest = fileDigest
             }
+            lineHasher.update(data: Data(hexBytes(digest)))
+            lineHasher.update(data: Data([0x20, 0x20]))
+            lineHasher.update(data: Data(file.sortKey))
+            lineHasher.update(data: Data([0x0a]))
         }
-        return SHA256.hash(data: lines).map { String(format: "%02x", $0) }.joined()
+        return hexString(lineHasher.finalize())
+    }
+
+    private static func digestFile(at url: URL) -> [UInt8]? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while true {
+            let chunk: Data
+            do {
+                chunk = try handle.read(upToCount: 1024 * 1024) ?? Data()
+            } catch {
+                return nil
+            }
+            if chunk.isEmpty { break }
+            hasher.update(data: chunk)
+        }
+        return Array(hasher.finalize())
+    }
+
+    private static func hexBytes(_ digest: [UInt8]) -> [UInt8] {
+        let digits = Array("0123456789abcdef".utf8)
+        return digest.flatMap { byte in
+            [digits[Int(byte >> 4)], digits[Int(byte & 0x0f)]]
+        }
+    }
+
+    private static func hexString(_ digest: SHA256.Digest) -> String {
+        String(bytes: hexBytes(Array(digest)), encoding: .utf8)!
+    }
+
+    private struct FingerprintFile {
+        let sortKey: [UInt8]
+        let url: URL
+        let linkTarget: String?
     }
 
     private static func immutableTree(_ url: URL, under root: URL, fileManager: FileManager) -> Bool {
@@ -545,30 +592,37 @@ enum GatewayPayloadValidator {
         return entries.allSatisfy { immutableTree($0, under: root, fileManager: fileManager) }
     }
 
-    private static func collectRegularFiles(_ directory: URL, relativePrefix: String, root: URL, files: inout [(String, URL, String?)]) -> Bool {
+    private static func collectRegularFiles(
+        _ directory: URL,
+        relativePrefix: String,
+        root: URL,
+        fileManager: FileManager,
+        files: inout [FingerprintFile]
+    ) -> Bool {
         var info = stat()
         guard lstat(directory.path, &info) == 0, (info.st_mode & S_IFMT) == S_IFDIR,
               isImmutable(info),
-              let entries = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil, options: []) else { return false }
+              let entries = try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil, options: []) else { return false }
         for entry in entries {
             var entryInfo = stat()
             guard lstat(entry.path, &entryInfo) == 0 else { return false }
             let relative = "\(relativePrefix)/\(entry.lastPathComponent)"
+            let sortKey = Array(relative.utf8)
             guard entry.lastPathComponent.unicodeScalars.allSatisfy({ $0.value >= 0x20 && $0.value != 0x7f }) else { return false }
             if (entryInfo.st_mode & S_IFMT) == S_IFLNK {
-                guard let linkTarget = try? FileManager.default.destinationOfSymbolicLink(atPath: entry.path),
+                guard let linkTarget = try? fileManager.destinationOfSymbolicLink(atPath: entry.path),
                       !linkTarget.isEmpty,
                       linkTarget.unicodeScalars.allSatisfy({ $0.value >= 0x20 && $0.value != 0x7f }) else { return false }
                 let resolved = entry.resolvingSymlinksInPath().standardizedFileURL
                 var targetInfo = stat()
                 guard isFingerprintCovered(resolved, under: root), lstat(resolved.path, &targetInfo) == 0,
                       (targetInfo.st_mode & S_IFMT) == S_IFREG else { return false }
-                files.append((relative, entry, linkTarget))
+                files.append(FingerprintFile(sortKey: sortKey, url: entry, linkTarget: linkTarget))
             } else if (entryInfo.st_mode & S_IFMT) == S_IFDIR {
-                guard isImmutable(entryInfo), collectRegularFiles(entry, relativePrefix: relative, root: root, files: &files) else { return false }
+                guard isImmutable(entryInfo), collectRegularFiles(entry, relativePrefix: relative, root: root, fileManager: fileManager, files: &files) else { return false }
             } else if (entryInfo.st_mode & S_IFMT) == S_IFREG {
                 guard isImmutable(entryInfo) else { return false }
-                files.append((relative, entry, nil))
+                files.append(FingerprintFile(sortKey: sortKey, url: entry, linkTarget: nil))
             } else { return false }
         }
         return true

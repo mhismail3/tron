@@ -1052,8 +1052,11 @@ private actor ChatTranscriptProjectionWorker {
         if let textPreparationScope,
            textPreparationScope.cacheEpoch < retiredBeforeEpoch {
             self.textPreparationScope = nil
-            await textPreparationCache.removeAll()
         }
+        // The cache owns the same monotonic epoch fence. Retirement can be
+        // delivered after a successor build has begun, so it removes only
+        // entries at or below the retired epoch and preserves newer work.
+        await textPreparationCache.retire(before: cacheEpoch)
     }
 
     func removePreparedText() async {
@@ -1159,7 +1162,8 @@ private actor ChatTranscriptProjectionWorker {
         }
         let admittedTextPreparationGeneration = textPreparationGeneration
         let prepared = await textPreparationCache.prepare(
-            ChatTextPreparationPolicy.sources(in: snapshot)
+            ChatTextPreparationPolicy.sources(in: snapshot),
+            cacheEpoch: cacheEpoch
         )
         guard !Task.isCancelled else { return nil }
         let preparedText: ChatTextPreparationSnapshot

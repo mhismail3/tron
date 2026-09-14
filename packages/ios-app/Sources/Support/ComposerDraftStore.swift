@@ -114,9 +114,8 @@ actor ComposerDraftStore {
                 }
                 let payloadURL = directory.appending(path: item.payload, directoryHint: .notDirectory)
                 let data = try readBounded(payloadURL, maximumBytes: item.size)
-                let digestInput = Data("\(index)\u{0}".utf8) + data
                 guard data.count == item.size,
-                      item.payload == "\(Self.digest(digestInput)).payload" else {
+                      item.payload == "\(Self.digest(prefix: Data("\(index)\u{0}".utf8), body: data)).payload" else {
                     throw CocoaError(.fileReadCorruptFile)
                 }
                 totalBytes += data.count
@@ -184,8 +183,7 @@ actor ComposerDraftStore {
             )
             var manifests: [AttachmentManifest] = []
             for (index, attachment) in value.attachments.enumerated() {
-                let digestInput = Data("\(index)\u{0}".utf8) + attachment.data
-                let payloadName = "\(Self.digest(digestInput)).payload"
+                let payloadName = "\(Self.digest(prefix: Data("\(index)\u{0}".utf8), body: attachment.data)).payload"
                 try attachment.data.write(
                     to: staging.appending(path: payloadName, directoryHint: .notDirectory),
                     options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
@@ -398,9 +396,8 @@ actor ComposerDraftStore {
             }
             let payloadURL = directory.appending(path: item.payload)
             let data = try readBounded(payloadURL, maximumBytes: item.size)
-            let digestInput = Data("\(index)\u{0}".utf8) + data
             guard data.count == item.size,
-                  item.payload == "\(Self.digest(digestInput)).payload" else {
+                  item.payload == "\(Self.digest(prefix: Data("\(index)\u{0}".utf8), body: data)).payload" else {
                 throw CocoaError(.fileReadCorruptFile)
             }
             bytes += item.size
@@ -433,6 +430,17 @@ actor ComposerDraftStore {
 
     private static func digest(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Hash the exact logical prefix and payload without allocating their
+    /// concatenation. The prefix is intentionally still included in every
+    /// attachment digest so duplicate bytes at different indexes retain
+    /// distinct, restart-stable filenames.
+    private static func digest(prefix: Data, body: Data) -> String {
+        var hasher = SHA256()
+        hasher.update(data: prefix)
+        hasher.update(data: body)
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     private static func isPayloadName(_ value: String) -> Bool {
