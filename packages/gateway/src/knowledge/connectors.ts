@@ -1,9 +1,11 @@
+import { randomUUID } from "node:crypto";
 import type { KnowledgeConnectorConfigurationRequest, KnowledgeConnectorRunRequest, KnowledgeConnectorState, KnowledgeConnectorStatus, KnowledgeAction, KnowledgeRecord } from "./knowledge-contract.js";
 import { captureSource, isVerifiedSourceCapture } from "./source-capture.js";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import type { KnowledgeStore } from "./knowledge-store.js";
 import type { ConnectorCredentialStore } from "./connector-credentials.js";
+import { currentInvocationContext } from "../extensions/owner-attribution.js";
 
 const MAX_PAGE = 50;
 const MAX_ITEMS = 200;
@@ -57,14 +59,16 @@ async function defaultHTTP(input: string, init: { method?: "GET" | "PUT" | "POST
   return { status: response.status, headers: response.headers, body: await boundedResponseText(response) };
 }
 
-async function requestJson(http: ConnectorHTTP, endpoint: string, token: string, options: { method?: "GET" | "PUT" | "POST" | "DELETE"; body?: unknown; sleep: (milliseconds: number) => Promise<void>; signal: AbortSignal }): Promise<{ status: number; value: any; headers: Headers }> {
+async function requestJson(http: ConnectorHTTP, endpoint: string, token: string, options: { method?: "GET" | "PUT" | "POST" | "DELETE"; body?: unknown; sleep: (milliseconds: number) => Promise<void>; signal: AbortSignal; maxAttempts?: number; beforeAttempt?: () => Promise<void> }): Promise<{ status: number; value: any; headers: Headers }> {
   const retrySafe = !options.method || options.method === "GET";
-  for (let attempt = 1; attempt <= (retrySafe ? RETRIES : 1); attempt += 1) {
+  const maxAttempts = retrySafe ? (options.maxAttempts ?? RETRIES) : 1;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    await options.beforeAttempt?.();
     const result = await http(endpoint, { ...(options.method ? { method: options.method } : {}), headers: { authorization: `Bearer ${token}`, accept: "application/json", ...(options.body !== undefined ? { "content-type": "application/json" } : {}) }, ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}), signal: options.signal });
     let value: unknown = undefined;
     if (result.body) { try { value = JSON.parse(result.body); } catch { value = undefined; } }
     if (result.status >= 200 && result.status < 300) return { status: result.status, value, headers: result.headers };
-    if (!retryable(result.status) || attempt === RETRIES) throw new ConnectorHTTPError(result.status, result.headers.get("retry-after"));
+    if (!retryable(result.status) || attempt === maxAttempts) throw new ConnectorHTTPError(result.status, result.headers.get("retry-after"));
     const retryAfter = Number(result.headers.get("retry-after") ?? "0");
     await options.sleep(Math.min(2_000, Math.max(50, Number.isFinite(retryAfter) ? retryAfter * 1_000 : 100 * 2 ** (attempt - 1))));
   }
@@ -108,10 +112,10 @@ export class KnowledgeConnectorExtension {
   }
   private lane(connector: Connector): AsyncMutex { const existing = this.lanes.get(connector); if (existing) return existing; const created = new AsyncMutex(); this.lanes.set(connector, created); return created; }
 
-  async invoke(action: KnowledgeAction): Promise<unknown> {
+  async invoke(action: KnowledgeAction, signal?: AbortSignal): Promise<unknown> {
     if (action.operation === "knowledge.connector.configure") return this.configure(action.request);
     if (action.operation === "knowledge.connector.status") return stateStatus(await this.store.connectorState(action.request.connector), action.request.connector);
-    if (action.operation === "knowledge.connector.run") return this.lane(action.request.connector).run(() => this.run(action.request));
+    if (action.operation === "knowledge.connector.run") return this.lane(action.request.connector).run(() => this.run(action.request, signal));
     throw bad("Unsupported knowledge connector operation");
   }
 
@@ -140,24 +144,23 @@ export class KnowledgeConnectorExtension {
     return stateStatus(saved, request.connector);
   }
 
-  private async run(request: KnowledgeConnectorRunRequest): Promise<Record<string, unknown>> {
+  private async run(request: KnowledgeConnectorRunRequest, externalSignal?: AbortSignal): Promise<Record<string, unknown>> {
     const connector = request.connector; const current = await this.store.connectorState(connector);
     if (!current?.enabled || !current.credentialRef || !current.accountId || !current.scope) throw new GatewayError("unsupported", `Knowledge ${connector} connector is not configured`);
     // X access requires a host-qualified account price and an explicit user
-    // allowance. Reserve/debit before the request so an ambiguous provider
-    // response cannot spend beyond the bounded allowance; unknown pricing is
-    // still unsupported rather than guessed.
+    // allowance. Charge immediately before every possible paid HTTP attempt;
+    // this covers pagination, provider retries, and a fresh replay without
+    // allowing an over-budget request to leave the Gateway.
+    const xPricing = connector === "x" ? this.options.xPricing : undefined;
     if (connector === "x") {
-      const pricing = this.options.xPricing;
-      if (!pricing || pricing.accountId !== current.accountId || !current.paidAccessApproved
-        || !Number.isSafeInteger(pricing.costCentsPerAttempt) || pricing.costCentsPerAttempt < 1
-        || !Number.isSafeInteger(pricing.maxAttempts) || pricing.maxAttempts < 1
-        || pricing.maxAttempts > 1 || current.paidBudgetCents < pricing.costCentsPerAttempt) throw new GatewayError("unsupported", "X connector pricing or allowance is unavailable");
-      await this.store.updateConnectorState(command(request.commandId, "x-reserve"), connector, state => {
-        const next = state ?? current;
-        if (next.accountId !== pricing.accountId || next.paidBudgetCents < pricing.costCentsPerAttempt) throw new GatewayError("conflict", "X connector allowance changed");
-        return { ...next, paidBudgetCents: next.paidBudgetCents - pricing.costCentsPerAttempt };
-      });
+      if (!xPricing || xPricing.accountId !== current.accountId || !current.paidAccessApproved
+        || !Number.isSafeInteger(xPricing.costCentsPerAttempt) || xPricing.costCentsPerAttempt < 1
+        || !Number.isSafeInteger(xPricing.maxAttempts) || xPricing.maxAttempts < 1
+        || xPricing.maxAttempts > RETRIES) throw new GatewayError("unsupported", "X connector pricing or allowance is unavailable");
+      const invocation = currentInvocationContext();
+      if (invocation?.operationId?.startsWith("automation:")) {
+        if (!current.recurringApproved) throw new GatewayError("unsupported", "X connector recurrence is not approved");
+      }
     }
     if (connector === "raindrop" && current.paidBudgetCents > 0) throw new GatewayError("unsupported", "Paid connector operations are unavailable without a priced operation");
     if (current.pendingRemote) {
@@ -170,10 +173,21 @@ export class KnowledgeConnectorExtension {
     const limit = Math.min(request.limit ?? MAX_ITEMS, MAX_ITEMS); if (!Number.isSafeInteger(limit) || limit < 1) throw bad("Connector limit is invalid");
     await this.store.updateConnectorState(command(request.commandId, "start"), connector, state => { const next = { ...(state ?? current), health: "running" as const, lastRunAt: this.now(), remaining: state?.pending.length ?? 0 }; delete next.lastError; return next; });
     const abort = new AbortController();
+    const signal = externalSignal ? AbortSignal.any([abort.signal, externalSignal]) : abort.signal;
     const deadline = setTimeout(() => abort.abort(new Error("Connector run deadline exceeded")), RUN_DEADLINE_MS);
     deadline.unref?.();
     try {
-      const discovered = await this.discover(connector, current, token, limit, abort.signal);
+      let xAttempt = 0;
+      const beforeXAttempt = xPricing ? async () => {
+        xAttempt += 1;
+        const attemptID = `${request.commandId}:x-attempt:${xAttempt}:${randomUUID()}`;
+        await this.store.updateConnectorState(attemptID, "x", state => {
+          const next = state ?? current;
+          if (next.accountId !== xPricing.accountId || !next.paidAccessApproved || next.paidBudgetCents < xPricing.costCentsPerAttempt) throw new GatewayError("conflict", "X connector allowance exhausted or changed");
+          return { ...next, paidBudgetCents: next.paidBudgetCents - xPricing.costCentsPerAttempt };
+        });
+      } : undefined;
+      const discovered = await this.discover(connector, current, token, limit, signal, xPricing?.maxAttempts, beforeXAttempt);
       let state = await this.store.connectorState(connector) ?? current;
       if (request.dryRun) {
         const result = { connector, dryRun: true, discovered: discovered.discovered, pending: state.pending.length, remaining: state.remaining, health: state.health };
@@ -186,7 +200,7 @@ export class KnowledgeConnectorExtension {
           const live = await this.store.connectorState(connector);
           if (!live || live.accountId !== current.accountId || live.scope !== current.scope || live.credentialRef !== current.credentialRef || live.enabled !== current.enabled) throw new GatewayError("conflict", "Connector configuration changed during the run");
           state = live;
-          const result = await captureSource(this.store, { commandId: command(request.commandId, `capture-${item.id}`), url: item.url, scope: "research", title: item.title, origin: "connector", identity: { provider: connector, accountId: state.accountId!, itemId: item.id }, ...(item.annotation ? { annotations: [{ text: item.annotation }] } : {}) }, { signal: abort.signal, ...(this.options.sourceFetch ? { fetcher: (sourceUrl, init) => this.options.sourceFetch!(sourceUrl.toString(), item.excerpt, init?.signal ?? abort.signal) } : {}), ...(this.options.resolveHost ? { resolveHost: this.options.resolveHost } : {}) });
+          const result = await captureSource(this.store, { commandId: command(request.commandId, `capture-${item.id}`), url: item.url, scope: "research", title: item.title, origin: "connector", identity: { provider: connector, accountId: state.accountId!, itemId: item.id }, ...(item.annotation ? { annotations: [{ text: item.annotation }] } : {}) }, { signal, ...(this.options.sourceFetch ? { fetcher: (sourceUrl, init) => this.options.sourceFetch!(sourceUrl.toString(), item.excerpt, init?.signal ?? signal) } : {}), ...(this.options.resolveHost ? { resolveHost: this.options.resolveHost } : {}) });
           let capturedRecord = result.record;
           // X API entities/author fields are authenticated evidence. Retain a
           // bounded canonical object instead of certifying a public-page fetch.
@@ -216,10 +230,10 @@ export class KnowledgeConnectorExtension {
     }
   }
 
-  private async discover(connector: Connector, state: KnowledgeConnectorState, token: string, limit: number, signal: AbortSignal): Promise<{ discovered: number }> {
+  private async discover(connector: Connector, state: KnowledgeConnectorState, token: string, limit: number, signal: AbortSignal, maxAttempts?: number, beforeAttempt?: () => Promise<void>): Promise<{ discovered: number }> {
     let cursor = state.checkpoint; let discovered = 0; const seen = new Set([...state.pending.map(item => item.id), ...state.capturedIds]);
     for (let page = 0; page < 10 && discovered < limit; page += 1) {
-      const result = connector === "raindrop" ? await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrops/${encodeURIComponent(state.scope!)}?page=${cursor ? encodeURIComponent(cursor) : "0"}&perpage=${MAX_PAGE}`, token, { sleep: this.sleep, signal }) : await requestJson(this.http, `https://api.x.com/2/users/${encodeURIComponent(state.scope!)}/bookmarks?max_results=${MAX_PAGE}${cursor ? `&pagination_token=${encodeURIComponent(cursor)}` : ""}&tweet.fields=created_at,entities,author_id`, token, { sleep: this.sleep, signal });
+      const result = connector === "raindrop" ? await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrops/${encodeURIComponent(state.scope!)}?page=${cursor ? encodeURIComponent(cursor) : "0"}&perpage=${MAX_PAGE}`, token, { sleep: this.sleep, signal }) : await requestJson(this.http, `https://api.x.com/2/users/${encodeURIComponent(state.scope!)}/bookmarks?max_results=${MAX_PAGE}${cursor ? `&pagination_token=${encodeURIComponent(cursor)}` : ""}&tweet.fields=created_at,entities,author_id`, token, { sleep: this.sleep, signal, ...(maxAttempts === undefined ? {} : { maxAttempts }), ...(beforeAttempt === undefined ? {} : { beforeAttempt }) });
       const items = connector === "raindrop" ? parseRaindrop(result.value) : parseX(result.value);
       const fresh = items.filter(item => !seen.has(item.id));
       const next = connector === "raindrop" ? (items.length >= MAX_PAGE ? String((Number(cursor ?? "0") || 0) + 1) : undefined) : text(result.value?.meta?.next_token, 512);

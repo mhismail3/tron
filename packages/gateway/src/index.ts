@@ -39,6 +39,17 @@ import { createKnowledgeConnectorExtension } from "./knowledge/connectors.js";
 import { createKnowledgeImporter } from "./knowledge/legacy-import.js";
 
 const config = await loadConfig();
+// Paid X access is only qualified when the host explicitly supplies the
+// provider/account price and retry ceiling. Missing or malformed values keep
+// the connector unavailable; no default price is inferred in production.
+const xPricing = (() => {
+  const accountId = process.env.TRON_X_ACCOUNT_ID?.trim();
+  const costCentsPerAttempt = Number(process.env.TRON_X_COST_CENTS_PER_ATTEMPT);
+  const maxAttempts = Number(process.env.TRON_X_MAX_ATTEMPTS);
+  if (!accountId || !Number.isSafeInteger(costCentsPerAttempt) || costCentsPerAttempt < 1
+    || !Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 3) return undefined;
+  return { accountId, costCentsPerAttempt, maxAttempts };
+})();
 const configuredSessionDir = SettingsManager.create(process.cwd(), config.agentDir, { projectTrusted: false }).getSessionDir();
 // Pi installs its private agent-bin projection while loading settings. Apply
 // the supervised immutable command contract afterward, before extension or
@@ -151,7 +162,10 @@ const sessions = new RuntimeRegistry({
   },
 });
 const knowledgeStore = new KnowledgeStore(sessions.knowledgeWorkspace());
-const knowledgeConnector = createKnowledgeConnectorExtension(knowledgeStore, { credentials: new MacKeychainConnectorCredentialStore() });
+const knowledgeConnector = createKnowledgeConnectorExtension(knowledgeStore, {
+  credentials: new MacKeychainConnectorCredentialStore(),
+  ...(xPricing ? { xPricing } : {}),
+});
 const knowledge = new KnowledgeService(
   knowledgeStore,
   new KnowledgeObservationService(

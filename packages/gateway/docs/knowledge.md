@@ -144,10 +144,15 @@ recharge. A complete label alone is never sufficient for remote acknowledgment. 
 runs are serialized per provider; pending discovery is advanced only after the complete
 bounded page is durably retained, and incomplete/partial captures remain pending for
 retry. Paid budgets are rejected until a provider operation has an explicit maintained
-price; approval flags never imply unknown spend. X is not contacted unless
-both explicit paid-access approval and a positive bounded budget are present.
-Uncertain remote PUTs are not retried; the persisted receipt is reconciled
-before another connector effect.
+price; approval flags never imply unknown spend. X is not contacted unless both explicit paid-access approval and a positive
+bounded budget are present. Paid qualification is host-owned and requires
+`TRON_X_ACCOUNT_ID`, `TRON_X_COST_CENTS_PER_ATTEMPT`, and
+`TRON_X_MAX_ATTEMPTS` (1–3); missing or malformed values leave X unsupported.
+Each possible X API attempt, including pagination and safe GET retries, debits
+that budget immediately before the request. A new operation uses a distinct
+attempt receipt, so replay cannot reuse an old reservation. Uncertain remote
+PUTs are not retried; the persisted receipt is reconciled before another
+connector effect.
 
 ## Legacy import
 

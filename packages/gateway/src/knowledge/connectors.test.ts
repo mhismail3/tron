@@ -6,6 +6,7 @@ import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { InMemoryConnectorCredentialStore } from "./connector-credentials.js";
 import { KnowledgeConnectorExtension, type ConnectorHTTPResponse } from "./connectors.js";
+import { withInvocationContext } from "../extensions/owner-attribution.js";
 
 const roots: string[] = [];
 const command = (name: string) => `connector-test-${name}`;
@@ -15,7 +16,7 @@ const publicResolver = async () => ["93.184.216.34"];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 
 function response(value: unknown, status = 200): ConnectorHTTPResponse { return { status, headers: headers(), body: JSON.stringify(value) }; }
-async function fixture(http: (url: string, init: { headers: Record<string, string>; signal: AbortSignal; method?: "GET" | "PUT" | "POST" | "DELETE" }) => Promise<ConnectorHTTPResponse>) {
+async function fixture(http: (url: string, init: { headers: Record<string, string>; signal: AbortSignal; method?: "GET" | "PUT" | "POST" | "DELETE" }) => Promise<ConnectorHTTPResponse>, xPricing?: { accountId: string; costCentsPerAttempt: number; maxAttempts: number }) {
   const root = await mkdtemp(join(tmpdir(), "tron-connector-")); roots.push(root);
   const store = new KnowledgeStore(new TronWorkspace(root));
   const extension = new KnowledgeConnectorExtension(store, {
@@ -25,6 +26,7 @@ async function fixture(http: (url: string, init: { headers: Record<string, strin
     sourceFetch: async (_url, excerpt) => new Response(excerpt ?? "", { headers: { "content-type": "text/plain", ...(excerpt ? { "x-tron-source-capture-quality": "partial" } : {}) } }),
     sleep: async () => {},
     now: () => "2026-01-01T00:00:00.000Z",
+    ...(xPricing ? { xPricing } : {}),
   });
   return { store, extension };
 }
@@ -60,6 +62,33 @@ describe("knowledge connectors", () => {
     await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("x-configure"), connector: "x", enabled: true, accountId: "account-1", scope: "123", credentialRef: "connector:x:test-account" } });
     await expect(extension.invoke({ operation: "knowledge.connector.run", request: { commandId: command("x-run"), connector: "x", dryRun: false, limit: 1 } })).rejects.toMatchObject({ code: "unsupported" });
     expect(calls).toBe(0);
+  });
+
+  it("debits every X retry attempt and refuses the request before exceeding budget", async () => {
+    let calls = 0;
+    const { store, extension } = await fixture(async () => { calls += 1; return response({ error: "retry" }, 500); }, { accountId: "account-1", costCentsPerAttempt: 1, maxAttempts: 3 });
+    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("x-qualified"), connector: "x", enabled: true, accountId: "account-1", scope: "123", credentialRef: "connector:x:test-account", paidAccessApproved: true, paidBudgetCents: 2 } });
+    await expect(extension.invoke({ operation: "knowledge.connector.run", request: { commandId: command("x-budget"), connector: "x", dryRun: false, limit: 1 } })).rejects.toMatchObject({ code: "internal" });
+    expect(calls).toBe(2);
+    expect((await store.connectorState("x"))?.paidBudgetCents).toBe(0);
+  });
+
+  it("charges a fresh allowance for each repeated run command", async () => {
+    let calls = 0;
+    const { store, extension } = await fixture(async () => { calls += 1; return response({ error: "rate limited" }, 429); }, { accountId: "account-1", costCentsPerAttempt: 1, maxAttempts: 1 });
+    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("x-replay-configure"), connector: "x", enabled: true, accountId: "account-1", scope: "123", credentialRef: "connector:x:test-account", paidAccessApproved: true, paidBudgetCents: 2 } });
+    const run = { operation: "knowledge.connector.run" as const, request: { commandId: command("x-replay-run"), connector: "x" as const, dryRun: false, limit: 1 } };
+    await expect(extension.invoke(run)).rejects.toMatchObject({ code: "internal" });
+    await expect(extension.invoke(run)).rejects.toMatchObject({ code: "internal" });
+    await expect(extension.invoke(run)).rejects.toMatchObject({ code: "internal" });
+    expect(calls).toBe(2);
+    expect((await store.connectorState("x"))?.paidBudgetCents).toBe(0);
+  });
+
+  it("requires trusted current Automation authority for recurring X sweeps", async () => {
+    const { extension } = await fixture(async () => response({ data: [] }), { accountId: "account-1", costCentsPerAttempt: 1, maxAttempts: 1 });
+    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("x-recurring-configure"), connector: "x", enabled: true, accountId: "account-1", scope: "123", credentialRef: "connector:x:test-account", paidAccessApproved: true, paidBudgetCents: 1 } });
+    await expect(withInvocationContext({ invocationId: "invocation-1", operationId: "automation:run-1" }, () => extension.invoke({ operation: "knowledge.connector.run", request: { commandId: command("x-recurring-run"), connector: "x", dryRun: true, limit: 1 } }))).rejects.toMatchObject({ code: "unsupported" });
   });
 
   it("reconciles an effect-before-response crash from a durable Raindrop receipt", async () => {

@@ -31,6 +31,22 @@ describe("KnowledgeService integration", () => {
     expect((await store.read(source.record.id))?.content).toMatchObject({ assessment: { summary: "Useful source" } });
   });
 
+  it("preserves source actor while recording trusted confirmation and supports agent note reads/updates", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined));
+    const created = await service.invoke({ operation: "knowledge.note.create", request: {
+      commandId: "service-agent-note", confirmedByUser: true,
+      record: { kind: "note", scope: "personal", provenance: { actor: "agent", source: "automation", evidence: [] }, relations: [], content: { title: "Agent note", body: "initial", role: "fact", confirmed: true },
+    }}});
+    expect(created).toMatchObject({ record: { provenance: { actor: "agent" }, content: { confirmed: true } } });
+    const record = (created as { record: { id: string; revisionId: string } }).record;
+    const updated = await service.tool({ action: "updateNote", commandId: "service-agent-note-update", id: record.id, revisionId: record.revisionId, title: "Agent note", noteBody: "updated" });
+    expect(updated.details).toMatchObject({ record: { provenance: { actor: "agent" }, content: { body: "updated", confirmed: false } } });
+    const read = await service.tool({ action: "read", id: record.id, revisionId: (updated.details as { record: { revisionId: string } }).record.revisionId });
+    expect(read.details).toMatchObject({ record: { provenance: { actor: "agent" }, content: { body: "updated" } } });
+  });
+
   it("rejects excluded observation revisions before invoking the Reflector", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));

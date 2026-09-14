@@ -357,6 +357,30 @@ export interface RuntimeDrainBlockerFact {
  * canonical JSONL session. Every mutation runs through `lane`; distinct slots
  * remain concurrent.
  */
+/** Derive a stable scope from the canonical active branch. A leaf hash is
+ * intentionally avoided: continuing a branch must not create a new privacy
+ * scope, while sibling choices in one JSONL file must remain isolated. */
+export function observationBranchIdFor(
+  activeEntries: readonly FileEntry[],
+  allEntries: readonly FileEntry[],
+  inheritedAnchor?: string,
+): string {
+  const entries = activeEntries.filter(entry => entry.type !== "session" && entry.type !== "label");
+  const siblingCounts = new Map<string, number>();
+  for (const entry of allEntries) {
+    if (entry.type === "session" || entry.type === "label") continue;
+    const parent = entry.parentId ?? "<root>";
+    siblingCounts.set(parent, (siblingCounts.get(parent) ?? 0) + 1);
+  }
+  const divergence = entries
+    .filter(entry => (siblingCounts.get(entry.parentId ?? "<root>") ?? 0) > 1)
+    .map(entry => `${entry.parentId ?? "<root>"}\0${entry.id}`);
+  if (divergence.length === 0 && !inheritedAnchor) return "root";
+  const lineage = [inheritedAnchor ? `parent\0${inheritedAnchor}` : undefined, ...divergence]
+    .filter((value): value is string => value !== undefined);
+  return `branch-${createHash("sha256").update(lineage.join("\n")).digest("hex").slice(0, 48)}`;
+}
+
 export class RuntimeSlot {
   private readonly contextPolicies = new WeakMap<AgentSession, SessionContextWindowPolicy>();
   private readonly compactionPolicies = new WeakMap<AgentSession, CompactionOperationPolicy>();
@@ -775,22 +799,16 @@ export class RuntimeSlot {
     return this.sessionManager.getSessionId();
   }
 
-  /** Read-only owner seam for bounded derived projections; callers never mutate. */
+  /** Read-only owner seam for bounded derived projections; callers never
+   * mutate. Branch-sensitive consumers must use the SDK-selected branch, not
+   * the file-wide entry set (which also contains sibling fork history). */
   canonicalSessionEntries(): FileEntry[] {
     const header = this.sessionManager.getHeader();
-    return header ? [header, ...this.sessionManager.getEntries()] : [];
+    return header ? [header, ...this.sessionManager.getBranch()] : [];
   }
 
-  /** Stable lineage for observation scope. The current leaf identifies a turn,
-   * not a branch: use the retained fork anchor plus the first post-anchor
-   * canonical entry so additional turns do not move observations between
-   * branch scopes. */
   private observationBranchId(entries: readonly FileEntry[]): string {
-    const anchor = this.forkBoundary?.inheritedEntryId;
-    if (!anchor) return "root";
-    const anchorIndex = entries.findIndex(entry => entry.id === anchor);
-    const firstChild = anchorIndex >= 0 ? entries.slice(anchorIndex + 1).find(entry => entry.type !== "session" && entry.type !== "label") : undefined;
-    return `fork-${createHash("sha256").update(`${anchor}\0${firstChild?.id ?? "pending"}`).digest("hex").slice(0, 48)}`;
+    return observationBranchIdFor(entries, this.sessionManager.getEntries(), this.forkBoundary?.inheritedEntryId);
   }
 
   private observationEntries(operationId: string, endEntryId?: string): { entries: readonly FileEntry[]; branchId: string } {

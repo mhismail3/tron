@@ -57,6 +57,7 @@ import { admitsAutomationTrigger } from "../automations/automation-contract.js";
 import { validateTimelineWindow } from "../automations/automation-timeline.js";
 import { ProviderUsageOwner, PROVIDER_USAGE_CAPABILITY } from "../providers/provider-usage.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
+import { KnowledgeStoreError } from "../knowledge/knowledge-store.js";
 import type { KnowledgeAction } from "../knowledge/knowledge-contract.js";
 
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
@@ -1647,7 +1648,17 @@ export class GatewayService {
     if (value.record && typeof value.record === "object" && !Array.isArray(value.record)) {
       const ref = value.record as Record<string, JsonValue>;
       if (typeof ref.id === "string" && typeof ref.revisionId === "string") {
-        const record = await knowledge.invoke({ operation: "knowledge.read", request: { id: ref.id, revisionId: ref.revisionId } });
+        let record: unknown;
+        try {
+          record = await knowledge.invoke({ operation: "knowledge.read", request: { id: ref.id, revisionId: ref.revisionId } });
+        } catch (error) {
+          // A forgotten record's old revision is deliberately no longer a
+          // readable receipt dependency. Treat that stale reference like a
+          // missing record instead of allowing replay/status to resurrect or
+          // expose erased evidence.
+          if (!(error instanceof KnowledgeStoreError) || error.kind !== "invalid") throw error;
+          record = null;
+        }
         return record ? { ...value, record: safeJson(record) } : { ...value, record: null };
       }
     }

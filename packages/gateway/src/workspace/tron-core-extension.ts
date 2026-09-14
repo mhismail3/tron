@@ -56,7 +56,7 @@ export function createTronCoreExtension(workspace: Pick<TronWorkspace, "describe
         executionMode: "sequential",
         execute: async (_toolCallId, parameters: KnowledgeToolParameters, signal) => {
           if (signal?.aborted) throw new Error("Knowledge retrieval aborted");
-          const result = await knowledge.tool(parameters);
+          const result = await knowledge.tool(parameters, signal);
           return { content: [{ type: "text", text: result.text }], details: result.details };
         },
       });

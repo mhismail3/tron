@@ -8,9 +8,10 @@ import { captureSource, type SourceAssessmentModel } from "./source-capture.js";
 import { triageSource } from "./source-triage.js";
 import { GatewayError } from "../errors.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
+import { currentInvocationContext } from "../extensions/owner-attribution.js";
 
 const toolParameters = Type.Object({
-  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("triageSource"), Type.Literal("createNote"), Type.Literal("connectorSweep"), Type.Literal("synthesis")]),
+  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("triageSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorSweep"), Type.Literal("synthesis")]),
   query: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   commandId: Type.Optional(Type.String({ minLength: 8, maxLength: 160 })),
   connector: Type.Optional(Type.Union([Type.Literal("raindrop"), Type.Literal("x")])),
@@ -19,12 +20,16 @@ const toolParameters = Type.Object({
   sessionId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
   entryId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
   id: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+  revisionId: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
+  hash: Type.Optional(Type.String({ minLength: 64, maxLength: 64 })),
+  mediaType: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
+  bytes: Type.Optional(Type.Integer({ minimum: 0, maximum: 2_000_000 })),
+  offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 2_000_000 })),
   sourceId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
   url: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
   title: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   scope: Type.Optional(Type.Union([Type.Literal("personal"), Type.Literal("research")])),
   noteBody: Type.Optional(Type.String({ maxLength: 100_000 })),
-  revisionId: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
   confirmed: Type.Optional(Type.Boolean()),
   kind: Type.Optional(Type.Union([Type.Literal("source"), Type.Literal("observation"), Type.Literal("note")])),
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
@@ -42,7 +47,7 @@ function recordSummary(record: import("./knowledge-contract.js").KnowledgeRecord
 }
 
 export interface KnowledgeExtensionSeam {
-  connector?: (action: KnowledgeAction) => Promise<unknown>;
+  connector?: (action: KnowledgeAction, signal?: AbortSignal) => Promise<unknown>;
   importer?: (action: KnowledgeAction) => Promise<unknown>;
 }
 
@@ -125,12 +130,15 @@ export class KnowledgeService {
       }
       case "knowledge.note.create": {
         const request = action.request;
-        const record = { ...request.record, provenance: { ...request.record.provenance, actor: "user" as const }, content: { ...request.record.content, confirmed: request.confirmedByUser === true && request.record.content.confirmed } };
+        // The trusted confirmation owner controls the confirmation bit; it
+        // must not rewrite the record's actor (agent/import/connector) into
+        // user-authored provenance.
+        const record = { ...request.record, content: { ...request.record.content, confirmed: request.confirmedByUser === true && request.record.content.confirmed } };
         return this.store.createNote({ ...request, record });
       }
       case "knowledge.note.update": {
         const request = action.request;
-        const record = { ...request.record, provenance: { ...request.record.provenance, actor: "user" as const }, content: { ...request.record.content, confirmed: request.confirmedByUser === true && request.record.content.confirmed } };
+        const record = { ...request.record, content: { ...request.record.content, confirmed: request.confirmedByUser === true && request.record.content.confirmed } };
         return this.store.updateNote({ ...request, record });
       }
       case "knowledge.source.triage": {
@@ -162,8 +170,8 @@ export class KnowledgeService {
       case "knowledge.correction": {
         const replacement = action.request.replacement;
         const normalized = replacement.kind === "note"
-          ? { ...replacement, provenance: { ...replacement.provenance, actor: "user" as const }, content: { ...replacement.content, confirmed: action.request.confirmedByUser === true && replacement.content.confirmed } }
-          : { ...replacement, provenance: { ...replacement.provenance, actor: "user" as const } };
+          ? { ...replacement, content: { ...replacement.content, confirmed: action.request.confirmedByUser === true && replacement.content.confirmed } }
+          : replacement;
         return this.store.correct(action.request.commandId, action.request.recordId, action.request.expectedRevision, normalized, action.request.relation);
       }
       case "knowledge.forget": return this.store.forget(action.request.commandId, action.request.recordId, action.request.reason, action.request.expectedRevision);
@@ -182,7 +190,7 @@ export class KnowledgeService {
     }
   }
 
-  async tool(parameters: KnowledgeToolParameters): Promise<{ text: string; details: unknown }> {
+  async tool(parameters: KnowledgeToolParameters, signal?: AbortSignal): Promise<{ text: string; details: unknown }> {
     const limit = parameters.limit ?? 8;
     switch (parameters.action) {
       case "search": {
@@ -198,7 +206,15 @@ export class KnowledgeService {
       case "read": {
         if (!parameters.id) throw new GatewayError("invalid_request", "Knowledge read requires an id");
         const result = await this.store.read(parameters.id, parameters.revisionId);
-        return { text: result ? JSON.stringify({ ...recordSummary(result), label: recordLabel(result).slice(0, 4_000) }) : "No knowledge record found.", details: result ? recordSummary(result) : null };
+        return { text: result ? JSON.stringify({ ...recordSummary(result), label: recordLabel(result).slice(0, 4_000) }) : "No knowledge record found.", details: result ? { record: result } : null };
+      }
+      case "readObject": {
+        const hash = parameters.hash;
+        const mediaType = parameters.mediaType;
+        const bytes = parameters.bytes;
+        if (!hash || !mediaType || typeof bytes !== "number" || !Number.isSafeInteger(bytes) || bytes < 0) throw new GatewayError("invalid_request", "Knowledge object read requires hash, mediaType, and bytes");
+        const result = await this.invoke({ operation: "knowledge.object.read", request: { hash, mediaType, bytes, ...(parameters.offset === undefined ? {} : { offset: parameters.offset }) } } as KnowledgeAction);
+        return { text: result ? `Read retained object chunk: ${JSON.stringify(result).slice(0, 4_000)}` : "Retained object is unavailable.", details: result };
       }
       case "list": {
         const request: KnowledgeListRequest = { ...(parameters.kind ? { kind: parameters.kind } : {}), limit };
@@ -221,10 +237,24 @@ export class KnowledgeService {
         const result = await this.store.createNote({ commandId: parameters.commandId, record: { kind: "note", scope: parameters.scope, provenance: { actor: "agent", evidence: [] }, relations: [], content: { title: parameters.title, ...(parameters.noteBody ? { body: parameters.noteBody } : {}), role: "fact", confirmed: false } } });
         return { text: `Created note ${result.record.id}.`, details: result };
       }
+      case "updateNote": {
+        if (!parameters.commandId || !parameters.id || !parameters.revisionId || !parameters.title) throw new GatewayError("invalid_request", "Note update requires commandId, id, revisionId, and title");
+        const current = await this.store.read(parameters.id, parameters.revisionId);
+        if (!current || current.kind !== "note") throw new GatewayError("conflict", "The note revision is unavailable");
+        const result = await this.store.updateNote({ commandId: parameters.commandId, recordId: current.id, expectedRevision: current.revisionId, record: { kind: "note", scope: parameters.scope ?? current.scope, provenance: current.provenance, relations: current.relations, ...(current.temporal ? { temporal: current.temporal } : {}), ...(current.importOrigin ? { importOrigin: current.importOrigin } : {}), content: { ...current.content, title: parameters.title, confirmed: false, ...(parameters.noteBody === undefined ? {} : { body: parameters.noteBody }) } } });
+        return { text: `Updated note ${result.record.id}.`, details: result };
+      }
       case "connectorSweep": {
         if (!this.extensions.connector) throw new GatewayError("unsupported", "Knowledge connector support is not configured");
         if (!parameters.commandId || !parameters.connector) throw new GatewayError("invalid_request", "Connector sweeps require commandId and connector");
-        const result = await this.extensions.connector({ operation: "knowledge.connector.run", request: { commandId: parameters.commandId, connector: parameters.connector, dryRun: parameters.dryRun ?? false, ...(parameters.limit ? { limit: parameters.limit } : {}) } });
+        if (signal?.aborted) throw new GatewayError("busy", "Knowledge connector sweep was cancelled", true);
+        const invocation = currentInvocationContext();
+        if (invocation?.operationId?.startsWith("automation:")) {
+          const connectorState = await this.store.connectorState(parameters.connector);
+          if (!connectorState?.recurringApproved) throw new GatewayError("unsupported", "Connector recurrence is not approved");
+        }
+        const result = await this.extensions.connector({ operation: "knowledge.connector.run", request: { commandId: parameters.commandId, connector: parameters.connector, dryRun: parameters.dryRun ?? false, ...(parameters.limit ? { limit: parameters.limit } : {}) } }, signal);
+        if (signal?.aborted) throw new GatewayError("busy", "Knowledge connector sweep was cancelled", true);
         return { text: `${parameters.connector} connector sweep completed: ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
       }
       case "synthesis": {
