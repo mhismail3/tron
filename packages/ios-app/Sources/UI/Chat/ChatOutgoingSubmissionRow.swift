@@ -8,6 +8,9 @@ struct ChatMessageCopyMenu: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            // UILabel-backed prompt text needs an explicit SwiftUI hit region;
+            // the preview shape alone registers a menu that cannot open.
+            .contentShape(.interaction, RoundedRectangle(cornerRadius: ChatPromptContainerStyle.cornerRadius))
             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: ChatPromptContainerStyle.cornerRadius))
             .contextMenu {
                 ChatMessageCopyButton(text: text)

@@ -1191,6 +1191,7 @@ final class SessionSheetPresentationTests: XCTestCase {
                     .compactMap { $0 as? UIContextMenuInteraction }
                 XCTAssertEqual(interactions.count, 1)
                 XCTAssertTrue(self.views(of: UILabel.self, in: controller.view).contains { $0.text == arguments })
+                try self.assertMessageMenuOpens(in: controller, text: arguments)
             }
         }
         let message = SessionSnapshot.QueuedMessage(id: "copy-queue", behavior: .steer,
@@ -1207,6 +1208,7 @@ final class SessionSheetPresentationTests: XCTestCase {
                         .compactMap { $0 as? UIContextMenuInteraction }
                     XCTAssertEqual(interactions.count, 1, "Copy must join the queue menu, never shadow its management actions")
                     XCTAssertTrue(self.views(of: UILabel.self, in: controller.view).contains { $0.text == arguments })
+                    try self.assertMessageMenuOpens(in: controller, text: arguments)
                 }
             }
         }
@@ -1227,6 +1229,7 @@ final class SessionSheetPresentationTests: XCTestCase {
                 let texts = self.views(of: UILabel.self, in: controller.view).compactMap(\.text)
                 XCTAssertTrue(texts.contains(arguments))
                 XCTAssertFalse(texts.contains(pending.text))
+                try self.assertMessageMenuOpens(in: controller, text: arguments)
             }
         }
         let empty = SessionSnapshot.PendingPrompt(id: "copy-empty", createdAt: nil, behavior: nil,
@@ -1272,6 +1275,7 @@ final class SessionSheetPresentationTests: XCTestCase {
                     let interactions = self.views(of: UIView.self, in: controller.view).flatMap(\.interactions)
                         .compactMap { $0 as? UIContextMenuInteraction }
                     XCTAssertEqual(interactions.count, 1, "Canonical user text must expose one native Copy menu")
+                    try self.assertMessageMenuOpens(in: controller, text: bound ? resource.arguments : expanded)
                 }
             }
         }
@@ -1589,6 +1593,21 @@ final class SessionSheetPresentationTests: XCTestCase {
             host.dismiss(animated: false) { continuation.resume() }
         }
         if let failure { throw failure }
+    }
+
+    private func assertMessageMenuOpens(in controller: UIViewController, text: String) throws {
+        let interaction = try XCTUnwrap(views(of: UIView.self, in: controller.view).flatMap(\.interactions)
+            .compactMap { $0 as? UIContextMenuInteraction }.first)
+        let owner = try XCTUnwrap(interaction.view)
+        let label = try XCTUnwrap(views(of: UILabel.self, in: controller.view).first { $0.text == text })
+        // UIKit asks the delegate in the interaction owner's coordinate space,
+        // which can be a shared hosting view rather than the bubble itself.
+        let point = label.convert(CGPoint(x: label.bounds.midX, y: min(label.bounds.midY, 10)), to: owner)
+        XCTAssertTrue(owner.isUserInteractionEnabled)
+        let hit = controller.view.hitTest(owner.convert(point, to: controller.view), with: nil)
+        XCTAssertTrue(hit === owner || hit?.isDescendant(of: owner) == true)
+        XCTAssertNotNil(interaction.delegate?.contextMenuInteraction(interaction, configurationForMenuAtLocation: point),
+                        "Registration alone is insufficient: pressing the visible text must produce a native menu")
     }
 
     private func views<T: UIView>(of type: T.Type, in root: UIView) -> [T] {
