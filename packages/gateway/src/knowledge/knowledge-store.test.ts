@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
@@ -48,6 +48,35 @@ describe("KnowledgeStore", () => {
     const reopened = new KnowledgeStore(reopenedWorkspace);
     expect((await reopened.read(result.record.id))?.revisionId).toBe(result.record.revisionId);
     expect((await reopened.list()).records).toHaveLength(1);
+  });
+
+  it("survives a rejected first mutation and permits the next valid mutation", async () => {
+    const { store } = await fixture();
+    await expect(store.captureSource({ commandId: command("invalid-first"), record: { ...source("invalid"), content: { ...source("invalid").content, object: { hash: "a".repeat(64), mediaType: "text/plain", bytes: 1 } } } })).rejects.toThrow(/durably captured/);
+    await expect(store.captureSource({ commandId: command("valid-after-invalid"), record: source("valid after invalid") })).resolves.toBeDefined();
+  });
+
+  it("publishes forget tombstones before cleanup if state save fails", async () => {
+    const { store, home, workspace } = await fixture();
+    const created = await store.captureSource({ commandId: command("forget-save-failure-source"), record: source("must remain until commit") });
+    vi.spyOn(store as unknown as { save: () => Promise<void> }, "save").mockRejectedValueOnce(new Error("injected save failure"));
+    await expect(store.forget(command("forget-save-failure"), created.record.id, "privacy request", created.record.revisionId)).rejects.toThrow("injected save failure");
+    await workspace.dispose();
+    const reopenedWorkspace = new TronWorkspace(home); workspaces.push(reopenedWorkspace);
+    const reopened = new KnowledgeStore(reopenedWorkspace);
+    expect((await reopened.read(created.record.id, created.record.revisionId, true))?.content).toMatchObject({ title: "must remain until commit" });
+  });
+
+  it("never reads an orphan revision after a failed update publication", async () => {
+    const { store, home } = await fixture();
+    const created = await store.createNote({ commandId: command("orphan-note-create"), record: { kind: "note", scope: "personal", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "old", role: "fact", confirmed: true } } });
+    const save = vi.spyOn(store as unknown as { save: () => Promise<void> }, "save").mockRejectedValueOnce(new Error("injected save failure"));
+    await expect(store.updateNote({ commandId: command("orphan-note-update"), recordId: created.record.id, expectedRevision: created.record.revisionId, record: { kind: "note", scope: "personal", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "orphan", role: "fact", confirmed: true } } })).rejects.toThrow("injected save failure");
+    save.mockRestore();
+    const revisions = await readdir(join(home, "workspace/state/knowledge/records", created.record.id));
+    const orphan = revisions.find(name => !name.startsWith(created.record.revisionId));
+    expect(orphan).toBeDefined();
+    await expect(store.read(created.record.id, orphan!.replace(/\.json$/, ""), true)).rejects.toThrow(/committed/);
   });
 
   it("rejects stale writers and keeps immutable record revisions", async () => {

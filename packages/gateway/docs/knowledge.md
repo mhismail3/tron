@@ -76,14 +76,38 @@ ranges cannot be reflected.
 
 The typed action surface remains the shared Gateway/agent/native DTO. Reads
 return state revisions, and recall distinguishes no-match from unavailable
-store errors. Observation defaults to disabled and the store never chooses a provider or model silently. Connector/import DTOs are
-operation shapes; their network/account implementations belong to later owners.
-The Gateway registers `knowledge.v1` typed RPC handlers and a bounded first-party
-`knowledge` retrieval tool. The tool performs explicit search/recall/read/list
-only; retrieved text is evidence, not authorization. A prospective
+store errors. Observation defaults to disabled and the store never chooses a
+provider or model silently. Connector/import DTOs are operation shapes; their
+network/account implementations belong to later owners. The Gateway registers
+`knowledge.v1` typed RPC handlers and a bounded first-party `knowledge`
+retrieval tool. The tool performs explicit search/recall/read/list only;
+retrieved text is evidence, not authorization. A prospective
 `KnowledgeObservationService` coalesces terminal turns (including no-tool,
 failed, and interrupted turns), omits thinking/attachment bodies, uses one
 pinned `ModelRuntime` adapter (the configured model is an explicit
 `provider/model` value), and keeps model/storage latency outside foreground
-settlement. Connector/import calls fail as unsupported until their
-named extension seam is installed.
+settlement. Connector/import calls fail as unsupported until their named
+extension seam is installed.
+
+## Sources and maintained notes
+
+`SourceContent` keeps the original immutable object (`object`) separate from its
+bounded readable extraction (`text`) and optional generated `assessment`.
+Capture quality is explicit (`complete`, `partial`, `metadata-only`,
+`inaccessible`, or `failed`) and is never upgraded because assessment worked.
+Connector captures may include opaque provider/account/item identity and
+multiple `origins`; these fields contain no credentials. Source capture uses
+manual redirects, public-DNS destination checks, owner-bounded response bytes,
+and script/style-free extraction. URL diagnostics are redacted.
+
+`NoteContent` supports structured field values with exact evidence revisions,
+validity, explicit confirmation, privacy scope, freshness, corrections,
+supersession, and preserved contrary evidence. Personal/research scope remains
+the sharing authority; `privacyScope` is descriptive metadata, not a second
+sharing system. Assessment/triage is an optional derivative against persisted
+editable `KnowledgeConfig.currentInterests` and uses an injected adapter owned
+by the existing model boundary. The `knowledge.source.triage` action names an
+exact source revision; it does not accept an unpersisted interest list. Capture
+is durable even when that adapter fails. Exact source-object reads resolve a
+source record and revision before reading its object; orphan and suppressed
+object hashes are not an object browsing API.

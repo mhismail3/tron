@@ -28,6 +28,7 @@ const OBJECT_SCHEMA_VERSION = 1 as const;
 type RecordHead = { latestRevisionId: string; revisionIds: string[] };
 type Suppression = { excluded: boolean; forgotten: boolean; reason?: string; updatedAt: string };
 type ScopeExclusion = { sessionId?: string; branchId?: string; projectId?: string; excluded: boolean; reason?: string; updatedAt: string };
+type PendingRecordCleanup = { recordId: string; revisionId: string };
 type StoredReceipt = { operation: string; requestHash: string; createdAt: string; result: ReceiptResult; recordIds: string[]; invalidated?: boolean };
 type ReceiptResult =
   | { kind: "record"; recordId: string; revisionId: string; stateRevision: number }
@@ -41,6 +42,8 @@ interface KnowledgeState {
   suppressions: Record<string, Suppression>;
   scopeExclusions: Record<string, ScopeExclusion>;
   cleanup: string[];
+  /** Forgotten immutable revisions awaiting post-commit removal. */
+  recordCleanup?: PendingRecordCleanup[];
   receipts: Record<string, StoredReceipt>;
   config: KnowledgeConfig;
 }
@@ -90,7 +93,7 @@ async function safeDirectory(path: string, create: boolean): Promise<void> {
 }
 
 function emptyState(): KnowledgeState {
-  return { schemaVersion: KNOWLEDGE_SCHEMA_VERSION, stateRevision: 0, records: {}, coverage: {}, suppressions: {}, scopeExclusions: {}, cleanup: [], receipts: {}, config: structuredClone(DEFAULT_KNOWLEDGE_CONFIG) };
+  return { schemaVersion: KNOWLEDGE_SCHEMA_VERSION, stateRevision: 0, records: {}, coverage: {}, suppressions: {}, scopeExclusions: {}, cleanup: [], recordCleanup: [], receipts: {}, config: structuredClone(DEFAULT_KNOWLEDGE_CONFIG) };
 }
 function validateCoverage(value: unknown): asserts value is ObservationCoverage {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new KnowledgeStoreError("invalid", "Invalid observation coverage");
@@ -126,6 +129,7 @@ function validateState(value: unknown): KnowledgeState {
   }
   if (!state.scopeExclusions || typeof state.scopeExclusions !== "object" || Array.isArray(state.scopeExclusions)) throw new KnowledgeStoreError("invalid", "Invalid scope exclusions");
   if (!Array.isArray(state.cleanup) || state.cleanup.some(hash => typeof hash !== "string" || !OBJECT_HASH.test(hash))) throw new KnowledgeStoreError("invalid", "Invalid knowledge cleanup list");
+  if (state.recordCleanup !== undefined && (!Array.isArray(state.recordCleanup) || state.recordCleanup.some(item => !item || typeof item !== "object" || typeof item.recordId !== "string" || typeof item.revisionId !== "string"))) throw new KnowledgeStoreError("invalid", "Invalid record cleanup list");
   if (!state.receipts || typeof state.receipts !== "object" || Array.isArray(state.receipts)) throw new KnowledgeStoreError("invalid", "Invalid knowledge receipts");
   for (const receipt of Object.values(state.receipts as Record<string, unknown>)) {
     const item = receipt as Record<string, unknown>;
@@ -143,7 +147,11 @@ function recordObjectHashes(record: KnowledgeRecord): string[] {
   return [...new Set(hashes)];
 }
 function searchableFields(record: KnowledgeRecord): Array<[string, string]> {
-  if (record.kind === "source") return [["title", record.content.title], ["text", record.content.text ?? ""], ["uri", record.content.uri ?? ""]];
+  if (record.kind === "source") return [
+    ["title", record.content.title], ["text", record.content.text ?? ""], ["uri", record.content.uri ?? ""],
+    ["assessment", record.content.assessment ? [record.content.assessment.summary, record.content.assessment.contribution, record.content.assessment.whyItMatters, record.content.assessment.possibleUse].filter(Boolean).join(" ") : ""],
+    ["identity", record.content.identity ? `${record.content.identity.provider} ${record.content.identity.accountId} ${record.content.identity.itemId}` : ""],
+  ];
   if (record.kind === "observation") return [["observation", record.content.items.map(item => item.text).join(" ")], ["session", record.content.range.sessionId]];
   return [["title", record.content.title], ["body", record.content.body ?? ""], ["fields", (record.content.fields ?? []).map(field => `${field.field} ${String(field.value)}`).join(" ")]];
 }
@@ -234,9 +242,14 @@ export class KnowledgeStore {
     }
     return { state: validateState(read.value), present: true };
   }
-  private async save(paths: StorePaths, state: KnowledgeState): Promise<void> { await durableAtomicWriteJson(paths.state, state, 0o600); }
+  private async save(paths: StorePaths, state: KnowledgeState): Promise<void> {
+    if (Buffer.byteLength(`${JSON.stringify(state, null, 2)}\n`, "utf8") > STATE_MAX_BYTES) throw invalid("Knowledge control state exceeds its byte limit");
+    await durableAtomicWriteJson(paths.state, state, 0o600);
+  }
   private recordPath(paths: StorePaths, id: string, revision: string): string { safeId(id, "record id"); safeId(revision, "record revision"); return join(paths.records, id, `${revision}.json`); }
   private async readRecord(paths: StorePaths, id: string, revision: string): Promise<KnowledgeRecord> {
+    try { await safeDirectory(join(paths.records, id), false); }
+    catch (error) { if (error instanceof KnowledgeStoreError && error.message.includes("unavailable")) throw new KnowledgeStoreError("invalid", `Record revision is missing: ${id}/${revision}`); throw error; }
     let value;
     try { value = await readSecureJson<unknown>(this.recordPath(paths, id, revision), RECORD_MAX_BYTES); }
     catch (error) { if (error instanceof SecureJsonFileError) throw new KnowledgeStoreError(error.kind === "unsafe" ? "unsafe" : "invalid", error.message); throw error; }
@@ -273,10 +286,13 @@ export class KnowledgeStore {
     }
     return { stored: { kind: "value", value: result }, recordIds: [] };
   }
-  private async mutate<T>(operation: string, commandId: string, request: unknown, action: (state: KnowledgeState, paths: StorePaths) => Promise<T>): Promise<T> {
+  private async mutate<T>(operation: string, commandId: string, request: unknown, action: (state: KnowledgeState, paths: StorePaths) => Promise<T>, afterCommit?: (state: KnowledgeState, paths: StorePaths, result: T) => Promise<void>): Promise<T> {
     if (!/^[A-Za-z0-9._:-]{8,160}$/.test(commandId)) throw invalid("Mutating requests require a stable commandId");
     return this.mutex.run(async () => {
       const paths = await this.paths(true); const loaded = await this.load(paths, true); const state = loaded.state;
+      // Establish control state before validation/action can fail, so a
+      // rejected first mutation cannot leave a permanently half-initialized namespace.
+      if (!loaded.present) await this.save(paths, state);
       const key = `${operation}\0${commandId}`; const hash = requestHash(operation, request); const prior = state.receipts[key];
       if (prior) { if (prior.operation !== operation || prior.requestHash !== hash) throw conflict("Command ID was already used for a different knowledge mutation"); if (prior.invalidated) throw conflict("Knowledge mutation result was forgotten"); return await this.receiptResult(paths, state, prior.result) as T; }
       const result = await action(state, paths); state.stateRevision += 1;
@@ -284,7 +300,12 @@ export class KnowledgeStore {
       state.receipts[key] = { operation, requestHash: hash, result: stored.stored, recordIds: stored.recordIds, createdAt: now(), invalidated: false };
       const entries = Object.entries(state.receipts).sort(([, a], [, b]) => a.createdAt.localeCompare(b.createdAt));
       for (const [receiptKey] of entries.slice(0, Math.max(0, entries.length - RECEIPT_LIMIT))) delete state.receipts[receiptKey];
-      await this.save(paths, state); return result;
+      await this.save(paths, state);
+      // Cleanup runs only after the control document is durable. A failed
+      // cleanup leaves an ignored orphan for a later maintenance pass rather
+      // than losing the committed suppression/tombstone.
+      if (afterCommit) await afterCommit(state, paths, result).catch(() => {});
+      return result;
     });
   }
 
@@ -313,7 +334,11 @@ export class KnowledgeStore {
   }
   async read(id: string, revision?: string, includeSuppressed = false): Promise<KnowledgeRecord | null> {
     safeId(id, "record id"); if (revision !== undefined) safeId(revision, "knowledge revision"); const paths = await this.paths(false); const state = (await this.load(paths, false)).state;
-    if (!includeSuppressed && state.suppressions[id]?.excluded) return null; const head = state.records[id]; return head ? this.readRecord(paths, id, revision ?? head.latestRevisionId) : null;
+    if (!includeSuppressed && state.suppressions[id]?.excluded) return null; const head = state.records[id];
+    if (!head) return null;
+    const selected = revision ?? head.latestRevisionId;
+    if (!head.revisionIds.includes(selected)) throw new KnowledgeStoreError("invalid", "Requested revision is not committed for this record");
+    return this.readRecord(paths, id, selected);
   }
   async search(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse> {
     if (typeof request.query !== "string" || request.query.trim().length === 0 || request.query.length > 512) throw invalid("Search query must be non-empty and bounded");
@@ -351,6 +376,8 @@ export class KnowledgeStore {
     if (draft.kind === "source" && draft.content.object) await this.assertObject(paths, draft.content.object);
     const timestamp = now(); const record = { ...draft, schemaVersion: KNOWLEDGE_SCHEMA_VERSION, id, revisionId: revisionId(), createdAt: draft.createdAt ?? current?.createdAt ?? timestamp, updatedAt: draft.updatedAt ?? timestamp } as KnowledgeRecord;
     try { validateKnowledgeRecord(record); } catch (error) { throw invalid(error instanceof Error ? error.message : "Invalid knowledge record"); }
+    if (Buffer.byteLength(`${JSON.stringify(record, null, 2)}\n`, "utf8") > RECORD_MAX_BYTES) throw invalid("Knowledge record exceeds its byte limit");
+    await safeDirectory(join(paths.records, id), true);
     await durableAtomicWriteJson(this.recordPath(paths, id, record.revisionId), record, 0o600);
     state.records[id] = { latestRevisionId: record.revisionId, revisionIds: [...(existing?.revisionIds ?? []), record.revisionId] };
     return { record, stateRevision: state.stateRevision + 1 };
@@ -452,14 +479,32 @@ export class KnowledgeStore {
   }
   async setExclusion(commandId: string, recordId: string, excluded: boolean, expectedRevision?: string, reason?: string): Promise<{ recordId: string; excluded: boolean; stateRevision: number }> { return this.mutate("knowledge.exclusion", commandId, { recordId, excluded, expectedRevision, reason }, async (state, paths) => { const current = await this.currentRecord(state, paths, recordId); if (!current) throw conflict("Knowledge record does not exist"); if (expectedRevision !== undefined && expectedRevision !== current.revisionId) throw conflict("Knowledge record revision is stale"); state.suppressions[recordId] = { excluded, forgotten: false, ...(reason === undefined ? {} : { reason }), updatedAt: now() }; return { recordId, excluded, stateRevision: state.stateRevision + 1 }; }); }
   async forget(commandId: string, recordId: string, reason: string, expectedRevision?: string): Promise<KnowledgeForgetResult> {
-    if (!reason || reason.length > 1_000) throw invalid("Forget reason is required and bounded"); return this.mutate("knowledge.forget", commandId, { recordId, reason, expectedRevision }, async (state, paths) => {
+    if (!reason || reason.length > 1_000) throw invalid("Forget reason is required and bounded");
+    let forgottenRevisions: string[] = [];
+    return this.mutate("knowledge.forget", commandId, { recordId, reason, expectedRevision }, async (state, paths) => {
       const history = state.records[recordId]; const current = history ? await this.currentRecord(state, paths, recordId) : null; if (!current) throw conflict("Knowledge record does not exist"); if (expectedRevision !== undefined && expectedRevision !== current.revisionId) throw conflict("Knowledge record revision is stale");
-      for (const revision of history!.revisionIds) { const record = await this.readRecord(paths, recordId, revision); state.cleanup.push(...recordObjectHashes(record)); await durableRemove(this.recordPath(paths, recordId, revision)); }
+      forgottenRevisions = [...history!.revisionIds];
+      state.recordCleanup = [...(state.recordCleanup ?? []), ...forgottenRevisions.map(revisionId => ({ recordId, revisionId }))];
+      // The tombstone, object cleanup intent, and derivative redactions are
+      // published atomically before any canonical revision is removed.
+      for (const revision of history!.revisionIds) { const record = await this.readRecord(paths, recordId, revision); state.cleanup.push(...recordObjectHashes(record)); }
       delete state.records[recordId]; state.suppressions[recordId] = { excluded: true, forgotten: true, reason, updatedAt: now() }; state.cleanup = [...new Set(state.cleanup)];
       for (const receipt of Object.values(state.receipts)) if (receipt.recordIds.includes(recordId)) { receipt.recordIds = []; receipt.result = { kind: "value", value: null }; receipt.invalidated = true; }
-      // Derivative references are invalidated in their current revisions; old source history remains untouched.
-      for (const [id, head] of Object.entries(state.records)) { const derivative = await this.readRecord(paths, id, head.latestRevisionId); const scrubbed = scrubReferences(derivative, recordId); if (scrubbed) { await durableAtomicWriteJson(this.recordPath(paths, id, scrubbed.revisionId), scrubbed, 0o600); state.records[id] = { latestRevisionId: scrubbed.revisionId, revisionIds: [...head.revisionIds, scrubbed.revisionId] }; } }
+      // Derivative references are redacted and hidden, rather than leaving a
+      // current unsupported claim available after its evidence is forgotten.
+      for (const [id, head] of Object.entries(state.records)) { const derivative = await this.readRecord(paths, id, head.latestRevisionId); const scrubbed = scrubReferences(derivative, recordId); if (scrubbed) { await durableAtomicWriteJson(this.recordPath(paths, id, scrubbed.revisionId), scrubbed, 0o600); state.records[id] = { latestRevisionId: scrubbed.revisionId, revisionIds: [...head.revisionIds, scrubbed.revisionId] }; state.suppressions[id] = { excluded: true, forgotten: false, reason: "Dependent evidence was forgotten", updatedAt: now() }; } }
       return { forgotten: true, recordId, stateRevision: state.stateRevision + 1 };
+    }, async (state, paths) => {
+      // A failed post-commit deletion is safe: the state no longer references
+      // these files. Pending paths remain durable for reconcile() to retry.
+      const pending = [...(state.recordCleanup ?? [])];
+      const remaining: PendingRecordCleanup[] = [];
+      for (const item of pending) {
+        try { await durableRemove(this.recordPath(paths, item.recordId, item.revisionId)); }
+        catch { remaining.push(item); }
+      }
+      state.recordCleanup = remaining;
+      if (remaining.length !== pending.length) { state.stateRevision += 1; await this.save(paths, state); }
     });
   }
   async putObject(bytes: Uint8Array, mediaType: string): Promise<KnowledgeObjectRef> {
@@ -467,9 +512,43 @@ export class KnowledgeStore {
     return this.mutex.run(async () => { const paths = await this.paths(true); const initialized = await this.load(paths, true); if (!initialized.present) await this.save(paths, initialized.state); const path = join(paths.objects, hash); const existing = await readSecureBytes(path, OBJECT_MAX_BYTES); if (existing) { if (existing.byteLength !== bytes.byteLength || createHash("sha256").update(existing).digest("hex") !== hash) throw new KnowledgeStoreError("invalid", "Existing knowledge object bytes do not match their identity"); return { hash, mediaType, bytes: bytes.byteLength }; } await durableAtomicWriteBytes(path, bytes); return { hash, mediaType, bytes: bytes.byteLength }; });
   }
   private async assertObject(paths: StorePaths, ref: KnowledgeObjectRef): Promise<void> { validateObjectRef(ref); const bytes = await readSecureBytes(join(paths.objects, ref.hash), OBJECT_MAX_BYTES); if (!bytes || bytes.byteLength !== ref.bytes || createHash("sha256").update(bytes).digest("hex") !== ref.hash) throw conflict("Referenced knowledge object bytes are not durably captured"); }
-  async readObject(ref: KnowledgeObjectRef): Promise<Uint8Array | null> { validateObjectRef(ref); const paths = await this.paths(false); const bytes = await readSecureBytes(join(paths.objects, ref.hash), OBJECT_MAX_BYTES); if (!bytes) return null; if (bytes.byteLength !== ref.bytes || createHash("sha256").update(bytes).digest("hex") !== ref.hash) throw new KnowledgeStoreError("invalid", "Knowledge object failed hash or size verification"); return bytes; }
+  async readObject(ref: KnowledgeObjectRef): Promise<Uint8Array | null> {
+    validateObjectRef(ref); const paths = await this.paths(false); const loaded = await this.load(paths, false); if (!loaded.present) return null;
+    // Object hashes are not a public directory index. Require a citation from
+    // a retained, unsuppressed record before exposing bytes.
+    let authorized = false;
+    for (const [id, head] of Object.entries(loaded.state.records)) {
+      if (loaded.state.suppressions[id]?.excluded || loaded.state.suppressions[id]?.forgotten) continue;
+      for (const revision of head.revisionIds) {
+        if ((await this.recordObjectHashes(paths, id, revision)).includes(ref.hash)) { authorized = true; break; }
+      }
+      if (authorized) break;
+    }
+    const bytes = await readSecureBytes(join(paths.objects, ref.hash), OBJECT_MAX_BYTES); if (!bytes) return null;
+    if (bytes.byteLength !== ref.bytes || createHash("sha256").update(bytes).digest("hex") !== ref.hash) throw new KnowledgeStoreError("invalid", "Knowledge object failed hash or size verification");
+    return authorized ? bytes : null;
+  }
   async reconcile(): Promise<KnowledgeReconcileResult> {
-    return this.mutex.run(async () => { const paths = await this.paths(false); const loaded = await this.load(paths, false); if (!loaded.present || loaded.state.cleanup.length === 0) return { removedObjects: [], pendingObjects: loaded.state.cleanup, stateRevision: loaded.state.stateRevision }; const state = loaded.state; const referenced = new Set<string>(); for (const [id, head] of Object.entries(state.records)) for (const revision of head.revisionIds) for (const hash of await this.recordObjectHashes(paths, id, revision)) referenced.add(hash); const removedObjects: string[] = []; const pendingObjects: string[] = []; for (const hash of state.cleanup) { if (referenced.has(hash)) continue; try { await durableRemove(join(paths.objects, hash)); removedObjects.push(hash); } catch { pendingObjects.push(hash); } } if (removedObjects.length) { state.cleanup = pendingObjects; state.stateRevision += 1; await this.save(paths, state); } return { removedObjects, pendingObjects, stateRevision: state.stateRevision }; });
+    return this.mutex.run(async () => {
+      const paths = await this.paths(false); const loaded = await this.load(paths, false);
+      if (!loaded.present) return { removedObjects: [], pendingObjects: [], stateRevision: 0 };
+      const state = loaded.state;
+      const referenced = new Set<string>();
+      for (const [id, head] of Object.entries(state.records)) for (const revision of head.revisionIds) for (const hash of await this.recordObjectHashes(paths, id, revision)) referenced.add(hash);
+      const removedObjects: string[] = []; const pendingObjects: string[] = [];
+      for (const hash of state.cleanup) {
+        if (referenced.has(hash)) continue;
+        try { await durableRemove(join(paths.objects, hash)); removedObjects.push(hash); } catch { pendingObjects.push(hash); }
+      }
+      const pendingRecords: PendingRecordCleanup[] = [];
+      for (const item of state.recordCleanup ?? []) {
+        try { await durableRemove(this.recordPath(paths, item.recordId, item.revisionId)); } catch { pendingRecords.push(item); }
+      }
+      if (removedObjects.length || pendingRecords.length !== (state.recordCleanup?.length ?? 0)) {
+        state.cleanup = pendingObjects; state.recordCleanup = pendingRecords; state.stateRevision += 1; await this.save(paths, state);
+      }
+      return { removedObjects, pendingObjects, stateRevision: state.stateRevision };
+    });
   }
   private async recordObjectHashes(paths: StorePaths, id: string, revision: string): Promise<string[]> { return recordObjectHashes(await this.readRecord(paths, id, revision)); }
   async coverage(id: string): Promise<ObservationCoverage | null> { safeId(id, "coverage id"); const paths = await this.paths(false); return (await this.load(paths, false)).state.coverage[id] ?? null; }
@@ -490,11 +569,37 @@ export class KnowledgeStore {
 
 function scrubReferences(record: KnowledgeRecord, forgottenId: string): KnowledgeRecord | null {
   const keep = (e: KnowledgeEvidenceRef): boolean => e.recordId !== forgottenId;
+  const hadProvenance = record.provenance.evidence.some(evidence => evidence.recordId === forgottenId);
+  const hadRelation = record.relations.some(relation => relation.recordId === forgottenId);
   const provenance = { ...record.provenance, evidence: record.provenance.evidence.filter(keep) };
   const relations = record.relations.filter(relation => relation.recordId !== forgottenId);
   let content = record.content;
-  if (record.kind === "observation") content = { ...record.content, items: record.content.items.map(item => ({ ...item, ...(item.evidence ? { evidence: item.evidence.filter(keep) } : {}) })) };
-  if (record.kind === "note") content = { ...record.content, ...(record.content.fields ? { fields: record.content.fields.map(field => ({ ...field, evidence: field.evidence.filter(keep) })) } : {}) };
-  if (provenance.evidence.length === record.provenance.evidence.length && relations.length === record.relations.length && JSON.stringify(content) === JSON.stringify(record.content)) return null;
+  let hadNestedEvidence = false;
+  if (record.kind === "observation") {
+    const items = record.content.items.map(item => {
+      const removed = item.evidence?.some(evidence => evidence.recordId === forgottenId) ?? false;
+      hadNestedEvidence ||= removed;
+      return removed ? { ...item, text: "[Redacted: supporting evidence was forgotten.]", certainty: "uncertain" as const, evidence: [] } : item;
+    });
+    content = { ...record.content, items };
+  }
+  if (record.kind === "note") {
+    const fields = record.content.fields ?? [];
+    const keptFields = fields.filter(field => {
+      const removed = field.evidence.some(evidence => evidence.recordId === forgottenId);
+      hadNestedEvidence ||= removed;
+      return !removed;
+    });
+    const contraryEvidence = record.content.contraryEvidence?.filter(keep);
+    hadNestedEvidence ||= (record.content.contraryEvidence?.length ?? 0) !== (contraryEvidence?.length ?? 0);
+    content = {
+      ...record.content,
+      ...(record.content.fields ? { fields: keptFields } : {}),
+      ...(record.content.body !== undefined ? { body: "[Redacted: supporting evidence was forgotten.]" } : {}),
+      confirmed: false,
+      ...(contraryEvidence ? { contraryEvidence } : {}),
+    };
+  }
+  if (!hadProvenance && !hadRelation && !hadNestedEvidence) return null;
   const scrubbed = { ...record, revisionId: revisionId(), updatedAt: now(), provenance, relations, content } as KnowledgeRecord; validateKnowledgeRecord(scrubbed); return scrubbed;
 }

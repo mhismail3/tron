@@ -61,17 +61,51 @@ export interface KnowledgeRelation {
   field?: string;
 }
 
+export type SourceOriginKind = "manual" | "connector" | "import" | "conversation";
+
+/** Stable identity supplied by a connector. Values are opaque and never credentials. */
+export interface SourceIdentity {
+  provider: string;
+  accountId: string;
+  itemId: string;
+}
+
+export interface SourceOrigin {
+  kind: SourceOriginKind;
+  capturedAt: string;
+  uri?: string;
+  identity?: SourceIdentity;
+  annotation?: string;
+}
+
+/** Generated material is deliberately separate from retained source evidence. */
+export interface SourceAssessment {
+  summary: string;
+  contribution?: string;
+  whyItMatters?: string;
+  evidenceQuality: "high" | "medium" | "low" | "none";
+  freshness: "current" | "aging" | "stale" | "unknown";
+  possibleUse?: string;
+  generatedAt: string;
+  model?: string;
+}
+
 export interface SourceContent {
   title: string;
   uri?: string;
+  /** Readable extraction, not a substitute for the original object. */
   text?: string;
+  /** Immutable original bytes, when captured. */
   object?: KnowledgeObjectRef;
   mediaType?: string;
   captureDisposition: "complete" | "partial" | "metadata-only" | "inaccessible" | "failed" | "reference-only";
   annotations?: Array<{ text: string; locator?: string; createdAt?: string }>;
   sourcePublishedAt?: string;
   capturedAt: string;
-  origin?: "manual" | "connector" | "import" | "conversation";
+  origin?: SourceOriginKind;
+  origins?: SourceOrigin[];
+  identity?: SourceIdentity;
+  assessment?: SourceAssessment;
 }
 
 export interface ObservationRange {
@@ -118,6 +152,11 @@ export interface NoteContent {
   fields?: NoteFieldQualification[];
   role: "fact" | "preference" | "concept" | "decision" | "workflow" | "synthesis";
   confirmed: boolean;
+  /** Explicitly retained evidence against a candidate or claim. */
+  contraryEvidence?: KnowledgeEvidenceRef[];
+  /** Review/freshness metadata is descriptive and never an automatic deletion date. */
+  freshness?: "current" | "aging" | "stale" | "unknown";
+  privacyScope?: "private" | "shared";
 }
 
 export interface KnowledgeRecordBase {
@@ -176,6 +215,8 @@ export interface KnowledgeConfig {
     maxAttempts: number;
   };
   maximumSearchResults: number;
+  /** Editable interests used only when an explicit triage operation runs. */
+  currentInterests?: string[];
 }
 
 export const DEFAULT_KNOWLEDGE_CONFIG: KnowledgeConfig = {
@@ -190,6 +231,7 @@ export const DEFAULT_KNOWLEDGE_CONFIG: KnowledgeConfig = {
     maxAttempts: 1,
   },
   maximumSearchResults: 50,
+  currentInterests: [],
 };
 
 export interface KnowledgeStatus {
@@ -299,6 +341,12 @@ export interface KnowledgeReflectRequest {
   text: string;
 }
 
+export interface KnowledgeTriageRequest {
+  commandId: string;
+  sourceId: string;
+  expectedRevision: string;
+}
+
 export interface KnowledgeConnectorConfigurationRequest {
   commandId: string;
   connector: "raindrop" | "x";
@@ -323,6 +371,7 @@ export type KnowledgeAction =
   | { operation: "knowledge.note.create"; request: KnowledgeNoteMutationRequest & { recordId?: never } }
   | { operation: "knowledge.note.update"; request: KnowledgeNoteMutationRequest & { recordId: string } }
   | { operation: "knowledge.reflect"; request: KnowledgeReflectRequest }
+  | { operation: "knowledge.source.triage"; request: KnowledgeTriageRequest }
   | { operation: "knowledge.correction"; request: KnowledgeCorrectionRequest }
   | { operation: "knowledge.forget"; request: KnowledgeForgetRequest }
   | { operation: "knowledge.exclusion"; request: KnowledgeExclusionRequest }
@@ -414,9 +463,37 @@ function validateKindContent(kind: KnowledgeRecordKind, value: unknown): void {
       try { const uri = new URL(content.uri); if (!["http:", "https:"].includes(uri.protocol) || uri.username || uri.password) throw new Error(); } catch { throw new Error("Source URI must be an http(s) URL without credentials"); }
     }
     if (!["complete", "partial", "metadata-only", "inaccessible", "failed", "reference-only"].includes(content.captureDisposition as string)) throw new Error("Invalid capture disposition");
+    if (content.origin !== undefined && !["manual", "connector", "import", "conversation"].includes(content.origin as string)) throw new Error("Invalid source origin");
     assertTimestamp(content.capturedAt, "capturedAt");
     if (content.sourcePublishedAt !== undefined) assertTimestamp(content.sourcePublishedAt, "sourcePublishedAt");
     if (content.mediaType !== undefined) boundedString(content.mediaType, "source media type", 160);
+    if (content.identity !== undefined) {
+      const identity = content.identity as Record<string, unknown>;
+      if (!identity || typeof identity !== "object" || Array.isArray(identity)) throw new Error("Invalid source identity");
+      boundedString(identity.provider, "source identity provider", 160);
+      boundedString(identity.accountId, "source identity account", 256);
+      boundedString(identity.itemId, "source identity item", 512);
+    }
+    if (content.origins !== undefined) {
+      if (!Array.isArray(content.origins) || content.origins.length > 20) throw new Error("Invalid source origins");
+      for (const origin of content.origins) {
+        const item = origin as Record<string, unknown>;
+        if (!item || typeof item !== "object" || !["manual", "connector", "import", "conversation"].includes(item.kind as string)) throw new Error("Invalid source origin kind");
+        assertTimestamp(item.capturedAt, "source origin capturedAt");
+        if (item.uri !== undefined) { boundedString(item.uri, "source origin uri", 4_096); try { const uri = new URL(item.uri); if (!["http:", "https:"].includes(uri.protocol) || uri.username || uri.password) throw new Error(); } catch { throw new Error("Source origin URI must be an http(s) URL without credentials"); } }
+        if (item.identity !== undefined) { const identity = item.identity as Record<string, unknown>; boundedString(identity.provider, "source origin provider", 160); boundedString(identity.accountId, "source origin account", 256); boundedString(identity.itemId, "source origin item", 512); }
+        if (item.annotation !== undefined) boundedString(item.annotation, "source origin annotation", 2_000);
+      }
+    }
+    if (content.assessment !== undefined) {
+      const assessment = content.assessment as Record<string, unknown>;
+      if (!assessment || typeof assessment !== "object" || Array.isArray(assessment)) throw new Error("Invalid source assessment");
+      boundedString(assessment.summary, "source assessment summary", 20_000);
+      for (const key of ["contribution", "whyItMatters", "possibleUse"]) if (assessment[key] !== undefined) boundedString(assessment[key], `source assessment ${key}`, 10_000);
+      if (!["high", "medium", "low", "none"].includes(assessment.evidenceQuality as string) || !["current", "aging", "stale", "unknown"].includes(assessment.freshness as string)) throw new Error("Invalid source assessment quality");
+      assertTimestamp(assessment.generatedAt, "source assessment generatedAt");
+      if (assessment.model !== undefined) boundedString(assessment.model, "source assessment model", 200);
+    }
     if (content.annotations !== undefined) {
       if (!Array.isArray(content.annotations) || content.annotations.length > 200) throw new Error("Invalid source annotations");
       for (const annotation of content.annotations) { const item = annotation as Record<string, unknown>; boundedString(item.text, "annotation", 20_000); if (item.locator !== undefined) boundedString(item.locator, "annotation locator", 512); if (item.createdAt !== undefined) assertTimestamp(item.createdAt, "annotation createdAt"); }
@@ -440,6 +517,9 @@ function validateKindContent(kind: KnowledgeRecordKind, value: unknown): void {
   } else {
     if (typeof content.title !== "string" || content.title.length > 512 || !["fact", "preference", "concept", "decision", "workflow", "synthesis"].includes(content.role as string) || typeof content.confirmed !== "boolean") throw new Error("Invalid note content");
     if (content.body !== undefined && (typeof content.body !== "string" || content.body.length > 100_000)) throw new Error("Invalid note body");
+    if (content.contraryEvidence !== undefined) { if (!Array.isArray(content.contraryEvidence) || content.contraryEvidence.length > 100) throw new Error("Invalid contrary evidence"); content.contraryEvidence.forEach(assertEvidence); }
+    if (content.freshness !== undefined && !["current", "aging", "stale", "unknown"].includes(content.freshness as string)) throw new Error("Invalid note freshness");
+    if (content.privacyScope !== undefined && !["private", "shared"].includes(content.privacyScope as string)) throw new Error("Invalid note privacy scope");
     if (content.fields !== undefined) {
       if (!Array.isArray(content.fields) || content.fields.length > 100) throw new Error("Invalid note fields");
       for (const field of content.fields) {
@@ -475,5 +555,6 @@ export function validateKnowledgeConfig(value: unknown): KnowledgeConfig {
   const eligibility = config.eligibility as Record<string, unknown>;
   if (config.schemaVersion !== KNOWLEDGE_SCHEMA_VERSION || typeof config.revision !== "number" || !Number.isSafeInteger(config.revision) || config.revision < 0 || !eligibility || typeof eligibility !== "object" || !Array.isArray(eligibility.sessionIds) || !Array.isArray(eligibility.projectIds) || !Array.isArray(eligibility.excludedSessionIds) || !Array.isArray(eligibility.excludedProjectIds) || ![...eligibility.sessionIds, ...eligibility.projectIds, ...eligibility.excludedSessionIds, ...eligibility.excludedProjectIds].every(item => typeof item === "string" && ID.test(item)) || !observation || typeof observation !== "object" || typeof observation.enabled !== "boolean" || typeof maxInputChars !== "number" || !Number.isSafeInteger(maxInputChars) || maxInputChars < 1_000 || maxInputChars > 200_000 || typeof maxOutputChars !== "number" || !Number.isSafeInteger(maxOutputChars) || maxOutputChars < 100 || maxOutputChars > 50_000 || typeof timeoutMs !== "number" || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 300_000 || typeof maxAttempts !== "number" || !Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 3 || typeof maximumSearchResults !== "number" || !Number.isSafeInteger(maximumSearchResults) || maximumSearchResults < 1 || maximumSearchResults > 100) throw new Error("Invalid knowledge configuration");
   if (observation.model !== undefined && (typeof observation.model !== "string" || observation.model.length === 0 || observation.model.length > 200)) throw new Error("Invalid observation model");
+  if (config.currentInterests !== undefined && (!Array.isArray(config.currentInterests) || config.currentInterests.length > 50 || !config.currentInterests.every(item => typeof item === "string" && item.length > 0 && item.length <= 500))) throw new Error("Invalid current interests");
   return value as KnowledgeConfig;
 }

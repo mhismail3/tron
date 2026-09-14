@@ -1,0 +1,316 @@
+import { createHash } from "node:crypto";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
+import type {
+  KnowledgeEvidenceRef, KnowledgeObjectRef, KnowledgeRecord, KnowledgeRecordDraft,
+  KnowledgeScope, KnowledgeSourceCaptureRequest, SourceAssessment, SourceContent,
+  SourceIdentity, SourceOriginKind,
+} from "./knowledge-contract.js";
+import { KnowledgeStore } from "./knowledge-store.js";
+
+export const SOURCE_CAPTURE_LIMITS = {
+  maxBytes: 8_000_000,
+  maxReadableChars: 2_000_000,
+  timeoutMs: 15_000,
+  maxRedirects: 3,
+} as const;
+
+type ResolveHost = (hostname: string, signal?: AbortSignal) => Promise<string[]>;
+type SourceFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
+
+export interface SourceCaptureInput {
+  commandId: string;
+  url: string;
+  scope: KnowledgeScope;
+  title?: string;
+  annotations?: SourceContent["annotations"];
+  identity?: SourceIdentity;
+  origin?: SourceOriginKind;
+  expectedRevision?: string;
+  interests?: string[];
+}
+
+export interface SourceAssessmentModelInput {
+  title: string;
+  text: string;
+  interests: string[];
+  source: { uri?: string; mediaType?: string; capturedAt: string };
+}
+
+export interface SourceAssessmentModel {
+  assess(input: SourceAssessmentModelInput, signal: AbortSignal): Promise<Omit<SourceAssessment, "generatedAt"> & { generatedAt?: string }>;
+}
+
+export interface SourceCaptureOptions {
+  fetcher?: SourceFetch;
+  resolveHost?: ResolveHost;
+  model?: SourceAssessmentModel;
+  now?: () => string;
+  limits?: Partial<typeof SOURCE_CAPTURE_LIMITS>;
+  signal?: AbortSignal;
+}
+
+export interface SourceCaptureResult {
+  record: KnowledgeRecord & { kind: "source" };
+  duplicate: boolean;
+  fetched: boolean;
+  assessmentError?: string;
+}
+
+function invalid(message: string): Error { return new Error(message); }
+class SourceNetworkError extends Error {}
+function timestamp(now: () => string): string { return now(); }
+function sourceOrigin(kind: SourceOriginKind, at: string, input: { uri?: string; identity?: SourceIdentity } = {}): NonNullable<SourceContent["origins"]> { return [{ kind, capturedAt: at, ...(input.uri ? { uri: input.uri } : {}), ...(input.identity ? { identity: input.identity } : {}) }]; }
+
+function isPrivateAddress(address: string): boolean {
+  const normalized = address.toLowerCase().replace(/^\[|\]$/g, "");
+  const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped?.[1]) return isPrivateAddress(mapped[1]);
+  if (isIP(normalized) === 4) {
+    const octets = normalized.split(".").map(Number);
+    const [a = 0, b = 0] = octets;
+    return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+  }
+  if (isIP(normalized) === 6) {
+    const value = normalized.split("%")[0] ?? "";
+    return value === "::1" || value === "::" || value.startsWith("fc") || value.startsWith("fd") || value.startsWith("fe8") || value.startsWith("fe9") || value.startsWith("fea") || value.startsWith("feb") || value.startsWith("ff") || value.startsWith("::ffff:127.") || value.startsWith("::ffff:10.") || value.startsWith("::ffff:192.168.");
+  }
+  return true;
+}
+
+function assertSafeUrl(value: string): URL {
+  let parsed: URL;
+  try { parsed = new URL(value); } catch { throw invalid("Source URL is invalid"); }
+  if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password || parsed.hostname.length === 0) throw invalid("Source URL must be an http(s) URL without credentials");
+  return parsed;
+}
+
+/** URL diagnostics never include query strings or credentials. */
+export function redactSourceUrl(value: string): string {
+  try { const url = new URL(value); return `${url.protocol}//${url.host}${url.pathname}`; } catch { return "[invalid-url]"; }
+}
+
+async function defaultResolveHost(hostname: string): Promise<string[]> {
+  const answers = await lookup(hostname, { all: true, verbatim: true });
+  return answers.map(answer => answer.address);
+}
+
+async function pinnedFetch(url: URL, address: string, init: RequestInit = {}): Promise<Response> {
+  const transport = url.protocol === "https:" ? httpsRequest : httpRequest;
+  const headers = new Headers(init.headers);
+  headers.set("host", url.host);
+  return new Promise((resolve, reject) => {
+    const requestHeaders = Object.fromEntries([...headers].map(([name, value]) => [name, value]));
+    const req = transport({ hostname: address, ...(url.port ? { port: url.port } : {}), path: `${url.pathname}${url.search}`, method: "GET", headers: requestHeaders, ...(url.protocol === "https:" ? { servername: url.hostname } : {}), lookup: (_hostname, _options, callback) => callback(null, address, isIP(address)), }, response => {
+      const body = new ReadableStream<Uint8Array>({ start(controller) { response.on("data", chunk => controller.enqueue(new Uint8Array(chunk))); response.on("end", () => controller.close()); response.on("error", error => controller.error(error)); }, cancel() { response.destroy(); } });
+      const responseHeaders = Object.fromEntries(Object.entries(response.headers).map(([name, value]) => [name, Array.isArray(value) ? value.join(", ") : value ?? ""]));
+      resolve(new Response(body, { status: response.statusCode ?? 200, ...(response.statusMessage ? { statusText: response.statusMessage } : {}), headers: responseHeaders }));
+    });
+    const signal = init.signal;
+    const abort = () => req.destroy(new Error("Source fetch cancelled"));
+    if (signal?.aborted) abort(); else signal?.addEventListener("abort", abort, { once: true });
+    req.once("error", reject); req.once("close", () => signal?.removeEventListener("abort", abort)); req.end();
+  });
+}
+
+async function assertPublicDestination(url: URL, resolveHost: ResolveHost, signal?: AbortSignal): Promise<string> {
+  const hostname = url.hostname.toLowerCase();
+  if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local") || (isIP(hostname) !== 0 && isPrivateAddress(hostname))) throw invalid("Source destination is not publicly routable");
+  // Resolve every hop, including the initial hostname, before issuing a request.
+  const addresses = await Promise.race([
+    resolveHost(url.hostname, signal),
+    ...(signal ? [new Promise<string[]>((_, reject) => { if (signal.aborted) reject(new Error("Source destination resolution cancelled")); else signal.addEventListener("abort", () => reject(new Error("Source destination resolution cancelled")), { once: true }); })] : []),
+  ]);
+  if (addresses.length === 0 || addresses.some(isPrivateAddress)) throw invalid("Source destination is not publicly routable");
+  const address = addresses[0]; if (!address) throw invalid("Source destination is not publicly routable");
+  return address;
+}
+
+async function readBounded(response: Response, maxBytes: number, signal?: AbortSignal): Promise<{ bytes: Uint8Array; truncated: boolean }> {
+  if (!response.body) return { bytes: new Uint8Array(), truncated: false };
+  const reader = response.body.getReader();
+  const abort = () => { void reader.cancel(signal?.reason); };
+  if (signal?.aborted) abort(); else signal?.addEventListener("abort", abort, { once: true });
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      if (!next.value) continue;
+      const remaining = maxBytes - total;
+      if (next.value.byteLength > remaining) {
+        if (remaining > 0) chunks.push(next.value.slice(0, remaining));
+        total = maxBytes;
+        await reader.cancel();
+        return { bytes: joinBytes(chunks, total), truncated: true };
+      }
+      chunks.push(next.value);
+      total += next.value.byteLength;
+      if (total === maxBytes) {
+        const extra = await reader.read();
+        if (!extra.done) { await reader.cancel(); return { bytes: joinBytes(chunks, total), truncated: true }; }
+        return { bytes: joinBytes(chunks, total), truncated: false };
+      }
+    }
+    return { bytes: joinBytes(chunks, total), truncated: false };
+  } finally { signal?.removeEventListener("abort", abort); reader.releaseLock(); }
+}
+
+function joinBytes(chunks: Uint8Array[], length: number): Uint8Array {
+  const result = new Uint8Array(length); let offset = 0;
+  for (const chunk of chunks) { result.set(chunk, offset); offset += chunk.byteLength; }
+  return result;
+}
+
+function extractReadable(bytes: Uint8Array, mediaType: string | undefined, maxChars: number): { text: string; truncated: boolean } | undefined {
+  const normalized = (mediaType ?? "").split(";", 1)[0]!.trim().toLowerCase();
+  if (!(normalized.startsWith("text/") || ["application/xhtml+xml", "application/json", "application/xml", "application/ld+json"].includes(normalized))) return undefined;
+  let text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+  if (normalized === "text/html" || normalized === "application/xhtml+xml") {
+    text = text.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ").replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ").replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, " ").replace(/<!--([\s\S]*?)-->/g, " ").replace(/<[^>]*>/g, " ");
+    text = text.replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&#39;/g, "'").replace(/&quot;/gi, '"');
+  }
+  const normalizedText = text.replace(/[\t\r ]+/g, " ").replace(/\n\s*\n+/g, "\n\n").trim();
+  return normalizedText ? { text: normalizedText.slice(0, maxChars), truncated: normalizedText.length > maxChars } : undefined;
+}
+
+function titleFrom(bytes: Uint8Array, mediaType: string | undefined): string | undefined {
+  const normalized = (mediaType ?? "").toLowerCase();
+  if (!normalized.includes("html")) return undefined;
+  const text = new TextDecoder().decode(bytes.slice(0, 100_000));
+  return text.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/<[^>]+>/g, " ").trim().slice(0, 512) || undefined;
+}
+
+async function fetchSafe(inputUrl: string, options: { fetcher?: SourceFetch; resolveHost: ResolveHost; signal?: AbortSignal; limits: typeof SOURCE_CAPTURE_LIMITS }): Promise<{ response?: Response; bytes?: Uint8Array; truncated: boolean; finalUrl: string; disposition?: SourceContent["captureDisposition"]; mediaType?: string }> {
+  let current = assertSafeUrl(inputUrl);
+  for (let hop = 0; hop <= options.limits.maxRedirects; hop += 1) {
+    const address = await assertPublicDestination(current, options.resolveHost, options.signal);
+    const controller = new AbortController();
+    const onAbort = () => controller.abort(options.signal?.reason);
+    if (options.signal) { if (options.signal.aborted) controller.abort(options.signal.reason); else options.signal.addEventListener("abort", onAbort, { once: true }); }
+    let response: Response;
+    try { response = options.fetcher ? await options.fetcher(current, { redirect: "manual", signal: controller.signal }) : await pinnedFetch(current, address, { signal: controller.signal }); }
+    catch { options.signal?.removeEventListener("abort", onAbort); throw new SourceNetworkError("Source fetch failed"); }
+    options.signal?.removeEventListener("abort", onAbort);
+    const location = response.headers.get("location");
+    if (location && [301, 302, 303, 307, 308].includes(response.status)) {
+      await response.body?.cancel().catch(() => {});
+      if (hop === options.limits.maxRedirects) throw invalid("Source redirect limit exceeded");
+      current = assertSafeUrl(new URL(location, current).toString());
+      continue;
+    }
+    const mediaType = response.headers.get("content-type") ?? undefined;
+    if (response.status === 401 || response.status === 403 || response.status === 407 || response.status === 429) { await response.body?.cancel().catch(() => {}); return { response, truncated: false, finalUrl: current.toString(), disposition: "inaccessible", ...(mediaType ? { mediaType } : {}) }; }
+    if (!response.ok) { await response.body?.cancel().catch(() => {}); return { response, truncated: false, finalUrl: current.toString(), disposition: "failed", ...(mediaType ? { mediaType } : {}) }; }
+    const bounded = await readBounded(response, options.limits.maxBytes, options.signal);
+    if (options.signal?.aborted) throw new SourceNetworkError("Source fetch deadline exceeded");
+    return { response, bytes: bounded.bytes, truncated: bounded.truncated, finalUrl: current.toString(), ...(mediaType ? { mediaType } : {}) };
+  }
+  throw invalid("Source redirect limit exceeded");
+}
+
+async function allSourceRecords(store: KnowledgeStore): Promise<Array<KnowledgeRecord & { kind: "source" }>> {
+  const result: Array<KnowledgeRecord & { kind: "source" }> = [];
+  let cursor: string | undefined;
+  do {
+    const page = await store.list({ kind: "source", includeSuppressed: true, limit: 100, ...(cursor ? { cursor } : {}) });
+    result.push(...page.records.filter((record): record is KnowledgeRecord & { kind: "source" } => record.kind === "source"));
+    cursor = page.nextCursor;
+  } while (cursor);
+  return result;
+}
+
+function normalizedUrl(value: string): string {
+  const url = new URL(value); url.hash = ""; url.hostname = url.hostname.toLowerCase();
+  if ((url.protocol === "https:" && url.port === "443") || (url.protocol === "http:" && url.port === "80")) url.port = "";
+  return url.toString();
+}
+
+function sourceDraft(input: SourceCaptureInput, content: SourceContent, evidence: KnowledgeEvidenceRef[] = []): KnowledgeRecordDraft & { kind: "source" } {
+  return { kind: "source", scope: input.scope, provenance: { actor: input.origin === "connector" ? "connector" : input.origin === "import" ? "import" : "user", ...(input.identity ? { source: `${input.identity.provider}:${input.identity.accountId}:${input.identity.itemId}` } : {}), evidence }, relations: [], content };
+}
+
+/** Capture is durable before optional assessment. Assessment errors are returned, not promoted to capture failures. */
+export async function captureSource(store: KnowledgeStore, input: SourceCaptureInput, options: SourceCaptureOptions = {}): Promise<SourceCaptureResult> {
+  const now = options.now ?? (() => new Date().toISOString());
+  const limits = { ...SOURCE_CAPTURE_LIMITS, ...(options.limits ?? {}) };
+  if (!Number.isSafeInteger(limits.maxBytes) || limits.maxBytes < 1 || limits.maxBytes > SOURCE_CAPTURE_LIMITS.maxBytes || !Number.isSafeInteger(limits.maxRedirects) || limits.maxRedirects < 0 || limits.maxRedirects > SOURCE_CAPTURE_LIMITS.maxRedirects || !Number.isSafeInteger(limits.timeoutMs) || limits.timeoutMs < 100 || limits.timeoutMs > SOURCE_CAPTURE_LIMITS.timeoutMs) throw invalid("Invalid source capture limits");
+  const sourceUrl = assertSafeUrl(input.url);
+  const existing = await allSourceRecords(store);
+  const normalized = normalizedUrl(sourceUrl.toString());
+  const duplicate = existing.find(record => record.scope === input.scope && record.content.captureDisposition !== "failed" && record.content.captureDisposition !== "inaccessible" && ((input.identity && record.content.identity && JSON.stringify(record.content.identity) === JSON.stringify(input.identity)) || (record.content.uri && normalizedUrl(record.content.uri) === normalized)));
+  if (duplicate) {
+    const kind = input.origin ?? "manual";
+    const origins = duplicate.content.origins ?? (duplicate.content.origin ? [{ kind: duplicate.content.origin, capturedAt: duplicate.content.capturedAt }] : []);
+    const nextOrigins = origins.some(origin => origin.kind === kind && JSON.stringify(origin.identity) === JSON.stringify(input.identity)) ? origins : [...origins, { kind, capturedAt: now(), ...(duplicate.content.uri ? { uri: duplicate.content.uri } : {}), ...(input.identity ? { identity: input.identity } : {}) }];
+    const annotations = input.annotations ? [...(duplicate.content.annotations ?? []), ...input.annotations.filter(annotation => !(duplicate.content.annotations ?? []).some(previous => previous.text === annotation.text && previous.locator === annotation.locator))] : duplicate.content.annotations;
+    if (nextOrigins.length !== origins.length || annotations?.length !== duplicate.content.annotations?.length) {
+      const mergedContent: SourceContent = { ...duplicate.content, origins: nextOrigins, ...(annotations ? { annotations } : {}) };
+      const merged = await store.captureSource({ commandId: input.commandId, expectedRevision: duplicate.revisionId, record: { kind: "source", id: duplicate.id, createdAt: duplicate.createdAt, scope: duplicate.scope, provenance: duplicate.provenance, relations: duplicate.relations, ...(duplicate.temporal ? { temporal: duplicate.temporal } : {}), content: mergedContent } });
+      if (merged.record.kind !== "source") throw new Error("Source deduplication returned a non-source record");
+      return { record: merged.record, duplicate: true, fetched: false };
+    }
+    return { record: duplicate, duplicate: true, fetched: false };
+  }
+  const fetcher = options.fetcher;
+  const resolveHost = options.resolveHost ?? defaultResolveHost;
+  const operationController = new AbortController();
+  const relayAbort = () => operationController.abort(options.signal?.reason);
+  if (options.signal) { if (options.signal.aborted) operationController.abort(options.signal.reason); else options.signal.addEventListener("abort", relayAbort, { once: true }); }
+  const deadlineTimer = setTimeout(() => operationController.abort(new Error("Source operation deadline exceeded")), limits.timeoutMs); deadlineTimer.unref?.();
+  let fetched: Awaited<ReturnType<typeof fetchSafe>>;
+  try {
+    fetched = await fetchSafe(sourceUrl.toString(), { ...(fetcher ? { fetcher } : {}), resolveHost, signal: operationController.signal, limits });
+  } catch (error) {
+    if (!(error instanceof SourceNetworkError)) throw error;
+    if (operationController.signal.aborted) { clearTimeout(deadlineTimer); options.signal?.removeEventListener("abort", relayAbort); throw invalid("Source fetch timed out or was cancelled"); }
+    const capturedAt = timestamp(now);
+    const failedContent: SourceContent = { title: input.title?.trim() || sourceUrl.hostname, uri: sourceUrl.toString(), captureDisposition: "failed", capturedAt, origin: input.origin ?? "manual", origins: sourceOrigin(input.origin ?? "manual", capturedAt, { uri: sourceUrl.toString(), ...(input.identity ? { identity: input.identity } : {}) }), ...(input.annotations ? { annotations: input.annotations } : {}), ...(input.identity ? { identity: input.identity } : {}) };
+    const failed = await store.captureSource({ commandId: input.commandId, ...(input.expectedRevision ? { expectedRevision: input.expectedRevision } : {}), record: sourceDraft(input, failedContent) });
+    if (failed.record.kind !== "source") throw new Error("Source capture returned a non-source record");
+    clearTimeout(deadlineTimer); options.signal?.removeEventListener("abort", relayAbort);
+    return { record: failed.record, duplicate: false, fetched: false };
+  }
+  const capturedAt = timestamp(now);
+  const bytes = fetched.bytes;
+  const mediaType = fetched.mediaType;
+  const readable = bytes && bytes.byteLength ? extractReadable(bytes, mediaType, SOURCE_CAPTURE_LIMITS.maxReadableChars) : undefined;
+  const disposition: SourceContent["captureDisposition"] = fetched.disposition ?? (bytes && bytes.byteLength > 0 ? (readable === undefined ? "metadata-only" : fetched.truncated || readable.truncated ? "partial" : "complete") : "metadata-only");
+  let object: KnowledgeObjectRef | undefined;
+  if (bytes && bytes.byteLength > 0) {
+    const contentHash = createHash("sha256").update(bytes).digest("hex");
+    const contentDuplicate = existing.find(record => record.scope === input.scope && record.content.captureDisposition !== "failed" && record.content.captureDisposition !== "inaccessible" && record.content.object?.hash === contentHash);
+    if (contentDuplicate) { clearTimeout(deadlineTimer); options.signal?.removeEventListener("abort", relayAbort); return { record: contentDuplicate, duplicate: true, fetched: true }; }
+    object = await store.putObject(bytes, mediaType ?? "application/octet-stream");
+  }
+  const kind = input.origin ?? "manual";
+  const content: SourceContent = {
+    title: input.title?.trim() || titleFrom(bytes ?? new Uint8Array(), mediaType) || sourceUrl.hostname,
+    uri: fetched.finalUrl,
+    ...(readable ? { text: readable.text } : {}), ...(object ? { object } : {}), ...(mediaType ? { mediaType } : {}),
+    captureDisposition: disposition, ...(input.annotations ? { annotations: input.annotations } : {}), capturedAt,
+    origin: kind, origins: sourceOrigin(kind, capturedAt, { uri: fetched.finalUrl, ...(input.identity ? { identity: input.identity } : {}) }), ...(input.identity ? { identity: input.identity } : {}),
+  };
+  const request: KnowledgeSourceCaptureRequest = { commandId: input.commandId, ...(input.expectedRevision ? { expectedRevision: input.expectedRevision } : {}), record: sourceDraft(input, content) };
+  let result = await store.captureSource(request);
+  if (result.record.kind !== "source") throw new Error("Source capture returned a non-source record");
+  let sourceRecord = result.record;
+  let assessmentError: string | undefined;
+  if (options.model && readable && disposition !== "inaccessible" && disposition !== "failed") {
+    try {
+      const interests = input.interests ?? (await store.config()).currentInterests ?? [];
+      const assessment = await options.model.assess({ title: sourceRecord.content.title, text: readable.text.slice(0, 100_000), interests: interests.slice(0, 50).map(item => item.slice(0, 500)), source: { ...(sourceRecord.content.uri ? { uri: sourceRecord.content.uri } : {}), ...(mediaType ? { mediaType } : {}), capturedAt } }, operationController.signal);
+      const assessed: SourceContent = { ...sourceRecord.content, assessment: { ...assessment, generatedAt: assessment.generatedAt ?? now() } };
+      result = await store.captureSource({ commandId: `${input.commandId}:assessment`, expectedRevision: sourceRecord.revisionId, record: { ...sourceDraft(input, assessed), id: sourceRecord.id, createdAt: sourceRecord.createdAt } });
+      if (result.record.kind !== "source") throw new Error("Source assessment returned a non-source record");
+      sourceRecord = result.record;
+    } catch (error) { assessmentError = error instanceof Error ? error.message : "Source assessment failed"; }
+  }
+  clearTimeout(deadlineTimer); options.signal?.removeEventListener("abort", relayAbort);
+  return { record: sourceRecord, duplicate: false, fetched: true, ...(assessmentError ? { assessmentError } : {}) };
+}
+
+export { assertPublicDestination, isPrivateAddress };
