@@ -9,6 +9,7 @@ import {
   ModelRuntime,
   parseSessionEntries,
   SessionManager,
+  type FileEntry,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
@@ -42,6 +43,7 @@ import {
 import { RunMarkerStore, type RunMarkerEvidence } from "./run-markers.js";
 import {
   RuntimeSlot,
+  observationBranchIdFor,
   completionOwnedByMarker,
   type CanonicalAssistantCompletion,
   type SessionAttentionRebindDisposition,
@@ -75,6 +77,7 @@ import {
 import { branchFromParsedSession } from "./session-branch.js";
 import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-boundary.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
+import { observationEntriesDigest } from "../knowledge/knowledge-observation.js";
 
 const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
 /** A read-only child observer may page only canonical sessions that fit this
@@ -577,22 +580,57 @@ export class RuntimeRegistry {
   }
 
   /** Re-admit only durable pending/failed Knowledge cuts after restart. The
-   * session runtime supplies the exact active branch; no prompt or tool is
-   * replayed and a missing/changed branch remains an honest pending gap. */
+   * canonical slot supplies the exact currently selected branch; recovery does
+   * not acquire or pin a foreground runtime, replay a prompt/tool, or invent
+   * provenance. Missing/non-active/changed coverage is made explicitly
+   * unavailable so it remains visible as a bounded gap. */
   async recoverKnowledgeObservation(): Promise<void> {
     const knowledge = this.knowledgeService;
     if (!knowledge) return;
-    const pending = await knowledge.pendingObservationCoverage(32).catch(() => []);
+    const pending = await knowledge.pendingObservationCoverage(100).catch(() => []);
+    const config = await knowledge.store.config().catch(() => undefined);
+    if (!config) return;
     for (const coverage of pending) {
-      const slot = await this.acquire(coverage.range.sessionId).catch(() => undefined);
-      if (!slot || slot.isDisposed) continue;
-      const branch = slot.canonicalSessionEntries().slice(1);
+      const markUnavailable = async (reason: string): Promise<void> => {
+        await knowledge.store.setCoverage({
+          commandId: `knowledge-recovery-unavailable-${coverage.id}`,
+          expectedConfigRevision: config.revision,
+          expectedRevision: coverage.revisionId,
+          coverage: { ...coverage, disposition: "unavailable", groupRevisionIds: [], reason },
+        }).catch(() => {});
+      };
+      let branch: FileEntry[];
+      let branchId: string;
+      const slot = this.slots.get(coverage.range.sessionId);
+      if (slot && !slot.isDisposed) {
+        branch = slot.canonicalSessionEntries().slice(1);
+        branchId = slot.canonicalObservationBranchId();
+      } else {
+        // Read the admitted canonical file without constructing a live slot.
+        // This keeps recovery useful after restart while avoiding foreground
+        // ownership, model/session initialization, or a second runtime.
+        const candidates = this.catalogStructuralIndex?.allInfos.filter(info => info.id === coverage.range.sessionId) ?? [];
+        if (candidates.length !== 1) { await markUnavailable(candidates.length === 0 ? "canonical-session-unavailable" : "canonical-session-identity-ambiguous"); continue; }
+        let manager: SessionManager;
+        try { manager = SessionManager.open(candidates[0]!.path, this.sessionDirectoryFor(candidates[0]!.cwd)); } catch { await markUnavailable("canonical-session-read-failed"); continue; }
+        const canonical = manager.getHeader() ? [manager.getHeader()!, ...manager.getBranch()] : [];
+        branch = canonical.slice(1);
+        const anchor = await this.resolveForkBoundary(manager).catch(() => undefined);
+        branchId = observationBranchIdFor(canonical, manager.getEntries(), anchor?.inheritedEntryId);
+      }
+      if (branchId !== (coverage.range.branchId ?? "root")) { await markUnavailable("coverage-branch-not-active"); continue; }
       const start = branch.findIndex(entry => entry.id === coverage.range.fromEntryId);
-      if (start < 0) continue;
+      if (start < 0) { await markUnavailable("coverage-start-is-unavailable"); continue; }
       const entries = branch.slice(start, start + coverage.range.entryIds.length);
-      if (entries.length !== coverage.range.entryIds.length
-        || entries.some((entry, index) => entry.id !== coverage.range.entryIds[index])) continue;
-      knowledge.observe({ sessionId: coverage.range.sessionId, entries, outcome: "outcomeUnknown", ...(coverage.range.branchId ? { branchId: coverage.range.branchId } : {}), ...(coverage.range.projectId ? { projectId: coverage.range.projectId } : {}) });
+      if (entries.length !== coverage.range.entryIds.length || entries.some((entry, index) => entry.id !== coverage.range.entryIds[index])) { await markUnavailable("coverage-entry-sequence-changed"); continue; }
+      if (observationEntriesDigest(entries) !== coverage.range.entryDigest) { await markUnavailable("coverage-digest-changed"); continue; }
+      knowledge.observe({
+        sessionId: coverage.range.sessionId, entries, outcome: "outcomeUnknown",
+        ...(coverage.range.branchId ? { branchId: coverage.range.branchId } : {}),
+        ...(coverage.range.projectId ? { projectId: coverage.range.projectId } : {}),
+        ...(coverage.range.invocationIds?.[0] ? { invocationId: coverage.range.invocationIds[0] } : {}),
+        ...(coverage.range.invocationIds ? { invocationIds: coverage.range.invocationIds } : {}),
+      });
     }
   }
 

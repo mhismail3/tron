@@ -47,6 +47,42 @@ describe("KnowledgeService integration", () => {
     expect(read.details).toMatchObject({ record: { provenance: { actor: "agent" }, content: { body: "updated" } } });
   });
 
+  it("synthesizes exact source and note revisions through the registered knowledge tool", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const configured = await store.configure("service-synthesis-config", { ...(await store.config()), observation: { ...(await store.config()).observation, enabled: true, model: "fixture/model" } });
+    const source = await store.captureSource({ commandId: "service-synthesis-source", record: {
+      kind: "source", scope: "research", provenance: { actor: "connector", source: "fixture:account:item", evidence: [] }, relations: [],
+      content: { title: "Partial source", text: "source evidence", captureDisposition: "partial", capturedAt: "2026-01-01T00:00:00Z" },
+    }});
+    const note = await store.createNote({ commandId: "service-synthesis-note", record: {
+      kind: "note", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [],
+      content: { title: "Qualification", body: "candidate claim", role: "preference", confirmed: false, freshness: "aging", contraryEvidence: [{ recordId: source.record.id, revisionId: source.record.revisionId }] },
+    }});
+    let input = "";
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => ({ ...model(), async synthesize(request) { input = request.sourceText; return "bounded synthesis retaining uncertainty"; } }));
+    const result = await service.tool({ action: "synthesis", commandId: "service-synthesis", sessionId: "synthetic-session", sourceRevisionIds: [source.record.revisionId, note.record.revisionId] });
+    const generated = (result.details as { record: import("./knowledge-contract.js").KnowledgeRecord }).record;
+    expect(generated).toMatchObject({ kind: "note", scope: "research", content: { role: "synthesis", confirmed: false, body: "bounded synthesis retaining uncertainty" } });
+    expect(generated.provenance.evidence).toEqual([{ recordId: source.record.id, revisionId: source.record.revisionId }, { recordId: note.record.id, revisionId: note.record.revisionId }]);
+    expect(input).toContain("disposition=partial");
+    expect(input).toContain("confirmed=false");
+    expect(input).toContain("contraryEvidence");
+    expect(configured.revision).toBe(1);
+  });
+
+  it("does not publish a late synthesis when the model ignores cancellation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    await store.configure("service-late-config", { ...(await store.config()), observation: { ...(await store.config()).observation, enabled: true, model: "fixture/model" } });
+    const source = await store.captureSource({ commandId: "service-late-source", record: { kind: "source", scope: "research", provenance: { actor: "connector", evidence: [] }, relations: [], content: { title: "Source", text: "evidence", captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z" } } });
+    const controller = new AbortController();
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => ({ ...model(), async synthesize() { return "late result"; } }));
+    controller.abort(new Error("cancelled"));
+    await expect(service.tool({ action: "synthesis", commandId: "service-late-synthesis", sessionId: "synthetic-session", sourceRevisionIds: [source.record.revisionId] }, controller.signal)).rejects.toMatchObject({ code: "busy" });
+    expect((await store.list({ kind: "note" })).records).toHaveLength(0);
+  });
+
   it("rejects excluded observation revisions before invoking the Reflector", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));

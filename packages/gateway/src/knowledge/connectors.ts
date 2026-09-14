@@ -206,12 +206,12 @@ export class KnowledgeConnectorExtension {
           // bounded canonical object instead of certifying a public-page fetch.
           if (item.apiPayload && capturedRecord.content.captureDisposition !== "failed") {
             const apiObject = await this.store.putObject(new TextEncoder().encode(item.apiPayload), "application/json");
-            const updated = await this.store.captureSource({ commandId: command(request.commandId, `api-evidence-${item.id}`), expectedRevision: capturedRecord.revisionId, record: { kind: "source", id: capturedRecord.id, createdAt: capturedRecord.createdAt, scope: capturedRecord.scope, provenance: capturedRecord.provenance, relations: capturedRecord.relations, content: { ...capturedRecord.content, object: apiObject } } });
+            const updated = await this.store.captureSource({ commandId: command(request.commandId, `api-evidence-${item.id}`), expectedRevision: capturedRecord.revisionId, record: { kind: "source", id: capturedRecord.id, createdAt: capturedRecord.createdAt, scope: capturedRecord.scope, provenance: capturedRecord.provenance, relations: capturedRecord.relations, content: { ...capturedRecord.content, representations: [...(capturedRecord.content.representations ?? []), { kind: "provider-api", object: apiObject, mediaType: "application/json" }] } } });
             if (updated.record.kind === "source") capturedRecord = updated.record;
           }
           if (capturedRecord.content.captureDisposition !== "complete") { partial += 1; lastError = `Capture for ${item.id} is ${capturedRecord.content.captureDisposition}`; break; }
           if (connector === "raindrop" && state.allowWrites && state.destination && item.collectionId && item.collectionId !== state.destination) {
-            const moved = await this.moveRaindrop({ commandId: command(request.commandId, `move-${item.id}`), itemId: item.id, source: capturedRecord, expectedRevision: capturedRecord.revisionId, identity: { provider: connector, accountId: state.accountId!, itemId: item.id }, destination: state.destination });
+            const moved = await this.moveRaindrop({ commandId: command(request.commandId, `move-${item.id}`), itemId: item.id, source: capturedRecord, expectedRevision: capturedRecord.revisionId, identity: { provider: connector, accountId: state.accountId!, itemId: item.id }, destination: state.destination }, signal);
             if (moved.status !== "moved") { lastError = moved.status === "unsupported" ? "Approved Raindrop move is unavailable" : "Raindrop move could not be verified"; break; }
           }
           captured += 1;
@@ -262,7 +262,7 @@ export class KnowledgeConnectorExtension {
     const basis = await this.store.read(pending.basisRecordId, pending.basisRevisionId);
     const basisIdentity = basis?.kind === "source" ? basis.content.identity : undefined;
     const basisOrigin = basis?.kind === "source" && basis.content.origins?.some(origin => origin.identity?.provider === pending.provider && origin.identity.accountId === pending.accountId && origin.identity.itemId === pending.itemId);
-    if (!basis || basis.kind !== "source" || basis.revisionId !== pending.basisRevisionId
+    if (!basis || basis.kind !== "source" || basis.revisionId !== pending.basisRevisionId || !isVerifiedSourceCapture(basis)
       || (!basisIdentity && !basisOrigin)
       || (basisIdentity && basisIdentity.provider !== pending.provider && !basisOrigin)
       || (basisIdentity && basisIdentity.accountId !== pending.accountId && !basisOrigin)
@@ -289,34 +289,49 @@ export class KnowledgeConnectorExtension {
 
   /** Raindrop-only reversible move. Capture must be locally complete and the
    * exact pending effect is durable before the provider mutation is attempted. */
-  async moveRaindrop(input: { commandId: string; itemId: string; source: KnowledgeRecord & { kind: "source" }; expectedRevision?: string; identity?: { provider: string; accountId: string; itemId: string }; destination: string }): Promise<{ status: "moved" | "conflict" | "unsupported" }> {
-    if (!isVerifiedSourceCapture(input.source)) return { status: "unsupported" };
+  async moveRaindrop(input: { commandId: string; itemId: string; source: KnowledgeRecord & { kind: "source" }; expectedRevision?: string; identity?: { provider: string; accountId: string; itemId: string }; destination: string }, externalSignal?: AbortSignal): Promise<{ status: "moved" | "conflict" | "unsupported" }> {
     const state = await this.store.connectorState("raindrop"); if (!state?.enabled || !state.allowWrites || !state.credentialRef) return { status: "unsupported" };
-    if (!state.destination || state.destination !== input.destination) return { status: "conflict" };
+    if (!input.expectedRevision || !input.identity || input.identity.itemId !== input.itemId || input.source.revisionId !== input.expectedRevision) return { status: "conflict" };
+    // The caller's object is only a hint. Re-read the exact revision so a held
+    // JS record cannot bypass forget/exclusion or a source correction.
+    let source: KnowledgeRecord | null;
+    try { source = await this.store.read(input.source.id, input.expectedRevision); } catch { return { status: "conflict" }; }
+    if (!source || source.kind !== "source" || !isVerifiedSourceCapture(source)) return { status: "unsupported" };
+    if (!state.destination || state.destination !== input.destination || state.accountId !== input.identity.accountId) return { status: "conflict" };
     if (state.paidBudgetCents > 0) return { status: "unsupported" };
     const token = await this.options.credentials.read(state.credentialRef); if (!token) return { status: "unsupported" };
-    const capturedIdentity = input.source.content.identity;
-    const incomingOrigin = input.identity && input.source.content.origins?.some(origin => origin.identity?.provider === input.identity!.provider && origin.identity.accountId === input.identity!.accountId && origin.identity.itemId === input.identity!.itemId);
-    const primaryIdentityMatches = Boolean(capturedIdentity && input.identity && capturedIdentity.provider === input.identity.provider && capturedIdentity.accountId === input.identity.accountId && capturedIdentity.itemId === input.identity.itemId);
-    if (!input.expectedRevision || !input.identity || input.source.revisionId !== input.expectedRevision
-      || (!primaryIdentityMatches && !incomingOrigin)
-      || input.identity.itemId !== input.itemId) return { status: "conflict" };
+    const capturedIdentity = source.content.identity;
+    const incomingOrigin = source.content.origins?.some(origin => origin.identity?.provider === input.identity!.provider && origin.identity.accountId === input.identity!.accountId && origin.identity.itemId === input.identity!.itemId);
+    const primaryIdentityMatches = Boolean(capturedIdentity && capturedIdentity.provider === input.identity.provider && capturedIdentity.accountId === input.identity.accountId && capturedIdentity.itemId === input.identity.itemId);
+    if ((!primaryIdentityMatches && !incomingOrigin) || input.identity.provider !== "raindrop") return { status: "conflict" };
+    const abort = new AbortController();
+    const signal = externalSignal ? AbortSignal.any([abort.signal, externalSignal]) : abort.signal;
     // Preflight the exact item immediately before recording and applying the
-    // effect. A configured collection is not proof of the item's current
-    // location; stop rather than moving a user-edited bookmark.
-    const preflight = await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrop/${encodeURIComponent(input.itemId)}`, token, { sleep: this.sleep, signal: new AbortController().signal });
+    // effect. A configured collection is not proof of its current location.
+    const preflight = await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrop/${encodeURIComponent(input.itemId)}`, token, { sleep: this.sleep, signal });
+    if (signal.aborted) return { status: "conflict" };
+    // Re-read both authorities after the await: native/user revocation and a
+    // source forget/correction must win over the preflight snapshot.
+    const latestState = await this.store.connectorState("raindrop");
+    const latestSource = await this.store.read(source.id, input.expectedRevision).catch(() => null);
+    if (!latestState?.enabled || !latestState.allowWrites || latestState.accountId !== input.identity.accountId || latestState.scope !== state.scope || latestState.credentialRef !== state.credentialRef || latestState.destination !== input.destination || latestState.paidBudgetCents > 0 || !latestSource || latestSource.kind !== "source" || !isVerifiedSourceCapture(latestSource)) return { status: "conflict" };
     const remoteItemId = id(preflight.value?.item?._id ?? preflight.value?._id, "Raindrop item");
     const originalCollectionId = String(preflight.value?.item?.collection?.$id ?? preflight.value?.collection?.$id ?? "");
-    if (!remoteItemId || remoteItemId !== input.identity.itemId || !originalCollectionId || originalCollectionId !== state.scope) return { status: "conflict" };
-    const pending = { operationId: input.commandId, itemId: input.itemId, action: "move" as const, basisRecordId: input.source.id, basisRevisionId: input.expectedRevision, provider: input.identity.provider, accountId: input.identity.accountId, originalCollectionId, destination: input.destination, createdAt: this.now() };
-    await this.store.updateConnectorState(input.commandId, "raindrop", current => ({ ...(current ?? state), pendingRemote: pending }));
-    const abort = new AbortController();
+    if (!remoteItemId || remoteItemId !== input.identity.itemId || !originalCollectionId || originalCollectionId !== latestState.scope) return { status: "conflict" };
+    const pending = { operationId: input.commandId, itemId: input.itemId, action: "move" as const, basisRecordId: latestSource.id, basisRevisionId: latestSource.revisionId, provider: input.identity.provider, accountId: input.identity.accountId, originalCollectionId, destination: input.destination, createdAt: this.now() };
+    await this.store.updateConnectorState(input.commandId, "raindrop", current => ({ ...(current ?? latestState), pendingRemote: pending }));
+    if (signal.aborted) return { status: "conflict" };
+    // Recheck write authority at the effect boundary as well. If permission
+    // is revoked after the durable receipt, retain uncertainty for reconcile
+    // but never issue the remote PUT.
+    const effectState = await this.store.connectorState("raindrop");
+    if (!effectState?.enabled || !effectState.allowWrites || effectState.accountId !== input.identity.accountId || effectState.scope !== latestState.scope || effectState.credentialRef !== latestState.credentialRef || effectState.destination !== input.destination || effectState.paidBudgetCents > 0) return { status: "conflict" };
     try {
-      await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrop/${encodeURIComponent(input.itemId)}`, token, { method: "PUT", body: { collection: { $id: input.destination } }, sleep: this.sleep, signal: abort.signal });
-      const verified = await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrop/${encodeURIComponent(input.itemId)}`, token, { sleep: this.sleep, signal: abort.signal });
+      await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrop/${encodeURIComponent(input.itemId)}`, token, { method: "PUT", body: { collection: { $id: input.destination } }, sleep: this.sleep, signal });
+      const verified = await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrop/${encodeURIComponent(input.itemId)}`, token, { sleep: this.sleep, signal });
       const collection = verified.value?.item?.collection?.$id ?? verified.value?.collection?.$id;
       if (String(collection) !== input.destination) return { status: "conflict" };
-      await this.store.updateConnectorState(`${input.commandId}:complete`, "raindrop", current => { const next = current ?? state; const { pendingRemote: _pending, ...rest } = next; return rest; });
+      await this.store.updateConnectorState(`${input.commandId}:complete`, "raindrop", current => { const next = current ?? latestState; const { pendingRemote: _pending, ...rest } = next; return rest; });
       return { status: "moved" };
     } catch { return { status: "conflict" }; }
   }

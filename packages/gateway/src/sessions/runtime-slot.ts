@@ -359,24 +359,32 @@ export interface RuntimeDrainBlockerFact {
  */
 /** Derive a stable scope from the canonical active branch. A leaf hash is
  * intentionally avoided: continuing a branch must not create a new privacy
- * scope, while sibling choices in one JSONL file must remain isolated. */
+ * scope, while sibling choices in one JSONL file must remain isolated. The
+ * first child is the append-order continuation of its parent; only later
+ * sibling choices add lineage. This is important because appending a sibling
+ * must not retroactively move the original conversation into a new scope. */
 export function observationBranchIdFor(
   activeEntries: readonly FileEntry[],
   allEntries: readonly FileEntry[],
   inheritedAnchor?: string,
 ): string {
   const entries = activeEntries.filter(entry => entry.type !== "session" && entry.type !== "label");
-  const siblingCounts = new Map<string, number>();
+  const siblings = new Map<string, string[]>();
   for (const entry of allEntries) {
     if (entry.type === "session" || entry.type === "label") continue;
     const parent = entry.parentId ?? "<root>";
-    siblingCounts.set(parent, (siblingCounts.get(parent) ?? 0) + 1);
+    const children = siblings.get(parent) ?? [];
+    if (!children.includes(entry.id)) children.push(entry.id);
+    siblings.set(parent, children);
   }
-  const divergence = entries
-    .filter(entry => (siblingCounts.get(entry.parentId ?? "<root>") ?? 0) > 1)
+  // A branch's identity is its inherited anchor plus the choices that were
+  // appended after the canonical first child at each fork. Future appends do
+  // not alter an already-selected first-child continuation.
+  const choices = entries
+    .filter(entry => (siblings.get(entry.parentId ?? "<root>") ?? []).indexOf(entry.id) > 0)
     .map(entry => `${entry.parentId ?? "<root>"}\0${entry.id}`);
-  if (divergence.length === 0 && !inheritedAnchor) return "root";
-  const lineage = [inheritedAnchor ? `parent\0${inheritedAnchor}` : undefined, ...divergence]
+  if (choices.length === 0 && !inheritedAnchor) return "root";
+  const lineage = [inheritedAnchor ? `parent\0${inheritedAnchor}` : undefined, ...choices]
     .filter((value): value is string => value !== undefined);
   return `branch-${createHash("sha256").update(lineage.join("\n")).digest("hex").slice(0, 48)}`;
 }
@@ -809,6 +817,12 @@ export class RuntimeSlot {
 
   private observationBranchId(entries: readonly FileEntry[]): string {
     return observationBranchIdFor(entries, this.sessionManager.getEntries(), this.forkBoundary?.inheritedEntryId);
+  }
+
+  /** Recovery reads the currently selected SDK branch without acquiring a
+   * foreground lease or opening a second session runtime. */
+  canonicalObservationBranchId(): string {
+    return this.observationBranchId(this.canonicalSessionEntries());
   }
 
   private observationEntries(operationId: string, endEntryId?: string): { entries: readonly FileEntry[]; branchId: string } {
