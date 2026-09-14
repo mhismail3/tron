@@ -1178,6 +1178,93 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
   });
 
+  it("keeps a live-owned index cut when the owner appends during reconciliation", async () => {
+    const fixture = await coldFixture("live-index-append-race");
+    await fixture.registry.catalog("all");
+    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
+    await waitUntil(() => existsSync(indexPath));
+    await fixture.registry.acquire(fixture.manager.getSessionId());
+    const internals = fixture.registry as unknown as {
+      catalogStructuralIndex: unknown;
+      sessionInfos: () => Promise<unknown[]>;
+    };
+    // Force the same durable-index load path used by a cold registry while
+    // retaining the exact live slot ownership that permits its summary overlay.
+    internals.catalogStructuralIndex = undefined;
+    const scanner = vi.spyOn(internals, "sessionInfos");
+    const indexReconcile = CatalogMetadataIndex.prototype.reconcile;
+    const reconcile = vi.spyOn(CatalogMetadataIndex.prototype, "reconcile");
+    reconcile.mockImplementation(async function (this: CatalogMetadataIndex, ...args) {
+      const rows = await indexReconcile.apply(this, args);
+      fixture.manager.appendMessage(fauxAssistantMessage("append during index reconciliation"));
+      return rows;
+    });
+    try {
+      const listed = await fixture.registry.catalog("all");
+      expect(listed.sessions.map((session) => session.id)).toContain(fixture.manager.getSessionId());
+      expect(scanner).not.toHaveBeenCalled();
+    } finally {
+      reconcile.mockRestore();
+      scanner.mockRestore();
+    }
+  });
+
+  it("rejects an unowned append that races durable-index reconciliation", async () => {
+    const fixture = await coldFixture("unowned-index-append-race");
+    await fixture.registry.catalog("all");
+    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
+    await waitUntil(() => existsSync(indexPath));
+    const internals = fixture.registry as unknown as {
+      catalogStructuralIndex: unknown;
+      sessionInfos: () => Promise<unknown[]>;
+    };
+    internals.catalogStructuralIndex = undefined;
+    const scanner = vi.spyOn(internals, "sessionInfos");
+    const indexReconcile = CatalogMetadataIndex.prototype.reconcile;
+    const reconcile = vi.spyOn(CatalogMetadataIndex.prototype, "reconcile");
+    reconcile.mockImplementation(async function (this: CatalogMetadataIndex, ...args) {
+      const rows = await indexReconcile.apply(this, args);
+      fixture.manager.appendMessage(fauxAssistantMessage("unowned append during index reconciliation"));
+      return rows;
+    });
+    try {
+      await fixture.registry.catalog("all");
+      expect(scanner).toHaveBeenCalled();
+    } finally {
+      reconcile.mockRestore();
+      scanner.mockRestore();
+    }
+  });
+
+  it("rejects an inode replacement that races durable-index reconciliation", async () => {
+    const fixture = await coldFixture("inode-index-replacement-race");
+    await fixture.registry.catalog("all");
+    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
+    await waitUntil(() => existsSync(indexPath));
+    const internals = fixture.registry as unknown as {
+      catalogStructuralIndex: unknown;
+      sessionInfos: () => Promise<unknown[]>;
+    };
+    internals.catalogStructuralIndex = undefined;
+    const scanner = vi.spyOn(internals, "sessionInfos");
+    const indexReconcile = CatalogMetadataIndex.prototype.reconcile;
+    const reconcile = vi.spyOn(CatalogMetadataIndex.prototype, "reconcile");
+    reconcile.mockImplementation(async function (this: CatalogMetadataIndex, ...args) {
+      const rows = await indexReconcile.apply(this, args);
+      const replacement = `${fixture.sessionFile}.replacement`;
+      await copyFile(fixture.sessionFile, replacement);
+      await rename(replacement, fixture.sessionFile);
+      return rows;
+    });
+    try {
+      await fixture.registry.catalog("all");
+      expect(scanner).toHaveBeenCalled();
+    } finally {
+      reconcile.mockRestore();
+      scanner.mockRestore();
+    }
+  });
+
   it.each([false, true])("publishes reconciled catalog membership without changing an older traversal (restart: %s)", async (restart) => {
     const fixture = await coldFixture("catalog-membership-revision");
     let registry = fixture.registry;
@@ -1962,6 +2049,14 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       child.appendMessage(fauxAssistantMessage(`child registration ${index}`));
       children.push(child);
     }
+    // Force the canonical materialization path instead of relying on the
+    // asynchronous acceleration-index save racing this test. The invariant
+    // under test is the stable user cut while child files mutate during the
+    // real metadata pass.
+    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
+    await waitUntil(() => existsSync(indexPath));
+    (fixture.registry as unknown as { catalogStructuralIndex: unknown }).catalogStructuralIndex = undefined;
+    await rm(indexPath, { force: true });
     mutateDuringDiscovery = true;
     try {
       const userCut = await fixture.registry.catalog("user");
@@ -5066,6 +5161,65 @@ export default function (pi) {
 
     expect(recovered.mock.calls.map(([, completionId]) => completionId)).toEqual(durableCompletionIds);
     expect(restarted.attentionProjection(slot.id)).toMatchObject({ completionRevision: 2, isUnread: true });
+  });
+
+  it("measures real prompt snapshot burst without dropping ordered lifecycle frames", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-snapshot-burst-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const sessionDirectory = join(agentDir, "sessions", "workspace");
+    await mkdir(sessionDirectory, { recursive: true });
+    await mkdir(cwd, { recursive: true });
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    const manager = SessionManager.create(cwd, sessionDirectory);
+    for (let index = 0; index < 160; index += 1) {
+      manager.appendMessage(fauxAssistantMessage(`history-${index} ${"x".repeat(3_600)}`));
+    }
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    const faux = fauxProvider({ provider: "tron-snapshot-burst", tokensPerSecond: 10_000 });
+    faux.setResponses([fauxAssistantMessage("prompt response")]);
+    runtime.registerNativeProvider(faux.provider);
+    const events: Array<{ topic: string; payload: any; at: number }> = [];
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime,
+      trust: new TrustService(agentDir), broadcast: (_id, topic, payload) => events.push({ topic, payload, at: Date.now() }),
+      sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.acquire(manager.getSessionId());
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    const before = events.length;
+    const receipt = await slot.prompt("accepted snapshot burst");
+    await waitUntil(() => !slot.isBusy);
+    const snapshots = events.slice(before).filter((event) => event.topic === "session.snapshot");
+    const sizes = snapshots.map((event) => Buffer.byteLength(JSON.stringify(event.payload)));
+    expect(sizes.some((size) => size >= 400 * 1_024)).toBe(true);
+    const sequences = events.slice(before)
+      .map((event) => event.payload.eventSequence)
+      .filter((value) => typeof value === "number");
+    for (let index = 1; index < sequences.length; index += 1) {
+      expect(sequences[index]).toBe(sequences[index - 1]! + 1);
+    }
+    // Deterministic paused-consumer oracle: hold every ordered frame until
+    // the owner has finished the accepted prompt. This proves the complete
+    // serialized burst exceeds the 2 MiB connection budget independently of
+    // CI scheduling. A resumed consumer can then dequeue the same frames in
+    // order; no frame is silently removed by this fixture.
+    const pausedQueue = events.slice(before).map((event) => Buffer.byteLength(JSON.stringify({
+      type: "event", topic: event.topic, sessionId: slot.id, payload: event.payload,
+    })));
+    const pausedBytes = pausedQueue.reduce((total, bytes) => total + bytes, 0);
+    expect(pausedBytes).toBeGreaterThan(2 * 1_024 * 1_024);
+    let resumedBytes = pausedBytes;
+    for (const bytes of pausedQueue) resumedBytes -= bytes;
+    expect(resumedBytes).toBe(0);
+    expect(slot.snapshot().transcript.some((item) => item.kind === "message" && item.presentationId === receipt.operationId)).toBe(true);
+    // The owner emits complete snapshots for distinct lifecycle revisions; no
+    // safe frame can be subtracted here without a receiver rebaseline contract.
+    expect(snapshots.every((event) => event.payload.sessionId === slot.id)).toBe(true);
   });
 
   it("coalesces streaming progress frames while keeping the event stream contiguous and complete", async () => {

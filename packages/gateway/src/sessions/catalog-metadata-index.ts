@@ -11,6 +11,7 @@ export const CATALOG_METADATA_INDEX_VERSION = 2 as const;
 export const CATALOG_METADATA_INDEX_MAX_BYTES = 8 * 1_024 * 1_024;
 export const CATALOG_METADATA_INDEX_MAX_ENTRIES = 25_000;
 const TAIL_BOUNDARY_BYTES = 4_096;
+const RECONCILE_CONCURRENCY = 16;
 
 export interface CatalogMetadataIndexRow {
   id: string;
@@ -169,24 +170,38 @@ export class CatalogMetadataIndex {
       return undefined;
     }
     const prior = new Map(document.rows.map((row) => [resolve(row.path), row]));
+    // Reconcile is an independent bounded read phase. The old implementation
+    // serialized every lstat/header/tail read, turning a valid index into an
+    // O(session-count) startup stall on large catalogs. Keep the candidate
+    // order for deterministic output while allowing bounded filesystem
+    // parallelism; each candidate still performs the same identity and
+    // stability checks before its row is admitted.
     const rows: CatalogMetadataIndexRow[] = [];
     let rebuiltAny = false;
-    for (const candidate of candidates) {
-      const candidatePath = await realpath(candidate.path).catch(() => resolve(candidate.path));
-      const old = prior.get(candidatePath);
-      if (old && old.id === candidate.id && old.cwd === candidate.cwd && old.fileIdentity === candidate.fileIdentity) {
-        const unchanged = await this.verifyUnchanged(old);
-        if (unchanged) { rows.push(old); continue; }
-        const advanced = await this.append(old);
-        if (advanced) { rows.push(advanced); continue; }
+    for (let start = 0; start < candidates.length; start += RECONCILE_CONCURRENCY) {
+      const batch = candidates.slice(start, start + RECONCILE_CONCURRENCY);
+      const results = await Promise.all(batch.map(async (candidate) => {
+        const candidatePath = await realpath(candidate.path).catch(() => resolve(candidate.path));
+        const old = prior.get(candidatePath);
+        if (old && old.id === candidate.id && old.cwd === candidate.cwd && old.fileIdentity === candidate.fileIdentity) {
+          if (await this.verifyUnchanged(old)) return old;
+          const advanced = await this.append(old);
+          if (advanced) return advanced;
+        }
+        const summary = await rebuild(candidate);
+        if (!summary) return undefined;
+        const rebuilt = await this.entryFromSummary(summary);
+        if (!rebuilt || rebuilt.id !== candidate.id || rebuilt.cwd !== candidate.cwd
+          || rebuilt.fileIdentity !== candidate.fileIdentity) return undefined;
+        return rebuilt;
+      }));
+      for (let index = 0; index < results.length; index += 1) {
+        const result = results[index];
+        if (!result) return undefined;
+        rows.push(result);
+        const candidate = batch[index]!;
+        if (!prior.has(resolve(candidate.path)) || result !== prior.get(resolve(candidate.path))) rebuiltAny = true;
       }
-      rebuiltAny = true;
-      const summary = await rebuild(candidate);
-      if (!summary) return undefined;
-      const rebuilt = await this.entryFromSummary(summary);
-      if (!rebuilt || rebuilt.id !== candidate.id || rebuilt.cwd !== candidate.cwd
-        || rebuilt.fileIdentity !== candidate.fileIdentity) return undefined;
-      rows.push(rebuilt);
     }
     // The candidate set is the exact structural evidence cut. Dropped rows
     // therefore represent removed canonical paths, never stale index entries.

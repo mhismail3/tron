@@ -1717,9 +1717,15 @@ export class RuntimeRegistry {
     const rowsMatchAfterFacts = rows.length === after.identitiesByPath.size
       && rows.every((row) => {
         const identity = after.identitiesByPath.get(resolve(row.path));
+        const liveOwner = identity !== undefined && this.isLiveRuntimeOwnedPath(resolve(row.path), row.id);
         return identity?.id === row.id && identity.cwd === row.cwd
           && identity.fileIdentity === row.fileIdentity
-          && identity.size === row.size && identity.mtimeMs === row.mtimeMs;
+          // A Gateway-owned session may append between the index read and the
+          // post-read evidence cut. Its exact slot owns the live summary
+          // overlay, while identity remains the admission boundary; requiring
+          // old size/mtime here would discard a valid index and rescan every
+          // canonical body during normal active work.
+          && (liveOwner || (identity.size === row.size && identity.mtimeMs === row.mtimeMs));
       });
     if (structuralGeneration !== this.catalogStructuralGeneration
       || invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration
