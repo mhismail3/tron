@@ -189,6 +189,7 @@ function validateState(value: unknown): KnowledgeState {
 function recordObjectHashes(record: KnowledgeRecord): string[] {
   const hashes: string[] = [];
   if (record.kind === "source" && record.content.object) hashes.push(record.content.object.hash);
+  if (record.kind === "source" && record.content.representations) hashes.push(...record.content.representations.map(item => item.object.hash));
   for (const evidence of record.provenance.evidence) if (evidence.objectHash) hashes.push(evidence.objectHash);
   if (record.kind === "observation") for (const item of record.content.items) for (const evidence of item.evidence ?? []) if (evidence.objectHash) hashes.push(evidence.objectHash);
   if (record.kind === "note") for (const field of record.content.fields ?? []) for (const evidence of field.evidence) if (evidence.objectHash) hashes.push(evidence.objectHash);
@@ -492,6 +493,33 @@ export class KnowledgeStore {
     for (const record of selected) citations.push(...record.provenance.evidence, ...(record.kind === "observation" ? record.content.items.flatMap(item => item.evidence ?? []) : []));
     return { records: selected, citations, stateRevision: state.stateRevision, availability: selected.length ? "available" : "no-match", ...(scanned.incomplete ? { incomplete: true } : {}) };
   }
+  /** Resolve exact revisions for generation without exposing a second search
+   * authority. Every returned revision is still revalidated by synthesize at
+   * the publication boundary. */
+  async synthesisRevisions(sessionId: string, revisionIds: string[]): Promise<KnowledgeRecord[]> {
+    safeId(sessionId, "session id");
+    if (revisionIds.length === 0 || revisionIds.length > 100 || new Set(revisionIds).size !== revisionIds.length) throw invalid("Synthesis requires distinct source revisions");
+    const paths = await this.paths(false);
+    const state = (await this.load(paths, false)).state;
+    const records: KnowledgeRecord[] = [];
+    for (const revisionId of revisionIds) {
+      safeId(revisionId, "knowledge revision");
+      let found: KnowledgeRecord | undefined;
+      for (const [id, head] of Object.entries(state.records)) {
+        if (!head.revisionIds.includes(revisionId)) continue;
+        const record = await this.readRecord(paths, id, revisionId);
+        if (record.kind === "observation" && record.content.range.sessionId !== sessionId) throw conflict("Synthesis observation is outside the requested session");
+        if (record.kind !== "observation" && record.provenance.sessionId !== undefined && record.provenance.sessionId !== sessionId) throw conflict("Synthesis record is outside the requested session");
+        if (this.recordExcluded(state, record)) throw conflict("Synthesis source is unavailable or excluded");
+        found = record;
+        break;
+      }
+      if (!found) throw conflict("Synthesis source revision is unavailable");
+      records.push(found);
+    }
+    return records;
+  }
+
   /** Resolve exact observation revisions for the Reflector without exposing a
    * second search/index authority. The caller still publishes through reflect,
    * which revalidates session, branch, suppression, and revision identity. */
@@ -522,6 +550,7 @@ export class KnowledgeStore {
     const id = draft.id ?? recordId(); safeId(id, "record id"); const existing = state.records[id]; if (state.suppressions[id]?.forgotten) throw conflict("Knowledge record was forgotten and cannot be recreated");
     const current = existing ? await this.currentRecord(state, paths, id) : null; if (expectedRevision !== undefined && current?.revisionId !== expectedRevision) throw conflict("Knowledge record revision is stale"); if (expectedRevision === undefined && current) throw conflict("Knowledge record already exists; supply its expected revision");
     if (draft.kind === "source" && draft.content.object) await this.assertObject(paths, draft.content.object);
+    if (draft.kind === "source" && draft.content.representations) for (const representation of draft.content.representations) await this.assertObject(paths, representation.object);
     const timestamp = now(); const record = { ...draft, schemaVersion: KNOWLEDGE_SCHEMA_VERSION, id, revisionId: revisionId(), createdAt: draft.createdAt ?? current?.createdAt ?? timestamp, updatedAt: draft.updatedAt ?? timestamp } as KnowledgeRecord;
     try { validateKnowledgeRecord(record); } catch (error) { throw invalid(error instanceof Error ? error.message : "Invalid knowledge record"); }
     if (Buffer.byteLength(`${JSON.stringify(record, null, 2)}\n`, "utf8") > RECORD_MAX_BYTES) throw invalid("Knowledge record exceeds its byte limit");
@@ -556,8 +585,9 @@ export class KnowledgeStore {
       || (scope.sessionId ? state.config.eligibility.excludedSessionIds.includes(scope.sessionId) : false)
       || (scope.projectId ? state.config.eligibility.excludedProjectIds.includes(scope.projectId) : false);
   }
-  async publishObservationGroup(input: ObservationGroupInput): Promise<{ records: KnowledgeRecord[]; coverage: ObservationCoverage; stateRevision: number }> {
+  async publishObservationGroup(input: ObservationGroupInput, signal?: AbortSignal): Promise<{ records: KnowledgeRecord[]; coverage: ObservationCoverage; stateRevision: number }> {
     return this.mutate("knowledge.observation.publish", input.commandId, input, async (state, paths) => {
+      if (signal?.aborted) throw new GatewayError("busy", "Observation publication was cancelled", true);
       if (input.expectedConfigRevision !== undefined && state.config.revision !== input.expectedConfigRevision) throw conflict("Observation configuration changed while inference was running");
       if (this.excludedRange(state, input.coverage.range)) throw conflict("Observation range is excluded"); const prior = state.coverage[input.coverage.id];
       if (prior && !sameRange(prior.range, input.coverage.range)) throw conflict("Observation coverage identity changed");
@@ -593,6 +623,48 @@ export class KnowledgeStore {
       const coverage: ObservationCoverage = { ...input.coverage, schemaVersion: KNOWLEDGE_SCHEMA_VERSION, revisionId: revisionId(), recordedAt: now() }; validateCoverage(coverage); state.coverage[coverage.id] = coverage; return { coverage, stateRevision: state.stateRevision + 1 };
     });
   }
+  /** Publish a bounded SOURCE/NOTE/OBSERVATION synthesis as an unconfirmed
+   * derived note. The expected configuration and exact revision set are
+   * checked inside the serialized mutation, so late cancellation/config or
+   * privacy changes cannot publish stale generated content. */
+  async synthesize(commandId: string, sessionId: string, sourceRevisionIds: string[], text: string, expectedConfigRevision: number, signal?: AbortSignal): Promise<KnowledgeMutationResult> {
+    safeId(sessionId, "session id");
+    if (!text || text.length > 30_000 || sourceRevisionIds.length === 0 || sourceRevisionIds.length > 100 || new Set(sourceRevisionIds).size !== sourceRevisionIds.length) throw invalid("Synthesis is bounded and requires distinct source revisions");
+    return this.mutate("knowledge.synthesis", commandId, { sessionId, sourceRevisionIds, text, expectedConfigRevision }, async (state, paths) => {
+      if (signal?.aborted) throw new GatewayError("busy", "Knowledge synthesis was cancelled", true);
+      if (state.config.revision !== expectedConfigRevision) throw conflict("Knowledge configuration changed while synthesis was running");
+      const sources: KnowledgeRecord[] = [];
+      for (const revision of sourceRevisionIds) {
+        let source: KnowledgeRecord | undefined;
+        for (const [id, head] of Object.entries(state.records)) {
+          if (!head.revisionIds.includes(revision)) continue;
+          source = await this.readRecord(paths, id, revision);
+          break;
+        }
+        if (!source || this.recordExcluded(state, source)) throw conflict("Synthesis source changed or became unavailable");
+        if (source.kind === "observation" && source.content.range.sessionId !== sessionId) throw conflict("Synthesis observation is outside the requested session");
+        if (source.kind !== "observation" && source.provenance.sessionId !== undefined && source.provenance.sessionId !== sessionId) throw conflict("Synthesis record is outside the requested session");
+        sources.push(source);
+      }
+      const scopes = new Set(sources.map(source => source.scope));
+      if (scopes.size !== 1) throw conflict("Synthesis sources must share one privacy scope");
+      if (signal?.aborted) throw new GatewayError("busy", "Knowledge synthesis was cancelled", true);
+      const evidence = sources.map(source => ({ recordId: source.id, revisionId: source.revisionId }));
+      const contraryEvidence = sources.flatMap(source => source.kind === "note" ? (source.content.contraryEvidence ?? []) : []);
+      const relations = sources.map(source => ({ type: "derivedFrom" as const, recordId: source.id, revisionId: source.revisionId }));
+      const sourceSetDigest = createHash("sha256").update(JSON.stringify(sourceRevisionIds.map((revision, index) => `${sources[index]!.id}:${revision}`))).digest("hex");
+      const synthesisId = `synthesis-${createHash("sha256").update(`${sessionId}\\0${sourceSetDigest}`).digest("hex").slice(0, 48)}`;
+      const existing = state.records[synthesisId] ? await this.currentRecord(state, paths, synthesisId) : null;
+      if (existing && existing.kind !== "note") throw conflict("Synthesis identity is occupied by another record kind");
+      const record: KnowledgeRecordDraft & { kind: "note" } = {
+        id: synthesisId, ...(existing ? { createdAt: existing.createdAt } : {}), kind: "note", scope: sources[0]!.scope,
+        provenance: { actor: "agent", source: `synthesis:${sourceSetDigest}`, sessionId, evidence }, relations,
+        content: { title: "Knowledge synthesis", body: text, role: "synthesis", confirmed: false, ...(contraryEvidence.length ? { contraryEvidence } : {}) },
+      };
+      return this.putRecord(state, paths, record, existing?.revisionId);
+    });
+  }
+
   async reflect(commandId: string, sessionId: string, sourceRevisionIds: string[], text: string): Promise<KnowledgeMutationResult> {
     safeId(sessionId, "session id");
     if (!text || text.length > 30_000 || sourceRevisionIds.length === 0 || sourceRevisionIds.length > 100 || new Set(sourceRevisionIds).size !== sourceRevisionIds.length) throw invalid("Reflection is bounded and requires distinct source revisions");

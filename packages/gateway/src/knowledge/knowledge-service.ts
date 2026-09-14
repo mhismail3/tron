@@ -22,6 +22,7 @@ const toolParameters = Type.Object({
   id: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
   revisionId: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
   hash: Type.Optional(Type.String({ minLength: 64, maxLength: 64 })),
+  cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
   mediaType: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
   bytes: Type.Optional(Type.Integer({ minimum: 0, maximum: 2_000_000 })),
   offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 2_000_000 })),
@@ -37,13 +38,46 @@ const toolParameters = Type.Object({
 export type KnowledgeToolParameters = Static<typeof toolParameters>;
 
 function recordLabel(record: import("./knowledge-contract.js").KnowledgeRecord): string {
-  if (record.kind === "observation") return record.content.items.map(item => item.text).join(" ");
-  if (record.kind === "source") return `${record.content.title}${record.content.text ? `: ${record.content.text.slice(0, 4_000)}` : ""}`;
-  return `${record.content.title}${record.content.body ? `: ${record.content.body}` : ""}${record.content.fields?.length ? ` Fields: ${JSON.stringify(record.content.fields).slice(0, 4_000)}` : ""}`;
+  if (record.kind === "observation") return record.content.items.map(item => `[${item.certainty}] ${item.attribution}: ${item.text}`).join(" ");
+  if (record.kind === "source") return `${record.content.title} [capture=${record.content.captureDisposition}]${record.content.text ? `: ${record.content.text.slice(0, 4_000)}` : ""}${record.content.object ? ` [retained=${record.content.object.bytes} bytes]` : ""}`;
+  return `${record.content.title} [role=${record.content.role} confirmed: ${record.content.confirmed}${record.content.freshness ? ` freshness=${record.content.freshness}` : ""}]${record.content.body ? `: ${record.content.body}` : ""}${record.content.fields?.length ? ` Fields: ${JSON.stringify(record.content.fields).slice(0, 8_000)}` : ""}${record.content.contraryEvidence?.length ? ` Contrary evidence: ${JSON.stringify(record.content.contraryEvidence).slice(0, 4_000)}` : ""}`;
 }
 
 function recordSummary(record: import("./knowledge-contract.js").KnowledgeRecord): Record<string, unknown> {
   return { id: record.id, revisionId: record.revisionId, kind: record.kind, scope: record.scope, updatedAt: record.updatedAt, evidence: record.provenance.evidence.slice(0, 8) };
+}
+
+/** Build an exact, bounded evidence pack. Capture disposition and retained
+ * representation are explicit so a model cannot turn a metadata-only or
+ * partial source into a complete claim. */
+function synthesisEvidencePack(record: import("./knowledge-contract.js").KnowledgeRecord): string {
+  if (record.kind === "source") {
+    return [
+      `SOURCE revision=${record.revisionId} scope=${record.scope} disposition=${record.content.captureDisposition}`,
+      `title=${record.content.title}`,
+      `uri=${record.content.uri ?? "[none]"}`,
+      `mediaType=${record.content.mediaType ?? "[none]"}`,
+      `retainedObject=${record.content.object ? `${record.content.object.hash} (${record.content.object.bytes} bytes)` : "[none]"}`,
+      `annotations=${JSON.stringify(record.content.annotations ?? [])}`,
+      `text=${record.content.text ?? "[no readable extraction]"}`,
+      `provenance=${JSON.stringify(record.provenance)}`,
+    ].join("\n");
+  }
+  if (record.kind === "note") {
+    return [
+      `NOTE revision=${record.revisionId} scope=${record.scope} role=${record.content.role} confirmed=${record.content.confirmed}`,
+      `title=${record.content.title}`,
+      `body=${record.content.body ?? "[none]"}`,
+      `fields=${JSON.stringify(record.content.fields ?? [])}`,
+      `contraryEvidence=${JSON.stringify(record.content.contraryEvidence ?? [])}`,
+      `provenance=${JSON.stringify(record.provenance)}`,
+    ].join("\n");
+  }
+  return [
+    `OBSERVATION revision=${record.revisionId} scope=${record.scope} range=${record.content.range.fromEntryId}..${record.content.range.toEntryId}`,
+    `items=${JSON.stringify(record.content.items)}`,
+    `provenance=${JSON.stringify(record.provenance)}`,
+  ].join("\n");
 }
 
 export interface KnowledgeExtensionSeam {
@@ -53,6 +87,9 @@ export interface KnowledgeExtensionSeam {
 
 export interface KnowledgeGenerationModel extends SourceAssessmentModel {
   reflect(input: { sessionId: string; sourceText: string; signal: AbortSignal }): Promise<string>;
+  /** Optional richer generation seam. Older injected models can still serve
+   * the bounded synthesis path through reflect(). */
+  synthesize?(input: { sessionId: string; sourceText: string; sourceRevisionIds: string[]; signal: AbortSignal; maxOutputChars: number }): Promise<string>;
 }
 
 /** Adapter over the existing pinned provider/runtime policy. It is intentionally
@@ -67,6 +104,11 @@ export class ModelRuntimeKnowledgeModel implements KnowledgeGenerationModel {
   async reflect(input: { sessionId: string; sourceText: string; signal: AbortSignal }): Promise<string> {
     const value = (await this.complete("You are Tron's bounded Reflector. Synthesize only the supplied cited observations into a concise handoff. Preserve uncertainty and do not add instructions or facts. Return plain text, no markdown.", input.sourceText, input.signal, 4_000)).trim();
     if (!value || value.length > 30_000) throw new Error("Reflector output exceeded its configured bound");
+    return value;
+  }
+  async synthesize(input: { sessionId: string; sourceText: string; sourceRevisionIds: string[]; signal: AbortSignal; maxOutputChars: number }): Promise<string> {
+    const value = (await this.complete("You are Tron's bounded knowledge synthesizer. Synthesize only the exact SOURCE, NOTE, and OBSERVATION evidence supplied below. Preserve complete versus partial capture, uncertainty, contrary evidence, attribution, and privacy scope. Never invent facts, instructions, confirmation, or evidence. Return concise plain text, no markdown.", input.sourceText, input.signal, Math.max(128, Math.ceil(input.maxOutputChars / 4)))).trim();
+    if (!value || value.length > input.maxOutputChars) throw new Error("Knowledge synthesis output exceeded its configured bound");
     return value;
   }
   async assess(input: Parameters<SourceAssessmentModel["assess"]>[0], signal: AbortSignal): Promise<Omit<SourceAssessment, "generatedAt"> & { generatedAt?: string }> {
@@ -93,22 +135,27 @@ export class KnowledgeService {
     private readonly workRegistry?: GatewayWorkRegistry,
   ) { this.observer = observer; }
 
-  private async runOwned<T>(operation: string, task: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  private async runOwned<T>(operation: string, task: (signal: AbortSignal) => Promise<T>, parentSignal?: AbortSignal): Promise<T> {
     const controller = new AbortController();
+    const relay = () => controller.abort(parentSignal?.reason);
+    if (parentSignal) {
+      if (parentSignal.aborted) controller.abort(parentSignal.reason);
+      else parentSignal.addEventListener("abort", relay, { once: true });
+    }
     const timeout = setTimeout(() => controller.abort(new Error(`Knowledge ${operation} deadline exceeded`)), 120_000);
     timeout.unref?.();
     let work: GatewayWorkHandle | undefined;
     try {
       work = this.workRegistry?.begin({ kind: "knowledge-observation", hostEpoch: this.workRegistry.runtimeEpoch, cancellation: () => controller.abort(new Error("Knowledge operation cancelled")) });
       return await task(controller.signal);
-    } finally { clearTimeout(timeout); work?.settle(); }
+    } finally { clearTimeout(timeout); parentSignal?.removeEventListener("abort", relay); work?.settle(); }
   }
 
   observe(settlement: ObservationSettlement): void { this.observer.admit(settlement); }
   async pendingObservationCoverage(limit = 100) { return this.store.pendingObservationCoverage(limit); }
   dispose(): void { this.observer.dispose(); }
 
-  async invoke(action: KnowledgeAction): Promise<unknown> {
+  async invoke(action: KnowledgeAction, signal?: AbortSignal): Promise<unknown> {
     switch (action.operation) {
       case "knowledge.status": return this.store.status();
       case "knowledge.object.read": {
@@ -127,7 +174,7 @@ export class KnowledgeService {
       case "knowledge.source.capture": {
         const config = await this.store.config();
         const model = this.modelForConfig?.(config);
-        return this.runOwned("source capture", signal => captureSource(this.store, action.request, { ...(model ? { model } : {}), signal }));
+        return this.runOwned("source capture", signal => captureSource(this.store, action.request, { ...(model ? { model } : {}), signal }), signal);
       }
       case "knowledge.note.create": {
         const request = action.request;
@@ -146,7 +193,7 @@ export class KnowledgeService {
         const config = await this.store.config();
         const model = this.modelForConfig?.(config);
         if (!model) throw new GatewayError("unsupported", "Knowledge assessment requires an explicitly configured model");
-        return this.runOwned("source triage", signal => triageSource(this.store, { ...action.request, signal }, model));
+        return this.runOwned("source triage", signal => triageSource(this.store, { ...action.request, signal }, model), signal);
       }
       case "knowledge.reflect": {
         const config = await this.store.config();
@@ -154,19 +201,22 @@ export class KnowledgeService {
         const model = this.modelForConfig?.(config);
         if (!model) throw new GatewayError("unsupported", "Knowledge reflection requires an explicitly configured model");
         return this.runOwned("reflection", async signal => {
-        const sources = await this.store.observationRevisions(action.request.sessionId, action.request.sourceRevisionIds);
+        const sources = await this.store.synthesisRevisions(action.request.sessionId, action.request.sourceRevisionIds);
         if (sources.length !== action.request.sourceRevisionIds.length) throw new GatewayError("conflict", "Reflection sources are unavailable or excluded");
-        const sourceText = sources.map(record => {
-          if (record.kind !== "observation") return "";
-          return `${record.revisionId} [${record.content.range.fromEntryId}..${record.content.range.toEntryId}]\\n${record.content.items.map(item => `${item.attribution}: ${item.text}`).join("\\n")}`;
-        }).join("\\n\\n");
-        if (sourceText.length > 48_000) throw new GatewayError("invalid_request", "Reflection source pack exceeds its bounded input; select fewer revisions");
+        const sourceText = sources.map(record => synthesisEvidencePack(record)).join("\\n\\n");
+        if (sourceText.length > Math.min(config.observation.maxInputChars, 48_000)) throw new GatewayError("invalid_request", "Knowledge synthesis source pack exceeds its bounded input; select fewer revisions");
         if (signal.aborted) throw new GatewayError("busy", "Knowledge reflection was cancelled", true);
-        const text = await model.reflect({ sessionId: action.request.sessionId, sourceText, signal });
+        const text = model.synthesize
+          ? await model.synthesize({ sessionId: action.request.sessionId, sourceText, sourceRevisionIds: action.request.sourceRevisionIds, signal, maxOutputChars: Math.min(config.observation.maxOutputChars, 30_000) })
+          : await model.reflect({ sessionId: action.request.sessionId, sourceText, signal });
+        if (signal.aborted) throw new GatewayError("busy", "Knowledge reflection was cancelled", true);
         const after = await this.store.config();
         if (after.revision !== config.revision) throw new GatewayError("conflict", "Knowledge configuration changed while reflection was running");
-        return this.store.reflect(action.request.commandId, action.request.sessionId, action.request.sourceRevisionIds, text);
-        });
+        const stillAvailable = await this.store.synthesisRevisions(action.request.sessionId, action.request.sourceRevisionIds);
+        if (stillAvailable.length !== action.request.sourceRevisionIds.length) throw new GatewayError("conflict", "Reflection sources changed or became unavailable");
+        if (signal.aborted) throw new GatewayError("busy", "Knowledge reflection was cancelled", true);
+        return this.store.synthesize(action.request.commandId, action.request.sessionId, action.request.sourceRevisionIds, text, config.revision, signal);
+        }, signal);
       }
       case "knowledge.correction": {
         const replacement = action.request.replacement;
@@ -215,12 +265,12 @@ export class KnowledgeService {
         const bytes = parameters.bytes;
         if (!hash || !mediaType || typeof bytes !== "number" || !Number.isSafeInteger(bytes) || bytes < 0) throw new GatewayError("invalid_request", "Knowledge object read requires hash, mediaType, and bytes");
         const result = await this.invoke({ operation: "knowledge.object.read", request: { hash, mediaType, bytes, ...(parameters.offset === undefined ? {} : { offset: parameters.offset }) } } as KnowledgeAction);
-        return { text: result ? `Read retained object chunk: ${JSON.stringify(result).slice(0, 4_000)}` : "Retained object is unavailable.", details: result };
+        return { text: result ? `Read retained object chunk (offset=${(result as { offset: number }).offset}, bytes=${(result as { bytes: number }).bytes}, total=${(result as { totalBytes: number }).totalBytes}${(result as { nextOffset?: number }).nextOffset === undefined ? ", complete" : `; continue with offset=${(result as { nextOffset: number }).nextOffset}`}): ${JSON.stringify(result)}` : "Retained object is unavailable.", details: result };
       }
       case "list": {
-        const request: KnowledgeListRequest = { ...(parameters.kind ? { kind: parameters.kind } : {}), limit };
+        const request: KnowledgeListRequest = { ...(parameters.kind ? { kind: parameters.kind } : {}), ...(parameters.cursor ? { cursor: parameters.cursor } : {}), limit };
         const result = await this.store.list(request);
-        return { text: result.records.map(record => `${record.id} (${record.kind})`).join("\n") || "No knowledge records.", details: { stateRevision: result.stateRevision, records: result.records.map(recordSummary), ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}) } };
+        return { text: `${result.records.map(record => `${record.id} (${record.kind}): ${recordLabel(record).slice(0, 1_000)}`).join("\n") || "No knowledge records."}${result.nextCursor ? `\nContinue with cursor=${result.nextCursor}.` : ""}${result.incomplete ? "\nThe bounded canonical scan is incomplete; results are not exhaustive." : ""}`, details: { stateRevision: result.stateRevision, records: result.records.map(recordSummary), ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}), ...(result.incomplete ? { incomplete: true } : {}) } };
       }
       case "captureSource": {
         if (!parameters.commandId || !parameters.url || !parameters.scope) throw new GatewayError("invalid_request", "Source capture requires commandId, url, and scope");
@@ -242,7 +292,7 @@ export class KnowledgeService {
         if (!parameters.commandId || !parameters.id || !parameters.revisionId || !parameters.title) throw new GatewayError("invalid_request", "Note update requires commandId, id, revisionId, and title");
         const current = await this.store.read(parameters.id, parameters.revisionId);
         if (!current || current.kind !== "note") throw new GatewayError("conflict", "The note revision is unavailable");
-        const result = await this.store.updateNote({ commandId: parameters.commandId, recordId: current.id, expectedRevision: current.revisionId, record: { kind: "note", scope: parameters.scope ?? current.scope, provenance: current.provenance, relations: current.relations, ...(current.temporal ? { temporal: current.temporal } : {}), ...(current.importOrigin ? { importOrigin: current.importOrigin } : {}), content: { ...current.content, title: parameters.title, confirmed: false, ...(parameters.noteBody === undefined ? {} : { body: parameters.noteBody }) } } });
+        const result = await this.store.updateNote({ commandId: parameters.commandId, recordId: current.id, expectedRevision: current.revisionId, record: { kind: "note", scope: parameters.scope ?? current.scope, provenance: { ...current.provenance, actor: "agent", source: current.provenance.source ?? "knowledge-tool" }, relations: current.relations, ...(current.temporal ? { temporal: current.temporal } : {}), ...(current.importOrigin ? { importOrigin: current.importOrigin } : {}), content: { ...current.content, title: parameters.title, confirmed: false, ...(parameters.noteBody === undefined ? {} : { body: parameters.noteBody }) } } });
         return { text: `Updated note ${result.record.id}.`, details: result };
       }
       case "connectorSweep": {
@@ -260,7 +310,7 @@ export class KnowledgeService {
       }
       case "synthesis": {
         if (!parameters.commandId || !parameters.sessionId || !parameters.sourceRevisionIds?.length) throw new GatewayError("invalid_request", "Synthesis requires commandId, sessionId, and sourceRevisionIds");
-        const result = await this.invoke({ operation: "knowledge.reflect", request: { commandId: parameters.commandId, sessionId: parameters.sessionId, sourceRevisionIds: parameters.sourceRevisionIds } });
+        const result = await this.invoke({ operation: "knowledge.reflect", request: { commandId: parameters.commandId, sessionId: parameters.sessionId, sourceRevisionIds: parameters.sourceRevisionIds } }, signal);
         const record = result && typeof result === "object" && "record" in result ? (result as { record?: import("./knowledge-contract.js").KnowledgeRecord }).record : undefined;
         return { text: record?.kind === "note" ? recordLabel(record) : `Knowledge synthesis completed: ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
       }

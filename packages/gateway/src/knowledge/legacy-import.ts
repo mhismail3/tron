@@ -35,6 +35,7 @@ interface SourcePlan {
   warning?: string;
   excluded?: boolean;
 }
+
 interface EntityPlan { kind: "entity"; legacy: LegacyEntity; id: string; }
 interface AssertionPlan { kind: "assertion"; legacy: LegacyAssertion; id: string; auditId?: string; }
 type PlanItem = SourcePlan | EntityPlan | AssertionPlan;
@@ -231,7 +232,7 @@ export class LegacyKnowledgeImporter {
     return { root, store };
   }
 
-  private async plan(source: string, scope?: KnowledgeImportScope): Promise<{ root: string; store: LegacyStoreName; revision: string; items: PlanItem[]; planHash: string; warnings: string[] }> {
+  private async plan(source: string, scope?: KnowledgeImportScope): Promise<{ root: string; store: LegacyStoreName; revision: string; items: PlanItem[]; planHash: string; warnings: string[]; withheldSourceIds: Set<string>; withheldAssertionIds: Set<string> }> {
     const { root, store } = await this.resolveSource(source); const revision = await gitRevision(root); const warnings: string[] = []; const budget = new ImportBudget();
     for (const relativePath of ["sources/records", "graph", "reviews/receipts", "audits/records"]) {
       await assertContainedNoSymlink(root, join(root, relativePath));
@@ -241,12 +242,19 @@ export class LegacyKnowledgeImporter {
     const receiptByBatch = new Map<string, { id: string; resultRevision?: string }>();
     for (const receiptPath of await regularJsonFiles(join(root, "reviews", "receipts"), budget)) { const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as Record<string, unknown>; const batch = receipt.batch_id; const id = receipt.receipt_id; if (typeof batch === "string" && typeof id === "string") receiptByBatch.set(batch, { id, ...(typeof receipt.result_revision === "string" ? { resultRevision: receipt.result_revision } : {}) }); }
     const sourcePaths = await regularJsonFiles(join(root, "sources", "records"), budget); const sourceRecords: LegacySource[] = [];
+    // Status is privacy authority for the whole legacy metadata graph, not
+    // merely for the selected/batched source items. Do this bounded metadata
+    // pass before scope and offset slicing so assertions cannot disclose an
+    // excluded source through a later batch.
+    const sourceStatus = new Map<string, string>();
     for (const path of sourcePaths) {
       const value = JSON.parse(await readFile(path, "utf8")) as LegacySource;
       if (!value || typeof value.source_id !== "string") continue;
       if (value.status && !["accepted", "excluded", "suppressed"].includes(String(value.status))) continue;
+      sourceStatus.set(value.source_id, String(value.status ?? "accepted"));
       if (included("sources", value.source_id)) sourceRecords.push(value);
     }
+    const withheldSourceIds = new Set([...sourceStatus.entries()].filter(([, status]) => status === "excluded" || status === "suppressed").map(([id]) => id));
     sourceRecords.sort((a, b) => a.source_id.localeCompare(b.source_id));
     const items: PlanItem[] = [];
     for (const legacy of sourceRecords) {
@@ -262,22 +270,32 @@ export class LegacyKnowledgeImporter {
     const entities = await jsonl<LegacyEntity>(join(root, "graph", "entities.jsonl"), "legacy entities", budget);
     for (const legacy of entities.filter(item => typeof item.entity_id === "string" && typeof item.label === "string" && included("entities", item.entity_id)).sort((a, b) => a.entity_id.localeCompare(b.entity_id))) items.push({ kind: "entity", legacy, id: stableId(store, "entity", legacy.entity_id) });
     const assertions = await jsonl<LegacyAssertion>(join(root, "graph", "assertions.jsonl"), "legacy assertions", budget);
+    const validAssertions = assertions.filter(item => typeof item.assertion_id === "string" && typeof item.subject_id === "string" && typeof item.predicate === "string");
+    const withheldAssertionIds = new Set(validAssertions.filter(item => ["excluded", "suppressed"].includes(String(item.status ?? "")) || (Array.isArray(item.evidence) && item.evidence.some(raw => raw && typeof raw === "object" && withheldSourceIds.has((raw as Record<string, unknown>).source_id as string)))).map(item => item.assertion_id));
+    // Compute the transitive depends_on closure before applying the selected
+    // scope. A selected assertion is withheld if any dependency eventually
+    // relies on excluded legacy evidence.
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const item of validAssertions) if (!withheldAssertionIds.has(item.assertion_id) && (item.depends_on ?? []).some(dependency => withheldAssertionIds.has(dependency))) { withheldAssertionIds.add(item.assertion_id); changed = true; }
+    }
     const auditByAssertion = new Map<string, string>();
     for (const auditPath of await regularJsonFiles(join(root, "audits", "records"), budget)) {
       const audit = JSON.parse(await readFile(auditPath, "utf8")) as Record<string, unknown>; const auditId = typeof audit.audit_id === "string" ? audit.audit_id : auditPath.split("/").pop()?.replace(/\.json$/, "");
       if (!auditId || !Array.isArray(audit.assertions)) continue;
       for (const assertion of audit.assertions) { const assertionId = (assertion as Record<string, unknown>).assertion_id; if (typeof assertionId === "string") auditByAssertion.set(assertionId, auditId); }
     }
-    for (const legacy of assertions.filter(item => typeof item.assertion_id === "string" && typeof item.subject_id === "string" && typeof item.predicate === "string" && included("assertions", item.assertion_id)).sort((a, b) => a.assertion_id.localeCompare(b.assertion_id))) { const auditId = auditByAssertion.get(legacy.assertion_id); items.push({ kind: "assertion", legacy, id: stableId(store, "assertion", legacy.assertion_id), ...(auditId ? { auditId } : {}) }); }
+    for (const legacy of validAssertions.filter(item => included("assertions", item.assertion_id)).sort((a, b) => a.assertion_id.localeCompare(b.assertion_id))) { const auditId = auditByAssertion.get(legacy.assertion_id); items.push({ kind: "assertion", legacy, id: stableId(store, "assertion", legacy.assertion_id), ...(auditId ? { auditId } : {}) }); }
     if (revision === "unversioned") warnings.push("Legacy checkout has no readable Git HEAD; lineage is marked unversioned");
     const identity = items.map(item => ({ kind: item.kind, legacyId: item.legacy.kind === "source" ? item.legacy.source_id : item.legacy.kind === "entity" ? item.legacy.entity_id : item.legacy.assertion_id, id: item.id, payload: item.legacy, ...(item.kind === "source" ? { hash: item.legacy.content_sha256 ?? null, evidence: item.evidence?.hash ?? null } : {}) }));
-    return { root, store, revision, items, planHash: hash({ store, revision, identity }), warnings };
+    return { root, store, revision, items, planHash: hash({ store, revision, identity }), warnings, withheldSourceIds, withheldAssertionIds };
   }
 
   private sourceDraft(item: SourcePlan, revision: string, importedAt: string): KnowledgeRecordDraft & { kind: "source" } {
     const legacy = item.legacy; const metadata = legacy.metadata ?? {}; const capturedAt = normalizedTimestamp(legacy.captured_at, importedAt);
-    const origin = "import" as const; const usageConstraint = stringValue(metadata.usage_constraint, 20_000); const uri = sourceUri(legacy); const publishedAt = stringValue(metadata.published_at, 80); const text = item.evidence && item.evidence.mediaType.startsWith("text/") ? Buffer.from(item.evidence.bytes).toString("utf8").slice(0, 2_000_000) : undefined;
-    const content = { title: sourceTitle(legacy), ...(uri ? { uri } : {}), ...(text ? { text } : {}), ...(item.evidence ? { object: { hash: item.evidence.hash, mediaType: item.evidence.mediaType, bytes: item.evidence.bytes.byteLength } } : {}), mediaType: mediaType(legacy), captureDisposition: item.excluded ? "reference-only" as const : item.evidence ? "complete" as const : "metadata-only" as const, capturedAt, ...(publishedAt ? { sourcePublishedAt: normalizedTimestamp(publishedAt, capturedAt) } : {}), origin, origins: [{ kind: "import" as const, capturedAt, ...(uri ? { uri } : {}) }], retention: { sensitivity: sensitivity(legacy), evidenceAvailable: Boolean(item.evidence), ...(legacy.content_sha256 ? { originalHash: legacy.content_sha256 } : {}), ...(usageConstraint ? { usageConstraint } : {}) } };
+    const origin = "import" as const; const usageConstraint = stringValue(metadata.usage_constraint, 20_000); const uri = item.excluded ? undefined : sourceUri(legacy); const publishedAt = item.excluded ? undefined : stringValue(metadata.published_at, 80); const text = item.evidence && item.evidence.mediaType.startsWith("text/") ? Buffer.from(item.evidence.bytes).toString("utf8").slice(0, 2_000_000) : undefined;
+    const content = { title: item.excluded ? "Excluded legacy source" : sourceTitle(legacy), ...(uri ? { uri } : {}), ...(text ? { text } : {}), ...(item.evidence ? { object: { hash: item.evidence.hash, mediaType: item.evidence.mediaType, bytes: item.evidence.bytes.byteLength } } : {}), mediaType: mediaType(legacy), captureDisposition: item.excluded ? "reference-only" as const : item.evidence ? "complete" as const : "metadata-only" as const, capturedAt, ...(publishedAt ? { sourcePublishedAt: normalizedTimestamp(publishedAt, capturedAt) } : {}), origin, origins: [{ kind: "import" as const, capturedAt, ...(uri ? { uri } : {}) }], retention: { sensitivity: sensitivity(legacy), evidenceAvailable: Boolean(item.evidence), ...(legacy.content_sha256 && !item.excluded ? { originalHash: legacy.content_sha256 } : {}), ...(usageConstraint && !item.excluded ? { usageConstraint } : {}) } };
     return { kind: "source", id: item.id, scope: item.legacy.representation === "llm-wiki" ? "research" : "personal", createdAt: capturedAt, updatedAt: capturedAt, provenance: { actor: "import", source: `${legacy.representation ?? "legacy"}:${legacy.source_id}@${revision}`, evidence: [] }, relations: [], importOrigin: { store: item.legacy.representation === "llm-wiki" ? "llm-wiki" : "personal-os", recordId: legacy.source_id, revision, importedAt, ...(metadata.review_batch ? { review: { batch: String(metadata.review_batch), ...(item.reviewReceipt ? { receiptId: item.reviewReceipt.id, ...(item.reviewReceipt.resultRevision ? { resultRevision: item.reviewReceipt.resultRevision } : {}) } : {}) } } : {}) }, content };
   }
 
@@ -348,7 +366,11 @@ export class LegacyKnowledgeImporter {
     if (runRequest.expectedPlanHash !== selectedPlanHash) throw new Error("Import plan hash is stale; run dry-run again");
     const checkpoint = await this.store.beginImport(`import.begin:${runRequest.commandId}`, selectedPlanHash, selected.map(item => item.id)); base.checkpoint = checkpoint;
     const done = new Set(checkpoint.completedRecordIds); const sourceRevisions = new Map<string, string>();
-    const withheldSourceIds = new Set(selected.filter((item): item is SourcePlan => item.kind === "source" && item.excluded === true).map(item => item.legacy.source_id));
+    // These sets were computed from the complete legacy metadata graph before
+    // scope/batch slicing. Never derive privacy from the currently selected
+    // page: source and dependent assertion batches may be run separately.
+    const withheldSourceIds = plan.withheldSourceIds;
+    const withheldAssertionIds = plan.withheldAssertionIds;
     for (const item of selected) { const existing = await this.store.read(item.id, undefined, true); if (existing?.kind === "source" && item.kind === "source" && item.excluded !== true) sourceRevisions.set(item.legacy.source_id, existing.revisionId); }
     for (const item of selected) {
       if (done.has(item.id)) { base.resumed += 1; continue; }
@@ -362,7 +384,7 @@ export class LegacyKnowledgeImporter {
       // Assertions whose only evidence is explicitly excluded must remain
       // withheld; publishing them with a citation would disclose a projection
       // of suppressed legacy content.
-      if (item.kind === "assertion" && (Array.isArray(item.legacy.evidence) && item.legacy.evidence.some(raw => raw && typeof raw === "object" && withheldSourceIds.has((raw as Record<string, unknown>).source_id as string)))) {
+      if (item.kind === "assertion" && withheldAssertionIds.has(item.legacy.assertion_id)) {
         base.skipped += 1;
         await this.store.markImportRecord(`import.withheld:${selectedPlanHash.slice(0, 48)}:${item.id}`.slice(0, 160), selectedPlanHash, item.id); done.add(item.id); base.warnings.push(`${item.id}: withheld because cited legacy evidence is excluded`); continue;
       }

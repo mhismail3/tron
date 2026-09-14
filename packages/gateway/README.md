@@ -48,14 +48,22 @@ cut is branch-lineage-scoped (not the changing leaf), exact, redacted, and
 input-bounded. Distinct terminal envelopes retain their own invocation/outcome
 when queued. Cancellation or a
 configuration/privacy change leaves the cut retryable and cannot publish late.
-Retained source objects are available only through `knowledge.object.read` after
-record authorization; excluded/forgotten records cannot authorize object reads.
+Branch scope uses append-order first-child continuation, so adding a sibling
+never changes the original branch identity; recovery compares exact canonical
+entry IDs and digest and marks missing/non-active coverage unavailable rather
+than replaying it. Registered synthesis accepts exact SOURCE, NOTE, and
+OBSERVATION revisions, preserves capture disposition, qualifications, contrary
+evidence, and privacy scope, and publishes only an unconfirmed agent-derived
+note after cancellation/configuration/source fences. Retained source objects
+are available only through `knowledge.object.read` after record
+authorization; excluded/forgotten records cannot authorize object reads.
 Legacy imports support explicit `offset` continuation with checkpoint-tied plan
-membership. Connector X runs require a host-qualified account price, explicit paid
+membership and compute excluded-source/dependent assertion closure before page
+slicing. Connector X runs require a host-qualified account price, explicit paid
 access, and a one-attempt allowance reservation/debit; unknown pricing or a
 positive budget alone never permits an API call. Remote Raindrop moves
-preflight the exact incoming provider/account/item origin and readable source
-revision before persisting or applying the effect. Legacy exclusions are
+re-read the exact current source revision and connector account/write policy
+after preflight before persisting or applying the effect. Legacy exclusions are
 withheld rather than copied and hidden; native import exposes bounded offset
 continuation. Native note/correction mutations carry an explicit confirmation
 bit; agent-tool notes remain agent-authored and unconfirmed.

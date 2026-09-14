@@ -91,22 +91,25 @@ describe("knowledge connectors", () => {
     await expect(withInvocationContext({ invocationId: "invocation-1", operationId: "automation:run-1" }, () => extension.invoke({ operation: "knowledge.connector.run", request: { commandId: command("x-recurring-run"), connector: "x", dryRun: true, limit: 1 } }))).rejects.toMatchObject({ code: "unsupported" });
   });
 
-  it("reconciles an effect-before-response crash from a durable Raindrop receipt", async () => {
+  it("reconciles an admitted effect-before-response crash from its durable Raindrop receipt", async () => {
     let putAttempts = 0;
+    let remoteCollection = 123;
     const { store, extension } = await fixture(async (_url, init) => {
-      if (init.method === "PUT") { putAttempts += 1; return response({ error: "timeout-after-effect" }, 500); }
-      return response({ item: { collection: { $id: 456 } } });
+      if (init.method === "PUT") { putAttempts += 1; remoteCollection = 456; return response({ error: "timeout-after-effect" }, 500); }
+      return response({ item: { _id: 1, collection: { $id: remoteCollection } } });
     });
     const object = await store.putObject(new TextEncoder().encode("captured article"), "text/plain");
-    const captured = await store.captureSource({ commandId: command("source"), record: { kind: "source", scope: "research", provenance: { actor: "connector", evidence: [] }, relations: [], content: { title: "Captured", uri: "https://example.com/1", text: "captured article", object, captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00.000Z" } } });
+    const captured = await store.captureSource({ commandId: command("source"), record: { kind: "source", scope: "research", provenance: { actor: "connector", evidence: [] }, relations: [], content: { title: "Captured", uri: "https://example.com/1", text: "captured article", object, identity: { provider: "raindrop", accountId: "account-1", itemId: "1" }, captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00.000Z" } } });
     await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("write-approved"), connector: "raindrop", enabled: true, accountId: "account-1", scope: "123", credentialRef: "connector:raindrop:test-account", destination: "456", allowWrites: true } });
-    await expect(extension.moveRaindrop({ commandId: command("move-uncertain"), itemId: "1", destination: "456", source: captured.record as typeof captured.record & { kind: "source" } })).resolves.toEqual({ status: "conflict" });
-    // The exact original collection preflight detects the already-moved item
-    // before issuing a second remote mutation.
-    expect(putAttempts).toBe(0);
-    expect((await store.connectorState("raindrop"))?.pendingRemote).toBeUndefined();
+    await expect(extension.moveRaindrop({ commandId: command("move-uncertain"), itemId: "1", destination: "456", source: captured.record as typeof captured.record & { kind: "source" }, expectedRevision: captured.record.revisionId, identity: { provider: "raindrop", accountId: "account-1", itemId: "1" } })).resolves.toEqual({ status: "conflict" });
+    // The effect was admitted and the provider changed before its response;
+    // reconciliation must inspect the exact item and clear the receipt rather
+    // than issue a blind second PUT.
+    expect(putAttempts).toBe(1);
+    expect((await store.connectorState("raindrop"))?.pendingRemote).toBeDefined();
     const status = await extension.reconcile("raindrop");
     expect(status.health).toBe("ready");
+    expect((await store.connectorState("raindrop"))?.pendingRemote).toBeUndefined();
   });
 
   it("does not permit remote Raindrop effects without a separately approved write policy", async () => {

@@ -42,6 +42,21 @@ describe("LegacyKnowledgeImporter", () => {
     const old = await store.read("import:llm-wiki:assertion:ast-old"); expect(old).toMatchObject({ importOrigin: { recordId: "ast-old", review: { auditId: "audit-R001" } }, relations: [{ type: "related" }, { type: "supersedes", recordId: "import:llm-wiki:assertion:ast-new" }] }); expect(old?.kind === "note" && old.content.fields?.find(field => field.field === "value")).toMatchObject({ value: { negated: true, channel: "email", qualification: "Historical only" }, certainty: "external" });
   });
 
+  it("withholds excluded source dependencies across assertion-only and offset batches", async () => {
+    const root = await legacyFixture(); const destination = await mkdtemp(join(tmpdir(), "tron-import-withholding-")); roots.push(destination);
+    await writeFile(join(root, "sources", "records", "src-missing.json"), JSON.stringify({ schema_version: 1, source_id: "src-missing", representation: "personal-os", status: "excluded", captured_at: "2025-05-01", metadata: { canonical_url: "https://private.example/should-not-copy", reference_title: "Private source" }, evidence_path: "private.txt" }));
+    await writeFile(join(root, "graph", "assertions.jsonl"), `${JSON.stringify({ assertion_id: "ast-hidden", subject_id: "ent-person", predicate: "hidden_fact", value: "secret", evidence: [{ source_id: "src-missing", locator: "private locator" }] })}\n${JSON.stringify({ assertion_id: "ast-indirect", subject_id: "ent-person", predicate: "derived_fact", value: "secret derivative", depends_on: ["ast-hidden"] })}\n`);
+    const store = new KnowledgeStore(new TronWorkspace(destination)); const importer = new LegacyKnowledgeImporter(store, { roots: { "llm-wiki": root } });
+    const allDry = await importer.execute({ commandId: "import-withholding-dry-all", source: "llm-wiki", scope: { kinds: ["assertions"] } });
+    expect(allDry.selected).toBe(2);
+    const dry = await importer.execute({ commandId: "import-withholding-dry", source: "llm-wiki", scope: { kinds: ["assertions"] }, offset: 0, limit: 1 });
+    const result = await importer.execute({ commandId: "import-withholding-run", source: "llm-wiki", scope: { kinds: ["assertions"] }, expectedPlanHash: dry.planHash, offset: 0, limit: 1 });
+    expect(result.skipped).toBe(1); expect(result.completed).toBe(true);
+    const secondDry = await importer.execute({ commandId: "import-withholding-dry-second", source: "llm-wiki", scope: { kinds: ["assertions"] }, offset: 1, limit: 1 });
+    const second = await importer.execute({ commandId: "import-withholding-run-second", source: "llm-wiki", scope: { kinds: ["assertions"] }, expectedPlanHash: secondDry.planHash, offset: 1, limit: 1 });
+    expect(second.skipped).toBe(1); expect((await store.list({ kind: "note" })).records).toHaveLength(0);
+  });
+
   it("records exact batch progress and resumes an interrupted batch idempotently", async () => {
     const root = await legacyFixture(); const destination = await mkdtemp(join(tmpdir(), "tron-import-dest-")); roots.push(destination);
     const importer = new LegacyKnowledgeImporter(new KnowledgeStore(new TronWorkspace(destination)), { roots: { "llm-wiki": root } });

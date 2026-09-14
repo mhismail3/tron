@@ -99,6 +99,12 @@ export interface SourceAssessment {
   model?: string;
 }
 
+export interface SourceRepresentation {
+  kind: "provider-api" | "linked-article";
+  object: KnowledgeObjectRef;
+  mediaType?: string;
+}
+
 export interface SourceContent {
   title: string;
   uri?: string;
@@ -106,6 +112,8 @@ export interface SourceContent {
   text?: string;
   /** Immutable original bytes, when captured. */
   object?: KnowledgeObjectRef;
+  /** Additional retained representations never replace the captured object. */
+  representations?: SourceRepresentation[];
   mediaType?: string;
   captureDisposition: "complete" | "partial" | "metadata-only" | "inaccessible" | "failed" | "reference-only";
   annotations?: Array<{ text: string; locator?: string; createdAt?: string }>;
@@ -627,6 +635,15 @@ function validateKindContent(kind: KnowledgeRecordKind, value: unknown): void {
       for (const annotation of content.annotations) { const item = annotation as Record<string, unknown>; boundedString(item.text, "annotation", 20_000); if (item.locator !== undefined) boundedString(item.locator, "annotation locator", 512); if (item.createdAt !== undefined) assertTimestamp(item.createdAt, "annotation createdAt"); }
     }
     if (content.object !== undefined) validateObjectRef(content.object);
+    if (content.representations !== undefined) {
+      if (!Array.isArray(content.representations) || content.representations.length > 20) throw new Error("Invalid source representations");
+      for (const representation of content.representations) {
+        const item = representation as Record<string, unknown>;
+        if (!item || typeof item !== "object" || !["provider-api", "linked-article"].includes(item.kind as string)) throw new Error("Invalid source representation kind");
+        validateObjectRef(item.object);
+        if (item.mediaType !== undefined) boundedString(item.mediaType, "source representation media type", 160);
+      }
+    }
     if (content.retention !== undefined) {
       const retention = content.retention as Record<string, unknown>;
       if (!retention || typeof retention !== "object" || Array.isArray(retention) || !["public", "restricted", "private"].includes(retention.sensitivity as string) || typeof retention.evidenceAvailable !== "boolean") throw new Error("Invalid source retention");

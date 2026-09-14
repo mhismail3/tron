@@ -33,11 +33,16 @@ describe("canonical fork boundaries", () => {
     const first = message("first", "root");
     const second = message("second", "root");
     const firstNext = message("first-next", "first");
-    const all = [root, first, second, firstNext] as FileEntry[];
-    const firstScope = observationBranchIdFor([root, first], all);
+    const beforeSibling = [root, first, firstNext] as FileEntry[];
+    const all = [root, first, firstNext, second] as FileEntry[];
+    const firstScope = observationBranchIdFor([root, first], beforeSibling);
+    const afterSiblingScope = observationBranchIdFor([root, first], all);
     const continuedScope = observationBranchIdFor([root, first, firstNext], all);
     const siblingScope = observationBranchIdFor([root, second], all);
-    expect(firstScope).not.toBe("root");
+    // The first append-order child remains the original scope even after its
+    // sibling is discovered; only the later sibling receives a fork scope.
+    expect(firstScope).toBe("root");
+    expect(afterSiblingScope).toBe(firstScope);
     expect(continuedScope).toBe(firstScope);
     expect(siblingScope).not.toBe(firstScope);
   });

@@ -31,6 +31,8 @@ export interface ObservationSettlement {
   outcome: TerminalOutcome;
   completionId?: string;
   invocationId?: string;
+  /** Recovery preserves every invocation identity admitted to this exact cut. */
+  invocationIds?: readonly string[];
 }
 
 export interface ObservationModelInput {
@@ -137,10 +139,14 @@ export function projectObservationEntry(raw: unknown): ObservationSourceEntry | 
   return { id: entry.id, timestamp: entry.timestamp, type: typeof entry.type === "string" ? entry.type : "unknown", ...(role ? { role } : {}), text: redactModelText(text), canonical: raw };
 }
 
-function sourceDigest(entries: readonly ObservationSourceEntry[]): string {
+export function observationEntriesDigest(entries: readonly unknown[]): string {
   const digest = createHash("sha256");
-  for (const entry of entries) digest.update(JSON.stringify(entry.canonical)).update("\n");
+  for (const entry of entries) digest.update(JSON.stringify(entry)).update("\n");
   return digest.digest("hex");
+}
+
+function sourceDigest(entries: readonly ObservationSourceEntry[]): string {
+  return observationEntriesDigest(entries.map(entry => entry.canonical));
 }
 
 function rangeID(range: ObservationRange): string { return `coverage-${hash(JSON.stringify(range))}`; }
@@ -327,7 +333,9 @@ export class KnowledgeObservationService {
       entryIds: chunk.map(entry => entry.id),
       entryDigest: sourceDigest(chunk),
       ...(settlement.projectId ? { projectId: settlement.projectId } : {}),
-      ...(settlement.invocationId ? { invocationIds: [settlement.invocationId] } : {}),
+      ...((settlement.invocationIds?.length ?? 0) > 0
+        ? { invocationIds: [...new Set(settlement.invocationIds)] }
+        : settlement.invocationId ? { invocationIds: [settlement.invocationId] } : {}),
     };
     const admitRemaining = (entries: readonly ObservationSourceEntry[] = remaining) => {
       if (entries.length > 0) this.enqueue({ ...settlement, entries: entries.map(entry => entry.canonical) }, envelopeKey);
@@ -357,12 +365,25 @@ export class KnowledgeObservationService {
       work = this.workRegistry?.begin({ kind: "knowledge-observation", sessionId: settlement.sessionId, hostEpoch: this.workRegistry.runtimeEpoch, cancellation: () => operationAbort.abort() });
       const model = typeof this.model === "function" ? this.model(config) : this.model;
       if (!model) throw new Error("No explicitly configured observation model");
+      // Model implementations are not required to honor AbortSignal. Fence
+      // immediately after the await and again before parsing/publication so a
+      // late completion cannot become durable evidence.
       const raw = await inferBounded(model, { sessionId: settlement.sessionId, range, sourceText: boundedSourceText, outcome: settlement.outcome, maxOutputChars: config.observation.maxOutputChars }, operationSignal, config.observation.timeoutMs, config.observation.maxAttempts);
-      if (operationSignal.aborted || await this.store.scopeExcluded({ sessionId: settlement.sessionId, ...(settlement.branchId ? { branchId: settlement.branchId } : {}), ...(settlement.projectId ? { projectId: settlement.projectId } : {}) })) {
+      if (operationSignal.aborted) {
+        admitRemaining([chunk[0]!, ...remaining]);
+        return;
+      }
+      const afterModelConfig = await this.store.config();
+      const scopeExcluded = await this.store.scopeExcluded({ sessionId: settlement.sessionId, ...(settlement.branchId ? { branchId: settlement.branchId } : {}), ...(settlement.projectId ? { projectId: settlement.projectId } : {}) });
+      if (operationSignal.aborted || afterModelConfig.revision !== config.revision || scopeExcluded) {
         admitRemaining([chunk[0]!, ...remaining]);
         return;
       }
       const items = parseModelOutput(raw, range, fallbackAt);
+      if (operationSignal.aborted) {
+        admitRemaining([chunk[0]!, ...remaining]);
+        return;
+      }
       if (oversized) {
         // The bounded model call is useful for diagnostics, but its truncated
         // input is not evidence for the full entry. Retain an explicit gap and
@@ -380,7 +401,7 @@ export class KnowledgeObservationService {
         kind: "observation", scope: "personal", provenance: { actor: "agent", sessionId: settlement.sessionId, ...(settlement.branchId ? { branchId: settlement.branchId } : {}), ...(settlement.invocationId ? { invocationId: settlement.invocationId } : {}), evidence: range.entryIds.map(entryId => ({ sessionEntry: { sessionId: settlement.sessionId, ...(settlement.branchId ? { branchId: settlement.branchId } : {}), entryId, digest: range.entryDigest } })) },
         relations: [], content: { range, items: [item], observer: { promptVersion: OBSERVER_PROMPT_VERSION, ...(config.observation.model ? { model: config.observation.model } : {}) } },
       }));
-      await this.store.publishObservationGroup({ commandId: commandID("knowledge-publish", range), expectedConfigRevision: config.revision, ...(expectedRevision ? { expectedCoverageRevision: expectedRevision } : {}), coverage: { id, range, disposition: "observed", reason: `terminal:${settlement.outcome}` }, records });
+      await this.store.publishObservationGroup({ commandId: commandID("knowledge-publish", range), expectedConfigRevision: config.revision, ...(expectedRevision ? { expectedCoverageRevision: expectedRevision } : {}), coverage: { id, range, disposition: "observed", reason: `terminal:${settlement.outcome}` }, records }, operationSignal);
       admitRemaining();
     } catch (error) {
       if (operationSignal.aborted) {
