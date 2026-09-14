@@ -120,7 +120,7 @@ const restartDrainMethods = new Set([
   "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.abort", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
   "automation.status", "automation.list", "automation.get", "automation.schedule.preview", "automation.timeline.list", "automation.run.list", "automation.run.get", "automation.run.cancel", "automation.run.resolve",
-  "knowledge.status", "knowledge.list", "knowledge.read", "knowledge.search", "knowledge.recall",
+  "knowledge.status", "knowledge.list", "knowledge.read", "knowledge.object.read", "knowledge.search", "knowledge.recall",
 ]);
 
 export interface ClientContext {
@@ -309,6 +309,7 @@ export class GatewayService {
       case "knowledge.status":
       case "knowledge.list":
       case "knowledge.read":
+      case "knowledge.object.read":
       case "knowledge.search":
       case "knowledge.recall":
       case "knowledge.connector.status": {
@@ -344,12 +345,11 @@ export class GatewayService {
       case "uploads.status":
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Upload status accepts no parameters");
         return safeJson(await this.dependencies.uploads.status());
-      case "command.status":
-        return safeJson(await this.dependencies.receipts.status(
-          client.identity,
-          string(params.method, "method", { max: 160 }),
-          string(params.commandId, "commandId", { min: 8, max: 160 }),
-        ));
+      case "command.status": {
+        const method = string(params.method, "method", { max: 160 });
+        const status = await this.dependencies.receipts.status(client.identity, method, string(params.commandId, "commandId", { min: 8, max: 160 }));
+        return safeJson(method.startsWith("knowledge.") ? await this.knowledgeReceiptResult(status as unknown as JsonValue) : status);
+      }
       case "gateway.drain.status": {
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Gateway drain status accepts no parameters");
         return safeJson(this.dependencies.sessions.administrativeDrainSnapshot());
@@ -1620,6 +1620,51 @@ export class GatewayService {
     }
   }
 
+  private knowledgeReceiptSafe(result: JsonValue): JsonValue {
+    if (!result || typeof result !== "object" || Array.isArray(result)) return result;
+    const value = result as Record<string, JsonValue>;
+    if (value.record && typeof value.record === "object" && !Array.isArray(value.record)) {
+      const record = value.record as Record<string, JsonValue>;
+      if (typeof record.id === "string" && typeof record.revisionId === "string") return { ...value, record: { id: record.id, revisionId: record.revisionId } };
+    }
+    if (Array.isArray(value.records)) {
+      const records = value.records.filter(item => item && typeof item === "object" && !Array.isArray(item)).map(item => {
+        const record = item as Record<string, JsonValue>;
+        return { id: record.id, revisionId: record.revisionId };
+      }).filter(item => typeof item.id === "string" && typeof item.revisionId === "string");
+      if (records.length === value.records.length) return { ...value, records: records as unknown as JsonValue };
+    }
+    return result;
+  }
+
+  private async knowledgeReceiptResult(result: JsonValue): Promise<JsonValue> {
+    if (!result || typeof result !== "object" || Array.isArray(result)) return result;
+    const value = result as Record<string, JsonValue>;
+    const knowledge = this.requireKnowledge();
+    if (value.result && typeof value.result === "object" && !Array.isArray(value.result)) {
+      return { ...value, result: await this.knowledgeReceiptResult(value.result) };
+    }
+    if (value.record && typeof value.record === "object" && !Array.isArray(value.record)) {
+      const ref = value.record as Record<string, JsonValue>;
+      if (typeof ref.id === "string" && typeof ref.revisionId === "string") {
+        const record = await knowledge.invoke({ operation: "knowledge.read", request: { id: ref.id, revisionId: ref.revisionId } });
+        return record ? { ...value, record: safeJson(record) } : { ...value, record: null };
+      }
+    }
+    if (Array.isArray(value.records)) {
+      const records = [];
+      for (const item of value.records) {
+        const ref = item as Record<string, JsonValue>;
+        if (typeof ref?.id !== "string" || typeof ref?.revisionId !== "string") return result;
+        const record = await knowledge.invoke({ operation: "knowledge.read", request: { id: ref.id, revisionId: ref.revisionId } });
+        if (!record) return { ...value, records: [] };
+        records.push(safeJson(record));
+      }
+      return { ...value, records };
+    }
+    return result;
+  }
+
   private async mutation(
     client: ClientContext,
     method: string,
@@ -1640,7 +1685,20 @@ export class GatewayService {
             }))
       : undefined;
     try {
-      return await this.dependencies.receipts.execute(client.identity, method, commandId, operation);
+      const knowledgeMutation = method.startsWith("knowledge.");
+      const prior = knowledgeMutation
+        ? await this.dependencies.receipts.status(client.identity, method, commandId)
+        : undefined;
+      if (prior?.status === "completed" && prior.result !== undefined) return this.knowledgeReceiptResult(prior.result);
+      const result = await this.dependencies.receipts.execute(
+        client.identity,
+        method,
+        commandId,
+        knowledgeMutation
+          ? async () => this.knowledgeReceiptSafe(await operation())
+          : operation,
+      );
+      return knowledgeMutation ? this.knowledgeReceiptResult(result) : result;
     } finally {
       work?.settle();
     }

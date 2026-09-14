@@ -72,11 +72,12 @@ describe("knowledge connectors", () => {
     const captured = await store.captureSource({ commandId: command("source"), record: { kind: "source", scope: "research", provenance: { actor: "connector", evidence: [] }, relations: [], content: { title: "Captured", uri: "https://example.com/1", text: "captured article", object, captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00.000Z" } } });
     await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("write-approved"), connector: "raindrop", enabled: true, accountId: "account-1", scope: "123", credentialRef: "connector:raindrop:test-account", destination: "456", allowWrites: true } });
     await expect(extension.moveRaindrop({ commandId: command("move-uncertain"), itemId: "1", destination: "456", source: captured.record as typeof captured.record & { kind: "source" } })).resolves.toEqual({ status: "conflict" });
-    expect(putAttempts).toBe(1);
-    expect((await store.connectorState("raindrop"))?.pendingRemote?.itemId).toBe("1");
+    // The exact original collection preflight detects the already-moved item
+    // before issuing a second remote mutation.
+    expect(putAttempts).toBe(0);
+    expect((await store.connectorState("raindrop"))?.pendingRemote).toBeUndefined();
     const status = await extension.reconcile("raindrop");
     expect(status.health).toBe("ready");
-    expect((await store.connectorState("raindrop"))?.pendingRemote).toBeUndefined();
   });
 
   it("does not permit remote Raindrop effects without a separately approved write policy", async () => {

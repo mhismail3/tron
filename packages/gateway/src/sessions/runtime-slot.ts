@@ -781,10 +781,17 @@ export class RuntimeSlot {
     return header ? [header, ...this.sessionManager.getEntries()] : [];
   }
 
-  private observationEntries(operationId: string): { entries: readonly FileEntry[]; branchId: string } {
+  private observationEntries(operationId: string, endEntryId?: string): { entries: readonly FileEntry[]; branchId: string } {
     const entries = this.canonicalSessionEntries();
     const start = this.observationStarts.get(operationId);
-    return { entries: start ? entries.slice(start.entryIndex) : entries, branchId: start?.branchId ?? this.runtime.session.sessionManager.getLeafId() ?? "root" };
+    // Observation admission must use the operation's immutable cut. A missing
+    // start marker is an unavailable range, never permission to expose the
+    // entire session history to a background model.
+    if (!start) return { entries: [], branchId: "root" };
+    const endIndex = endEntryId ? entries.findIndex(entry => entry.id === endEntryId) : -1;
+    if (endEntryId && endIndex < start.entryIndex) return { entries: [], branchId: start.branchId };
+    const cutEnd = endEntryId ? endIndex + 1 : entries.length;
+    return { entries: [...entries.slice(start.entryIndex, cutEnd)], branchId: start.branchId };
   }
 
   get cwd(): string {
@@ -2855,7 +2862,7 @@ export class RuntimeSlot {
                 await this.terminalizeInvocation(settledOperationId, terminalLifecycle, terminalErrorCode);
               }
               await this.beginAttentionSettlement(completion);
-              const observed = this.observationEntries(completion.operationId ?? settledOperationId ?? "");
+              const observed = this.observationEntries(completion.operationId ?? settledOperationId ?? "", completion.id);
               this.hooks.turnSettled?.(this.id, observed.entries, terminalLifecycle, completion.id, observed.branchId, this.cwd, settledOperationId ? this.invocationForOperation(settledOperationId)?.invocationId : undefined);
               if (settledOperationId) this.observationStarts.delete(settledOperationId);
               if (settledOperationId && settledOperationId !== completion.operationId) {

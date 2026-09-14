@@ -40,6 +40,17 @@ async function waitFor(predicate: () => boolean | Promise<boolean>): Promise<voi
 }
 
 describe("KnowledgeObservationService", () => {
+  it("keeps model input within the configured bound and does not publish after disposal", async () => {
+    let observer!: KnowledgeObservationService;
+    const infer = vi.fn(async (input) => { expect(input.sourceText.length).toBeLessThanOrEqual(48_000); observer.dispose(); return output; });
+    const { store, observer: created } = await fixture(infer); observer = created;
+    const large = { type: "message", id: "oversized-entry", timestamp: "2026-01-01T00:00:03Z", message: { role: "user", content: "x".repeat(100_000) } };
+    observer.admit({ sessionId: "session-1", entries: [large], outcome: "completed" });
+    await vi.waitFor(() => infer.mock.calls.length === 1);
+    await new Promise(resolve => setTimeout(resolve, 25));
+    expect((await store.list({ kind: "observation" })).records).toHaveLength(0);
+  });
+
   it("coalesces and durably deduplicates canonical no-tool turns without forwarding thinking", async () => {
     const infer = vi.fn(async (input) => {
       expect(input.sourceText).not.toContain("private reasoning omitted");

@@ -272,6 +272,7 @@ export interface KnowledgeListResponse {
   records: KnowledgeRecord[];
   nextCursor?: string;
   stateRevision: number;
+  incomplete?: boolean;
 }
 
 export interface KnowledgeSearchRequest {
@@ -291,6 +292,7 @@ export interface KnowledgeSearchResponse {
   hits: KnowledgeSearchHit[];
   stateRevision: number;
   indexState: "canonical";
+  incomplete?: boolean;
 }
 
 export interface KnowledgeRecallRequest {
@@ -306,6 +308,7 @@ export interface KnowledgeRecallResponse {
   citations: KnowledgeEvidenceRef[];
   stateRevision: number;
   availability: "available" | "no-match";
+  incomplete?: boolean;
 }
 
 export interface KnowledgeSourceRecordCaptureRequest {
@@ -411,7 +414,7 @@ export interface KnowledgeConnectorState {
   paidBudgetCents: number;
   recurringApproved: boolean;
   checkpoint?: string;
-  pending: Array<{ id: string; title: string; url: string; excerpt?: string; annotation?: string; publishedAt?: string; collectionId?: string }>;
+  pending: Array<{ id: string; title: string; url: string; excerpt?: string; annotation?: string; publishedAt?: string; collectionId?: string; apiPayload?: string }>;
   capturedIds: string[];
   health: "unconfigured" | "ready" | "running" | "partial" | "rate-limited" | "auth-error" | "error";
   lastRunAt?: string;
@@ -450,11 +453,13 @@ export interface KnowledgeImportScope {
   /** Optional exact legacy IDs; an empty list selects nothing. */
   ids?: string[];
 }
-export interface KnowledgeImportDryRunRequest { commandId: string; source: string; scope?: KnowledgeImportScope; limit?: number; }
-export interface KnowledgeImportRunRequest { commandId: string; source: string; scope?: KnowledgeImportScope; expectedPlanHash: string; limit?: number; }
+export interface KnowledgeImportDryRunRequest { commandId: string; source: string; scope?: KnowledgeImportScope; limit?: number; offset?: number; }
+export interface KnowledgeImportRunRequest { commandId: string; source: string; scope?: KnowledgeImportScope; expectedPlanHash: string; limit?: number; offset?: number; }
 
+export interface KnowledgeObjectReadRequest { hash: string; bytes: number; mediaType: string; offset?: number; }
 export type KnowledgeAction =
   | { operation: "knowledge.status"; request: Record<string, never> }
+  | { operation: "knowledge.object.read"; request: KnowledgeObjectReadRequest }
   | { operation: "knowledge.config"; request: { commandId: string; config: KnowledgeConfig } }
   | { operation: "knowledge.list"; request: KnowledgeListRequest }
   | { operation: "knowledge.read"; request: { id: string; revisionId?: string; includeSuppressed?: boolean } }
@@ -480,6 +485,16 @@ const HASH = /^[a-f0-9]{64}$/;
 
 export function assertKnowledgeId(value: unknown, label = "knowledge id"): asserts value is string {
   if (typeof value !== "string" || !ID.test(value) || value === "." || value === "..") throw new Error(`Invalid ${label}`);
+}
+
+/** Project identity is a bounded workspace reference, not a record ID. */
+export function assertKnowledgeProjectId(value: unknown, label = "project id"): asserts value is string {
+  if (typeof value !== "string" || value.length < 1 || value.length > 4_096 || /[\u0000-\u001f\u007f]/.test(value)) throw new Error(`Invalid ${label}`);
+  if (value.startsWith("/")) {
+    if (value.includes("\\") || value.split("/").some(component => component === "..")) throw new Error(`Invalid ${label}`);
+    return;
+  }
+  if (!ID.test(value) || value === "." || value === "..") throw new Error(`Invalid ${label}`);
 }
 
 function assertTimestamp(value: unknown, label: string): asserts value is string {
@@ -666,7 +681,7 @@ export function validateKnowledgeConfig(value: unknown): KnowledgeConfig {
   const maxAttempts = observation?.maxAttempts;
   const maximumSearchResults = config.maximumSearchResults;
   const eligibility = config.eligibility as Record<string, unknown>;
-  if (config.schemaVersion !== KNOWLEDGE_SCHEMA_VERSION || typeof config.revision !== "number" || !Number.isSafeInteger(config.revision) || config.revision < 0 || !eligibility || typeof eligibility !== "object" || !Array.isArray(eligibility.sessionIds) || !Array.isArray(eligibility.projectIds) || !Array.isArray(eligibility.excludedSessionIds) || !Array.isArray(eligibility.excludedProjectIds) || ![...eligibility.sessionIds, ...eligibility.projectIds, ...eligibility.excludedSessionIds, ...eligibility.excludedProjectIds].every(item => typeof item === "string" && ID.test(item)) || !observation || typeof observation !== "object" || typeof observation.enabled !== "boolean" || typeof maxInputChars !== "number" || !Number.isSafeInteger(maxInputChars) || maxInputChars < 1_000 || maxInputChars > 200_000 || typeof maxOutputChars !== "number" || !Number.isSafeInteger(maxOutputChars) || maxOutputChars < 100 || maxOutputChars > 50_000 || typeof timeoutMs !== "number" || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 300_000 || typeof maxAttempts !== "number" || !Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 3 || typeof maximumSearchResults !== "number" || !Number.isSafeInteger(maximumSearchResults) || maximumSearchResults < 1 || maximumSearchResults > 100) throw new Error("Invalid knowledge configuration");
+  if (config.schemaVersion !== KNOWLEDGE_SCHEMA_VERSION || typeof config.revision !== "number" || !Number.isSafeInteger(config.revision) || config.revision < 0 || !eligibility || typeof eligibility !== "object" || !Array.isArray(eligibility.sessionIds) || !Array.isArray(eligibility.projectIds) || !Array.isArray(eligibility.excludedSessionIds) || !Array.isArray(eligibility.excludedProjectIds) || !eligibility.sessionIds.every(item => typeof item === "string" && ID.test(item)) || !eligibility.projectIds.every(item => { try { assertKnowledgeProjectId(item, "project id"); return true; } catch { return false; } }) || !eligibility.excludedSessionIds.every(item => typeof item === "string" && ID.test(item)) || !eligibility.excludedProjectIds.every(item => { try { assertKnowledgeProjectId(item, "excluded project id"); return true; } catch { return false; } }) || !observation || typeof observation !== "object" || typeof observation.enabled !== "boolean" || typeof maxInputChars !== "number" || !Number.isSafeInteger(maxInputChars) || maxInputChars < 1_000 || maxInputChars > 200_000 || typeof maxOutputChars !== "number" || !Number.isSafeInteger(maxOutputChars) || maxOutputChars < 100 || maxOutputChars > 50_000 || typeof timeoutMs !== "number" || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 300_000 || typeof maxAttempts !== "number" || !Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 3 || typeof maximumSearchResults !== "number" || !Number.isSafeInteger(maximumSearchResults) || maximumSearchResults < 1 || maximumSearchResults > 100) throw new Error("Invalid knowledge configuration");
   if (observation.model !== undefined && (typeof observation.model !== "string" || observation.model.length === 0 || observation.model.length > 200)) throw new Error("Invalid observation model");
   if (config.currentInterests !== undefined && (!Array.isArray(config.currentInterests) || config.currentInterests.length > 50 || !config.currentInterests.every(item => typeof item === "string" && item.length > 0 && item.length <= 500))) throw new Error("Invalid current interests");
   return value as KnowledgeConfig;

@@ -241,7 +241,8 @@ struct SessionShellView: View {
         case .knowledge:
             KnowledgeDashboardView(
                 onSelectDashboard: selectDashboard,
-                onOpenDraft: openKnowledgeDraft
+                onOpenDraft: openKnowledgeDraft,
+                onOpenSession: openKnowledgeEvidence
             )
         }
     }
@@ -269,6 +270,21 @@ struct SessionShellView: View {
         transaction.disablesAnimations = true
         withTransaction(transaction) {
             dashboardMode = mode
+        }
+    }
+
+    private func openKnowledgeEvidence(sessionID: String, entryID: String) {
+        guard let profileID = model.knowledgePresentationIdentity.profileID, openingSessionID == nil else { return }
+        openingSessionID = "knowledge:\(profileID):\(sessionID):\(entryID)"
+        let navigationIntent = navigationOwner.begin()
+        Task { @MainActor in
+            defer { openingSessionID = nil }
+            do {
+                let route = try await model.navigationRoute(profileID: profileID, sessionID: sessionID)
+                guard navigationOwner.admit(navigationIntent), model.ownsNavigationRoute(route) else { return }
+                dashboardMode = .sessions
+                present(route)
+            } catch is CancellationError { return } catch { model.presentError(error) }
         }
     }
 

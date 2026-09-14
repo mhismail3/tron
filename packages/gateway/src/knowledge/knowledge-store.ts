@@ -15,7 +15,7 @@ import {
   type KnowledgeSearchRequest, type KnowledgeSearchResponse, type KnowledgeSearchHit,
   type KnowledgeNoteMutationRequest,
   type KnowledgeConnectorState, type ObservationCoverage, type ObservationRange, validateKnowledgeConfig,
-  validateKnowledgeRecord, validateObjectRef, assertKnowledgeId,
+  validateKnowledgeRecord, validateObjectRef, assertKnowledgeId, assertKnowledgeProjectId,
 } from "./knowledge-contract.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 
@@ -25,6 +25,8 @@ const OBJECT_MAX_BYTES = 8_000_000;
 const RECEIPT_LIMIT = 256;
 const OBJECT_HASH = /^[a-f0-9]{64}$/;
 const OBJECT_SCHEMA_VERSION = 1 as const;
+const MAX_SCAN_RECORDS = 1_000;
+const MAX_SCAN_BYTES = 16 * 1_048_576;
 
 type RecordHead = { latestRevisionId: string; revisionIds: string[] };
 type Suppression = { excluded: boolean; forgotten: boolean; reason?: string; updatedAt: string };
@@ -119,14 +121,14 @@ function validateCoverage(value: unknown): asserts value is ObservationCoverage 
   if (range.branchId !== undefined) safeId(range.branchId as string, "coverage branchId");
   if (!Array.isArray(range.entryIds) || range.entryIds.length < 1 || range.entryIds[0] !== range.fromEntryId || range.entryIds.at(-1) !== range.toEntryId || typeof range.entryDigest !== "string" || !OBJECT_HASH.test(range.entryDigest)) throw new KnowledgeStoreError("invalid", "Coverage does not identify an exact canonical input");
   range.entryIds.forEach(entry => safeId(entry as string, "coverage entry id"));
-  if (range.projectId !== undefined) safeId(range.projectId as string, "coverage projectId");
+  if (range.projectId !== undefined) assertKnowledgeProjectId(range.projectId as string, "coverage projectId");
 }
 function validateConnectorState(value: unknown, connector: "raindrop" | "x"): asserts value is KnowledgeConnectorState {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new KnowledgeStoreError("invalid", "Invalid connector state");
   const state = value as Record<string, unknown>;
   if (state.connector !== connector || typeof state.enabled !== "boolean" || typeof state.allowWrites !== "boolean" || typeof state.paidAccessApproved !== "boolean" || !Number.isSafeInteger(state.paidBudgetCents) || (state.paidBudgetCents as number) < 0 || (state.paidBudgetCents as number) > 1_000_000 || typeof state.recurringApproved !== "boolean" || !Array.isArray(state.pending) || !Array.isArray(state.capturedIds) || !["unconfigured", "ready", "running", "partial", "rate-limited", "auth-error", "error"].includes(state.health as string) || !Number.isSafeInteger(state.remaining) || (state.remaining as number) < 0 || state.pending.length > 500 || state.capturedIds.length > 2_000) throw new KnowledgeStoreError("invalid", "Invalid connector state");
   for (const item of state.pending) {
-    if (!item || typeof item !== "object" || typeof (item as Record<string, unknown>).id !== "string" || typeof (item as Record<string, unknown>).title !== "string" || typeof (item as Record<string, unknown>).url !== "string") throw new KnowledgeStoreError("invalid", "Invalid connector pending item");
+    if (!item || typeof item !== "object" || typeof (item as Record<string, unknown>).id !== "string" || typeof (item as Record<string, unknown>).title !== "string" || typeof (item as Record<string, unknown>).url !== "string" || ((item as Record<string, unknown>).apiPayload !== undefined && (typeof (item as Record<string, unknown>).apiPayload !== "string" || ((item as Record<string, unknown>).apiPayload as string).length > 100_000))) throw new KnowledgeStoreError("invalid", "Invalid connector pending item");
   }
   for (const id of state.capturedIds) if (typeof id !== "string" || id.length > 512) throw new KnowledgeStoreError("invalid", "Invalid connector captured ID");
   for (const key of ["accountId", "scope", "destination", "credentialRef", "checkpoint", "lastRunAt", "lastError"]) if (state[key] !== undefined && (typeof state[key] !== "string" || (state[key] as string).length > 4_096)) throw new KnowledgeStoreError("invalid", "Invalid connector state field");
@@ -315,8 +317,21 @@ export class KnowledgeStore {
 
   /** One predicate guards every read boundary, including derivatives and
    * object authorization. Scope exclusion is stronger than record kind. */
+  private recordHardErased(state: KnowledgeState, record: KnowledgeRecord): boolean {
+    if (state.suppressions[record.id]?.forgotten) return true;
+    const forgotten = (id: string | undefined): boolean => id !== undefined && state.suppressions[id]?.forgotten === true;
+    // Forget is a hard evidence fence, including historical revisions and
+    // includeSuppressed reads. A derivative that still cites a forgotten
+    // record is unavailable until its owning revision is scrubbed.
+    if (record.provenance.evidence.some(evidence => forgotten(evidence.recordId)) || record.relations.some(relation => forgotten(relation.recordId))) return true;
+    if (record.kind === "observation" && record.content.items.some(item => item.evidence?.some(evidence => forgotten(evidence.recordId)))) return true;
+    if (record.kind === "note" && (record.content.fields?.some(field => field.evidence.some(evidence => forgotten(evidence.recordId))) || record.content.contraryEvidence?.some(evidence => forgotten(evidence.recordId)))) return true;
+    return false;
+  }
+
   private recordExcluded(state: KnowledgeState, record: KnowledgeRecord): boolean {
     if (state.suppressions[record.id]?.excluded || state.suppressions[record.id]?.forgotten) return true;
+    if (this.recordHardErased(state, record)) return true;
     const scope = this.recordScope(record);
     if (scope.sessionId && state.config.eligibility.excludedSessionIds.includes(scope.sessionId)) return true;
     if (scope.projectId && state.config.eligibility.excludedProjectIds.includes(scope.projectId)) return true;
@@ -328,13 +343,18 @@ export class KnowledgeStore {
     return keys.some(key => state.scopeExclusions[key]?.excluded);
   }
 
-  private async allRecords(paths: StorePaths, state: KnowledgeState, includeSuppressed = false): Promise<KnowledgeRecord[]> {
+  private async allRecords(paths: StorePaths, state: KnowledgeState, includeSuppressed = false): Promise<{ records: KnowledgeRecord[]; incomplete: boolean }> {
     const records: KnowledgeRecord[] = [];
+    let scannedBytes = 0;
+    let incomplete = false;
     for (const [id, head] of Object.entries(state.records)) {
+      if (records.length >= MAX_SCAN_RECORDS || scannedBytes >= MAX_SCAN_BYTES) { incomplete = true; break; }
       const record = await this.readRecord(paths, id, head.latestRevisionId);
+      scannedBytes += Buffer.byteLength(JSON.stringify(record), "utf8");
       if (includeSuppressed || !this.recordExcluded(state, record)) records.push(record);
     }
-    return records;
+    if (Object.keys(state.records).length > records.length && records.length >= MAX_SCAN_RECORDS) incomplete = true;
+    return { records, incomplete };
   }
   private async receiptResult(paths: StorePaths, state: KnowledgeState, result: ReceiptResult): Promise<unknown> {
     if (result.kind === "value") return result.value;
@@ -420,9 +440,10 @@ export class KnowledgeStore {
   async list(request: KnowledgeListRequest = {}): Promise<KnowledgeListResponse> {
     const paths = await this.paths(false); const loaded = await this.load(paths, false); const state = loaded.state;
     const limit = Math.min(request.limit ?? 50, state.config.maximumSearchResults); if (!Number.isSafeInteger(limit) || limit < 1) throw invalid("Invalid knowledge list limit");
-    const records = (await this.allRecords(paths, state, request.includeSuppressed === true)).filter(record => (!request.kind || record.kind === request.kind) && (!request.scope || record.scope === request.scope));
+    const scanned = await this.allRecords(paths, state, request.includeSuppressed === true);
+    const records = scanned.records.filter(record => (!request.kind || record.kind === request.kind) && (!request.scope || record.scope === request.scope));
     records.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id)); const start = request.cursor ? Math.max(0, records.findIndex(record => record.id === request.cursor) + 1) : 0; const page = records.slice(start, start + limit);
-    return { records: page, ...(start + limit < records.length ? { nextCursor: page.at(-1)!.id } : {}), stateRevision: state.stateRevision };
+    return { records: page, ...(start + limit < records.length ? { nextCursor: page.at(-1)!.id } : {}), stateRevision: state.stateRevision, ...(scanned.incomplete ? { incomplete: true } : {}) };
   }
   async read(id: string, revision?: string, includeSuppressed = false): Promise<KnowledgeRecord | null> {
     safeId(id, "record id"); if (revision !== undefined) safeId(revision, "knowledge revision"); const paths = await this.paths(false); const state = (await this.load(paths, false)).state;
@@ -431,6 +452,8 @@ export class KnowledgeStore {
     const selected = revision ?? head.latestRevisionId;
     if (!head.revisionIds.includes(selected)) throw new KnowledgeStoreError("invalid", "Requested revision is not committed for this record");
     const record = await this.readRecord(paths, id, selected);
+    // includeSuppressed is an audit visibility option, not an erasure bypass.
+    if (this.recordHardErased(state, record)) return null;
     if (!includeSuppressed && this.recordExcluded(state, record)) return null;
     return record;
   }
@@ -438,18 +461,20 @@ export class KnowledgeStore {
     if (typeof request.query !== "string" || request.query.trim().length === 0 || request.query.length > 512) throw invalid("Search query must be non-empty and bounded");
     const paths = await this.paths(false); const state = (await this.load(paths, false)).state; const terms = request.query.toLocaleLowerCase().split(/\s+/).filter(Boolean); const hits: KnowledgeSearchHit[] = [];
     // Search the complete bounded canonical corpus first; list() pagination is a presentation limit.
-    for (const record of await this.allRecords(paths, state)) {
+    const scanned = await this.allRecords(paths, state);
+    for (const record of scanned.records) {
       if ((request.kind && record.kind !== request.kind) || (request.scope && record.scope !== request.scope)) continue;
       const matchedFields: string[] = []; let score = 0;
       for (const [field, value] of searchableFields(record)) { const lower = value.toLocaleLowerCase(); const count = terms.reduce((sum, term) => sum + (lower.includes(term) ? 1 : 0), 0); if (count) { matchedFields.push(field); score += count; } }
       if (score) hits.push({ record, score, matchedFields });
     }
     hits.sort((a, b) => b.score - a.score || b.record.updatedAt.localeCompare(a.record.updatedAt)); const limit = Math.min(request.limit ?? 50, state.config.maximumSearchResults);
-    return { hits: hits.slice(0, limit), stateRevision: state.stateRevision, indexState: "canonical" };
+    return { hits: hits.slice(0, limit), stateRevision: state.stateRevision, indexState: "canonical", ...(scanned.incomplete ? { incomplete: true } : {}) };
   }
   async recall(request: KnowledgeRecallRequest): Promise<KnowledgeRecallResponse> {
     const paths = await this.paths(false); const state = (await this.load(paths, false)).state; const terms = request.query?.toLocaleLowerCase().split(/\s+/).filter(Boolean) ?? []; const records: KnowledgeRecord[] = [];
-    for (const record of await this.allRecords(paths, state)) {
+    const scanned = await this.allRecords(paths, state);
+    for (const record of scanned.records) {
       if ((request.scope && record.scope !== request.scope)) continue;
       if (record.kind === "observation" && request.sessionId && record.content.range.sessionId !== request.sessionId) continue;
       if (record.kind === "observation" && request.entryId && !record.content.range.entryIds.includes(request.entryId)) continue;
@@ -458,7 +483,7 @@ export class KnowledgeStore {
     }
     records.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id)); const limit = Math.min(request.limit ?? 20, state.config.maximumSearchResults); const selected = records.slice(0, limit); const citations: KnowledgeEvidenceRef[] = [];
     for (const record of selected) citations.push(...record.provenance.evidence, ...(record.kind === "observation" ? record.content.items.flatMap(item => item.evidence ?? []) : []));
-    return { records: selected, citations, stateRevision: state.stateRevision, availability: selected.length ? "available" : "no-match" };
+    return { records: selected, citations, stateRevision: state.stateRevision, availability: selected.length ? "available" : "no-match", ...(scanned.incomplete ? { incomplete: true } : {}) };
   }
   /** Resolve exact observation revisions for the Reflector without exposing a
    * second search/index authority. The caller still publishes through reflect,
@@ -515,9 +540,11 @@ export class KnowledgeStore {
   async scopeExcluded(scope: { sessionId?: string; branchId?: string; projectId?: string }): Promise<boolean> {
     const paths = await this.paths(false);
     const state = (await this.load(paths, false)).state;
-    const keys = scope.sessionId
-      ? [scope.branchId ? `branch:${scope.sessionId}:${scope.branchId}` : `session:${scope.sessionId}`]
-      : scope.projectId ? [`project:${scope.projectId}`] : [];
+    const keys = [
+      ...(scope.sessionId ? [`session:${scope.sessionId}`] : []),
+      ...(scope.sessionId && scope.branchId ? [`branch:${scope.sessionId}:${scope.branchId}`] : []),
+      ...(scope.projectId ? [`project:${scope.projectId}`] : []),
+    ];
     return keys.some(key => state.scopeExclusions[key]?.excluded)
       || (scope.sessionId ? state.config.eligibility.excludedSessionIds.includes(scope.sessionId) : false)
       || (scope.projectId ? state.config.eligibility.excludedProjectIds.includes(scope.projectId) : false);
@@ -543,7 +570,7 @@ export class KnowledgeStore {
       if (this.excludedRange(state, input.coverage.range) && input.coverage.disposition !== "excluded") throw conflict("Observation range is excluded"); const current = state.coverage[input.coverage.id];
       if (current && !sameRange(current.range, input.coverage.range)) throw conflict("Observation coverage identity changed");
       if (input.expectedRevision !== undefined && current?.revisionId !== input.expectedRevision) throw conflict("Observation coverage revision is stale");
-      if (current && ["observed", "empty", "excluded"].includes(current.disposition)) {
+      if (current && ["observed", "empty", "excluded", "unavailable"].includes(current.disposition)) {
         if (current.disposition !== input.coverage.disposition || current.groupRevisionIds.join("\0") !== input.coverage.groupRevisionIds.join("\0")) throw conflict("Terminal observation coverage cannot be replaced");
         return { coverage: current, stateRevision: state.stateRevision };
       }
@@ -661,11 +688,18 @@ export class KnowledgeStore {
     // Object hashes are not a public directory index. Require a citation from
     // a retained, unsuppressed record before exposing bytes.
     let authorized = false;
+    let scannedRevisions = 0;
+    let scannedBytes = 0;
     for (const [id, head] of Object.entries(loaded.state.records)) {
+      if (scannedRevisions >= MAX_SCAN_RECORDS || scannedBytes >= MAX_SCAN_BYTES) break;
       const candidate = await this.readRecord(paths, id, head.latestRevisionId);
+      scannedBytes += Buffer.byteLength(JSON.stringify(candidate), "utf8");
       if (this.recordExcluded(loaded.state, candidate)) continue;
       for (const revision of head.revisionIds) {
+        if (scannedRevisions >= MAX_SCAN_RECORDS || scannedBytes >= MAX_SCAN_BYTES) break;
         const revisionRecord = await this.readRecord(paths, id, revision);
+        scannedRevisions += 1;
+        scannedBytes += Buffer.byteLength(JSON.stringify(revisionRecord), "utf8");
         if (this.recordExcluded(loaded.state, revisionRecord)) continue;
         if (recordObjectHashes(revisionRecord).includes(ref.hash)) { authorized = true; break; }
       }
@@ -706,11 +740,11 @@ export class KnowledgeStore {
   async observationCoverageForScope(sessionId: string, branchId?: string, projectId?: string): Promise<ObservationCoverage[]> {
     safeId(sessionId, "session id");
     if (branchId !== undefined) safeId(branchId, "branch id");
-    if (projectId !== undefined) safeId(projectId, "project id");
+    if (projectId !== undefined) assertKnowledgeProjectId(projectId, "project id");
     const paths = await this.paths(false); const state = (await this.load(paths, false)).state;
     return Object.values(state.coverage).filter(coverage => coverage.range.sessionId === sessionId
       && coverage.range.branchId === branchId && coverage.range.projectId === projectId
-      && ["observed", "empty", "excluded"].includes(coverage.disposition));
+      && ["observed", "empty", "excluded", "unavailable"].includes(coverage.disposition));
   }
 }
 

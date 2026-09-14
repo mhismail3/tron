@@ -96,6 +96,9 @@ function assertSafeUrl(value: string): URL {
   let parsed: URL;
   try { parsed = new URL(value); } catch { throw invalid("Source URL is invalid"); }
   if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password || parsed.hostname.length === 0) throw invalid("Source URL must be an http(s) URL without credentials");
+  // Query credentials are credentials too. Reject them before the URL can be
+  // persisted, logged, fetched, or passed to an assessment model.
+  for (const key of parsed.searchParams.keys()) if (/^(?:token|api[_-]?key|key|secret|password|passwd|auth|signature|sig|access[_-]?token|credential|session)$/i.test(key)) throw invalid("Source URL contains a credential-bearing query parameter");
   return parsed;
 }
 
@@ -116,12 +119,15 @@ async function pinnedFetch(url: URL, address: string, init: RequestInit = {}): P
   return new Promise((resolve, reject) => {
     const requestHeaders = Object.fromEntries([...headers].map(([name, value]) => [name, value]));
     const req = transport({ hostname: address, ...(url.port ? { port: url.port } : {}), path: `${url.pathname}${url.search}`, method: "GET", headers: requestHeaders, ...(url.protocol === "https:" ? { servername: url.hostname } : {}), lookup: (_hostname, _options, callback) => callback(null, address, isIP(address)), }, response => {
-      const status = response.statusCode ?? 200;
-      // Node may invoke the callback for bodyless statuses. Do not attach a
-      // stream (or a body) for statuses whose wire contract forbids one.
-      const body = [204, 205, 304].includes(status) ? null : new ReadableStream<Uint8Array>({ start(controller) { response.on("data", chunk => controller.enqueue(new Uint8Array(chunk))); response.on("end", () => controller.close()); response.on("error", error => controller.error(error)); }, cancel() { response.destroy(); } });
-      const responseHeaders = Object.fromEntries(Object.entries(response.headers).map(([name, value]) => [name, Array.isArray(value) ? value.join(", ") : value ?? ""]));
-      resolve(new Response(body, { status, ...(response.statusMessage ? { statusText: response.statusMessage } : {}), headers: responseHeaders }));
+      try {
+        const status = response.statusCode ?? 200;
+        if (!Number.isInteger(status) || status < 200 || status > 599) throw new Error("Invalid HTTP response status");
+        // Node may invoke the callback for bodyless statuses. Do not attach a
+        // stream (or a body) for statuses whose wire contract forbids one.
+        const body = [204, 205, 304].includes(status) ? null : new ReadableStream<Uint8Array>({ start(controller) { response.on("data", chunk => controller.enqueue(new Uint8Array(chunk))); response.on("end", () => controller.close()); response.on("error", error => controller.error(error)); }, cancel() { response.destroy(); } });
+        const responseHeaders = Object.fromEntries(Object.entries(response.headers).map(([name, value]) => [name, Array.isArray(value) ? value.join(", ") : value ?? ""]));
+        resolve(new Response(body, { status, ...(response.statusMessage ? { statusText: response.statusMessage } : {}), headers: responseHeaders }));
+      } catch (error) { response.resume(); reject(error); }
     });
     const signal = init.signal;
     const abort = () => req.destroy(new Error("Source fetch cancelled"));
@@ -326,10 +332,11 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
   if (result.record.kind !== "source") throw new Error("Source capture returned a non-source record");
   let sourceRecord = result.record;
   let assessmentError: string | undefined;
-  if (options.model && readable && disposition !== "inaccessible" && disposition !== "failed") {
+  if (options.model && readable && disposition !== "inaccessible" && disposition !== "failed" && !operationController.signal.aborted) {
     try {
       const interests = input.interests ?? (await store.config()).currentInterests ?? [];
       const assessment = await options.model.assess({ title: sourceRecord.content.title, text: readable.text.slice(0, 100_000), interests: interests.slice(0, 50).map(item => item.slice(0, 500)), source: { ...(sourceRecord.content.uri ? { uri: sourceRecord.content.uri } : {}), ...(mediaType ? { mediaType } : {}), capturedAt } }, operationController.signal);
+      if (operationController.signal.aborted) throw new SourceNetworkError("Source assessment cancelled");
       const assessed: SourceContent = { ...sourceRecord.content, assessment: { ...assessment, generatedAt: assessment.generatedAt ?? now() } };
       result = await store.captureSource({ commandId: `${input.commandId}:assessment`, expectedRevision: sourceRecord.revisionId, record: { ...sourceDraft(input, assessed), id: sourceRecord.id, createdAt: sourceRecord.createdAt } });
       if (result.record.kind !== "source") throw new Error("Source assessment returned a non-source record");

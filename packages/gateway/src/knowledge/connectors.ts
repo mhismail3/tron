@@ -9,6 +9,7 @@ const MAX_PAGE = 50;
 const MAX_ITEMS = 200;
 const BODY_LIMIT = 2_000_000;
 const RETRIES = 3;
+const RUN_DEADLINE_MS = 120_000;
 const CONNECTORS = ["raindrop", "x"] as const;
 type Connector = typeof CONNECTORS[number];
 
@@ -26,7 +27,7 @@ export interface KnowledgeConnectorOptions {
   now?: () => string;
 }
 
-interface PendingItem { id: string; title: string; url: string; excerpt?: string; annotation?: string; publishedAt?: string; collectionId?: string }
+interface PendingItem { id: string; title: string; url: string; excerpt?: string; annotation?: string; publishedAt?: string; collectionId?: string; apiPayload?: string }
 interface Page { items: PendingItem[]; next?: string; accountId?: string; }
 interface RaindropItemDTO { _id?: unknown; title?: unknown; link?: unknown; excerpt?: unknown; note?: unknown; created?: unknown; collection?: unknown; }
 interface XBookmarkDTO { id?: unknown; text?: unknown; created_at?: unknown; author_id?: unknown; entities?: unknown; }
@@ -87,7 +88,12 @@ function parseRaindrop(value: any): PendingItem[] {
 }
 function parseX(value: any): PendingItem[] {
   if (!value || !Array.isArray(value.data)) return [];
-  return value.data.map((item: XBookmarkDTO) => { const itemId = id(item.id, "X bookmark"); if (!itemId) return undefined; const link = `https://x.com/i/web/status/${encodeURIComponent(itemId)}`; return { id: itemId, title: text(item.text, 512) ?? `X post ${itemId}`, url: link, ...(text(item.text, 100_000) ? { excerpt: text(item.text, 100_000) } : {}), ...(text(item.created_at, 80) ? { publishedAt: text(item.created_at, 80) } : {}) }; }).filter((item: PendingItem | undefined): item is PendingItem => Boolean(item));
+  return value.data.map((item: XBookmarkDTO) => {
+    const itemId = id(item.id, "X bookmark"); if (!itemId) return undefined;
+    const link = `https://x.com/i/web/status/${encodeURIComponent(itemId)}`;
+    const payload = JSON.stringify({ id: item.id, text: item.text, created_at: item.created_at, author_id: item.author_id, entities: item.entities });
+    return { id: itemId, title: text(item.text, 512) ?? `X post ${itemId}`, url: link, ...(text(item.text, 100_000) ? { excerpt: text(item.text, 100_000) } : {}), ...(text(item.created_at, 80) ? { publishedAt: text(item.created_at, 80) } : {}), ...(payload.length <= 100_000 ? { apiPayload: payload } : {}) };
+  }).filter((item: PendingItem | undefined): item is PendingItem => Boolean(item));
 }
 
 export class KnowledgeConnectorExtension {
@@ -137,7 +143,10 @@ export class KnowledgeConnectorExtension {
     if (!current?.enabled || !current.credentialRef || !current.accountId || !current.scope) throw new GatewayError("unsupported", `Knowledge ${connector} connector is not configured`);
     // X access is never inferred from a zero budget: the provider capability
     // and explicit paid entitlement must both be present before any request.
-    if (connector === "x" && (!current.paidAccessApproved || current.paidBudgetCents <= 0)) throw new GatewayError("unsupported", "X connector access requires explicit paid entitlement and budget");
+    // X pricing is endpoint/resource dependent and this owner has no pricing,
+    // reservation, or debit ledger. A positive user budget is not permission
+    // to spend; keep access explicitly unsupported until that owner exists.
+    if (connector === "x") throw new GatewayError("unsupported", "X connector paid pricing and accounting are unavailable");
     if (connector === "raindrop" && current.paidBudgetCents > 0) throw new GatewayError("unsupported", "Paid connector operations are unavailable without a priced operation");
     if (current.pendingRemote) {
       await this.reconcile(connector);
@@ -149,6 +158,8 @@ export class KnowledgeConnectorExtension {
     const limit = Math.min(request.limit ?? MAX_ITEMS, MAX_ITEMS); if (!Number.isSafeInteger(limit) || limit < 1) throw bad("Connector limit is invalid");
     await this.store.updateConnectorState(command(request.commandId, "start"), connector, state => { const next = { ...(state ?? current), health: "running" as const, lastRunAt: this.now(), remaining: state?.pending.length ?? 0 }; delete next.lastError; return next; });
     const abort = new AbortController();
+    const deadline = setTimeout(() => abort.abort(new Error("Connector run deadline exceeded")), RUN_DEADLINE_MS);
+    deadline.unref?.();
     try {
       const discovered = await this.discover(connector, current, token, limit, abort.signal);
       let state = await this.store.connectorState(connector) ?? current;
@@ -160,10 +171,21 @@ export class KnowledgeConnectorExtension {
       let captured = 0; let partial = 0; let lastError: string | undefined;
       for (const item of [...state.pending].slice(0, limit)) {
         try {
-          const result = await captureSource(this.store, { commandId: command(request.commandId, `capture-${item.id}`), url: item.url, scope: "research", title: item.title, origin: "connector", identity: { provider: connector, accountId: state.accountId!, itemId: item.id }, ...(item.annotation ? { annotations: [{ text: item.annotation }] } : {}) }, { ...(this.options.sourceFetch ? { fetcher: (sourceUrl, init) => this.options.sourceFetch!(sourceUrl.toString(), item.excerpt, init?.signal ?? new AbortController().signal) } : {}), ...(this.options.resolveHost ? { resolveHost: this.options.resolveHost } : {}) });
-          if (result.record.content.captureDisposition !== "complete") { partial += 1; lastError = `Capture for ${item.id} is ${result.record.content.captureDisposition}`; break; }
+          const live = await this.store.connectorState(connector);
+          if (!live || live.accountId !== current.accountId || live.scope !== current.scope || live.credentialRef !== current.credentialRef || live.enabled !== current.enabled) throw new GatewayError("conflict", "Connector configuration changed during the run");
+          state = live;
+          const result = await captureSource(this.store, { commandId: command(request.commandId, `capture-${item.id}`), url: item.url, scope: "research", title: item.title, origin: "connector", identity: { provider: connector, accountId: state.accountId!, itemId: item.id }, ...(item.annotation ? { annotations: [{ text: item.annotation }] } : {}) }, { signal: abort.signal, ...(this.options.sourceFetch ? { fetcher: (sourceUrl, init) => this.options.sourceFetch!(sourceUrl.toString(), item.excerpt, init?.signal ?? abort.signal) } : {}), ...(this.options.resolveHost ? { resolveHost: this.options.resolveHost } : {}) });
+          let capturedRecord = result.record;
+          // X API entities/author fields are authenticated evidence. Retain a
+          // bounded canonical object instead of certifying a public-page fetch.
+          if (item.apiPayload && capturedRecord.content.captureDisposition !== "failed") {
+            const apiObject = await this.store.putObject(new TextEncoder().encode(item.apiPayload), "application/json");
+            const updated = await this.store.captureSource({ commandId: command(request.commandId, `api-evidence-${item.id}`), expectedRevision: capturedRecord.revisionId, record: { kind: "source", id: capturedRecord.id, createdAt: capturedRecord.createdAt, scope: capturedRecord.scope, provenance: capturedRecord.provenance, relations: capturedRecord.relations, content: { ...capturedRecord.content, object: apiObject } } });
+            if (updated.record.kind === "source") capturedRecord = updated.record;
+          }
+          if (capturedRecord.content.captureDisposition !== "complete") { partial += 1; lastError = `Capture for ${item.id} is ${capturedRecord.content.captureDisposition}`; break; }
           if (connector === "raindrop" && state.allowWrites && state.destination && item.collectionId && item.collectionId !== state.destination) {
-            const moved = await this.moveRaindrop({ commandId: command(request.commandId, `move-${item.id}`), itemId: item.id, source: result.record, destination: state.destination });
+            const moved = await this.moveRaindrop({ commandId: command(request.commandId, `move-${item.id}`), itemId: item.id, source: capturedRecord, destination: state.destination });
             if (moved.status !== "moved") { lastError = moved.status === "unsupported" ? "Approved Raindrop move is unavailable" : "Raindrop move could not be verified"; break; }
           }
           captured += 1;
@@ -171,11 +193,13 @@ export class KnowledgeConnectorExtension {
         } catch (error) { lastError = error instanceof Error ? error.message : "Connector capture failed"; break; }
       }
       state = await this.store.updateConnectorState(command(request.commandId, "finish"), connector, value => ({ ...(value ?? state), health: lastError ? "partial" : "ready", ...(lastError ? { lastError } : {}), lastRunAt: this.now(), remaining: value?.pending.length ?? state.pending.length }));
+      clearTimeout(deadline);
       return { connector, dryRun: false, discovered: discovered.discovered, captured, partial, pending: state.pending.length, remaining: state.remaining, health: state.health, ...(lastError ? { error: lastError } : {}) };
     } catch (error) {
       const health = error instanceof ConnectorHTTPError && authFailure(error.status) ? "auth-error" : error instanceof ConnectorHTTPError && error.status === 429 ? "rate-limited" : "error";
       const message = error instanceof ConnectorHTTPError ? `Provider request failed (${error.status})` : error instanceof Error ? error.message : "Connector failed";
       await this.store.updateConnectorState(command(request.commandId, "error"), connector, state => ({ ...(state ?? current), health, lastError: message, lastRunAt: this.now(), remaining: state?.pending.length ?? current.pending.length }));
+      clearTimeout(deadline);
       throw new GatewayError(health === "auth-error" ? "unsupported" : "internal", message, true);
     }
   }
@@ -234,7 +258,13 @@ export class KnowledgeConnectorExtension {
     if (!state.destination || state.destination !== input.destination) return { status: "conflict" };
     if (state.paidBudgetCents > 0) return { status: "unsupported" };
     const token = await this.options.credentials.read(state.credentialRef); if (!token) return { status: "unsupported" };
-    const pending = { operationId: input.commandId, itemId: input.itemId, action: "move" as const, basisRecordId: input.source.id, originalCollectionId: state.scope!, destination: input.destination, createdAt: this.now() };
+    // Preflight the exact item immediately before recording and applying the
+    // effect. A configured collection is not proof of the item's current
+    // location; stop rather than moving a user-edited bookmark.
+    const preflight = await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrop/${encodeURIComponent(input.itemId)}`, token, { sleep: this.sleep, signal: new AbortController().signal });
+    const originalCollectionId = String(preflight.value?.item?.collection?.$id ?? preflight.value?.collection?.$id ?? "");
+    if (!originalCollectionId || originalCollectionId !== state.scope) return { status: "conflict" };
+    const pending = { operationId: input.commandId, itemId: input.itemId, action: "move" as const, basisRecordId: input.source.id, originalCollectionId, destination: input.destination, createdAt: this.now() };
     await this.store.updateConnectorState(input.commandId, "raindrop", current => ({ ...(current ?? state), pendingRemote: pending }));
     const abort = new AbortController();
     try {

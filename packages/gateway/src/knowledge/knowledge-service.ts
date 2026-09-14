@@ -7,6 +7,7 @@ import { KnowledgeObservationService, type ObservationSettlement } from "./knowl
 import { captureSource, type SourceAssessmentModel } from "./source-capture.js";
 import { triageSource } from "./source-triage.js";
 import { GatewayError } from "../errors.js";
+import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 
 const toolParameters = Type.Object({
   action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("list"), Type.Literal("connectorSweep"), Type.Literal("synthesis")]),
@@ -78,7 +79,19 @@ export class KnowledgeService {
     observer: KnowledgeObservationService,
     private readonly extensions: KnowledgeExtensionSeam = {},
     private readonly modelForConfig?: (config: KnowledgeConfig) => KnowledgeGenerationModel | undefined,
+    private readonly workRegistry?: GatewayWorkRegistry,
   ) { this.observer = observer; }
+
+  private async runOwned<T>(operation: string, task: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(new Error(`Knowledge ${operation} deadline exceeded`)), 120_000);
+    timeout.unref?.();
+    let work: GatewayWorkHandle | undefined;
+    try {
+      work = this.workRegistry?.begin({ kind: "knowledge-observation", hostEpoch: this.workRegistry.runtimeEpoch, cancellation: () => controller.abort(new Error("Knowledge operation cancelled")) });
+      return await task(controller.signal);
+    } finally { clearTimeout(timeout); work?.settle(); }
+  }
 
   observe(settlement: ObservationSettlement): void { this.observer.admit(settlement); }
   dispose(): void { this.observer.dispose(); }
@@ -86,6 +99,14 @@ export class KnowledgeService {
   async invoke(action: KnowledgeAction): Promise<unknown> {
     switch (action.operation) {
       case "knowledge.status": return this.store.status();
+      case "knowledge.object.read": {
+        const bytes = await this.store.readObject({ hash: action.request.hash, mediaType: action.request.mediaType, bytes: action.request.bytes });
+        if (!bytes) return null;
+        const offset = action.request.offset ?? 0;
+        if (!Number.isSafeInteger(offset) || offset < 0 || offset > bytes.byteLength) throw new GatewayError("invalid_request", "Knowledge object offset is invalid");
+        const chunk = bytes.slice(offset, Math.min(bytes.byteLength, offset + 512_000));
+        return { hash: action.request.hash, mediaType: action.request.mediaType, bytes: chunk.byteLength, totalBytes: bytes.byteLength, offset, ...(offset + chunk.byteLength < bytes.byteLength ? { nextOffset: offset + chunk.byteLength } : {}), base64: Buffer.from(chunk).toString("base64") };
+      }
       case "knowledge.config": return this.store.configure(action.request.commandId, action.request.config);
       case "knowledge.list": return this.store.list(action.request);
       case "knowledge.read": return this.store.read(action.request.id, action.request.revisionId, action.request.includeSuppressed);
@@ -94,7 +115,7 @@ export class KnowledgeService {
       case "knowledge.source.capture": {
         const config = await this.store.config();
         const model = this.modelForConfig?.(config);
-        return captureSource(this.store, action.request, { ...(model ? { model } : {}) }).then(result => result);
+        return this.runOwned("source capture", signal => captureSource(this.store, action.request, { ...(model ? { model } : {}), signal }));
       }
       case "knowledge.note.create": return this.store.createNote(action.request);
       case "knowledge.note.update": return this.store.updateNote(action.request);
@@ -102,24 +123,27 @@ export class KnowledgeService {
         const config = await this.store.config();
         const model = this.modelForConfig?.(config);
         if (!model) throw new GatewayError("unsupported", "Knowledge assessment requires an explicitly configured model");
-        return triageSource(this.store, action.request, model);
+        return this.runOwned("source triage", signal => triageSource(this.store, { ...action.request, signal }, model));
       }
       case "knowledge.reflect": {
         const config = await this.store.config();
         if (action.request.expectedConfigRevision !== undefined && action.request.expectedConfigRevision !== config.revision) throw new GatewayError("conflict", "Knowledge configuration revision is stale");
         const model = this.modelForConfig?.(config);
         if (!model) throw new GatewayError("unsupported", "Knowledge reflection requires an explicitly configured model");
+        return this.runOwned("reflection", async signal => {
         const sources = await this.store.observationRevisions(action.request.sessionId, action.request.sourceRevisionIds);
         if (sources.length !== action.request.sourceRevisionIds.length) throw new GatewayError("conflict", "Reflection sources are unavailable or excluded");
         const sourceText = sources.map(record => {
           if (record.kind !== "observation") return "";
           return `${record.revisionId} [${record.content.range.fromEntryId}..${record.content.range.toEntryId}]\\n${record.content.items.map(item => `${item.attribution}: ${item.text}`).join("\\n")}`;
-        }).join("\\n\\n").slice(0, 48_000);
-        const controller = new AbortController();
-        const text = await model.reflect({ sessionId: action.request.sessionId, sourceText, signal: controller.signal });
+        }).join("\\n\\n");
+        if (sourceText.length > 48_000) throw new GatewayError("invalid_request", "Reflection source pack exceeds its bounded input; select fewer revisions");
+        if (signal.aborted) throw new GatewayError("busy", "Knowledge reflection was cancelled", true);
+        const text = await model.reflect({ sessionId: action.request.sessionId, sourceText, signal });
         const after = await this.store.config();
         if (after.revision !== config.revision) throw new GatewayError("conflict", "Knowledge configuration changed while reflection was running");
         return this.store.reflect(action.request.commandId, action.request.sessionId, action.request.sourceRevisionIds, text);
+        });
       }
       case "knowledge.correction": return this.store.correct(action.request.commandId, action.request.recordId, action.request.expectedRevision, action.request.replacement, action.request.relation);
       case "knowledge.forget": return this.store.forget(action.request.commandId, action.request.recordId, action.request.reason, action.request.expectedRevision);

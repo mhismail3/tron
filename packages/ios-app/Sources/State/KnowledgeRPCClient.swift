@@ -49,6 +49,19 @@ final class KnowledgeRPCClient {
         let value: JSONValue = try await request("knowledge.read", Params(id: id, revisionId: revisionID, includeSuppressed: false))
         if value == .null { return nil }; return try value.decode(KnowledgeRecord.self)
     }
+    func readSessionEntry(sessionID: String, entryID: String, offset: Int = 0) async throws -> JSONValue {
+        let params: JSONValue = .object(["sessionId": .string(sessionID), "entryId": .string(entryID), "offset": .number(Double(max(0, offset)))])
+        return try await requestValue("session.history.entry", params, .seconds(20))
+    }
+    func readObject(_ reference: KnowledgeObjectRef, offset: Int = 0) async throws -> KnowledgeObjectRead? {
+        struct Params: Encodable { let hash: String; let bytes: Int; let mediaType: String; let offset: Int }
+        let value: JSONValue = try await request("knowledge.object.read", Params(hash: reference.hash, bytes: reference.bytes, mediaType: reference.mediaType, offset: max(0, offset)), timeout: .seconds(30))
+        if value == .null { return nil }
+        let object = try value.decode(KnowledgeObjectRead.self)
+        guard object.hash == reference.hash, object.bytes <= 512_000, object.base64.count <= 700_000,
+              object.offset == max(0, offset), object.totalBytes == reference.bytes else { throw invalidResponse() }
+        return object
+    }
     func configure(_ config: KnowledgeConfig) async throws -> KnowledgeConfig {
         struct Params: Encodable { let config: KnowledgeConfig }
         return try await mutate("knowledge.config", parameters: Params(config: config))
@@ -96,13 +109,13 @@ final class KnowledgeRPCClient {
         struct Params: Encodable { let connector: String; let dryRun: Bool; let limit: Int }
         return try await mutate("knowledge.connector.run", parameters: Params(connector: connector, dryRun: dryRun, limit: min(100, max(1, limit))))
     }
-    func importDryRun(source: String, limit: Int = 50) async throws -> KnowledgeImportPlan {
-        struct Params: Encodable { let source: String; let limit: Int }
-        return try await mutate("knowledge.import.dry-run", parameters: Params(source: String(source.prefix(4_096)), limit: min(100, max(1, limit))))
+    func importDryRun(source: String, limit: Int = 50, offset: Int = 0) async throws -> KnowledgeImportPlan {
+        struct Params: Encodable { let source: String; let limit: Int; let offset: Int }
+        return try await mutate("knowledge.import.dry-run", parameters: Params(source: String(source.prefix(4_096)), limit: min(100, max(1, limit)), offset: max(0, offset)))
     }
-    func importRun(source: String, planHash: String, limit: Int = 50) async throws -> KnowledgeImportResult {
-        struct Params: Encodable { let source: String; let expectedPlanHash: String; let limit: Int }
-        return try await mutate("knowledge.import.run", parameters: Params(source: String(source.prefix(4_096)), expectedPlanHash: planHash, limit: min(100, max(1, limit))))
+    func importRun(source: String, planHash: String, limit: Int = 50, offset: Int = 0) async throws -> KnowledgeImportResult {
+        struct Params: Encodable { let source: String; let expectedPlanHash: String; let limit: Int; let offset: Int }
+        return try await mutate("knowledge.import.run", parameters: Params(source: String(source.prefix(4_096)), expectedPlanHash: planHash, limit: min(100, max(1, limit)), offset: max(0, offset)))
     }
 
     private func needsSelectedGateway() -> GatewayFailure { GatewayFailure(code: "needs_server", message: "Select this Gateway before changing Knowledge.", retryable: false, details: nil) }

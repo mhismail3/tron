@@ -2,6 +2,17 @@ import XCTest
 @testable import TronMobile
 
 final class KnowledgeModelsTests: XCTestCase {
+    func testGatewayObjectResponseAndImportedQualificationWireShapeDecode() throws {
+        let object = KnowledgeObjectRead(hash: String(repeating: "a", count: 64), mediaType: "text/plain", bytes: 5, totalBytes: 5, offset: 0, nextOffset: nil, base64: "aGVsbG8=")
+        let imported = KnowledgeImportOrigin(store: "llm-wiki", recordId: "assertion-1", revision: "git-revision", importedAt: "2026-01-01T00:00:00Z", review: KnowledgeImportReview(batch: "batch-1", auditId: "audit-1", receiptId: nil, resultRevision: nil, basis: "user-confirmed"))
+        let decoder = JSONDecoder()
+        let decodedObject = try decoder.decode(KnowledgeObjectRead.self, from: try JSONEncoder().encode(object))
+        let decodedOrigin = try decoder.decode(KnowledgeImportOrigin.self, from: try JSONEncoder().encode(imported))
+        XCTAssertEqual(decodedObject.hash, object.hash)
+        XCTAssertEqual(Data(base64Encoded: decodedObject.base64), Data("hello".utf8))
+        XCTAssertEqual(decodedOrigin.review?.basis, "user-confirmed")
+    }
+
     func testObservationRoundTripPreservesCanonicalInputIdentity() throws {
         let range = KnowledgeObservationRange(
             sessionId: "session-1", branchId: "branch-1", fromEntryId: "entry-1", toEntryId: "entry-2",

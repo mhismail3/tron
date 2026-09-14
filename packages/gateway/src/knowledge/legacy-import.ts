@@ -26,6 +26,7 @@ interface SourcePlan {
   evidence?: { bytes: Uint8Array; mediaType: string; hash: string };
   reviewReceipt?: { id: string; resultRevision?: string };
   warning?: string;
+  excluded?: boolean;
 }
 interface EntityPlan { kind: "entity"; legacy: LegacyEntity; id: string; }
 interface AssertionPlan { kind: "assertion"; legacy: LegacyAssertion; id: string; auditId?: string; }
@@ -225,8 +226,8 @@ export class LegacyKnowledgeImporter {
     const sourcePaths = await regularJsonFiles(join(root, "sources", "records")); const sourceRecords: LegacySource[] = [];
     for (const path of sourcePaths) {
       const value = JSON.parse(await readFile(path, "utf8")) as LegacySource;
-      if (!value || typeof value.source_id !== "string" || value.status === "excluded") continue;
-      if (value.status && value.status !== "accepted") continue;
+      if (!value || typeof value.source_id !== "string") continue;
+      if (value.status && !["accepted", "excluded", "suppressed"].includes(String(value.status))) continue;
       if (included("sources", value.source_id)) sourceRecords.push(value);
     }
     sourceRecords.sort((a, b) => a.source_id.localeCompare(b.source_id));
@@ -235,7 +236,7 @@ export class LegacyKnowledgeImporter {
       const retained = await evidence(root, legacy, revision); const warning = retained ? undefined : (legacy.evidence_path || (legacy.metadata?.legacy_provenance as Record<string, unknown> | undefined)?.git_blob) ? `Evidence unavailable or hash-mismatched for ${legacy.source_id}; retained as metadata-only` : `No retained raw evidence for ${legacy.source_id}`;
       if (warning) warnings.push(warning);
       const batch = typeof legacy.metadata?.review_batch === "string" ? legacy.metadata.review_batch : undefined; const reviewReceipt = batch ? receiptByBatch.get(batch) : undefined;
-      items.push({ kind: "source", legacy, id: stableId(store, "source", legacy.source_id), ...(retained ? { evidence: retained } : {}), ...(reviewReceipt ? { reviewReceipt } : {}), ...(warning ? { warning } : {}) });
+      items.push({ kind: "source", legacy, id: stableId(store, "source", legacy.source_id), ...(retained ? { evidence: retained } : {}), ...(reviewReceipt ? { reviewReceipt } : {}), ...(warning ? { warning } : {}), ...(legacy.status === "excluded" || legacy.status === "suppressed" ? { excluded: true } : {}) });
     }
     const entities = await jsonl<LegacyEntity>(join(root, "graph", "entities.jsonl"), "legacy entities");
     for (const legacy of entities.filter(item => typeof item.entity_id === "string" && typeof item.label === "string" && included("entities", item.entity_id)).sort((a, b) => a.entity_id.localeCompare(b.entity_id))) items.push({ kind: "entity", legacy, id: stableId(store, "entity", legacy.entity_id) });
@@ -255,7 +256,7 @@ export class LegacyKnowledgeImporter {
   private sourceDraft(item: SourcePlan, revision: string, importedAt: string): KnowledgeRecordDraft & { kind: "source" } {
     const legacy = item.legacy; const metadata = legacy.metadata ?? {}; const capturedAt = normalizedTimestamp(legacy.captured_at, importedAt);
     const origin = "import" as const; const usageConstraint = stringValue(metadata.usage_constraint, 20_000); const uri = sourceUri(legacy); const originalLocator = stringValue(legacy.origin?.locator, 512); const publishedAt = stringValue(metadata.published_at, 80); const text = item.evidence && item.evidence.mediaType.startsWith("text/") ? Buffer.from(item.evidence.bytes).toString("utf8").slice(0, 2_000_000) : undefined;
-    const content = { title: sourceTitle(legacy), ...(uri ? { uri } : {}), ...(text ? { text } : {}), ...(item.evidence ? { object: { hash: item.evidence.hash, mediaType: item.evidence.mediaType, bytes: item.evidence.bytes.byteLength } } : {}), mediaType: mediaType(legacy), captureDisposition: item.evidence ? "complete" as const : "metadata-only" as const, capturedAt, ...(publishedAt ? { sourcePublishedAt: normalizedTimestamp(publishedAt, capturedAt) } : {}), origin, origins: [{ kind: "import" as const, capturedAt, ...(uri ? { uri } : {}), ...(originalLocator ? { annotation: `Original locator: ${originalLocator}` } : {}) }], retention: { sensitivity: sensitivity(legacy), evidenceAvailable: Boolean(item.evidence), ...(legacy.content_sha256 ? { originalHash: legacy.content_sha256 } : {}), ...(usageConstraint ? { usageConstraint } : {}) } };
+    const content = { title: sourceTitle(legacy), ...(uri ? { uri } : {}), ...(text ? { text } : {}), ...(item.evidence ? { object: { hash: item.evidence.hash, mediaType: item.evidence.mediaType, bytes: item.evidence.bytes.byteLength } } : {}), mediaType: mediaType(legacy), captureDisposition: item.excluded ? "reference-only" as const : item.evidence ? "complete" as const : "metadata-only" as const, capturedAt, ...(publishedAt ? { sourcePublishedAt: normalizedTimestamp(publishedAt, capturedAt) } : {}), origin, origins: [{ kind: "import" as const, capturedAt, ...(uri ? { uri } : {}), ...(originalLocator ? { annotation: `Original locator: ${originalLocator}` } : {}) }], retention: { sensitivity: sensitivity(legacy), evidenceAvailable: Boolean(item.evidence), ...(legacy.content_sha256 ? { originalHash: legacy.content_sha256 } : {}), ...(usageConstraint ? { usageConstraint } : {}) } };
     return { kind: "source", id: item.id, scope: item.legacy.representation === "llm-wiki" ? "research" : "personal", createdAt: capturedAt, updatedAt: capturedAt, provenance: { actor: "import", source: `${legacy.representation ?? "legacy"}:${legacy.source_id}@${revision}`, evidence: [] }, relations: [], importOrigin: { store: item.legacy.representation === "llm-wiki" ? "llm-wiki" : "personal-os", recordId: legacy.source_id, revision, importedAt, ...(metadata.review_batch ? { review: { batch: String(metadata.review_batch), ...(item.reviewReceipt ? { receiptId: item.reviewReceipt.id, ...(item.reviewReceipt.resultRevision ? { resultRevision: item.reviewReceipt.resultRevision } : {}) } : {}) } } : {}) }, content };
   }
 
@@ -289,6 +290,7 @@ export class LegacyKnowledgeImporter {
     if (item.kind === "source") {
       if (item.evidence) await this.store.putObject(item.evidence.bytes, item.evidence.mediaType);
       const result = await this.store.captureSource({ commandId: `import.source:${plan.planHash.slice(0, 48)}:${item.legacy.source_id}`.slice(0, 160), record: this.sourceDraft(item, plan.revision, importedAt) });
+      if (item.excluded) await this.store.setExclusion(`import.exclude:${plan.planHash.slice(0, 48)}:${item.legacy.source_id}`.slice(0, 160), result.record.id, true, undefined, "Legacy source was excluded");
       sourceRevisions.set(item.legacy.source_id, result.record.revisionId); return { imported: true, revision: result.record.revisionId };
     }
     if (item.kind === "assertion" && Array.isArray(item.legacy.evidence)) {
@@ -312,7 +314,9 @@ export class LegacyKnowledgeImporter {
     const scope: KnowledgeImportScope | undefined = request.scope; const plan = await this.plan(request.source, scope);
     const scoped = plan.items;
     const requestedLimit = request.limit === undefined ? scoped.length : Math.max(0, Math.min(20_000, Math.floor(request.limit)));
-    const selected = scoped.slice(0, requestedLimit); const selectedPlanHash = hash({ base: plan.planHash, scope: scope ?? null, selected: selected.map(item => item.id) });
+    const offset = request.offset === undefined ? 0 : Math.max(0, Math.min(scoped.length, Math.floor(request.offset)));
+    if (!Number.isSafeInteger(offset) || offset > scoped.length) throw new Error("Import offset is invalid");
+    const selected = scoped.slice(offset, offset + requestedLimit); const selectedPlanHash = hash({ base: plan.planHash, scope: scope ?? null, selected: selected.map(item => item.id) });
     const mappings: LegacyImportMapping[] = selected.map(item => ({ legacyId: item.kind === "source" ? item.legacy.source_id : item.kind === "entity" ? item.legacy.entity_id : item.legacy.assertion_id, kind: item.kind === "source" ? "source" : item.kind === "entity" ? "entity" : "assertion", newId: item.id }));
     const base: LegacyImportReport = { operation: operation === "knowledge.import.run" ? "run" : "dry-run", source: request.source, ...(scope ? { scope } : {}), store: plan.store, planHash: selectedPlanHash, planned: plan.items.length, selected: selected.length, imported: 0, resumed: 0, skipped: 0, failed: 0, completed: operation !== "knowledge.import.run", progress: { completed: 0, remaining: selected.length, total: selected.length }, mappings, warnings: plan.warnings.slice(0, 200) };
     if (operation !== "knowledge.import.run") return base;

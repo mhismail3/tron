@@ -173,6 +173,7 @@ const knowledge = new KnowledgeService(
     const model = modelForConfig(modelRuntime, knowledgeConfig.observation.model);
     return model ? new ModelRuntimeKnowledgeModel(modelRuntime, model) : undefined;
   },
+  workRegistry,
 );
 sessions.setKnowledgeService(knowledge);
 const terminal = new TerminalService(

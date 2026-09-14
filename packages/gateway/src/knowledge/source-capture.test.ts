@@ -23,6 +23,14 @@ describe("safe source capture", () => {
     expect(isPrivateAddress("::ffff:c0a8:101")).toBe(true);
     expect(isPrivateAddress("2001:db8::1")).toBe(false);
   });
+  it("rejects credential-bearing query parameters before persistence or fetch", async () => {
+    const { store } = await fixture();
+    let fetched = false;
+    await expect(captureSource(store, { commandId: command("query-secret"), url: "https://example.com/article?access_token=secret", scope: "research" }, { resolveHost: publicResolver, fetcher: async () => { fetched = true; return new Response("not reached"); } })).rejects.toThrow(/credential-bearing/);
+    expect(fetched).toBe(false);
+    expect((await store.status()).state).toBe("uninitialized");
+  });
+
   it("retains raw bytes separately from readable extraction and deduplicates normalized URLs", async () => {
     const { store } = await fixture();
     const fetcher = async () => new Response("<html><title>Useful</title><script>evil()</script><body>Hello <b>world</b></body></html>", { headers: { "content-type": "text/html; charset=utf-8" } });

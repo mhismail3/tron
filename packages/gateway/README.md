@@ -39,6 +39,21 @@ app. It embeds the pinned Pi SDK through supported SDK exports. User-facing copy
 calls the product and agent **Tron**; source may use Pi-specific names only where
 it identifies the backing SDK contract.
 
+## Knowledge boundaries
+
+Knowledge state is owned by the Gateway under `state/knowledge`; iOS retains only
+bounded pages. Observation project scope uses the canonical absolute workspace
+path (a project reference, not a record filename ID), and each admitted model
+cut is branch-scoped, exact, redacted, and input-bounded. Cancellation or a
+configuration/privacy change leaves the cut retryable and cannot publish late.
+Retained source objects are available only through `knowledge.object.read` after
+record authorization; excluded/forgotten records cannot authorize object reads.
+Legacy imports support explicit `offset` continuation with checkpoint-tied plan
+membership. Connector X runs remain unsupported until provider pricing,
+reservation, and debit accounting are owned; a positive budget alone never
+permits an API call. Remote Raindrop moves preflight the item's actual current
+collection before persisting or applying the effect.
+
 ## Pi SDK maintenance
 
 `packages/gateway/package.json` is the sole Pi SDK version authority. The four

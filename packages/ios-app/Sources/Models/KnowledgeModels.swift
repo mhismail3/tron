@@ -26,6 +26,7 @@ enum KnowledgeNoteRole: String, Codable, CaseIterable, Sendable { case fact, pre
 enum KnowledgeRelationType: String, Codable, Sendable { case supports, contradicts, corrects, supersedes, derivedFrom, related }
 
 struct KnowledgeObjectRef: Codable, Hashable, Sendable { let hash: String; let mediaType: String; let bytes: Int }
+struct KnowledgeObjectRead: Codable, Hashable, Sendable { let hash: String; let mediaType: String; let bytes: Int; let totalBytes: Int?; let offset: Int?; let nextOffset: Int?; let base64: String }
 struct KnowledgeSessionEntryCitation: Codable, Hashable, Sendable {
     let sessionId: String; let branchId: String?; let entryId: String; let digest: String?; let startOffset: Int?; let endOffset: Int?
 }

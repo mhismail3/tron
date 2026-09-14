@@ -76,6 +76,15 @@ function bounded(value: string, maximum: number): string {
 }
 function validTimestamp(value: string): boolean { return !Number.isNaN(Date.parse(value)); }
 
+/** Remove credentials and machine-local paths before text crosses the model boundary. */
+function redactModelText(value: string): string {
+  return value
+    .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[redacted]")
+    .replace(/\b(api[_-]?key|access[_-]?token|auth(?:entication)?|password|passwd|secret| private[_-]?key)\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]")
+    .replace(/([?&](?:token|key|secret|password|passwd|signature|sig|auth|access_token)\s*=)[^&#\s]*/gi, "$1[redacted]")
+    .replace(/\/(?:Users|home|private|var)\/[^\s"'<>]+/g, "[path]");
+}
+
 function textPart(value: unknown): string {
   if (typeof value === "string") return value;
   if (!Array.isArray(value)) return "";
@@ -117,7 +126,7 @@ export function projectObservationEntry(raw: unknown): ObservationSourceEntry | 
     text = typeof entry.summary === "string" ? entry.summary : "";
     role = "system";
   }
-  return { id: entry.id, timestamp: entry.timestamp, type: typeof entry.type === "string" ? entry.type : "unknown", ...(role ? { role } : {}), text: bounded(text, 20_000), canonical: raw };
+  return { id: entry.id, timestamp: entry.timestamp, type: typeof entry.type === "string" ? entry.type : "unknown", ...(role ? { role } : {}), text: bounded(redactModelText(text), 20_000), canonical: raw };
 }
 
 function sourceDigest(entries: readonly ObservationSourceEntry[]): string {
@@ -176,6 +185,23 @@ function parseModelOutput(raw: string, range: ObservationRange, fallbackAt: stri
  * an already committed range. */
 export class KnowledgeObservationService {
   private readonly queued = new Map<string, ObservationSettlement>();
+  private queueKey(settlement: Pick<ObservationSettlement, "sessionId" | "branchId" | "projectId">): string {
+    return `${settlement.sessionId}\u0000${settlement.branchId ?? ""}\u0000${settlement.projectId ?? ""}`;
+  }
+  private enqueue(settlement: ObservationSettlement): void {
+    const key = this.queueKey(settlement);
+    const prior = this.queued.get(key);
+    if (!prior) { this.queued.set(key, { ...settlement, entries: [...settlement.entries] }); return; }
+    // Keep the newest exact snapshot, but never discard a suffix admitted by a
+    // bounded prior chunk. IDs are merged in arrival order, with the incoming
+    // canonical prefix taking precedence when it is newer.
+    const incoming = [...settlement.entries];
+    const priorEntries = [...prior.entries];
+    const merged = incoming.length >= priorEntries.length && priorEntries.every((entry, index) => JSON.stringify(entry) === JSON.stringify(incoming[index]))
+      ? incoming
+      : [...priorEntries, ...incoming.filter(entry => !priorEntries.some(existing => JSON.stringify(existing) === JSON.stringify(entry)))];
+    this.queued.set(key, { ...settlement, entries: merged });
+  }
   private running = false;
   private readonly cancelled = new AbortController();
 
@@ -190,9 +216,7 @@ export class KnowledgeObservationService {
   admit(settlement: ObservationSettlement): void {
     if (this.cancelled.signal.aborted) return;
     if (!settlement.sessionId || settlement.entries.length > MAX_SOURCE_ENTRIES) return;
-    // Last-write coalescing prevents duplicate model calls while a session is
-    // producing rapid turns. The retained canonical range is always rebuilt.
-    this.queued.set(settlement.sessionId, settlement);
+    this.enqueue(settlement);
     void this.drain();
   }
 
@@ -224,6 +248,9 @@ export class KnowledgeObservationService {
   private async process(settlement: ObservationSettlement): Promise<void> {
     let config: KnowledgeConfig;
     try { config = await this.store.config(); } catch { return; }
+    // Ordinary settlements must not create the knowledge namespace while the
+    // feature is still at its untouched default configuration.
+    if (!config.observation.enabled) return;
     const projected = settlement.entries.map(projectObservationEntry).filter((entry): entry is ObservationSourceEntry => entry !== undefined);
     if (projected.length === 0) return;
     const committed = await this.store.observationCoverageForScope(settlement.sessionId, settlement.branchId, settlement.projectId).catch(() => []);
@@ -239,7 +266,7 @@ export class KnowledgeObservationService {
         const ids = coverage.range.entryIds;
         if (ids.length === 0 || coveredPrefix + ids.length > projectedIds.length) return false;
         if (ids.some((entry, index) => projectedIds[coveredPrefix + index] !== entry)) return false;
-        return coverage.disposition === "observed" || coverage.disposition === "empty";
+        return coverage.disposition === "observed" || coverage.disposition === "empty" || coverage.disposition === "unavailable";
       });
       if (!match) break;
       coveredPrefix += match.range.entryIds.length;
@@ -253,11 +280,30 @@ export class KnowledgeObservationService {
     const included: ObservationSourceEntry[] = [];
     let inputChars = 0;
     for (const entry of pendingProjected) {
-      const line = `[${entry.timestamp}] ${entry.role ?? entry.type}: ${entry.text}`;
-      if (included.length > 0 && inputChars + line.length + 1 > inputLimit) break;
-      included.push(entry);
-      inputChars += line.length + 1;
+      const prefix = `[${entry.timestamp}] ${entry.role ?? entry.type}: `;
+      const separator = included.length > 0 ? 1 : 0;
+      const available = inputLimit - inputChars - separator;
+      if (available <= prefix.length && included.length > 0) break;
+      // An individual canonical entry may exceed the model bound. Keep its
+      // exact ID in this cut, but send only a bounded redacted prefix and
+      // continue the suffix as a future exact cut rather than overflowing the
+      // configured input limit.
+      const textLimit = Math.max(0, available - prefix.length);
+      if (entry.text.length > textLimit) {
+        // A range cannot claim an entry whose complete projected text was not
+        // admitted. Record it as an unavailable gap below and continue later
+        // entries; never certify the original bytes as observed.
+        if (included.length === 0) break;
+        break;
+      }
+      const boundedText = entry.text;
+      const projectedEntry = entry;
+      const lineLength = prefix.length + boundedText.length;
+      included.push(projectedEntry);
+      inputChars += separator + lineLength;
+      if (lineLength + separator >= inputLimit) break;
     }
+    const oversized = included.length === 0 && pendingProjected[0] !== undefined;
     const chunk = included.length > 0 ? included : [pendingProjected[0]!];
     const remaining = pendingProjected.slice(chunk.length);
     const range: ObservationRange = {
@@ -270,18 +316,24 @@ export class KnowledgeObservationService {
       ...(settlement.projectId ? { projectId: settlement.projectId } : {}),
       ...(settlement.invocationId ? { invocationIds: [settlement.invocationId] } : {}),
     };
-    const admitRemaining = () => {
-      if (remaining.length > 0) this.queued.set(settlement.sessionId, { ...settlement, entries: remaining });
+    const admitRemaining = (entries: readonly ObservationSourceEntry[] = remaining) => {
+      if (entries.length > 0) this.enqueue({ ...settlement, entries: entries.map(entry => entry.canonical) });
     };
     const id = rangeID(range);
     const existing = await this.store.coverage(id).catch(() => null);
-    if (existing?.disposition === "observed" || existing?.disposition === "empty" || existing?.disposition === "excluded") return;
+    if (existing?.disposition === "observed" || existing?.disposition === "empty" || existing?.disposition === "excluded" || existing?.disposition === "unavailable") return;
     if (this.eligible(config, settlement) === "excluded" || !config.observation.enabled) {
       await this.store.setCoverage({ commandId: commandID("knowledge-excluded", range), expectedConfigRevision: config.revision, ...(existing?.revisionId ? { expectedRevision: existing.revisionId } : {}), coverage: { id, range, disposition: "excluded", groupRevisionIds: [], reason: !config.observation.enabled ? "observation-disabled" : "scope-excluded" } }).catch(() => {});
       admitRemaining();
       return;
     }
-    const sourceText = chunk.map(entry => `[${entry.timestamp}] ${entry.role ?? entry.type}: ${entry.text}`).join("\n");
+    if (oversized) {
+      await this.store.setCoverage({ commandId: commandID("knowledge-unavailable", range), expectedConfigRevision: config.revision, ...(existing?.revisionId ? { expectedRevision: existing.revisionId } : {}), coverage: { id, range, disposition: "unavailable", groupRevisionIds: [], reason: "entry-exceeds-model-input-bound" } }).catch(() => {});
+      admitRemaining();
+      return;
+    }
+    const sourceText = bounded(chunk.map(entry => `[${entry.timestamp}] ${entry.role ?? entry.type}: ${entry.text}`).join("\n"), inputLimit);
+    const boundedSourceText = bounded(`${sourceText}\n[terminal outcome: ${settlement.outcome}]`, inputLimit);
     const fallbackAt = chunk.at(-1)!.timestamp;
     const pending = await this.store.setCoverage({ commandId: commandID("knowledge-pending", range), expectedConfigRevision: config.revision, ...(existing?.revisionId ? { expectedRevision: existing.revisionId } : {}), coverage: { id, range, disposition: "pending", groupRevisionIds: [], reason: "observer-admitted" } }).catch(() => undefined);
     const expectedRevision = pending?.coverage.revisionId ?? existing?.revisionId;
@@ -292,8 +344,20 @@ export class KnowledgeObservationService {
       work = this.workRegistry?.begin({ kind: "knowledge-observation", sessionId: settlement.sessionId, hostEpoch: this.workRegistry.runtimeEpoch, cancellation: () => operationAbort.abort() });
       const model = typeof this.model === "function" ? this.model(config) : this.model;
       if (!model) throw new Error("No explicitly configured observation model");
-      const raw = await inferBounded(model, { sessionId: settlement.sessionId, range, sourceText: `${sourceText}\n[terminal outcome: ${settlement.outcome}]`, outcome: settlement.outcome, maxOutputChars: config.observation.maxOutputChars }, operationSignal, config.observation.timeoutMs, config.observation.maxAttempts);
+      const raw = await inferBounded(model, { sessionId: settlement.sessionId, range, sourceText: boundedSourceText, outcome: settlement.outcome, maxOutputChars: config.observation.maxOutputChars }, operationSignal, config.observation.timeoutMs, config.observation.maxAttempts);
+      if (operationSignal.aborted || await this.store.scopeExcluded({ sessionId: settlement.sessionId, ...(settlement.branchId ? { branchId: settlement.branchId } : {}), ...(settlement.projectId ? { projectId: settlement.projectId } : {}) })) {
+        admitRemaining([chunk[0]!, ...remaining]);
+        return;
+      }
       const items = parseModelOutput(raw, range, fallbackAt);
+      if (oversized) {
+        // The bounded model call is useful for diagnostics, but its truncated
+        // input is not evidence for the full entry. Retain an explicit gap and
+        // never publish an observation for this cut.
+        await this.store.setCoverage({ commandId: commandID("knowledge-unavailable", range), expectedConfigRevision: config.revision, ...(expectedRevision ? { expectedRevision } : {}), coverage: { id, range, disposition: "unavailable", groupRevisionIds: [], reason: "entry-exceeds-model-input-bound" } }).catch(() => {});
+        admitRemaining();
+        return;
+      }
       if (items.length === 0) {
         await this.store.setCoverage({ commandId: commandID("knowledge-empty", range), expectedConfigRevision: config.revision, ...(expectedRevision ? { expectedRevision } : {}), coverage: { id, range, disposition: "empty", groupRevisionIds: [], reason: "no-substantive-observation" } });
         admitRemaining();
@@ -306,7 +370,12 @@ export class KnowledgeObservationService {
       await this.store.publishObservationGroup({ commandId: commandID("knowledge-publish", range), expectedConfigRevision: config.revision, ...(expectedRevision ? { expectedCoverageRevision: expectedRevision } : {}), coverage: { id, range, disposition: "observed", reason: `terminal:${settlement.outcome}` }, records });
       admitRemaining();
     } catch (error) {
-      if (operationSignal.aborted) return;
+      if (operationSignal.aborted) {
+        // A cancelled inference has no terminal coverage. Retain the exact cut
+        // for a later admission; dispose() clears this queue deliberately.
+        admitRemaining([chunk[0]!, ...remaining]);
+        return;
+      }
       await this.store.setCoverage({ commandId: commandID("knowledge-failed", range), expectedConfigRevision: config.revision, ...(expectedRevision ? { expectedRevision } : {}), coverage: { id, range, disposition: "failed", groupRevisionIds: [], reason: error instanceof Error ? bounded(error.message, 500) : "observer-failed" } }).catch(() => {});
     } finally { work?.settle(); }
   }
