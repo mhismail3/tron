@@ -258,6 +258,82 @@ struct AutomationCoordinatorTests {
         #expect(coordinator.days.first?.items.first?.occurrence.count == 60)
     }
 
+    @Test("revised timeline admission rejects a delayed predecessor and keeps one request per refresh")
+    func revisedTimelineAdmissionFencesDelayedRead() async throws {
+        let firstGate = TestReadGate()
+        let secondGate = TestReadGate()
+        var calls = 0
+        var finished = 0
+        var profile = self.profile(connectionID: 7)
+        let catalogItem = automationSummary(id: "automation-catalog", name: "Catalog")
+        let client = AutomationRPCClient { method, _, _ in
+            switch method {
+            case "automation.status":
+                return .object([
+                    "ready": .bool(true), "degraded": .bool(false),
+                    "automationCount": .number(1), "aggregateBytes": .number(256),
+                    "malformedRecordCount": .number(0),
+                    "catalogRevision": .number(profile.connectionID == 7 ? 7 : 8),
+                ])
+            case "automation.list":
+                return .object([
+                    "catalogRevision": .number(profile.connectionID == 7 ? 7 : 8),
+                    "items": .array([catalogItem]),
+                ])
+            case "automation.timeline.list":
+                calls += 1
+                let requestNumber = calls
+                if requestNumber == 1 {
+                    await firstGate.wait()
+                } else {
+                    await secondGate.wait()
+                }
+                finished += 1
+                let id = requestNumber == 1 ? "automation-old" : "automation-new"
+                return .object([
+                    "catalogRevision": .number(requestNumber == 1 ? 7 : 8),
+                    "items": .array([.object([
+                        "kind": .string("series"), "automationId": .string(id),
+                        "automationRevision": .number(1),
+                        "dayStart": .string("2026-12-01T00:00:00.000Z"),
+                        "firstAt": .string("2026-12-01T12:00:00.000Z"),
+                        "lastAt": .string("2026-12-01T13:00:00.000Z"), "count": .number(60),
+                    ])])
+                ])
+            default:
+                throw GatewayFailure(code: "unexpected", message: method, retryable: false, details: nil)
+            }
+        }
+        let catalog = AutomationCatalogCoordinator(endpoints: {
+            [AutomationGatewayEndpoint(profile: profile, client: client)]
+        })
+        catalog.activate()
+        try await eventually { catalog.hasLoaded && !catalog.isLoading }
+        let originalAdmission = catalog.timelineAdmissionKey
+        let timeline = AutomationTimelineCoordinator(endpoints: { catalog.allEndpoints() })
+        timeline.load(start: Date(timeIntervalSince1970: 1_795_000_000))
+        try await eventually { calls == 1 }
+
+        // A revised authoritative catalog and a new connection change the
+        // admission key; the dashboard then explicitly starts one successor.
+        profile = self.profile(connectionID: 8)
+        catalog.invalidate()
+        try await eventually {
+            catalog.hasLoaded && !catalog.isLoading && catalog.timelineAdmissionKey != originalAdmission
+        }
+        timeline.load(start: Date(timeIntervalSince1970: 1_795_000_000))
+        try await eventually { calls == 2 }
+        await firstGate.release()
+        try await eventually { finished == 1 }
+        #expect(timeline.days.isEmpty)
+        await secondGate.release()
+        try await eventually { !timeline.isLoading && finished == 2 }
+        #expect(timeline.days.first?.items.first?.id.contains("automation-new") == true)
+        #expect(calls == 2)
+        timeline.cancel()
+        catalog.deactivate()
+    }
+
     @Test("covered Upcoming cancels reads, rejects late failures and restarts on return")
     func coveredTimelineOwnsReadLifetime() async throws {
         let request = DeferredTimelineRequest()
@@ -287,12 +363,13 @@ struct AutomationCoordinatorTests {
         #expect(coordinator.errorMessage == nil)
     }
 
-    private func profile() -> AutomationDashboardProfile {
+    private func profile(connectionID: Int? = 1) -> AutomationDashboardProfile {
         AutomationDashboardProfile(
             id: "profile-one",
             label: "Mac",
             state: .connected,
-            capabilities: [AutomationAdmissionPolicy.capability, AutomationAdmissionPolicy.timelineCapability]
+            capabilities: [AutomationAdmissionPolicy.capability, AutomationAdmissionPolicy.timelineCapability],
+            connectionID: connectionID
         )
     }
 

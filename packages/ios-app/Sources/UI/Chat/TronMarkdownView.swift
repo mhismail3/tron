@@ -1,15 +1,6 @@
+import Observation
 import SwiftUI
 import UIKit
-
-#if HOSTED_TEST
-/// The view task uses the same generation rule; keeping the rule pure makes
-/// delayed two-tap and retirement behavior testable without launching a UI.
-enum CodeCopyFeedbackPolicy {
-    static func mayReset(taskGeneration: Int, currentGeneration: Int, isMounted: Bool) -> Bool {
-        isMounted && taskGeneration == currentGeneration
-    }
-}
-#endif
 
 struct TronMarkdownView: View {
     let document: MarkdownPresentation.Document
@@ -109,12 +100,53 @@ extension View {
     }
 }
 
+@MainActor
+@Observable
+final class CodeCopyFeedbackLifecycle {
+    private(set) var copied = false
+    private(set) var generation = 0
+    private var mounted = true
+    private let sleep: @Sendable (Duration) async throws -> Void
+
+    init() {
+        sleep = { duration in try await Task.sleep(for: duration) }
+    }
+
+    #if HOSTED_TEST
+    init(sleep: @escaping @Sendable (Duration) async throws -> Void) {
+        self.sleep = sleep
+    }
+    #endif
+
+    func markCopied() {
+        copied = true
+        generation &+= 1
+    }
+
+    func disappear() {
+        mounted = false
+        generation &+= 1
+        copied = false
+    }
+
+    @discardableResult
+    func resetIfCurrent(_ taskGeneration: Int) async -> Bool {
+        do {
+            try await sleep(.seconds(1.2))
+            guard !Task.isCancelled, mounted, generation == taskGeneration else { return false }
+            copied = false
+            return true
+        } catch {
+            return false
+        }
+    }
+}
+
 private struct CodeBlock: View {
     let language: String?
     let code: String
     let streaming: Bool
-    @State private var copied = false
-    @State private var copyGeneration = 0
+    @State private var copyFeedback = CodeCopyFeedbackLifecycle()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -125,10 +157,9 @@ private struct CodeBlock: View {
                 if streaming { TronPulseLoadingIndicator(accent: .tronEmerald, size: 16) }
                 Button {
                     UIPasteboard.general.string = code
-                    copied = true
-                    copyGeneration &+= 1
+                    copyFeedback.markCopied()
                 } label: {
-                    Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
+                    Label(copyFeedback.copied ? "Copied" : "Copy", systemImage: copyFeedback.copied ? "checkmark" : "doc.on.doc")
                         .font(TronFont.body(10, weight: .medium))
                 }.buttonStyle(.plain)
             }
@@ -141,26 +172,14 @@ private struct CodeBlock: View {
         }
         .background(Color.tronSurfaceElevated, in: RoundedRectangle(cornerRadius: 9))
         .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.tronBorder, lineWidth: 0.5))
-        .task(id: copyGeneration) {
-            let taskGeneration = copyGeneration
+        .task(id: copyFeedback.generation) {
+            let taskGeneration = copyFeedback.generation
             guard taskGeneration != 0 else { return }
-            do {
-                try await Task.sleep(for: .seconds(1.2))
-                guard !Task.isCancelled else { return }
-                #if HOSTED_TEST
-                guard CodeCopyFeedbackPolicy.mayReset(
-                    taskGeneration: taskGeneration,
-                    currentGeneration: copyGeneration,
-                    isMounted: true
-                ) else { return }
-                #endif
-                copied = false
-            } catch {
-                // The task is presentation-owned; disappearance or a newer
-                // tap cancels this reset and must not publish stale state.
-            }
+            // The lifecycle owner keeps the delay, cancellation, generation,
+            // and mount fence in one shipping path for every configuration.
+            _ = await copyFeedback.resetIfCurrent(taskGeneration)
         }
-        .onDisappear { copied = false }
+        .onDisappear { copyFeedback.disappear() }
     }
 }
 

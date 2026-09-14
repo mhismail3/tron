@@ -6,10 +6,32 @@ import Testing
 @Suite("Chat transcript presentation store")
 struct ChatTranscriptPresentationStoreTests {
     @Test("copy feedback resets only the latest mounted tap")
-    func copyFeedbackLatestTapAndRetirement() {
-        #expect(CodeCopyFeedbackPolicy.mayReset(taskGeneration: 1, currentGeneration: 1, isMounted: true))
-        #expect(!CodeCopyFeedbackPolicy.mayReset(taskGeneration: 1, currentGeneration: 2, isMounted: true))
-        #expect(!CodeCopyFeedbackPolicy.mayReset(taskGeneration: 2, currentGeneration: 2, isMounted: false))
+    func copyFeedbackLatestTapAndRetirement() async throws {
+        let tapGate = TestReadGate()
+        let feedback = CodeCopyFeedbackLifecycle(sleep: { _ in await tapGate.wait() })
+        feedback.markCopied()
+        let firstGeneration = feedback.generation
+        let firstReset = Task { @MainActor in
+            await feedback.resetIfCurrent(firstGeneration)
+        }
+        try await tapGate.waitForEntry()
+
+        feedback.markCopied()
+        await tapGate.release()
+        #expect(!(await firstReset.value))
+        #expect(feedback.copied)
+
+        let disappearanceGate = TestReadGate()
+        let successor = CodeCopyFeedbackLifecycle(sleep: { _ in await disappearanceGate.wait() })
+        successor.markCopied()
+        let successorReset = Task { @MainActor in
+            await successor.resetIfCurrent(successor.generation)
+        }
+        try await disappearanceGate.waitForEntry()
+        successor.disappear()
+        await disappearanceGate.release()
+        #expect(!(await successorReset.value))
+        #expect(!successor.copied)
     }
 
     @Test("runtime and streaming rows install in live region, never committed ledger")
@@ -2261,6 +2283,19 @@ struct ChatTranscriptPresentationStoreTests {
             ])
             #expect(store.installed?.timeline == ChatTranscriptPresentation.timeline(in: snapshot))
             #expect(preparations.count == 4)
+
+            // Compare the retired-worker result with a new worker's cold build;
+            // work counters alone cannot prove parity of the installed payload.
+            let coldStore = ChatTranscriptPresentationStore()
+            coldStore.submit(snapshot: snapshot, tag: tag)
+            let cold = try await coldStore.waitForInstall(of: tag)
+            #expect(store.installed?.timeline == cold.timeline)
+            #expect(store.installed?.toolPayloads == cold.toolPayloads)
+            #expect(store.installed?.runtimeItems == cold.runtimeItems)
+            #expect(preparationSources(store.installed?.preparedTextByRenderedID ?? [:])
+                == preparationSources(cold.preparedTextByRenderedID))
+            #expect(store.installed?.committedLedger == cold.committedLedger)
+            #expect(store.installed?.liveRegion == cold.liveRegion)
         }
     }
 
@@ -2573,6 +2608,21 @@ private func streamingMessage(update: Int) throws -> TranscriptItem {
         {"id":"streaming","parentId":null,"presentationId":"stream:store","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"thinking","ordinal":0,"thinkingRunOrdinal":0,"type":"thinking","text":"Working"},{"id":"answer","ordinal":1,"type":"text","text":"update-\(update)"}]}
         """.utf8)
     )
+}
+
+private func preparationSources(
+    _ values: [String: ChatTextPreparationSnapshot]
+) -> [String: String] {
+    var result: [String: String] = [:]
+    for (renderedID, snapshot) in values {
+        for (key, entry) in snapshot.markdown {
+            result["\(renderedID):markdown:\(key)"] = entry.source
+        }
+        for (key, entry) in snapshot.thinking {
+            result["\(renderedID):thinking:\(key)"] = entry.source
+        }
+    }
+    return result
 }
 
 private final class PreparationCallRecorder: @unchecked Sendable {
