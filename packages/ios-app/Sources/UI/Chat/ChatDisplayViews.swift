@@ -953,7 +953,7 @@ private struct DisplayHTMLArtifactView: View {
     }
 }
 
-private struct StaticDisplayWebView: UIViewRepresentable {
+struct StaticDisplayWebView: UIViewRepresentable {
     let html: String
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -971,6 +971,9 @@ private struct StaticDisplayWebView: UIViewRepresentable {
         view.isOpaque = false
         view.backgroundColor = UIColor(Color.tronBackground)
         view.scrollView.backgroundColor = UIColor(Color.tronBackground)
+        // The document sheet owns the custom top blur. WebKit's automatic
+        // edge treatment can add a hard cutoff and dividing line beneath it.
+        view.scrollView.topEdgeEffect.isHidden = true
         return view
     }
 

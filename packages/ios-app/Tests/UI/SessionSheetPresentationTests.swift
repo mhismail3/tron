@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import XCTest
+import WebKit
 @testable import TronMobile
 
 @MainActor
@@ -674,6 +675,32 @@ final class SessionSheetPresentationTests: XCTestCase {
             context.draw(image.cgImage!, in: CGRect(x: 0, y: 0, width: 1, height: 1))
         }
         return pixel
+    }
+
+    func testHTMLDocumentUsesOnlyCustomTopBlur() async throws {
+        let html = "<meta name='viewport' content='width=device-width, initial-scale=1'><style>body{background:#102720;color:#e0f0ea;font:24px system-ui;padding:20px}p{margin:40px 0}</style><h1>HTML preview</h1>"
+            + String(repeating: "<p>Scrollable document content beneath the custom blur.</p>", count: 30)
+        for scheme: ColorScheme in [.light, .dark] {
+            try await withSheet(TronDocumentSheet(title: "HTML preview") {
+                StaticDisplayWebView(html: html).tronDocumentTopBlurSurface()
+            }.preferredColorScheme(scheme)) { controller in
+                let web = try XCTUnwrap(self.views(of: WKWebView.self, in: controller.view).first)
+                for _ in 0..<180 {
+                    if !web.isLoading && web.scrollView.contentSize.height > web.bounds.height { break }
+                    try await DisplayFrameScheduler.displayLink.nextFrame()
+                }
+                XCTAssertFalse(web.isLoading)
+                XCTAssertGreaterThan(web.scrollView.contentSize.height, web.bounds.height)
+                XCTAssertTrue(web.scrollView.topEdgeEffect.isHidden,
+                              "WebKit must not add a hard native edge beneath the custom blur")
+                XCTAssertFalse(web.configuration.defaultWebpagePreferences.allowsContentJavaScript)
+                XCTAssertFalse(web.configuration.websiteDataStore.isPersistent)
+                XCTAssertEqual(self.views(of: VariableBackdropBlurView.self, in: controller.view).count, 1)
+                web.scrollView.setContentOffset(CGPoint(x: 0, y: 240), animated: false)
+                for _ in 0..<8 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+                self.capture(controller, name: "html-custom-top-blur-\(scheme)")
+            }
+        }
     }
 
     func testInstructionsOpenAsALargeDocumentWithCustomBlurAndNoBottomToolbar() async throws {
