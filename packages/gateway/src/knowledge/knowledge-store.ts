@@ -25,8 +25,12 @@ const OBJECT_MAX_BYTES = 8_000_000;
 const RECEIPT_LIMIT = 256;
 const OBJECT_HASH = /^[a-f0-9]{64}$/;
 const OBJECT_SCHEMA_VERSION = 1 as const;
-const MAX_SCAN_RECORDS = 1_000;
-const MAX_SCAN_BYTES = 16 * 1_048_576;
+// Canonical scans remain bounded, but the bound must not turn an ordinary
+// corpus larger than one thousand records into a permanently unreachable
+// prefix. Presentation pages still limit returned rows; callers receive
+// `incomplete` when this larger safety bound is reached.
+const MAX_SCAN_RECORDS = 10_000;
+const MAX_SCAN_BYTES = 64 * 1_048_576;
 
 type RecordHead = { latestRevisionId: string; revisionIds: string[] };
 type Suppression = { excluded: boolean; forgotten: boolean; reason?: string; updatedAt: string };
@@ -134,7 +138,7 @@ function validateConnectorState(value: unknown, connector: "raindrop" | "x"): as
   for (const key of ["accountId", "scope", "destination", "credentialRef", "checkpoint", "lastRunAt", "lastError"]) if (state[key] !== undefined && (typeof state[key] !== "string" || (state[key] as string).length > 4_096)) throw new KnowledgeStoreError("invalid", "Invalid connector state field");
   if (state.pendingRemote !== undefined) {
     const pending = state.pendingRemote as Record<string, unknown>;
-    if (!pending || pending.action !== "move" || typeof pending.operationId !== "string" || typeof pending.itemId !== "string" || typeof pending.basisRecordId !== "string" || typeof pending.originalCollectionId !== "string" || typeof pending.destination !== "string" || typeof pending.createdAt !== "string") throw new KnowledgeStoreError("invalid", "Invalid connector remote receipt");
+    if (!pending || pending.action !== "move" || typeof pending.operationId !== "string" || typeof pending.itemId !== "string" || typeof pending.basisRecordId !== "string" || typeof pending.basisRevisionId !== "string" || typeof pending.provider !== "string" || typeof pending.accountId !== "string" || typeof pending.originalCollectionId !== "string" || typeof pending.destination !== "string" || typeof pending.createdAt !== "string") throw new KnowledgeStoreError("invalid", "Invalid connector remote receipt");
   }
 }
 
@@ -347,13 +351,16 @@ export class KnowledgeStore {
     const records: KnowledgeRecord[] = [];
     let scannedBytes = 0;
     let incomplete = false;
+    let scannedRecords = 0;
     for (const [id, head] of Object.entries(state.records)) {
-      if (records.length >= MAX_SCAN_RECORDS || scannedBytes >= MAX_SCAN_BYTES) { incomplete = true; break; }
+      if (scannedRecords >= MAX_SCAN_RECORDS || scannedBytes >= MAX_SCAN_BYTES) { incomplete = true; break; }
       const record = await this.readRecord(paths, id, head.latestRevisionId);
+      scannedRecords += 1;
       scannedBytes += Buffer.byteLength(JSON.stringify(record), "utf8");
       if (includeSuppressed || !this.recordExcluded(state, record)) records.push(record);
+      if (scannedBytes >= MAX_SCAN_BYTES && scannedRecords < Object.keys(state.records).length) incomplete = true;
     }
-    if (Object.keys(state.records).length > records.length && records.length >= MAX_SCAN_RECORDS) incomplete = true;
+    if (scannedRecords < Object.keys(state.records).length && (scannedRecords >= MAX_SCAN_RECORDS || scannedBytes >= MAX_SCAN_BYTES)) incomplete = true;
     return { records, incomplete };
   }
   private async receiptResult(paths: StorePaths, state: KnowledgeState, result: ReceiptResult): Promise<unknown> {
@@ -636,7 +643,21 @@ export class KnowledgeStore {
       // Derivative references are redacted and hidden, rather than leaving a
       // current unsupported claim available after its evidence is forgotten.
       const scrubbedRecordIds = new Set<string>();
-      for (const [id, head] of Object.entries(state.records)) { const derivative = await this.readRecord(paths, id, head.latestRevisionId); const scrubbed = scrubReferences(derivative, recordId); if (scrubbed) { await durableAtomicWriteJson(this.recordPath(paths, id, scrubbed.revisionId), scrubbed, 0o600); state.records[id] = { latestRevisionId: scrubbed.revisionId, revisionIds: [...head.revisionIds, scrubbed.revisionId] }; state.suppressions[id] = { excluded: true, forgotten: false, reason: "Dependent evidence was forgotten", updatedAt: now() }; scrubbedRecordIds.add(id); } }
+      for (const [id, head] of Object.entries(state.records)) {
+        const derivative = await this.readRecord(paths, id, head.latestRevisionId);
+        const scrubbed = scrubReferences(derivative, recordId);
+        if (scrubbed) {
+          // Historical derivative revisions are replay/object routes too. Queue
+          // every pre-scrub revision for durable removal, not only the latest
+          // head, while retaining the scrubbed tombstone until cleanup runs.
+          state.recordCleanup = [...(state.recordCleanup ?? []), ...head.revisionIds.map(revisionId => ({ recordId: id, revisionId }))];
+          await durableAtomicWriteJson(this.recordPath(paths, id, scrubbed.revisionId), scrubbed, 0o600);
+          state.records[id] = { latestRevisionId: scrubbed.revisionId, revisionIds: [scrubbed.revisionId] };
+          state.suppressions[id] = { excluded: true, forgotten: false, reason: "Dependent evidence was forgotten", updatedAt: now() };
+          scrubbedRecordIds.add(id);
+        }
+      }
+      state.recordCleanup = [...new Map((state.recordCleanup ?? []).map(item => [`${item.recordId}:${item.revisionId}`, item])).values()];
       // A receipt is another replay path. Invalidate receipts for every
       // derivative rewritten by the forget, not only the forgotten source.
       for (const receipt of Object.values(state.receipts)) if (receipt.recordIds.some(id => scrubbedRecordIds.has(id))) { receipt.recordIds = []; receipt.result = { kind: "value", value: null }; receipt.invalidated = true; }

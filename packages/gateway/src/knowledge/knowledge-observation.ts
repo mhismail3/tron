@@ -80,7 +80,12 @@ function validTimestamp(value: string): boolean { return !Number.isNaN(Date.pars
 function redactModelText(value: string): string {
   return value
     .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[redacted]")
-    .replace(/\b(api[_-]?key|access[_-]?token|auth(?:entication)?|password|passwd|secret| private[_-]?key)\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]")
+    // Environment-style names are commonly emitted by bash/tool output and
+    // contain underscores, so a simple word-boundary around `secret` misses
+    // AWS_SECRET_ACCESS_KEY and GITHUB_TOKEN.
+    .replace(/\b(?:AWS_SECRET_ACCESS_KEY|AWS_ACCESS_KEY_ID|GITHUB_TOKEN|GH_TOKEN|NPM_TOKEN|OPENAI_API_KEY|ANTHROPIC_API_KEY)\s*[:=]\s*[^\s,;]+/gi, "[credential]=[redacted]")
+    .replace(/(?:^|[\s{,])(?:export\s+)?[A-Z][A-Z0-9_]*(?:TOKEN|API[_-]?KEY|SECRET|PASSWORD|PRIVATE[_-]?KEY)\s*[:=]\s*[^\s,;}]+/g, match => match.replace(/[:=]\s*[^\s,;}]+$/, "=[redacted]"))
+    .replace(/\b(api[_-]?key|access[_-]?token|auth(?:entication)?|password|passwd|secret|private[_-]?key)\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]")
     .replace(/([?&](?:token|key|secret|password|passwd|signature|sig|auth|access_token)\s*=)[^&#\s]*/gi, "$1[redacted]")
     .replace(/\/(?:Users|home|private|var)\/[^\s"'<>]+/g, "[path]");
 }
@@ -126,7 +131,10 @@ export function projectObservationEntry(raw: unknown): ObservationSourceEntry | 
     text = typeof entry.summary === "string" ? entry.summary : "";
     role = "system";
   }
-  return { id: entry.id, timestamp: entry.timestamp, type: typeof entry.type === "string" ? entry.type : "unknown", ...(role ? { role } : {}), text: bounded(redactModelText(text), 20_000), canonical: raw };
+  // Do not silently shorten a canonical entry before admission. The observer
+  // either sends the complete redacted projection or records an explicit
+  // unavailable cut when the configured prompt bound cannot contain it.
+  return { id: entry.id, timestamp: entry.timestamp, type: typeof entry.type === "string" ? entry.type : "unknown", ...(role ? { role } : {}), text: redactModelText(text), canonical: raw };
 }
 
 function sourceDigest(entries: readonly ObservationSourceEntry[]): string {
@@ -185,11 +193,16 @@ function parseModelOutput(raw: string, range: ObservationRange, fallbackAt: stri
  * an already committed range. */
 export class KnowledgeObservationService {
   private readonly queued = new Map<string, ObservationSettlement>();
-  private queueKey(settlement: Pick<ObservationSettlement, "sessionId" | "branchId" | "projectId">): string {
-    return `${settlement.sessionId}\u0000${settlement.branchId ?? ""}\u0000${settlement.projectId ?? ""}`;
+  private queueSequence = 0;
+  private queueKey(settlement: Pick<ObservationSettlement, "sessionId" | "branchId" | "projectId" | "completionId" | "invocationId">): string {
+    const envelope = settlement.completionId ?? settlement.invocationId;
+    // Distinct terminal turns must never share an envelope: doing so can
+    // attribute a failed/newer turn's entries to an older completed turn while
+    // one bounded inference is still running. Repeated snapshots for the same
+    // invocation may coalesce; anonymous admissions receive a unique key.
+    return `${settlement.sessionId}\u0000${settlement.branchId ?? ""}\u0000${settlement.projectId ?? ""}\u0000${envelope ?? `admission-${++this.queueSequence}`}`;
   }
-  private enqueue(settlement: ObservationSettlement): void {
-    const key = this.queueKey(settlement);
+  private enqueue(settlement: ObservationSettlement, key = this.queueKey(settlement)): void {
     const prior = this.queued.get(key);
     if (!prior) { this.queued.set(key, { ...settlement, entries: [...settlement.entries] }); return; }
     // Keep the newest exact snapshot, but never discard a suffix admitted by a
@@ -228,7 +241,7 @@ export class KnowledgeObservationService {
         const next = this.queued.entries().next().value as [string, ObservationSettlement] | undefined;
         if (!next) break;
         this.queued.delete(next[0]);
-        await this.process(next[1]);
+        await this.process(next[1], next[0]);
       }
     } finally { this.running = false; }
   }
@@ -245,7 +258,7 @@ export class KnowledgeObservationService {
     return "eligible";
   }
 
-  private async process(settlement: ObservationSettlement): Promise<void> {
+  private async process(settlement: ObservationSettlement, envelopeKey: string): Promise<void> {
     let config: KnowledgeConfig;
     try { config = await this.store.config(); } catch { return; }
     // Ordinary settlements must not create the knowledge namespace while the
@@ -317,7 +330,7 @@ export class KnowledgeObservationService {
       ...(settlement.invocationId ? { invocationIds: [settlement.invocationId] } : {}),
     };
     const admitRemaining = (entries: readonly ObservationSourceEntry[] = remaining) => {
-      if (entries.length > 0) this.enqueue({ ...settlement, entries: entries.map(entry => entry.canonical) });
+      if (entries.length > 0) this.enqueue({ ...settlement, entries: entries.map(entry => entry.canonical) }, envelopeKey);
     };
     const id = rangeID(range);
     const existing = await this.store.coverage(id).catch(() => null);

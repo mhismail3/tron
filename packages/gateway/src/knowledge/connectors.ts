@@ -25,6 +25,8 @@ export interface KnowledgeConnectorOptions {
   resolveHost?: ConnectorResolveHost;
   sleep?: (milliseconds: number) => Promise<void>;
   now?: () => string;
+  /** Host-qualified X allowance; unknown price/account remains unsupported. */
+  xPricing?: { accountId: string; costCentsPerAttempt: number; maxAttempts: number };
 }
 
 interface PendingItem { id: string; title: string; url: string; excerpt?: string; annotation?: string; publishedAt?: string; collectionId?: string; apiPayload?: string }
@@ -141,12 +143,22 @@ export class KnowledgeConnectorExtension {
   private async run(request: KnowledgeConnectorRunRequest): Promise<Record<string, unknown>> {
     const connector = request.connector; const current = await this.store.connectorState(connector);
     if (!current?.enabled || !current.credentialRef || !current.accountId || !current.scope) throw new GatewayError("unsupported", `Knowledge ${connector} connector is not configured`);
-    // X access is never inferred from a zero budget: the provider capability
-    // and explicit paid entitlement must both be present before any request.
-    // X pricing is endpoint/resource dependent and this owner has no pricing,
-    // reservation, or debit ledger. A positive user budget is not permission
-    // to spend; keep access explicitly unsupported until that owner exists.
-    if (connector === "x") throw new GatewayError("unsupported", "X connector paid pricing and accounting are unavailable");
+    // X access requires a host-qualified account price and an explicit user
+    // allowance. Reserve/debit before the request so an ambiguous provider
+    // response cannot spend beyond the bounded allowance; unknown pricing is
+    // still unsupported rather than guessed.
+    if (connector === "x") {
+      const pricing = this.options.xPricing;
+      if (!pricing || pricing.accountId !== current.accountId || !current.paidAccessApproved
+        || !Number.isSafeInteger(pricing.costCentsPerAttempt) || pricing.costCentsPerAttempt < 1
+        || !Number.isSafeInteger(pricing.maxAttempts) || pricing.maxAttempts < 1
+        || pricing.maxAttempts > 1 || current.paidBudgetCents < pricing.costCentsPerAttempt) throw new GatewayError("unsupported", "X connector pricing or allowance is unavailable");
+      await this.store.updateConnectorState(command(request.commandId, "x-reserve"), connector, state => {
+        const next = state ?? current;
+        if (next.accountId !== pricing.accountId || next.paidBudgetCents < pricing.costCentsPerAttempt) throw new GatewayError("conflict", "X connector allowance changed");
+        return { ...next, paidBudgetCents: next.paidBudgetCents - pricing.costCentsPerAttempt };
+      });
+    }
     if (connector === "raindrop" && current.paidBudgetCents > 0) throw new GatewayError("unsupported", "Paid connector operations are unavailable without a priced operation");
     if (current.pendingRemote) {
       await this.reconcile(connector);
@@ -185,7 +197,7 @@ export class KnowledgeConnectorExtension {
           }
           if (capturedRecord.content.captureDisposition !== "complete") { partial += 1; lastError = `Capture for ${item.id} is ${capturedRecord.content.captureDisposition}`; break; }
           if (connector === "raindrop" && state.allowWrites && state.destination && item.collectionId && item.collectionId !== state.destination) {
-            const moved = await this.moveRaindrop({ commandId: command(request.commandId, `move-${item.id}`), itemId: item.id, source: capturedRecord, destination: state.destination });
+            const moved = await this.moveRaindrop({ commandId: command(request.commandId, `move-${item.id}`), itemId: item.id, source: capturedRecord, expectedRevision: capturedRecord.revisionId, identity: { provider: connector, accountId: state.accountId!, itemId: item.id }, destination: state.destination });
             if (moved.status !== "moved") { lastError = moved.status === "unsupported" ? "Approved Raindrop move is unavailable" : "Raindrop move could not be verified"; break; }
           }
           captured += 1;
@@ -233,6 +245,17 @@ export class KnowledgeConnectorExtension {
     const state = await this.store.connectorState(connector); if (!state) return stateStatus(undefined, connector);
     const pending = state.pendingRemote;
     if (!pending || connector !== "raindrop" || !state.credentialRef) return stateStatus(state, connector);
+    const basis = await this.store.read(pending.basisRecordId, pending.basisRevisionId);
+    const basisIdentity = basis?.kind === "source" ? basis.content.identity : undefined;
+    const basisOrigin = basis?.kind === "source" && basis.content.origins?.some(origin => origin.identity?.provider === pending.provider && origin.identity.accountId === pending.accountId && origin.identity.itemId === pending.itemId);
+    if (!basis || basis.kind !== "source" || basis.revisionId !== pending.basisRevisionId
+      || (!basisIdentity && !basisOrigin)
+      || (basisIdentity && basisIdentity.provider !== pending.provider && !basisOrigin)
+      || (basisIdentity && basisIdentity.accountId !== pending.accountId && !basisOrigin)
+      || (basisIdentity && basisIdentity.itemId !== pending.itemId && !basisOrigin)) {
+      await this.store.updateConnectorState(`${pending.operationId}:basis-conflict`, connector, current => ({ ...(current ?? state), health: "partial", lastError: "Remote effect basis source changed or is unavailable" }));
+      return stateStatus(await this.store.connectorState(connector), connector);
+    }
     if (state.paidBudgetCents > 0) return stateStatus(state, connector);
     const token = await this.options.credentials.read(state.credentialRef);
     if (!token) return stateStatus(state, connector);
@@ -252,19 +275,26 @@ export class KnowledgeConnectorExtension {
 
   /** Raindrop-only reversible move. Capture must be locally complete and the
    * exact pending effect is durable before the provider mutation is attempted. */
-  async moveRaindrop(input: { commandId: string; itemId: string; source: KnowledgeRecord & { kind: "source" }; destination: string }): Promise<{ status: "moved" | "conflict" | "unsupported" }> {
+  async moveRaindrop(input: { commandId: string; itemId: string; source: KnowledgeRecord & { kind: "source" }; expectedRevision?: string; identity?: { provider: string; accountId: string; itemId: string }; destination: string }): Promise<{ status: "moved" | "conflict" | "unsupported" }> {
     if (!isVerifiedSourceCapture(input.source)) return { status: "unsupported" };
     const state = await this.store.connectorState("raindrop"); if (!state?.enabled || !state.allowWrites || !state.credentialRef) return { status: "unsupported" };
     if (!state.destination || state.destination !== input.destination) return { status: "conflict" };
     if (state.paidBudgetCents > 0) return { status: "unsupported" };
     const token = await this.options.credentials.read(state.credentialRef); if (!token) return { status: "unsupported" };
+    const capturedIdentity = input.source.content.identity;
+    const incomingOrigin = input.identity && input.source.content.origins?.some(origin => origin.identity?.provider === input.identity!.provider && origin.identity.accountId === input.identity!.accountId && origin.identity.itemId === input.identity!.itemId);
+    const primaryIdentityMatches = Boolean(capturedIdentity && input.identity && capturedIdentity.provider === input.identity.provider && capturedIdentity.accountId === input.identity.accountId && capturedIdentity.itemId === input.identity.itemId);
+    if (!input.expectedRevision || !input.identity || input.source.revisionId !== input.expectedRevision
+      || (!primaryIdentityMatches && !incomingOrigin)
+      || input.identity.itemId !== input.itemId) return { status: "conflict" };
     // Preflight the exact item immediately before recording and applying the
     // effect. A configured collection is not proof of the item's current
     // location; stop rather than moving a user-edited bookmark.
     const preflight = await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrop/${encodeURIComponent(input.itemId)}`, token, { sleep: this.sleep, signal: new AbortController().signal });
+    const remoteItemId = id(preflight.value?.item?._id ?? preflight.value?._id, "Raindrop item");
     const originalCollectionId = String(preflight.value?.item?.collection?.$id ?? preflight.value?.collection?.$id ?? "");
-    if (!originalCollectionId || originalCollectionId !== state.scope) return { status: "conflict" };
-    const pending = { operationId: input.commandId, itemId: input.itemId, action: "move" as const, basisRecordId: input.source.id, originalCollectionId, destination: input.destination, createdAt: this.now() };
+    if (!remoteItemId || remoteItemId !== input.identity.itemId || !originalCollectionId || originalCollectionId !== state.scope) return { status: "conflict" };
+    const pending = { operationId: input.commandId, itemId: input.itemId, action: "move" as const, basisRecordId: input.source.id, basisRevisionId: input.expectedRevision, provider: input.identity.provider, accountId: input.identity.accountId, originalCollectionId, destination: input.destination, createdAt: this.now() };
     await this.store.updateConnectorState(input.commandId, "raindrop", current => ({ ...(current ?? state), pendingRemote: pending }));
     const abort = new AbortController();
     try {

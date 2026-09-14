@@ -10,7 +10,7 @@ import { GatewayError } from "../errors.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 
 const toolParameters = Type.Object({
-  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("list"), Type.Literal("connectorSweep"), Type.Literal("synthesis")]),
+  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("triageSource"), Type.Literal("createNote"), Type.Literal("connectorSweep"), Type.Literal("synthesis")]),
   query: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   commandId: Type.Optional(Type.String({ minLength: 8, maxLength: 160 })),
   connector: Type.Optional(Type.Union([Type.Literal("raindrop"), Type.Literal("x")])),
@@ -19,7 +19,13 @@ const toolParameters = Type.Object({
   sessionId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
   entryId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
   id: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+  sourceId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+  url: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
+  title: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+  scope: Type.Optional(Type.Union([Type.Literal("personal"), Type.Literal("research")])),
+  noteBody: Type.Optional(Type.String({ maxLength: 100_000 })),
   revisionId: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
+  confirmed: Type.Optional(Type.Boolean()),
   kind: Type.Optional(Type.Union([Type.Literal("source"), Type.Literal("observation"), Type.Literal("note")])),
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
 }, { additionalProperties: false });
@@ -117,8 +123,16 @@ export class KnowledgeService {
         const model = this.modelForConfig?.(config);
         return this.runOwned("source capture", signal => captureSource(this.store, action.request, { ...(model ? { model } : {}), signal }));
       }
-      case "knowledge.note.create": return this.store.createNote(action.request);
-      case "knowledge.note.update": return this.store.updateNote(action.request);
+      case "knowledge.note.create": {
+        const request = action.request;
+        const record = { ...request.record, provenance: { ...request.record.provenance, actor: "user" as const }, content: { ...request.record.content, confirmed: request.confirmedByUser === true && request.record.content.confirmed } };
+        return this.store.createNote({ ...request, record });
+      }
+      case "knowledge.note.update": {
+        const request = action.request;
+        const record = { ...request.record, provenance: { ...request.record.provenance, actor: "user" as const }, content: { ...request.record.content, confirmed: request.confirmedByUser === true && request.record.content.confirmed } };
+        return this.store.updateNote({ ...request, record });
+      }
       case "knowledge.source.triage": {
         const config = await this.store.config();
         const model = this.modelForConfig?.(config);
@@ -145,7 +159,7 @@ export class KnowledgeService {
         return this.store.reflect(action.request.commandId, action.request.sessionId, action.request.sourceRevisionIds, text);
         });
       }
-      case "knowledge.correction": return this.store.correct(action.request.commandId, action.request.recordId, action.request.expectedRevision, action.request.replacement, action.request.relation);
+      case "knowledge.correction": return this.store.correct(action.request.commandId, action.request.recordId, action.request.expectedRevision, { ...action.request.replacement, provenance: { ...action.request.replacement.provenance, actor: "user" as const } }, action.request.relation);
       case "knowledge.forget": return this.store.forget(action.request.commandId, action.request.recordId, action.request.reason, action.request.expectedRevision);
       case "knowledge.exclusion":
         if (action.request.recordId) return this.store.setExclusion(action.request.commandId, action.request.recordId, action.request.excluded, action.request.expectedRevision, action.request.reason);
@@ -184,6 +198,22 @@ export class KnowledgeService {
         const request: KnowledgeListRequest = { ...(parameters.kind ? { kind: parameters.kind } : {}), limit };
         const result = await this.store.list(request);
         return { text: result.records.map(record => `${record.id} (${record.kind})`).join("\n") || "No knowledge records.", details: { stateRevision: result.stateRevision, records: result.records.map(recordSummary), ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}) } };
+      }
+      case "captureSource": {
+        if (!parameters.commandId || !parameters.url || !parameters.scope) throw new GatewayError("invalid_request", "Source capture requires commandId, url, and scope");
+        const result = await this.invoke({ operation: "knowledge.source.capture", request: { commandId: parameters.commandId, url: parameters.url, scope: parameters.scope, ...(parameters.title ? { title: parameters.title } : {}) } });
+        const record = result && typeof result === "object" && "record" in result ? (result as { record?: import("./knowledge-contract.js").KnowledgeRecord }).record : undefined;
+        return { text: record ? `${record.id} (source): ${recordLabel(record).slice(0, 4_000)}` : "Source capture completed.", details: result };
+      }
+      case "triageSource": {
+        if (!parameters.commandId || !parameters.sourceId || !parameters.revisionId) throw new GatewayError("invalid_request", "Source triage requires commandId, sourceId, and revisionId");
+        const result = await this.invoke({ operation: "knowledge.source.triage", request: { commandId: parameters.commandId, sourceId: parameters.sourceId, expectedRevision: parameters.revisionId } });
+        return { text: `Source triage completed: ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
+      }
+      case "createNote": {
+        if (!parameters.commandId || !parameters.title || !parameters.scope) throw new GatewayError("invalid_request", "Note creation requires commandId, title, and scope");
+        const result = await this.store.createNote({ commandId: parameters.commandId, record: { kind: "note", scope: parameters.scope, provenance: { actor: "agent", evidence: [] }, relations: [], content: { title: parameters.title, ...(parameters.noteBody ? { body: parameters.noteBody } : {}), role: "fact", confirmed: false } } });
+        return { text: `Created note ${result.record.id}.`, details: result };
       }
       case "connectorSweep": {
         if (!this.extensions.connector) throw new GatewayError("unsupported", "Knowledge connector support is not configured");

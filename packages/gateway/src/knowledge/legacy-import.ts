@@ -14,6 +14,13 @@ const MAX_TOTAL_INPUT_BYTES = 256 * 1024 * 1024;
 const MAX_EVIDENCE_BYTES = 8 * 1024 * 1024;
 const ID_MAX = 200;
 
+class ImportBudget {
+  inputBytes = 0;
+  evidenceBytes = 0;
+  consumeInput(bytes: number): void { this.inputBytes += bytes; if (this.inputBytes > MAX_TOTAL_INPUT_BYTES) throw new Error("Legacy import aggregate input budget exhausted"); }
+  consumeEvidence(bytes: number): void { this.evidenceBytes += bytes; if (this.evidenceBytes > MAX_EVIDENCE_BYTES) throw new Error("Legacy import aggregate evidence budget exhausted"); }
+}
+
 type LegacyStoreName = "personal-os" | "llm-wiki";
 type LegacySource = Record<string, unknown> & { source_id: string; captured_at: string; content_sha256?: string; evidence_path?: string | null; metadata?: Record<string, unknown>; origin?: Record<string, unknown>; representation?: string; sensitivity?: string };
 type LegacyEntity = Record<string, unknown> & { entity_id: string; label: string; kind?: string; aliases?: unknown[]; created_at?: string };
@@ -93,10 +100,11 @@ function safeJsonLine(line: string, path: string, lineNumber: number): unknown {
   if (Buffer.byteLength(line, "utf8") > MAX_LINE_BYTES) throw new Error(`${path}:${lineNumber} exceeds its size bound`);
   try { return JSON.parse(line) as unknown; } catch { throw new Error(`${path}:${lineNumber} is not valid JSON`); }
 }
-async function jsonl<T>(path: string, label: string): Promise<T[]> {
+async function jsonl<T>(path: string, label: string, budget?: ImportBudget): Promise<T[]> {
   let stat;
   try { stat = await lstat(path); } catch { return []; }
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_TOTAL_INPUT_BYTES) throw new Error(`${label} is not a safe regular file`);
+  budget?.consumeInput(stat.size);
   const text = await readFile(path, "utf8");
   const result: T[] = [];
   for (const [index, line] of text.split(/\r?\n/).entries()) {
@@ -108,7 +116,7 @@ async function jsonl<T>(path: string, label: string): Promise<T[]> {
   }
   return result;
 }
-async function regularJsonFiles(path: string): Promise<string[]> {
+async function regularJsonFiles(path: string, budget?: ImportBudget): Promise<string[]> {
   let entries;
   try { entries = await readdir(path, { withFileTypes: true }); } catch { return []; }
   const paths: string[] = []; let totalBytes = 0;
@@ -117,6 +125,7 @@ async function regularJsonFiles(path: string): Promise<string[]> {
     const item = join(path, entry.name); const stat = await lstat(item);
     if (stat.isSymbolicLink() || !stat.isFile() || stat.size > MAX_LINE_BYTES) throw new Error(`Unsafe legacy source record: ${item}`);
     totalBytes += stat.size; if (totalBytes > MAX_TOTAL_INPUT_BYTES) throw new Error("Legacy input exceeds its aggregate byte bound");
+    budget?.consumeInput(stat.size);
     paths.push(item);
     if (paths.length > MAX_RECORD_FILES) throw new Error("Legacy source record count exceeds its bound");
   }
@@ -145,23 +154,24 @@ async function gitRevision(root: string): Promise<string> {
   try { const result = await execFile("git", ["--no-optional-locks", "rev-parse", "HEAD"], { cwd: root, env: GIT_READ_ENV, encoding: "utf8", maxBuffer: 256 }); return result.stdout.trim() || "unversioned"; }
   catch { return "unversioned"; }
 }
-async function gitBlob(root: string, objectId: string): Promise<Uint8Array | undefined> {
+async function gitBlob(root: string, objectId: string, budget?: ImportBudget): Promise<Uint8Array | undefined> {
   if (!/^[0-9a-f]{40,64}$/i.test(objectId)) return undefined;
   try {
     const result = await execFile("git", ["--no-optional-locks", "cat-file", "blob", objectId], { cwd: root, env: GIT_READ_ENV, encoding: "buffer", maxBuffer: MAX_EVIDENCE_BYTES + 1 });
     const bytes = Buffer.from(result.stdout as unknown as Uint8Array);
     if (bytes.byteLength > MAX_EVIDENCE_BYTES) return undefined;
+    budget?.consumeEvidence(bytes.byteLength);
     return bytes;
-  } catch { return undefined; }
+  } catch (error) { if (error instanceof Error && error.message.includes("aggregate evidence budget")) throw error; return undefined; }
 }
-async function gitPath(root: string, revision: string, relativePath: string): Promise<Uint8Array | undefined> {
+async function gitPath(root: string, revision: string, relativePath: string, budget?: ImportBudget): Promise<Uint8Array | undefined> {
   if (revision === "unversioned" || !relativePath || isAbsolute(relativePath) || relativePath.split(/[\\/]/).includes("..") || relativePath.length > 1_024) return undefined;
   try {
     const result = await execFile("git", ["--no-optional-locks", "show", `${revision}:${relativePath}`], { cwd: root, env: GIT_READ_ENV, encoding: "buffer", maxBuffer: MAX_EVIDENCE_BYTES + 1 });
-    const bytes = Buffer.from(result.stdout as unknown as Uint8Array); return bytes.byteLength <= MAX_EVIDENCE_BYTES ? bytes : undefined;
-  } catch { return undefined; }
+    const bytes = Buffer.from(result.stdout as unknown as Uint8Array); if (bytes.byteLength > MAX_EVIDENCE_BYTES) return undefined; budget?.consumeEvidence(bytes.byteLength); return bytes;
+  } catch (error) { if (error instanceof Error && error.message.includes("aggregate evidence budget")) throw error; return undefined; }
 }
-async function evidence(root: string, source: LegacySource, revision: string): Promise<{ bytes: Uint8Array; mediaType: string; hash: string } | undefined> {
+async function evidence(root: string, source: LegacySource, revision: string, budget?: ImportBudget): Promise<{ bytes: Uint8Array; mediaType: string; hash: string } | undefined> {
   const expected = typeof source.content_sha256 === "string" && /^[a-f0-9]{64}$/.test(source.content_sha256) ? source.content_sha256 : undefined;
   let bytes: Uint8Array | undefined;
   const evidencePath = source.evidence_path;
@@ -169,15 +179,15 @@ async function evidence(root: string, source: LegacySource, revision: string): P
     if (isAbsolute(evidencePath) || evidencePath.split(/[\\/]/).includes("..")) return undefined;
     const candidate = resolve(root, evidencePath); const rel = relative(root, candidate);
     if (rel.startsWith("..") || isAbsolute(rel)) return undefined;
-    try { await assertContainedNoSymlink(root, candidate); const stat = await lstat(candidate); if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_EVIDENCE_BYTES) return undefined; bytes = await readFile(candidate); } catch { /* Missing retained evidence is intentional. */ }
+    try { await assertContainedNoSymlink(root, candidate); const stat = await lstat(candidate); if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_EVIDENCE_BYTES) return undefined; budget?.consumeEvidence(stat.size); bytes = await readFile(candidate); } catch (error) { if (error instanceof Error && error.message.includes("aggregate evidence budget")) throw error; /* Missing retained evidence is intentional. */ }
   }
   if (!bytes) {
     const provenance = source.metadata?.legacy_provenance as Record<string, unknown> | undefined;
     const blob = stringValue(provenance?.git_blob, 80);
-    if (blob) bytes = await gitBlob(root, blob);
+    if (blob) bytes = await gitBlob(root, blob, budget);
     if (!bytes) {
       const path = stringValue(provenance?.git_path ?? provenance?.path, 1_024);
-      if (path) bytes = await gitPath(root, revision, path);
+      if (path) bytes = await gitPath(root, revision, path, budget);
     }
   }
   if (!bytes) return undefined;
@@ -187,12 +197,19 @@ async function evidence(root: string, source: LegacySource, revision: string): P
 }
 function sourceTitle(source: LegacySource): string {
   const metadata = source.metadata ?? {};
-  return stringValue(metadata.reference_title, 512) ?? stringValue(metadata.title, 512) ?? stringValue((source.origin ?? {}).locator, 512) ?? source.source_id;
+  // Never fall back to an untrusted locator: it may contain query credentials
+  // and is not needed to preserve import lineage.
+  return stringValue(metadata.reference_title, 512) ?? stringValue(metadata.title, 512) ?? source.source_id;
 }
 function sourceUri(source: LegacySource): string | undefined {
   const candidate = stringValue(source.metadata?.canonical_url, 4_096) ?? stringValue((source.origin ?? {}).locator, 4_096);
   if (!candidate) return undefined;
-  try { const parsed = new URL(candidate); return ["http:", "https:"].includes(parsed.protocol) && !parsed.username && !parsed.password ? parsed.toString() : undefined; } catch { return undefined; }
+  try {
+    const parsed = new URL(candidate);
+    if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password) return undefined;
+    for (const key of parsed.searchParams.keys()) if (/^(?:token|api[_-]?key|key|secret|password|passwd|auth|signature|sig|access[_-]?token|credential|session)$/i.test(key)) return undefined;
+    return parsed.toString();
+  } catch { return undefined; }
 }
 
 export class LegacyKnowledgeImporter {
@@ -215,15 +232,15 @@ export class LegacyKnowledgeImporter {
   }
 
   private async plan(source: string, scope?: KnowledgeImportScope): Promise<{ root: string; store: LegacyStoreName; revision: string; items: PlanItem[]; planHash: string; warnings: string[] }> {
-    const { root, store } = await this.resolveSource(source); const revision = await gitRevision(root); const warnings: string[] = [];
+    const { root, store } = await this.resolveSource(source); const revision = await gitRevision(root); const warnings: string[] = []; const budget = new ImportBudget();
     for (const relativePath of ["sources/records", "graph", "reviews/receipts", "audits/records"]) {
       await assertContainedNoSymlink(root, join(root, relativePath));
     }
     const kinds = scope?.kinds ? new Set(scope.kinds) : undefined; const ids = scope?.ids ? new Set(scope.ids) : undefined;
     const included = (kind: "sources" | "entities" | "assertions", id: string): boolean => (!kinds || kinds.has(kind)) && (!ids || ids.has(id));
     const receiptByBatch = new Map<string, { id: string; resultRevision?: string }>();
-    for (const receiptPath of await regularJsonFiles(join(root, "reviews", "receipts"))) { const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as Record<string, unknown>; const batch = receipt.batch_id; const id = receipt.receipt_id; if (typeof batch === "string" && typeof id === "string") receiptByBatch.set(batch, { id, ...(typeof receipt.result_revision === "string" ? { resultRevision: receipt.result_revision } : {}) }); }
-    const sourcePaths = await regularJsonFiles(join(root, "sources", "records")); const sourceRecords: LegacySource[] = [];
+    for (const receiptPath of await regularJsonFiles(join(root, "reviews", "receipts"), budget)) { const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as Record<string, unknown>; const batch = receipt.batch_id; const id = receipt.receipt_id; if (typeof batch === "string" && typeof id === "string") receiptByBatch.set(batch, { id, ...(typeof receipt.result_revision === "string" ? { resultRevision: receipt.result_revision } : {}) }); }
+    const sourcePaths = await regularJsonFiles(join(root, "sources", "records"), budget); const sourceRecords: LegacySource[] = [];
     for (const path of sourcePaths) {
       const value = JSON.parse(await readFile(path, "utf8")) as LegacySource;
       if (!value || typeof value.source_id !== "string") continue;
@@ -233,16 +250,20 @@ export class LegacyKnowledgeImporter {
     sourceRecords.sort((a, b) => a.source_id.localeCompare(b.source_id));
     const items: PlanItem[] = [];
     for (const legacy of sourceRecords) {
-      const retained = await evidence(root, legacy, revision); const warning = retained ? undefined : (legacy.evidence_path || (legacy.metadata?.legacy_provenance as Record<string, unknown> | undefined)?.git_blob) ? `Evidence unavailable or hash-mismatched for ${legacy.source_id}; retained as metadata-only` : `No retained raw evidence for ${legacy.source_id}`;
+      const excluded = legacy.status === "excluded" || legacy.status === "suppressed";
+      // Excluded source material is withheld at planning time: do not read or
+      // persist its raw bytes, objects, locator, or metadata projection.
+      const retained = excluded ? undefined : await evidence(root, legacy, revision, budget);
+      const warning = excluded ? `Excluded legacy source ${legacy.source_id} withheld` : retained ? undefined : (legacy.evidence_path || (legacy.metadata?.legacy_provenance as Record<string, unknown> | undefined)?.git_blob) ? `Evidence unavailable or hash-mismatched for ${legacy.source_id}; retained as metadata-only` : `No retained raw evidence for ${legacy.source_id}`;
       if (warning) warnings.push(warning);
       const batch = typeof legacy.metadata?.review_batch === "string" ? legacy.metadata.review_batch : undefined; const reviewReceipt = batch ? receiptByBatch.get(batch) : undefined;
-      items.push({ kind: "source", legacy, id: stableId(store, "source", legacy.source_id), ...(retained ? { evidence: retained } : {}), ...(reviewReceipt ? { reviewReceipt } : {}), ...(warning ? { warning } : {}), ...(legacy.status === "excluded" || legacy.status === "suppressed" ? { excluded: true } : {}) });
+      items.push({ kind: "source", legacy, id: stableId(store, "source", legacy.source_id), ...(retained ? { evidence: retained } : {}), ...(reviewReceipt ? { reviewReceipt } : {}), ...(warning ? { warning } : {}), ...(excluded ? { excluded: true } : {}) });
     }
-    const entities = await jsonl<LegacyEntity>(join(root, "graph", "entities.jsonl"), "legacy entities");
+    const entities = await jsonl<LegacyEntity>(join(root, "graph", "entities.jsonl"), "legacy entities", budget);
     for (const legacy of entities.filter(item => typeof item.entity_id === "string" && typeof item.label === "string" && included("entities", item.entity_id)).sort((a, b) => a.entity_id.localeCompare(b.entity_id))) items.push({ kind: "entity", legacy, id: stableId(store, "entity", legacy.entity_id) });
-    const assertions = await jsonl<LegacyAssertion>(join(root, "graph", "assertions.jsonl"), "legacy assertions");
+    const assertions = await jsonl<LegacyAssertion>(join(root, "graph", "assertions.jsonl"), "legacy assertions", budget);
     const auditByAssertion = new Map<string, string>();
-    for (const auditPath of await regularJsonFiles(join(root, "audits", "records"))) {
+    for (const auditPath of await regularJsonFiles(join(root, "audits", "records"), budget)) {
       const audit = JSON.parse(await readFile(auditPath, "utf8")) as Record<string, unknown>; const auditId = typeof audit.audit_id === "string" ? audit.audit_id : auditPath.split("/").pop()?.replace(/\.json$/, "");
       if (!auditId || !Array.isArray(audit.assertions)) continue;
       for (const assertion of audit.assertions) { const assertionId = (assertion as Record<string, unknown>).assertion_id; if (typeof assertionId === "string") auditByAssertion.set(assertionId, auditId); }
@@ -255,8 +276,8 @@ export class LegacyKnowledgeImporter {
 
   private sourceDraft(item: SourcePlan, revision: string, importedAt: string): KnowledgeRecordDraft & { kind: "source" } {
     const legacy = item.legacy; const metadata = legacy.metadata ?? {}; const capturedAt = normalizedTimestamp(legacy.captured_at, importedAt);
-    const origin = "import" as const; const usageConstraint = stringValue(metadata.usage_constraint, 20_000); const uri = sourceUri(legacy); const originalLocator = stringValue(legacy.origin?.locator, 512); const publishedAt = stringValue(metadata.published_at, 80); const text = item.evidence && item.evidence.mediaType.startsWith("text/") ? Buffer.from(item.evidence.bytes).toString("utf8").slice(0, 2_000_000) : undefined;
-    const content = { title: sourceTitle(legacy), ...(uri ? { uri } : {}), ...(text ? { text } : {}), ...(item.evidence ? { object: { hash: item.evidence.hash, mediaType: item.evidence.mediaType, bytes: item.evidence.bytes.byteLength } } : {}), mediaType: mediaType(legacy), captureDisposition: item.excluded ? "reference-only" as const : item.evidence ? "complete" as const : "metadata-only" as const, capturedAt, ...(publishedAt ? { sourcePublishedAt: normalizedTimestamp(publishedAt, capturedAt) } : {}), origin, origins: [{ kind: "import" as const, capturedAt, ...(uri ? { uri } : {}), ...(originalLocator ? { annotation: `Original locator: ${originalLocator}` } : {}) }], retention: { sensitivity: sensitivity(legacy), evidenceAvailable: Boolean(item.evidence), ...(legacy.content_sha256 ? { originalHash: legacy.content_sha256 } : {}), ...(usageConstraint ? { usageConstraint } : {}) } };
+    const origin = "import" as const; const usageConstraint = stringValue(metadata.usage_constraint, 20_000); const uri = sourceUri(legacy); const publishedAt = stringValue(metadata.published_at, 80); const text = item.evidence && item.evidence.mediaType.startsWith("text/") ? Buffer.from(item.evidence.bytes).toString("utf8").slice(0, 2_000_000) : undefined;
+    const content = { title: sourceTitle(legacy), ...(uri ? { uri } : {}), ...(text ? { text } : {}), ...(item.evidence ? { object: { hash: item.evidence.hash, mediaType: item.evidence.mediaType, bytes: item.evidence.bytes.byteLength } } : {}), mediaType: mediaType(legacy), captureDisposition: item.excluded ? "reference-only" as const : item.evidence ? "complete" as const : "metadata-only" as const, capturedAt, ...(publishedAt ? { sourcePublishedAt: normalizedTimestamp(publishedAt, capturedAt) } : {}), origin, origins: [{ kind: "import" as const, capturedAt, ...(uri ? { uri } : {}) }], retention: { sensitivity: sensitivity(legacy), evidenceAvailable: Boolean(item.evidence), ...(legacy.content_sha256 ? { originalHash: legacy.content_sha256 } : {}), ...(usageConstraint ? { usageConstraint } : {}) } };
     return { kind: "source", id: item.id, scope: item.legacy.representation === "llm-wiki" ? "research" : "personal", createdAt: capturedAt, updatedAt: capturedAt, provenance: { actor: "import", source: `${legacy.representation ?? "legacy"}:${legacy.source_id}@${revision}`, evidence: [] }, relations: [], importOrigin: { store: item.legacy.representation === "llm-wiki" ? "llm-wiki" : "personal-os", recordId: legacy.source_id, revision, importedAt, ...(metadata.review_batch ? { review: { batch: String(metadata.review_batch), ...(item.reviewReceipt ? { receiptId: item.reviewReceipt.id, ...(item.reviewReceipt.resultRevision ? { resultRevision: item.reviewReceipt.resultRevision } : {}) } : {}) } } : {}) }, content };
   }
 
@@ -276,7 +297,9 @@ export class LegacyKnowledgeImporter {
     const role = legacy.assertion_type === "relationship" || legacy.object_id ? "concept" as const : legacy.predicate.toLowerCase().includes("preference") ? "preference" as const : "fact" as const;
     const usageConstraint = stringValue((legacy as Record<string, unknown>).usage_constraint, 20_000);
     const fields = [{ field: "value", value: objectValue(legacy.value), subject: stableId(store, "entity", legacy.subject_id), evidence, certainty, ...(legacy.valid_from ? { validFrom: normalizedTimestamp(legacy.valid_from, createdAt) } : {}), ...(legacy.valid_to ? { validTo: normalizedTimestamp(legacy.valid_to, createdAt) } : {}) }, { field: "assertionType", value: String(legacy.assertion_type ?? "unknown"), evidence, certainty: "historical" as const }, { field: "status", value: String(legacy.status ?? "active"), evidence, certainty: "historical" as const }, { field: "evidenceQualifications", value: rawEvidence.map(value => objectValue(value)), evidence: [], certainty: "historical" as const }, ...(unresolvedEvidence.length ? [{ field: "unresolvedEvidence", value: unresolvedEvidence, evidence: [], certainty: "historical" as const }] : []), ...(legacy.confidence ? [{ field: "confidence", value: legacy.confidence, evidence, certainty: "historical" as const }] : [])];
-    const content = { title: legacy.predicate, ...(superseded ? { body: "Historical assertion retained as superseded; it is not current instruction." } : {}), role, confirmed: legacy.basis === "user-confirmed", privacyScope: store === "llm-wiki" ? "shared" as const : "private" as const, ...(usageConstraint ? { usageConstraint } : {}), fields };
+    // Import lineage may describe a historical user-confirmed basis, but the
+    // current import operation is not that user's confirmation action.
+    const content = { title: legacy.predicate, ...(superseded ? { body: "Historical assertion retained as superseded; it is not current instruction." } : {}), role, confirmed: false, privacyScope: store === "llm-wiki" ? "shared" as const : "private" as const, ...(usageConstraint ? { usageConstraint } : {}), fields };
     const review = { ...(item.auditId ? { auditId: item.auditId } : {}), ...(legacy.basis ? { basis: legacy.basis } : {}) };
     return { kind: "note", id: item.id, scope: store === "llm-wiki" ? "research" : "personal", createdAt, updatedAt: createdAt, provenance: { actor: "import", source: `assertion:${legacy.assertion_id}@${revision}`, evidence }, relations, temporal: { ...(legacy.observed_at ? { eventAt: normalizedTimestamp(legacy.observed_at, createdAt) } : {}), ...(legacy.valid_from ? { validFrom: normalizedTimestamp(legacy.valid_from, createdAt) } : {}), ...(legacy.valid_to ? { validTo: normalizedTimestamp(legacy.valid_to, createdAt) } : {}) }, importOrigin: { store, recordId: legacy.assertion_id, revision, importedAt, ...(Object.keys(review).length ? { review } : {}) }, content };
   }
@@ -291,7 +314,8 @@ export class LegacyKnowledgeImporter {
       if (item.evidence) await this.store.putObject(item.evidence.bytes, item.evidence.mediaType);
       const result = await this.store.captureSource({ commandId: `import.source:${plan.planHash.slice(0, 48)}:${item.legacy.source_id}`.slice(0, 160), record: this.sourceDraft(item, plan.revision, importedAt) });
       if (item.excluded) await this.store.setExclusion(`import.exclude:${plan.planHash.slice(0, 48)}:${item.legacy.source_id}`.slice(0, 160), result.record.id, true, undefined, "Legacy source was excluded");
-      sourceRevisions.set(item.legacy.source_id, result.record.revisionId); return { imported: true, revision: result.record.revisionId };
+      if (!item.excluded) sourceRevisions.set(item.legacy.source_id, result.record.revisionId);
+      return { imported: true, revision: result.record.revisionId };
     }
     if (item.kind === "assertion" && Array.isArray(item.legacy.evidence)) {
       // A selected batch may contain an assertion without its source. Resolve
@@ -324,12 +348,29 @@ export class LegacyKnowledgeImporter {
     if (runRequest.expectedPlanHash !== selectedPlanHash) throw new Error("Import plan hash is stale; run dry-run again");
     const checkpoint = await this.store.beginImport(`import.begin:${runRequest.commandId}`, selectedPlanHash, selected.map(item => item.id)); base.checkpoint = checkpoint;
     const done = new Set(checkpoint.completedRecordIds); const sourceRevisions = new Map<string, string>();
-    for (const item of selected) { const existing = await this.store.read(item.id, undefined, true); if (existing?.kind === "source" && item.kind === "source") sourceRevisions.set(item.legacy.source_id, existing.revisionId); }
+    const withheldSourceIds = new Set(selected.filter((item): item is SourcePlan => item.kind === "source" && item.excluded === true).map(item => item.legacy.source_id));
+    for (const item of selected) { const existing = await this.store.read(item.id, undefined, true); if (existing?.kind === "source" && item.kind === "source" && item.excluded !== true) sourceRevisions.set(item.legacy.source_id, existing.revisionId); }
     for (const item of selected) {
       if (done.has(item.id)) { base.resumed += 1; continue; }
+      if (item.kind === "source" && item.excluded === true) {
+        base.skipped += 1;
+        await this.store.markImportRecord(`import.withheld:${selectedPlanHash.slice(0, 48)}:${item.id}`.slice(0, 160), selectedPlanHash, item.id);
+        done.add(item.id);
+        base.warnings.push(`${item.id}: excluded source withheld`);
+        continue;
+      }
+      // Assertions whose only evidence is explicitly excluded must remain
+      // withheld; publishing them with a citation would disclose a projection
+      // of suppressed legacy content.
+      if (item.kind === "assertion" && (Array.isArray(item.legacy.evidence) && item.legacy.evidence.some(raw => raw && typeof raw === "object" && withheldSourceIds.has((raw as Record<string, unknown>).source_id as string)))) {
+        base.skipped += 1;
+        await this.store.markImportRecord(`import.withheld:${selectedPlanHash.slice(0, 48)}:${item.id}`.slice(0, 160), selectedPlanHash, item.id); done.add(item.id); base.warnings.push(`${item.id}: withheld because cited legacy evidence is excluded`); continue;
+      }
       try {
         const result = await this.importItem(item, plan, sourceRevisions, this.options.now?.() ?? new Date().toISOString());
-        if (result.imported) base.imported += 1; else base.resumed += 1;
+        if (item.kind === "source" && item.excluded) base.skipped += 1;
+        else if (result.imported) base.imported += 1;
+        else base.resumed += 1;
         await this.store.markImportRecord(`import.progress:${selectedPlanHash.slice(0, 48)}:${item.id}`.slice(0, 160), selectedPlanHash, item.id); done.add(item.id);
       } catch (error) { base.failed += 1; base.warnings.push(`${item.id}: ${error instanceof Error ? error.message : String(error)}`); break; }
     }

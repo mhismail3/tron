@@ -781,13 +781,26 @@ export class RuntimeSlot {
     return header ? [header, ...this.sessionManager.getEntries()] : [];
   }
 
+  /** Stable lineage for observation scope. The current leaf identifies a turn,
+   * not a branch: use the retained fork anchor plus the first post-anchor
+   * canonical entry so additional turns do not move observations between
+   * branch scopes. */
+  private observationBranchId(entries: readonly FileEntry[]): string {
+    const anchor = this.forkBoundary?.inheritedEntryId;
+    if (!anchor) return "root";
+    const anchorIndex = entries.findIndex(entry => entry.id === anchor);
+    const firstChild = anchorIndex >= 0 ? entries.slice(anchorIndex + 1).find(entry => entry.type !== "session" && entry.type !== "label") : undefined;
+    return `fork-${createHash("sha256").update(`${anchor}\0${firstChild?.id ?? "pending"}`).digest("hex").slice(0, 48)}`;
+  }
+
   private observationEntries(operationId: string, endEntryId?: string): { entries: readonly FileEntry[]; branchId: string } {
     const entries = this.canonicalSessionEntries();
+    const branchId = this.observationBranchId(entries);
     const start = this.observationStarts.get(operationId);
     // Observation admission must use the operation's immutable cut. A missing
     // start marker is an unavailable range, never permission to expose the
     // entire session history to a background model.
-    if (!start) return { entries: [], branchId: "root" };
+    if (!start) return { entries: [], branchId };
     const endIndex = endEntryId ? entries.findIndex(entry => entry.id === endEntryId) : -1;
     if (endEntryId && endIndex < start.entryIndex) return { entries: [], branchId: start.branchId };
     const cutEnd = endEntryId ? endIndex + 1 : entries.length;
@@ -2761,7 +2774,8 @@ export class RuntimeSlot {
         this.toolStartedAtMonotonicMs.clear();
         this.nextToolOrder = 0;
         this.activeOperationId ??= requiresDistinctAgentOwner ? randomUUID() : (preflightOwner ?? randomUUID());
-        this.observationStarts.set(this.activeOperationId, { entryIndex: this.canonicalSessionEntries().length, branchId: this.runtime.session.sessionManager.getLeafId() ?? "root" });
+        const observationCut = this.canonicalSessionEntries();
+      this.observationStarts.set(this.activeOperationId, { entryIndex: observationCut.length, branchId: this.observationBranchId(observationCut) });
         if (!continuesToolSegment) {
           if (beginsWithUserInput) this.ownToolSegment(this.activeOperationId);
           else this.prepareAssistantOwnedToolSegment();

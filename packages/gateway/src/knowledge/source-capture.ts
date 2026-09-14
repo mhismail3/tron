@@ -238,8 +238,9 @@ async function allSourceRecords(store: KnowledgeStore): Promise<Array<KnowledgeR
   const result: Array<KnowledgeRecord & { kind: "source" }> = [];
   let cursor: string | undefined;
   do {
-    const page = await store.list({ kind: "source", includeSuppressed: true, limit: 100, ...(cursor ? { cursor } : {}) });
+    const page = await store.list({ kind: "source", includeSuppressed: false, limit: 100, ...(cursor ? { cursor } : {}) });
     result.push(...page.records.filter((record): record is KnowledgeRecord & { kind: "source" } => record.kind === "source"));
+    if (page.incomplete) throw new Error("Source deduplication scan is incomplete; retry after reducing the canonical corpus");
     cursor = page.nextCursor;
   } while (cursor);
   return result;
@@ -261,6 +262,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
   const limits = { ...SOURCE_CAPTURE_LIMITS, ...(options.limits ?? {}) };
   if (!Number.isSafeInteger(limits.maxBytes) || limits.maxBytes < 1 || limits.maxBytes > SOURCE_CAPTURE_LIMITS.maxBytes || !Number.isSafeInteger(limits.maxRedirects) || limits.maxRedirects < 0 || limits.maxRedirects > SOURCE_CAPTURE_LIMITS.maxRedirects || !Number.isSafeInteger(limits.timeoutMs) || limits.timeoutMs < 100 || limits.timeoutMs > SOURCE_CAPTURE_LIMITS.timeoutMs) throw invalid("Invalid source capture limits");
   const sourceUrl = assertSafeUrl(input.url);
+  const initialConfig = await store.config();
   const existing = await allSourceRecords(store);
   const normalized = normalizedUrl(sourceUrl.toString());
   const duplicate = existing.find(record => record.scope === input.scope && record.content.captureDisposition === "complete" && ((input.identity && record.content.identity && JSON.stringify(record.content.identity) === JSON.stringify(input.identity)) || (record.content.uri && normalizedUrl(record.content.uri) === normalized)));
@@ -335,9 +337,12 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
   if (options.model && readable && disposition !== "inaccessible" && disposition !== "failed" && !operationController.signal.aborted) {
     try {
       const interests = input.interests ?? (await store.config()).currentInterests ?? [];
-      const assessment = await options.model.assess({ title: sourceRecord.content.title, text: readable.text.slice(0, 100_000), interests: interests.slice(0, 50).map(item => item.slice(0, 500)), source: { ...(sourceRecord.content.uri ? { uri: sourceRecord.content.uri } : {}), ...(mediaType ? { mediaType } : {}), capturedAt } }, operationController.signal);
+      const assessment = await options.model.assess({ title: sourceRecord.content.title, text: readable.text, interests: interests.slice(0, 50).map(item => item.slice(0, 500)), source: { ...(sourceRecord.content.uri ? { uri: sourceRecord.content.uri } : {}), ...(mediaType ? { mediaType } : {}), capturedAt } }, operationController.signal);
       if (operationController.signal.aborted) throw new SourceNetworkError("Source assessment cancelled");
-      const assessed: SourceContent = { ...sourceRecord.content, assessment: { ...assessment, generatedAt: assessment.generatedAt ?? now() } };
+      const latestConfig = await store.config();
+      const latest = await store.read(sourceRecord.id, sourceRecord.revisionId);
+      if (latestConfig.revision !== initialConfig.revision || !latest || latest.kind !== "source" || await store.scopeExcluded({ ...(latest.provenance.sessionId ? { sessionId: latest.provenance.sessionId } : {}), ...(latest.provenance.branchId ? { branchId: latest.provenance.branchId } : {}) })) throw new Error("Source changed or became unavailable during assessment");
+      const assessed: SourceContent = { ...latest.content, assessment: { ...assessment, generatedAt: assessment.generatedAt ?? now() } };
       result = await store.captureSource({ commandId: `${input.commandId}:assessment`, expectedRevision: sourceRecord.revisionId, record: { ...sourceDraft(input, assessed), id: sourceRecord.id, createdAt: sourceRecord.createdAt } });
       if (result.record.kind !== "source") throw new Error("Source assessment returned a non-source record");
       sourceRecord = result.record;

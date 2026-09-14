@@ -51,6 +51,40 @@ describe("KnowledgeObservationService", () => {
     expect((await store.list({ kind: "observation" })).records).toHaveLength(0);
   });
 
+  it("does not merge distinct terminal envelopes while an older inference is busy", async () => {
+    let release!: (value: string) => void;
+    const blocked = new Promise<string>(resolve => { release = resolve; });
+    const infer = vi.fn(async (input) => input.range.invocationIds?.includes("invocation-a") ? blocked : output.replace("planned for Friday", "failed turn"));
+    const { store, observer } = await fixture({ infer });
+    const first = { type: "message", id: "turn-a", timestamp: "2026-01-01T00:00:01Z", message: { role: "user", content: "first turn" } };
+    const second = { type: "message", id: "turn-b", timestamp: "2026-01-01T00:00:02Z", message: { role: "user", content: "failed turn" } };
+    observer.admit({ sessionId: "session-1", entries: [first], outcome: "completed", invocationId: "invocation-a" });
+    await waitFor(() => infer.mock.calls.length === 1);
+    observer.admit({ sessionId: "session-1", entries: [second], outcome: "failed", invocationId: "invocation-c" });
+    await new Promise(resolve => setTimeout(resolve, 25));
+    expect(infer).toHaveBeenCalledTimes(1);
+    release(output);
+    await waitFor(() => infer.mock.calls.length === 2);
+    expect(infer.mock.calls[1]?.[0].outcome).toBe("failed");
+    expect(infer.mock.calls[1]?.[0].range.invocationIds).toEqual(["invocation-c"]);
+    await waitFor(async () => (await store.status()).coverageCount === 2);
+    observer.dispose();
+    await new Promise(resolve => setTimeout(resolve, 1_000));
+  });
+
+  it("does not publish a truncated canonical entry as successful coverage", async () => {
+    const infer = vi.fn(async () => output);
+    const { store, observer } = await fixture({ infer });
+    const long = { type: "message", id: "long-entry", timestamp: "2026-01-01T00:00:01Z", message: { role: "user", content: "x".repeat(21_000) } };
+    const config = await store.config();
+    await store.configure("observer-small-input", { ...config, observation: { ...config.observation, maxInputChars: 1_000 } });
+    observer.admit({ sessionId: "session-1", entries: [long], outcome: "completed" });
+    await waitFor(async () => (await store.status()).coverageCount === 1);
+    expect((await store.list({ kind: "observation" })).records).toHaveLength(0);
+    expect((await store.observationCoverageForScope("session-1")).at(-1)?.disposition).toBe("unavailable");
+    observer.dispose();
+  });
+
   it("coalesces and durably deduplicates canonical no-tool turns without forwarding thinking", async () => {
     const infer = vi.fn(async (input) => {
       expect(input.sourceText).not.toContain("private reasoning omitted");

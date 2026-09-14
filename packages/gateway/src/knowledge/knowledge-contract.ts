@@ -336,6 +336,8 @@ export type KnowledgeSourceCaptureRequest = KnowledgeSourceURLCaptureRequest;
 
 export interface KnowledgeNoteMutationRequest {
   commandId: string;
+  /** Set only by the trusted native explicit-confirmation owner. */
+  confirmedByUser?: boolean;
   recordId?: string;
   expectedRevision?: string;
   record: KnowledgeRecordDraft & { kind: "note" };
@@ -425,6 +427,9 @@ export interface KnowledgeConnectorState {
     itemId: string;
     action: "move";
     basisRecordId: string;
+    basisRevisionId: string;
+    provider: string;
+    accountId: string;
     originalCollectionId: string;
     destination: string;
     createdAt: string;

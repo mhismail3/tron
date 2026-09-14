@@ -44,15 +44,20 @@ it identifies the backing SDK contract.
 Knowledge state is owned by the Gateway under `state/knowledge`; iOS retains only
 bounded pages. Observation project scope uses the canonical absolute workspace
 path (a project reference, not a record filename ID), and each admitted model
-cut is branch-scoped, exact, redacted, and input-bounded. Cancellation or a
+cut is branch-lineage-scoped (not the changing leaf), exact, redacted, and
+input-bounded. Distinct terminal envelopes retain their own invocation/outcome
+when queued. Cancellation or a
 configuration/privacy change leaves the cut retryable and cannot publish late.
 Retained source objects are available only through `knowledge.object.read` after
 record authorization; excluded/forgotten records cannot authorize object reads.
 Legacy imports support explicit `offset` continuation with checkpoint-tied plan
-membership. Connector X runs remain unsupported until provider pricing,
-reservation, and debit accounting are owned; a positive budget alone never
-permits an API call. Remote Raindrop moves preflight the item's actual current
-collection before persisting or applying the effect.
+membership. Connector X runs require a host-qualified account price, explicit paid
+access, and a one-attempt allowance reservation/debit; unknown pricing or a
+positive budget alone never permits an API call. Remote Raindrop moves
+preflight the exact incoming provider/account/item origin and readable source
+revision before persisting or applying the effect. Legacy exclusions are
+withheld rather than copied and hidden; native import exposes bounded offset
+continuation.
 
 ## Pi SDK maintenance
 

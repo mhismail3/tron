@@ -2027,7 +2027,11 @@ Source object reads use the Gateway's authorization-checked `knowledge.object.re
 projection and report verified bounded bytes rather than caching a second corpus;
 session citations open through the existing session presentation owner. Import
 requests carry an explicit offset and exact dry-run plan hash so a later page
-cannot silently repeat the first prefix.
+cannot silently repeat the first prefix. Detail renders structured field values,
+subjects, validity, qualifications, contrary evidence, and nested record/session
+citations; exact session-entry reads are bounded and displayed before navigation.
+Handoffs carry record/revision and Gateway identity metadata with explicit
+untrusted-evidence wording and a bounded preview.
 Observation configuration requires an explicitly selected existing model and at
 least one prospective session or project scope; an empty allowlist remains
 ineligible and exclusions are evaluated by the Gateway. Editable current interests are persisted in the Gateway configuration and do not enable observation; source triage is an explicit `knowledge.source.triage` mutation that resolves those interests server-side. Connector status reports

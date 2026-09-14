@@ -21,19 +21,24 @@ export interface SourceTriageResult {
  * readable text only; the adapter is supplied by the existing model owner.
  */
 export async function triageSource(store: KnowledgeStore, input: SourceTriageInput, model: SourceAssessmentModel, now: () => string = () => new Date().toISOString()): Promise<SourceTriageResult> {
+  const config = await store.config();
   const source = await store.read(input.sourceId, input.expectedRevision);
   if (input.signal?.aborted) throw new Error("Source triage was cancelled");
-  const interests = input.interests ?? (await store.config()).currentInterests ?? [];
+  const interests = input.interests ?? config.currentInterests ?? [];
   if (!source || source.kind !== "source") throw new Error("Source revision does not exist");
   if (!source.content.text) throw new Error("Source has no readable evidence to assess");
   const assessment = await model.assess({
     title: source.content.title,
-    text: source.content.text.slice(0, 100_000),
+    text: source.content.text,
     interests: interests.slice(0, 50).map(value => value.slice(0, 500)),
     source: { ...(source.content.uri ? { uri: source.content.uri } : {}), ...(source.content.mediaType ? { mediaType: source.content.mediaType } : {}), capturedAt: source.content.capturedAt },
   }, input.signal ?? new AbortController().signal);
+  if (input.signal?.aborted) throw new Error("Source triage was cancelled");
+  const latestConfig = await store.config();
+  const latest = await store.read(input.sourceId, input.expectedRevision);
+  if (latestConfig.revision !== config.revision || !latest || latest.kind !== "source" || await store.scopeExcluded({ ...(latest.provenance.sessionId ? { sessionId: latest.provenance.sessionId } : {}), ...(latest.provenance.branchId ? { branchId: latest.provenance.branchId } : {}) })) throw new Error("Source changed or became unavailable during triage");
   const complete: SourceAssessment = { ...assessment, generatedAt: assessment.generatedAt ?? now() };
-  const content: SourceContent = { ...source.content, assessment: complete };
+  const content: SourceContent = { ...latest.content, assessment: complete };
   const result: KnowledgeMutationResult = await store.captureSource({
     commandId: input.commandId,
     expectedRevision: source.revisionId,
