@@ -1962,6 +1962,11 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       child.appendMessage(fauxAssistantMessage(`child registration ${index}`));
       children.push(child);
     }
+    // Force the canonical materialization path instead of relying on the
+    // asynchronous acceleration-index save racing this test. The invariant
+    // under test is the stable user cut while child files mutate during the
+    // real metadata pass.
+    await rm(join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json"), { force: true });
     mutateDuringDiscovery = true;
     try {
       const userCut = await fixture.registry.catalog("user");

@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, rename, truncate, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CatalogMetadataIndex,
   applyCatalogMetadataEntry,
@@ -141,6 +141,41 @@ describe("CatalogMetadataIndex", () => {
     expect(rows).toHaveLength(2);
     expect(rows?.find((row) => row.id === "second")?.messageCount).toBe(0);
     expect(rows?.find((row) => row.id === "session")?.messageCount).toBe(1);
+  });
+
+  it("reconciles unchanged rows with bounded filesystem concurrency", async () => {
+    const f = await fixture();
+    const index = new CatalogMetadataIndex(f.gateway);
+    const files = [f.path];
+    for (let number = 1; number < 32; number += 1) {
+      const path = join(f.catalog, `session-${number}.jsonl`);
+      await writeFile(path, `${JSON.stringify({ type: "session", version: 3, id: `session-${number}`, timestamp: "2026-01-01T00:00:00.000Z", cwd: "/workspace" })}\n`);
+      files.push(path);
+    }
+    const rows = (await Promise.all(files.map((path, number) => index.entryFromSummary({
+      ...summary(path), id: number === 0 ? "session" : `session-${number}`,
+    })))).filter((row): row is NonNullable<typeof row> => row !== undefined);
+    await index.save(f.catalog, rows);
+    let active = 0;
+    let maximumActive = 0;
+    const originalVerify = (index as any).verifyUnchanged.bind(index) as (row: unknown) => Promise<boolean>;
+    const verify = vi.spyOn(index as any, "verifyUnchanged").mockImplementation(async (row: unknown) => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      return originalVerify(row);
+    });
+    try {
+      const candidates = rows.map((row) => ({
+        path: row.path, id: row.id, cwd: row.cwd, fileIdentity: row.fileIdentity, size: row.size, mtimeMs: row.mtimeMs,
+      }));
+      await expect(index.reconcile(f.catalog, candidates, async () => undefined)).resolves.toHaveLength(rows.length);
+      expect(maximumActive).toBeGreaterThan(1);
+      expect(maximumActive).toBeLessThanOrEqual(16);
+    } finally {
+      verify.mockRestore();
+    }
   });
 
   it("updates exact summary fields from newline-complete appended bytes", async () => {

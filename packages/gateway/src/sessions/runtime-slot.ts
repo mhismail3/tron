@@ -2579,7 +2579,10 @@ export class RuntimeSlot {
       // remains operationally running and owns final idle transition.
       if (this.hasActiveAgentRun) {
         this.ensureAgentProjection();
-        this.publishSnapshot();
+        // Completion persistence already follows the SDK event that advanced
+        // revision. Defer this enrichment so a fast continuation cannot add a
+        // second full transcript frame to a mobile peer's bounded queue.
+        this.scheduleSnapshot();
         return;
       }
       if (this.pendingManualCompaction) {
@@ -2876,7 +2879,10 @@ export class RuntimeSlot {
               this.abortedOperations.delete(settledOperationId);
               this.settleOperationWork(settledOperationId);
               this.hooks.settled(this.id);
-              this.publishSnapshot();
+              // The terminal receipt is an asynchronous enrichment of the
+              // settled event. Coalesce it with any adjacent lifecycle update
+              // rather than publishing another immediate full snapshot.
+              this.scheduleSnapshot();
             });
           } else {
             // A duplicate/late SDK callback has no exact marker authority. Never
@@ -5943,7 +5949,7 @@ export class RuntimeSlot {
         if (this.activeOperationId !== undefined || this.hasActiveAgentRun) return;
         this.phase = "idle";
         if (this.pendingManualCompaction) {
-          this.publishSnapshot();
+          this.scheduleSnapshot();
           this.startPendingManualCompaction();
         } else {
           this.hooks.settled(this.id);
@@ -6795,7 +6801,7 @@ export class RuntimeSlot {
           if (this.phase === "retrying") this.phase = "idle";
         }
         if (!completed && ownsBranchSummary) this.revision += 1;
-        if (completed || ownsBranchSummary) this.publishSnapshot();
+        if (completed || ownsBranchSummary) this.scheduleSnapshot();
         work?.settle();
       }
     });
