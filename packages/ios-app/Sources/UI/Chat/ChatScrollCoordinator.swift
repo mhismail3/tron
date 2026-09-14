@@ -221,6 +221,9 @@ final class ChatScrollCoordinator {
     /// before ChatView installs the authoritative opening baseline.
     private var awaitingOpeningBaseline = false
     private var retainedViewportReconciliationPending = false
+    // Set only when a physical repair target retired without a fresh marker;
+    // ordinary retained presentation handoffs still require marker alignment.
+    private var targetFreeRebasePending = false
     private var semanticFrames: [String: SemanticFrameSample] = [:]
     private var semanticFrameRevision = 0
     private var openingTailPhase: OpeningTailPhase = .idle
@@ -390,6 +393,7 @@ final class ChatScrollCoordinator {
         lastForegroundActivation = nil
         reduceViewport(.presentationReset(retainingViewport: retainingVisibleViewport))
         retainedViewportReconciliationPending = retainingVisibleViewport
+        targetFreeRebasePending = false
         clearCommand()
         if viewportMode == .pinned { pinnedPositionRevision &+= 1 }
         // Semantic evidence is scoped to the current presentation epoch.
@@ -724,18 +728,37 @@ final class ChatScrollCoordinator {
 
     private func reconcileRetainedViewport(with current: ChatTranscriptGeometry) {
         guard retainedViewportReconciliationPending, current.isValid else { return }
-        if isUserInteracting || !current.isAtCatchUpBoundary {
+        if isUserInteracting {
             retainedViewportReconciliationPending = false
+            targetFreeRebasePending = false
             return
         }
+        // A geometry sample that has not reached the legal tail is not an
+        // acknowledgement of the target-free rebase. Keep the owner pending
+        // until the next admitted sample instead of silently abandoning a
+        // displaced mounted transcript.
+        guard current.isAtCatchUpBoundary else { return }
         let hasCurrentAlignedTail = physicalTailEvidence.map {
             $0.presentationEpoch == presentation
                 && $0.layoutEpoch == layoutEpoch
                 && $0.classification == .aligned
         } == true
-        guard hasCurrentAlignedTail else { return }
         retainedViewportReconciliationPending = false
-        pinAtTail()
+        if hasCurrentAlignedTail {
+            targetFreeRebasePending = false
+            pinAtTail()
+        } else if targetFreeRebasePending {
+            targetFreeRebasePending = false
+            // The native geometry is already at the legal boundary, but the
+            // marker callback is stale or absent. Re-apply the persistent
+            // pinned mode without leasing another ScrollPosition target; the
+            // next marker sample remains the only physical-proof admission.
+            tailSettlementGeneration &+= 1
+        } else {
+            // A retained presentation handoff still waits for its own marker
+            // proof; it must not claim a reader's viewport from geometry alone.
+            retainedViewportReconciliationPending = true
+        }
     }
 
     func positionOpeningTail(
@@ -1051,6 +1074,7 @@ final class ChatScrollCoordinator {
     func viewportObservationChanged(isActive: Bool) {
         viewportObservationActive = isActive
         guard !isActive else { return }
+        targetFreeRebasePending = false
         physicalTailRepairTask?.cancel()
         physicalTailRepairTask = nil
         physicalTailRepairEvidenceRevision = nil
@@ -2059,6 +2083,7 @@ final class ChatScrollCoordinator {
 
     private func beginDirectInteraction(allowsBottomRubberBand: Bool = true) {
         retainedViewportReconciliationPending = false
+        targetFreeRebasePending = false
         physicalTailRepairTask?.cancel()
         physicalTailRepairTask = nil
         physicalTailRepairEvidenceRevision = nil
@@ -2667,6 +2692,7 @@ final class ChatScrollCoordinator {
                 // scroll tree. Later evidence may use only the remaining
                 // attempt, never renew this episode's budget.
                 self.retainedViewportReconciliationPending = true
+                self.targetFreeRebasePending = true
                 self.pinnedPositionRevision &+= 1
                 return
             }
