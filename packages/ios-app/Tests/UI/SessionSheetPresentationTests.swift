@@ -677,7 +677,7 @@ final class SessionSheetPresentationTests: XCTestCase {
         return pixel
     }
 
-    func testHTMLDocumentUsesSoftNativeTopEdge() async throws {
+    func testHTMLDocumentUsesOnlyCustomTopBlur() async throws {
         let html = "<meta name='viewport' content='width=device-width, initial-scale=1'><style>body{background:#102720;color:#e0f0ea;font:24px system-ui;padding:20px}p{margin:40px 0}</style><h1>HTML preview</h1>"
             + String(repeating: "<p>Scrollable document content beneath the custom blur.</p>", count: 30)
         for scheme: ColorScheme in [.light, .dark] {
@@ -691,15 +691,14 @@ final class SessionSheetPresentationTests: XCTestCase {
                 }
                 XCTAssertFalse(web.isLoading)
                 XCTAssertGreaterThan(web.scrollView.contentSize.height, web.bounds.height)
-                XCTAssertFalse(web.scrollView.topEdgeEffect.isHidden)
-                XCTAssertEqual(web.scrollView.topEdgeEffect.style, .soft,
-                               "WebKit must retain its native edge with an explicitly soft treatment")
+                XCTAssertTrue(web.scrollView.topEdgeEffect.isHidden,
+                              "WebKit must not add a hard native edge beneath the custom blur")
                 XCTAssertFalse(web.configuration.defaultWebpagePreferences.allowsContentJavaScript)
                 XCTAssertFalse(web.configuration.websiteDataStore.isPersistent)
                 XCTAssertEqual(self.views(of: VariableBackdropBlurView.self, in: controller.view).count, 1)
                 web.scrollView.setContentOffset(CGPoint(x: 0, y: 240), animated: false)
                 for _ in 0..<8 { try await DisplayFrameScheduler.displayLink.nextFrame() }
-                self.capture(controller, name: "html-soft-native-edge-\(scheme)")
+                self.capture(controller, name: "html-custom-top-blur-\(scheme)")
             }
         }
     }
