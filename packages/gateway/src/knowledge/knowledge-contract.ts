@@ -366,12 +366,66 @@ export interface KnowledgeConnectorConfigurationRequest {
   commandId: string;
   connector: "raindrop" | "x";
   enabled: boolean;
+  /** Stable provider account identifier; never a token. */
+  accountId?: string;
+  /** Provider-owned collection/user scope; never a token or URL with credentials. */
   scope?: string;
+  /** Optional Raindrop destination collection. Writes remain disabled unless explicitly approved. */
   destination?: string;
+  /** Opaque reference resolved only by the Mac-owned credential adapter. */
+  credentialRef?: string;
+  allowWrites?: boolean;
+  paidAccessApproved?: boolean;
+  /** Explicit maximum spend in cents; no connector currently spends when unset/zero. */
+  paidBudgetCents?: number;
+  recurringApproved?: boolean;
 }
 
 export interface KnowledgeConnectorStatusRequest { connector: "raindrop" | "x"; }
 export interface KnowledgeConnectorRunRequest { commandId: string; connector: "raindrop" | "x"; dryRun: boolean; limit?: number; }
+
+export interface KnowledgeConnectorState {
+  connector: "raindrop" | "x";
+  enabled: boolean;
+  accountId?: string;
+  scope?: string;
+  destination?: string;
+  credentialRef?: string;
+  allowWrites: boolean;
+  paidAccessApproved: boolean;
+  paidBudgetCents: number;
+  recurringApproved: boolean;
+  checkpoint?: string;
+  pending: Array<{ id: string; title: string; url: string; excerpt?: string; annotation?: string; publishedAt?: string; collectionId?: string }>;
+  capturedIds: string[];
+  health: "unconfigured" | "ready" | "running" | "partial" | "rate-limited" | "auth-error" | "error";
+  lastRunAt?: string;
+  lastError?: string;
+  remaining: number;
+  pendingRemote?: {
+    operationId: string;
+    itemId: string;
+    action: "move";
+    basisRecordId: string;
+    originalCollectionId: string;
+    destination: string;
+    createdAt: string;
+  };
+}
+
+export interface KnowledgeConnectorStatus {
+  connector: "raindrop" | "x";
+  configured: boolean;
+  enabled: boolean;
+  health: KnowledgeConnectorState["health"];
+  accountId?: string;
+  scope?: string;
+  lastRunAt?: string;
+  lastError?: string;
+  remaining: number;
+  pending: number;
+  paidBudgetCents: number;
+}
 export interface KnowledgeImportDryRunRequest { commandId: string; source: string; limit?: number; }
 export interface KnowledgeImportRunRequest { commandId: string; source: string; expectedPlanHash: string; limit?: number; }
 

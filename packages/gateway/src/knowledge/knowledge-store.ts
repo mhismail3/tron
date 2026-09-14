@@ -14,7 +14,7 @@ import {
   type KnowledgeRecallResponse, type KnowledgeRecord, type KnowledgeRecordDraft,
   type KnowledgeSearchRequest, type KnowledgeSearchResponse, type KnowledgeSearchHit,
   type KnowledgeSourceCaptureRequest, type KnowledgeNoteMutationRequest,
-  type ObservationCoverage, type ObservationRange, validateKnowledgeConfig,
+  type KnowledgeConnectorState, type ObservationCoverage, type ObservationRange, validateKnowledgeConfig,
   validateKnowledgeRecord, validateObjectRef, assertKnowledgeId,
 } from "./knowledge-contract.js";
 
@@ -46,6 +46,8 @@ interface KnowledgeState {
   recordCleanup?: PendingRecordCleanup[];
   receipts: Record<string, StoredReceipt>;
   config: KnowledgeConfig;
+  /** Connector checkpoints and pending IDs are canonical operational state; secrets are never stored here. */
+  connectors?: Partial<Record<"raindrop" | "x", KnowledgeConnectorState>>;
 }
 
 export type KnowledgeStateFailure = "unsafe" | "invalid" | "newer";
@@ -93,7 +95,7 @@ async function safeDirectory(path: string, create: boolean): Promise<void> {
 }
 
 function emptyState(): KnowledgeState {
-  return { schemaVersion: KNOWLEDGE_SCHEMA_VERSION, stateRevision: 0, records: {}, coverage: {}, suppressions: {}, scopeExclusions: {}, cleanup: [], recordCleanup: [], receipts: {}, config: structuredClone(DEFAULT_KNOWLEDGE_CONFIG) };
+  return { schemaVersion: KNOWLEDGE_SCHEMA_VERSION, stateRevision: 0, records: {}, coverage: {}, suppressions: {}, scopeExclusions: {}, cleanup: [], recordCleanup: [], receipts: {}, config: structuredClone(DEFAULT_KNOWLEDGE_CONFIG), connectors: {} };
 }
 function validateCoverage(value: unknown): asserts value is ObservationCoverage {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new KnowledgeStoreError("invalid", "Invalid observation coverage");
@@ -109,6 +111,21 @@ function validateCoverage(value: unknown): asserts value is ObservationCoverage 
   range.entryIds.forEach(entry => safeId(entry as string, "coverage entry id"));
   if (range.projectId !== undefined) safeId(range.projectId as string, "coverage projectId");
 }
+function validateConnectorState(value: unknown, connector: "raindrop" | "x"): asserts value is KnowledgeConnectorState {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new KnowledgeStoreError("invalid", "Invalid connector state");
+  const state = value as Record<string, unknown>;
+  if (state.connector !== connector || typeof state.enabled !== "boolean" || typeof state.allowWrites !== "boolean" || typeof state.paidAccessApproved !== "boolean" || !Number.isSafeInteger(state.paidBudgetCents) || (state.paidBudgetCents as number) < 0 || (state.paidBudgetCents as number) > 1_000_000 || typeof state.recurringApproved !== "boolean" || !Array.isArray(state.pending) || !Array.isArray(state.capturedIds) || !["unconfigured", "ready", "running", "partial", "rate-limited", "auth-error", "error"].includes(state.health as string) || !Number.isSafeInteger(state.remaining) || (state.remaining as number) < 0 || state.pending.length > 500 || state.capturedIds.length > 2_000) throw new KnowledgeStoreError("invalid", "Invalid connector state");
+  for (const item of state.pending) {
+    if (!item || typeof item !== "object" || typeof (item as Record<string, unknown>).id !== "string" || typeof (item as Record<string, unknown>).title !== "string" || typeof (item as Record<string, unknown>).url !== "string") throw new KnowledgeStoreError("invalid", "Invalid connector pending item");
+  }
+  for (const id of state.capturedIds) if (typeof id !== "string" || id.length > 512) throw new KnowledgeStoreError("invalid", "Invalid connector captured ID");
+  for (const key of ["accountId", "scope", "destination", "credentialRef", "checkpoint", "lastRunAt", "lastError"]) if (state[key] !== undefined && (typeof state[key] !== "string" || (state[key] as string).length > 4_096)) throw new KnowledgeStoreError("invalid", "Invalid connector state field");
+  if (state.pendingRemote !== undefined) {
+    const pending = state.pendingRemote as Record<string, unknown>;
+    if (!pending || pending.action !== "move" || typeof pending.operationId !== "string" || typeof pending.itemId !== "string" || typeof pending.basisRecordId !== "string" || typeof pending.originalCollectionId !== "string" || typeof pending.destination !== "string" || typeof pending.createdAt !== "string") throw new KnowledgeStoreError("invalid", "Invalid connector remote receipt");
+  }
+}
+
 function validateState(value: unknown): KnowledgeState {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new KnowledgeStoreError("invalid", "Knowledge state is not an object");
   const state = value as Record<string, unknown>;
@@ -136,6 +153,11 @@ function validateState(value: unknown): KnowledgeState {
     if (!item || typeof item !== "object" || typeof item.operation !== "string" || typeof item.requestHash !== "string" || !item.result || !Array.isArray(item.recordIds) || (item.invalidated !== undefined && typeof item.invalidated !== "boolean")) throw new KnowledgeStoreError("invalid", "Invalid knowledge mutation receipt");
   }
   try { validateKnowledgeConfig(state.config); } catch (error) { throw new KnowledgeStoreError("invalid", error instanceof Error ? error.message : "Invalid knowledge config"); }
+  if (state.connectors !== undefined) {
+    if (!state.connectors || typeof state.connectors !== "object" || Array.isArray(state.connectors)) throw new KnowledgeStoreError("invalid", "Invalid connector map");
+    const connectors = state.connectors as Partial<Record<"raindrop" | "x", unknown>>;
+    for (const connector of ["raindrop", "x"] as const) if (connectors[connector] !== undefined) validateConnectorState(connectors[connector], connector);
+  }
   return value as KnowledgeState;
 }
 function recordObjectHashes(record: KnowledgeRecord): string[] {
@@ -325,6 +347,24 @@ export class KnowledgeStore {
     try { validateKnowledgeConfig(config); } catch (error) { throw invalid(error instanceof Error ? error.message : "Invalid knowledge config"); }
     return this.mutate("knowledge.config", commandId, config, async state => { if (config.revision !== state.config.revision) throw conflict("Knowledge configuration revision is stale"); const next = structuredClone(config); next.revision += 1; state.config = next; return next; });
   }
+
+  async connectorState(connector: "raindrop" | "x"): Promise<KnowledgeConnectorState | undefined> {
+    const paths = await this.paths(false); const state = (await this.load(paths, false)).state;
+    const value = state.connectors?.[connector];
+    return value ? structuredClone(value) : undefined;
+  }
+
+  /** Connector operational state shares the knowledge owner’s serialized state;
+   * this update never accepts or persists a credential value. */
+  async updateConnectorState(commandId: string, connector: "raindrop" | "x", update: (current: KnowledgeConnectorState | undefined) => KnowledgeConnectorState): Promise<KnowledgeConnectorState> {
+    return this.mutate("knowledge.connector.state", commandId, { connector }, async state => {
+      const next = update(state.connectors?.[connector] ? structuredClone(state.connectors[connector]) : undefined);
+      validateConnectorState(next, connector);
+      state.connectors = { ...(state.connectors ?? {}), [connector]: next };
+      return next;
+    });
+  }
+
   async list(request: KnowledgeListRequest = {}): Promise<KnowledgeListResponse> {
     const paths = await this.paths(false); const loaded = await this.load(paths, false); const state = loaded.state;
     const limit = Math.min(request.limit ?? 50, state.config.maximumSearchResults); if (!Number.isSafeInteger(limit) || limit < 1) throw invalid("Invalid knowledge list limit");

@@ -196,7 +196,7 @@ function titleFrom(bytes: Uint8Array, mediaType: string | undefined): string | u
   return text.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/<[^>]+>/g, " ").trim().slice(0, 512) || undefined;
 }
 
-async function fetchSafe(inputUrl: string, options: { fetcher?: SourceFetch; resolveHost: ResolveHost; signal?: AbortSignal; limits: typeof SOURCE_CAPTURE_LIMITS }): Promise<{ response?: Response; bytes?: Uint8Array; truncated: boolean; finalUrl: string; disposition?: SourceContent["captureDisposition"]; mediaType?: string }> {
+async function fetchSafe(inputUrl: string, options: { fetcher?: SourceFetch; resolveHost: ResolveHost; signal?: AbortSignal; limits: typeof SOURCE_CAPTURE_LIMITS }): Promise<{ response?: Response; bytes?: Uint8Array; truncated: boolean; finalUrl: string; disposition?: SourceContent["captureDisposition"]; mediaType?: string; quality?: "partial" }> {
   let current = assertSafeUrl(inputUrl);
   for (let hop = 0; hop <= options.limits.maxRedirects; hop += 1) {
     const address = await assertPublicDestination(current, options.resolveHost, options.signal);
@@ -219,7 +219,8 @@ async function fetchSafe(inputUrl: string, options: { fetcher?: SourceFetch; res
     if (!response.ok) { await response.body?.cancel().catch(() => {}); return { response, truncated: false, finalUrl: current.toString(), disposition: "failed", ...(mediaType ? { mediaType } : {}) }; }
     const bounded = await readBounded(response, options.limits.maxBytes, options.signal);
     if (options.signal?.aborted) throw new SourceNetworkError("Source fetch deadline exceeded");
-    return { response, bytes: bounded.bytes, truncated: bounded.truncated, finalUrl: current.toString(), ...(mediaType ? { mediaType } : {}) };
+    const quality = response.headers.get("x-tron-source-capture-quality") === "partial" ? "partial" as const : undefined;
+    return { response, bytes: bounded.bytes, truncated: bounded.truncated, finalUrl: current.toString(), ...(mediaType ? { mediaType } : {}), ...(quality ? { quality } : {}) };
   }
   throw invalid("Source redirect limit exceeded");
 }
@@ -290,7 +291,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
   const bytes = fetched.bytes;
   const mediaType = fetched.mediaType;
   const readable = bytes && bytes.byteLength ? extractReadable(bytes, mediaType, SOURCE_CAPTURE_LIMITS.maxReadableChars) : undefined;
-  const disposition: SourceContent["captureDisposition"] = fetched.disposition ?? (bytes && bytes.byteLength > 0 ? (readable === undefined ? "metadata-only" : fetched.truncated || readable.truncated ? "partial" : "complete") : "metadata-only");
+  const disposition: SourceContent["captureDisposition"] = fetched.disposition ?? (bytes && bytes.byteLength > 0 ? (readable === undefined ? "metadata-only" : fetched.quality === "partial" || fetched.truncated || readable.truncated ? "partial" : "complete") : "metadata-only");
   let object: KnowledgeObjectRef | undefined;
   if (bytes && bytes.byteLength > 0) {
     const contentHash = createHash("sha256").update(bytes).digest("hex");
@@ -323,6 +324,13 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
   }
   clearTimeout(deadlineTimer); options.signal?.removeEventListener("abort", relayAbort);
   return { record: sourceRecord, duplicate: false, fetched: true, ...(assessmentError ? { assessmentError } : {}) };
+}
+
+/** Remote acknowledgements require a retained raw object and readable bytes;
+ * a provider metadata/excerpt or a nominal complete label is insufficient. */
+export function isVerifiedSourceCapture(record: KnowledgeRecord & { kind: "source" }): boolean {
+  const content = record.content;
+  return content.captureDisposition === "complete" && Boolean(content.object && content.object.bytes > 0 && content.text && content.text.trim().length > 0);
 }
 
 export { assertPublicDestination, isPrivateAddress };

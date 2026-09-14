@@ -31,6 +31,17 @@ describe("KnowledgeService integration", () => {
     expect((await store.read(source.record.id))?.content).toMatchObject({ assessment: { summary: "Useful source" } });
   });
 
+  it("exposes typed connector sweeps to existing Automation tool callers", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {
+      connector: async action => ({ operation: action.operation, accepted: true }),
+    });
+    const result = await service.tool({ action: "connectorSweep", commandId: "service-sweep", connector: "raindrop", dryRun: true, limit: 1 });
+    expect(result.text).toContain("connector sweep completed");
+    expect(result.details).toEqual({ operation: "knowledge.connector.run", accepted: true });
+  });
+
   it("rejects connector and importer calls without an installed extension", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));

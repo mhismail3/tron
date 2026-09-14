@@ -77,11 +77,16 @@ ranges cannot be reflected.
 The typed action surface remains the shared Gateway/agent/native DTO. Reads
 return state revisions, and recall distinguishes no-match from unavailable
 store errors. Observation defaults to disabled and the store never chooses a
-provider or model silently. Connector/import DTOs are operation shapes; their
-network/account implementations belong to later owners. The Gateway registers
-`knowledge.v1` typed RPC handlers and a bounded first-party `knowledge`
-retrieval tool. The tool performs explicit search/recall/read/list only;
-retrieved text is evidence, not authorization. A prospective
+provider or model silently. Connector/import DTOs are operation shapes implemented by the installed connector
+extension. Connector configuration supplies a selected account/collection scope and
+opaque `credentialRef` (`connector:<provider>:<account>`); only the Mac Keychain adapter
+resolves it. Tokens never enter knowledge state, receipts, logs, prompts, iOS models, or
+process arguments. `allowWrites`, `paidAccessApproved`, and `recurringApproved` remain
+independent controls and default to false. The Gateway registers `knowledge.v1` typed RPC
+handlers and a bounded first-party `knowledge` retrieval tool. The tool performs explicit
+search/recall/read/list plus typed `connectorSweep` and `synthesis` actions for existing
+Automations; it does not create a scheduler or run journal. Retrieved text is evidence, not
+authorization. A prospective
 `KnowledgeObservationService` coalesces terminal turns (including no-tool,
 failed, and interrupted turns), omits thinking/attachment bodies, uses one
 pinned `ModelRuntime` adapter (the configured model is an explicit
@@ -116,3 +121,16 @@ exact source revision; it does not accept an unpersisted interest list. Capture
 is durable even when that adapter fails. Exact source-object reads resolve a
 source record and revision before reading its object; orphan and suppressed
 object hashes are not an object browsing API.
+
+## Connector boundaries
+
+Raindrop reads `/rest/v1/collection/{collectionId}/items` in bounded pages; X reads
+`/2/users/{userId}/bookmarks` with the provider pagination token. Discovered provider IDs
+and pending metadata are persisted before checkpoint advancement, so pagination shifts do
+not silently skip work. Items use shared URL capture/store with explicit partial or
+metadata-only quality, annotations, stable identity, finite retries, and visible auth,
+rate-limit, remaining, and last-error health. Remote Raindrop moves are disabled by
+default and require a locally verified raw object plus readable extraction, explicit write
+approval, a durable pending receipt before PUT, and exact post-effect reconciliation.
+X exposes no folder moves, browser fallback, automatic unbookmarking, purchases, or
+recharge. A complete label alone is never sufficient for remote acknowledgment.

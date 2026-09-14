@@ -310,7 +310,8 @@ export class GatewayService {
       case "knowledge.list":
       case "knowledge.read":
       case "knowledge.search":
-      case "knowledge.recall": {
+      case "knowledge.recall":
+      case "knowledge.connector.status": {
         const knowledge = this.requireKnowledge();
         return safeJson(await knowledge.invoke({ operation: method, request: params } as KnowledgeAction));
       }
@@ -324,7 +325,6 @@ export class GatewayService {
       case "knowledge.forget":
       case "knowledge.exclusion":
       case "knowledge.connector.configure":
-      case "knowledge.connector.status":
       case "knowledge.connector.run":
       case "knowledge.import.dry-run":
       case "knowledge.import.run": {

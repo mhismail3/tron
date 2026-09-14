@@ -34,6 +34,8 @@ import { BrowserLiveViewRegistry } from "./display/browser-live-view.js";
 import { KnowledgeStore } from "./knowledge/knowledge-store.js";
 import { KnowledgeService, ModelRuntimeKnowledgeModel } from "./knowledge/knowledge-service.js";
 import { KnowledgeObservationService, ModelRuntimeObservationModel, modelForConfig } from "./knowledge/knowledge-observation.js";
+import { MacKeychainConnectorCredentialStore } from "./knowledge/connector-credentials.js";
+import { createKnowledgeConnectorExtension } from "./knowledge/connectors.js";
 
 const config = await loadConfig();
 const configuredSessionDir = SettingsManager.create(process.cwd(), config.agentDir, { projectTrusted: false }).getSessionDir();
@@ -148,6 +150,7 @@ const sessions = new RuntimeRegistry({
   },
 });
 const knowledgeStore = new KnowledgeStore(sessions.knowledgeWorkspace());
+const knowledgeConnector = createKnowledgeConnectorExtension(knowledgeStore, { credentials: new MacKeychainConnectorCredentialStore() });
 const knowledge = new KnowledgeService(
   knowledgeStore,
   new KnowledgeObservationService(
@@ -158,7 +161,7 @@ const knowledge = new KnowledgeService(
     },
     workRegistry,
   ),
-  {},
+  { connector: (action) => knowledgeConnector.invoke(action) },
   (knowledgeConfig) => {
     const model = modelForConfig(modelRuntime, knowledgeConfig.observation.model);
     return model ? new ModelRuntimeKnowledgeModel(modelRuntime, model) : undefined;

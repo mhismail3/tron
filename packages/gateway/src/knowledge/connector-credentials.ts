@@ -1,0 +1,35 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
+
+/** Connector credentials are addressed by opaque references, never copied into
+ * knowledge state or DTOs. The Mac implementation reads the dedicated Tron
+ * Keychain service without placing a secret in argv or logs. */
+export interface ConnectorCredentialStore {
+  read(reference: string): Promise<string | undefined>;
+}
+
+export class MacKeychainConnectorCredentialStore implements ConnectorCredentialStore {
+  constructor(private readonly service = "Tron Connector Credentials") {}
+
+  async read(reference: string): Promise<string | undefined> {
+    if (!/^connector:[a-z][a-z0-9-]{0,31}:[A-Za-z0-9._:-]{1,160}$/.test(reference)) return undefined;
+    try {
+      const result = await execFileAsync("security", ["find-generic-password", "-s", this.service, "-a", reference, "-w"], { maxBuffer: 8 * 1024, windowsHide: true });
+      const value = result.stdout.trim();
+      return value.length > 0 && value.length <= 8_192 ? value : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+/** Synthetic-only adapter used by focused connector tests. */
+export class InMemoryConnectorCredentialStore implements ConnectorCredentialStore {
+  constructor(private readonly values: ReadonlyMap<string, string>) {}
+  async read(reference: string): Promise<string | undefined> {
+    const value = this.values.get(reference);
+    return value && value.length <= 8_192 ? value : undefined;
+  }
+}

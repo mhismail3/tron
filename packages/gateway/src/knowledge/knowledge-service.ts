@@ -9,8 +9,12 @@ import { triageSource } from "./source-triage.js";
 import { GatewayError } from "../errors.js";
 
 const toolParameters = Type.Object({
-  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("list")]),
+  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("list"), Type.Literal("connectorSweep"), Type.Literal("synthesis")]),
   query: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+  commandId: Type.Optional(Type.String({ minLength: 8, maxLength: 160 })),
+  connector: Type.Optional(Type.Union([Type.Literal("raindrop"), Type.Literal("x")])),
+  dryRun: Type.Optional(Type.Boolean()),
+  sourceRevisionIds: Type.Optional(Type.Array(Type.String({ minLength: 16, maxLength: 80 }), { minItems: 1, maxItems: 32 })),
   sessionId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
   entryId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
   id: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
@@ -157,6 +161,18 @@ export class KnowledgeService {
         const request: KnowledgeListRequest = { ...(parameters.kind ? { kind: parameters.kind } : {}), limit };
         const result = await this.store.list(request);
         return { text: result.records.map(record => `${record.id} (${record.kind})`).join("\n") || "No knowledge records.", details: { stateRevision: result.stateRevision, records: result.records.map(recordSummary), ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}) } };
+      }
+      case "connectorSweep": {
+        if (!this.extensions.connector) throw new GatewayError("unsupported", "Knowledge connector support is not configured");
+        if (!parameters.commandId || !parameters.connector) throw new GatewayError("invalid_request", "Connector sweeps require commandId and connector");
+        const result = await this.extensions.connector({ operation: "knowledge.connector.run", request: { commandId: parameters.commandId, connector: parameters.connector, dryRun: parameters.dryRun ?? false, ...(parameters.limit ? { limit: parameters.limit } : {}) } });
+        return { text: `${parameters.connector} connector sweep completed: ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
+      }
+      case "synthesis": {
+        if (!parameters.commandId || !parameters.sessionId || !parameters.sourceRevisionIds?.length) throw new GatewayError("invalid_request", "Synthesis requires commandId, sessionId, and sourceRevisionIds");
+        const result = await this.invoke({ operation: "knowledge.reflect", request: { commandId: parameters.commandId, sessionId: parameters.sessionId, sourceRevisionIds: parameters.sourceRevisionIds } });
+        const record = result && typeof result === "object" && "record" in result ? (result as { record?: import("./knowledge-contract.js").KnowledgeRecord }).record : undefined;
+        return { text: record?.kind === "note" ? recordLabel(record) : `Knowledge synthesis completed: ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
       }
     }
   }
