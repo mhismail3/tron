@@ -105,6 +105,7 @@ export class KnowledgeService {
   }
 
   observe(settlement: ObservationSettlement): void { this.observer.admit(settlement); }
+  async pendingObservationCoverage(limit = 100) { return this.store.pendingObservationCoverage(limit); }
   dispose(): void { this.observer.dispose(); }
 
   async invoke(action: KnowledgeAction): Promise<unknown> {

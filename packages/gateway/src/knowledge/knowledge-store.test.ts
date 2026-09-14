@@ -105,6 +105,7 @@ describe("KnowledgeStore", () => {
       id: "coverage-1", range: { sessionId: "session-1", fromEntryId: "entry-1", toEntryId: "entry-1", entryIds: ["entry-1"], entryDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }, disposition: "failed", groupRevisionIds: [],
     }});
     expect((await store.coverage("coverage-1"))?.disposition).toBe("failed");
+    expect((await store.pendingObservationCoverage()).map(item => item.id)).toEqual(["coverage-1"]);
     const published = await store.publishObservationGroup({ commandId: command("coverage-recover"), expectedConfigRevision: configured.revision, expectedCoverageRevision: failed.coverage.revisionId, coverage: {
       id: "coverage-1", range: failed.coverage.range, disposition: "observed",
     }, records: [observation("session-1", "entry-1")] });

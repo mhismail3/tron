@@ -393,6 +393,7 @@ await transport.listen(async () => {
   await automations.initialize();
   transport.setStartupPhase("storage-warming");
   await sessions.initializeBlobStorage();
+  await sessions.recoverKnowledgeObservation();
 });
 const maintainStorage = async (): Promise<void> => {
   try {

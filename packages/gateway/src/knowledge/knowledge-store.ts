@@ -755,6 +755,18 @@ export class KnowledgeStore {
   private async recordObjectHashes(paths: StorePaths, id: string, revision: string): Promise<string[]> { return recordObjectHashes(await this.readRecord(paths, id, revision)); }
   async coverage(id: string): Promise<ObservationCoverage | null> { safeId(id, "coverage id"); const paths = await this.paths(false); return (await this.load(paths, false)).state.coverage[id] ?? null; }
 
+  /** Pending/failed cuts are recovery inputs, not a second journal. The
+   * canonical session owner must supply their exact current branch entries. */
+  async pendingObservationCoverage(limit = 100): Promise<ObservationCoverage[]> {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new KnowledgeStoreError("invalid", "Invalid observation recovery limit");
+    const paths = await this.paths(false); const loaded = await this.load(paths, false);
+    return Object.values(loaded.state.coverage)
+      .filter(coverage => coverage.disposition === "pending" || coverage.disposition === "failed")
+      .sort((left, right) => left.recordedAt.localeCompare(right.recordedAt) || left.id.localeCompare(right.id))
+      .slice(0, limit)
+      .map(coverage => structuredClone(coverage));
+  }
+
   /** Read committed coverage identities for recovery. The observation owner
    * uses these manifests to advance only beyond an exact covered prefix after
    * restart or changed coalescing boundaries. */

@@ -576,6 +576,26 @@ export class RuntimeRegistry {
     void this.discoverExtensionArtifacts();
   }
 
+  /** Re-admit only durable pending/failed Knowledge cuts after restart. The
+   * session runtime supplies the exact active branch; no prompt or tool is
+   * replayed and a missing/changed branch remains an honest pending gap. */
+  async recoverKnowledgeObservation(): Promise<void> {
+    const knowledge = this.knowledgeService;
+    if (!knowledge) return;
+    const pending = await knowledge.pendingObservationCoverage(32).catch(() => []);
+    for (const coverage of pending) {
+      const slot = await this.acquire(coverage.range.sessionId).catch(() => undefined);
+      if (!slot || slot.isDisposed) continue;
+      const branch = slot.canonicalSessionEntries().slice(1);
+      const start = branch.findIndex(entry => entry.id === coverage.range.fromEntryId);
+      if (start < 0) continue;
+      const entries = branch.slice(start, start + coverage.range.entryIds.length);
+      if (entries.length !== coverage.range.entryIds.length
+        || entries.some((entry, index) => entry.id !== coverage.range.entryIds[index])) continue;
+      knowledge.observe({ sessionId: coverage.range.sessionId, entries, outcome: "outcomeUnknown", ...(coverage.range.branchId ? { branchId: coverage.range.branchId } : {}), ...(coverage.range.projectId ? { projectId: coverage.range.projectId } : {}) });
+    }
+  }
+
   async initializeBlobStorage(): Promise<void> {
     const liveSessionIDs = new Set((await this.list("all")).map((session) => session.id));
     await Promise.all([
