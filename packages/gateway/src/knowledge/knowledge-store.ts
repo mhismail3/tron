@@ -14,7 +14,7 @@ import {
   type KnowledgeRecallResponse, type KnowledgeRecord, type KnowledgeRecordDraft,
   type KnowledgeSearchRequest, type KnowledgeSearchResponse, type KnowledgeSearchHit,
   type KnowledgeNoteMutationRequest,
-  type KnowledgeConnectorState, type ObservationCoverage, type ObservationRange, validateKnowledgeConfig,
+  type KnowledgeConnectorState, type ObservationCoverage, type ObservationRange, type KnowledgeCoveragePage, type KnowledgeCoverageSummary, validateKnowledgeConfig,
   validateKnowledgeRecord, validateObjectRef, assertKnowledgeId, assertKnowledgeProjectId,
 } from "./knowledge-contract.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
@@ -206,6 +206,21 @@ function searchableFields(record: KnowledgeRecord): Array<[string, string]> {
 }
 function sameRange(left: ObservationRange, right: ObservationRange): boolean {
   return left.sessionId === right.sessionId && left.branchId === right.branchId && left.projectId === right.projectId && left.fromEntryId === right.fromEntryId && left.toEntryId === right.toEntryId && left.entryDigest === right.entryDigest && left.entryIds.length === right.entryIds.length && left.entryIds.every((entry, index) => entry === right.entryIds[index]);
+}
+function coverageSummary(coverage: Iterable<ObservationCoverage>): KnowledgeCoverageSummary {
+  const summary: KnowledgeCoverageSummary = { observedCount: 0, emptyCount: 0, excludedCount: 0, pendingCount: 0, failedCount: 0, unavailableCount: 0, remainingCount: 0 };
+  for (const item of coverage) {
+    switch (item.disposition) {
+      case "observed": summary.observedCount += 1; break;
+      case "empty": summary.emptyCount += 1; break;
+      case "excluded": summary.excludedCount += 1; break;
+      case "pending": summary.pendingCount += 1; break;
+      case "failed": summary.failedCount += 1; break;
+      case "unavailable": summary.unavailableCount += 1; break;
+    }
+  }
+  summary.remainingCount = summary.pendingCount + summary.failedCount + summary.unavailableCount;
+  return summary;
 }
 function scopeKey(range: ObservationRange): string[] { return [`session:${range.sessionId}`, ...(range.branchId ? [`branch:${range.sessionId}:${range.branchId}`] : []), ...(range.projectId ? [`project:${range.projectId}`] : [])]; }
 
@@ -414,12 +429,12 @@ export class KnowledgeStore {
   async status(): Promise<import("./knowledge-contract.js").KnowledgeStatus> {
     try {
       const paths = await this.paths(false); const loaded = await this.load(paths, false);
-      if (!loaded.present) return { available: true, state: "uninitialized", recordCount: 0, coverageCount: 0, suppressedCount: 0, pendingCleanupCount: 0, config: structuredClone(DEFAULT_KNOWLEDGE_CONFIG), observationConfigured: false };
+      if (!loaded.present) return { available: true, state: "uninitialized", recordCount: 0, coverageCount: 0, coverage: coverageSummary([]), suppressedCount: 0, pendingCleanupCount: 0, config: structuredClone(DEFAULT_KNOWLEDGE_CONFIG), observationConfigured: false };
       const state = loaded.state;
-      return { available: true, state: "ready", stateRevision: state.stateRevision, recordCount: Object.keys(state.records).length, coverageCount: Object.keys(state.coverage).length, suppressedCount: Object.values(state.suppressions).filter(item => item.excluded || item.forgotten).length, pendingCleanupCount: state.cleanup.length, config: state.config, observationConfigured: state.config.observation.enabled && state.config.observation.model !== undefined };
+      return { available: true, state: "ready", stateRevision: state.stateRevision, recordCount: Object.keys(state.records).length, coverageCount: Object.keys(state.coverage).length, coverage: coverageSummary(Object.values(state.coverage)), suppressedCount: Object.values(state.suppressions).filter(item => item.excluded || item.forgotten).length, pendingCleanupCount: state.cleanup.length, config: state.config, observationConfigured: state.config.observation.enabled && state.config.observation.model !== undefined };
     } catch (error) {
       const kind = error instanceof KnowledgeStoreError ? error.kind : "unsafe";
-      return { available: false, state: kind, recordCount: 0, coverageCount: 0, suppressedCount: 0, pendingCleanupCount: 0, config: structuredClone(DEFAULT_KNOWLEDGE_CONFIG), observationConfigured: false, detail: error instanceof Error ? error.message : String(error) };
+      return { available: false, state: kind, recordCount: 0, coverageCount: 0, coverage: coverageSummary([]), suppressedCount: 0, pendingCleanupCount: 0, config: structuredClone(DEFAULT_KNOWLEDGE_CONFIG), observationConfigured: false, detail: error instanceof Error ? error.message : String(error) };
     }
   }
   async config(): Promise<KnowledgeConfig> { const paths = await this.paths(false); return (await this.load(paths, false)).state.config; }
@@ -665,10 +680,14 @@ export class KnowledgeStore {
     });
   }
 
-  async reflect(commandId: string, sessionId: string, sourceRevisionIds: string[], text: string): Promise<KnowledgeMutationResult> {
+  async reflect(commandId: string, sessionId: string, sourceRevisionIds: string[], text: string, expectedConfigRevision: number, signal?: AbortSignal): Promise<KnowledgeMutationResult> {
     safeId(sessionId, "session id");
     if (!text || text.length > 30_000 || sourceRevisionIds.length === 0 || sourceRevisionIds.length > 100 || new Set(sourceRevisionIds).size !== sourceRevisionIds.length) throw invalid("Reflection is bounded and requires distinct source revisions");
-    return this.mutate("knowledge.reflect", commandId, { sessionId, sourceRevisionIds, text }, async (state, paths) => {
+    return this.mutate("knowledge.reflect", commandId, { sessionId, sourceRevisionIds, text, expectedConfigRevision }, async (state, paths) => {
+      // Configuration and cancellation are checked after waiting for the real
+      // store mutex: queued work has not yet become an accepted mutation.
+      if (signal?.aborted) throw new GatewayError("busy", "Knowledge reflection was cancelled", true);
+      if (state.config.revision !== expectedConfigRevision) throw conflict("Knowledge configuration changed while reflection was running");
       const evidence: KnowledgeEvidenceRef[] = []; const relations: KnowledgeRecord["relations"] = []; let branchId: string | undefined;
       const sources: KnowledgeRecord[] = [];
       for (const revision of sourceRevisionIds) {
@@ -826,6 +845,19 @@ export class KnowledgeStore {
   }
   private async recordObjectHashes(paths: StorePaths, id: string, revision: string): Promise<string[]> { return recordObjectHashes(await this.readRecord(paths, id, revision)); }
   async coverage(id: string): Promise<ObservationCoverage | null> { safeId(id, "coverage id"); const paths = await this.paths(false); return (await this.load(paths, false)).state.coverage[id] ?? null; }
+
+  /** Read the bounded canonical coverage projection for app/tools. The cursor
+   * continues the deterministic ID/time order; it is not a recovery journal. */
+  async observationCoveragePage(limit = 100, cursor?: string): Promise<KnowledgeCoveragePage> {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new KnowledgeStoreError("invalid", "Invalid observation coverage page limit");
+    if (cursor !== undefined) safeId(cursor, "observation coverage cursor");
+    const paths = await this.paths(false); const loaded = await this.load(paths, false);
+    if (!loaded.present) return { coverage: [], stateRevision: 0 };
+    const all = Object.values(loaded.state.coverage).sort((left, right) => left.recordedAt.localeCompare(right.recordedAt) || left.id.localeCompare(right.id));
+    const start = cursor === undefined ? 0 : Math.max(0, all.findIndex(item => item.id === cursor) + 1);
+    const page = all.slice(start, start + limit).map(item => structuredClone(item));
+    return { coverage: page, stateRevision: loaded.state.stateRevision, ...(start + page.length < all.length && page.length > 0 ? { nextCursor: page.at(-1)!.id } : {}) };
+  }
 
   /** Pending/failed cuts are recovery inputs, not a second journal. The
    * canonical session owner must supply their exact current branch entries. */

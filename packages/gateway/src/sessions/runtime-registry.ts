@@ -600,10 +600,12 @@ export class RuntimeRegistry {
         }).catch(() => {});
       };
       let branch: FileEntry[];
+      let canonicalEntries: FileEntry[];
       let branchId: string;
       const slot = this.slots.get(coverage.range.sessionId);
       if (slot && !slot.isDisposed) {
-        branch = slot.canonicalSessionEntries().slice(1);
+        canonicalEntries = slot.canonicalSessionEntries();
+        branch = canonicalEntries.slice(1);
         branchId = slot.canonicalObservationBranchId();
       } else {
         // Read the admitted canonical file without constructing a live slot.
@@ -613,10 +615,10 @@ export class RuntimeRegistry {
         if (candidates.length !== 1) { await markUnavailable(candidates.length === 0 ? "canonical-session-unavailable" : "canonical-session-identity-ambiguous"); continue; }
         let manager: SessionManager;
         try { manager = SessionManager.open(candidates[0]!.path, this.sessionDirectoryFor(candidates[0]!.cwd)); } catch { await markUnavailable("canonical-session-read-failed"); continue; }
-        const canonical = manager.getHeader() ? [manager.getHeader()!, ...manager.getBranch()] : [];
-        branch = canonical.slice(1);
+        canonicalEntries = manager.getHeader() ? [manager.getHeader()!, ...manager.getBranch()] : [];
+        branch = canonicalEntries.slice(1);
         const anchor = await this.resolveForkBoundary(manager).catch(() => undefined);
-        branchId = observationBranchIdFor(canonical, manager.getEntries(), anchor?.inheritedEntryId);
+        branchId = observationBranchIdFor(canonicalEntries, manager.getEntries(), anchor?.inheritedEntryId);
       }
       if (branchId !== (coverage.range.branchId ?? "root")) { await markUnavailable("coverage-branch-not-active"); continue; }
       const start = branch.findIndex(entry => entry.id === coverage.range.fromEntryId);
@@ -624,8 +626,27 @@ export class RuntimeRegistry {
       const entries = branch.slice(start, start + coverage.range.entryIds.length);
       if (entries.length !== coverage.range.entryIds.length || entries.some((entry, index) => entry.id !== coverage.range.entryIds[index])) { await markUnavailable("coverage-entry-sequence-changed"); continue; }
       if (observationEntriesDigest(entries) !== coverage.range.entryDigest) { await markUnavailable("coverage-digest-changed"); continue; }
+      // Recovery must retain the outcome admitted with this exact cut. A
+      // restart is not evidence that a completed canonical invocation became
+      // unknown; only a missing or contradictory Gateway terminal receipt is.
+      const invocationIds = coverage.range.invocationIds;
+      if (!invocationIds || invocationIds.length === 0) { await markUnavailable("invocation-provenance-missing"); continue; }
+      let recoveredOutcome: "completed" | "failed" | "interrupted" | "outcomeUnknown";
+      try {
+        const projections = invocationProjection(invocationReceipts(canonicalEntries as unknown as Parameters<typeof invocationReceipts>[0], coverage.range.sessionId));
+        const byInvocation = new Map(projections.map(projection => [projection.invocationId, projection]));
+        const outcomes = invocationIds.map(invocationId => byInvocation.get(invocationId)?.lifecycle);
+        if (outcomes.some(outcome => outcome === undefined)) { await markUnavailable("invocation-terminal-missing"); continue; }
+        if (outcomes.some(outcome => !["completed", "failed", "interrupted", "outcomeUnknown"].includes(outcome as string))) { await markUnavailable("invocation-terminal-missing"); continue; }
+        const distinct = new Set(outcomes);
+        if (distinct.size !== 1) { await markUnavailable("invocation-terminal-conflict"); continue; }
+        recoveredOutcome = outcomes[0] as "completed" | "failed" | "interrupted" | "outcomeUnknown";
+      } catch {
+        await markUnavailable("invocation-terminal-conflict");
+        continue;
+      }
       knowledge.observe({
-        sessionId: coverage.range.sessionId, entries, outcome: "outcomeUnknown",
+        sessionId: coverage.range.sessionId, entries, outcome: recoveredOutcome,
         ...(coverage.range.branchId ? { branchId: coverage.range.branchId } : {}),
         ...(coverage.range.projectId ? { projectId: coverage.range.projectId } : {}),
         ...(coverage.range.invocationIds?.[0] ? { invocationId: coverage.range.invocationIds[0] } : {}),

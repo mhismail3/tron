@@ -7,6 +7,7 @@ import { DEFAULT_KNOWLEDGE_CONFIG } from "./knowledge-contract.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { KnowledgeObservationService, type ObservationModel } from "./knowledge-observation.js";
 import { KnowledgeService } from "./knowledge-service.js";
+import { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 
 const roots: string[] = [];
 const workspaces: TronWorkspace[] = [];
@@ -15,7 +16,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
 
-async function fixture(model: ObservationModel): Promise<{ store: KnowledgeStore; observer: KnowledgeObservationService }> {
+async function fixture(model: ObservationModel, workRegistry?: GatewayWorkRegistry): Promise<{ store: KnowledgeStore; observer: KnowledgeObservationService }> {
   const root = await mkdtemp(join(tmpdir(), "tron-observer-")); roots.push(root);
   const workspace = new TronWorkspace(join(root, "home")); workspaces.push(workspace);
   const store = new KnowledgeStore(workspace);
@@ -24,7 +25,7 @@ async function fixture(model: ObservationModel): Promise<{ store: KnowledgeStore
     eligibility: { ...DEFAULT_KNOWLEDGE_CONFIG.eligibility, sessionIds: ["session-1"] },
     observation: { ...DEFAULT_KNOWLEDGE_CONFIG.observation, enabled: true },
   });
-  return { store, observer: new KnowledgeObservationService(store, model) };
+  return { store, observer: new KnowledgeObservationService(store, model, workRegistry) };
 }
 
 const entries = [
@@ -70,6 +71,48 @@ describe("KnowledgeObservationService", () => {
     await waitFor(async () => (await store.status()).coverageCount === 2);
     observer.dispose();
     await new Promise(resolve => setTimeout(resolve, 1_000));
+  });
+
+  it("rejects a model result that arrives after the configured attempt deadline", async () => {
+    const infer = vi.fn(async (input: { signal: AbortSignal }) => {
+      await new Promise<void>(resolve => input.signal.addEventListener("abort", () => resolve(), { once: true }));
+      return output;
+    });
+    const { store, observer } = await fixture({ infer });
+    const config = await store.config();
+    await store.configure("observer-short-deadline", { ...config, observation: { ...config.observation, timeoutMs: 1_000, maxAttempts: 1 } });
+    observer.admit({ sessionId: "session-1", entries, outcome: "completed" });
+    await waitFor(async () => (await store.pendingObservationCoverage()).some(coverage => coverage.disposition === "failed"));
+    expect((await store.list({ kind: "observation" })).records).toHaveLength(0);
+    expect((await store.pendingObservationCoverage()).at(-1)?.disposition).toBe("failed");
+    observer.dispose();
+  });
+
+  it("keeps work ownership through a timed-out attempt and active retry", async () => {
+    const work = new GatewayWorkRegistry();
+    let calls = 0;
+    let release!: (value: string) => void;
+    const retry = new Promise<string>(resolve => { release = resolve; });
+    const infer = vi.fn(async (input: { signal: AbortSignal }) => {
+      calls += 1;
+      if (calls === 1) {
+        await new Promise<void>(resolve => input.signal.addEventListener("abort", () => resolve(), { once: true }));
+        throw new Error("timed out");
+      }
+      return retry;
+    });
+    const { store, observer } = await fixture({ infer }, work);
+    const config = await store.config();
+    await store.configure("observer-retry-deadline", { ...config, observation: { ...config.observation, timeoutMs: 1_000, maxAttempts: 2 } });
+    observer.admit({ sessionId: "session-1", entries, outcome: "completed" });
+    await waitFor(() => calls === 2);
+    expect(work.size).toBe(1);
+    work.beginDrain();
+    await work.requestCancellation();
+    release(output);
+    await waitFor(() => work.size === 0);
+    expect((await store.list({ kind: "observation" })).records).toHaveLength(0);
+    observer.dispose();
   });
 
   it("does not publish a truncated canonical entry as successful coverage", async () => {

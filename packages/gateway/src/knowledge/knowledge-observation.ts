@@ -156,13 +156,32 @@ async function inferBounded(model: ObservationModel, input: Omit<ObservationMode
   let lastError: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const controller = new AbortController();
-    const abort = () => controller.abort(signal.reason);
+    let rejectBounded!: (error: unknown) => void;
+    const boundedFailure = new Promise<never>((_, reject) => { rejectBounded = reject; });
+    const abort = () => {
+      controller.abort(signal.reason);
+      rejectBounded(new Error("Observer was cancelled"));
+    };
     if (signal.aborted) throw new Error("Observer was cancelled");
     signal.addEventListener("abort", abort, { once: true });
-    const timer = setTimeout(() => controller.abort(new Error("Observer model timeout")), timeoutMs);
+    const timer = setTimeout(() => {
+      controller.abort(new Error("Observer model timeout"));
+      // AbortSignal is advisory for providers. Reject the Gateway-owned await
+      // as well, so an uncooperative attempt cannot hold the observer or its
+      // work token forever while a bounded retry is still active.
+      rejectBounded(new Error("Observer model timeout"));
+    }, timeoutMs);
     timer.unref?.();
     try {
-      return await model.infer({ ...input, signal: controller.signal });
+      const result = await Promise.race([
+        model.infer({ ...input, signal: controller.signal }),
+        boundedFailure,
+      ]);
+      // A model is allowed to ignore cancellation and resolve late. The timed
+      // attempt is not admitted after its own deadline even when the outer
+      // operation is still alive for a retry.
+      if (controller.signal.aborted) throw controller.signal.reason ?? new Error("Observer model timeout");
+      return result;
     } catch (error) {
       lastError = error;
       if (signal.aborted) throw error;
@@ -370,18 +389,18 @@ export class KnowledgeObservationService {
       // late completion cannot become durable evidence.
       const raw = await inferBounded(model, { sessionId: settlement.sessionId, range, sourceText: boundedSourceText, outcome: settlement.outcome, maxOutputChars: config.observation.maxOutputChars }, operationSignal, config.observation.timeoutMs, config.observation.maxAttempts);
       if (operationSignal.aborted) {
-        admitRemaining([chunk[0]!, ...remaining]);
+        if (!this.cancelled.signal.aborted && !operationAbort.signal.aborted) admitRemaining([chunk[0]!, ...remaining]);
         return;
       }
       const afterModelConfig = await this.store.config();
       const scopeExcluded = await this.store.scopeExcluded({ sessionId: settlement.sessionId, ...(settlement.branchId ? { branchId: settlement.branchId } : {}), ...(settlement.projectId ? { projectId: settlement.projectId } : {}) });
       if (operationSignal.aborted || afterModelConfig.revision !== config.revision || scopeExcluded) {
-        admitRemaining([chunk[0]!, ...remaining]);
+        if (!this.cancelled.signal.aborted && !operationAbort.signal.aborted) admitRemaining([chunk[0]!, ...remaining]);
         return;
       }
       const items = parseModelOutput(raw, range, fallbackAt);
       if (operationSignal.aborted) {
-        admitRemaining([chunk[0]!, ...remaining]);
+        if (!this.cancelled.signal.aborted && !operationAbort.signal.aborted) admitRemaining([chunk[0]!, ...remaining]);
         return;
       }
       if (oversized) {
@@ -406,8 +425,9 @@ export class KnowledgeObservationService {
     } catch (error) {
       if (operationSignal.aborted) {
         // A cancelled inference has no terminal coverage. Retain the exact cut
-        // for a later admission; dispose() clears this queue deliberately.
-        admitRemaining([chunk[0]!, ...remaining]);
+        // for a later admission unless the owning observer/work token is being
+        // disposed or cancelled; those paths must become quiescent now.
+        if (!this.cancelled.signal.aborted && !operationAbort.signal.aborted) admitRemaining([chunk[0]!, ...remaining]);
         return;
       }
       await this.store.setCoverage({ commandId: commandID("knowledge-failed", range), expectedConfigRevision: config.revision, ...(expectedRevision ? { expectedRevision } : {}), coverage: { id, range, disposition: "failed", groupRevisionIds: [], reason: error instanceof Error ? bounded(error.message, 500) : "observer-failed" } }).catch(() => {});

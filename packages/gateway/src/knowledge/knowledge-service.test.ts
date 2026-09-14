@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { KnowledgeObservationService } from "./knowledge-observation.js";
 import { KnowledgeService, type KnowledgeGenerationModel } from "./knowledge-service.js";
@@ -13,9 +13,12 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {
 function model(): KnowledgeGenerationModel {
   return {
     async reflect() { return "generated handoff"; },
+    async synthesize() { return "generated synthesis"; },
     async assess() { return { summary: "Useful source", evidenceQuality: "high", freshness: "current" }; },
   };
 }
+
+function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
 
 describe("KnowledgeService integration", () => {
   it("routes source triage through the persisted source and model seam", async () => {
@@ -29,6 +32,44 @@ describe("KnowledgeService integration", () => {
     const result = await service.invoke({ operation: "knowledge.source.triage", request: { commandId: "service-triage", sourceId: source.record.id, expectedRevision: source.record.revisionId } });
     expect(result).toMatchObject({ assessment: { summary: "Useful source", evidenceQuality: "high" } });
     expect((await store.read(source.record.id))?.content).toMatchObject({ assessment: { summary: "Useful source" } });
+  });
+
+  it("rejects reflection queued behind a configuration change", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const initial = await store.config();
+    const configured = await store.configure("service-reflect-queue-config", { ...initial, observation: { ...initial.observation, model: "fixture/model" }, eligibility: { ...initial.eligibility, sessionIds: ["queued-session"] } });
+    const range = { sessionId: "queued-session", branchId: "queued-branch", fromEntryId: "queued-entry", toEntryId: "queued-entry", entryIds: ["queued-entry"], entryDigest: "a".repeat(64) };
+    const source = await store.publishObservationGroup({ commandId: "service-reflect-queue-source", expectedConfigRevision: configured.revision, coverage: { id: "service-reflect-queue-coverage", range, disposition: "observed" }, records: [{ kind: "observation", scope: "personal", provenance: { actor: "agent", sessionId: range.sessionId, branchId: range.branchId, evidence: [] }, relations: [], content: { range, items: [{ text: "queued", attribution: "user", observedAt: "2026-01-01T00:00:00Z", certainty: "qualified" }] } }] });
+    const release = deferred<void>();
+    const blocker = (store as unknown as { mutex: { run<T>(operation: () => Promise<T>): Promise<T> } }).mutex.run(() => release.promise);
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => model());
+    const reflection = service.invoke({ operation: "knowledge.reflect", request: { commandId: "service-reflect-queued", sessionId: range.sessionId, sourceRevisionIds: [source.records[0]!.revisionId] } }).then(() => false, () => true);
+    const changed = store.configure("service-reflect-queued-change", { ...configured, currentInterests: ["changed"] });
+    try { await vi.waitFor(() => expect((store as unknown as { mutex: { waiting: Set<unknown> } }).mutex.waiting.size).toBe(2)); }
+    finally { release.resolve(); }
+    await blocker; await changed;
+    expect(await reflection).toBe(true);
+    expect((await store.list({ kind: "note" })).records).toHaveLength(0);
+  });
+
+  it("rejects reflection cancellation while queued for serialized publication", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const initial = await store.config();
+    const configured = await store.configure("service-reflect-cancel-config", { ...initial, observation: { ...initial.observation, model: "fixture/model" }, eligibility: { ...initial.eligibility, sessionIds: ["cancel-session"] } });
+    const range = { sessionId: "cancel-session", branchId: "cancel-branch", fromEntryId: "cancel-entry", toEntryId: "cancel-entry", entryIds: ["cancel-entry"], entryDigest: "b".repeat(64) };
+    const source = await store.publishObservationGroup({ commandId: "service-reflect-cancel-source", expectedConfigRevision: configured.revision, coverage: { id: "service-reflect-cancel-coverage", range, disposition: "observed" }, records: [{ kind: "observation", scope: "personal", provenance: { actor: "agent", sessionId: range.sessionId, branchId: range.branchId, evidence: [] }, relations: [], content: { range, items: [{ text: "cancel", attribution: "user", observedAt: "2026-01-01T00:00:00Z", certainty: "qualified" }] } }] });
+    const release = deferred<void>();
+    const blocker = (store as unknown as { mutex: { run<T>(operation: () => Promise<T>): Promise<T> } }).mutex.run(() => release.promise);
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => model());
+    const cancellation = new AbortController();
+    const reflection = service.invoke({ operation: "knowledge.reflect", request: { commandId: "service-reflect-cancelled", sessionId: range.sessionId, sourceRevisionIds: [source.records[0]!.revisionId] } }, cancellation.signal).then(() => false, () => true);
+    try { await vi.waitFor(() => expect((store as unknown as { mutex: { waiting: Set<unknown> } }).mutex.waiting.size).toBe(1)); cancellation.abort(); }
+    finally { release.resolve(); }
+    await blocker;
+    expect(await reflection).toBe(true);
+    expect((await store.list({ kind: "note" })).records).toHaveLength(0);
   });
 
   it("preserves source actor while recording trusted confirmation and supports agent note reads/updates", async () => {

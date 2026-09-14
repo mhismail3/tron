@@ -255,17 +255,42 @@ export const DEFAULT_KNOWLEDGE_CONFIG: KnowledgeConfig = {
   currentInterests: [],
 };
 
+export type ObservationCoverageDisposition = "observed" | "empty" | "excluded" | "pending" | "failed" | "unavailable";
+
+export interface KnowledgeCoverageSummary {
+  observedCount: number;
+  emptyCount: number;
+  excludedCount: number;
+  pendingCount: number;
+  failedCount: number;
+  unavailableCount: number;
+  /** Cuts that need a retry, user action, or canonical evidence recovery. */
+  remainingCount: number;
+}
+
+export interface KnowledgeCoveragePage {
+  coverage: ObservationCoverage[];
+  stateRevision: number;
+  nextCursor?: string;
+}
+
 export interface KnowledgeStatus {
   available: boolean;
   state: "uninitialized" | "ready" | "unsafe" | "invalid" | "newer" | "closed";
   stateRevision?: number;
   recordCount: number;
   coverageCount: number;
+  coverage: KnowledgeCoverageSummary;
   suppressedCount: number;
   pendingCleanupCount: number;
   config: KnowledgeConfig;
   observationConfigured: boolean;
   detail?: string;
+}
+
+export interface KnowledgeCoverageRequest {
+  cursor?: string;
+  limit?: number;
 }
 
 export interface KnowledgeListRequest {
@@ -474,10 +499,11 @@ export interface KnowledgeImportRunRequest { commandId: string; source: string; 
 export interface KnowledgeObjectReadRequest { hash: string; bytes: number; mediaType: string; offset?: number; }
 export type KnowledgeAction =
   | { operation: "knowledge.status"; request: Record<string, never> }
+  | { operation: "knowledge.observation.coverage"; request: KnowledgeCoverageRequest }
   | { operation: "knowledge.object.read"; request: KnowledgeObjectReadRequest }
   | { operation: "knowledge.config"; request: { commandId: string; config: KnowledgeConfig } }
   | { operation: "knowledge.list"; request: KnowledgeListRequest }
-  | { operation: "knowledge.read"; request: { id: string; revisionId?: string; includeSuppressed?: boolean } }
+  | { operation: "knowledge.read"; request: { id: string; revisionId?: string; includeSuppressed?: boolean; offset?: number } }
   | { operation: "knowledge.search"; request: KnowledgeSearchRequest }
   | { operation: "knowledge.recall"; request: KnowledgeRecallRequest }
   | { operation: "knowledge.source.capture"; request: KnowledgeSourceCaptureRequest }

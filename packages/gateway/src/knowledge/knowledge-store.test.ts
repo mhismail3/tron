@@ -105,6 +105,10 @@ describe("KnowledgeStore", () => {
       id: "coverage-1", range: { sessionId: "session-1", fromEntryId: "entry-1", toEntryId: "entry-1", entryIds: ["entry-1"], entryDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }, disposition: "failed", groupRevisionIds: [],
     }});
     expect((await store.coverage("coverage-1"))?.disposition).toBe("failed");
+    expect((await store.status()).coverage).toMatchObject({ failedCount: 1, remainingCount: 1 });
+    const firstCoveragePage = await store.observationCoveragePage(1);
+    expect(firstCoveragePage.coverage.map(item => item.id)).toEqual(["coverage-1"]);
+    expect(firstCoveragePage.nextCursor).toBeUndefined();
     expect((await store.pendingObservationCoverage()).map(item => item.id)).toEqual(["coverage-1"]);
     const published = await store.publishObservationGroup({ commandId: command("coverage-recover"), expectedConfigRevision: configured.revision, expectedCoverageRevision: failed.coverage.revisionId, coverage: {
       id: "coverage-1", range: failed.coverage.range, disposition: "observed",
@@ -204,8 +208,8 @@ describe("KnowledgeStore", () => {
     const secondDraft = observation("reflect-session", "entry-2");
     secondDraft.content.range.entryDigest = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     const second = await store.publishObservationGroup({ commandId: command("reflect-source-2"), expectedConfigRevision: configured.revision, coverage: { id: "reflect-coverage-2", range: secondDraft.content.range, disposition: "observed" }, records: [secondDraft] });
-    const reflected = await store.reflect(command("reflect-command-1"), "reflect-session", [first.records[0]!.revisionId], "bounded handoff");
-    const replaced = await store.reflect(command("reflect-command-2"), "reflect-session", [first.records[0]!.revisionId, second.records[0]!.revisionId], "new bounded handoff");
+    const reflected = await store.reflect(command("reflect-command-1"), "reflect-session", [first.records[0]!.revisionId], "bounded handoff", configured.revision);
+    const replaced = await store.reflect(command("reflect-command-2"), "reflect-session", [first.records[0]!.revisionId, second.records[0]!.revisionId], "new bounded handoff", configured.revision);
     expect(replaced.record.id).toBe(reflected.record.id);
     expect(replaced.record.revisionId).not.toBe(reflected.record.revisionId);
     expect(replaced.record.provenance.evidence).toEqual([
@@ -213,7 +217,7 @@ describe("KnowledgeStore", () => {
       { recordId: second.records[0]!.id, revisionId: second.records[0]!.revisionId },
     ]);
     await store.setExclusion(command("reflect-exclude"), first.records[0]!.id, true, first.records[0]!.revisionId, "excluded evidence");
-    await expect(store.reflect(command("reflect-command-3"), "reflect-session", [first.records[0]!.revisionId], "must fail")).rejects.toThrow("excluded");
+    await expect(store.reflect(command("reflect-command-3"), "reflect-session", [first.records[0]!.revisionId], "must fail", configured.revision)).rejects.toThrow("excluded");
   });
 
   it("does not replace terminal coverage with a fake disposition", async () => {

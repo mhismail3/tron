@@ -66,7 +66,14 @@ re-read the exact current source revision and connector account/write policy
 after preflight before persisting or applying the effect. Legacy exclusions are
 withheld rather than copied and hidden; native import exposes bounded offset
 continuation. Native note/correction mutations carry an explicit confirmation
-bit; agent-tool notes remain agent-authored and unconfirmed.
+bit; agent-tool notes remain agent-authored and unconfirmed. `knowledge.status`
+returns typed coverage counts (`observedCount`, `emptyCount`, `excludedCount`,
+`pendingCount`, `failedCount`, `unavailableCount`, and `remainingCount`), while
+`knowledge.observation.coverage` returns bounded canonical coverage pages with a
+`nextCursor`; remaining means pending, failed, or unavailable cuts—not empty or
+intentionally excluded scope. Recovery preserves the admitted terminal outcome
+only when its canonical Gateway invocation receipt is present and unambiguous;
+otherwise it marks the cut unavailable with an explicit reason.
 
 ## Pi SDK maintenance
 
