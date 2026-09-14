@@ -1539,14 +1539,37 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    @Test("displaced retained pinned view resumes without reopening conversation authority")
+    @Test("dynamic-height retained pinned view rebases native rows after displacement")
     func displacedRetainedResume() async throws {
-        try await withTestWatchdog(timeout: .seconds(10)) {
-            try await withHarness(seed: 1_207) { harness in
+        try await withTestWatchdog(timeout: .seconds(15)) {
+            var snapshot = try SessionScenarioBuilder(seed: 1_207)
+                .openingTail(targetEncodedBytes: 10_000)
+            snapshot.transcript = try (0..<72).map { index in
+                try harnessRichAssistantMessage(
+                    id: "retained-\(index)", presentationID: "retained-turn-\(index)",
+                    thinkingLines: index.isMultiple(of: 5) ? ["Retained native geometry evidence."] : [],
+                    text: Array(
+                        repeating: "Variable-height retained history must remain mounted after a native displacement.",
+                        count: 1 + index % 4
+                    ).joined(separator: "\n\n")
+                )
+            }
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = snapshot.transcript.count
+            let tailSemanticID = "retained-turn-71"
+            try await withHarness(snapshot: snapshot) { harness in
                 let ready = try await harness.recorder.waitUntil {
                     $0.observation.readyFrameCompletionCount == 1
-                        && $0.observation.visibleRowIDs.contains(harness.lastTranscriptID)
                 }
+                let readyWithNativeTail = try await harness.recorder.waitUntil {
+                    $0.nativeRows.contains { $0.semanticID == tailSemanticID && $0.isVisible }
+                }
+                let readyTail = try #require(readyWithNativeTail.nativeRows.first {
+                    $0.semanticID == tailSemanticID && $0.isVisible
+                })
+                #expect(readyWithNativeTail.observation.installedProjectionRowCount == 72)
+                #expect(readyTail.frame.height > 0)
+                #expect(readyWithNativeTail.observation.rowFrames[tailSemanticID]?.height ?? 0 > 0)
                 try harness.displaceNativeTranscriptFromTail(by: 180)
                 #expect(try harness.nativeTranscriptDistanceFromTail() > 100)
 
@@ -1554,10 +1577,16 @@ struct ChatViewScrollHarnessTests {
                 let resumed = try await harness.recorder.waitUntil {
                     $0.frameIndex > ready.frameIndex
                         && $0.observation.isReady
-                        && $0.observation.visibleRowIDs.contains(harness.lastTranscriptID)
+                        && $0.observation.visibleRowIDs.contains(tailSemanticID)
+                        && $0.nativeRows.contains { $0.semanticID == tailSemanticID && $0.isVisible }
                         && $0.observation.geometry.distanceFromBottom <= 2
                 }
+                let resumedTail = try #require(resumed.nativeRows.first {
+                    $0.semanticID == tailSemanticID && $0.isVisible
+                })
                 #expect(try harness.nativeTranscriptDistanceFromTail() <= 2)
+                #expect(resumedTail.frame.height > 0)
+                #expect(resumed.observation.rowFrames[tailSemanticID]?.height ?? 0 > 0)
                 #expect(!harness.recorder.samples.contains {
                     $0.frameIndex > ready.frameIndex && !$0.observation.isReady
                 })
@@ -1565,6 +1594,12 @@ struct ChatViewScrollHarnessTests {
                     resumed.observation.smoothAutomaticScrollCommandCount
                         == ready.observation.smoothAutomaticScrollCommandCount
                 )
+                let repairBaseline = resumed.observation.physicalTailRepairCommandCount
+                for _ in 0..<3 { try await harness.driveFrameBoundary() }
+                let settled = harness.probeObservation
+                #expect(settled.physicalTailRepairCommandCount == repairBaseline)
+                #expect(settled.visibleRowIDs.contains(tailSemanticID))
+                #expect(harness.recorder.samples.last?.nativeGeometryMatches == true)
             }
         }
     }
