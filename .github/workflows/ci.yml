@@ -68,6 +68,11 @@ jobs:
         run: |
           python3 scripts/test-ios-test-infrastructure.py
           python3 scripts/test-ios-gateway-e2e-xctestrun.py
+      - name: Test isolated development lifecycle tooling
+        run: |
+          node --test scripts/tron-dev-state.test.mjs
+          scripts/tron-dev-toolchain.test.sh
+          scripts/verify-ci-toolchain.test.sh
       - run: python3 scripts/check-documentation-policy.py
       - name: Check shell syntax
         run: |
@@ -119,6 +124,7 @@ jobs:
         working-directory: packages/gateway
       - run: npm run build
         working-directory: packages/gateway
+      - run: node --test scripts/gateway-payload-deploy.test.mjs
       - run: npm test
         working-directory: packages/gateway
       - run: npm run test:pi-sdk-rollback
