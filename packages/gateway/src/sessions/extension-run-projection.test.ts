@@ -31,6 +31,15 @@ describe("lifecycleProjection header", () => {
     expect(lifecycleProjectionArtifact(projection).steps[0]).toMatchObject({ hostStep: { provider: "github" } });
   });
 
+  it("accepts producer-sized Unicode fields without confusing characters with bytes", () => {
+    const label = "é".repeat(160);
+    const unicodeProjection = {
+      ...projection,
+      root: { ...projection.root, label },
+    };
+    expect(inspectExtensionLifecycleProjection(unicodeProjection)).toEqual(unicodeProjection);
+  });
+
   it("rejects truncated, non-first, and malformed lifecycle headers without legacy parsing", () => {
     const truncated = Buffer.from('{"lifecycleProjection":{"version":1,"runId":"run-1"');
     expect(parseExtensionLifecycleProjectionHeader(truncated)).toBeUndefined();
@@ -43,10 +52,11 @@ describe("lifecycleProjection header", () => {
     expect(inspectExtensionLifecycleProjection({ ...projection, root: { ...projection.root, children: [{ ...projection.root.children[0], hostStep: { kind: "ci", state: "done", provider: "github", extra: true } }] } })).toBeUndefined();
   });
 
-  it("maps producer partial state to failed with honest attention", () => {
+  it("maps producer partial state to the native failed state with honest attention", () => {
+    expect(extensionLifecycleState("partial")).toBe("failed");
     const partial = { state: "partial", startedAt: 1, lastUpdate: 3, endedAt: 2 };
     const activity = projectExtensionRunActivity(partial, { ...base, status: "failed", authoritativeStatus: false });
-    expect(activity).toMatchObject({ status: "failed", lifecycle: { state: "partial", attention: "needsAttention" } });
+    expect(activity).toMatchObject({ status: "failed", lifecycle: { state: "failed", attention: "needsAttention" } });
   });
 });
 

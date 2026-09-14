@@ -126,8 +126,12 @@ function boundedProjectionTime(value: unknown): boolean {
   return value === undefined || Number.isSafeInteger(value) && (value as number) >= 0;
 }
 
-function boundedProjectionString(value: unknown, maximumBytes: number, required = false): boolean {
-  return typeof value === "string" && (!required || value.length > 0) && Buffer.byteLength(value) <= maximumBytes && !/[\0]/u.test(value);
+function boundedProjectionString(value: unknown, maximumCharacters: number, required = false, maximumBytes = maximumCharacters * 4): boolean {
+  // The producer caps display strings by JavaScript string length, not UTF-8
+  // bytes. Keep the Gateway byte bound too, but do not reject valid emoji/CJK
+  // values that occupy more than one byte per character.
+  return typeof value === "string" && (!required || value.length > 0)
+    && value.length <= maximumCharacters && Buffer.byteLength(value) <= maximumBytes && !/[\0]/u.test(value);
 }
 
 function validProjectionHost(value: unknown): boolean {
@@ -162,12 +166,16 @@ function validProjectionNode(value: unknown, depth: number, runId: string, root:
     || typeof node.kind !== "string" || !["subagent", "workflow", "step", "host-step"].includes(node.kind)
     || typeof node.state !== "string" || !lifecycleProjectionStates.has(node.state)
     || !boundedProjectionTime(node.startedAt) || !boundedProjectionTime(node.updatedAt) || !boundedProjectionTime(node.endedAt)
-    || (node.sessionFile !== undefined && (!boundedProjectionString(node.sessionFile, 4_096, true) || typeof node.sessionFile !== "string" || !node.sessionFile.startsWith("/")))
-    || (node.sessionOwnerId !== undefined && !boundedProjectionString(node.sessionOwnerId, 256, true))
+    || (node.sessionFile !== undefined && (!boundedProjectionString(node.sessionFile, 4_096, true, 4_096) || typeof node.sessionFile !== "string" || !node.sessionFile.startsWith("/")))
+    || (node.sessionOwnerId !== undefined && !boundedProjectionString(node.sessionOwnerId, 256, true, 256))
     || (node.activity !== undefined && !validProjectionActivity(node.activity))
     || (node.hostStep !== undefined && (node.kind !== "host-step" || !validProjectionHost(node.hostStep)))) return false;
   if (root && (node.id !== runId || node.kind === "host-step" || node.startedAt === undefined || node.updatedAt === undefined)) return false;
-  if (terminalLifecycleStates.has(extensionLifecycleState(node.state)) && node.endedAt === undefined) return false;
+  // Child completion may be reported without a child-local end timestamp;
+  // the producer's canonical root timestamp remains the lifecycle authority.
+  // A terminal root still needs an end timestamp because RuntimeSlot's
+  // artifact admission requires one for the parent activity.
+  if (root && terminalLifecycleStates.has(extensionLifecycleState(node.state)) && node.endedAt === undefined) return false;
   if (node.children !== undefined) {
     if (!Array.isArray(node.children) || node.children.length > 32 || depth >= MAX_DEPTH) return false;
     if (!node.children.every((child) => validProjectionNode(child, depth + 1, runId, false))) return false;
@@ -181,9 +189,9 @@ function validLifecycleProjection(value: unknown): value is ExtensionLifecyclePr
   const omitted = record(source?.omitted);
   const root = record(source?.root);
   if (!source || [...Object.keys(source)].some((key) => !["version", "runId", "toolCallId", "sessionId", "generatedAt", "caps", "omitted", "root"].includes(key))) return false;
-  if (source.version !== 1 || !boundedProjectionString(source.runId, 256, true)
-    || (source.toolCallId !== undefined && !boundedProjectionString(source.toolCallId, 256, true))
-    || (source.sessionId !== undefined && !boundedProjectionString(source.sessionId, 256, true))
+  if (source.version !== 1 || !boundedProjectionString(source.runId, 256, true, 256)
+    || (source.toolCallId !== undefined && !boundedProjectionString(source.toolCallId, 256, true, 256))
+    || (source.sessionId !== undefined && !boundedProjectionString(source.sessionId, 256, true, 256))
     || !Number.isSafeInteger(source.generatedAt) || (source.generatedAt as number) < 0 || !caps || !omitted || !root
     || !validProjectionNode(root, 0, source.runId as string, true)) return false;
   const capValues = [caps.maxRuns, caps.maxChildrenPerNode, caps.maxDepth, caps.maxStringLength, caps.maxSerializedBytes];
@@ -342,9 +350,9 @@ function status(value: unknown, fallback: ExtensionRunStatus): ExtensionRunStatu
 }
 
 const lifecycleStates = new Set<ExtensionRunLifecycleState>([
-  "queued", "running", "paused", "partial", "completed", "failed", "stopped", "rejected", "unknown",
+  "queued", "running", "paused", "completed", "failed", "stopped", "rejected", "unknown",
 ]);
-export const terminalLifecycleStates = new Set<ExtensionRunLifecycleState>(["completed", "failed", "partial", "stopped", "rejected"]);
+export const terminalLifecycleStates = new Set<ExtensionRunLifecycleState>(["completed", "failed", "stopped", "rejected"]);
 export const EXTENSION_LIFECYCLE_ARTIFACT_VERSION = 3;
 
 export type ExtensionArtifactRejectionReason =
@@ -474,6 +482,7 @@ export function admitExtensionRunActivity(previous: ExtensionRunActivity | undef
 /** Strictly admits the additive producer lifecycle vocabulary. Unsupported
  * values are unknown rather than silently becoming running. */
 export function extensionLifecycleState(value: unknown, fallback: ExtensionRunLifecycleState = "unknown"): ExtensionRunLifecycleState {
+  if (value === "partial") return "failed";
   if (typeof value === "string" && lifecycleStates.has(value as ExtensionRunLifecycleState)) return value as ExtensionRunLifecycleState;
   if (value === "complete") return "completed";
   if (value === "pending" || value === "detached") return "running";
@@ -499,7 +508,7 @@ export function normalizeExtensionArtifact(
   const lifecycleState = extensionLifecycleState(value.state ?? value.status);
   if (lifecycleState === "unknown") return undefined;
   const terminal = terminalLifecycleStates.has(lifecycleState);
-  const status = lifecycleState === "failed" || lifecycleState === "partial" ? "failed" : terminal ? "completed" : "running";
+  const status = lifecycleState === "failed" ? "failed" : terminal ? "completed" : "running";
   const artifactStartedAt = value.startedAt === undefined ? undefined : isoTime(value.startedAt);
   const artifactUpdatedAt = value.lastUpdate === undefined ? undefined : isoTime(value.lastUpdate);
   const endedAtAlias = value.endedAt === undefined ? undefined : isoTime(value.endedAt);
@@ -557,7 +566,7 @@ function lifecycleFrom(
     state,
     attention: priorTerminal
       ? (prior?.attention ?? "none")
-      : state === "partial" ? "needsAttention" : attention(details?.attention ?? details?.attentionState),
+      : explicit === "partial" ? "needsAttention" : attention(details?.attention ?? details?.attentionState),
     sequence: Math.max(0, Number.isSafeInteger(base.sequence) ? base.sequence! : (prior?.sequence ?? 0)),
     observedAt: base.observedAt ?? prior?.observedAt ?? base.updatedAt,
     ...(producerUpdatedAt ? { producerUpdatedAt } : {}),

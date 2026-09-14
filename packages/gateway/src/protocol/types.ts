@@ -275,7 +275,7 @@ export type ExtensionRunStatus = "running" | "completed" | "failed";
 
 /** Rich lifecycle state. `status` remains the coarse compatibility field above. */
 export type ExtensionRunLifecycleState =
-  | "queued" | "running" | "paused" | "partial" | "completed" | "failed" | "stopped" | "rejected" | "unknown";
+  | "queued" | "running" | "paused" | "completed" | "failed" | "stopped" | "rejected" | "unknown";
 export type ExtensionRunAttention = "none" | "activeLongRunning" | "needsAttention";
 export type ExtensionRunVisibility = "current" | "recent" | "historical" | "unknown";
 
