@@ -1997,7 +1997,10 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     // asynchronous acceleration-index save racing this test. The invariant
     // under test is the stable user cut while child files mutate during the
     // real metadata pass.
-    await rm(join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json"), { force: true });
+    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
+    await waitUntil(() => existsSync(indexPath));
+    (fixture.registry as unknown as { catalogStructuralIndex: unknown }).catalogStructuralIndex = undefined;
+    await rm(indexPath, { force: true });
     mutateDuringDiscovery = true;
     try {
       const userCut = await fixture.registry.catalog("user");
