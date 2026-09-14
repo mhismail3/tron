@@ -671,15 +671,16 @@ struct ComposerResourcePicker: View {
 
 }
 
-/// Authorship and installation scope are independent: a project may contain
-/// both directly authored resources and package-provided resources.
+/// Project scope takes precedence over authorship. User identifies only
+/// directly authored global resources, never a package installation.
 struct ComposerResourceBadges: View {
     let origin: CommandInfo.ResourceOrigin?
     let scope: CommandInfo.ResourceScope?
     let accent: Color
 
     static func titles(origin: CommandInfo.ResourceOrigin?, scope: CommandInfo.ResourceScope?) -> [String] {
-        (origin == .topLevel ? ["User"] : []) + (scope == .project ? ["Project"] : [])
+        if scope == .project { return ["Project"] }
+        return scope == .user && origin == .topLevel ? ["User"] : []
     }
 
     var body: some View {

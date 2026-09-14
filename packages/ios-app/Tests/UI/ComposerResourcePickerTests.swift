@@ -127,7 +127,7 @@ struct ComposerResourcePickerTests {
         #expect(ComposerResourcePickerSource.menu(.prompt).title == "Prompts")
     }
 
-    @Test("top-level resources are user-authored while user-scope packages and unknown origins are not",
+    @Test("project badges take precedence and User badges require global authorship",
           arguments: [CommandInfo.Source.skill, .prompt, .extension])
     func resourceProvenance(source: CommandInfo.Source) throws {
         let user = try #require(ComposerResourceEntry(command: CommandInfo(
@@ -148,12 +148,15 @@ struct ComposerResourcePickerTests {
             resourceScope: .user,
             resourceOrigin: .package
         )))
-        #expect(ComposerResourceBadges.titles(origin: user.resourceOrigin, scope: user.resourceScope) == ["User", "Project"])
+        #expect(ComposerResourceBadges.titles(origin: user.resourceOrigin, scope: user.resourceScope) == ["Project"])
         #expect(ComposerResourceBadges.titles(origin: package.resourceOrigin, scope: package.resourceScope).isEmpty)
         #expect(ComposerResourceBadges.titles(origin: .topLevel, scope: .user) == ["User"])
         #expect(ComposerResourceBadges.titles(origin: .package, scope: .project) == ["Project"])
         #expect(ComposerResourceBadges.titles(origin: nil, scope: .project) == ["Project"])
         #expect(ComposerResourceBadges.titles(origin: nil, scope: nil).isEmpty)
+        #expect(ComposerResourceBadges.titles(origin: .topLevel, scope: nil).isEmpty)
+        #expect(ComposerResourceBadges.titles(origin: .topLevel, scope: .temporary).isEmpty)
+        #expect(ComposerResourceBadges.titles(origin: nil, scope: .user).isEmpty)
         #expect(ComposerResourceContentPresentation.normalizingSoftWraps(
             in: "A folded\ndescription stays natural."
         ) == "A folded description stays natural.")

@@ -1976,9 +1976,9 @@ Menu pickers are category-exclusive; leading slash completion combines commands
 and prompts without losing canonical source identity, while @ remains skill-only.
 Initial derivation and typing share the same picker-scope resolver. Resource
 presentation uses indigo for commands, purple for prompts, and cyan for skills.
-User badges derive from top-level origin, not user installation scope; package
-resources remain package-owned. Project badges independently identify project
-scope, so directly authored project resources show both User and Project. Picker,
+Project scope takes precedence: every project entry shows only Project. User
+requires both top-level origin and user scope; global package resources and
+unknown/temporary scope do not receive User. The tags are mutually exclusive. Picker,
 selected-chip, and detail titles share the same badge policy and styling.
 Detail sheets can resolve provenance from their
 admitted response when opened from a canonical transcript chip.
