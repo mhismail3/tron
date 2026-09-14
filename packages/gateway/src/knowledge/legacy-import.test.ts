@@ -51,18 +51,18 @@ describe("LegacyKnowledgeImporter", () => {
     expect(allDry.selected).toBe(2);
     const dry = await importer.execute({ commandId: "import-withholding-dry", source: "llm-wiki", scope: { kinds: ["assertions"] }, offset: 0, limit: 1 });
     const result = await importer.execute({ commandId: "import-withholding-run", source: "llm-wiki", scope: { kinds: ["assertions"] }, expectedPlanHash: dry.planHash, offset: 0, limit: 1 });
-    expect(result.skipped).toBe(1); expect(result.completed).toBe(true);
+    expect(result.skipped).toBe(1); expect(result.completed).toBe(false);
     const secondDry = await importer.execute({ commandId: "import-withholding-dry-second", source: "llm-wiki", scope: { kinds: ["assertions"] }, offset: 1, limit: 1 });
     const second = await importer.execute({ commandId: "import-withholding-run-second", source: "llm-wiki", scope: { kinds: ["assertions"] }, expectedPlanHash: secondDry.planHash, offset: 1, limit: 1 });
-    expect(second.skipped).toBe(1); expect((await store.list({ kind: "note" })).records).toHaveLength(0);
+    expect(second.skipped).toBe(1); expect(second.completed).toBe(true); expect(second.progress.remaining).toBe(0); expect((await store.list({ kind: "note" })).records).toHaveLength(0);
   });
 
   it("records exact batch progress and resumes an interrupted batch idempotently", async () => {
     const root = await legacyFixture(); const destination = await mkdtemp(join(tmpdir(), "tron-import-dest-")); roots.push(destination);
     const importer = new LegacyKnowledgeImporter(new KnowledgeStore(new TronWorkspace(destination)), { roots: { "llm-wiki": root } });
     const dry = await importer.execute({ commandId: "import-dry-limit", source: "llm-wiki", limit: 1 });
-    const first = await importer.execute({ commandId: "import-run-limit", source: "llm-wiki", expectedPlanHash: dry.planHash, limit: 1 }); expect(first.completed).toBe(true); expect(first.imported).toBe(1);
-    const retry = await importer.execute({ commandId: "import-run-limit-retry", source: "llm-wiki", expectedPlanHash: dry.planHash, limit: 1 }); expect(retry.completed).toBe(true); expect(retry.resumed).toBe(1); expect(retry.imported).toBe(0);
+    const first = await importer.execute({ commandId: "import-run-limit", source: "llm-wiki", expectedPlanHash: dry.planHash, limit: 1 }); expect(first.completed).toBe(false); expect(first.imported).toBe(1); expect(first.progress.total).toBe(5);
+    const retry = await importer.execute({ commandId: "import-run-limit-retry", source: "llm-wiki", expectedPlanHash: dry.planHash, limit: 1 }); expect(retry.completed).toBe(false); expect(retry.resumed).toBe(1); expect(retry.imported).toBe(0);
     await expect(importer.execute({ commandId: "import-absolute", source: root, limit: 1 })).rejects.toThrow("explicitly named");
   });
 });

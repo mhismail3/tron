@@ -56,6 +56,24 @@ describe("knowledge connectors", () => {
     expect((await store.list({ kind: "source" })).records).toHaveLength(1);
   });
 
+  it("serializes connector configuration behind an admitted discovery request", async () => {
+    let release!: () => void;
+    let requests = 0;
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    const { extension } = await fixture(async () => { requests += 1; await blocked; return response({ items: [] }); });
+    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("lane-configure"), connector: "raindrop", enabled: true, accountId: "account-1", scope: "123", credentialRef: "connector:raindrop:test-account" } });
+    const run = extension.invoke({ operation: "knowledge.connector.run", request: { commandId: command("lane-run"), connector: "raindrop", dryRun: true, limit: 1 } });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const reconfigure = extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("lane-reconfigure"), connector: "raindrop", enabled: true, accountId: "account-2", scope: "456", credentialRef: "connector:raindrop:test-account" } });
+    let settled = false; void reconfigure.then(() => { settled = true; });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(requests).toBe(1);
+    expect(settled).toBe(false);
+    release();
+    await run; await reconfigure;
+    expect(settled).toBe(true);
+  });
+
   it("does not contact X without explicit paid access and budget", async () => {
     let calls = 0;
     const { extension } = await fixture(async () => { calls += 1; return response({ data: [] }); });

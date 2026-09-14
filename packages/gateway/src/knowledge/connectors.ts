@@ -59,12 +59,13 @@ async function defaultHTTP(input: string, init: { method?: "GET" | "PUT" | "POST
   return { status: response.status, headers: response.headers, body: await boundedResponseText(response) };
 }
 
-async function requestJson(http: ConnectorHTTP, endpoint: string, token: string, options: { method?: "GET" | "PUT" | "POST" | "DELETE"; body?: unknown; sleep: (milliseconds: number) => Promise<void>; signal: AbortSignal; maxAttempts?: number; beforeAttempt?: () => Promise<void> }): Promise<{ status: number; value: any; headers: Headers }> {
+async function requestJson(http: ConnectorHTTP, endpoint: string, token: string | (() => Promise<string>), options: { method?: "GET" | "PUT" | "POST" | "DELETE"; body?: unknown; sleep: (milliseconds: number) => Promise<void>; signal: AbortSignal; maxAttempts?: number; beforeAttempt?: () => Promise<void> }): Promise<{ status: number; value: any; headers: Headers }> {
   const retrySafe = !options.method || options.method === "GET";
   const maxAttempts = retrySafe ? (options.maxAttempts ?? RETRIES) : 1;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     await options.beforeAttempt?.();
-    const result = await http(endpoint, { ...(options.method ? { method: options.method } : {}), headers: { authorization: `Bearer ${token}`, accept: "application/json", ...(options.body !== undefined ? { "content-type": "application/json" } : {}) }, ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}), signal: options.signal });
+    const attemptToken = typeof token === "function" ? await token() : token;
+    const result = await http(endpoint, { ...(options.method ? { method: options.method } : {}), headers: { authorization: `Bearer ${attemptToken}`, accept: "application/json", ...(options.body !== undefined ? { "content-type": "application/json" } : {}) }, ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}), signal: options.signal });
     let value: unknown = undefined;
     if (result.body) { try { value = JSON.parse(result.body); } catch { value = undefined; } }
     if (result.status >= 200 && result.status < 300) return { status: result.status, value, headers: result.headers };
@@ -113,7 +114,7 @@ export class KnowledgeConnectorExtension {
   private lane(connector: Connector): AsyncMutex { const existing = this.lanes.get(connector); if (existing) return existing; const created = new AsyncMutex(); this.lanes.set(connector, created); return created; }
 
   async invoke(action: KnowledgeAction, signal?: AbortSignal): Promise<unknown> {
-    if (action.operation === "knowledge.connector.configure") return this.configure(action.request);
+    if (action.operation === "knowledge.connector.configure") return this.lane(action.request.connector).run(() => this.configure(action.request));
     if (action.operation === "knowledge.connector.status") return stateStatus(await this.store.connectorState(action.request.connector), action.request.connector);
     if (action.operation === "knowledge.connector.run") return this.lane(action.request.connector).run(() => this.run(action.request, signal));
     throw bad("Unsupported knowledge connector operation");
@@ -170,6 +171,17 @@ export class KnowledgeConnectorExtension {
     }
     const token = await this.options.credentials.read(current.credentialRef);
     if (!token) { await this.store.updateConnectorState(command(request.commandId, "auth"), connector, state => ({ ...(state ?? current), health: "auth-error", lastError: "Credential reference is unavailable", lastRunAt: this.now() })); throw new GatewayError("unsupported", "Connector credential is unavailable"); }
+    const assertCurrentAuthority = async (): Promise<void> => {
+      const live = await this.store.connectorState(connector);
+      if (!live?.enabled || live.accountId !== current.accountId || live.scope !== current.scope || live.credentialRef !== current.credentialRef) throw new GatewayError("conflict", "Connector configuration changed during provider discovery");
+    };
+    const currentToken = async (): Promise<string> => {
+      const live = await this.store.connectorState(connector);
+      if (!live?.credentialRef || live.credentialRef !== current.credentialRef) throw new GatewayError("conflict", "Connector credential changed during provider discovery");
+      const fresh = await this.options.credentials.read(live.credentialRef);
+      if (!fresh) throw new GatewayError("unsupported", "Connector credential is unavailable");
+      return fresh;
+    };
     const limit = Math.min(request.limit ?? MAX_ITEMS, MAX_ITEMS); if (!Number.isSafeInteger(limit) || limit < 1) throw bad("Connector limit is invalid");
     await this.store.updateConnectorState(command(request.commandId, "start"), connector, state => { const next = { ...(state ?? current), health: "running" as const, lastRunAt: this.now(), remaining: state?.pending.length ?? 0 }; delete next.lastError; return next; });
     const abort = new AbortController();
@@ -187,7 +199,11 @@ export class KnowledgeConnectorExtension {
           return { ...next, paidBudgetCents: next.paidBudgetCents - xPricing.costCentsPerAttempt };
         });
       } : undefined;
-      const discovered = await this.discover(connector, current, token, limit, signal, xPricing?.maxAttempts, beforeXAttempt);
+      const beforeProviderAttempt = async (): Promise<void> => {
+        await assertCurrentAuthority();
+        await beforeXAttempt?.();
+      };
+      const discovered = await this.discover(connector, current, currentToken, limit, signal, xPricing?.maxAttempts, beforeProviderAttempt);
       let state = await this.store.connectorState(connector) ?? current;
       if (request.dryRun) {
         const result = { connector, dryRun: true, discovered: discovered.discovered, pending: state.pending.length, remaining: state.remaining, health: state.health };
@@ -230,10 +246,10 @@ export class KnowledgeConnectorExtension {
     }
   }
 
-  private async discover(connector: Connector, state: KnowledgeConnectorState, token: string, limit: number, signal: AbortSignal, maxAttempts?: number, beforeAttempt?: () => Promise<void>): Promise<{ discovered: number }> {
+  private async discover(connector: Connector, state: KnowledgeConnectorState, token: string | (() => Promise<string>), limit: number, signal: AbortSignal, maxAttempts?: number, beforeAttempt?: () => Promise<void>): Promise<{ discovered: number }> {
     let cursor = state.checkpoint; let discovered = 0; const seen = new Set([...state.pending.map(item => item.id), ...state.capturedIds]);
     for (let page = 0; page < 10 && discovered < limit; page += 1) {
-      const result = connector === "raindrop" ? await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrops/${encodeURIComponent(state.scope!)}?page=${cursor ? encodeURIComponent(cursor) : "0"}&perpage=${MAX_PAGE}`, token, { sleep: this.sleep, signal }) : await requestJson(this.http, `https://api.x.com/2/users/${encodeURIComponent(state.scope!)}/bookmarks?max_results=${MAX_PAGE}${cursor ? `&pagination_token=${encodeURIComponent(cursor)}` : ""}&tweet.fields=created_at,entities,author_id`, token, { sleep: this.sleep, signal, ...(maxAttempts === undefined ? {} : { maxAttempts }), ...(beforeAttempt === undefined ? {} : { beforeAttempt }) });
+      const result = connector === "raindrop" ? await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrops/${encodeURIComponent(state.scope!)}?page=${cursor ? encodeURIComponent(cursor) : "0"}&perpage=${MAX_PAGE}`, token, { sleep: this.sleep, signal, ...(beforeAttempt === undefined ? {} : { beforeAttempt }) }) : await requestJson(this.http, `https://api.x.com/2/users/${encodeURIComponent(state.scope!)}/bookmarks?max_results=${MAX_PAGE}${cursor ? `&pagination_token=${encodeURIComponent(cursor)}` : ""}&tweet.fields=created_at,entities,author_id`, token, { sleep: this.sleep, signal, ...(maxAttempts === undefined ? {} : { maxAttempts }), ...(beforeAttempt === undefined ? {} : { beforeAttempt }) });
       const items = connector === "raindrop" ? parseRaindrop(result.value) : parseX(result.value);
       const fresh = items.filter(item => !seen.has(item.id));
       const next = connector === "raindrop" ? (items.length >= MAX_PAGE ? String((Number(cursor ?? "0") || 0) + 1) : undefined) : text(result.value?.meta?.next_token, 512);

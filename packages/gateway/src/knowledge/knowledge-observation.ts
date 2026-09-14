@@ -87,7 +87,10 @@ function redactModelText(value: string): string {
     // AWS_SECRET_ACCESS_KEY and GITHUB_TOKEN.
     .replace(/\b(?:AWS_SECRET_ACCESS_KEY|AWS_ACCESS_KEY_ID|GITHUB_TOKEN|GH_TOKEN|NPM_TOKEN|OPENAI_API_KEY|ANTHROPIC_API_KEY)\s*[:=]\s*[^\s,;]+/gi, "[credential]=[redacted]")
     .replace(/(?:^|[\s{,])(?:export\s+)?[A-Z][A-Z0-9_]*(?:TOKEN|API[_-]?KEY|SECRET|PASSWORD|PRIVATE[_-]?KEY)\s*[:=]\s*[^\s,;}]+/g, match => match.replace(/[:=]\s*[^\s,;}]+$/, "=[redacted]"))
+    .replace(/(["'])(api[_-]?key|access[_-]?token|auth(?:entication)?|password|passwd|secret|private[_-]?key)\1\s*:\s*(["'])[^"']*\3/gi, (_match, quote: string, key: string, valueQuote: string) => `${quote}${key}${quote}:${valueQuote}[redacted]${valueQuote}`)
     .replace(/\b(api[_-]?key|access[_-]?token|auth(?:entication)?|password|passwd|secret|private[_-]?key)\s*[:=]\s*[^\s,;]+/gi, "$1=[redacted]")
+    .replace(/\b(https?:\/\/)[^\s/@:]+:[^\s/@]+@/gi, "$1[redacted]:[redacted]@")
+    .replace(/(?:--user|-u)\s+[^\s]+/gi, match => match.replace(/\s+[^\s]+$/, " [redacted]"))
     .replace(/([?&](?:token|key|secret|password|passwd|signature|sig|auth|access_token)\s*=)[^&#\s]*/gi, "$1[redacted]")
     .replace(/\/(?:Users|home|private|var)\/[^\s"'<>]+/g, "[path]");
 }
@@ -317,10 +320,15 @@ export class KnowledgeObservationService {
     const inputLimit = Math.min(config.observation.maxInputChars, MAX_SOURCE_TEXT);
     const included: ObservationSourceEntry[] = [];
     let inputChars = 0;
+    const terminalSuffix = `[terminal outcome: ${settlement.outcome}]`;
+    // Reserve the terminal outcome before selecting entries. Coverage and model
+    // input must describe the same complete cut; appending it after a bound
+    // truncates the last entry while still certifying its digest.
     for (const entry of pendingProjected) {
       const prefix = `[${entry.timestamp}] ${entry.role ?? entry.type}: `;
       const separator = included.length > 0 ? 1 : 0;
-      const available = inputLimit - inputChars - separator;
+      const suffixSeparator = included.length > 0 ? 1 : 0;
+      const available = inputLimit - inputChars - separator - suffixSeparator - terminalSuffix.length;
       if (available <= prefix.length && included.length > 0) break;
       // An individual canonical entry may exceed the model bound. Keep its
       // exact ID in this cut, but send only a bounded redacted prefix and
@@ -372,8 +380,15 @@ export class KnowledgeObservationService {
       admitRemaining();
       return;
     }
-    const sourceText = bounded(chunk.map(entry => `[${entry.timestamp}] ${entry.role ?? entry.type}: ${entry.text}`).join("\n"), inputLimit);
-    const boundedSourceText = bounded(`${sourceText}\n[terminal outcome: ${settlement.outcome}]`, inputLimit);
+    const sourceText = chunk.map(entry => `[${entry.timestamp}] ${entry.role ?? entry.type}: ${entry.text}`).join("\n");
+    const boundedSourceText = `${sourceText}\n${terminalSuffix}`;
+    if (boundedSourceText.length > inputLimit) {
+      // This should only be reachable for an unusually long prefix or suffix;
+      // do not silently publish a shortened model input as observed evidence.
+      await this.store.setCoverage({ commandId: commandID("knowledge-unavailable", range), expectedConfigRevision: config.revision, ...(existing?.revisionId ? { expectedRevision: existing.revisionId } : {}), coverage: { id, range, disposition: "unavailable", groupRevisionIds: [], reason: "terminal-outcome-exceeds-model-input-bound" } }).catch(() => {});
+      admitRemaining();
+      return;
+    }
     const fallbackAt = chunk.at(-1)!.timestamp;
     const pending = await this.store.setCoverage({ commandId: commandID("knowledge-pending", range), expectedConfigRevision: config.revision, ...(existing?.revisionId ? { expectedRevision: existing.revisionId } : {}), coverage: { id, range, disposition: "pending", groupRevisionIds: [], reason: "observer-admitted" } }).catch(() => undefined);
     const expectedRevision = pending?.coverage.revisionId ?? existing?.revisionId;

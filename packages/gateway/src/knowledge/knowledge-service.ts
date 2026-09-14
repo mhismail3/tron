@@ -38,10 +38,14 @@ const toolParameters = Type.Object({
 export type KnowledgeToolParameters = Static<typeof toolParameters>;
 
 function recordLabel(record: import("./knowledge-contract.js").KnowledgeRecord): string {
+  // The read tool applies its page bound after this complete canonical section
+  // is built. Truncating text, fields, or qualifications here made advertised
+  // cursors unable to reach evidence that was only present in `details`.
   const temporal = record.temporal ? ` temporal=${JSON.stringify(record.temporal)}` : "";
-  if (record.kind === "observation") return `${record.content.items.map(item => `[${item.certainty}] ${item.attribution}: ${item.text}`).join(" ")}${temporal}`;
-  if (record.kind === "source") return `${record.content.title} [capture=${record.content.captureDisposition}]${temporal}${record.content.text ? `: ${record.content.text.slice(0, 4_000)}` : ""}${record.content.object ? ` [retained=${record.content.object.bytes} bytes]` : ""}`;
-  return `${record.content.title} [role=${record.content.role} confirmed: ${record.content.confirmed}${record.content.freshness ? ` freshness=${record.content.freshness}` : ""}]${temporal}${record.content.body ? `: ${record.content.body}` : ""}${record.content.fields?.length ? ` Fields: ${JSON.stringify(record.content.fields).slice(0, 8_000)}` : ""}${record.content.contraryEvidence?.length ? ` Contrary evidence: ${JSON.stringify(record.content.contraryEvidence).slice(0, 4_000)}` : ""}`;
+  const provenance = ` provenance=${JSON.stringify(record.provenance)} relations=${JSON.stringify(record.relations)}`;
+  if (record.kind === "observation") return `${record.content.items.map(item => `[${item.certainty}] ${item.attribution}: ${item.text}`).join(" ")}${temporal}${provenance} range=${JSON.stringify(record.content.range)} observer=${JSON.stringify(record.content.observer)}`;
+  if (record.kind === "source") return `${record.content.title} [capture=${record.content.captureDisposition}]${temporal}${provenance} source=${JSON.stringify(record.content)}`;
+  return `${record.content.title} [role=${record.content.role} confirmed: ${record.content.confirmed}${record.content.freshness ? ` freshness=${record.content.freshness}` : ""}]${temporal}${provenance} note=${JSON.stringify(record.content)}`;
 }
 
 function recordSummary(record: import("./knowledge-contract.js").KnowledgeRecord): Record<string, unknown> {
@@ -59,8 +63,13 @@ function synthesisEvidencePack(record: import("./knowledge-contract.js").Knowled
       `title=${record.content.title}`,
       `uri=${record.content.uri ?? "[none]"}`,
       `mediaType=${record.content.mediaType ?? "[none]"}`,
+      `sourcePublishedAt=${record.content.sourcePublishedAt ?? "[unknown]"} capturedAt=${record.content.capturedAt}`,
+      `retention=${JSON.stringify(record.content.retention ?? null)}`,
+      `origins=${JSON.stringify(record.content.origins ?? [])} origin=${record.content.origin ?? "[none]"}`,
+      `representations=${JSON.stringify(record.content.representations ?? [])}`,
       `retainedObject=${record.content.object ? `${record.content.object.hash} (${record.content.object.bytes} bytes)` : "[none]"}`,
       `annotations=${JSON.stringify(record.content.annotations ?? [])}`,
+      `assessment=${JSON.stringify(record.content.assessment ?? null)}`,
       `text=${record.content.text ?? "[no readable extraction]"}`,
       `provenance=${JSON.stringify(record.provenance)}`,
     ].join("\n");

@@ -358,13 +358,17 @@ export class LegacyKnowledgeImporter {
     const requestedLimit = request.limit === undefined ? scoped.length : Math.max(0, Math.min(20_000, Math.floor(request.limit)));
     const offset = request.offset === undefined ? 0 : Math.max(0, Math.min(scoped.length, Math.floor(request.offset)));
     if (!Number.isSafeInteger(offset) || offset > scoped.length) throw new Error("Import offset is invalid");
-    const selected = scoped.slice(offset, offset + requestedLimit); const selectedPlanHash = hash({ base: plan.planHash, scope: scope ?? null, selected: selected.map(item => item.id) });
+    const selected = scoped.slice(offset, offset + requestedLimit);
+    // The plan hash and checkpoint membership describe the complete admitted
+    // plan, not this page. A final page must not certify earlier records that
+    // were never processed; page selection remains only an execution bound.
+    const selectedPlanHash = plan.planHash;
     const mappings: LegacyImportMapping[] = selected.map(item => ({ legacyId: item.kind === "source" ? item.legacy.source_id : item.kind === "entity" ? item.legacy.entity_id : item.legacy.assertion_id, kind: item.kind === "source" ? "source" : item.kind === "entity" ? "entity" : "assertion", newId: item.id }));
-    const base: LegacyImportReport = { operation: operation === "knowledge.import.run" ? "run" : "dry-run", source: request.source, ...(scope ? { scope } : {}), store: plan.store, planHash: selectedPlanHash, planned: plan.items.length, selected: selected.length, imported: 0, resumed: 0, skipped: 0, failed: 0, completed: operation !== "knowledge.import.run", progress: { completed: 0, remaining: selected.length, total: selected.length }, mappings, warnings: plan.warnings.slice(0, 200) };
+    const base: LegacyImportReport = { operation: operation === "knowledge.import.run" ? "run" : "dry-run", source: request.source, ...(scope ? { scope } : {}), store: plan.store, planHash: selectedPlanHash, planned: plan.items.length, selected: selected.length, imported: 0, resumed: 0, skipped: 0, failed: 0, completed: operation !== "knowledge.import.run", progress: { completed: 0, remaining: plan.items.length, total: plan.items.length }, mappings, warnings: plan.warnings.slice(0, 200) };
     if (operation !== "knowledge.import.run") return base;
     const runRequest = request as KnowledgeImportRunRequest;
     if (runRequest.expectedPlanHash !== selectedPlanHash) throw new Error("Import plan hash is stale; run dry-run again");
-    const checkpoint = await this.store.beginImport(`import.begin:${runRequest.commandId}`, selectedPlanHash, selected.map(item => item.id)); base.checkpoint = checkpoint;
+    const checkpoint = await this.store.beginImport(`import.begin:${runRequest.commandId}`, selectedPlanHash, scoped.map(item => item.id)); base.checkpoint = checkpoint;
     const done = new Set(checkpoint.completedRecordIds); const sourceRevisions = new Map<string, string>();
     // These sets were computed from the complete legacy metadata graph before
     // scope/batch slicing. Never derive privacy from the currently selected
@@ -397,7 +401,8 @@ export class LegacyKnowledgeImporter {
       } catch (error) { base.failed += 1; base.warnings.push(`${item.id}: ${error instanceof Error ? error.message : String(error)}`); break; }
     }
     const final = await this.store.importCheckpoint(selectedPlanHash); if (final) base.checkpoint = final; const completed = final?.completedRecordIds.length ?? done.size;
-    base.completed = completed === selected.length && base.failed === 0; base.progress = { completed, remaining: Math.max(0, selected.length - completed), total: selected.length }; return base;
+    base.completed = completed === scoped.length && base.failed === 0;
+    base.progress = { completed, remaining: Math.max(0, scoped.length - completed), total: scoped.length }; return base;
   }
 }
 

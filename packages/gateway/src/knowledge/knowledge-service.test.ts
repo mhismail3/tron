@@ -88,6 +88,28 @@ describe("KnowledgeService integration", () => {
     expect(read.details).toMatchObject({ record: { provenance: { actor: "agent" }, content: { body: "updated" } } });
   });
 
+  it("reads complete source text and qualifications through bounded continuation pages", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const source = await store.captureSource({ commandId: "service-long-source", record: {
+      kind: "source", scope: "research", provenance: { actor: "connector", evidence: [] }, relations: [],
+      content: { title: "Long source", text: `${"prefix ".repeat(900)}TAIL-EVIDENCE`, captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z", sourcePublishedAt: "2025-12-01T00:00:00Z", retention: { sensitivity: "restricted", evidenceAvailable: true, usageConstraint: "synthetic qualification" }, assessment: { summary: "assessed", evidenceQuality: "medium", freshness: "aging", generatedAt: "2026-01-01T00:00:00Z" } },
+    }});
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined));
+    let offset = 0; let text = ""; let pages = 0;
+    for (;;) {
+      const page = await service.tool({ action: "read", id: source.record.id, revisionId: source.record.revisionId, offset });
+      text += page.text; pages += 1;
+      const nextOffset = (page.details as { nextOffset?: number } | null)?.nextOffset;
+      if (nextOffset === undefined) break;
+      offset = nextOffset;
+    }
+    expect(pages).toBeGreaterThan(1);
+    expect(text).toContain("TAIL-EVIDENCE");
+    expect(text).toContain("synthetic qualification");
+    expect(text).toContain("sourcePublishedAt");
+  });
+
   it("synthesizes exact source and note revisions through the registered knowledge tool", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));

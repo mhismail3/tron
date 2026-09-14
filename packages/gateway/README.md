@@ -54,12 +54,16 @@ entry IDs and digest and marks missing/non-active coverage unavailable rather
 than replaying it. Registered synthesis accepts exact SOURCE, NOTE, and
 OBSERVATION revisions, preserves capture disposition, qualifications, contrary
 evidence, and privacy scope, and publishes only an unconfirmed agent-derived
-note after cancellation/configuration/source fences. Retained source objects
+note after cancellation/configuration/source fences. Knowledge read pages
+continue through complete canonical record sections (including source text,
+fields, retention, origins, representations, and assessments); `details` is
+not the only route to evidence. Retained source objects
 are available only through `knowledge.object.read` after record
 authorization; excluded/forgotten records cannot authorize object reads.
-Legacy imports support explicit `offset` continuation with checkpoint-tied plan
-membership and compute excluded-source/dependent assertion closure before page
-slicing. Connector X runs require a host-qualified account price, explicit paid
+Legacy imports support explicit `offset` continuation with one checkpoint
+covering the complete admitted plan; page completion is distinct from whole-plan
+completion. They compute excluded-source/dependent assertion closure before
+page slicing. Connector X runs require a host-qualified account price, explicit paid
 access, and a one-attempt allowance reservation/debit; unknown pricing or a
 positive budget alone never permits an API call. Remote Raindrop moves
 re-read the exact current source revision and connector account/write policy

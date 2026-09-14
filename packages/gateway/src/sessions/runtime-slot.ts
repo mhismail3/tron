@@ -2889,10 +2889,6 @@ export class RuntimeSlot {
         if (this.pendingExtensionCommand === undefined
           || this.pendingExtensionCommand.id !== settledOperationId) {
           if (this.pendingAssistantCompletion) {
-            if (!this.pendingAssistantCompletion.operationId && settledOperationId) {
-              this.pendingAssistantCompletion = { ...this.pendingAssistantCompletion, operationId: settledOperationId };
-            }
-            if (settledOperationId) this.completionWorkOwners.set(this.pendingAssistantCompletion.id, settledOperationId);
             this.operationWork.get(settledOperationId ?? "")?.transition("terminal-receipt-persistence");
             // Pi has settled, but the Gateway remains operationally running until
             // the exact canonical completion is durable. This is the open/drain
@@ -2908,8 +2904,16 @@ export class RuntimeSlot {
                 await this.terminalizeInvocation(settledOperationId, terminalLifecycle, terminalErrorCode);
               }
               await this.beginAttentionSettlement(completion);
-              const observed = this.observationEntries(completion.operationId ?? settledOperationId ?? "", completion.id);
-              this.hooks.turnSettled?.(this.id, observed.entries, terminalLifecycle, completion.id, observed.branchId, this.cwd, settledOperationId ? this.invocationForOperation(settledOperationId)?.invocationId : undefined);
+              const completionOperationId = completion.operationId ?? this.completionWorkOwners.get(completion.id);
+              const observed = this.observationEntries(completionOperationId ?? "", completion.id);
+              // The completion waiting for attention is a separate owner from
+              // the follow-up that just settled. Admit each exact cut with its
+              // own outcome and invocation provenance.
+              this.hooks.turnSettled?.(this.id, observed.entries, "completed", completion.id, observed.branchId, this.cwd, completionOperationId ? this.invocationForOperation(completionOperationId)?.invocationId : undefined);
+              if (settledOperationId && settledOperationId !== completionOperationId) {
+                const followUpObserved = this.observationEntries(settledOperationId);
+                this.hooks.turnSettled?.(this.id, followUpObserved.entries, terminalLifecycle, undefined, followUpObserved.branchId, this.cwd, this.invocationForOperation(settledOperationId)?.invocationId);
+              }
               if (settledOperationId) this.observationStarts.delete(settledOperationId);
               if (settledOperationId && settledOperationId !== completion.operationId) {
                 await this.clearMarkerOwnership(settledOperationId);

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { DEFAULT_KNOWLEDGE_CONFIG } from "./knowledge-contract.js";
 import { KnowledgeStore } from "./knowledge-store.js";
-import { KnowledgeObservationService, type ObservationModel } from "./knowledge-observation.js";
+import { KnowledgeObservationService, projectObservationEntry, type ObservationModel } from "./knowledge-observation.js";
 import { KnowledgeService } from "./knowledge-service.js";
 import { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 
@@ -112,6 +112,27 @@ describe("KnowledgeObservationService", () => {
     release(output);
     await waitFor(() => work.size === 0);
     expect((await store.list({ kind: "observation" })).records).toHaveLength(0);
+    observer.dispose();
+  });
+
+  it("reserves terminal outcome space and redacts quoted credentials and URL userinfo", async () => {
+    const infer = vi.fn(async (input) => {
+      expect(input.sourceText).toMatch(/\[terminal outcome: completed\]$/);
+      expect(input.sourceText).toContain("safe tail");
+      expect(input.sourceText).not.toContain("quoted-secret");
+      expect(input.sourceText).not.toContain("user:password@");
+      return output;
+    });
+    const { store, observer } = await fixture({ infer });
+    const sensitiveText = `{"password":"quoted-secret"} https://user:password@example.test/private safe tail ${"x".repeat(760)}`;
+    const projected = projectObservationEntry({ type: "message", id: "redaction-entry", timestamp: "2026-01-01T00:00:01Z", message: { role: "user", content: sensitiveText } });
+    expect(projected?.text).toContain("[redacted]");
+    const config = await store.config();
+    await store.configure("observer-terminal-bound", { ...config, observation: { ...config.observation, maxInputChars: 1_000 } });
+    observer.admit({ sessionId: "session-1", entries: [{ type: "message", id: "redaction-entry", timestamp: "2026-01-01T00:00:01Z", message: { role: "user", content: sensitiveText } }], outcome: "completed" });
+    await waitFor(() => infer.mock.calls.length === 1);
+    await waitFor(async () => (await store.list({ kind: "observation" })).records.length === 1);
+    expect((await store.list({ kind: "observation" })).records).toHaveLength(1);
     observer.dispose();
   });
 
