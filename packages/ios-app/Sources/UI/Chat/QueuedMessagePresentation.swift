@@ -436,20 +436,22 @@ struct QueuedMessageRow: View {
         // a large queued prompt arrives causes a visible container flash.
         card.fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: UserPromptTextLayoutPolicy.maximumWidth, alignment: .trailing)
-        .contextMenu {
-            ChatMessageCopyButton(text: displayText)
+        .modifier(ChatMessageActionsPopover(
+            text: displayText,
+            hasAdditionalActions: isManageable && !isMutating && (canMoveEarlier || canMoveLater || total > 1)
+        ) {
             if isManageable && !isMutating {
                 if canMoveEarlier {
-                    Button("Move earlier", systemImage: "arrow.up") { onMove(-1) }
+                    ChatMessagePopoverAction(title: "Move earlier", icon: "arrow.up") { onMove(-1) }
                 }
                 if canMoveLater {
-                    Button("Move later", systemImage: "arrow.down") { onMove(1) }
+                    ChatMessagePopoverAction(title: "Move later", icon: "arrow.down") { onMove(1) }
                 }
                 if total > 1 {
-                    Button("Clear entire queue", systemImage: "trash.slash", role: .destructive, action: onClear)
+                    ChatMessagePopoverAction(title: "Clear entire queue", icon: "trash.slash", role: .destructive, action: onClear)
                 }
             }
-        }
+        })
         .frame(maxWidth: .infinity, alignment: .trailing)
         .accessibilityElement(children: .contain)
         .accessibilityHint(isManageable ? "" : readOnlyExplanation)

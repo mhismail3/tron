@@ -1,36 +1,129 @@
 import SwiftUI
 import UIKit
 
-/// Attach to the bounded message surface, never the full-width row or resource
-/// chips. The caller supplies displayed text so prompt expansion stays private.
-struct ChatMessageCopyMenu: ViewModifier {
+/// Capture exactly the displayed input, not a later template or row update.
+struct ChatMessageActionSelection: Identifiable {
+    let id = UUID()
     let text: String
+}
+
+/// App-authored popover contents cannot acquire system context-menu Siri actions.
+struct ChatMessageActionsPopover<Actions: View>: ViewModifier {
+    let text: String
+    var hasAdditionalActions = false
+    @ViewBuilder var additionalActions: () -> Actions
+    @State private var selection: ChatMessageActionSelection?
+    #if HOSTED_TEST
+    @Environment(\.chatMessageActionsProbe) private var probe
+    #endif
+
+    private var canPresent: Bool { !text.isEmpty || hasAdditionalActions }
+
+    private func present() {
+        guard canPresent else { return }
+        selection = .init(text: text)
+    }
 
     func body(content: Content) -> some View {
         content
-            // UILabel-backed prompt text needs an explicit SwiftUI hit region;
-            // the preview shape alone registers a menu that cannot open.
+            // Keep the UILabel hit region on the bubble, not the full-width row.
             .contentShape(.interaction, RoundedRectangle(cornerRadius: ChatPromptContainerStyle.cornerRadius))
-            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: ChatPromptContainerStyle.cornerRadius))
-            .contextMenu {
-                ChatMessageCopyButton(text: text)
+            .onLongPressGesture(perform: present)
+            .accessibilityActions {
+                if canPresent {
+                    Button("Message actions", action: present)
+                }
             }
+            .popover(item: $selection) { selected in
+                ChatMessageActionsContent(text: selected.text, additionalActions: additionalActions)
+                    .presentationCompactAdaptation(.popover)
+            }
+            .onChange(of: canPresent) { _, available in
+                if !available { selection = nil }
+            }
+            .onDisappear { selection = nil }
+            #if HOSTED_TEST
+            .onAppear { probe?.open = present }
+            .onDisappear { probe?.open = nil }
+            #endif
     }
 }
 
-/// Reused inside the queue's existing menu so a second long-press owner cannot
-/// hide its reorder/clear actions. Empty, attachment-only messages have no Copy.
-struct ChatMessageCopyButton: View {
+extension ChatMessageActionsPopover where Actions == EmptyView {
+    init(text: String) {
+        self.text = text
+        additionalActions = { EmptyView() }
+    }
+}
+
+struct ChatMessageActionsContent<Actions: View>: View {
     let text: String
+    @ViewBuilder var additionalActions: () -> Actions
 
     var body: some View {
-        if !text.isEmpty {
-            Button("Copy", systemImage: "doc.on.doc") {
-                UIPasteboard.general.string = text
+        VStack(alignment: .leading, spacing: 0) {
+            if !text.isEmpty {
+                ChatMessagePopoverAction(title: "Copy", icon: "doc.on.doc") {
+                    UIPasteboard.general.string = text
+                }
             }
+            additionalActions()
         }
+        .padding(8)
+        .frame(minWidth: 180)
     }
 }
+
+struct ChatMessagePopoverAction: View {
+    let title: String
+    let icon: String
+    var role: ButtonRole? = nil
+    let action: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    #if HOSTED_TEST
+    @Environment(\.chatMessageActionsProbe) private var probe
+    #endif
+
+    private func perform() {
+        dismiss()
+        action()
+    }
+
+    var body: some View {
+        Button(role: role, action: perform) {
+            Label(title, systemImage: icon)
+                .font(TronTypography.body)
+                .foregroundStyle(role == .destructive ? Color.tronError : .tronTextPrimary)
+                .padding(.horizontal, 12)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        #if HOSTED_TEST
+        .onAppear { probe?.actions[title] = perform }
+        .onDisappear { probe?.actions[title] = nil }
+        #endif
+    }
+}
+
+#if HOSTED_TEST
+@MainActor
+final class ChatMessageActionsProbe {
+    var open: (() -> Void)?
+    var actions: [String: () -> Void] = [:]
+}
+
+private struct ChatMessageActionsProbeKey: EnvironmentKey {
+    static let defaultValue: ChatMessageActionsProbe? = nil
+}
+
+extension EnvironmentValues {
+    var chatMessageActionsProbe: ChatMessageActionsProbe? {
+        get { self[ChatMessageActionsProbeKey.self] }
+        set { self[ChatMessageActionsProbeKey.self] = newValue }
+    }
+}
+#endif
 
 /// Shared behavior-aware visual core for queued-kind prompt lifecycles. The
 /// surrounding shell owns whether facts are optimistic, pending, or
@@ -190,7 +283,7 @@ struct ChatPendingPromptRow: View, Equatable {
                             .padding(.top, ChatPromptContainerStyle.topPadding)
                             .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
                             .modifier(UserPromptGlassModifier())
-                            .modifier(ChatMessageCopyMenu(text: displayText))
+                            .modifier(ChatMessageActionsPopover(text: displayText))
                     }
                     let attachmentChips = QueuedMessageAttachmentPresentation.chips(
                         attachmentCount: presentation.attachmentCount,
@@ -249,7 +342,7 @@ struct ChatPendingPromptRow: View, Equatable {
                 },
                 statusContent: { EmptyView() }
             )
-            .modifier(ChatMessageCopyMenu(text: displayText))
+            .modifier(ChatMessageActionsPopover(text: displayText))
         }
     }
 }
@@ -284,7 +377,7 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                         attachmentContent: { queuedAttachmentChips },
                         statusContent: { EmptyView() }
                     )
-                    .modifier(ChatMessageCopyMenu(text: displayText))
+                    .modifier(ChatMessageActionsPopover(text: displayText))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
@@ -304,7 +397,7 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                         .padding(.top, ChatPromptContainerStyle.topPadding)
                         .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
                         .modifier(UserPromptGlassModifier())
-                        .modifier(ChatMessageCopyMenu(text: displayText))
+                        .modifier(ChatMessageActionsPopover(text: displayText))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)

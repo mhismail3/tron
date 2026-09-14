@@ -60,39 +60,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNUser
     private nonisolated(unsafe) var onNotificationTap: (@MainActor @Sendable (PushNotificationTap) -> Void)?
     private nonisolated(unsafe) var pendingNotificationTap: PushNotificationTap?
 
-    override init() {
-        super.init()
-        NotificationCenter.default.addObserver(self, selector: #selector(sceneWillDeactivate(_:)),
-                                               name: UIScene.willDeactivateNotification, object: nil)
-    }
-
-    deinit {
-        NotificationCenter.default.removeObserver(self)
-    }
-
-    @objc private func sceneWillDeactivate(_ notification: Notification) {
-        guard let scene = notification.object as? UIWindowScene else { return }
-        // Siri can deactivate the scene while its system-added context-menu
-        // action is open. Retire the menu before SwiftUI's next layout tries to
-        // replace it (iOS 27 can assert in scrollToFirstSignificantAction).
-        // Stay synchronous: a Task would yield past that layout boundary.
-        for window in scene.windows {
-            Self.dismissContextMenus(in: window)
-        }
-    }
-
-    static func dismissContextMenus(in view: UIView) {
-        // One traversal on deactivation, not per-message observers or polling.
-        // Snapshot before dismissal, which may remove native presentation views.
-        var pending = [view]
-        var menus: [UIContextMenuInteraction] = []
-        while let current = pending.popLast() {
-            menus.append(contentsOf: current.interactions.compactMap { $0 as? UIContextMenuInteraction })
-            pending.append(contentsOf: current.subviews)
-        }
-        for menu in menus { menu.dismissMenu() }
-    }
-
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
