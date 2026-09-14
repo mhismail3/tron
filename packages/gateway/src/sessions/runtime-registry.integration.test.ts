@@ -4250,6 +4250,68 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(JSON.stringify(warnings)).not.toContain("output");
   });
 
+  it("discovers a real serialized lifecycle header without parsing report-bearing status", async () => {
+    const fixture = await coldFixture("embedded-lifecycle-header");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const runId = "embedded-header-run";
+    const toolCallId = "embedded-header-tool";
+    const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", runId);
+    await mkdir(asyncDir, { recursive: true });
+    const started = Date.now() - 5_000;
+    const projection = {
+      version: 1,
+      runId,
+      toolCallId,
+      sessionId: fixture.manager.getSessionId(),
+      generatedAt: started,
+      caps: { maxRuns: 1, maxChildrenPerNode: 8, maxDepth: 3, maxStringLength: 160, maxSerializedBytes: 32_768 },
+      omitted: { runs: 0, children: 0, byteLimitExceeded: false },
+      root: {
+        id: runId,
+        kind: "workflow",
+        label: "workflow",
+        state: "running",
+        startedAt: started,
+        updatedAt: started,
+        children: [{
+          id: "ci-check",
+          kind: "host-step",
+          label: "CI checks",
+          state: "complete",
+          hostStep: { kind: "ci", state: "done", provider: "github", role: "checks", verdict: "pass", detail: "all green", target: "main" },
+        }],
+      },
+    };
+    const internal = slot as unknown as {
+      extensionActivities: Map<string, ExtensionRunActivity>;
+      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
+    };
+    internal.extensionActivities.set(toolCallId, {
+      id: toolCallId,
+      activityId: "embedded-header-activity",
+      runId,
+      toolCallId,
+      source: { source: "pi-subagents" },
+      title: "Pi Subagents",
+      status: "running",
+      startedAt: new Date(started).toISOString(),
+      updatedAt: new Date(started).toISOString(),
+      children: [],
+      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: new Date(started).toISOString() },
+    });
+    internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
+    // This is the exact serialized shape emitted by the producer's pure
+    // lifecycle projector: the report-bearing field follows the bounded header.
+    await writeFile(join(asyncDir, "status.json"), JSON.stringify({ lifecycleProjection: projection, lifecycleArtifactVersion: 3, runId, state: "running", startedAt: started, steps: [{ report: "x".repeat(300 * 1_024) }] }));
+
+    await slot.discoverExtensionArtifact(asyncDir);
+    expect(slot.snapshot().extensionActivities).toMatchObject([{
+      toolCallId,
+      status: "running",
+      children: [{ hostStep: { provider: "github", role: "checks", verdict: "pass" } }],
+    }]);
+  });
+
   it("reconciles an exact-owned oversized terminal artifact from bounded event evidence", async () => {
     const fixture = await coldFixture("oversized-terminal-drain");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());

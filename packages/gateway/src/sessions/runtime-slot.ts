@@ -84,7 +84,7 @@ import {
 import type { ForkBoundaryAnchor } from "./fork-boundary.js";
 import { RunMarkerCompletionConflictError, type RunMarkerEvidence, type RunMarkerStore } from "./run-markers.js";
 import { attributeExtensions, attributedCommandOwner, attributedToolOwner, currentExtensionOwner, currentInvocationContext, trustedExtensionOriginKind, withInvocationContext } from "../extensions/owner-attribution.js";
-import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasForegroundSubagentRunActivity, hasObservedPausedProcessTerminal, hasStructuredExtensionRunActivity, inspectExtensionLifecycleArtifact, normalizeExtensionArtifact, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
+import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasObservedPausedProcessTerminal, hasStructuredExtensionRunActivity, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection } from "./invocation-receipts.js";
@@ -3565,20 +3565,24 @@ export class RuntimeSlot {
     try {
       const buffer = Buffer.alloc(MAX_EXTENSION_ARTIFACT_BYTES + 1);
       const { bytesRead } = await opened.handle.read(buffer, 0, buffer.length, 0);
-      if (bytesRead > MAX_EXTENSION_ARTIFACT_BYTES) {
-        return this.readOversizedTerminalExtensionArtifact(
-          asyncDir,
-          buffer.subarray(0, MAX_EXTENSION_ARTIFACT_BYTES),
-          opened.directory,
-        );
+      const bytes = buffer.subarray(0, bytesRead);
+      const lifecycleHeader = parseExtensionLifecycleProjectionHeader(bytes);
+      if (lifecycleHeader !== undefined) {
+        const projection = inspectExtensionLifecycleProjection(lifecycleHeader);
+        if (!projection) return undefined;
+        const projected = lifecycleProjectionArtifact(projection);
+        const withRecovery = await this.attachRecoverySessionOwner(asyncDir, projected, opened.directory);
+        return this.attachProcessTerminalProof(asyncDir, withRecovery, opened.directory);
       }
-      const parsed: unknown = JSON.parse(buffer.subarray(0, bytesRead).toString("utf8"));
+      // A first lifecycleProjection key marks a modern artifact even when its
+      // value is truncated or malformed; do not fall back to report parsing.
+      if (hasExtensionLifecycleProjectionProperty(bytes)) return undefined;
+      if (bytesRead > MAX_EXTENSION_ARTIFACT_BYTES) {
+        return this.readOversizedTerminalExtensionArtifact(asyncDir, bytes.subarray(0, MAX_EXTENSION_ARTIFACT_BYTES), opened.directory);
+      }
+      const parsed: unknown = JSON.parse(bytes.toString("utf8"));
       if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
-      const recovered = await this.attachRecoverySessionOwner(
-        asyncDir,
-        parsed as Record<string, unknown>,
-        opened.directory,
-      );
+      const recovered = await this.attachRecoverySessionOwner(asyncDir, parsed as Record<string, unknown>, opened.directory);
       return this.attachProcessTerminalProof(asyncDir, recovered, opened.directory);
     } finally {
       await opened.handle.close();

@@ -4,6 +4,7 @@ import type {
   ExtensionRunChild,
   ExtensionRunStatus,
   ExtensionRunAttention,
+  ExtensionRunHostStep,
   ExtensionRunLifecycle,
   ExtensionRunLifecycleState,
   ExtensionToolOrigin,
@@ -16,6 +17,163 @@ const MAX_DEPTH = 3;
 const MAX_TEXT_BYTES = 2_048;
 export const MAX_EXTENSION_ACTIVITY_COUNT = 32;
 export const MAX_EXTENSION_ACTIVITY_BYTES = 256 * 1_024;
+export const MAX_EXTENSION_LIFECYCLE_HEADER_BYTES = 32 * 1_024;
+
+export interface ExtensionLifecycleProjection {
+  version: 1;
+  runId: string;
+  toolCallId?: string;
+  sessionId?: string;
+  generatedAt: number;
+  caps: { maxRuns: number; maxChildrenPerNode: number; maxDepth: number; maxStringLength: number; maxSerializedBytes: number };
+  omitted: { runs: number; children: number; byteLimitExceeded: boolean };
+  root: Record<string, unknown>;
+}
+
+const strictUtf8 = new TextDecoder("utf-8", { fatal: true });
+
+function headerJSON(bytes: Uint8Array): unknown {
+  try { return JSON.parse(strictUtf8.decode(bytes)); } catch { return undefined; }
+}
+
+function headerStringEnd(bytes: Uint8Array, start: number): number | undefined {
+  if (bytes[start] !== 0x22) return undefined;
+  let escaped = false;
+  for (let index = start + 1; index < bytes.length; index += 1) {
+    const byte = bytes[index]!;
+    if (escaped) { escaped = false; continue; }
+    if (byte === 0x5c) { escaped = true; continue; }
+    if (byte === 0x22) return index + 1;
+    if (byte < 0x20) return undefined;
+  }
+  return undefined;
+}
+
+function headerValueEnd(bytes: Uint8Array, start: number): number | undefined {
+  const first = bytes[start];
+  if (first === 0x22) return headerStringEnd(bytes, start);
+  if (first !== 0x7b && first !== 0x5b) {
+    let index = start;
+    while (index < bytes.length && ![0x2c, 0x7d, 0x5d, 0x20, 0x09, 0x0a, 0x0d].includes(bytes[index]!)) index += 1;
+    return index > start ? index : undefined;
+  }
+  const stack: number[] = [first === 0x7b ? 0x7d : 0x5d];
+  let inString = false;
+  let escaped = false;
+  for (let index = start + 1; index < bytes.length; index += 1) {
+    const byte = bytes[index]!;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (byte === 0x5c) escaped = true;
+      else if (byte === 0x22) inString = false;
+      else if (byte < 0x20) return undefined;
+      continue;
+    }
+    if (byte === 0x22) { inString = true; continue; }
+    if (byte === 0x7b) stack.push(0x7d);
+    else if (byte === 0x5b) stack.push(0x5d);
+    else if (byte === 0x7d || byte === 0x5d) {
+      if (stack.pop() !== byte) return undefined;
+      if (stack.length === 0) return index + 1;
+    }
+  }
+  return undefined;
+}
+
+/** Parse only the complete first lifecycleProjection property. This scanner
+ * never searches later keys or parses report-bearing status content. */
+export function hasExtensionLifecycleProjectionProperty(bytes: Uint8Array): boolean {
+  let index = 0;
+  while (index < bytes.length && [0x20, 0x09, 0x0a, 0x0d].includes(bytes[index]!)) index += 1;
+  if (bytes[index++] !== 0x7b) return false;
+  while (index < bytes.length && [0x20, 0x09, 0x0a, 0x0d].includes(bytes[index]!)) index += 1;
+  const prefix = Buffer.from('"lifecycleProjection', "utf8");
+  const available = bytes.subarray(index, Math.min(bytes.length, index + prefix.length));
+  if (available.length > 0 && prefix.subarray(0, available.length).every((byte, offset) => byte === available[offset])) {
+    if (available.length < prefix.length) return true;
+  }
+  const end = headerStringEnd(bytes, index);
+  if (end === undefined) return false;
+  return headerJSON(bytes.subarray(index, end)) === "lifecycleProjection";
+}
+
+export function parseExtensionLifecycleProjectionHeader(bytes: Uint8Array): unknown {
+  const limit = Math.min(bytes.length, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES);
+  let index = 0;
+  const whitespace = () => { while (index < limit && [0x20, 0x09, 0x0a, 0x0d].includes(bytes[index]!)) index += 1; };
+  whitespace();
+  if (bytes[index++] !== 0x7b) return undefined;
+  whitespace();
+  const keyStart = index;
+  const keyEnd = headerStringEnd(bytes, index);
+  if (keyEnd === undefined || headerJSON(bytes.subarray(keyStart, keyEnd)) !== "lifecycleProjection") return undefined;
+  index = keyEnd;
+  whitespace();
+  if (bytes[index++] !== 0x3a) return undefined;
+  whitespace();
+  const valueStart = index;
+  const valueEnd = headerValueEnd(bytes, valueStart);
+  if (valueEnd === undefined || valueEnd > MAX_EXTENSION_LIFECYCLE_HEADER_BYTES) return undefined;
+  return headerJSON(bytes.subarray(valueStart, valueEnd));
+}
+
+function validLifecycleProjection(value: unknown): value is ExtensionLifecycleProjection {
+  const source = record(value);
+  const caps = record(source?.caps);
+  const omitted = record(source?.omitted);
+  const root = record(source?.root);
+  if (source?.version !== 1 || typeof source.runId !== "string" || !text(source.runId, 256)
+    || !Number.isSafeInteger(source.generatedAt) || (source.generatedAt as number) < 0 || !caps || !omitted || !root) return false;
+  const capValues = [caps.maxRuns, caps.maxChildrenPerNode, caps.maxDepth, caps.maxStringLength, caps.maxSerializedBytes];
+  if (capValues.some((value) => !Number.isSafeInteger(value) || (value as number) < 0 || (value as number) > MAX_EXTENSION_LIFECYCLE_HEADER_BYTES * 8)) return false;
+  return Number.isSafeInteger(omitted.runs) && (omitted.runs as number) >= 0
+    && Number.isSafeInteger(omitted.children) && (omitted.children as number) >= 0
+    && typeof omitted.byteLimitExceeded === "boolean";
+}
+
+export function inspectExtensionLifecycleProjection(value: unknown): ExtensionLifecycleProjection | undefined {
+  return validLifecycleProjection(value) ? value : undefined;
+}
+
+export function lifecycleProjectionArtifact(projection: ExtensionLifecycleProjection): Record<string, unknown> {
+  const root = projection.root;
+  const activity = record(root.activity);
+  const children = Array.isArray(root.children) ? root.children : [];
+  const steps = children.map((child) => {
+    const node = record(child);
+    if (!node) return child;
+    return {
+      id: node.id,
+      agent: node.label,
+      state: node.state,
+      status: node.state,
+      updatedAt: node.updatedAt,
+      startedAt: node.startedAt,
+      endedAt: node.endedAt,
+      activity: node.activity,
+      children: node.children,
+      hostStep: node.hostStep,
+    };
+  });
+  return {
+    lifecycleArtifactVersion: 3,
+    runId: projection.runId,
+    ...(projection.toolCallId ? { toolCallId: projection.toolCallId } : {}),
+    ...(projection.sessionId ? { sessionId: projection.sessionId } : {}),
+    state: root.state,
+    mode: root.kind,
+    startedAt: root.startedAt,
+    lastUpdate: root.updatedAt,
+    ...(activity?.state ? { activityState: activity.state } : {}),
+    ...(activity?.currentTool ? { currentTool: activity.currentTool } : {}),
+    ...(activity?.currentToolStartedAt ? { currentToolStartedAt: activity.currentToolStartedAt } : {}),
+    ...(activity?.lastActivityAt ? { lastActivityAt: activity.lastActivityAt } : {}),
+    ...(activity?.turnCount ? { turnCount: activity.turnCount } : {}),
+    ...(activity?.toolCount ? { toolCount: activity.toolCount } : {}),
+    steps,
+    lifecycleProjection: projection,
+  };
+}
 
 /** Stable native identity. It is intentionally independent of run/artifact
  * correlation so replacing a producer artifact cannot re-key a native row. */
@@ -419,6 +577,28 @@ function child(
       ?? source.output
       ?? source.error
   );
+  const host = record(source.hostStep);
+  const provider = text(host?.provider, 160);
+  const role = text(host?.role, 160);
+  const reasonCode = text(host?.reasonCode, 160);
+  const detail = text(host?.detail, 2_048);
+  const target = text(host?.target, 512);
+  const report = text(host?.report, 512);
+  const hostStep: ExtensionRunHostStep | undefined = host
+    && (host.kind === "command" || host.kind === "ci" || host.kind === "gate")
+    && (host.state === "pending" || host.state === "running" || host.state === "done" || host.state === "error" || host.state === "cancelled")
+    ? {
+      kind: host.kind,
+      state: host.state,
+      ...(provider ? { provider } : {}),
+      ...(role ? { role } : {}),
+      ...(host.verdict === "pass" || host.verdict === "fail" || host.verdict === "inconclusive" ? { verdict: host.verdict } : {}),
+      ...(reasonCode ? { reasonCode } : {}),
+      ...(detail ? { detail } : {}),
+      ...(target ? { target } : {}),
+      ...(typeof host.stale === "boolean" ? { stale: host.stale } : {}),
+      ...(report ? { report } : {}),
+    } : undefined;
   const producerId = extensionRunChildProducerId(source, index, depth, identityStrategy);
   return {
     id: producerId ?? `${label}:${index}`,
@@ -436,6 +616,7 @@ function child(
     ...(turnCount === undefined ? {} : { turnCount: Math.max(0, Math.round(turnCount)) }),
     ...(durationMs === undefined ? {} : { durationMs: Math.max(0, Math.round(durationMs)) }),
     ...(recentOutput ? { output: recentOutput } : {}),
+    ...(hostStep ? { hostStep } : {}),
     ...(depth < MAX_DEPTH && nested.length > 0 ? { children: nested } : {}),
   };
 }
