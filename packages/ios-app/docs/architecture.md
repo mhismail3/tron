@@ -249,6 +249,14 @@ reconciles only an exact visible prefix: the visible coverage end
 is the authority tail end, sliding tails promote covered old-tail rows, backward expansion trims the
 prefix, and ordinal ID overlap, parent, leaf, and runtime/total identity conflicts fail closed. A
 detached reader retains loaded rows; physical return to latest never mutates transcript coverage.
+A pinned mounted reader that loses a native marker during a bounded physical-tail repair retires the
+old target, then keeps one target-free rebase owner until the next admitted legal-boundary geometry
+sample. That sample re-applies persistent pinned mode without leasing a replacement target; a later
+current marker remains the only physical proof used for further repair. Ordinary retained presentation
+handoffs still require aligned marker evidence. Direct interaction and presentation replacement
+cancel the rebase owner; covering the viewport cancels only its target-free branch until a fresh
+foreground handoff establishes marker ownership. This prevents a stale native target from stranding a resumed
+transcript without weakening the opaque opening/readiness gate.
 History loading is admitted from the canonical cursor even when no rendered row or semantic scroll
 anchor exists; an anchor is optional viewport-preservation evidence. Only duplicate-free bounded
 summary rows enter the disk cache.

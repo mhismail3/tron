@@ -2233,6 +2233,14 @@ struct ChatScrollCoordinatorTests {
             await Task.yield()
             #expect(coordinator.command == nil)
             #expect(coordinator.targetReleaseGeneration == 0)
+
+            // The no-marker retirement must wait for a legal next geometry
+            // sample and request a target-free pinned rebase. It must not
+            // leave the mounted transcript permanently displaced.
+            let beforeRebase = coordinator.tailSettlementGeneration
+            coordinator.geometryChanged(previous: self.bottom, current: self.bottom)
+            #expect(coordinator.tailSettlementGeneration > beforeRebase)
+            #expect(coordinator.command == nil)
         }
     }
 

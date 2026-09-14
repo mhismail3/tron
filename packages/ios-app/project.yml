@@ -166,6 +166,8 @@ targets:
       - path: ../protocol-fixtures
         type: folder
         buildPhase: resources
+      - path: Tests/Fixtures/gateway-real-burst.json.zlib
+        buildPhase: resources
     dependencies:
       - target: TronMobile
     settings:

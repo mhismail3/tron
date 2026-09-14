@@ -220,7 +220,15 @@ final class ChatScrollCoordinator {
     /// A newly mounted non-retained tree cannot repair its placeholder geometry
     /// before ChatView installs the authoritative opening baseline.
     private var awaitingOpeningBaseline = false
-    private var retainedViewportReconciliationPending = false
+    private enum RetainedViewportReconciliationState {
+        case idle
+        case pendingMarker
+        // The old target retired without a fresh marker. The next legal
+        // geometry boundary may rebase without leasing a replacement target.
+        case pendingTargetFreeRebase
+    }
+
+    private var retainedViewportReconciliationState: RetainedViewportReconciliationState = .idle
     private var semanticFrames: [String: SemanticFrameSample] = [:]
     private var semanticFrameRevision = 0
     private var openingTailPhase: OpeningTailPhase = .idle
@@ -389,7 +397,7 @@ final class ChatScrollCoordinator {
         visibleOpeningRevealPending = !retainingVisibleViewport
         lastForegroundActivation = nil
         reduceViewport(.presentationReset(retainingViewport: retainingVisibleViewport))
-        retainedViewportReconciliationPending = retainingVisibleViewport
+        retainedViewportReconciliationState = retainingVisibleViewport ? .pendingMarker : .idle
         clearCommand()
         if viewportMode == .pinned { pinnedPositionRevision &+= 1 }
         // Semantic evidence is scoped to the current presentation epoch.
@@ -641,7 +649,7 @@ final class ChatScrollCoordinator {
             let hasOwnedWaiter = layoutRestore != nil
                 || prepend != nil
                 || openingTailSettlementPending
-                || retainedViewportReconciliationPending
+                || retainedViewportReconciliationState != .idle
                 || appliedTargetOrigin != nil
             // Identical callbacks are inert unless an exact active owner is
             // waiting for a later native sample after its command/layout epoch.
@@ -723,19 +731,36 @@ final class ChatScrollCoordinator {
     }
 
     private func reconcileRetainedViewport(with current: ChatTranscriptGeometry) {
-        guard retainedViewportReconciliationPending, current.isValid else { return }
-        if isUserInteracting || !current.isAtCatchUpBoundary {
-            retainedViewportReconciliationPending = false
+        guard retainedViewportReconciliationState != .idle, current.isValid else { return }
+        if isUserInteracting {
+            retainedViewportReconciliationState = .idle
             return
         }
+        // A geometry sample that has not reached the legal tail is not an
+        // acknowledgement of the target-free rebase. Keep the owner pending
+        // until the next admitted sample instead of silently abandoning a
+        // displaced mounted transcript.
+        guard current.isAtCatchUpBoundary else { return }
         let hasCurrentAlignedTail = physicalTailEvidence.map {
             $0.presentationEpoch == presentation
                 && $0.layoutEpoch == layoutEpoch
                 && $0.classification == .aligned
         } == true
-        guard hasCurrentAlignedTail else { return }
-        retainedViewportReconciliationPending = false
-        pinAtTail()
+        let wasTargetFreeRebase = retainedViewportReconciliationState == .pendingTargetFreeRebase
+        retainedViewportReconciliationState = .idle
+        if hasCurrentAlignedTail {
+            pinAtTail()
+        } else if wasTargetFreeRebase {
+            // The native geometry is already at the legal boundary, but the
+            // marker callback is stale or absent. Re-apply the persistent
+            // pinned mode without leasing another ScrollPosition target; the
+            // next marker sample remains the only physical-proof admission.
+            tailSettlementGeneration &+= 1
+        } else {
+            // A retained presentation handoff still waits for its own marker
+            // proof; it must not claim a reader's viewport from geometry alone.
+            retainedViewportReconciliationState = .pendingMarker
+        }
     }
 
     func positionOpeningTail(
@@ -1051,6 +1076,9 @@ final class ChatScrollCoordinator {
     func viewportObservationChanged(isActive: Bool) {
         viewportObservationActive = isActive
         guard !isActive else { return }
+        if retainedViewportReconciliationState == .pendingTargetFreeRebase {
+            retainedViewportReconciliationState = .idle
+        }
         physicalTailRepairTask?.cancel()
         physicalTailRepairTask = nil
         physicalTailRepairEvidenceRevision = nil
@@ -1071,7 +1099,7 @@ final class ChatScrollCoordinator {
             guard lastForegroundActivation != activation else { return }
             lastForegroundActivation = activation
         }
-        retainedViewportReconciliationPending = true
+        retainedViewportReconciliationState = .pendingMarker
         if catchUpPhase != .none {
             // Background suspension can interrupt before command application;
             // clear the whole catch-up owner so it cannot block later sends.
@@ -2058,7 +2086,7 @@ final class ChatScrollCoordinator {
     }
 
     private func beginDirectInteraction(allowsBottomRubberBand: Bool = true) {
-        retainedViewportReconciliationPending = false
+        retainedViewportReconciliationState = .idle
         physicalTailRepairTask?.cancel()
         physicalTailRepairTask = nil
         physicalTailRepairEvidenceRevision = nil
@@ -2666,7 +2694,7 @@ final class ChatScrollCoordinator {
                 // One target-free pinned revision lets SwiftUI rebase its native
                 // scroll tree. Later evidence may use only the remaining
                 // attempt, never renew this episode's budget.
-                self.retainedViewportReconciliationPending = true
+                self.retainedViewportReconciliationState = .pendingTargetFreeRebase
                 self.pinnedPositionRevision &+= 1
                 return
             }

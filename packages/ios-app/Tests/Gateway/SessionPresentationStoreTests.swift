@@ -1,3 +1,4 @@
+import Compression
 import Foundation
 import Observation
 import Synchronization
@@ -314,6 +315,94 @@ struct SessionPresentationStoreTests {
         #expect(store.visibleTranscript.map(\.id) == visible.transcript.map(\.id))
         #expect(store.mountedTranscriptCoverage?.start == 2)
         #expect(store.mountedTranscriptCoverage?.end == 10)
+    }
+
+    @Test("captured Gateway burst retires its epoch and preserves mounted prompt continuity")
+    func capturedGatewayBurstRecoversMountedPresentation() async throws {
+        let capture = try GatewayRealBurstFixture.load()
+        let first = try capture.snapshot(at: 0)
+        var baseline = first
+        baseline.revision = first.revision - 1
+        baseline.eventSequence = first.eventSequence - 1
+        let store = SessionPresentationStore(
+            client: GatewayClient(),
+            performanceSignposts: SystemPerformanceSignposts.shared
+        )
+        store.installHostedSubscription(snapshot: baseline, token: "fixture-subscription-1")
+        let mountedIDs = store.visibleTranscript.map(\.id)
+        #expect(mountedIDs.count == 143)
+        #expect(mountedIDs.allSatisfy { id in
+            store.visibleTranscript.contains { item in item.id == id }
+        })
+
+        let hub = GatewayEventHub()
+        var admitted = 0
+        var overflowReason: GatewayEventAdmissionReason?
+        for captured in capture.events {
+            let event = captured.gatewayEvent
+            let bytes = try JSONEncoder.gateway.encode(captured.frame)
+            let result = await hub.admit(
+                GatewayEventDelivery(connectionID: 1, event: event),
+                bytes: bytes.count
+            )
+            if result.accepted { admitted += 1 }
+            else {
+                overflowReason = result.reason
+                break
+            }
+        }
+        #expect(admitted < capture.events.count)
+        #expect(overflowReason == .byteLimit)
+        await hub.reset(
+            connectionID: 1,
+            notification: GatewayEvent(
+                type: "event", topic: "transport.disconnected", sessionId: nil,
+                payload: .object(["reason": .string("event_overflow")])
+            )
+        )
+        // Reset retires and discards the old epoch suffix; the mounted commit
+        // must survive without pretending those unconsumed frames were applied.
+        let disconnected = try #require(await hub.next())
+        #expect(disconnected.event.topic == "transport.disconnected")
+        await hub.finish()
+        #expect(store.visibleTranscript.map(\.id) == mountedIDs)
+
+        store.retireConnection()
+        #expect(store.visibleTranscript.map(\.id) == mountedIDs)
+
+        let successor = capture.finalSnapshot
+        store.installHostedSubscription(snapshot: successor, token: "fixture-subscription-2")
+        #expect(store.authoritativeSnapshot(for: successor.sessionId) == successor)
+        #expect(store.visibleTranscript.contains {
+            $0.presentationId == capture.expectedAcceptedReceipt.operationId
+        })
+        #expect(store.visibleTranscript.filter {
+            $0.presentationId == capture.expectedAcceptedReceipt.operationId
+        }.count == 1)
+        #expect(store.authoritativeSnapshot(for: successor.sessionId)?.eventSequence == 12)
+
+        // A post-sync progress frame from the successor epoch remains usable;
+        // it advances the authoritative cursor without replaying the prompt.
+        var progressPayload = try #require(capture.events[5].payload.objectValue)
+        progressPayload["sessionId"] = .string(successor.sessionId)
+        progressPayload["runtimeGeneration"] = .string(successor.runtimeGeneration)
+        progressPayload["eventSequence"] = .number(13)
+        progressPayload["revision"] = .number(17)
+        store.admitSynchronously(GatewayEvent(
+            type: "event",
+            topic: "session.progress",
+            sessionId: successor.sessionId,
+            payload: .object(progressPayload)
+        ))
+        #expect(store.authoritativeSnapshot(for: successor.sessionId)?.eventSequence == 13)
+
+        // A delivery retained from the retired epoch cannot regress the
+        // successor authority after the exact connection handoff.
+        store.admitSynchronously(capture.events[0].gatewayEvent)
+        #expect(store.authoritativeSnapshot(for: successor.sessionId)?.eventSequence == 13)
+        #expect(store.visibleTranscript.filter {
+            $0.presentationId == capture.expectedAcceptedReceipt.operationId
+        }.count == 1)
     }
 
     @Test("complete replacement window may retire an obsolete mounted prefix")
