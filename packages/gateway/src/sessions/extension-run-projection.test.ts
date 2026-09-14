@@ -50,6 +50,9 @@ describe("lifecycleProjection header", () => {
     expect(inspectExtensionLifecycleProjection({ ...projection, root: { ...projection.root, children: [{ foo: "fake" }] } })).toBeUndefined();
     expect(inspectExtensionLifecycleProjection({ ...projection, root: { ...projection.root, activity: { currentTool: 42 } } })).toBeUndefined();
     expect(inspectExtensionLifecycleProjection({ ...projection, root: { ...projection.root, children: [{ ...projection.root.children[0], hostStep: { kind: "ci", state: "done", provider: "github", extra: true } }] } })).toBeUndefined();
+    expect(inspectExtensionLifecycleProjection({ ...projection, root: { ...projection.root, kind: "step" } })).toBeUndefined();
+    expect(inspectExtensionLifecycleProjection({ ...projection, root: { ...projection.root, children: [projection.root.children[0], projection.root.children[0]] } })).toBeUndefined();
+    expect(inspectExtensionLifecycleProjection({ ...projection, root: { ...projection.root, children: [{ ...projection.root.children[0], hostStep: undefined }] } })).toBeUndefined();
   });
 
   it("maps producer partial state to the native failed state with honest attention", () => {

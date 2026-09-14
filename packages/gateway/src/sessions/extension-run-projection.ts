@@ -83,38 +83,40 @@ function headerValueEnd(bytes: Uint8Array, start: number): number | undefined {
 /** Parse only the complete first lifecycleProjection property. This scanner
  * never searches later keys or parses report-bearing status content. */
 export function hasExtensionLifecycleProjectionProperty(bytes: Uint8Array): boolean {
+  const bounded = bytes.subarray(0, Math.min(bytes.length, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES));
   let index = 0;
-  while (index < bytes.length && [0x20, 0x09, 0x0a, 0x0d].includes(bytes[index]!)) index += 1;
-  if (bytes[index++] !== 0x7b) return false;
-  while (index < bytes.length && [0x20, 0x09, 0x0a, 0x0d].includes(bytes[index]!)) index += 1;
+  while (index < bounded.length && [0x20, 0x09, 0x0a, 0x0d].includes(bounded[index]!)) index += 1;
+  if (bounded[index++] !== 0x7b) return false;
+  while (index < bounded.length && [0x20, 0x09, 0x0a, 0x0d].includes(bounded[index]!)) index += 1;
   const prefix = Buffer.from('"lifecycleProjection', "utf8");
-  const available = bytes.subarray(index, Math.min(bytes.length, index + prefix.length));
+  const available = bounded.subarray(index, Math.min(bounded.length, index + prefix.length));
   if (available.length > 0 && prefix.subarray(0, available.length).every((byte, offset) => byte === available[offset])) {
     if (available.length < prefix.length) return true;
   }
-  const end = headerStringEnd(bytes, index);
+  const end = headerStringEnd(bounded, index);
   if (end === undefined) return false;
-  return headerJSON(bytes.subarray(index, end)) === "lifecycleProjection";
+  return headerJSON(bounded.subarray(index, end)) === "lifecycleProjection";
 }
 
 export function parseExtensionLifecycleProjectionHeader(bytes: Uint8Array): unknown {
-  const limit = Math.min(bytes.length, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES);
+  const bounded = bytes.subarray(0, Math.min(bytes.length, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES));
+  const limit = bounded.length;
   let index = 0;
-  const whitespace = () => { while (index < limit && [0x20, 0x09, 0x0a, 0x0d].includes(bytes[index]!)) index += 1; };
+  const whitespace = () => { while (index < limit && [0x20, 0x09, 0x0a, 0x0d].includes(bounded[index]!)) index += 1; };
   whitespace();
-  if (bytes[index++] !== 0x7b) return undefined;
+  if (bounded[index++] !== 0x7b) return undefined;
   whitespace();
   const keyStart = index;
-  const keyEnd = headerStringEnd(bytes, index);
-  if (keyEnd === undefined || headerJSON(bytes.subarray(keyStart, keyEnd)) !== "lifecycleProjection") return undefined;
+  const keyEnd = headerStringEnd(bounded, index);
+  if (keyEnd === undefined || headerJSON(bounded.subarray(keyStart, keyEnd)) !== "lifecycleProjection") return undefined;
   index = keyEnd;
   whitespace();
-  if (bytes[index++] !== 0x3a) return undefined;
+  if (bounded[index++] !== 0x3a) return undefined;
   whitespace();
   const valueStart = index;
-  const valueEnd = headerValueEnd(bytes, valueStart);
+  const valueEnd = headerValueEnd(bounded, valueStart);
   if (valueEnd === undefined || valueEnd > MAX_EXTENSION_LIFECYCLE_HEADER_BYTES) return undefined;
-  return headerJSON(bytes.subarray(valueStart, valueEnd));
+  return headerJSON(bounded.subarray(valueStart, valueEnd));
 }
 
 const lifecycleProjectionStates = new Set(["queued", "running", "complete", "failed", "partial", "paused", "stopped", "rejected"]);
@@ -170,7 +172,9 @@ function validProjectionNode(value: unknown, depth: number, runId: string, root:
     || (node.sessionOwnerId !== undefined && !boundedProjectionString(node.sessionOwnerId, 256, true, 256))
     || (node.activity !== undefined && !validProjectionActivity(node.activity))
     || (node.hostStep !== undefined && (node.kind !== "host-step" || !validProjectionHost(node.hostStep)))) return false;
-  if (root && (node.id !== runId || node.kind === "host-step" || node.startedAt === undefined || node.updatedAt === undefined)) return false;
+  if (root && (node.id !== runId || (node.kind !== "subagent" && node.kind !== "workflow")
+    || node.startedAt === undefined || node.updatedAt === undefined)) return false;
+  if (node.kind === "host-step" && node.hostStep === undefined) return false;
   // Child completion may be reported without a child-local end timestamp;
   // the producer's canonical root timestamp remains the lifecycle authority.
   // A terminal root still needs an end timestamp because RuntimeSlot's
@@ -178,7 +182,14 @@ function validProjectionNode(value: unknown, depth: number, runId: string, root:
   if (root && terminalLifecycleStates.has(extensionLifecycleState(node.state)) && node.endedAt === undefined) return false;
   if (node.children !== undefined) {
     if (!Array.isArray(node.children) || node.children.length > 32 || depth >= MAX_DEPTH) return false;
-    if (!node.children.every((child) => validProjectionNode(child, depth + 1, runId, false))) return false;
+    const childIDs = new Set<string>();
+    if (!node.children.every((child) => {
+      const childRecord = record(child);
+      const childID = typeof childRecord?.id === "string" ? childRecord.id : undefined;
+      if (!childID || childIDs.has(childID)) return false;
+      childIDs.add(childID);
+      return validProjectionNode(child, depth + 1, runId, false);
+    })) return false;
   }
   return true;
 }

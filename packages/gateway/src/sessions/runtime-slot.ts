@@ -115,6 +115,27 @@ import { admitToolDisplayProjection, displayArtifactIDs } from "../display/displ
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
 
+// A lifecycle header is trusted only after RuntimeSlot has parsed and schema-
+// admitted the first property from the exact-owned status file. A payload key
+// named `lifecycleProjection` is presentation data until this private marker is
+// attached, so tool results cannot nominate a fresh child-session owner.
+const EMBEDDED_LIFECYCLE_ARTIFACT = Symbol("embedded-lifecycle-artifact");
+type EmbeddedLifecycleArtifact = Record<string, unknown> & { [EMBEDDED_LIFECYCLE_ARTIFACT]?: true };
+
+function markEmbeddedLifecycleArtifact(value: Record<string, unknown>): Record<string, unknown> {
+  Object.defineProperty(value, EMBEDDED_LIFECYCLE_ARTIFACT, { configurable: false, enumerable: false, value: true, writable: false });
+  return value;
+}
+
+function isEmbeddedLifecycleArtifact(value: unknown): boolean {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    && (value as EmbeddedLifecycleArtifact)[EMBEDDED_LIFECYCLE_ARTIFACT] === true;
+}
+
+function preserveEmbeddedLifecycleMarker(source: unknown, value: Record<string, unknown>): Record<string, unknown> {
+  return isEmbeddedLifecycleArtifact(source) ? markEmbeddedLifecycleArtifact(value) : value;
+}
+
 export type SessionBroadcast = (sessionId: string, topic: string, payload: JsonValue) => void;
 
 type QueueBehavior = QueuedMessageState["behavior"];
@@ -1468,10 +1489,7 @@ export class RuntimeSlot {
       ? wrapper.details as Record<string, unknown> : wrapper;
     const declaredRun = [root?.runId, root?.asyncId]
       .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
-    const embeddedHeader = root?.lifecycleProjection !== undefined
-      && root.lifecycleProjection !== null
-      && typeof root.lifecycleProjection === "object"
-      && !Array.isArray(root.lifecycleProjection);
+    const embeddedHeader = isEmbeddedLifecycleArtifact(value);
     // Exact producer run ownership is established before a child path can
     // enrich the already tool-owned activity. Generic nested records cannot
     // nominate arbitrary sessions.
@@ -3590,7 +3608,8 @@ export class RuntimeSlot {
         if (!projection) return undefined;
         const projected = lifecycleProjectionArtifact(projection);
         const withRecovery = await this.attachRecoverySessionOwner(asyncDir, projected, opened.directory);
-        return this.attachProcessTerminalProof(asyncDir, withRecovery, opened.directory);
+        const withProof = await this.attachProcessTerminalProof(asyncDir, withRecovery, opened.directory);
+        return markEmbeddedLifecycleArtifact(withProof);
       }
       // A first lifecycleProjection key marks a modern artifact even when its
       // value is truncated or malformed; do not fall back to report parsing.
@@ -3986,7 +4005,7 @@ export class RuntimeSlot {
       // enriches neither status nor ownership and must not resurrect the pill.
       if (ownership?.terminal && state === "running") return;
       const artifactValue = ownership?.terminal
-        ? { ...raw, state: previous?.status === "failed" ? "failed" : "completed" }
+        ? preserveEmbeddedLifecycleMarker(raw, { ...raw, state: previous?.status === "failed" ? "failed" : "completed" })
         : raw;
       const activityKey = previous?.activityId ?? extensionActivityId(this.runtime.session.sessionManager.getSessionId(), toolCallId);
       const sequence = (this.extensionActivitySequences.get(activityKey) ?? previous?.lifecycle?.sequence ?? 0) + 1;
@@ -4257,7 +4276,7 @@ export class RuntimeSlot {
         if (requestedTerminal !== previous.lifecycle?.state) return;
       }
       const artifactValue = ownership.terminal
-        ? { ...raw, state: previous.status === "failed" ? "failed" : "completed" }
+        ? preserveEmbeddedLifecycleMarker(raw, { ...raw, state: previous.status === "failed" ? "failed" : "completed" })
         : raw;
       const activityKey = previous.activityId ?? extensionActivityId(this.runtime.session.sessionManager.getSessionId(), toolCallId);
       const sequence = (this.extensionActivitySequences.get(activityKey) ?? previous.lifecycle?.sequence ?? 0) + 1;

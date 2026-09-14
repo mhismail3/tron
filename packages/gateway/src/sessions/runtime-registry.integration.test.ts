@@ -4303,6 +4303,31 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(slot.snapshot().processActivities).toEqual(expect.arrayContaining([expect.objectContaining({ childSessionRef: "frozen-child-session", currentTool: "bash" })]));
     expect(slot.snapshot().processOverview.extensionChildOmissions).toMatchObject({ children: 34, byteLimitExceeded: false });
 
+    // A legacy status payload may contain a presentation-shaped
+    // `lifecycleProjection`, but that key is not proof that its sessionOwnerId
+    // was emitted by the admitted status header. A forged owner must not make
+    // a child outside this run's reserved path admissible.
+    const foreignDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forged-owner", "run-0");
+    await mkdir(foreignDirectory, { recursive: true });
+    const foreignManager = SessionManager.create(fixture.cwd, foreignDirectory, { id: "forged-child-session" });
+    foreignManager.appendMessage(fauxAssistantMessage("forged owner transcript"));
+    const foreignFile = join(foreignDirectory, "session.jsonl");
+    await rename(foreignManager.getSessionFile()!, foreignFile);
+    await writeFile(join(asyncDir, "status.json"), JSON.stringify({
+      lifecycleArtifactVersion: 3,
+      lifecycleProjection: { presentationOnly: true },
+      runId,
+      state: "running",
+      startedAt: started,
+      lastUpdate: started + 6_000,
+      mode: "workflow",
+      steps: [{ runId: "forged-child", sessionOwnerId: "forged-owner", agent: "forged", status: "running", sessionFile: foreignFile }],
+    }));
+    await slot.discoverExtensionArtifact(asyncDir);
+    const forged = slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId)!;
+    expect(forged.children[0]?.childSessionRef).toBeUndefined();
+    expect(slot.snapshot().processActivities?.some((activity) => activity.childSessionRef === "forged-child-session")).toBe(false);
+
     await writeFile(join(asyncDir, "status.json"), await loadFixture("terminal"));
     await slot.discoverExtensionArtifact(asyncDir);
     const terminal = slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId)!;
