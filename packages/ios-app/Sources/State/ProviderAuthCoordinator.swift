@@ -99,6 +99,8 @@ struct ModelCatalogAccumulator {
     private var pageCount = 0
     private var stringBytes = 0
 
+    var nextPageNumber: Int { pageCount + 1 }
+
     mutating func append(_ page: [ModelSummary], hasNextPage: Bool) throws {
         guard pageCount < ModelCatalogPolicy.maximumPages,
               !(hasNextPage && pageCount + 1 == ModelCatalogPolicy.maximumPages),
@@ -301,7 +303,9 @@ final class ProviderAuthCoordinator {
                         sessionId: target.sessionID,
                         cursor: cursor,
                         limit: ModelCatalogPolicy.requestPageSize
-                    )
+                    ),
+                    diagnosticPurpose: "provider-model-catalog",
+                    diagnosticPage: accumulator.nextPageNumber
                 )
                 guard admits(admission) else { return false }
                 try accumulator.append(response.models, hasNextPage: response.nextCursor != nil)

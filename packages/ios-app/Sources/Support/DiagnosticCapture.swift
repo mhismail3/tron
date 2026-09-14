@@ -15,6 +15,29 @@ struct DiagnosticCaptureEvent: Codable, Equatable, Sendable {
     let profileID: String?
     let connectionID: Int?
     let lifecycleGeneration: Int?
+    let purpose: String?
+    let page: Int?
+
+    init(
+        elapsedMilliseconds: Int, kind: String, name: String, outcome: String?,
+        code: String?, requestID: String?, durationMilliseconds: Int?, count: Int?,
+        profileID: String?, connectionID: Int?, lifecycleGeneration: Int?,
+        purpose: String? = nil, page: Int? = nil
+    ) {
+        self.elapsedMilliseconds = elapsedMilliseconds
+        self.kind = kind
+        self.name = name
+        self.outcome = outcome
+        self.code = code
+        self.requestID = requestID
+        self.durationMilliseconds = durationMilliseconds
+        self.count = count
+        self.profileID = profileID
+        self.connectionID = connectionID
+        self.lifecycleGeneration = lifecycleGeneration
+        self.purpose = purpose
+        self.page = page
+    }
 
     var textLine: String {
         [
@@ -28,7 +51,9 @@ struct DiagnosticCaptureEvent: Codable, Equatable, Sendable {
             count.map { "count=\($0)" },
             profileID.map { "profile=\($0)" },
             connectionID.map { "connection=\($0)" },
-            lifecycleGeneration.map { "lifecycle=\($0)" }
+            lifecycleGeneration.map { "lifecycle=\($0)" },
+            purpose.map { "purpose=\($0)" },
+            page.map { "page=\($0)" }
         ].compactMap { $0 }.joined(separator: " ")
     }
 }
@@ -91,7 +116,9 @@ protocol DiagnosticCaptureRPCSink: Sendable {
         code: String?,
         durationMilliseconds: Int,
         profileID: String?,
-        connectionID: Int?
+        connectionID: Int?,
+        purpose: String?,
+        page: Int?
     )
 }
 
@@ -237,7 +264,7 @@ final class DiagnosticCaptureCoordinator: DiagnosticCaptureRPCSink, @unchecked S
         self.active = active
     }
 
-    func recordRPC(method: String, requestID: String, requestStartedAt: ContinuousClock.Instant, outcome: String, code: String?, durationMilliseconds: Int, profileID: String?, connectionID: Int?) {
+    func recordRPC(method: String, requestID: String, requestStartedAt: ContinuousClock.Instant, outcome: String, code: String?, durationMilliseconds: Int, profileID: String?, connectionID: Int?, purpose: String? = nil, page: Int? = nil) {
         // Request IDs are useful correlation within one export and are opaque
         // and bounded; no params, URLs, transcript data, or error text enter.
         lock.lock(); defer { lock.unlock() }
@@ -250,7 +277,7 @@ final class DiagnosticCaptureCoordinator: DiagnosticCaptureRPCSink, @unchecked S
             requestID: Self.safe(requestID, maximum: 64),
             durationMilliseconds: Self.boundedDuration(durationMilliseconds), count: 1,
             profileID: profileID.map { Self.safe($0, maximum: 64) }, connectionID: connectionID,
-            lifecycleGeneration: nil
+            lifecycleGeneration: nil, purpose: Self.safePurpose(purpose), page: Self.safePage(page)
         ), to: &active)
         self.active = active
     }
@@ -281,7 +308,8 @@ final class DiagnosticCaptureCoordinator: DiagnosticCaptureRPCSink, @unchecked S
             code: event.code, requestID: event.requestID,
             durationMilliseconds: event.durationMilliseconds, count: event.count,
             profileID: event.profileID, connectionID: event.connectionID,
-            lifecycleGeneration: event.lifecycleGeneration
+            lifecycleGeneration: event.lifecycleGeneration,
+            purpose: event.purpose, page: event.page
         )
         // Count the actual exported line, plus conservative room for the
         // summary line's changing counters and fixed report headers. This is
@@ -310,6 +338,17 @@ final class DiagnosticCaptureCoordinator: DiagnosticCaptureRPCSink, @unchecked S
 
     private static func boundedDuration(_ value: Int) -> Int {
         min(max(0, value), maximumDurationMilliseconds)
+    }
+
+    private static func safePurpose(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let allowed = ["session-command-catalog", "provider-model-catalog", "notification-page"]
+        return allowed.contains(value) ? value : "unknown"
+    }
+
+    private static func safePage(_ value: Int?) -> Int? {
+        guard let value else { return nil }
+        return (1...512).contains(value) ? value : 0
     }
 
     private static func safe(_ value: String, maximum: Int) -> String {

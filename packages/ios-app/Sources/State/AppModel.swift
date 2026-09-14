@@ -514,11 +514,15 @@ final class AppModel {
                     // advertise a background Gateway capability.
                     capabilities = Set(dashboardConnections.infoSnapshot(for: profile.id)?.capabilities ?? [])
                 }
+                let connectionID = profile.id == lifecycle.selectedProfileID
+                    ? lifecycle.connectionID
+                    : dashboardConnections.connectionIDSnapshot(for: profile.id)
                 let dashboardProfile = AutomationDashboardProfile(
                     id: profile.id,
                     label: profile.label,
                     state: state,
-                    capabilities: capabilities
+                    capabilities: capabilities,
+                    connectionID: connectionID
                 )
                 guard AutomationEndpointAdmissionPolicy.admits(dashboardProfile) else { return nil }
                 let request: AutomationRPCClient.Request = { method, params, timeout in
@@ -4218,9 +4222,10 @@ extension AppModel: SessionPresentationStoreDelegate {
         _ = composerDrafts.mountPreparedPresentation(target)
         Task { [weak self] in
             guard let self else { return }
-            async let providerRefresh: Bool = self.refreshProviders(target: .session(id: target.sessionID))
-            async let commandRefresh: Void = self.loadCommands(sessionID: target.sessionID)
-            _ = await (providerRefresh, commandRefresh)
+            // SessionPresentationStore owns the command catalog read after it
+            // installs the exact subscription target. Keep provider refresh
+            // independent; it has a separate catalog owner and admission.
+            _ = await self.refreshProviders(target: .session(id: target.sessionID))
         }
     }
 

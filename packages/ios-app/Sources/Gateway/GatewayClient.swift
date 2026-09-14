@@ -520,6 +520,8 @@ actor GatewayClient {
         let profileID: String?
         let profileLabel: String?
         let connectionID: Int
+        let diagnosticPurpose: String?
+        let diagnosticPage: Int?
         let timeout: Task<Void, Never>
         var send: Task<Void, Never>?
         var transmission: GatewayRequestTransmissionState
@@ -615,7 +617,9 @@ actor GatewayClient {
                 code: code,
                 durationMilliseconds: duration,
                 profileID: request.profileID,
-                connectionID: request.connectionID
+                connectionID: request.connectionID,
+                purpose: request.diagnosticPurpose,
+                page: request.diagnosticPage
             )
         }
         let incidentID = outcome == .success ? nil : "rpc:\(request.requestID)"
@@ -1019,22 +1023,31 @@ actor GatewayClient {
         _ method: String,
         _ params: P,
         as responseType: R.Type = R.self,
-        timeout: Duration = .seconds(30)
+        timeout: Duration = .seconds(30),
+        diagnosticPurpose: String? = nil,
+        diagnosticPage: Int? = nil
     ) async throws -> R {
-        let value = try await requestValue(method, params, timeout: timeout)
+        let value = try await requestValue(
+            method, params, timeout: timeout,
+            diagnosticPurpose: diagnosticPurpose, diagnosticPage: diagnosticPage
+        )
         return try GatewayResponseDecoding.decode(value, as: responseType, method: method)
     }
 
     func requestValue<P: Encodable>(
         _ method: String,
         _ params: P,
-        timeout: Duration = .seconds(30)
+        timeout: Duration = .seconds(30),
+        diagnosticPurpose: String? = nil,
+        diagnosticPage: Int? = nil
     ) async throws -> JSONValue {
         try await requestValue(
             method,
             params,
             timeout: timeout,
-            epochExpectation: .current
+            epochExpectation: .current,
+            diagnosticPurpose: diagnosticPurpose,
+            diagnosticPage: diagnosticPage
         )
     }
 
@@ -1108,7 +1121,9 @@ actor GatewayClient {
         _ method: String,
         _ params: P,
         timeout: Duration,
-        epochExpectation: EpochExpectation
+        epochExpectation: EpochExpectation,
+        diagnosticPurpose: String? = nil,
+        diagnosticPage: Int? = nil
     ) async throws -> JSONValue {
         guard let epoch = connection, epoch.info != nil, epoch.eventsActivated else {
             throw Self.definitelyNotSentFailure()
@@ -1152,6 +1167,8 @@ actor GatewayClient {
                     profileID: current.profileID,
                     profileLabel: current.profileLabel,
                     connectionID: epochID,
+                    diagnosticPurpose: diagnosticPurpose,
+                    diagnosticPage: diagnosticPage,
                     timeout: timeoutTask,
                     send: nil,
                     transmission: .queued

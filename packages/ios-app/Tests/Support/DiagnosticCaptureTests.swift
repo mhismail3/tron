@@ -9,6 +9,29 @@ final class DiagnosticCaptureTests: XCTestCase {
         XCTAssertTrue(capture.report.events.isEmpty)
     }
 
+    func testRPCPurposeAndPageAreAllowlistedAndBounded() {
+        let capture = DiagnosticCaptureCoordinator()
+        XCTAssertTrue(capture.start(duration: .seconds(30)))
+        let started = capture.beginInterval()!.1
+        capture.recordRPC(
+            method: "model.list", requestID: "opaque-id", requestStartedAt: started,
+            outcome: "success", code: nil, durationMilliseconds: 1,
+            profileID: "profile", connectionID: 7,
+            purpose: "provider-model-catalog", page: 2
+        )
+        capture.recordRPC(
+            method: "session.list", requestID: "opaque-id-2", requestStartedAt: started,
+            outcome: "success", code: nil, durationMilliseconds: 1,
+            profileID: "profile", connectionID: 7,
+            purpose: "cursor-secret", page: 9_999
+        )
+        let report = try! XCTUnwrap(capture.stop())
+        XCTAssertTrue(report.text.contains("purpose=provider-model-catalog page=2"))
+        XCTAssertTrue(report.text.contains("purpose=unknown page=0"))
+        XCTAssertFalse(report.text.contains("cursor-secret"))
+        XCTAssertLessThanOrEqual(report.events.compactMap(\.page).max() ?? 0, 512)
+    }
+
     func testStartedCaptureFreezesOperationAndRPCEvidence() {
         let capture = DiagnosticCaptureCoordinator()
         XCTAssertTrue(capture.start(duration: .seconds(30)))

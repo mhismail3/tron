@@ -1407,7 +1407,10 @@ final class SessionPresentationStore {
         struct Params: Codable { let sessionId: String }
         struct Response: Decodable { let commands: [CommandInfo] }
         do {
-            let response: Response = try await client.request("session.commands", Params(sessionId: sessionID))
+            let response: Response = try await client.request(
+                "session.commands", Params(sessionId: sessionID),
+                diagnosticPurpose: "session-command-catalog"
+            )
             guard generation == commandLoadGeneration,
                   ownsSubscription(sessionID: sessionID, requestedToken: token),
                   subscriptionTarget == requestedTarget else { return }

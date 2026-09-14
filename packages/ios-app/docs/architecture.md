@@ -114,7 +114,10 @@ recurrence, dense-series counts, or DST locally. Full action text, run snapshots
 only while their managed detail surface is visible and are neither cached nor placed in global events.
 Automation mutations use command IDs and the focused profile's `ConfirmedMutationExecutor`; a background
 profile remains read-only until the explicit **Use This Gateway** action gives the existing lifecycle and
-receipt owner authority. No second mutation-reconciliation algorithm or Automation event journal exists.
+receipt owner authority. Timeline refresh admission is keyed to each endpoint's profile, connection,
+capabilities, and catalog revision; retained failure text does not restart an equivalent read, while
+explicit refresh and changed revisions still force fresh canonical occurrence reads. No second
+mutation-reconciliation algorithm or Automation event journal exists.
 `SessionCatalogCoordinator` owns the focused profile's summaries, while the dashboard pool owns
 profile-qualified shallow catalogs for non-focused profiles. `SessionSummary` carries dashboard-only
 profile ownership and the dashboard aggregates by `(profileID, sessionID)`; equal bare session IDs from
@@ -160,7 +163,11 @@ after Gateway restart or idle slot retirement. Initial connection, structural an
 reconnect, creation, and deletion own dashboard convergence without a manual refresh surface. Focused and
 secondary profile owners retain an unsatisfied structural generation across responsive list failures and retry with
 a capped delay until a complete authoritative publication; epoch retirement, backgrounding, and profile removal
-cancel that lease rather than turning it into polling. Catalog observability stays in this same ownership path: `GatewayClient` emits bounded `gateway.rpc` records for `session.list` with the sanitized request ID, outcome, failure code, duration, and profile identity, while `AppModel` emits `gateway.catalog` admission and terminal decisions with connection/lifecycle/request generations, actual failure code/reason, page, revision, retry attempt/budget, and the owning RPC request ID. The existing iOS diagnostic buffer and retained Logs export bound these records to 200 entries; they contain no session content, paths, payloads, credentials, or raw errors. A successful authoritative publication clears the catalog warning through the normal notice owner rather than inventing a second health state.
+cancel that lease rather than turning it into polling. Catalog observability stays in this same ownership path: `GatewayClient` emits bounded `gateway.rpc` records for `session.list` with the sanitized request ID, outcome, failure code, duration, and profile identity, while `AppModel` emits `gateway.catalog` admission and terminal decisions with connection/lifecycle/request generations, actual failure code/reason, page, revision, retry attempt/budget, and the owning RPC request ID. The existing iOS diagnostic buffer and retained Logs export bound these records to 200 entries; they contain no session content, paths, payloads, credentials, or raw errors. A successful authoritative publication clears the catalog warning through the normal notice owner rather than inventing a second health state. Session command catalogs are loaded by the
+presentation store only after exact subscription-target installation; the AppModel open callback
+refreshes provider catalogs but does not issue a duplicate command read. Opt-in diagnostic RPC
+records carry only an allowlisted purpose and bounded pagination ordinal, never request parameters,
+cursors, or payload values.
 Cache/disconnect/authoritative installs and removals all
 enter that one disposable projection; hidden/local selection policy remains outside it and cannot mount a chat. Cached or stale non-idle rows present as resuming without rewriting
 the canonical phase; only a live Gateway-authoritative interrupted phase uses the amber warning.
