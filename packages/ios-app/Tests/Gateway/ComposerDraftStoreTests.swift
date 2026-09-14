@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Testing
 @testable import TronMobile
@@ -99,6 +100,30 @@ struct ComposerDraftStoreTests {
 
         await store.removeProfile("profile")
         #expect(await store.load(newest) == nil)
+    }
+
+    @Test("attachment filenames hash exact prefix and body bytes")
+    func attachmentDigestDifferential() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ComposerDraftStore(root: root)
+        let scope = ComposerDraftScope(profileID: "profile", sessionID: "unicode-\u{1F30D}")
+        let bytes = Data((String(repeating: "é", count: 150_000) + "\u{1F642}").utf8)
+        await store.save(.init(text: "large", attachments: [
+            .init(name: "one", mimeType: "application/octet-stream", data: bytes),
+            .init(name: "two", mimeType: "application/octet-stream", data: bytes),
+        ]), for: scope)
+
+        let directory = await store.hostedPath(for: scope)
+        let manifest = try JSONDecoder().decode(AttachmentManifestFixture.self, from: Data(
+            contentsOf: directory.appending(path: "manifest.json")
+        ))
+        #expect(manifest.attachments.map(\.payload) == [
+            "\(expectedDigest(index: 0, body: bytes)).payload",
+            "\(expectedDigest(index: 1, body: bytes)).payload",
+        ])
+        #expect(manifest.attachments[0].payload != manifest.attachments[1].payload)
+        #expect(await store.load(scope)?.attachments.map(\.data) == [bytes, bytes])
     }
 
     @Test("payload digest rejects same-size corruption")
@@ -218,6 +243,21 @@ struct ComposerDraftStoreTests {
             }
         }
         return files
+    }
+
+    private struct AttachmentManifestFixture: Decodable {
+        let attachments: [AttachmentFixture]
+    }
+
+    private struct AttachmentFixture: Decodable {
+        let payload: String
+    }
+
+    private func expectedDigest(index: Int, body: Data) -> String {
+        var hasher = SHA256()
+        hasher.update(data: Data("\(index)\u{0}".utf8))
+        hasher.update(data: body)
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     private func temporaryRoot() -> URL {

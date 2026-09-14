@@ -452,10 +452,12 @@ private struct DisplayInlineImageChip: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.displayTranscriptReady) private var transcriptReady
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.colorScheme) private var colorScheme
     @State private var image: UIImage?
     @State private var loadedIdentity: ChatMediaIdentity?
     @State private var failed = false
+    @State private var loadGeneration = 0
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -487,7 +489,15 @@ private struct DisplayInlineImageChip: View {
             height: DisplayInlineLayoutPolicy.imageChipSide,
             alignment: .topLeading
         )
-        .task(id: transcriptReady ? mediaIdentity : nil) { await loadThumbnail() }
+        .task(id: PresentationActivityTaskID(
+            source: transcriptReady ? mediaIdentity : nil,
+            presentationActive: transcriptReady && presentationActivity.allowsPresentationPublication
+        )) {
+            await loadThumbnail(generation: loadGeneration)
+        }
+        .onChange(of: mediaIdentity) { _, _ in loadGeneration &+= 1 }
+        .onChange(of: presentationActivity.allowsPresentationPublication) { _, _ in loadGeneration &+= 1 }
+        .onChange(of: transcriptReady) { _, _ in loadGeneration &+= 1 }
         .accessibilityElement(children: .contain)
     }
 
@@ -532,8 +542,12 @@ private struct DisplayInlineImageChip: View {
         return model.chatMediaIdentity(blobID: artifact.id, sessionID: sessionID)
     }
 
-    private func loadThumbnail() async {
-        guard transcriptReady, let identity = mediaIdentity else { return }
+    private func loadThumbnail(generation: Int) async {
+        guard transcriptReady,
+              presentationActivity.allowsPresentationPublication,
+              !Task.isCancelled,
+              let identity = mediaIdentity else { return }
+        guard generation == loadGeneration, mediaIdentity == identity else { return }
         if loadedIdentity != identity {
             image = nil
             failed = false
@@ -541,11 +555,20 @@ private struct DisplayInlineImageChip: View {
             return
         }
         do {
-            image = try await model.chatMedia.thumbnail(for: identity)
+            let loaded = try await model.chatMedia.thumbnail(for: identity)
+            guard !Task.isCancelled,
+                  generation == loadGeneration,
+                  mediaIdentity == identity,
+                  presentationActivity.allowsPresentationPublication else { return }
+            image = loaded
             loadedIdentity = identity
         } catch is CancellationError {
             return
         } catch {
+            guard !Task.isCancelled,
+                  generation == loadGeneration,
+                  mediaIdentity == identity,
+                  presentationActivity.allowsPresentationPublication else { return }
             failed = true
             loadedIdentity = identity
         }

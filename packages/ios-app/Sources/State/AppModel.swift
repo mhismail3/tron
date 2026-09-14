@@ -1898,15 +1898,24 @@ final class AppModel {
     func refreshDevices() async {
         struct Response: Decodable { let devices: [PairedDevice] }
         guard !Task.isCancelled else { return }
+        let connectionID = await client.activeConnectionID()
         deviceLoadGeneration &+= 1
         let generation = deviceLoadGeneration
         do {
-            let response: Response = try await client.request("device.list", EmptyParams())
+            let response: Response = try await client.request(
+                "device.list",
+                EmptyParams(),
+                expectedEpochID: connectionID
+            )
             let admitted = try PairedDeviceCatalogPolicy.admit(response.devices)
-            guard !Task.isCancelled, deviceLoadGeneration == generation else { return }
+            guard !Task.isCancelled,
+                  deviceLoadGeneration == generation,
+                  await client.activeConnectionID() == connectionID else { return }
             pairedDevices = admitted
         } catch {
-            guard !Task.isCancelled, deviceLoadGeneration == generation else { return }
+            guard !Task.isCancelled,
+                  deviceLoadGeneration == generation,
+                  await client.activeConnectionID() == connectionID else { return }
             surface(error)
         }
     }

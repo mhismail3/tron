@@ -322,6 +322,9 @@ final class ChatMediaLoader {
 
         do {
             let value = try await flight.task.value
+            // A cancelled consumer must not publish or evict the shared flight;
+            // another owner may still be waiting on the same identity.
+            try Task.checkCancellation()
             guard flight.invalidationGeneration == invalidationGeneration,
                   admits(identity) else { throw ChatMediaLoadError.staleIdentity }
             if thumbnailFlights[identity]?.token == flight.token {
@@ -332,7 +335,7 @@ final class ChatMediaLoader {
             }
             return value.0
         } catch {
-            if thumbnailFlights[identity]?.token == flight.token {
+            if !Task.isCancelled, thumbnailFlights[identity]?.token == flight.token {
                 thumbnailFlights[identity] = nil
             }
             throw error

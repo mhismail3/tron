@@ -1027,7 +1027,7 @@ actor GatewayClient {
         _ params: P,
         as responseType: R.Type = R.self,
         timeout: Duration = .seconds(30),
-        expectedEpochID: Int
+        expectedEpochID: Int?
     ) async throws -> R {
         let value = try await requestValue(
             method,
@@ -1038,10 +1038,10 @@ actor GatewayClient {
         return try GatewayResponseDecoding.decode(value, as: responseType, method: method)
     }
 
-    private func requestValue<P: Encodable>(
+    func requestValue<P: Encodable>(
         _ method: String,
         _ params: P,
-        timeout: Duration,
+        timeout: Duration = .seconds(30),
         expectedEpochID: Int?
     ) async throws -> JSONValue {
         guard let epoch = connection, epoch.info != nil, epoch.eventsActivated,

@@ -56,6 +56,7 @@ final class SettingsTrustCoordinator {
         let profileGeneration: Int
         let target: SettingsTarget
         let targetGeneration: Int
+        let connectionID: Int?
     }
 
     private let client: GatewayClient
@@ -95,17 +96,19 @@ final class SettingsTrustCoordinator {
     @discardableResult
     func refreshSettings(target: SettingsTarget) async -> Bool {
         guard !Task.isCancelled else { return false }
-        let admission = beginSettingsLoad(target: target)
+        let connectionID = await client.activeConnectionID()
+        let admission = beginSettingsLoad(target: target, connectionID: connectionID)
         do {
             let value = try await client.requestValue(
                 "settings.get",
-                SettingsGetParams(cwd: target.cwd, scope: target.scope.rawValue)
+                SettingsGetParams(cwd: target.cwd, scope: target.scope.rawValue),
+                expectedEpochID: connectionID
             )
-            guard admits(admission) else { return false }
+            guard await admits(admission) else { return false }
             settingsByTarget[target] = value
             return true
         } catch {
-            guard admits(admission) else { return false }
+            guard await admits(admission) else { return false }
             delegate?.settingsTrustCoordinatorSurface(error)
             return false
         }
@@ -171,19 +174,24 @@ final class SettingsTrustCoordinator {
         settingsByTarget.removeAll()
     }
 
-    private func beginSettingsLoad(target: SettingsTarget) -> SettingsLoadAdmission {
+    private func beginSettingsLoad(
+        target: SettingsTarget,
+        connectionID: Int?
+    ) -> SettingsLoadAdmission {
         let targetGeneration = (settingsLoadGenerationByTarget[target] ?? 0) &+ 1
         settingsLoadGenerationByTarget[target] = targetGeneration
         return SettingsLoadAdmission(
             profileGeneration: profileGeneration,
             target: target,
-            targetGeneration: targetGeneration
+            targetGeneration: targetGeneration,
+            connectionID: connectionID
         )
     }
 
-    private func admits(_ admission: SettingsLoadAdmission) -> Bool {
+    private func admits(_ admission: SettingsLoadAdmission) async -> Bool {
         !Task.isCancelled && profileGeneration == admission.profileGeneration
             && settingsLoadGenerationByTarget[admission.target] == admission.targetGeneration
+            && await client.activeConnectionID() == admission.connectionID
     }
 
     private func requireProfile(_ admittedProfileGeneration: Int) throws {
