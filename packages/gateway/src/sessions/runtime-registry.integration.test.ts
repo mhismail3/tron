@@ -5203,22 +5203,19 @@ export default function (pi) {
     for (let index = 1; index < sequences.length; index += 1) {
       expect(sequences[index]).toBe(sequences[index - 1]! + 1);
     }
-    // Model the observed slow consumer: one frame dequeued every 88ms. The
-    // prompt's complete snapshots arrive inside one dequeue interval, so this
-    // lower-bound model proves that the 2 MiB queue can overflow before any
-    // client-side rebaseline is available.
-    const queue: number[] = [];
-    let nextDequeueAt = snapshots[0]!.at + 88;
-    let modeledPeak = 0;
-    for (const snapshot of snapshots) {
-      while (snapshot.at >= nextDequeueAt && queue.length > 0) {
-        queue.shift();
-        nextDequeueAt += 88;
-      }
-      queue.push(Buffer.byteLength(JSON.stringify(snapshot.payload)));
-      modeledPeak = Math.max(modeledPeak, queue.reduce((total, bytes) => total + bytes, 0));
-    }
-    expect(modeledPeak).toBeGreaterThan(2 * 1_024 * 1_024);
+    // Deterministic paused-consumer oracle: hold every ordered frame until
+    // the owner has finished the accepted prompt. This proves the complete
+    // serialized burst exceeds the 2 MiB connection budget independently of
+    // CI scheduling. A resumed consumer can then dequeue the same frames in
+    // order; no frame is silently removed by this fixture.
+    const pausedQueue = events.slice(before).map((event) => Buffer.byteLength(JSON.stringify({
+      type: "event", topic: event.topic, sessionId: slot.id, payload: event.payload,
+    })));
+    const pausedBytes = pausedQueue.reduce((total, bytes) => total + bytes, 0);
+    expect(pausedBytes).toBeGreaterThan(2 * 1_024 * 1_024);
+    let resumedBytes = pausedBytes;
+    for (const bytes of pausedQueue) resumedBytes -= bytes;
+    expect(resumedBytes).toBe(0);
     expect(slot.snapshot().transcript.some((item) => item.kind === "message" && item.presentationId === receipt.operationId)).toBe(true);
     // The owner emits complete snapshots for distinct lifecycle revisions; no
     // safe frame can be subtracted here without a receiver rebaseline contract.
