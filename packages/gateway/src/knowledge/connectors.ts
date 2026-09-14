@@ -152,15 +152,15 @@ export class KnowledgeConnectorExtension {
     // this covers pagination, provider retries, and a fresh replay without
     // allowing an over-budget request to leave the Gateway.
     const xPricing = connector === "x" ? this.options.xPricing : undefined;
+    const invocation = currentInvocationContext();
+    if (invocation?.operationId?.startsWith("automation:") && !current.recurringApproved) {
+      throw new GatewayError("unsupported", `Knowledge ${connector} recurrence is not approved`);
+    }
     if (connector === "x") {
       if (!xPricing || xPricing.accountId !== current.accountId || !current.paidAccessApproved
         || !Number.isSafeInteger(xPricing.costCentsPerAttempt) || xPricing.costCentsPerAttempt < 1
         || !Number.isSafeInteger(xPricing.maxAttempts) || xPricing.maxAttempts < 1
         || xPricing.maxAttempts > RETRIES) throw new GatewayError("unsupported", "X connector pricing or allowance is unavailable");
-      const invocation = currentInvocationContext();
-      if (invocation?.operationId?.startsWith("automation:")) {
-        if (!current.recurringApproved) throw new GatewayError("unsupported", "X connector recurrence is not approved");
-      }
     }
     if (connector === "raindrop" && current.paidBudgetCents > 0) throw new GatewayError("unsupported", "Paid connector operations are unavailable without a priced operation");
     if (current.pendingRemote) {
