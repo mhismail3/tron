@@ -891,6 +891,39 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    @Test("mention and slash pickers preserve source selection across catalog refresh", arguments: [true, false])
+    func resourcePickerSourceSelection(mention: Bool) async throws {
+        try await withTestWatchdog(timeout: .seconds(15)) {
+            let snapshot = try SessionScenarioBuilder(seed: 1_249).openingTail(targetEncodedBytes: 10_000)
+            try await withHarness(snapshot: snapshot, enablesComposerSubmission: true, enablesPresentationCover: true) { harness in
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady && $0.nativeGeometryMatches }
+                try await harness.loadCanonicalCommands(["review"], skills: ["skill:review"], prompts: ["review"])
+                try harness.setComposerText(mention ? "@rev" : "/rev")
+                let expected = mention ? ["skill:skill:review"] : ["extension:review", "prompt:review"]
+                _ = try await harness.recorder.waitUntil { _ in
+                    harness.probe.composerPickerEntries?().map(\.id) == expected
+                }
+                // Re-derive while the same trigger remains active. A refresh must
+                // not drop prompts or reinterpret @ as a slash command search.
+                try await harness.loadCanonicalCommands(["review", "other"], skills: ["skill:review"], prompts: ["review"])
+                _ = try await harness.recorder.waitUntil { _ in
+                    harness.probe.composerPickerEntries?().map(\.id) == expected
+                }
+                let selected = try #require(harness.probe.composerPickerEntries?().last)
+                let original = try harness.composerTextAndSelection()
+                harness.probe.composerResourceSelection?(selected)
+                #expect(harness.selectedComposerResource == selected.commandInfo)
+                #expect(harness.selectedComposerResource?.source == (mention ? .skill : .prompt))
+                _ = try await harness.recorder.waitUntil { _ in
+                    (try? harness.composerTextAndSelection().text.isEmpty) == true
+                }
+                let updated = try harness.composerTextAndSelection()
+                #expect(updated.text.isEmpty)
+                #expect(updated.identity == original.identity)
+            }
+        }
+    }
+
     @Test("hosted retirement releases composer control captures")
     func retiredProbeReleasesComposerControls() {
         let probe = ChatHostedProbe()
@@ -2871,7 +2904,7 @@ final class ChatViewScrollHarness {
     var canonicalCommandNames: [String] { model.commands.map(\.name) }
 
     func loadCanonicalCommands(
-        _ names: [String], skills: [String] = [],
+        _ names: [String], skills: [String] = [], prompts: [String] = [],
         beforeResponse: (@MainActor () async throws -> Void)? = nil
     ) async throws {
         let socket = try #require(socket)
@@ -2887,6 +2920,8 @@ final class ChatViewScrollHarness {
                 CommandInfo(name: $0, description: nil, argumentHint: nil, source: .extension, sourcePath: nil)
             } + skills.map {
                 CommandInfo(name: $0, description: nil, argumentHint: nil, source: .skill, sourcePath: nil)
+            } + prompts.map {
+                CommandInfo(name: $0, description: nil, argumentHint: nil, source: .prompt, sourcePath: nil)
             }
             await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
                 "type": .string("response"), "id": .string(id), "ok": .bool(true),

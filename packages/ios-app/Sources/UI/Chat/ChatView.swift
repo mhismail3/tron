@@ -268,7 +268,7 @@ struct ChatView: View {
                 model.composerDrafts.reconcileSelectedResource(for: composerScope, commands: commands)
             }
             if let picker = composerResourcePicker {
-                composerResourceResults = catalog.entries(kind: picker.kind, query: picker.query)
+                composerResourceResults = catalog.entries(for: picker)
             }
             reconcileComposerResourcePicker()
         }
@@ -2774,6 +2774,7 @@ struct ChatView: View {
             attachmentActionsEnabled: attachmentActionsEnabled,
             resourcePickerAvailable: resourcePickerAvailable,
             commandPickerAvailable: currentComposerResourceCatalog != nil,
+            promptPickerAvailable: currentComposerResourceCatalog != nil,
             glassNamespace: composerGlassNamespace,
             onProcessesTap: {
                 sessionPresentation.showProcesses = true
@@ -3012,7 +3013,12 @@ struct ChatView: View {
     private func requestAttachmentPresentation(_ destination: ChatAttachmentDestination) {
         guard attachmentActionsEnabled else { return }
         if destination.isComposerResource {
-            let kind: ComposerResourceEntry.Kind = destination == .skills ? .skill : .command
+            let kind: ComposerResourceEntry.Kind = switch destination {
+            case .skills: .skill
+            case .prompts: .prompt
+            case .commands: .command
+            default: preconditionFailure("non-resource attachment destination")
+            }
             guard currentComposerResourceCatalog != nil,
                   kind != .skill || supportsSkillPrompt else { return }
             sessionPresentation.attachmentPresentationTask?.cancel()
@@ -3087,7 +3093,7 @@ struct ChatView: View {
             sessionPresentation.attachmentPresentationTask?.cancel()
             sessionPresentation.attachmentPresentationTask = nil
             if composerResourcePicker != .token(token) {
-                composerResourceResults = catalog.entries(kind: token.kind, query: token.query)
+                composerResourceResults = catalog.entries(for: .token(token))
                 composerResourcePicker = .token(token)
             }
         } else if case .token = composerResourcePicker {
@@ -3112,11 +3118,11 @@ struct ChatView: View {
             replacement = ComposerCommandCompletionPolicy.removingLeadingCommand(
                 text: replacement.text,
                 selection: replacement.selection,
-                commands: catalog.commands
+                commands: catalog.slashEntries(query: "")
             )
             applyComposerReplacement(replacement)
             model.composerDrafts.selectResource(entry.commandInfo, for: composerScope)
-        case .command:
+        case .command, .prompt:
             let replacement: (text: String, selection: NSRange)
             if case .token(let token) = composerResourcePicker {
                 guard let tokenReplacement = ComposerSuggestionTriggerPolicy.replacing(
@@ -3132,7 +3138,7 @@ struct ChatView: View {
                 replacement = ComposerCommandCompletionPolicy.removingLeadingCommand(
                     text: composerText,
                     selection: composerSelection,
-                    commands: catalog.commands
+                    commands: catalog.slashEntries(query: "")
                 )
             }
             model.composerDrafts.selectResource(entry.commandInfo, for: composerScope)

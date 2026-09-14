@@ -96,12 +96,67 @@ struct ComposerResourcePickerTests {
             command("review-template", source: .prompt, description: "Review now"),
         ])
         #expect(catalog.skills.map(\.displayName) == ["review"])
-        #expect(catalog.commands.map(\.displayName) == ["review-template", "skill:repair", "zeta"])
+        #expect(catalog.commands.map(\.displayName) == ["skill:repair", "zeta"])
+        #expect(catalog.prompts.map(\.displayName) == ["review-template"])
         #expect(catalog.skills.map(\.friendlyName) == ["Review"])
-        #expect(catalog.commands.map(\.friendlyName) == ["Review Template", "Skill Repair", "Zeta"])
+        #expect(catalog.commands.map(\.friendlyName) == ["Skill Repair", "Zeta"])
         #expect(catalog.entries(kind: .skill, query: "rev").map(\.displayName) == ["review"])
-        #expect(catalog.entries(kind: .command, query: "review").map(\.displayName) == ["review-template", "zeta"])
+        #expect(catalog.entries(kind: .command, query: "review").map(\.displayName) == ["zeta"])
+        #expect(catalog.entries(kind: .prompt, query: "review").map(\.displayName) == ["review-template"])
+        #expect(catalog.slashEntries(query: "review").map(\.displayName) == ["review-template", "zeta"])
         #expect(catalog.exactSkill(named: "review")?.invocationName == "skill:review")
+    }
+
+    @Test("picker scopes preserve mentions, dedicated menus, and ranked slash completion")
+    func pickerScopes() throws {
+        let catalog = ComposerResourceCatalog(commands: [
+            command("skill:review", source: .skill),
+            command("review", source: .prompt),
+            command("review", source: .extension),
+            command("aaa", source: .extension, description: "Review changes"),
+        ])
+        let mention = ComposerResourcePickerSource.token(try #require(token("@rev", caret: 4)))
+        let slash = ComposerResourcePickerSource.token(try #require(token("/rev", caret: 4)))
+        #expect(catalog.entries(for: mention).map(\.source) == [.skill])
+        #expect(catalog.entries(for: .menu(.command)).map(\.source) == [.extension, .extension])
+        #expect(catalog.entries(for: .menu(.prompt)).map(\.source) == [.prompt])
+        #expect(catalog.entries(for: slash).map(\.id) == ["extension:review", "prompt:review", "extension:aaa"])
+        #expect(mention.title == "Skills")
+        #expect(slash.title == "Commands & Prompts")
+        #expect(ComposerResourcePickerSource.menu(.command).title == "Commands")
+        #expect(ComposerResourcePickerSource.menu(.prompt).title == "Prompts")
+    }
+
+    @Test("top-level resources are user-authored while user-scope packages and unknown origins are not",
+          arguments: [CommandInfo.Source.skill, .prompt, .extension])
+    func resourceProvenance(source: CommandInfo.Source) throws {
+        let user = try #require(ComposerResourceEntry(command: CommandInfo(
+            name: source == .skill ? "skill:review" : "review",
+            description: nil,
+            argumentHint: nil,
+            source: source,
+            sourcePath: "/resources/review.md",
+            resourceScope: .project,
+            resourceOrigin: .topLevel
+        )))
+        let package = try #require(ComposerResourceEntry(command: CommandInfo(
+            name: source == .skill ? "skill:review" : "review",
+            description: nil,
+            argumentHint: nil,
+            source: source,
+            sourcePath: "/package/resources/review.md",
+            resourceScope: .user,
+            resourceOrigin: .package
+        )))
+        #expect(ComposerResourceBadges.titles(origin: user.resourceOrigin, scope: user.resourceScope) == ["User", "Project"])
+        #expect(ComposerResourceBadges.titles(origin: package.resourceOrigin, scope: package.resourceScope).isEmpty)
+        #expect(ComposerResourceBadges.titles(origin: .topLevel, scope: .user) == ["User"])
+        #expect(ComposerResourceBadges.titles(origin: .package, scope: .project) == ["Project"])
+        #expect(ComposerResourceBadges.titles(origin: nil, scope: .project) == ["Project"])
+        #expect(ComposerResourceBadges.titles(origin: nil, scope: nil).isEmpty)
+        #expect(ComposerResourceContentPresentation.normalizingSoftWraps(
+            in: "A folded\ndescription stays natural."
+        ) == "A folded description stays natural.")
     }
 
     @Test("resource names become user-facing titles without changing invocation identity")
@@ -126,7 +181,10 @@ struct ComposerResourcePickerTests {
         let prompt = ComposerResourceInvocation(source: .prompt, name: "release_notes", arguments: "")
         #expect(CanonicalResourceChipPresentation.title(for: prompt) == "Release Notes")
         #expect(CanonicalResourceChipPresentation.kindTitle(for: prompt) == "Prompt")
-        #expect(CanonicalResourceChipPresentation.tone(for: prompt) == .purple)
+        #expect(CanonicalResourceChipPresentation.icon(for: prompt) == "text.quote")
+        #expect(CanonicalResourceChipPresentation.detailEntry(for: prompt)?.kind == .prompt)
+        #expect(ChatSemanticPillRole.prompt.tone != ChatSemanticPillRole.command.tone)
+        #expect(CanonicalResourceChipPresentation.tone(for: prompt) == ChatSemanticPillRole.prompt.tone)
         #expect(CanonicalResourceChipPresentation.invocationPrefix(for: prompt) == "/")
         #expect(CanonicalResourceChipPresentation.detailEntry(for: prompt)?.commandInfo.name == "release_notes")
 
@@ -226,31 +284,34 @@ struct ComposerResourcePickerTests {
     }
 
     @MainActor
-    @Test("native attachment menu exposes commands and capability-gated skills", arguments: [true, false])
+    @Test("native attachment menu orders capability-gated skills, prompts, and commands", arguments: [true, false])
     func attachmentMenuResources(commandsAvailable: Bool) {
         let supported = ComposerAttachmentMenuButton(
             isEnabled: true,
             showsSkills: true,
+            promptsAvailable: true,
             commandsAvailable: commandsAvailable,
             onSelect: { _ in }
         )
         let supportedActions = ComposerAttachmentMenuButton.Coordinator(parent: supported)
             .makeMenu().children.compactMap { $0 as? UIAction }
-        #expect(supportedActions.last?.attributes.contains(.disabled) == !commandsAvailable)
-        #expect(supportedActions.dropLast().allSatisfy { !$0.attributes.contains(.disabled) })
-        #expect(supportedActions.map(\.title) == ["Take Photo", "Select Photos", "Attach Files", "Add Skills", "Add Commands"])
+        #expect(supportedActions[5].attributes.contains(.disabled) == !commandsAvailable)
+        #expect(supportedActions.prefix(5).allSatisfy { !$0.attributes.contains(.disabled) })
+        #expect(supportedActions.map(\.title) == ["Take Photo", "Select Photos", "Attach Files", "Add Skills", "Add Prompts", "Add Commands"])
 
         let legacy = ComposerAttachmentMenuButton(
             isEnabled: true,
             showsSkills: false,
+            promptsAvailable: false,
             commandsAvailable: commandsAvailable,
             onSelect: { _ in }
         )
         let legacyActions = ComposerAttachmentMenuButton.Coordinator(parent: legacy)
             .makeMenu().children.compactMap { $0 as? UIAction }
         #expect(!legacyActions.map(\.title).contains("Add Skills"))
-        #expect(legacyActions.last?.title == "Add Commands")
-        #expect(legacyActions.last?.attributes.contains(.disabled) == !commandsAvailable)
+        #expect(legacyActions.map(\.title).suffix(2) == ["Add Prompts", "Add Commands"])
+        #expect(legacyActions[4].attributes.contains(.disabled) == !commandsAvailable)
+        #expect(legacyActions[3].attributes.contains(.disabled))
     }
 
     @Test("selected resource detail requires exact identity and bounded content")
@@ -294,8 +355,8 @@ struct ComposerResourcePickerTests {
             command(String(format: "command-%04d", $0), source: .prompt)
         }
         let catalog = ComposerResourceCatalog(commands: commands)
-        #expect(catalog.commands.count == CommandCatalogPolicy.maximumCommands)
-        #expect(catalog.entries(kind: .command, query: "0999").map(\.displayName) == ["command-0999"])
+        #expect(catalog.prompts.count == CommandCatalogPolicy.maximumCommands)
+        #expect(catalog.entries(kind: .prompt, query: "0999").map(\.displayName) == ["command-0999"])
     }
 
     @Test("skill and leading command selection can replace one another without losing arguments")

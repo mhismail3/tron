@@ -25,13 +25,17 @@ enum CanonicalResourceChipPresentation {
     }
 
     static func icon(for resource: ComposerResourceInvocation) -> String {
-        resource.source == .skill ? "sparkles" : "command"
+        switch resource.source {
+        case .skill: "sparkles"
+        case .prompt: "text.quote"
+        case .extension: "command"
+        }
     }
 
     static func tone(for resource: ComposerResourceInvocation) -> ChatNotificationTone {
         switch resource.source {
         case .skill: .information
-        case .prompt: .purple
+        case .prompt: ChatSemanticPillRole.prompt.tone
         case .extension: ChatSemanticPillRole.command.tone
         }
     }
@@ -39,7 +43,7 @@ enum CanonicalResourceChipPresentation {
     @MainActor static func accent(for resource: ComposerResourceInvocation) -> Color {
         switch resource.source {
         case .skill: .tronCyan
-        case .prompt: .tronPurple
+        case .prompt: ChatSemanticPillRole.prompt.accent
         case .extension: ChatSemanticPillRole.command.accent
         }
     }

@@ -1967,10 +1967,21 @@ enter that path. This reconciles the native viewport without resetting chat
 identity. The dashboard likewise retains its atomic rows/activity snapshot
 while covered. The composer's derived command-picker index also pauses beneath
 managed sheets and outside the active scene, without pausing canonical command
-intake or clearing its last installed value. The installed index retains its complete source identity atomically with its value. Picker rows, delayed menu actions, and selection require that source to match the current ready catalog; retained rows are not actionable during reload or replacement derivation. The native Add Commands action remains visible but disabled until the exact index is ready, independently of skill support (`ComposerResourcePickerTests.attachmentMenuResources`). Skills additionally require the current capability at discovery/menu admission (`ChatViewScrollHarnessTests.pickerRejectsRetiredCatalog`). Its existing task carries activity
+intake or clearing its last installed value. The installed index retains its complete source identity atomically with its value. Picker rows, delayed menu actions, and selection require that source to match the current ready catalog; retained rows are not actionable during reload or replacement derivation. The native Add Commands and Add Prompts actions remain visible but disabled until the exact index is ready, independently of skill support (`ComposerResourcePickerTests.attachmentMenuResources`). Skills additionally require the current capability at discovery/menu admission (`ChatViewScrollHarnessTests.pickerRejectsRetiredCatalog`). Its existing task carries activity
 plus exact command/target/capability identity, cancels detached preparation on
 retirement, and rechecks activity/source ownership before publishing or reconciling
 a selected resource. Uncover prepares only the newest complete command set.
+The same catalog owns distinct extension-command, prompt, and skill partitions.
+Menu pickers are category-exclusive; leading slash completion combines commands
+and prompts without losing canonical source identity, while @ remains skill-only.
+Initial derivation and typing share the same picker-scope resolver. Resource
+presentation uses indigo for commands, purple for prompts, and cyan for skills.
+User badges derive from top-level origin, not user installation scope; package
+resources remain package-owned. Project badges independently identify project
+scope, so directly authored project resources show both User and Project. Picker,
+selected-chip, and detail titles share the same badge policy and styling.
+Detail sheets can resolve provenance from their
+admitted response when opened from a canonical transcript chip.
 `ChatViewScrollHarnessTests.coveredChatDefersComposerCatalog` drives real command
 responses under a native managed sheet or an explicitly inactive hosted scene and
 checks suppressed worker admission, retained picker data, current canonical intake,

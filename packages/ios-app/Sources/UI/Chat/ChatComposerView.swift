@@ -34,6 +34,7 @@ struct ChatComposerView: View {
     let attachmentActionsEnabled: Bool
     let resourcePickerAvailable: Bool
     let commandPickerAvailable: Bool
+    let promptPickerAvailable: Bool
     let glassNamespace: Namespace.ID
 
     let onProcessesTap: () -> Void
@@ -161,8 +162,7 @@ struct ChatComposerView: View {
         if let resourcePicker {
             ComposerResourcePicker(
                 sessionID: sessionFacts?.sessionID,
-                kind: resourcePicker.kind,
-                query: resourcePicker.query,
+                source: resourcePicker,
                 entries: resourceResults,
                 keyboardVisible: keyboardVisible,
                 onSelect: onSelectResource,
@@ -256,6 +256,7 @@ struct ChatComposerView: View {
             ComposerAttachmentMenuButton(
                 isEnabled: attachmentActionsEnabled,
                 showsSkills: resourcePickerAvailable,
+                promptsAvailable: promptPickerAvailable,
                 commandsAvailable: commandPickerAvailable,
                 onSelect: onSelectAttachmentDestination
             )

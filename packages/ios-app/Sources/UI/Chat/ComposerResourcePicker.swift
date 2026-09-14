@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 
 struct ComposerResourceEntry: Identifiable, Hashable, Sendable {
-    enum Kind: Hashable, Sendable { case skill, command }
+    enum Kind: Hashable, Sendable { case skill, command, prompt }
 
     let id: String
     let kind: Kind
@@ -27,8 +27,11 @@ struct ComposerResourceEntry: Identifiable, Hashable, Sendable {
             guard command.name.hasPrefix("skill:"), command.name.count > "skill:".count else { return nil }
             kind = .skill
             displayName = String(command.name.dropFirst("skill:".count))
-        case .extension, .prompt:
+        case .extension:
             kind = .command
+            displayName = command.name
+        case .prompt:
+            kind = .prompt
             displayName = command.name
         }
         guard !displayName.isEmpty else { return nil }
@@ -149,7 +152,7 @@ enum ComposerResourceContentPresentation {
     /// Preserve Markdown block boundaries and intentional hard breaks while
     /// letting SwiftUI choose natural visual wrapping for ordinary prose and
     /// list continuations.
-    private static func normalizingSoftWraps(in markdown: String) -> String {
+    static func normalizingSoftWraps(in markdown: String) -> String {
         let lines = markdown.components(separatedBy: "\n")
         guard lines.count > 1 else { return markdown }
 
@@ -267,6 +270,7 @@ struct ComposerResourceCatalog: Equatable, Sendable {
     static let maximumResults = CommandCatalogPolicy.maximumCommands
     private(set) var skills: [ComposerResourceEntry]
     private(set) var commands: [ComposerResourceEntry]
+    private(set) var prompts: [ComposerResourceEntry]
 
     init(commands source: [CommandInfo]) {
         let admitted = source.prefix(CommandCatalogPolicy.maximumCommands).compactMap(ComposerResourceEntry.init)
@@ -277,10 +281,20 @@ struct ComposerResourceCatalog: Equatable, Sendable {
             $0.kind == .skill && !extensionInvocationNames.contains($0.invocationName)
         }.sorted(by: Self.order)
         commands = admitted.filter { $0.kind == .command }.sorted(by: Self.order)
+        prompts = admitted.filter { $0.kind == .prompt }.sorted(by: Self.order)
     }
 
     func entries(kind: ComposerResourceEntry.Kind, query: String) -> [ComposerResourceEntry] {
-        let source = kind == .skill ? skills : commands
+        let source: [ComposerResourceEntry]
+        switch kind {
+        case .skill: source = skills
+        case .command: source = commands
+        case .prompt: source = prompts
+        }
+        return Self.filtered(source, query: query)
+    }
+
+    private static func filtered(_ source: [ComposerResourceEntry], query: String) -> [ComposerResourceEntry] {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalized.isEmpty else { return source }
         var prefixes: [ComposerResourceEntry] = []
@@ -298,6 +312,21 @@ struct ComposerResourceCatalog: Equatable, Sendable {
             return Self.order(lhs, rhs)
         }
         return prefixes.sorted(by: relevanceOrder) + remaining.sorted(by: relevanceOrder)
+    }
+
+    /// Slash completion intentionally searches both extension commands and
+    /// prompts; the selected entry retains its canonical source for admission.
+    func slashEntries(query: String) -> [ComposerResourceEntry] {
+        Self.filtered((commands + prompts).sorted(by: Self.order), query: query)
+    }
+
+    /// Both fresh derivation and subsequent typing use the same picker scope.
+    /// An @ mention never admits slash resources, even after catalog replacement.
+    func entries(for picker: ComposerResourcePickerSource) -> [ComposerResourceEntry] {
+        if case .token(let token) = picker, token.kind == .command {
+            return slashEntries(query: token.query)
+        }
+        return entries(kind: picker.kind, query: picker.query)
     }
 
     func exactSkill(named displayName: String) -> ComposerResourceEntry? {
@@ -458,12 +487,20 @@ enum ComposerResourcePickerSource: Equatable {
         if case .token(let token) = self { return token.query }
         return ""
     }
+
+    var title: String {
+        if case .token(let token) = self, token.kind == .command { return "Commands & Prompts" }
+        return switch kind {
+        case .skill: "Skills"
+        case .command: "Commands"
+        case .prompt: "Prompts"
+        }
+    }
 }
 
 struct ComposerResourcePicker: View {
     let sessionID: String?
-    let kind: ComposerResourceEntry.Kind
-    let query: String
+    let source: ComposerResourcePickerSource
     let entries: [ComposerResourceEntry]
     let keyboardVisible: Bool
     let onSelect: (ComposerResourceEntry) -> Void
@@ -472,10 +509,39 @@ struct ComposerResourcePicker: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var detail: ComposerResourceEntry?
 
-    private var accent: Color { kind == .skill ? Color.tronCyan : ChatSemanticPillRole.command.accent }
-    private var icon: String { kind == .skill ? "sparkles" : "command" }
-    private var title: String { kind == .skill ? "Skills" : "Commands" }
-    private var prefix: String { kind == .skill ? "@" : "/" }
+    private var kind: ComposerResourceEntry.Kind { source.kind }
+    private var query: String { source.query }
+
+    private var accent: Color {
+        switch kind {
+        case .skill: .tronCyan
+        case .prompt: ChatSemanticPillRole.prompt.accent
+        case .command: ChatSemanticPillRole.command.accent
+        }
+    }
+    private var icon: String {
+        switch kind {
+        case .skill: "sparkles"
+        case .prompt: "text.quote"
+        case .command: "command"
+        }
+    }
+    private var title: String { source.title }
+    private func accent(for entry: ComposerResourceEntry) -> Color {
+        switch entry.kind {
+        case .skill: .tronCyan
+        case .prompt: ChatSemanticPillRole.prompt.accent
+        case .command: ChatSemanticPillRole.command.accent
+        }
+    }
+
+    private func icon(for entry: ComposerResourceEntry) -> String {
+        switch entry.kind {
+        case .skill: "sparkles"
+        case .prompt: "text.quote"
+        case .command: "command"
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -546,8 +612,8 @@ struct ComposerResourcePicker: View {
             ComposerResourceDetailSheet(
                 sessionID: sessionID,
                 entry: entry,
-                accent: accent,
-                prefix: prefix
+                accent: accent(for: entry),
+                prefix: entry.kind == .skill ? "@" : "/"
             )
         }
     }
@@ -557,10 +623,10 @@ struct ComposerResourcePicker: View {
             Button { onSelect(entry) } label: {
                 HStack(spacing: 10) {
                     ZStack {
-                        Circle().fill(accent.opacity(0.15)).frame(width: 28, height: 28)
-                        Image(systemName: icon)
+                        Circle().fill(accent(for: entry).opacity(0.15)).frame(width: 28, height: 28)
+                        Image(systemName: icon(for: entry))
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
-                            .foregroundStyle(accent)
+                            .foregroundStyle(accent(for: entry))
                     }
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 5) {
@@ -568,13 +634,14 @@ struct ComposerResourcePicker: View {
                                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
                                 .foregroundStyle(Color.tronTextPrimary)
                                 .lineLimit(1)
-                            if entry.source == .prompt {
-                                sourceBadge("prompt")
-                            } else if entry.source == .extension {
-                                sourceBadge("extension")
-                            }
+                            ComposerResourceBadges(
+                                origin: entry.resourceOrigin, scope: entry.resourceScope,
+                                accent: accent(for: entry)
+                            )
                         }
-                        Text(entry.description ?? entry.argumentHint ?? "No description")
+                        Text(ComposerResourceContentPresentation.normalizingSoftWraps(
+                            in: entry.description ?? entry.argumentHint ?? "No description"
+                        ))
                             .font(TronTypography.caption)
                             .foregroundStyle(Color.tronTextSecondary)
                             .lineLimit(1)
@@ -584,13 +651,13 @@ struct ComposerResourcePicker: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("\(title.dropLast()), \(entry.displayName)")
-            .accessibilityHint("Selects \(prefix)\(entry.displayName)")
+            .accessibilityLabel("\(CanonicalResourceChipPresentation.kindTitle(for: entry.invocation())), \(entry.displayName)\(ComposerResourceBadges.titles(origin: entry.resourceOrigin, scope: entry.resourceScope).map { ", \($0)" }.joined())")
+            .accessibilityHint("Selects \(entry.kind == .skill ? "@" : "/")\(entry.displayName)")
 
             Button { detail = entry } label: {
                 Image(systemName: "info.circle.fill")
                     .font(TronTypography.sans(size: TronTypography.sizeLargeTitle))
-                    .foregroundStyle(accent)
+                    .foregroundStyle(accent(for: entry))
                     .frame(width: 36, height: 36)
                     .contentShape(Rectangle())
             }
@@ -602,13 +669,29 @@ struct ComposerResourcePicker: View {
         .padding(.vertical, 6)
     }
 
-    private func sourceBadge(_ text: String) -> some View {
-        Text(text)
-            .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
-            .foregroundStyle(accent)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 1)
-            .background(accent.opacity(0.15), in: Capsule())
+}
+
+/// Authorship and installation scope are independent: a project may contain
+/// both directly authored resources and package-provided resources.
+struct ComposerResourceBadges: View {
+    let origin: CommandInfo.ResourceOrigin?
+    let scope: CommandInfo.ResourceScope?
+    let accent: Color
+
+    static func titles(origin: CommandInfo.ResourceOrigin?, scope: CommandInfo.ResourceScope?) -> [String] {
+        (origin == .topLevel ? ["User"] : []) + (scope == .project ? ["Project"] : [])
+    }
+
+    var body: some View {
+        ForEach(Self.titles(origin: origin, scope: scope), id: \.self) { title in
+            Text(title)
+                .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
+                .foregroundStyle(accent)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(accent.opacity(0.15), in: Capsule())
+                .fixedSize()
+        }
     }
 }
 
@@ -649,7 +732,14 @@ struct ComposerResourceDetailSheet: View {
                     .accessibilityLabel("Resource Info")
                 }
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: entry.friendlyName, accent: accent)
+                    HStack(spacing: 5) {
+                        TronSheetTitle(title: entry.friendlyName, accent: accent)
+                        ComposerResourceBadges(
+                            origin: detail?.resourceOrigin ?? entry.resourceOrigin,
+                            scope: detail?.resourceScope ?? entry.resourceScope,
+                            accent: accent
+                        )
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
@@ -677,11 +767,24 @@ struct ComposerResourceDetailSheet: View {
     }
 
     private var metadata: [TronTechnicalMetadataItem] {
+        let kindTitle: String
+        let kindIcon: String
+        switch entry.kind {
+        case .skill:
+            kindTitle = "Skill"
+            kindIcon = "sparkles"
+        case .prompt:
+            kindTitle = "Prompt"
+            kindIcon = "text.quote"
+        case .command:
+            kindTitle = "Command"
+            kindIcon = "command"
+        }
         var items = [
             TronTechnicalMetadataItem(
                 title: "Type",
-                value: entry.kind == .skill ? "Skill" : "Command",
-                icon: entry.kind == .skill ? "sparkles" : "command"
+                value: kindTitle,
+                icon: kindIcon
             ),
             TronTechnicalMetadataItem(
                 title: "Invocation",
@@ -739,7 +842,7 @@ struct ComposerResourceDetailSheet: View {
     private var sourceTitle: String {
         switch entry.source {
         case .skill: "Skill resource"
-        case .prompt: "Prompt template"
+        case .prompt: "Prompt"
         case .extension: "Extension command"
         }
     }
@@ -747,7 +850,7 @@ struct ComposerResourceDetailSheet: View {
     @ViewBuilder
     private var summary: some View {
         if let description = resolvedDescription, !description.isEmpty {
-            Text(description)
+            Text(ComposerResourceContentPresentation.normalizingSoftWraps(in: description))
                 .font(TronTypography.body)
                 .foregroundStyle(Color.tronTextPrimary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -820,13 +923,19 @@ struct ComposerResourceChip: View {
         ) {
             HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
                 Button { showsDetail = true } label: {
-                    ChatCompactPillLabel(
-                        icon: resource.commandInfo.source == .skill ? "sparkles" : "command",
-                        title: resource.friendlyName,
-                        tone: tone,
-                        iconSize: TronTypography.sizeBody,
-                        titleWeight: .bold
-                    )
+                    HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
+                        ChatCompactPillLabel(
+                            icon: resourceIcon,
+                            title: resource.friendlyName,
+                            tone: tone,
+                            iconSize: TronTypography.sizeBody,
+                            titleWeight: .bold
+                        )
+                        ComposerResourceBadges(
+                            origin: resource.resourceOrigin, scope: resource.resourceScope,
+                            accent: accent
+                        )
+                    }
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Show resource details, \(resource.friendlyName)")
@@ -859,15 +968,23 @@ struct ComposerResourceChip: View {
     private var tone: ChatNotificationTone {
         switch resource.source {
         case .skill: .information
-        case .prompt: .purple
+        case .prompt: ChatSemanticPillRole.prompt.tone
         case .extension: ChatSemanticPillRole.command.tone
+        }
+    }
+
+    private var resourceIcon: String {
+        switch resource.source {
+        case .skill: "sparkles"
+        case .prompt: "text.quote"
+        case .extension: "command"
         }
     }
 
     private var accent: Color {
         switch resource.source {
         case .skill: .tronCyan
-        case .prompt: .tronPurple
+        case .prompt: ChatSemanticPillRole.prompt.accent
         case .extension: ChatSemanticPillRole.command.accent
         }
     }

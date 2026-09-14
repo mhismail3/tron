@@ -6,9 +6,10 @@ enum ChatAttachmentDestination: Hashable {
     case photos
     case files
     case skills
+    case prompts
     case commands
 
-    var isComposerResource: Bool { self == .skills || self == .commands }
+    var isComposerResource: Bool { self == .skills || self == .prompts || self == .commands }
 }
 
 enum ChatAttachmentImportPolicy {
@@ -20,6 +21,7 @@ enum ChatAttachmentImportPolicy {
 struct ComposerAttachmentMenuButton: UIViewRepresentable {
     let isEnabled: Bool
     let showsSkills: Bool
+    let promptsAvailable: Bool
     let commandsAvailable: Bool
     let onSelect: @MainActor (ChatAttachmentDestination) -> Void
 
@@ -57,6 +59,9 @@ struct ComposerAttachmentMenuButton: UIViewRepresentable {
             if parent.showsSkills {
                 children.append(action("Add Skills", systemImage: "sparkles", destination: .skills))
             }
+            let prompts = action("Add Prompts", systemImage: "text.quote", destination: .prompts)
+            if !parent.promptsAvailable { prompts.attributes = [.disabled] }
+            children.append(prompts)
             let commands = action("Add Commands", systemImage: "command", destination: .commands)
             if !parent.commandsAvailable { commands.attributes = [.disabled] }
             children.append(commands)

@@ -52,6 +52,7 @@ extension ChatNotificationTone {
 /// text; category owns color, and warning/error may override that category.
 enum ChatSemanticPillRole: Hashable, Sendable {
     case command
+    case prompt
     case context
     case tool
     case notification
@@ -59,6 +60,7 @@ enum ChatSemanticPillRole: Hashable, Sendable {
     var tone: ChatNotificationTone {
         switch self {
         case .command: .command
+        case .prompt: .purple
         case .context: .purple
         case .tool: .tool
         case .notification: .information
@@ -70,6 +72,7 @@ enum ChatSemanticPillRole: Hashable, Sendable {
     var label: String {
         switch self {
         case .command: "Command"
+        case .prompt: "Prompt"
         case .context: "Context"
         case .tool: "Tool"
         case .notification: "Notification"

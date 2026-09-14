@@ -456,6 +456,7 @@ struct ChatCompactPillTests {
     @Test("semantic pill roles own a stable cross-extension palette")
     func semanticPillPalette() {
         #expect(ChatSemanticPillRole.command.tone == .command)
+        #expect(ChatSemanticPillRole.prompt.tone == .purple)
         #expect(ChatSemanticPillRole.context.tone == .purple)
         #expect(ChatSemanticPillRole.tool.tone == .tool)
         #expect(ChatSemanticPillRole.notification.tone == .information)
