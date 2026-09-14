@@ -609,7 +609,7 @@ struct SessionContextSheet: View {
                 manageRow(
                     icon: "point.3.connected.trianglepath.dotted",
                     title: "Session History",
-                    subtitle: "Review recent history, audit changes, continue, or create a fork",
+                    subtitle: "Review history, continue, or fork",
                     accent: sessionRowAccent
                 ) { destination = .history }
                 divider()
