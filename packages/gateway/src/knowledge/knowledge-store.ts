@@ -17,6 +17,7 @@ import {
   type KnowledgeConnectorState, type ObservationCoverage, type ObservationRange, validateKnowledgeConfig,
   validateKnowledgeRecord, validateObjectRef, assertKnowledgeId,
 } from "./knowledge-contract.js";
+import { isGatewayTimestamp } from "../util/timestamp.js";
 
 const STATE_MAX_BYTES = 4 * 1_048_576;
 const RECORD_MAX_BYTES = 2 * 1_048_576;
@@ -29,6 +30,12 @@ type RecordHead = { latestRevisionId: string; revisionIds: string[] };
 type Suppression = { excluded: boolean; forgotten: boolean; reason?: string; updatedAt: string };
 type ScopeExclusion = { sessionId?: string; branchId?: string; projectId?: string; excluded: boolean; reason?: string; updatedAt: string };
 type PendingRecordCleanup = { recordId: string; revisionId: string };
+export interface KnowledgeImportCheckpoint {
+  planHash: string;
+  plannedRecordIds: string[];
+  completedRecordIds: string[];
+  updatedAt: string;
+}
 type StoredReceipt = { operation: string; requestHash: string; createdAt: string; result: ReceiptResult; recordIds: string[]; invalidated?: boolean };
 type ReceiptResult =
   | { kind: "record"; recordId: string; revisionId: string; stateRevision: number }
@@ -44,6 +51,8 @@ interface KnowledgeState {
   cleanup: string[];
   /** Forgotten immutable revisions awaiting post-commit removal. */
   recordCleanup?: PendingRecordCleanup[];
+  /** Exact import batch membership and resumable progress, owned by the store. */
+  imports?: Record<string, KnowledgeImportCheckpoint>;
   receipts: Record<string, StoredReceipt>;
   config: KnowledgeConfig;
   /** Connector checkpoints and pending IDs are canonical operational state; secrets are never stored here. */
@@ -95,7 +104,7 @@ async function safeDirectory(path: string, create: boolean): Promise<void> {
 }
 
 function emptyState(): KnowledgeState {
-  return { schemaVersion: KNOWLEDGE_SCHEMA_VERSION, stateRevision: 0, records: {}, coverage: {}, suppressions: {}, scopeExclusions: {}, cleanup: [], recordCleanup: [], receipts: {}, config: structuredClone(DEFAULT_KNOWLEDGE_CONFIG), connectors: {} };
+  return { schemaVersion: KNOWLEDGE_SCHEMA_VERSION, stateRevision: 0, records: {}, coverage: {}, suppressions: {}, scopeExclusions: {}, cleanup: [], recordCleanup: [], imports: {}, receipts: {}, config: structuredClone(DEFAULT_KNOWLEDGE_CONFIG), connectors: {} };
 }
 function validateCoverage(value: unknown): asserts value is ObservationCoverage {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new KnowledgeStoreError("invalid", "Invalid observation coverage");
@@ -147,6 +156,16 @@ function validateState(value: unknown): KnowledgeState {
   if (!state.scopeExclusions || typeof state.scopeExclusions !== "object" || Array.isArray(state.scopeExclusions)) throw new KnowledgeStoreError("invalid", "Invalid scope exclusions");
   if (!Array.isArray(state.cleanup) || state.cleanup.some(hash => typeof hash !== "string" || !OBJECT_HASH.test(hash))) throw new KnowledgeStoreError("invalid", "Invalid knowledge cleanup list");
   if (state.recordCleanup !== undefined && (!Array.isArray(state.recordCleanup) || state.recordCleanup.some(item => !item || typeof item !== "object" || typeof item.recordId !== "string" || typeof item.revisionId !== "string"))) throw new KnowledgeStoreError("invalid", "Invalid record cleanup list");
+  if (state.imports !== undefined) {
+    if (!state.imports || typeof state.imports !== "object" || Array.isArray(state.imports)) throw new KnowledgeStoreError("invalid", "Invalid knowledge import checkpoints");
+    for (const [planHash, checkpoint] of Object.entries(state.imports as Record<string, unknown>)) {
+      if (!OBJECT_HASH.test(planHash) || !checkpoint || typeof checkpoint !== "object" || Array.isArray(checkpoint)) throw new KnowledgeStoreError("invalid", "Invalid knowledge import checkpoint");
+      const item = checkpoint as Record<string, unknown>;
+      const planned = item.plannedRecordIds; const completed = item.completedRecordIds;
+      if (item.planHash !== planHash || !Array.isArray(planned) || !Array.isArray(completed) || planned.length > 20_000 || completed.length > planned.length || !completed.every(id => typeof id === "string" && planned.includes(id)) || typeof item.updatedAt !== "string" || !isGatewayTimestamp(item.updatedAt)) throw new KnowledgeStoreError("invalid", "Invalid knowledge import checkpoint");
+      (planned as unknown[]).forEach(id => assertKnowledgeId(id, "import record id"));
+    }
+  }
   if (!state.receipts || typeof state.receipts !== "object" || Array.isArray(state.receipts)) throw new KnowledgeStoreError("invalid", "Invalid knowledge receipts");
   for (const receipt of Object.values(state.receipts as Record<string, unknown>)) {
     const item = receipt as Record<string, unknown>;
@@ -569,6 +588,30 @@ export class KnowledgeStore {
       if (remaining.length !== pending.length) { state.stateRevision += 1; await this.save(paths, state); }
     });
   }
+  async importCheckpoint(planHash: string): Promise<KnowledgeImportCheckpoint | null> {
+    if (!OBJECT_HASH.test(planHash)) throw invalid("Invalid import plan hash");
+    const paths = await this.paths(false); const loaded = await this.load(paths, false);
+    return loaded.state.imports?.[planHash] ? structuredClone(loaded.state.imports[planHash]) : null;
+  }
+  async beginImport(commandId: string, planHash: string, plannedRecordIds: string[]): Promise<KnowledgeImportCheckpoint> {
+    if (!OBJECT_HASH.test(planHash) || plannedRecordIds.length > 20_000 || plannedRecordIds.some(id => { try { assertKnowledgeId(id, "import record id"); return false; } catch { return true; } })) throw invalid("Invalid import batch");
+    const unique = [...new Set(plannedRecordIds)]; if (unique.length !== plannedRecordIds.length) throw invalid("Import batch contains duplicate record IDs");
+    return this.mutate("knowledge.import.begin", commandId, { planHash, plannedRecordIds: unique }, async state => {
+      state.imports ??= {};
+      const existing = state.imports[planHash];
+      if (existing && (existing.plannedRecordIds.length !== unique.length || existing.plannedRecordIds.some((id, index) => id !== unique[index]))) throw conflict("Import plan membership changed");
+      const checkpoint = existing ?? { planHash, plannedRecordIds: unique, completedRecordIds: [], updatedAt: now() };
+      state.imports[planHash] = checkpoint; return structuredClone(checkpoint);
+    });
+  }
+  async markImportRecord(commandId: string, planHash: string, recordId: string): Promise<KnowledgeImportCheckpoint> {
+    if (!OBJECT_HASH.test(planHash)) throw invalid("Invalid import plan hash"); assertKnowledgeId(recordId, "import record id");
+    return this.mutate("knowledge.import.progress", commandId, { planHash, recordId }, async state => {
+      const checkpoint = state.imports?.[planHash]; if (!checkpoint || !checkpoint.plannedRecordIds.includes(recordId)) throw conflict("Import record is outside the planned batch");
+      if (!checkpoint.completedRecordIds.includes(recordId)) checkpoint.completedRecordIds.push(recordId); checkpoint.updatedAt = now(); return structuredClone(checkpoint);
+    });
+  }
+
   async putObject(bytes: Uint8Array, mediaType: string): Promise<KnowledgeObjectRef> {
     if (bytes.byteLength > OBJECT_MAX_BYTES || !mediaType || mediaType.length > 160) throw invalid("Content object is too large or has an invalid media type"); const hash = createHash("sha256").update(bytes).digest("hex");
     return this.mutex.run(async () => { const paths = await this.paths(true); const initialized = await this.load(paths, true); if (!initialized.present) await this.save(paths, initialized.state); const path = join(paths.objects, hash); const existing = await readSecureBytes(path, OBJECT_MAX_BYTES); if (existing) { if (existing.byteLength !== bytes.byteLength || createHash("sha256").update(existing).digest("hex") !== hash) throw new KnowledgeStoreError("invalid", "Existing knowledge object bytes do not match their identity"); return { hash, mediaType, bytes: bytes.byteLength }; } await durableAtomicWriteBytes(path, bytes); return { hash, mediaType, bytes: bytes.byteLength }; });

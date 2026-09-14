@@ -32,10 +32,12 @@ import { GatewayAutomationExecutor } from "./automations/automation-executor.js"
 import { GatewayScheduleToolOperations } from "./automations/automation-tool-operations.js";
 import { BrowserLiveViewRegistry } from "./display/browser-live-view.js";
 import { KnowledgeStore } from "./knowledge/knowledge-store.js";
+import { createKnowledgeImporter } from "./knowledge/legacy-import.js";
 import { KnowledgeService, ModelRuntimeKnowledgeModel } from "./knowledge/knowledge-service.js";
 import { KnowledgeObservationService, ModelRuntimeObservationModel, modelForConfig } from "./knowledge/knowledge-observation.js";
 import { MacKeychainConnectorCredentialStore } from "./knowledge/connector-credentials.js";
 import { createKnowledgeConnectorExtension } from "./knowledge/connectors.js";
+import { createKnowledgeImporter } from "./knowledge/legacy-import.js";
 
 const config = await loadConfig();
 const configuredSessionDir = SettingsManager.create(process.cwd(), config.agentDir, { projectTrusted: false }).getSessionDir();
@@ -161,7 +163,13 @@ const knowledge = new KnowledgeService(
     },
     workRegistry,
   ),
-  { connector: (action) => knowledgeConnector.invoke(action) },
+  {
+    connector: (action) => knowledgeConnector.invoke(action),
+    importer: createKnowledgeImporter(knowledgeStore, { roots: {
+      ...(process.env.TRON_PERSONAL_OS_ROOT ? { "personal-os": process.env.TRON_PERSONAL_OS_ROOT } : {}),
+      ...(process.env.TRON_LLM_WIKI_ROOT ? { "llm-wiki": process.env.TRON_LLM_WIKI_ROOT } : {}),
+    } }),
+  }
   (knowledgeConfig) => {
     const model = modelForConfig(modelRuntime, knowledgeConfig.observation.model);
     return model ? new ModelRuntimeKnowledgeModel(modelRuntime, model) : undefined;

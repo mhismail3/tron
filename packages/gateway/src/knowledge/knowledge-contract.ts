@@ -38,6 +38,15 @@ export interface KnowledgeProvenance {
   evidence: KnowledgeEvidenceRef[];
 }
 
+/** Stable lineage for records reconstructed from a pinned legacy checkout. */
+export interface KnowledgeImportOrigin {
+  store: "personal-os" | "llm-wiki";
+  recordId: string;
+  revision: string;
+  importedAt: string;
+  review?: { batch?: string; auditId?: string; receiptId?: string; resultRevision?: string; basis?: string };
+}
+
 export interface KnowledgeTemporalQualification {
   eventAt?: string;
   validFrom?: string;
@@ -105,6 +114,8 @@ export interface SourceContent {
   origin?: SourceOriginKind;
   origins?: SourceOrigin[];
   identity?: SourceIdentity;
+  /** Retention and sensitivity are distinct from capture completeness. */
+  retention?: { sensitivity: "public" | "restricted" | "private"; usageConstraint?: string; evidenceAvailable: boolean; originalHash?: string };
   assessment?: SourceAssessment;
 }
 
@@ -157,6 +168,7 @@ export interface NoteContent {
   /** Review/freshness metadata is descriptive and never an automatic deletion date. */
   freshness?: "current" | "aging" | "stale" | "unknown";
   privacyScope?: "private" | "shared";
+  usageConstraint?: string;
 }
 
 export interface KnowledgeRecordBase {
@@ -170,6 +182,7 @@ export interface KnowledgeRecordBase {
   provenance: KnowledgeProvenance;
   temporal?: KnowledgeTemporalQualification;
   relations: KnowledgeRelation[];
+  importOrigin?: KnowledgeImportOrigin;
 }
 
 export type KnowledgeRecord =
@@ -426,8 +439,14 @@ export interface KnowledgeConnectorStatus {
   pending: number;
   paidBudgetCents: number;
 }
-export interface KnowledgeImportDryRunRequest { commandId: string; source: string; limit?: number; }
-export interface KnowledgeImportRunRequest { commandId: string; source: string; expectedPlanHash: string; limit?: number; }
+export interface KnowledgeImportScope {
+  /** Explicitly limits which legacy record families may be admitted. */
+  kinds?: Array<"sources" | "entities" | "assertions">;
+  /** Optional exact legacy IDs; an empty list selects nothing. */
+  ids?: string[];
+}
+export interface KnowledgeImportDryRunRequest { commandId: string; source: string; scope?: KnowledgeImportScope; limit?: number; }
+export interface KnowledgeImportRunRequest { commandId: string; source: string; scope?: KnowledgeImportScope; expectedPlanHash: string; limit?: number; }
 
 export type KnowledgeAction =
   | { operation: "knowledge.status"; request: Record<string, never> }
@@ -512,6 +531,19 @@ export function validateKnowledgeRecord(value: unknown): KnowledgeRecord {
     if (!relation || typeof relation !== "object" || !["supports", "contradicts", "corrects", "supersedes", "derivedFrom", "related"].includes((relation as Record<string, unknown>).type as string)) throw new Error("Invalid relation");
     assertKnowledgeId((relation as Record<string, unknown>).recordId, "relation record id");
   }
+  const importOrigin = item.importOrigin;
+  if (importOrigin !== undefined) {
+    if (!importOrigin || typeof importOrigin !== "object" || Array.isArray(importOrigin)
+      || !["personal-os", "llm-wiki"].includes((importOrigin as Record<string, unknown>).store as string)) throw new Error("Invalid import origin");
+    boundedString((importOrigin as Record<string, unknown>).recordId, "import origin record id", 512);
+    boundedString((importOrigin as Record<string, unknown>).revision, "import origin revision", 200);
+    assertTimestamp((importOrigin as Record<string, unknown>).importedAt, "import origin importedAt");
+    const review = (importOrigin as Record<string, unknown>).review;
+    if (review !== undefined) {
+      if (!review || typeof review !== "object" || Array.isArray(review)) throw new Error("Invalid import review lineage");
+      for (const key of ["batch", "auditId", "receiptId", "resultRevision", "basis"]) if ((review as Record<string, unknown>)[key] !== undefined) boundedString((review as Record<string, unknown>)[key], `import review ${key}`, 512);
+    }
+  }
   const temporal = item.temporal;
   if (temporal !== undefined) {
     if (!temporal || typeof temporal !== "object" || Array.isArray(temporal)) throw new Error("Invalid temporal qualification");
@@ -568,6 +600,12 @@ function validateKindContent(kind: KnowledgeRecordKind, value: unknown): void {
       for (const annotation of content.annotations) { const item = annotation as Record<string, unknown>; boundedString(item.text, "annotation", 20_000); if (item.locator !== undefined) boundedString(item.locator, "annotation locator", 512); if (item.createdAt !== undefined) assertTimestamp(item.createdAt, "annotation createdAt"); }
     }
     if (content.object !== undefined) validateObjectRef(content.object);
+    if (content.retention !== undefined) {
+      const retention = content.retention as Record<string, unknown>;
+      if (!retention || typeof retention !== "object" || Array.isArray(retention) || !["public", "restricted", "private"].includes(retention.sensitivity as string) || typeof retention.evidenceAvailable !== "boolean") throw new Error("Invalid source retention");
+      if (retention.usageConstraint !== undefined) boundedString(retention.usageConstraint, "source usage constraint", 20_000);
+      if (retention.originalHash !== undefined && (typeof retention.originalHash !== "string" || !HASH.test(retention.originalHash))) throw new Error("Invalid source original hash");
+    }
   } else if (kind === "observation") {
     const range = content.range as Record<string, unknown>;
     if (!range || typeof range !== "object" || Array.isArray(range)) throw new Error("Invalid observation range");
@@ -589,6 +627,7 @@ function validateKindContent(kind: KnowledgeRecordKind, value: unknown): void {
     if (content.contraryEvidence !== undefined) { if (!Array.isArray(content.contraryEvidence) || content.contraryEvidence.length > 100) throw new Error("Invalid contrary evidence"); content.contraryEvidence.forEach(assertEvidence); }
     if (content.freshness !== undefined && !["current", "aging", "stale", "unknown"].includes(content.freshness as string)) throw new Error("Invalid note freshness");
     if (content.privacyScope !== undefined && !["private", "shared"].includes(content.privacyScope as string)) throw new Error("Invalid note privacy scope");
+    if (content.usageConstraint !== undefined) boundedString(content.usageConstraint, "note usage constraint", 20_000);
     if (content.fields !== undefined) {
       if (!Array.isArray(content.fields) || content.fields.length > 100) throw new Error("Invalid note fields");
       for (const field of content.fields) {

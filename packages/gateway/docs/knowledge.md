@@ -91,8 +91,8 @@ authorization. A prospective
 failed, and interrupted turns), omits thinking/attachment bodies, uses one
 pinned `ModelRuntime` adapter (the configured model is an explicit
 `provider/model` value), and keeps model/storage latency outside foreground
-settlement. Connector/import calls fail as unsupported until their named
-extension seam is installed.
+settlement. Connector calls fail as unsupported until their named extension seam is installed;
+legacy import is installed only when explicitly named checkout roots are configured.
 
 ## Sources and maintained notes
 
@@ -134,3 +134,24 @@ default and require a locally verified raw object plus readable extraction, expl
 approval, a durable pending receipt before PUT, and exact post-effect reconciliation.
 X exposes no folder moves, browser fallback, automatic unbookmarking, purchases, or
 recharge. A complete label alone is never sufficient for remote acknowledgment.
+
+## Legacy import
+
+`LegacyKnowledgeImporter` is installed through the `KnowledgeExtensionSeam.importer`
+registration. It accepts only an explicitly named, configured `personal-os` or
+`llm-wiki` checkout and a bounded `KnowledgeImportScope` (record families and/or
+exact legacy IDs); it never scans an arbitrary path or invokes legacy wrappers.
+Dry-run returns a deterministic plan hash and stable mappings. Run requires that
+hash and records exact selected batch membership and completed IDs in the
+knowledge store, so a crash can resume without creating a second record.
+
+Legacy source, entity, and assertion IDs are retained in `importOrigin` together
+with the pinned Git revision and import time. Source capture disposition is
+independent of evidence availability: Personal OS metadata-only sources remain
+metadata-only, while Wiki extracts are read from a regular retained file or a
+verified Git blob when available. Git reads disable lazy fetch, prompts, optional
+locks, and helpers; no checkout or remote side effect occurs. Original dates,
+structured assertion values, field evidence, negation, validity, supersession,
+review lineage, sensitivity, and usage constraints remain explicit in typed
+source/note payloads. Missing or over-limit evidence is reported and never
+reconstructed from a hash.
