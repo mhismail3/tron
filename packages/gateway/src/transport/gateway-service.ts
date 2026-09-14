@@ -1656,7 +1656,8 @@ export class GatewayService {
           // readable receipt dependency. Treat that stale reference like a
           // missing record instead of allowing replay/status to resurrect or
           // expose erased evidence.
-          if (!(error instanceof KnowledgeStoreError) || error.kind !== "invalid") throw error;
+          if (!(error instanceof KnowledgeStoreError) || error.kind !== "invalid"
+            || error.message !== "Requested revision is not committed for this record") throw error;
           record = null;
         }
         return record ? { ...value, record: safeJson(record) } : { ...value, record: null };
