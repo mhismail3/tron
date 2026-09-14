@@ -1178,6 +1178,37 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
   });
 
+  it("keeps a live-owned index cut when the owner appends during reconciliation", async () => {
+    const fixture = await coldFixture("live-index-append-race");
+    await fixture.registry.catalog("all");
+    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
+    await waitUntil(() => existsSync(indexPath));
+    await fixture.registry.acquire(fixture.manager.getSessionId());
+    const internals = fixture.registry as unknown as {
+      catalogStructuralIndex: unknown;
+      sessionInfos: () => Promise<unknown[]>;
+    };
+    // Force the same durable-index load path used by a cold registry while
+    // retaining the exact live slot ownership that permits its summary overlay.
+    internals.catalogStructuralIndex = undefined;
+    const scanner = vi.spyOn(internals, "sessionInfos");
+    const indexReconcile = CatalogMetadataIndex.prototype.reconcile;
+    const reconcile = vi.spyOn(CatalogMetadataIndex.prototype, "reconcile");
+    reconcile.mockImplementation(async function (this: CatalogMetadataIndex, ...args) {
+      const rows = await indexReconcile.apply(this, args);
+      fixture.manager.appendMessage(fauxAssistantMessage("append during index reconciliation"));
+      return rows;
+    });
+    try {
+      const listed = await fixture.registry.catalog("all");
+      expect(listed.sessions.map((session) => session.id)).toContain(fixture.manager.getSessionId());
+      expect(scanner).not.toHaveBeenCalled();
+    } finally {
+      reconcile.mockRestore();
+      scanner.mockRestore();
+    }
+  });
+
   it.each([false, true])("publishes reconciled catalog membership without changing an older traversal (restart: %s)", async (restart) => {
     const fixture = await coldFixture("catalog-membership-revision");
     let registry = fixture.registry;
