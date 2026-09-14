@@ -649,10 +649,10 @@ export class RuntimeRegistry {
         this.options.sessionListChanged();
       },
       settled: (sessionId: string) => { this.interrupted.delete(sessionId); },
-      turnSettled: (sessionId: string, entries: readonly import("@earendil-works/pi-coding-agent").FileEntry[], outcome: "completed" | "failed" | "interrupted" | "outcomeUnknown", completionId?: string, branchId?: string) => {
-        // Admission is intentionally detached from canonical terminal receipt
-        // settlement: model/storage latency cannot hold the foreground lane.
-        this.knowledgeService?.observe({ sessionId, entries, outcome, ...(completionId ? { completionId } : {}), ...(branchId ? { branchId } : {}) });
+      turnSettled: (sessionId: string, entries: readonly import("@earendil-works/pi-coding-agent").FileEntry[], outcome: "completed" | "failed" | "interrupted" | "outcomeUnknown", completionId?: string, branchId?: string, projectId?: string, invocationId?: string) => {
+        // Admission is detached from inference, but RuntimeSlot invokes this
+        // only after the terminal receipt and canonical attention barrier settle.
+        this.knowledgeService?.observe({ sessionId, entries, outcome, ...(completionId ? { completionId } : {}), ...(branchId ? { branchId } : {}), ...(projectId ? { projectId } : {}), ...(invocationId ? { invocationId } : {}) });
       },
       assistantResponseCompleted: async (
         sessionId: string,

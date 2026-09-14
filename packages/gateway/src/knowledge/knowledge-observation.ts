@@ -30,6 +30,7 @@ export interface ObservationSettlement {
   entries: readonly unknown[];
   outcome: TerminalOutcome;
   completionId?: string;
+  invocationId?: string;
 }
 
 export interface ObservationModelInput {
@@ -245,24 +246,43 @@ export class KnowledgeObservationService {
     }
     const pendingProjected = projected.slice(coveredPrefix);
     if (pendingProjected.length === 0) return;
+    // A coverage record names exactly the bytes sent to the model. Never claim
+    // the tail of a coalesced canonical snapshot when the bounded prompt only
+    // included its prefix; the suffix is admitted as its own exact chunk.
+    const inputLimit = Math.min(config.observation.maxInputChars, MAX_SOURCE_TEXT);
+    const included: ObservationSourceEntry[] = [];
+    let inputChars = 0;
+    for (const entry of pendingProjected) {
+      const line = `[${entry.timestamp}] ${entry.role ?? entry.type}: ${entry.text}`;
+      if (included.length > 0 && inputChars + line.length + 1 > inputLimit) break;
+      included.push(entry);
+      inputChars += line.length + 1;
+    }
+    const chunk = included.length > 0 ? included : [pendingProjected[0]!];
+    const remaining = pendingProjected.slice(chunk.length);
     const range: ObservationRange = {
       sessionId: settlement.sessionId,
       ...(settlement.branchId ? { branchId: settlement.branchId } : {}),
-      fromEntryId: pendingProjected[0]!.id,
-      toEntryId: pendingProjected.at(-1)!.id,
-      entryIds: pendingProjected.map(entry => entry.id),
-      entryDigest: sourceDigest(projected),
+      fromEntryId: chunk[0]!.id,
+      toEntryId: chunk.at(-1)!.id,
+      entryIds: chunk.map(entry => entry.id),
+      entryDigest: sourceDigest(chunk),
       ...(settlement.projectId ? { projectId: settlement.projectId } : {}),
+      ...(settlement.invocationId ? { invocationIds: [settlement.invocationId] } : {}),
+    };
+    const admitRemaining = () => {
+      if (remaining.length > 0) this.queued.set(settlement.sessionId, { ...settlement, entries: remaining });
     };
     const id = rangeID(range);
     const existing = await this.store.coverage(id).catch(() => null);
     if (existing?.disposition === "observed" || existing?.disposition === "empty" || existing?.disposition === "excluded") return;
     if (this.eligible(config, settlement) === "excluded" || !config.observation.enabled) {
       await this.store.setCoverage({ commandId: commandID("knowledge-excluded", range), expectedConfigRevision: config.revision, ...(existing?.revisionId ? { expectedRevision: existing.revisionId } : {}), coverage: { id, range, disposition: "excluded", groupRevisionIds: [], reason: !config.observation.enabled ? "observation-disabled" : "scope-excluded" } }).catch(() => {});
+      admitRemaining();
       return;
     }
-    const sourceText = bounded(pendingProjected.map(entry => `[${entry.timestamp}] ${entry.role ?? entry.type}: ${entry.text}`).join("\n"), Math.min(config.observation.maxInputChars, MAX_SOURCE_TEXT));
-    const fallbackAt = pendingProjected.at(-1)!.timestamp;
+    const sourceText = chunk.map(entry => `[${entry.timestamp}] ${entry.role ?? entry.type}: ${entry.text}`).join("\n");
+    const fallbackAt = chunk.at(-1)!.timestamp;
     const pending = await this.store.setCoverage({ commandId: commandID("knowledge-pending", range), expectedConfigRevision: config.revision, ...(existing?.revisionId ? { expectedRevision: existing.revisionId } : {}), coverage: { id, range, disposition: "pending", groupRevisionIds: [], reason: "observer-admitted" } }).catch(() => undefined);
     const expectedRevision = pending?.coverage.revisionId ?? existing?.revisionId;
     let work: GatewayWorkHandle | undefined;
@@ -276,13 +296,15 @@ export class KnowledgeObservationService {
       const items = parseModelOutput(raw, range, fallbackAt);
       if (items.length === 0) {
         await this.store.setCoverage({ commandId: commandID("knowledge-empty", range), expectedConfigRevision: config.revision, ...(expectedRevision ? { expectedRevision } : {}), coverage: { id, range, disposition: "empty", groupRevisionIds: [], reason: "no-substantive-observation" } });
+        admitRemaining();
         return;
       }
       const records: Array<KnowledgeRecordDraft & { kind: "observation" }> = items.map(item => ({
-        kind: "observation", scope: "personal", provenance: { actor: "agent", sessionId: settlement.sessionId, ...(settlement.branchId ? { branchId: settlement.branchId } : {}), evidence: range.entryIds.map(entryId => ({ sessionEntry: { sessionId: settlement.sessionId, ...(settlement.branchId ? { branchId: settlement.branchId } : {}), entryId, digest: range.entryDigest } })) },
+        kind: "observation", scope: "personal", provenance: { actor: "agent", sessionId: settlement.sessionId, ...(settlement.branchId ? { branchId: settlement.branchId } : {}), ...(settlement.invocationId ? { invocationId: settlement.invocationId } : {}), evidence: range.entryIds.map(entryId => ({ sessionEntry: { sessionId: settlement.sessionId, ...(settlement.branchId ? { branchId: settlement.branchId } : {}), entryId, digest: range.entryDigest } })) },
         relations: [], content: { range, items: [item], observer: { promptVersion: OBSERVER_PROMPT_VERSION, ...(config.observation.model ? { model: config.observation.model } : {}) } },
       }));
       await this.store.publishObservationGroup({ commandId: commandID("knowledge-publish", range), expectedConfigRevision: config.revision, ...(expectedRevision ? { expectedCoverageRevision: expectedRevision } : {}), coverage: { id, range, disposition: "observed", reason: `terminal:${settlement.outcome}` }, records });
+      admitRemaining();
     } catch (error) {
       if (operationSignal.aborted) return;
       await this.store.setCoverage({ commandId: commandID("knowledge-failed", range), expectedConfigRevision: config.revision, ...(expectedRevision ? { expectedRevision } : {}), coverage: { id, range, disposition: "failed", groupRevisionIds: [], reason: error instanceof Error ? bounded(error.message, 500) : "observer-failed" } }).catch(() => {});

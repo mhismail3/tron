@@ -13,7 +13,7 @@ import {
   type KnowledgeListResponse, type KnowledgeObjectRef, type KnowledgeRecallRequest,
   type KnowledgeRecallResponse, type KnowledgeRecord, type KnowledgeRecordDraft,
   type KnowledgeSearchRequest, type KnowledgeSearchResponse, type KnowledgeSearchHit,
-  type KnowledgeSourceCaptureRequest, type KnowledgeNoteMutationRequest,
+  type KnowledgeNoteMutationRequest,
   type KnowledgeConnectorState, type ObservationCoverage, type ObservationRange, validateKnowledgeConfig,
   validateKnowledgeRecord, validateObjectRef, assertKnowledgeId,
 } from "./knowledge-contract.js";
@@ -30,6 +30,7 @@ type RecordHead = { latestRevisionId: string; revisionIds: string[] };
 type Suppression = { excluded: boolean; forgotten: boolean; reason?: string; updatedAt: string };
 type ScopeExclusion = { sessionId?: string; branchId?: string; projectId?: string; excluded: boolean; reason?: string; updatedAt: string };
 type PendingRecordCleanup = { recordId: string; revisionId: string };
+type SourceRecordWriteRequest = { commandId: string; expectedRevision?: string; record: KnowledgeRecordDraft & { kind: "source" } };
 export interface KnowledgeImportCheckpoint {
   planHash: string;
   plannedRecordIds: string[];
@@ -252,13 +253,14 @@ export class KnowledgeStore {
       if (create) { await safeDirectory(stateRoot, true); stateRootPresent = true; }
     }
     const root = join(stateRoot, "knowledge");
-    if (!stateRootPresent) return { root, state: join(root, "state.json"), objects: join(root, "objects"), records: join(root, "records"), groups: join(root, "groups"), present: false, fresh: false };
+    if (!stateRootPresent) return { root, state: join(root, "state.json"), objects: join(root, "objects"), records: join(root, "records"), groups: join(root, "groups"), present: false, fresh: !(await this.workspace.featureInitialized("knowledge")) };
     let present = true;
     let fresh = false;
     try { await safeDirectory(root, false); } catch (error) {
       if (!(error instanceof KnowledgeStoreError) || !error.message.includes("unavailable")) throw error;
       present = false;
-      if (create) { await safeDirectory(root, true); present = true; fresh = true; }
+      fresh = !(await this.workspace.featureInitialized("knowledge"));
+      if (create) { await safeDirectory(root, true); present = true; }
     }
     const paths = { root, state: join(root, "state.json"), objects: join(root, "objects"), records: join(root, "records"), groups: join(root, "groups"), present, fresh };
     if (!present) return paths;
@@ -269,6 +271,7 @@ export class KnowledgeStore {
       // A namespace created by this owner is marked before its first state commit.
       await safeDirectory(paths.objects, true); await safeDirectory(paths.records, true); await safeDirectory(paths.groups, true);
       await durableAtomicWriteJson(marker, { version: 1 }, 0o600);
+      await this.workspace.markFeatureInitialized("knowledge");
     } else if (JSON.stringify(markerRead.value) !== JSON.stringify({ version: 1 })) throw new KnowledgeStoreError("invalid", "Invalid knowledge initialization record");
     await safeDirectory(paths.objects, false); await safeDirectory(paths.records, false); await safeDirectory(paths.groups, false);
     return { ...paths, fresh };
@@ -278,7 +281,7 @@ export class KnowledgeStore {
     try { read = await readSecureJson<unknown>(paths.state, STATE_MAX_BYTES); }
     catch (error) { if (error instanceof SecureJsonFileError) throw new KnowledgeStoreError(error.kind === "unsafe" ? "unsafe" : "invalid", error.message); throw error; }
     if (!read.present) {
-      if (paths.present && !paths.fresh) throw new KnowledgeStoreError("invalid", "Initialized knowledge state is missing");
+      if (!paths.fresh) throw new KnowledgeStoreError("invalid", "Initialized knowledge state is missing");
       return { state: emptyState(), present: false };
     }
     return { state: validateState(read.value), present: true };
@@ -298,9 +301,39 @@ export class KnowledgeStore {
     try { const record = validateKnowledgeRecord(value.value); if (record.id !== id || record.revisionId !== revision) throw new Error("Record identity does not match its path"); return record; }
     catch (error) { throw new KnowledgeStoreError("invalid", error instanceof Error ? error.message : "Invalid record revision"); }
   }
-  private async allRecords(paths: StorePaths, state: KnowledgeState): Promise<KnowledgeRecord[]> {
+  private recordScope(record: KnowledgeRecord): { sessionId?: string; branchId?: string; projectId?: string } {
+    if (record.kind === "observation") return {
+      sessionId: record.content.range.sessionId,
+      ...(record.content.range.branchId ? { branchId: record.content.range.branchId } : {}),
+      ...(record.content.range.projectId ? { projectId: record.content.range.projectId } : {}),
+    };
+    return {
+      ...(record.provenance.sessionId ? { sessionId: record.provenance.sessionId } : {}),
+      ...(record.provenance.branchId ? { branchId: record.provenance.branchId } : {}),
+    };
+  }
+
+  /** One predicate guards every read boundary, including derivatives and
+   * object authorization. Scope exclusion is stronger than record kind. */
+  private recordExcluded(state: KnowledgeState, record: KnowledgeRecord): boolean {
+    if (state.suppressions[record.id]?.excluded || state.suppressions[record.id]?.forgotten) return true;
+    const scope = this.recordScope(record);
+    if (scope.sessionId && state.config.eligibility.excludedSessionIds.includes(scope.sessionId)) return true;
+    if (scope.projectId && state.config.eligibility.excludedProjectIds.includes(scope.projectId)) return true;
+    const keys = [
+      ...(scope.sessionId ? [`session:${scope.sessionId}`] : []),
+      ...(scope.sessionId && scope.branchId ? [`branch:${scope.sessionId}:${scope.branchId}`] : []),
+      ...(scope.projectId ? [`project:${scope.projectId}`] : []),
+    ];
+    return keys.some(key => state.scopeExclusions[key]?.excluded);
+  }
+
+  private async allRecords(paths: StorePaths, state: KnowledgeState, includeSuppressed = false): Promise<KnowledgeRecord[]> {
     const records: KnowledgeRecord[] = [];
-    for (const [id, head] of Object.entries(state.records)) records.push(await this.readRecord(paths, id, head.latestRevisionId));
+    for (const [id, head] of Object.entries(state.records)) {
+      const record = await this.readRecord(paths, id, head.latestRevisionId);
+      if (includeSuppressed || !this.recordExcluded(state, record)) records.push(record);
+    }
     return records;
   }
   private async receiptResult(paths: StorePaths, state: KnowledgeState, result: ReceiptResult): Promise<unknown> {
@@ -387,24 +420,26 @@ export class KnowledgeStore {
   async list(request: KnowledgeListRequest = {}): Promise<KnowledgeListResponse> {
     const paths = await this.paths(false); const loaded = await this.load(paths, false); const state = loaded.state;
     const limit = Math.min(request.limit ?? 50, state.config.maximumSearchResults); if (!Number.isSafeInteger(limit) || limit < 1) throw invalid("Invalid knowledge list limit");
-    const records = (await this.allRecords(paths, state)).filter(record => (!request.kind || record.kind === request.kind) && (!request.scope || record.scope === request.scope) && (request.includeSuppressed || !state.suppressions[record.id]?.excluded));
+    const records = (await this.allRecords(paths, state, request.includeSuppressed === true)).filter(record => (!request.kind || record.kind === request.kind) && (!request.scope || record.scope === request.scope));
     records.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id)); const start = request.cursor ? Math.max(0, records.findIndex(record => record.id === request.cursor) + 1) : 0; const page = records.slice(start, start + limit);
     return { records: page, ...(start + limit < records.length ? { nextCursor: page.at(-1)!.id } : {}), stateRevision: state.stateRevision };
   }
   async read(id: string, revision?: string, includeSuppressed = false): Promise<KnowledgeRecord | null> {
     safeId(id, "record id"); if (revision !== undefined) safeId(revision, "knowledge revision"); const paths = await this.paths(false); const state = (await this.load(paths, false)).state;
-    if (!includeSuppressed && state.suppressions[id]?.excluded) return null; const head = state.records[id];
+    const head = state.records[id];
     if (!head) return null;
     const selected = revision ?? head.latestRevisionId;
     if (!head.revisionIds.includes(selected)) throw new KnowledgeStoreError("invalid", "Requested revision is not committed for this record");
-    return this.readRecord(paths, id, selected);
+    const record = await this.readRecord(paths, id, selected);
+    if (!includeSuppressed && this.recordExcluded(state, record)) return null;
+    return record;
   }
   async search(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse> {
     if (typeof request.query !== "string" || request.query.trim().length === 0 || request.query.length > 512) throw invalid("Search query must be non-empty and bounded");
     const paths = await this.paths(false); const state = (await this.load(paths, false)).state; const terms = request.query.toLocaleLowerCase().split(/\s+/).filter(Boolean); const hits: KnowledgeSearchHit[] = [];
     // Search the complete bounded canonical corpus first; list() pagination is a presentation limit.
     for (const record of await this.allRecords(paths, state)) {
-      if ((request.kind && record.kind !== request.kind) || (request.scope && record.scope !== request.scope) || state.suppressions[record.id]?.excluded) continue;
+      if ((request.kind && record.kind !== request.kind) || (request.scope && record.scope !== request.scope)) continue;
       const matchedFields: string[] = []; let score = 0;
       for (const [field, value] of searchableFields(record)) { const lower = value.toLocaleLowerCase(); const count = terms.reduce((sum, term) => sum + (lower.includes(term) ? 1 : 0), 0); if (count) { matchedFields.push(field); score += count; } }
       if (score) hits.push({ record, score, matchedFields });
@@ -415,7 +450,7 @@ export class KnowledgeStore {
   async recall(request: KnowledgeRecallRequest): Promise<KnowledgeRecallResponse> {
     const paths = await this.paths(false); const state = (await this.load(paths, false)).state; const terms = request.query?.toLocaleLowerCase().split(/\s+/).filter(Boolean) ?? []; const records: KnowledgeRecord[] = [];
     for (const record of await this.allRecords(paths, state)) {
-      if (state.suppressions[record.id]?.excluded || (request.scope && record.scope !== request.scope)) continue;
+      if ((request.scope && record.scope !== request.scope)) continue;
       if (record.kind === "observation" && request.sessionId && record.content.range.sessionId !== request.sessionId) continue;
       if (record.kind === "observation" && request.entryId && !record.content.range.entryIds.includes(request.entryId)) continue;
       if (terms.length && !searchableFields(record).some(([, value]) => terms.every(term => value.toLocaleLowerCase().includes(term)))) continue;
@@ -438,15 +473,15 @@ export class KnowledgeStore {
       for (const revisionId of head.revisionIds) {
         if (!wanted.has(revisionId)) continue;
         const record = await this.readRecord(paths, id, revisionId);
-        if (record.kind === "observation" && record.content.range.sessionId === sessionId && !state.suppressions[id]?.excluded && !state.suppressions[id]?.forgotten) records.push(record);
+        if (record.kind === "observation" && record.content.range.sessionId === sessionId && !this.recordExcluded(state, record)) records.push(record);
       }
     }
     return records;
   }
 
-  async captureSource(request: KnowledgeSourceCaptureRequest): Promise<KnowledgeMutationResult> {
-    if (!("record" in request)) throw invalid("URL source capture must be handled by the source capture owner");
-    return this.mutate("knowledge.source.capture", request.commandId, request, async (state, paths) => this.putRecord(state, paths, request.record, request.expectedRevision));
+  /** Internal source/import owner write. The transport action accepts URLs only. */
+  async captureSource(request: SourceRecordWriteRequest): Promise<KnowledgeMutationResult> {
+    return this.mutate("knowledge.source.record-write", request.commandId, request, async (state, paths) => this.putRecord(state, paths, request.record as KnowledgeRecordDraft, request.expectedRevision));
   }
   async createNote(request: KnowledgeNoteMutationRequest & { recordId?: never }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.create", request.commandId, request, async (state, paths) => this.putRecord(state, paths, request.record)); }
   async updateNote(request: KnowledgeNoteMutationRequest & { recordId: string }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.update", request.commandId, request, async (state, paths) => { const current = await this.currentRecord(state, paths, request.recordId); if (!current || current.kind !== "note") throw conflict("Knowledge note does not exist"); if (request.expectedRevision !== current.revisionId) throw conflict("Knowledge note revision is stale"); return this.putRecord(state, paths, { ...request.record, id: request.recordId, createdAt: current.createdAt }, request.expectedRevision); }); }
@@ -573,7 +608,11 @@ export class KnowledgeStore {
       for (const receipt of Object.values(state.receipts)) if (receipt.recordIds.includes(recordId)) { receipt.recordIds = []; receipt.result = { kind: "value", value: null }; receipt.invalidated = true; }
       // Derivative references are redacted and hidden, rather than leaving a
       // current unsupported claim available after its evidence is forgotten.
-      for (const [id, head] of Object.entries(state.records)) { const derivative = await this.readRecord(paths, id, head.latestRevisionId); const scrubbed = scrubReferences(derivative, recordId); if (scrubbed) { await durableAtomicWriteJson(this.recordPath(paths, id, scrubbed.revisionId), scrubbed, 0o600); state.records[id] = { latestRevisionId: scrubbed.revisionId, revisionIds: [...head.revisionIds, scrubbed.revisionId] }; state.suppressions[id] = { excluded: true, forgotten: false, reason: "Dependent evidence was forgotten", updatedAt: now() }; } }
+      const scrubbedRecordIds = new Set<string>();
+      for (const [id, head] of Object.entries(state.records)) { const derivative = await this.readRecord(paths, id, head.latestRevisionId); const scrubbed = scrubReferences(derivative, recordId); if (scrubbed) { await durableAtomicWriteJson(this.recordPath(paths, id, scrubbed.revisionId), scrubbed, 0o600); state.records[id] = { latestRevisionId: scrubbed.revisionId, revisionIds: [...head.revisionIds, scrubbed.revisionId] }; state.suppressions[id] = { excluded: true, forgotten: false, reason: "Dependent evidence was forgotten", updatedAt: now() }; scrubbedRecordIds.add(id); } }
+      // A receipt is another replay path. Invalidate receipts for every
+      // derivative rewritten by the forget, not only the forgotten source.
+      for (const receipt of Object.values(state.receipts)) if (receipt.recordIds.some(id => scrubbedRecordIds.has(id))) { receipt.recordIds = []; receipt.result = { kind: "value", value: null }; receipt.invalidated = true; }
       return { forgotten: true, recordId, stateRevision: state.stateRevision + 1 };
     }, async (state, paths) => {
       // A failed post-commit deletion is safe: the state no longer references
@@ -623,9 +662,12 @@ export class KnowledgeStore {
     // a retained, unsuppressed record before exposing bytes.
     let authorized = false;
     for (const [id, head] of Object.entries(loaded.state.records)) {
-      if (loaded.state.suppressions[id]?.excluded || loaded.state.suppressions[id]?.forgotten) continue;
+      const candidate = await this.readRecord(paths, id, head.latestRevisionId);
+      if (this.recordExcluded(loaded.state, candidate)) continue;
       for (const revision of head.revisionIds) {
-        if ((await this.recordObjectHashes(paths, id, revision)).includes(ref.hash)) { authorized = true; break; }
+        const revisionRecord = await this.readRecord(paths, id, revision);
+        if (this.recordExcluded(loaded.state, revisionRecord)) continue;
+        if (recordObjectHashes(revisionRecord).includes(ref.hash)) { authorized = true; break; }
       }
       if (authorized) break;
     }

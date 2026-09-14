@@ -285,7 +285,7 @@ export interface RuntimeSlotHooks {
   settled: (sessionId: string) => void;
   /** Fire-and-forget canonical observation admission after Pi has appended the
    * terminal turn. Implementations must never delay foreground settlement. */
-  turnSettled?: (sessionId: string, entries: readonly FileEntry[], outcome: "completed" | "failed" | "interrupted" | "outcomeUnknown", completionId?: string, branchId?: string) => void;
+  turnSettled?: (sessionId: string, entries: readonly FileEntry[], outcome: "completed" | "failed" | "interrupted" | "outcomeUnknown", completionId?: string, branchId?: string, projectId?: string, invocationId?: string) => void;
   assistantResponseCompleted: (
     sessionId: string,
     completion: CanonicalAssistantCompletion,
@@ -779,6 +779,12 @@ export class RuntimeSlot {
   canonicalSessionEntries(): FileEntry[] {
     const header = this.sessionManager.getHeader();
     return header ? [header, ...this.sessionManager.getEntries()] : [];
+  }
+
+  private observationEntries(operationId: string): { entries: readonly FileEntry[]; branchId: string } {
+    const entries = this.canonicalSessionEntries();
+    const start = this.observationStarts.get(operationId);
+    return { entries: start ? entries.slice(start.entryIndex) : entries, branchId: start?.branchId ?? this.runtime.session.sessionManager.getLeafId() ?? "root" };
   }
 
   get cwd(): string {
@@ -2164,6 +2170,8 @@ export class RuntimeSlot {
     });
   }
 
+  private readonly observationStarts = new Map<string, { entryIndex: number; branchId: string }>();
+
   private completionObserved(completionId: string): boolean {
     const existing = this.completionDispositions.get(completionId);
     if (existing !== undefined) return existing;
@@ -2746,6 +2754,7 @@ export class RuntimeSlot {
         this.toolStartedAtMonotonicMs.clear();
         this.nextToolOrder = 0;
         this.activeOperationId ??= requiresDistinctAgentOwner ? randomUUID() : (preflightOwner ?? randomUUID());
+        this.observationStarts.set(this.activeOperationId, { entryIndex: this.canonicalSessionEntries().length, branchId: this.runtime.session.sessionManager.getLeafId() ?? "root" });
         if (!continuesToolSegment) {
           if (beginsWithUserInput) this.ownToolSegment(this.activeOperationId);
           else this.prepareAssistantOwnedToolSegment();
@@ -2808,10 +2817,9 @@ export class RuntimeSlot {
         const terminalErrorCode = terminalLifecycle === "interrupted"
           ? (settledOperationId && this.abortedOperations.has(settledOperationId) ? "user-abort" : "agent-aborted")
           : terminalLifecycle === "failed" ? "agent-error" : undefined;
-        if (settledOperationId) {
-          const completionId = this.pendingAssistantCompletion?.id;
-          this.hooks.turnSettled?.(this.id, this.canonicalSessionEntries(), terminalLifecycle, completionId, this.runtime.session.sessionManager.getLeafId() ?? "root");
-        }
+        // Observation admission is issued only after the exact terminal receipt
+        // path below settles; before that point canonical durability is still
+        // provisional and must not be projected as memory coverage.
         this.activeOperationId = undefined;
         this.ownToolSegment(undefined);
         this.operation = this.compactionOperation;
@@ -2847,6 +2855,9 @@ export class RuntimeSlot {
                 await this.terminalizeInvocation(settledOperationId, terminalLifecycle, terminalErrorCode);
               }
               await this.beginAttentionSettlement(completion);
+              const observed = this.observationEntries(completion.operationId ?? settledOperationId ?? "");
+              this.hooks.turnSettled?.(this.id, observed.entries, terminalLifecycle, completion.id, observed.branchId, this.cwd, settledOperationId ? this.invocationForOperation(settledOperationId)?.invocationId : undefined);
+              if (settledOperationId) this.observationStarts.delete(settledOperationId);
               if (settledOperationId && settledOperationId !== completion.operationId) {
                 await this.clearMarkerOwnership(settledOperationId);
                 this.abortedOperations.delete(settledOperationId);
@@ -2863,6 +2874,9 @@ export class RuntimeSlot {
               terminalLifecycle,
               terminalErrorCode,
             ).then(async () => {
+              const observed = this.observationEntries(settledOperationId);
+              this.hooks.turnSettled?.(this.id, observed.entries, terminalLifecycle, undefined, observed.branchId, this.cwd, this.invocationForOperation(settledOperationId)?.invocationId);
+              this.observationStarts.delete(settledOperationId);
               if (terminalNotification) await this.notifyAgentTerminal(terminalNotification.sourceId, terminalNotification.outcome);
               await this.clearMarkerOwnership(settledOperationId);
             });

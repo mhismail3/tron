@@ -5,7 +5,7 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import type {
   KnowledgeEvidenceRef, KnowledgeObjectRef, KnowledgeRecord, KnowledgeRecordDraft,
-  KnowledgeScope, KnowledgeSourceCaptureRequest, SourceAssessment, SourceContent,
+  KnowledgeScope, SourceAssessment, SourceContent,
   SourceIdentity, SourceOriginKind,
 } from "./knowledge-contract.js";
 import { KnowledgeStore } from "./knowledge-store.js";
@@ -66,7 +66,7 @@ function sourceOrigin(kind: SourceOriginKind, at: string, input: { uri?: string;
 
 function isPrivateAddress(address: string): boolean {
   const normalized = address.toLowerCase().replace(/^\[|\]$/g, "");
-  const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  const mapped = normalized.match(/^(?:0:){5}(?:ffff|0:ffff):?(\d+\.\d+\.\d+\.\d+)$/i) ?? normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
   if (mapped?.[1]) return isPrivateAddress(mapped[1]);
   if (isIP(normalized) === 4) {
     const octets = normalized.split(".").map(Number);
@@ -116,9 +116,12 @@ async function pinnedFetch(url: URL, address: string, init: RequestInit = {}): P
   return new Promise((resolve, reject) => {
     const requestHeaders = Object.fromEntries([...headers].map(([name, value]) => [name, value]));
     const req = transport({ hostname: address, ...(url.port ? { port: url.port } : {}), path: `${url.pathname}${url.search}`, method: "GET", headers: requestHeaders, ...(url.protocol === "https:" ? { servername: url.hostname } : {}), lookup: (_hostname, _options, callback) => callback(null, address, isIP(address)), }, response => {
-      const body = new ReadableStream<Uint8Array>({ start(controller) { response.on("data", chunk => controller.enqueue(new Uint8Array(chunk))); response.on("end", () => controller.close()); response.on("error", error => controller.error(error)); }, cancel() { response.destroy(); } });
+      const status = response.statusCode ?? 200;
+      // Node may invoke the callback for bodyless statuses. Do not attach a
+      // stream (or a body) for statuses whose wire contract forbids one.
+      const body = [204, 205, 304].includes(status) ? null : new ReadableStream<Uint8Array>({ start(controller) { response.on("data", chunk => controller.enqueue(new Uint8Array(chunk))); response.on("end", () => controller.close()); response.on("error", error => controller.error(error)); }, cancel() { response.destroy(); } });
       const responseHeaders = Object.fromEntries(Object.entries(response.headers).map(([name, value]) => [name, Array.isArray(value) ? value.join(", ") : value ?? ""]));
-      resolve(new Response(body, { status: response.statusCode ?? 200, ...(response.statusMessage ? { statusText: response.statusMessage } : {}), headers: responseHeaders }));
+      resolve(new Response(body, { status, ...(response.statusMessage ? { statusText: response.statusMessage } : {}), headers: responseHeaders }));
     });
     const signal = init.signal;
     const abort = () => req.destroy(new Error("Source fetch cancelled"));
@@ -254,11 +257,12 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
   const sourceUrl = assertSafeUrl(input.url);
   const existing = await allSourceRecords(store);
   const normalized = normalizedUrl(sourceUrl.toString());
-  const duplicate = existing.find(record => record.scope === input.scope && record.content.captureDisposition !== "failed" && record.content.captureDisposition !== "inaccessible" && ((input.identity && record.content.identity && JSON.stringify(record.content.identity) === JSON.stringify(input.identity)) || (record.content.uri && normalizedUrl(record.content.uri) === normalized)));
+  const duplicate = existing.find(record => record.scope === input.scope && record.content.captureDisposition === "complete" && ((input.identity && record.content.identity && JSON.stringify(record.content.identity) === JSON.stringify(input.identity)) || (record.content.uri && normalizedUrl(record.content.uri) === normalized)));
+  const retryTarget = existing.find(record => record.scope === input.scope && record.content.captureDisposition !== "complete" && ((input.identity && record.content.identity && JSON.stringify(record.content.identity) === JSON.stringify(input.identity)) || (record.content.uri && normalizedUrl(record.content.uri) === normalized)));
   if (duplicate) {
     const kind = input.origin ?? "manual";
     const origins = duplicate.content.origins ?? (duplicate.content.origin ? [{ kind: duplicate.content.origin, capturedAt: duplicate.content.capturedAt }] : []);
-    const nextOrigins = origins.some(origin => origin.kind === kind && JSON.stringify(origin.identity) === JSON.stringify(input.identity)) ? origins : [...origins, { kind, capturedAt: now(), ...(duplicate.content.uri ? { uri: duplicate.content.uri } : {}), ...(input.identity ? { identity: input.identity } : {}) }];
+    const nextOrigins = origins.some(origin => origin.kind === kind && origin.uri === sourceUrl.toString() && JSON.stringify(origin.identity) === JSON.stringify(input.identity)) ? origins : [...origins, { kind, capturedAt: now(), uri: sourceUrl.toString(), ...(input.identity ? { identity: input.identity } : {}) }];
     const annotations = input.annotations ? [...(duplicate.content.annotations ?? []), ...input.annotations.filter(annotation => !(duplicate.content.annotations ?? []).some(previous => previous.text === annotation.text && previous.locator === annotation.locator))] : duplicate.content.annotations;
     if (nextOrigins.length !== origins.length || annotations?.length !== duplicate.content.annotations?.length) {
       const mergedContent: SourceContent = { ...duplicate.content, origins: nextOrigins, ...(annotations ? { annotations } : {}) };
@@ -278,7 +282,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
   try {
     fetched = await fetchSafe(sourceUrl.toString(), { ...(fetcher ? { fetcher } : {}), resolveHost, signal: operationController.signal, limits });
   } catch (error) {
-    if (!(error instanceof SourceNetworkError)) throw error;
+    if (!(error instanceof SourceNetworkError)) { clearTimeout(deadlineTimer); options.signal?.removeEventListener("abort", relayAbort); throw error; }
     if (operationController.signal.aborted) { clearTimeout(deadlineTimer); options.signal?.removeEventListener("abort", relayAbort); throw invalid("Source fetch timed out or was cancelled"); }
     const capturedAt = timestamp(now);
     const failedContent: SourceContent = { title: input.title?.trim() || sourceUrl.hostname, uri: sourceUrl.toString(), captureDisposition: "failed", capturedAt, origin: input.origin ?? "manual", origins: sourceOrigin(input.origin ?? "manual", capturedAt, { uri: sourceUrl.toString(), ...(input.identity ? { identity: input.identity } : {}) }), ...(input.annotations ? { annotations: input.annotations } : {}), ...(input.identity ? { identity: input.identity } : {}) };
@@ -295,8 +299,18 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
   let object: KnowledgeObjectRef | undefined;
   if (bytes && bytes.byteLength > 0) {
     const contentHash = createHash("sha256").update(bytes).digest("hex");
-    const contentDuplicate = existing.find(record => record.scope === input.scope && record.content.captureDisposition !== "failed" && record.content.captureDisposition !== "inaccessible" && record.content.object?.hash === contentHash);
-    if (contentDuplicate) { clearTimeout(deadlineTimer); options.signal?.removeEventListener("abort", relayAbort); return { record: contentDuplicate, duplicate: true, fetched: true }; }
+    const contentDuplicate = existing.find(record => record.scope === input.scope && record.content.captureDisposition === "complete" && record.content.object?.hash === contentHash);
+    if (contentDuplicate) {
+      const kind = input.origin ?? "manual";
+      const origins = contentDuplicate.content.origins ?? (contentDuplicate.content.origin ? [{ kind: contentDuplicate.content.origin, capturedAt: contentDuplicate.content.capturedAt, ...(contentDuplicate.content.uri ? { uri: contentDuplicate.content.uri } : {}) }] : []);
+      const incomingOrigin = { kind, capturedAt, uri: sourceUrl.toString(), ...(input.identity ? { identity: input.identity } : {}) };
+      const annotations = input.annotations ? [...(contentDuplicate.content.annotations ?? []), ...input.annotations.filter(annotation => !(contentDuplicate.content.annotations ?? []).some(previous => previous.text === annotation.text && previous.locator === annotation.locator))] : contentDuplicate.content.annotations;
+      const mergedContent: SourceContent = { ...contentDuplicate.content, origins: origins.some(origin => origin.uri === incomingOrigin.uri && JSON.stringify(origin.identity) === JSON.stringify(incomingOrigin.identity)) ? origins : [...origins, incomingOrigin], ...(annotations ? { annotations } : {}) };
+      const merged = await store.captureSource({ commandId: input.commandId, expectedRevision: contentDuplicate.revisionId, record: { kind: "source", id: contentDuplicate.id, createdAt: contentDuplicate.createdAt, scope: contentDuplicate.scope, provenance: contentDuplicate.provenance, relations: contentDuplicate.relations, content: mergedContent } });
+      clearTimeout(deadlineTimer); options.signal?.removeEventListener("abort", relayAbort);
+      if (merged.record.kind !== "source") throw new Error("Source deduplication returned a non-source record");
+      return { record: merged.record, duplicate: true, fetched: true };
+    }
     object = await store.putObject(bytes, mediaType ?? "application/octet-stream");
   }
   const kind = input.origin ?? "manual";
@@ -305,9 +319,9 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
     uri: fetched.finalUrl,
     ...(readable ? { text: readable.text } : {}), ...(object ? { object } : {}), ...(mediaType ? { mediaType } : {}),
     captureDisposition: disposition, ...(input.annotations ? { annotations: input.annotations } : {}), capturedAt,
-    origin: kind, origins: sourceOrigin(kind, capturedAt, { uri: fetched.finalUrl, ...(input.identity ? { identity: input.identity } : {}) }), ...(input.identity ? { identity: input.identity } : {}),
+    origin: kind, origins: [...(retryTarget?.content.origins ?? []), ...sourceOrigin(kind, capturedAt, { uri: fetched.finalUrl, ...(input.identity ? { identity: input.identity } : {}) }), ...(fetched.finalUrl !== sourceUrl.toString() ? [{ kind, capturedAt, uri: sourceUrl.toString(), ...(input.identity ? { identity: input.identity } : {}) }] : [])], ...(input.identity ? { identity: input.identity } : {}),
   };
-  const request: KnowledgeSourceCaptureRequest = { commandId: input.commandId, ...(input.expectedRevision ? { expectedRevision: input.expectedRevision } : {}), record: sourceDraft(input, content) };
+  const request = { commandId: input.commandId, ...(input.expectedRevision ? { expectedRevision: input.expectedRevision } : retryTarget ? { expectedRevision: retryTarget.revisionId } : {}), record: { ...sourceDraft(input, content), ...(retryTarget ? { id: retryTarget.id, createdAt: retryTarget.createdAt } : {}) } };
   let result = await store.captureSource(request);
   if (result.record.kind !== "source") throw new Error("Source capture returned a non-source record");
   let sourceRecord = result.record;

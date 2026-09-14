@@ -54,19 +54,12 @@ describe("knowledge connectors", () => {
     expect((await store.list({ kind: "source" })).records).toHaveLength(1);
   });
 
-  it("uses the documented X bookmarks path and exposes authentication failures without token leakage", async () => {
-    let requested = "";
-    const { store, extension } = await fixture(async (url, init) => {
-      requested = url;
-      expect(init.headers.authorization).toBe("Bearer synthetic-x-token");
-      return response({ error: "unauthorized" }, 401);
-    });
+  it("does not contact X without explicit paid access and budget", async () => {
+    let calls = 0;
+    const { extension } = await fixture(async () => { calls += 1; return response({ data: [] }); });
     await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("x-configure"), connector: "x", enabled: true, accountId: "account-1", scope: "123", credentialRef: "connector:x:test-account" } });
     await expect(extension.invoke({ operation: "knowledge.connector.run", request: { commandId: command("x-run"), connector: "x", dryRun: false, limit: 1 } })).rejects.toMatchObject({ code: "unsupported" });
-    expect(requested).toBe("https://api.x.com/2/users/123/bookmarks?max_results=50&tweet.fields=created_at,entities,author_id");
-    const state = await store.connectorState("x");
-    expect(state?.health).toBe("auth-error");
-    expect(JSON.stringify(state)).not.toContain("synthetic-x-token");
+    expect(calls).toBe(0);
   });
 
   it("reconciles an effect-before-response crash from a durable Raindrop receipt", async () => {
@@ -79,7 +72,7 @@ describe("knowledge connectors", () => {
     const captured = await store.captureSource({ commandId: command("source"), record: { kind: "source", scope: "research", provenance: { actor: "connector", evidence: [] }, relations: [], content: { title: "Captured", uri: "https://example.com/1", text: "captured article", object, captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00.000Z" } } });
     await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("write-approved"), connector: "raindrop", enabled: true, accountId: "account-1", scope: "123", credentialRef: "connector:raindrop:test-account", destination: "456", allowWrites: true } });
     await expect(extension.moveRaindrop({ commandId: command("move-uncertain"), itemId: "1", destination: "456", source: captured.record as typeof captured.record & { kind: "source" } })).resolves.toEqual({ status: "conflict" });
-    expect(putAttempts).toBe(3);
+    expect(putAttempts).toBe(1);
     expect((await store.connectorState("raindrop"))?.pendingRemote?.itemId).toBe("1");
     const status = await extension.reconcile("raindrop");
     expect(status.health).toBe("ready");

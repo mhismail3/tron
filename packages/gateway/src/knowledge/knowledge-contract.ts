@@ -327,7 +327,9 @@ export interface KnowledgeSourceURLCaptureRequest {
   expectedRevision?: string;
 }
 
-export type KnowledgeSourceCaptureRequest = KnowledgeSourceRecordCaptureRequest | KnowledgeSourceURLCaptureRequest;
+/** Transport callers may request only URL capture. Record writes are owned by
+ * source/import implementations and are not part of the Gateway action. */
+export type KnowledgeSourceCaptureRequest = KnowledgeSourceURLCaptureRequest;
 
 export interface KnowledgeNoteMutationRequest {
   commandId: string;

@@ -6,8 +6,13 @@ first deliberate mutation creates the owner-only namespace:
 
 ```text
 state/knowledge/
-  initialized.json          # durable evidence that this namespace was created
+  initialized.json          # namespace-local integrity marker
   state.json                 # small atomic control state only
+
+The workspace-owned `gateway/workspace-state/initialized.json` also records
+that Knowledge was initialized. This evidence is outside the deletable
+namespace, so deleting an established namespace reports invalid/lost state
+instead of silently creating a pristine corpus.
   records/<record-id>/<revision-id>.json
   groups/<coverage-id>-<revision-id>.json
   objects/<sha256>           # immutable raw content-addressed bytes
@@ -91,7 +96,9 @@ authorization. A prospective
 failed, and interrupted turns), omits thinking/attachment bodies, uses one
 pinned `ModelRuntime` adapter (the configured model is an explicit
 `provider/model` value), and keeps model/storage latency outside foreground
-settlement. Connector calls fail as unsupported until their named extension seam is installed;
+settlement. Admission occurs only after the runtime's terminal receipt and
+canonical attention barrier; bounded model chunks name only their exact entry
+IDs and digest, and any remaining suffix is admitted as a separate chunk. Connector calls fail as unsupported until their named extension seam is installed;
 legacy import is installed only when explicitly named checkout roots are configured.
 
 ## Sources and maintained notes
@@ -137,7 +144,10 @@ recharge. A complete label alone is never sufficient for remote acknowledgment. 
 runs are serialized per provider; pending discovery is advanced only after the complete
 bounded page is durably retained, and incomplete/partial captures remain pending for
 retry. Paid budgets are rejected until a provider operation has an explicit maintained
-price; approval flags never imply unknown spend.
+price; approval flags never imply unknown spend. X is not contacted unless
+both explicit paid-access approval and a positive bounded budget are present.
+Uncertain remote PUTs are not retried; the persisted receipt is reconciled
+before another connector effect.
 
 ## Legacy import
 

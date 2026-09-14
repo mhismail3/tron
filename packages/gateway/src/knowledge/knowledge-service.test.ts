@@ -31,6 +31,20 @@ describe("KnowledgeService integration", () => {
     expect((await store.read(source.record.id))?.content).toMatchObject({ assessment: { summary: "Useful source" } });
   });
 
+  it("rejects excluded observation revisions before invoking the Reflector", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const config = await store.configure("service-reflect-config", { ...(await store.config()), observation: { ...(await store.config()).observation, model: "fixture/model" }, eligibility: { ...(await store.config()).eligibility, sessionIds: ["service-session"] } });
+    const range = { sessionId: "service-session", fromEntryId: "service-entry", toEntryId: "service-entry", entryIds: ["service-entry"], entryDigest: "a".repeat(64) };
+    const published = await store.publishObservationGroup({ commandId: "service-reflect-source", expectedConfigRevision: config.revision, coverage: { id: "service-reflect-coverage", range, disposition: "observed" }, records: [{ kind: "observation", scope: "personal", provenance: { actor: "agent", sessionId: range.sessionId, evidence: [] }, relations: [], content: { range, items: [{ text: "withheld", attribution: "user", observedAt: "2026-01-01T00:00:00Z", certainty: "qualified" }] } }] });
+    await store.setScopeExclusion("service-reflect-exclude", { sessionId: range.sessionId }, true, "privacy");
+    let calls = 0;
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => ({ ...model(), async reflect() { calls += 1; return "must not run"; } }));
+    await expect(service.invoke({ operation: "knowledge.reflect", request: { commandId: "service-reflect", sessionId: range.sessionId, sourceRevisionIds: [published.records[0]!.revisionId] } })).rejects.toThrow();
+    expect(calls).toBe(0);
+    expect(await store.read(published.records[0]!.id)).toBeNull();
+  });
+
   it("exposes typed connector sweeps to existing Automation tool callers", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));

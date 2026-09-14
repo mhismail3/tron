@@ -54,6 +54,16 @@ describe("safe source capture", () => {
     expect(Date.now() - started).toBeLessThan(2_000);
   });
 
+  it("upgrades an incomplete URL capture in place on retry", async () => {
+    const { store } = await fixture();
+    const partial = await captureSource(store, { commandId: command("partial-first"), url: "https://example.com/retry", scope: "research" }, { fetcher: async () => new Response("x".repeat(20), { headers: { "content-type": "text/plain" } }), resolveHost: publicResolver, limits: { maxBytes: 5 } });
+    expect(partial.record.content.captureDisposition).toBe("partial");
+    const complete = await captureSource(store, { commandId: command("partial-retry"), url: "https://example.com/retry", scope: "research" }, { fetcher: async () => new Response("recovered", { headers: { "content-type": "text/plain" } }), resolveHost: publicResolver });
+    expect(complete.record.id).toBe(partial.record.id);
+    expect(complete.record.content.captureDisposition).toBe("complete");
+    expect((await store.list({ kind: "source" })).records).toHaveLength(1);
+  });
+
   it("bounds response extraction and keeps capture successful when assessment fails", async () => {
     const { store } = await fixture();
     const result = await captureSource(store, { commandId: command("bounded"), url: "https://example.com/large", scope: "research", interests: ["testing"] }, {

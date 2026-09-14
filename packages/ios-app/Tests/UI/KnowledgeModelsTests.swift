@@ -35,12 +35,14 @@ final class KnowledgeModelsTests: XCTestCase {
             schemaVersion: 1, id: "note-1", revisionId: "revision-1", kind: .note, scope: .personal,
             createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
             provenance: KnowledgeProvenance(actor: .user, source: nil, sessionId: nil, branchId: nil, invocationId: nil, evidence: []), temporal: nil, relations: [],
-            content: .note(KnowledgeNoteContent(title: "Preference", body: "Keep it concise", fields: nil, role: .preference, confirmed: true, contraryEvidence: nil, freshness: .current, privacyScope: "private"))
+            content: .note(KnowledgeNoteContent(title: "Preference", body: "Keep it concise", fields: nil, role: .preference, confirmed: true, contraryEvidence: nil, freshness: .current, privacyScope: "private", usageConstraint: "Keep private"))
         )
         let data = try JSONEncoder().encode([source, note])
         let decoded = try JSONDecoder().decode([KnowledgeRecord].self, from: data)
         XCTAssertEqual(decoded.map(\.kind), [.source, .note])
         XCTAssertEqual(decoded.map(\.title), ["A link", "Preference"])
+        guard case .note(let noteContent) = decoded[1].content else { return XCTFail("Expected note content") }
+        XCTAssertEqual(noteContent.usageConstraint, "Keep private")
         guard case .source(let sourceContent) = decoded[0].content else { return XCTFail("Expected source content") }
         XCTAssertEqual(sourceContent.identity?.itemId, "item")
         XCTAssertEqual(sourceContent.assessment?.evidenceQuality, .high)

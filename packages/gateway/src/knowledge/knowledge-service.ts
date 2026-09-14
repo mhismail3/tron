@@ -1,7 +1,7 @@
 import { Type, type Static } from "typebox";
 import type { Api, AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import type { KnowledgeAction, KnowledgeConfig, KnowledgeListRequest, KnowledgeRecallRequest, KnowledgeSearchRequest, KnowledgeSourceCaptureRequest, SourceAssessment } from "./knowledge-contract.js";
+import type { KnowledgeAction, KnowledgeConfig, KnowledgeListRequest, KnowledgeRecallRequest, KnowledgeSearchRequest, SourceAssessment } from "./knowledge-contract.js";
 import type { KnowledgeStore } from "./knowledge-store.js";
 import { KnowledgeObservationService, type ObservationSettlement } from "./knowledge-observation.js";
 import { captureSource, type SourceAssessmentModel } from "./source-capture.js";
@@ -92,7 +92,6 @@ export class KnowledgeService {
       case "knowledge.search": return this.store.search(action.request);
       case "knowledge.recall": return this.store.recall(action.request);
       case "knowledge.source.capture": {
-        if ("record" in action.request) return this.store.captureSource(action.request);
         const config = await this.store.config();
         const model = this.modelForConfig?.(config);
         return captureSource(this.store, action.request, { ...(model ? { model } : {}) }).then(result => result);

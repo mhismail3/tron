@@ -53,10 +53,6 @@ final class KnowledgeRPCClient {
         struct Params: Encodable { let config: KnowledgeConfig }
         return try await mutate("knowledge.config", parameters: Params(config: config))
     }
-    func captureSource(_ record: KnowledgeRecordDraft, expectedRevision: String? = nil) async throws -> KnowledgeMutationResult {
-        struct Params: Encodable { let expectedRevision: String?; let record: KnowledgeRecordDraft }
-        return try await mutate("knowledge.source.capture", parameters: Params(expectedRevision: expectedRevision, record: record))
-    }
     func captureURL(url: String, title: String, scope: KnowledgeScope) async throws -> KnowledgeSourceCaptureResult {
         struct Params: Encodable { let url: String; let scope: KnowledgeScope; let title: String }
         return try await mutate("knowledge.source.capture", parameters: Params(url: url, scope: scope, title: title))

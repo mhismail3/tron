@@ -158,6 +158,20 @@ describe("KnowledgeStore", () => {
     await expect(store.captureSource({ commandId: command("forget-receipt"), record: { ...source("private receipt body"), id: "forgotten-record" } })).rejects.toThrow("forgotten");
   });
 
+  it("invalidates dependent creation receipts and reports established namespace loss", async () => {
+    const { store, home, workspace } = await fixture();
+    const captured = await store.captureSource({ commandId: command("dependent-source"), record: source("synthetic withheld fact") });
+    const note = { commandId: command("dependent-note"), record: { kind: "note" as const, scope: "personal" as const, provenance: { actor: "agent" as const, evidence: [{ recordId: captured.record.id, revisionId: captured.record.revisionId }] }, relations: [], content: { title: "Derived", body: "synthetic withheld fact", role: "fact" as const, confirmed: false } } };
+    await store.createNote(note);
+    await store.forget(command("dependent-forget"), captured.record.id, "synthetic erasure", captured.record.revisionId);
+    await expect(store.createNote(note)).rejects.toThrow(/forgotten|suppressed|excluded/i);
+    await workspace.dispose();
+    await rm(join(home, "workspace/state/knowledge"), { recursive: true, force: true });
+    const reopened = new KnowledgeStore(new TronWorkspace(home));
+    expect((await reopened.status()).state).toBe("invalid");
+    await reopened.workspace.dispose();
+  });
+
   it("verifies object bytes on reuse, reads, and record reference", async () => {
     const { store, home } = await fixture();
     const object = await store.putObject(new TextEncoder().encode("original bytes"), "text/plain");

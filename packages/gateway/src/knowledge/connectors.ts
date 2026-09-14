@@ -55,7 +55,8 @@ async function defaultHTTP(input: string, init: { method?: "GET" | "PUT" | "POST
 }
 
 async function requestJson(http: ConnectorHTTP, endpoint: string, token: string, options: { method?: "GET" | "PUT" | "POST" | "DELETE"; body?: unknown; sleep: (milliseconds: number) => Promise<void>; signal: AbortSignal }): Promise<{ status: number; value: any; headers: Headers }> {
-  for (let attempt = 1; attempt <= RETRIES; attempt += 1) {
+  const retrySafe = !options.method || options.method === "GET";
+  for (let attempt = 1; attempt <= (retrySafe ? RETRIES : 1); attempt += 1) {
     const result = await http(endpoint, { ...(options.method ? { method: options.method } : {}), headers: { authorization: `Bearer ${token}`, accept: "application/json", ...(options.body !== undefined ? { "content-type": "application/json" } : {}) }, ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}), signal: options.signal });
     let value: unknown = undefined;
     if (result.body) { try { value = JSON.parse(result.body); } catch { value = undefined; } }
@@ -114,7 +115,18 @@ export class KnowledgeConnectorExtension {
     if (request.paidBudgetCents !== undefined && (!Number.isSafeInteger(request.paidBudgetCents) || request.paidBudgetCents < 0 || request.paidBudgetCents > 1_000_000)) throw bad("Connector paid budget is invalid");
     const current = await this.store.connectorState(request.connector);
     const base = current ?? initial(request.connector);
-    const next: KnowledgeConnectorState = { ...base, enabled: request.enabled, ...(request.accountId !== undefined ? { accountId: request.accountId } : {}), ...(request.scope !== undefined ? { scope: request.scope } : {}), ...(request.destination !== undefined ? { destination: request.destination } : {}), ...(request.credentialRef !== undefined ? { credentialRef: request.credentialRef } : {}), allowWrites: request.allowWrites ?? current?.allowWrites ?? false, paidAccessApproved: request.paidAccessApproved ?? current?.paidAccessApproved ?? false, paidBudgetCents: request.paidBudgetCents ?? current?.paidBudgetCents ?? 0, recurringApproved: request.recurringApproved ?? current?.recurringApproved ?? false, health: request.enabled && (request.credentialRef ?? current?.credentialRef) && (request.accountId ?? current?.accountId) && (request.scope ?? current?.scope) ? "ready" : "unconfigured" };
+    const identityChanged = Boolean(current && ((request.accountId !== undefined && request.accountId !== current.accountId) || (request.scope !== undefined && request.scope !== current.scope) || (request.credentialRef !== undefined && request.credentialRef !== current.credentialRef)));
+    if (identityChanged && current?.pendingRemote) throw new GatewayError("conflict", "Connector identity cannot change while a remote effect is uncertain");
+    const next: KnowledgeConnectorState = identityChanged ? {
+      ...initial(request.connector), enabled: request.enabled,
+      ...(request.accountId !== undefined ? { accountId: request.accountId } : {}),
+      ...(request.scope !== undefined ? { scope: request.scope } : {}),
+      ...(request.credentialRef !== undefined ? { credentialRef: request.credentialRef } : {}),
+      ...(request.destination !== undefined ? { destination: request.destination } : {}),
+      allowWrites: request.allowWrites ?? false, paidAccessApproved: request.paidAccessApproved ?? false,
+      paidBudgetCents: request.paidBudgetCents ?? 0, recurringApproved: request.recurringApproved ?? false,
+      health: "unconfigured",
+    } : { ...base, enabled: request.enabled, ...(request.accountId !== undefined ? { accountId: request.accountId } : {}), ...(request.scope !== undefined ? { scope: request.scope } : {}), ...(request.destination !== undefined ? { destination: request.destination } : {}), ...(request.credentialRef !== undefined ? { credentialRef: request.credentialRef } : {}), allowWrites: request.allowWrites ?? current?.allowWrites ?? false, paidAccessApproved: request.paidAccessApproved ?? current?.paidAccessApproved ?? false, paidBudgetCents: request.paidBudgetCents ?? current?.paidBudgetCents ?? 0, recurringApproved: request.recurringApproved ?? current?.recurringApproved ?? false, health: request.enabled && (request.credentialRef ?? current?.credentialRef) && (request.accountId ?? current?.accountId) && (request.scope ?? current?.scope) ? "ready" : "unconfigured" };
     delete next.lastError;
     const saved = await this.store.updateConnectorState(request.commandId, request.connector, () => next);
     return stateStatus(saved, request.connector);
@@ -123,10 +135,15 @@ export class KnowledgeConnectorExtension {
   private async run(request: KnowledgeConnectorRunRequest): Promise<Record<string, unknown>> {
     const connector = request.connector; const current = await this.store.connectorState(connector);
     if (!current?.enabled || !current.credentialRef || !current.accountId || !current.scope) throw new GatewayError("unsupported", `Knowledge ${connector} connector is not configured`);
-    // No connector operation currently has a maintained paid-price contract.
-    // Keep the stored budget authoritative and reject paid work rather than
-    // guessing a provider cost.
-    if (current.paidBudgetCents > 0) throw new GatewayError("unsupported", "Paid connector operations are unavailable without a priced operation");
+    // X access is never inferred from a zero budget: the provider capability
+    // and explicit paid entitlement must both be present before any request.
+    if (connector === "x" && (!current.paidAccessApproved || current.paidBudgetCents <= 0)) throw new GatewayError("unsupported", "X connector access requires explicit paid entitlement and budget");
+    if (connector === "raindrop" && current.paidBudgetCents > 0) throw new GatewayError("unsupported", "Paid connector operations are unavailable without a priced operation");
+    if (current.pendingRemote) {
+      await this.reconcile(connector);
+      const reconciled = await this.store.connectorState(connector);
+      if (reconciled?.pendingRemote) throw new GatewayError("conflict", "Connector has an unresolved remote effect");
+    }
     const token = await this.options.credentials.read(current.credentialRef);
     if (!token) { await this.store.updateConnectorState(command(request.commandId, "auth"), connector, state => ({ ...(state ?? current), health: "auth-error", lastError: "Credential reference is unavailable", lastRunAt: this.now() })); throw new GatewayError("unsupported", "Connector credential is unavailable"); }
     const limit = Math.min(request.limit ?? MAX_ITEMS, MAX_ITEMS); if (!Number.isSafeInteger(limit) || limit < 1) throw bad("Connector limit is invalid");
@@ -221,7 +238,7 @@ export class KnowledgeConnectorExtension {
     await this.store.updateConnectorState(input.commandId, "raindrop", current => ({ ...(current ?? state), pendingRemote: pending }));
     const abort = new AbortController();
     try {
-      await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrop/${encodeURIComponent(input.itemId)}`, token, { method: "PUT", body: { collection: input.destination }, sleep: this.sleep, signal: abort.signal });
+      await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrop/${encodeURIComponent(input.itemId)}`, token, { method: "PUT", body: { collection: { $id: input.destination } }, sleep: this.sleep, signal: abort.signal });
       const verified = await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrop/${encodeURIComponent(input.itemId)}`, token, { sleep: this.sleep, signal: abort.signal });
       const collection = verified.value?.item?.collection?.$id ?? verified.value?.collection?.$id;
       if (String(collection) !== input.destination) return { status: "conflict" };

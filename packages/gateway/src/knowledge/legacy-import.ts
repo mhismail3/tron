@@ -4,7 +4,7 @@ import { lstat, readFile, readdir } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { JsonValue } from "../protocol/types.js";
-import type { KnowledgeAction, KnowledgeImportRunRequest, KnowledgeRecordDraft, KnowledgeImportScope, KnowledgeSourceCaptureRequest } from "./knowledge-contract.js";
+import type { KnowledgeAction, KnowledgeImportRunRequest, KnowledgeRecordDraft, KnowledgeImportScope } from "./knowledge-contract.js";
 import { KnowledgeStore, type KnowledgeImportCheckpoint } from "./knowledge-store.js";
 
 const execFile = promisify(execFileCallback);
@@ -121,7 +121,25 @@ async function regularJsonFiles(path: string): Promise<string[]> {
   }
   return paths;
 }
-const GIT_READ_ENV = { ...process.env, GIT_NO_LAZY_FETCH: "1", GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0", GIT_CONFIG_NOSYSTEM: "1" };
+const GIT_READ_ENV = {
+  ...process.env,
+  GIT_NO_LAZY_FETCH: "1", GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0",
+  GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_NOGLOBAL: "1", GIT_CONFIG_COUNT: "0",
+  GIT_SSH_COMMAND: "false", GIT_ASKPASS: "false",
+};
+async function assertContainedNoSymlink(root: string, candidate: string): Promise<void> {
+  const resolvedRoot = await resolve(root);
+  const resolvedCandidate = await resolve(candidate);
+  const rel = relative(resolvedRoot, resolvedCandidate);
+  if (rel.startsWith("..") || isAbsolute(rel)) throw new Error("Legacy path escapes its configured root");
+  let current = resolvedRoot;
+  for (const component of rel.split(/[\\/]/).filter(Boolean)) {
+    current = join(current, component);
+    let info;
+    try { info = await lstat(current); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
+    if (info.isSymbolicLink()) throw new Error("Legacy path contains a symbolic-link ancestor");
+  }
+}
 async function gitRevision(root: string): Promise<string> {
   try { const result = await execFile("git", ["--no-optional-locks", "rev-parse", "HEAD"], { cwd: root, env: GIT_READ_ENV, encoding: "utf8", maxBuffer: 256 }); return result.stdout.trim() || "unversioned"; }
   catch { return "unversioned"; }
@@ -150,7 +168,7 @@ async function evidence(root: string, source: LegacySource, revision: string): P
     if (isAbsolute(evidencePath) || evidencePath.split(/[\\/]/).includes("..")) return undefined;
     const candidate = resolve(root, evidencePath); const rel = relative(root, candidate);
     if (rel.startsWith("..") || isAbsolute(rel)) return undefined;
-    try { const stat = await lstat(candidate); if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_EVIDENCE_BYTES) return undefined; bytes = await readFile(candidate); } catch { /* Missing retained evidence is intentional. */ }
+    try { await assertContainedNoSymlink(root, candidate); const stat = await lstat(candidate); if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_EVIDENCE_BYTES) return undefined; bytes = await readFile(candidate); } catch { /* Missing retained evidence is intentional. */ }
   }
   if (!bytes) {
     const provenance = source.metadata?.legacy_provenance as Record<string, unknown> | undefined;
@@ -197,6 +215,9 @@ export class LegacyKnowledgeImporter {
 
   private async plan(source: string, scope?: KnowledgeImportScope): Promise<{ root: string; store: LegacyStoreName; revision: string; items: PlanItem[]; planHash: string; warnings: string[] }> {
     const { root, store } = await this.resolveSource(source); const revision = await gitRevision(root); const warnings: string[] = [];
+    for (const relativePath of ["sources/records", "graph", "reviews/receipts", "audits/records"]) {
+      await assertContainedNoSymlink(root, join(root, relativePath));
+    }
     const kinds = scope?.kinds ? new Set(scope.kinds) : undefined; const ids = scope?.ids ? new Set(scope.ids) : undefined;
     const included = (kind: "sources" | "entities" | "assertions", id: string): boolean => (!kinds || kinds.has(kind)) && (!ids || ids.has(id));
     const receiptByBatch = new Map<string, { id: string; resultRevision?: string }>();
@@ -247,12 +268,13 @@ export class LegacyKnowledgeImporter {
     const legacy = item.legacy; const createdAt = normalizedTimestamp(legacy.created_at ?? legacy.observed_at, importedAt); const superseded = legacy.status === "superseded";
     const rawEvidence = Array.isArray(legacy.evidence) ? legacy.evidence : [];
     const evidence = rawEvidence.flatMap(raw => { const value = raw as Record<string, unknown>; const sourceId = typeof value.source_id === "string" ? value.source_id : undefined; const sourceRevision = sourceId ? sourceRevisions.get(sourceId) : undefined; return sourceId && sourceRevision ? [{ recordId: stableId(store, "source", sourceId), revisionId: sourceRevision, ...(typeof value.locator === "string" ? { locator: value.locator.slice(0, 512) } : {}) }] : []; });
+    const unresolvedEvidence = rawEvidence.flatMap(raw => { const sourceId = raw && typeof raw === "object" && typeof (raw as Record<string, unknown>).source_id === "string" ? (raw as Record<string, unknown>).source_id as string : undefined; return sourceId && !sourceRevisions.has(sourceId) ? [sourceId] : []; }).slice(0, 100);
     const supersededIds = (Array.isArray(legacy.supersedes) ? legacy.supersedes : legacy.supersedes ? [legacy.supersedes] : []).filter((id): id is string => typeof id === "string").slice(0, 20);
     const relations = [{ type: "related" as const, recordId: stableId(store, "entity", legacy.subject_id) }, ...(legacy.object_id ? [{ type: "related" as const, recordId: stableId(store, "entity", legacy.object_id) }] : []), ...supersededIds.map(id => ({ type: "supersedes" as const, recordId: stableId(store, "assertion", id) })), ...(legacy.depends_on ?? []).filter(id => typeof id === "string").slice(0, 20).map(id => ({ type: "derivedFrom" as const, recordId: stableId(store, "assertion", id) }))];
     const certainty = store === "llm-wiki" ? "external" as const : superseded || legacy.valid_to ? "historical" as const : legacy.basis === "user-confirmed" ? "confirmed" as const : "candidate" as const;
     const role = legacy.assertion_type === "relationship" || legacy.object_id ? "concept" as const : legacy.predicate.toLowerCase().includes("preference") ? "preference" as const : "fact" as const;
     const usageConstraint = stringValue((legacy as Record<string, unknown>).usage_constraint, 20_000);
-    const fields = [{ field: "value", value: objectValue(legacy.value), subject: stableId(store, "entity", legacy.subject_id), evidence, certainty, ...(legacy.valid_from ? { validFrom: normalizedTimestamp(legacy.valid_from, createdAt) } : {}), ...(legacy.valid_to ? { validTo: normalizedTimestamp(legacy.valid_to, createdAt) } : {}) }, { field: "assertionType", value: String(legacy.assertion_type ?? "unknown"), evidence, certainty: "historical" as const }, { field: "status", value: String(legacy.status ?? "active"), evidence, certainty: "historical" as const }, { field: "evidenceQualifications", value: rawEvidence.map(value => objectValue(value)), evidence: [], certainty: "historical" as const }, ...(legacy.confidence ? [{ field: "confidence", value: legacy.confidence, evidence, certainty: "historical" as const }] : [])];
+    const fields = [{ field: "value", value: objectValue(legacy.value), subject: stableId(store, "entity", legacy.subject_id), evidence, certainty, ...(legacy.valid_from ? { validFrom: normalizedTimestamp(legacy.valid_from, createdAt) } : {}), ...(legacy.valid_to ? { validTo: normalizedTimestamp(legacy.valid_to, createdAt) } : {}) }, { field: "assertionType", value: String(legacy.assertion_type ?? "unknown"), evidence, certainty: "historical" as const }, { field: "status", value: String(legacy.status ?? "active"), evidence, certainty: "historical" as const }, { field: "evidenceQualifications", value: rawEvidence.map(value => objectValue(value)), evidence: [], certainty: "historical" as const }, ...(unresolvedEvidence.length ? [{ field: "unresolvedEvidence", value: unresolvedEvidence, evidence: [], certainty: "historical" as const }] : []), ...(legacy.confidence ? [{ field: "confidence", value: legacy.confidence, evidence, certainty: "historical" as const }] : [])];
     const content = { title: legacy.predicate, ...(superseded ? { body: "Historical assertion retained as superseded; it is not current instruction." } : {}), role, confirmed: legacy.basis === "user-confirmed", privacyScope: store === "llm-wiki" ? "shared" as const : "private" as const, ...(usageConstraint ? { usageConstraint } : {}), fields };
     const review = { ...(item.auditId ? { auditId: item.auditId } : {}), ...(legacy.basis ? { basis: legacy.basis } : {}) };
     return { kind: "note", id: item.id, scope: store === "llm-wiki" ? "research" : "personal", createdAt, updatedAt: createdAt, provenance: { actor: "import", source: `assertion:${legacy.assertion_id}@${revision}`, evidence }, relations, temporal: { ...(legacy.observed_at ? { eventAt: normalizedTimestamp(legacy.observed_at, createdAt) } : {}), ...(legacy.valid_from ? { validFrom: normalizedTimestamp(legacy.valid_from, createdAt) } : {}), ...(legacy.valid_to ? { validTo: normalizedTimestamp(legacy.valid_to, createdAt) } : {}) }, importOrigin: { store, recordId: legacy.assertion_id, revision, importedAt, ...(Object.keys(review).length ? { review } : {}) }, content };
@@ -266,8 +288,19 @@ export class LegacyKnowledgeImporter {
     }
     if (item.kind === "source") {
       if (item.evidence) await this.store.putObject(item.evidence.bytes, item.evidence.mediaType);
-      const result = await this.store.captureSource({ commandId: `import.source:${plan.planHash.slice(0, 48)}:${item.legacy.source_id}`.slice(0, 160), record: this.sourceDraft(item, plan.revision, importedAt) } as KnowledgeSourceCaptureRequest);
+      const result = await this.store.captureSource({ commandId: `import.source:${plan.planHash.slice(0, 48)}:${item.legacy.source_id}`.slice(0, 160), record: this.sourceDraft(item, plan.revision, importedAt) });
       sourceRevisions.set(item.legacy.source_id, result.record.revisionId); return { imported: true, revision: result.record.revisionId };
+    }
+    if (item.kind === "assertion" && Array.isArray(item.legacy.evidence)) {
+      // A selected batch may contain an assertion without its source. Resolve
+      // exact already-imported source revisions instead of silently dropping
+      // those citations when the source was imported in an earlier batch.
+      for (const raw of item.legacy.evidence) {
+        const sourceId = raw && typeof raw === "object" && typeof (raw as Record<string, unknown>).source_id === "string" ? (raw as Record<string, unknown>).source_id as string : undefined;
+        if (!sourceId || sourceRevisions.has(sourceId)) continue;
+        const prior = await this.store.read(stableId(plan.store, "source", sourceId));
+        if (prior?.kind === "source" && !prior.content.captureDisposition.includes("failed")) sourceRevisions.set(sourceId, prior.revisionId);
+      }
     }
     const draft = item.kind === "entity" ? this.entityDraft(item, plan.revision, importedAt, plan.store) : this.assertionDraft(item, sourceRevisions, plan.revision, importedAt, plan.store);
     const result = await this.store.createNote({ commandId: `import.${item.kind}:${plan.planHash.slice(0, 48)}:${item.kind === "entity" ? item.legacy.entity_id : item.legacy.assertion_id}`.slice(0, 160), record: draft });

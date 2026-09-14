@@ -64,7 +64,7 @@ struct KnowledgeObserver: Codable, Hashable, Sendable { let model: String?; let 
 struct KnowledgeNoteFieldQualification: Codable, Hashable, Sendable {
     let field: String; let value: JSONValue; let subject: String?; let evidence: [KnowledgeEvidenceRef]; let certainty: KnowledgeNoteCertainty; let validFrom: String?; let validTo: String?
 }
-struct KnowledgeNoteContent: Codable, Hashable, Sendable { let title: String; let body: String?; let fields: [KnowledgeNoteFieldQualification]?; let role: KnowledgeNoteRole; let confirmed: Bool; let contraryEvidence: [KnowledgeEvidenceRef]?; let freshness: KnowledgeFreshness?; let privacyScope: String? }
+struct KnowledgeNoteContent: Codable, Hashable, Sendable { let title: String; let body: String?; let fields: [KnowledgeNoteFieldQualification]?; let role: KnowledgeNoteRole; let confirmed: Bool; let contraryEvidence: [KnowledgeEvidenceRef]?; let freshness: KnowledgeFreshness?; let privacyScope: String?; let usageConstraint: String? }
 
 enum KnowledgeRecordContent: Codable, Hashable, Sendable {
     case source(KnowledgeSourceContent), observation(KnowledgeObservationContent), note(KnowledgeNoteContent)
