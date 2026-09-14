@@ -1709,6 +1709,9 @@ struct TronInlineMenu<Content: View>: View {
 /// A shared visual label for menus and sheet actions. Small controls have a
 /// slimmer capsule, not a smaller tap target.
 struct TronInlineActionLabel: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.isEnabled) private var isEnabled
+    let usesSemanticAccent: Bool
     let title: String
     var icon: String?
     var isWorking = false
@@ -1719,7 +1722,8 @@ struct TronInlineActionLabel: View {
     @Environment(\.controlSize) private var controlSize
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
-    init(_ title: String, icon: String? = nil, isWorking: Bool = false, fontSize: CGFloat? = nil, accent: Color = .tronEmerald) {
+    init(_ title: String, icon: String? = nil, isWorking: Bool = false, fontSize: CGFloat? = nil, accent: Color = .tronEmerald, usesSemanticAccent: Bool = false) {
+        self.usesSemanticAccent = usesSemanticAccent
         self.title = title
         self.icon = icon
         self.isWorking = isWorking
@@ -1740,7 +1744,9 @@ struct TronInlineActionLabel: View {
                 .minimumScaleFactor(0.65)
         }
         .font(TronTypography.sans(size: fontSize ?? TronTypography.sizeBodySM, weight: .semibold))
-        .tronSettingsButtonForeground(resolvedAccent)
+        .foregroundStyle(isEnabled
+            ? (!usesSemanticAccent && TronSettingsButtonContrastPolicy.usesWhiteForeground(in: colorScheme) ? .white : resolvedAccent)
+            : Color.tronTextMuted)
         .padding(.horizontal, 10)
         .frame(minHeight: controlSize == .small ? TronSettingsLayoutPolicy.compactPillHeight : 36)
         .glassEffect(.regular.tint(resolvedAccent.opacity(0.10)).interactive(), in: Capsule())

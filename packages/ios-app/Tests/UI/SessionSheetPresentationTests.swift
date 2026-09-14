@@ -168,6 +168,8 @@ final class SessionSheetPresentationTests: XCTestCase {
                     for _ in 0..<8 { try await DisplayFrameScheduler.displayLink.nextFrame() }
                     let sentCount = await gateway.socket.sentFrames().count
                     XCTAssertEqual(sentCount, 2, "Feed does not eagerly request entry bodies")
+                    let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
+                    self.assertToolbarPaint(.tronSessionTeal, bar: bar, leading: true, controller: controller)
                     self.capture(controller, name: "session-history-medium-\(scheme)")
                     controller.sheetPresentationController?.selectedDetentIdentifier = .large
                     controller.presentationController?.containerView?.layoutIfNeeded()

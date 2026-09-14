@@ -423,7 +423,8 @@ struct ProjectResourceDetailSheet: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: 16) {
-                    TronSettingsCaption(presentation.purpose)
+                    TronInfoCard(icon: "info.circle", text: presentation.purpose,
+                                 accent: selection.kind.accent, usesSemanticAccent: true)
 
                     if selection.kind == .prompts {
                         promptContent

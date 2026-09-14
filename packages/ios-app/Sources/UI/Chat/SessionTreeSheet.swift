@@ -200,12 +200,18 @@ struct SessionTreeSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button(action: reload) { TronToolbarTextLabel("Reload", systemImage: "arrow.clockwise", isWorking: store.loading) }
+                    Button(action: reload) {
+                        TronToolbarTextLabel("Reload", systemImage: "arrow.clockwise", isWorking: store.loading)
+                            .foregroundStyle(Color.tronSessionTeal)
+                    }
                         .disabled(store.loading || !supported || identity == nil)
                 }
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: "Session History", accent: .tronSessionTeal) }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: { Image(systemName: "checkmark").font(TronTypography.buttonSM) }.accessibilityLabel("Done")
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark").font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronSessionTeal)
+                    }.accessibilityLabel("Done")
                 }
             }
             .onChange(of: active) { _, active in if !active { store.suspend() } }
@@ -330,14 +336,14 @@ struct SessionHistoryPagingControls: View {
                 HStack(spacing: 6) {
                     if let older = page.older {
                         Button { select(older) } label: {
-                            TronInlineActionLabel("Older entries", icon: "arrow.down", accent: .tronSessionTeal)
+                            TronInlineActionLabel("Older entries", icon: "arrow.down", accent: .tronSessionTeal, usesSemanticAccent: true)
                         }
                         .accessibilityIdentifier("history-older-\(location)")
                         .transition(.opacity)
                     }
                     if let newer = page.newer {
                         Button { select(newer) } label: {
-                            TronInlineActionLabel("Newer entries", icon: "arrow.up", accent: .tronSessionTeal)
+                            TronInlineActionLabel("Newer entries", icon: "arrow.up", accent: .tronSessionTeal, usesSemanticAccent: true)
                         }
                         .accessibilityIdentifier("history-newer-\(location)")
                         .transition(.opacity)

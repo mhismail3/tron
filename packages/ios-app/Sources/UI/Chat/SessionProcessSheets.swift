@@ -377,6 +377,12 @@ struct SessionProcessRow: View {
                                     .lineLimit(1)
                             }
                             if let elapsedMilliseconds {
+                                if style == .history, startedText != nil {
+                                    Text("·")
+                                        .font(TronTypography.secondaryCodeDescription)
+                                        .foregroundStyle(Color.tronTextSecondary)
+                                        .accessibilityHidden(true)
+                                }
                                 elapsedText(elapsedMilliseconds)
                             }
                         }

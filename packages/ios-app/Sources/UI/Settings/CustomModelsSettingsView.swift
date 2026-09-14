@@ -190,7 +190,7 @@ struct CustomModelsSettingsView: View {
                 TronSettingsGroup("Models", detail: "One model ID per line. These appear in model selection.", surfaceStyle: .uncontained) {
                     TextField("Model IDs", text: editedProviderBinding(provider.models, providerID: providerID), axis: .vertical)
                         .lineLimit(2...8).textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .tronField(monospaced: true, compact: true)
+                        .tronField(monospaced: true, surfaceTint: Color.tronPurple.opacity(0.15), border: Color.tronPurple.opacity(0.30))
                 }
                 TronSettingsGroup("Protocol") {
                     TronSelectionRow(icon: "network", title: "API Format", value: apiTitle(api.wrappedValue)) {
