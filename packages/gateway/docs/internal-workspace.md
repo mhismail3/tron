@@ -9,9 +9,11 @@ inferred from pairing identity, browser preferences, or the current project.
 
 - `files/`: ordinary, deliberately retained documents. Existing filesystem tools
   may read/write these using the resolved absolute root. Subdirectories are lazy.
-- `state/<owner>/`: reserved for a real capability's managed data. No memory,
-  knowledge, indexing, namespace service, or generic state API is implemented.
-  Use the capability's owning interface when one exists, not arbitrary edits.
+- `state/<owner>/`: reserved for a real capability's managed data. Knowledge is
+  owned by `KnowledgeStore` under `state/knowledge/`; its canonical state,
+  immutable content objects, coverage, suppression and cleanup evidence must be
+  accessed through that owner, not arbitrary edits. Other namespaces have no
+  generic state API. Use the capability's owning interface when one exists.
 - Pi's `agentDir` remains authoritative for canonical JSONL, settings,
   credentials, installed packages/resources, retries, and compaction. Gateway
   state remains under `<tronHome>/gateway`; existing extension stores stay with
@@ -101,7 +103,10 @@ contract for the pinned API limits.
 
 ## Contract for future managed-state consumers
 
-Implement storage only alongside its production capability and focused tests:
+Implement storage only alongside its production capability and focused tests.
+The current managed knowledge namespace is documented in `knowledge.md` and is
+created lazily by `KnowledgeStore`; constructing a capability service alone must
+not create real namespace state.
 
 - One explicit owner per namespace; bounded reads, schema version, revision and
   validation before mutation. Reject and preserve malformed or newer data.
