@@ -2025,13 +2025,18 @@ search, pages, connector runs, and imports before exposing them to SwiftUI.
 record kind and Personal/Research scope, and loads detail evidence on demand.
 Source object reads use the Gateway's authorization-checked `knowledge.object.read`
 projection and report verified bounded bytes rather than caching a second corpus;
-session citations open through the existing session presentation owner. Import
-requests carry an explicit offset and exact dry-run plan hash so a later page
-cannot silently repeat the first prefix. Detail renders structured field values,
+loaded chunks remain visible and can continue by the returned offset. Session
+citations decode the exact Gateway history-entry DTO, render its bounded text
+before navigation, and expose continuation plus the originating-session action
+separately. Import requests carry an explicit offset and exact dry-run plan hash;
+a completed batch reports corpus progress and never claims whole-corpus completion
+until the final selected batch. Detail renders structured field values,
 subjects, validity, qualifications, contrary evidence, and nested record/session
 citations; exact session-entry reads are bounded and displayed before navigation.
 Handoffs carry record/revision and Gateway identity metadata with explicit
-untrusted-evidence wording and a bounded preview.
+untrusted-evidence wording and a bounded preview. Note confirmation is sent as
+an explicit user action rather than defaulting an inferred or imported note to
+confirmed; its original provenance remains unchanged.
 Observation configuration requires an explicitly selected existing model and at
 least one prospective session or project scope; an empty allowlist remains
 ineligible and exclusions are evaluated by the Gateway. Editable current interests are persisted in the Gateway configuration and do not enable observation; source triage is an explicit `knowledge.source.triage` mutation that resolves those interests server-side. Connector status reports

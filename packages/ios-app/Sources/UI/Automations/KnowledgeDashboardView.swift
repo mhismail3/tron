@@ -1,5 +1,28 @@
 import SwiftUI
 
+/// Catalogue pagination is available only for list responses. Search responses
+/// are intentionally bounded to one Gateway result page.
+enum KnowledgeCatalogPaginationPolicy {
+    static func admits(cursor: String?, search: String, loadingMore: Bool) -> Bool {
+        cursor != nil && !loadingMore && search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
+enum KnowledgeImportPresentationPolicy {
+    static func corpusProgress(planned: Int, selected: Int, offset: Int) -> String {
+        "\(min(max(0, planned), max(0, offset) + max(0, selected))) of \(max(0, planned))"
+    }
+
+    static func completionMessage(plan: KnowledgeImportPlan, result: KnowledgeImportResult, offset: Int) -> String {
+        let end = min(plan.planned, max(0, offset) + plan.selected)
+        if end < plan.planned {
+            return "Batch complete (through \(end) of \(plan.planned)); inspect the next batch to continue."
+        }
+        if result.completed { return "Import complete (\(result.imported) imported)." }
+        return "Import paused (\(result.progress.remaining) remaining)."
+    }
+}
+
 /// Bounded Gateway projection for observations, links, and notes. iOS never
 /// mirrors the canonical Knowledge corpus.
 struct KnowledgeDashboardView: View {
@@ -37,7 +60,13 @@ struct KnowledgeDashboardView: View {
         .toolbar { ToolbarItem(placement: .topBarLeading) { DashboardModeMenuButton(mode: .knowledge, onSelect: onSelectDashboard).frame(width: 34, height: 34) }; ToolbarItem(placement: .topBarTrailing) { Menu { Button("Observation configuration", systemImage: "eye") { configSheet = true }; Button("Connectors", systemImage: "arrow.triangle.2.circlepath") { connectorSheet = true }; Button("Capture URL", systemImage: "link.badge.plus") { captureSheet = true }; Button("New note", systemImage: "note.text.badge.plus") { noteSheet = true }; Button("Import legacy records", systemImage: "square.and.arrow.down") { importSheet = true } } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Knowledge actions") } }
         .searchable(text: $search, prompt: "Search Knowledge")
         .navigationDestination(item: $selected) { record in KnowledgeDetailView(record: record, origin: selectedIdentity ?? model.knowledgePresentationIdentity, onChanged: reload, onOpenDraft: openDraft, onOpenSession: onOpenSession) }
-        .onChange(of: model.knowledgePresentationIdentity) { _, _ in records.removeAll(); selected = nil; selectedIdentity = nil; revision = 0; nextCursor = nil }
+        .onChange(of: model.knowledgePresentationIdentity) { _, _ in
+            // Retire both the visible page and any manually spawned page task;
+            // the next task must carry the new Gateway identity from its start.
+            loadGeneration += 1
+            loadingMore = false
+            records.removeAll(); selected = nil; selectedIdentity = nil; revision = 0; nextCursor = nil
+        }
         .sheet(isPresented: $configSheet) { KnowledgeConfigurationView().environment(model) }
         .sheet(isPresented: $connectorSheet) { KnowledgeConnectorsView().environment(model) }
         .sheet(isPresented: $importSheet) { KnowledgeImportView().environment(model) }
@@ -60,14 +89,14 @@ struct KnowledgeDashboardView: View {
         } catch is CancellationError { return } catch { guard generation == loadGeneration, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }; self.error = error.localizedDescription }
     }
     private func loadMore() {
-        guard let cursor = nextCursor, !loadingMore, search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard KnowledgeCatalogPaginationPolicy.admits(cursor: nextCursor, search: search, loadingMore: loadingMore), let cursor = nextCursor else { return }
         loadingMore = true
         let generation = loadGeneration
         let query = search
         let requestedKind = kind
         let requestedScope = scope
+        let identity = model.knowledgePresentationIdentity
         Task { @MainActor in
-            let identity = model.knowledgePresentationIdentity
             defer { if generation == loadGeneration { loadingMore = false } }
             do {
                 let page = try await model.knowledge.list(kind: requestedKind, scope: requestedScope, cursor: cursor, limit: 50)
@@ -90,6 +119,7 @@ private struct KnowledgeRecordRow: View {
 struct KnowledgeDetailView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.tronPresentationActivity) private var activity
     let record: KnowledgeRecord
     let origin: KnowledgePresentationIdentity
     let onChanged: () async -> Void
@@ -101,22 +131,36 @@ struct KnowledgeDetailView: View {
     @State private var forgetConfirmation = false
     @State private var correctionSheet = false
     @State private var evidenceMessage: String?
-    @State private var objectPreview: String?
-    @State private var exactEntryPreview: String?
-    private var admitsOrigin: Bool { model.knowledgePresentationIdentity == origin }
+    @State private var objectBytes = Data()
+    @State private var objectNextOffset: Int?
+    @State private var objectTotalBytes: Int?
+    @State private var objectLoading = false
+    @State private var exactEntryText: String?
+    @State private var exactEntryNextOffset: Int?
+    @State private var exactEntryCitation: KnowledgeSessionEntryCitation?
+    private var admitsOrigin: Bool { model.knowledgePresentationIdentity == origin && activity.allowsPresentationPublication }
     var body: some View { ScrollView { VStack(alignment: .leading, spacing: 16) { Text(record.title).font(.title2.bold()); Label("\(record.kind.label) · \(record.scope.label)", systemImage: record.kind.icon).foregroundStyle(Color.tronEmerald); Text(record.summary).textSelection(.enabled); recordMetadata; sourceLink; noteMetadata; evidence; observationItems; if case .note(let note) = record.content, editing { TextEditor(text: $noteBody).frame(minHeight: 180).overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.3))); Button("Save note") { saveNote(note) }.buttonStyle(.borderedProminent) }; if let message { Text(message).font(.footnote).foregroundStyle(Color.tronTextSecondary) } }.padding(20) }.background(Color.tronBackground).navigationTitle("Detail").navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .topBarTrailing) { Menu { Button("Start editable session", systemImage: "plus.bubble") { onOpenDraft(record) }; if record.kind == .note { Button(editing ? "Cancel editing" : "Edit note", systemImage: "pencil") { editing.toggle(); if editing, case .note(let note) = record.content { noteBody = note.body ?? "" } } }; if record.kind == .source { Button("Assess with current interests", systemImage: "sparkles") { triage() } }; Button("Correct record", systemImage: "arrow.triangle.2.circlepath") { correctionSheet = true }; Button("Exclude from Knowledge", systemImage: "eye.slash") { exclude() }; Button("Forget permanently", systemImage: "trash", role: .destructive) { forgetConfirmation = true } } label: { Image(systemName: "ellipsis.circle") } } }.confirmationDialog("Forget this record?", isPresented: $forgetConfirmation) { Button("Forget", role: .destructive) { forget() } }.sheet(isPresented: $correctionSheet) { KnowledgeCorrectionView(record: record, origin: origin) { correctionSheet = false; dismiss() } } }
     @ViewBuilder private var recordMetadata: some View { VStack(alignment: .leading, spacing: 6) { Text("Revision: \(record.revisionId)").font(.caption); if let temporal = record.temporal { Text([temporal.eventAt.map { "event \($0)" }, temporal.validFrom.map { "valid from \($0)" }, temporal.validTo.map { "valid to \($0)" }, temporal.reviewDue.map { "review \($0)" }].compactMap { $0 }.joined(separator: " · ")).font(.caption) } }; if case .source(let source) = record.content { Text("Capture: \(source.captureDisposition.rawValue)").font(.caption); if source.captureDisposition != .complete { Label("Evidence is \(source.captureDisposition.rawValue); generated text is not proof.", systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(Color.tronAmber) } }; if case .note(let note) = record.content, let fields = note.fields { VStack(alignment: .leading, spacing: 8) { Text("Structured qualifications").font(.headline); ForEach(Array(fields.enumerated()), id: \.offset) { _, field in VStack(alignment: .leading, spacing: 3) { Text(field.field).font(.subheadline.bold()); Text("Value: \(jsonText(field.value))").font(.callout); if let subject = field.subject { Text("Subject: \(subject)").font(.caption) }; Text("\(field.certainty.rawValue)\(field.validFrom.map { " · from \($0)" } ?? "")\(field.validTo.map { " · to \($0)" } ?? "")").font(.caption).foregroundStyle(Color.tronTextSecondary); citationLinks(field.evidence) } } } } }
-    @ViewBuilder private var sourceLink: some View { if case .source(let source) = record.content { if let uri = source.uri, let url = URL(string: uri) { Link(uri, destination: url).font(.callout) }; if let object = source.object { Button("Open retained source object (\(object.bytes) bytes)") { readObject(object) }.buttonStyle(.bordered); if let retention = source.retention { Text("Retention: \(retention.sensitivity) · evidence \(retention.evidenceAvailable ? "available" : "unavailable")").font(.caption).foregroundStyle(Color.tronTextSecondary) } }; if let identity = source.identity { Text("\(identity.provider) · account \(identity.accountId) · item \(identity.itemId)").font(.caption).foregroundStyle(Color.tronTextSecondary) }; if let assessment = source.assessment { VStack(alignment: .leading, spacing: 6) { Text("Assessment").font(.headline); Text(assessment.summary); if let contribution = assessment.contribution { Text("Contribution: \(contribution)") }; if let use = assessment.possibleUse { Text("Possible use: \(use)") }; Text("Evidence \(assessment.evidenceQuality.rawValue) · Freshness \(assessment.freshness.rawValue)").font(.caption).foregroundStyle(Color.tronTextSecondary) } } } }
-    private var evidence: some View { VStack(alignment: .leading, spacing: 8) { Text("Evidence").font(.headline); citationLinks(record.provenance.evidence); if case .observation(let observation) = record.content { ForEach(Array(observation.items.enumerated()), id: \.offset) { _, item in citationLinks(item.evidence ?? []) } }; if case .note(let note) = record.content, let contrary = note.contraryEvidence { Text("Contrary evidence").font(.subheadline.bold()).foregroundStyle(Color.tronAmber); citationLinks(contrary) }; if let evidenceMessage { Text(evidenceMessage).font(.footnote).foregroundStyle(Color.tronTextSecondary) }; if let objectPreview { Text(objectPreview).font(.footnote.monospaced()).textSelection(.enabled).lineLimit(24) }; if let exactEntryPreview { VStack(alignment: .leading, spacing: 4) { Text("Exact canonical entry").font(.subheadline.bold()); Text(exactEntryPreview).font(.footnote.monospaced()).textSelection(.enabled).lineLimit(40) } } } }
-    @ViewBuilder private func citationLinks(_ refs: [KnowledgeEvidenceRef]) -> some View { ForEach(Array(refs.enumerated()), id: \.offset) { _, ref in if let citation = ref.sessionEntry { Button("Open session \(citation.sessionId) · entry \(citation.entryId)") { openSession(citation) }.font(.footnote) } else if let recordID = ref.recordId { Text("Record \(recordID) revision \(ref.revisionId ?? "latest")").font(.footnote).foregroundStyle(Color.tronTextSecondary) } else if let hash = ref.objectHash { Text("Retained object \(hash.prefix(12))…").font(.footnote).foregroundStyle(Color.tronTextSecondary) } else { Text("Evidence unavailable").font(.footnote).foregroundStyle(Color.tronAmber) } } }
+    @ViewBuilder private var sourceLink: some View { if case .source(let source) = record.content { if let uri = source.uri, let url = URL(string: uri) { Link(uri, destination: url).font(.callout) }; if let object = source.object {
+            Button(objectBytes.isEmpty ? "Open retained source object (\(object.bytes) bytes)" : "Load retained source object") { readObject(object, offset: objectNextOffset ?? 0) }.buttonStyle(.bordered).disabled(objectLoading || objectNextOffset == nil && !objectBytes.isEmpty)
+            if objectLoading { ProgressView().controlSize(.small) }
+            if !objectBytes.isEmpty {
+                Text(String(data: objectBytes, encoding: .utf8) ?? "Binary source object (\(objectBytes.count) bytes loaded)").font(.footnote.monospaced()).textSelection(.enabled)
+                if let next = objectNextOffset { Text("Loaded \(objectBytes.count) of \(objectTotalBytes ?? object.bytes) bytes.").font(.caption).foregroundStyle(Color.tronTextSecondary); Button("Load next chunk (offset \(next))") { readObject(object, offset: next) }.buttonStyle(.bordered) }
+                else { Text("Complete retained object loaded (\(objectBytes.count) bytes).").font(.caption).foregroundStyle(Color.tronTextSecondary) }
+            }
+            if let retention = source.retention { Text("Retention: \(retention.sensitivity) · evidence \(retention.evidenceAvailable ? "available" : "unavailable")").font(.caption).foregroundStyle(Color.tronTextSecondary) }
+        }; if let identity = source.identity { Text("\(identity.provider) · account \(identity.accountId) · item \(identity.itemId)").font(.caption).foregroundStyle(Color.tronTextSecondary) }; if let assessment = source.assessment { VStack(alignment: .leading, spacing: 6) { Text("Assessment").font(.headline); Text(assessment.summary); if let contribution = assessment.contribution { Text("Contribution: \(contribution)") }; if let use = assessment.possibleUse { Text("Possible use: \(use)") }; Text("Evidence \(assessment.evidenceQuality.rawValue) · Freshness \(assessment.freshness.rawValue)").font(.caption).foregroundStyle(Color.tronTextSecondary) } } } }
+    private var evidence: some View { VStack(alignment: .leading, spacing: 8) { Text("Evidence").font(.headline); citationLinks(record.provenance.evidence); if case .observation(let observation) = record.content { ForEach(Array(observation.items.enumerated()), id: \.offset) { _, item in citationLinks(item.evidence ?? []) } }; if case .note(let note) = record.content, let contrary = note.contraryEvidence { Text("Contrary evidence").font(.subheadline.bold()).foregroundStyle(Color.tronAmber); citationLinks(contrary) }; if let evidenceMessage { Text(evidenceMessage).font(.footnote).foregroundStyle(Color.tronTextSecondary) }; if let exactEntryText { VStack(alignment: .leading, spacing: 4) { Text("Exact canonical entry").font(.subheadline.bold()); Text(exactEntryText).font(.footnote.monospaced()).textSelection(.enabled); if let next = exactEntryNextOffset, let citation = exactEntryCitation { Button("Load next entry chunk (offset \(next))") { openSessionEvidence(citation, offset: next) }.buttonStyle(.bordered) }; if let citation = exactEntryCitation { Button("Open originating session", systemImage: "arrow.up.right") { onOpenSession(citation.sessionId, citation.entryId) }.buttonStyle(.bordered) } } } } }
+    @ViewBuilder private func citationLinks(_ refs: [KnowledgeEvidenceRef]) -> some View { ForEach(Array(refs.enumerated()), id: \.offset) { _, ref in if let citation = ref.sessionEntry { Button("Load exact session entry \(citation.sessionId) · \(citation.entryId)") { openSessionEvidence(citation, offset: 0) }.font(.footnote) } else if let recordID = ref.recordId { Text("Record \(recordID) revision \(ref.revisionId ?? "latest")").font(.footnote).foregroundStyle(Color.tronTextSecondary) } else if let hash = ref.objectHash { Text("Retained object \(hash.prefix(12))…").font(.footnote).foregroundStyle(Color.tronTextSecondary) } else { Text("Evidence unavailable").font(.footnote).foregroundStyle(Color.tronAmber) } } }
     private func jsonText(_ value: JSONValue) -> String { switch value { case .string(let value): return value; case .number(let value): return String(value); case .bool(let value): return value ? "true" : "false"; case .null: return "null"; case .array(let values): return "[\(values.prefix(20).map(jsonText).joined(separator: ", "))]"; case .object(let values): return "{\(values.keys.sorted().prefix(20).compactMap { key in values[key].map { "\(key): \(jsonText($0))" } }.joined(separator: ", "))}" } }
     @ViewBuilder private var noteMetadata: some View { if case .note(let note) = record.content { if let freshness = note.freshness { Text("Freshness: \(freshness.rawValue)").font(.caption).foregroundStyle(Color.tronTextSecondary) }; if let contrary = note.contraryEvidence, !contrary.isEmpty { Text("Contrary evidence retained: \(contrary.count)").font(.caption).foregroundStyle(Color.tronAmber) } } }
     @ViewBuilder private var observationItems: some View { if case .observation(let observation) = record.content { VStack(alignment: .leading, spacing: 8) { Text("Observed items").font(.headline); Text("Entries \(observation.range.fromEntryId)…\(observation.range.toEntryId) · digest \(observation.range.entryDigest.prefix(12))…").font(.caption).foregroundStyle(Color.tronTextSecondary); ForEach(Array(observation.items.enumerated()), id: \.offset) { _, item in Text("\(item.attribution.rawValue.capitalized) · \(item.certainty.rawValue): \(item.text)").font(.callout) }; Button("Reflect bounded handoff") { reflect(observation) }.buttonStyle(.bordered) } } }
-    private func readObject(_ reference: KnowledgeObjectRef) { guard admitsOrigin else { evidenceMessage = "Gateway changed; reopen this entry."; return }; Task { @MainActor in do { let object = try await model.knowledge.readObject(reference); guard admitsOrigin else { return }; if let object, let bytes = Data(base64Encoded: object.base64), let text = String(data: bytes, encoding: .utf8) { objectPreview = String(text.prefix(4_000)) }; evidenceMessage = object == nil ? "Retained object is unavailable or excluded." : "Retained object chunk verified (\(object!.bytes) of \(object!.totalBytes ?? object!.bytes) bytes, \(object!.mediaType))\(object!.nextOffset.map { "; more at offset \($0)" } ?? "")." } catch { guard admitsOrigin else { return }; evidenceMessage = error.localizedDescription } } }
-    private func openSession(_ citation: KnowledgeSessionEntryCitation) { guard admitsOrigin else { evidenceMessage = "Gateway changed; reopen this entry."; return }; Task { @MainActor in do { let entry = try await model.knowledge.readSessionEntry(sessionID: citation.sessionId, entryID: citation.entryId); guard admitsOrigin else { return }; if let data = try? JSONEncoder().encode(entry), let text = String(data: data, encoding: .utf8) { exactEntryPreview = String(text.prefix(8_000)) }; onOpenSession(citation.sessionId, citation.entryId); evidenceMessage = "Loaded exact entry \(citation.entryId); opening its originating session." } catch { guard admitsOrigin else { return }; evidenceMessage = error.localizedDescription } } }
+    private func readObject(_ reference: KnowledgeObjectRef, offset: Int) { guard admitsOrigin else { evidenceMessage = "Gateway changed; reopen this entry."; return }; objectLoading = true; let requestedOffset = max(0, offset); Task { @MainActor in do { let object = try await model.knowledge.readObject(reference, offset: requestedOffset); guard admitsOrigin else { return }; objectLoading = false; guard let object, let bytes = Data(base64Encoded: object.base64) else { evidenceMessage = "Retained object is unavailable or excluded."; return }; if requestedOffset == 0 { objectBytes = bytes } else if requestedOffset == objectBytes.count { objectBytes.append(bytes) } else { evidenceMessage = "The retained object changed while it was being read; reopen this entry."; return }; objectTotalBytes = object.totalBytes; objectNextOffset = object.nextOffset; evidenceMessage = "Retained object chunk verified (\(object.bytes) of \(object.totalBytes ?? object.bytes) bytes, \(object.mediaType))." } catch { guard admitsOrigin else { return }; objectLoading = false; evidenceMessage = error.localizedDescription } } }
+    private func openSessionEvidence(_ citation: KnowledgeSessionEntryCitation, offset: Int) { guard admitsOrigin else { evidenceMessage = "Gateway changed; reopen this entry."; return }; let requestedOffset = max(0, offset); Task { @MainActor in do { let entry = try await model.knowledge.readSessionEntry(sessionID: citation.sessionId, entryID: citation.entryId, offset: requestedOffset); guard admitsOrigin else { return }; if requestedOffset == 0 { exactEntryText = entry.text } else if requestedOffset == (exactEntryText?.utf16.count ?? 0) { exactEntryText = (exactEntryText ?? "") + entry.text } else { evidenceMessage = "The canonical entry changed while it was being read; reopen this entry."; return }; exactEntryNextOffset = entry.nextOffset; exactEntryCitation = citation; evidenceMessage = "Loaded exact entry \(citation.entryId); use the originating-session action when ready." } catch { guard admitsOrigin else { return }; evidenceMessage = error.localizedDescription } } }
     private func reflect(_ observation: KnowledgeObservationContent) { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; Task { @MainActor in do { let result = try await model.knowledge.reflect(sessionID: observation.range.sessionId, sourceRevisionIDs: [record.revisionId]); guard admitsOrigin else { return }; if case .note(let handoff) = result.record.content { message = "Reflected handoff: \(handoff.body ?? "(empty)")" } else { message = "Reflected handoff updated." } } catch { guard admitsOrigin else { return }; message = error.localizedDescription } } }
     private func triage() { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; Task { @MainActor in do { let result = try await model.knowledge.triage(sourceID: record.id, expectedRevision: record.revisionId); guard admitsOrigin else { return }; message = "Assessment updated (\(result.assessment.freshness.rawValue))." } catch { guard admitsOrigin else { return }; message = error.localizedDescription } } }
-    private func saveNote(_ note: KnowledgeNoteContent) { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; Task { @MainActor in do { _ = try await model.knowledge.updateNote(id: record.id, expectedRevision: record.revisionId, record: KnowledgeRecordDraft(id: record.id, createdAt: record.createdAt, updatedAt: nil, kind: .note, scope: record.scope, provenance: record.provenance, temporal: record.temporal, relations: record.relations, importOrigin: record.importOrigin, content: .note(KnowledgeNoteContent(title: note.title, body: noteBody, fields: note.fields, role: note.role, confirmed: note.confirmed, contraryEvidence: note.contraryEvidence, freshness: note.freshness, privacyScope: note.privacyScope, usageConstraint: note.usageConstraint)))); guard admitsOrigin else { return }; message = "Saved"; await onChanged() } catch { guard admitsOrigin else { return }; message = error.localizedDescription } } }
+    private func saveNote(_ note: KnowledgeNoteContent) { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; Task { @MainActor in do { _ = try await model.knowledge.updateNote(id: record.id, expectedRevision: record.revisionId, record: KnowledgeRecordDraft(id: record.id, createdAt: record.createdAt, updatedAt: nil, kind: .note, scope: record.scope, provenance: record.provenance, temporal: record.temporal, relations: record.relations, importOrigin: record.importOrigin, content: .note(KnowledgeNoteContent(title: note.title, body: noteBody, fields: note.fields, role: note.role, confirmed: note.confirmed, contraryEvidence: note.contraryEvidence, freshness: note.freshness, privacyScope: note.privacyScope, usageConstraint: note.usageConstraint))), confirmedByUser: note.confirmed); guard admitsOrigin else { return }; message = "Saved"; await onChanged() } catch { guard admitsOrigin else { return }; message = error.localizedDescription } } }
     private func exclude() { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; Task { @MainActor in do { _ = try await model.knowledge.setExclusion(recordID: record.id, expectedRevision: record.revisionId, excluded: true); guard admitsOrigin else { return }; dismiss() } catch { guard admitsOrigin else { return }; message = error.localizedDescription } } }
     private func forget() { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; Task { @MainActor in do { _ = try await model.knowledge.forget(id: record.id, expectedRevision: record.revisionId, reason: "Forgotten from iOS"); guard admitsOrigin else { return }; dismiss() } catch { guard admitsOrigin else { return }; message = error.localizedDescription } } }
 }
@@ -163,13 +207,17 @@ struct KnowledgeConfigurationView: View {
         }
     }
     private func load() async {
+        let requestIdentity = model.knowledgePresentationIdentity
         do {
-            let requestIdentity = model.knowledgePresentationIdentity
             let loaded = try await model.knowledge.status()
             guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity, requestIdentity.profileID != nil else { return }
             identity = requestIdentity; config = loaded.config; interestsText = loaded.config.currentInterests.joined(separator: "\n"); selectedSessionIDs = Set(loaded.config.eligibility.sessionIds); selectedProjectIDs = Set(loaded.config.eligibility.projectIds)
             if let value = loaded.config.observation.model { let parts = value.split(separator: "/", maxSplits: 1).map(String.init); if parts.count == 2 { chosenModel = ModelRef(provider: parts[0], id: parts[1]) } }
-        } catch { self.error = error.localizedDescription }
+        } catch {
+            guard activity.allowsPresentationPublication,
+                  model.knowledgePresentationIdentity == requestIdentity else { return }
+            self.error = error.localizedDescription
+        }
     }
     private func save() {
         guard var config else { return }
@@ -216,6 +264,7 @@ struct KnowledgeConnectorsView: View {
 private struct KnowledgeConnectorEditView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.tronPresentationActivity) private var activity
     let connector: String
     let status: KnowledgeConnectorStatus?
     let onSaved: () -> Void
@@ -240,7 +289,21 @@ private struct KnowledgeConnectorEditView: View {
             if let error { Text(error).foregroundStyle(.red) }
         }.navigationTitle(connector == "x" ? "X connector" : "Raindrop connector").toolbar { ToolbarItem(placement: .confirmationAction) { Button("Save") { save() } } } }
     }
-    private func save() { Task { @MainActor in do { _ = try await model.knowledge.configureConnector(connector, enabled: enabled, accountID: accountID.nilIfEmpty, scope: scope.nilIfEmpty, destination: destination.nilIfEmpty, credentialRef: credentialRef.nilIfEmpty, allowWrites: allowWrites, paidAccessApproved: paidAccessApproved, recurringApproved: recurringApproved); onSaved(); dismiss() } catch let caught { error = caught.localizedDescription } } }
+    private func save() {
+        let requestIdentity = model.knowledgePresentationIdentity
+        Task { @MainActor in
+            do {
+                _ = try await model.knowledge.configureConnector(connector, enabled: enabled, accountID: accountID.nilIfEmpty, scope: scope.nilIfEmpty, destination: destination.nilIfEmpty, credentialRef: credentialRef.nilIfEmpty, allowWrites: allowWrites, paidAccessApproved: paidAccessApproved, recurringApproved: recurringApproved)
+                guard activity.allowsPresentationPublication,
+                      model.knowledgePresentationIdentity == requestIdentity else { return }
+                onSaved(); dismiss()
+            } catch let caught {
+                guard activity.allowsPresentationPublication,
+                      model.knowledgePresentationIdentity == requestIdentity else { return }
+                error = caught.localizedDescription
+            }
+        }
+    }
 }
 
 private extension String { var nilIfEmpty: String? { isEmpty ? nil : self } }
@@ -259,14 +322,14 @@ struct KnowledgeImportView: View {
         NavigationStack {
             Form {
                 Section("Read-only dry run") { Picker("Named source", selection: $source) { Text("Personal OS").tag("personal-os"); Text("LLM Wiki").tag("llm-wiki") }; Text("Only a deliberately configured named root on this Gateway can be read.").font(.footnote).foregroundStyle(Color.tronTextSecondary); Button("Inspect import") { offset = 0; dryRun(offset: 0) } }
-                if let plan { Section("Inspected batch starting at \(offset)") { LabeledContent("Items", value: "\(plan.selected) of \(plan.planned)"); LabeledContent("Warnings", value: "\(plan.warnings.count)"); LabeledContent("Skipped/withheld", value: "\(plan.skipped)"); Text("Plan hash: \(plan.planHash)").font(.caption).textSelection(.enabled); Button("Import accepted items") { confirmExecute = true }; if offset + plan.selected < plan.planned && plan.selected > 0 { Button("Inspect next batch") { offset += plan.selected; dryRun(offset: offset) } } } }
+                if let plan { Section("Inspected batch starting at \(offset)") { LabeledContent("Corpus progress", value: KnowledgeImportPresentationPolicy.corpusProgress(planned: plan.planned, selected: plan.selected, offset: offset)); LabeledContent("Warnings", value: "\(plan.warnings.count)"); LabeledContent("Skipped/withheld", value: "\(plan.skipped)"); Text("Plan hash: \(plan.planHash)").font(.caption).textSelection(.enabled); Button("Import accepted items") { confirmExecute = true }; if offset + plan.selected < plan.planned && plan.selected > 0 { Button("Inspect next batch") { offset += plan.selected; dryRun(offset: offset) } } } }
                 if let message { Text(message).foregroundStyle(Color.tronTextSecondary) }
             }.navigationTitle("Import Knowledge").toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .confirmationDialog("Execute this exact inspected import?", isPresented: $confirmExecute) { Button("Import", role: .destructive) { if let plan { execute(plan) } }; Button("Cancel", role: .cancel) {} }
         }
     }
     private func dryRun(offset: Int) { guard activity.allowsPresentationPublication else { return }; let source = source; let requestIdentity = model.knowledgePresentationIdentity; Task { @MainActor in do { let value = try await model.knowledge.importDryRun(source: source, offset: offset); guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; identity = requestIdentity; plan = value; message = nil } catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; message = error.localizedDescription } } }
-    private func execute(_ plan: KnowledgeImportPlan) { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == (identity ?? model.knowledgePresentationIdentity) else { message = "Gateway changed; inspect the source again."; return }; let requestIdentity = identity ?? model.knowledgePresentationIdentity; Task { @MainActor in do { let value = try await model.knowledge.importRun(source: plan.source, planHash: plan.planHash, offset: offset); guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; message = value.completed ? "Import complete (\(value.imported) imported)." : "Import paused (\(value.progress.remaining) remaining)." } catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; message = error.localizedDescription } } }
+    private func execute(_ plan: KnowledgeImportPlan) { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == (identity ?? model.knowledgePresentationIdentity) else { message = "Gateway changed; inspect the source again."; return }; let requestIdentity = identity ?? model.knowledgePresentationIdentity; Task { @MainActor in do { let value = try await model.knowledge.importRun(source: plan.source, planHash: plan.planHash, offset: offset); guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; message = KnowledgeImportPresentationPolicy.completionMessage(plan: plan, result: value, offset: offset) } catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; message = error.localizedDescription } } }
 }
 
 private struct KnowledgeCorrectionView: View {
@@ -297,7 +360,7 @@ private struct KnowledgeCorrectionView: View {
         guard model.knowledgePresentationIdentity == origin else { error = "Gateway changed; reopen this entry."; return }
         let replacement = KnowledgeRecordDraft(id: record.id, createdAt: record.createdAt, updatedAt: nil, kind: record.kind, scope: record.scope, provenance: record.provenance, temporal: record.temporal, relations: record.relations, importOrigin: record.importOrigin, content: correctedContent)
         let relation = KnowledgeRelation(type: .corrects, recordId: record.id, revisionId: record.revisionId, field: nil)
-        Task { @MainActor in do { _ = try await model.knowledge.correct(id: record.id, expectedRevision: record.revisionId, replacement: replacement, relation: relation); guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == origin else { return }; onComplete() } catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == origin else { return }; self.error = error.localizedDescription } }
+        Task { @MainActor in do { _ = try await model.knowledge.correct(id: record.id, expectedRevision: record.revisionId, replacement: replacement, relation: relation, confirmedByUser: true); guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == origin else { return }; onComplete() } catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == origin else { return }; self.error = error.localizedDescription } }
     }
     private var correctedContent: KnowledgeRecordContent {
         switch record.content {
@@ -347,6 +410,6 @@ private struct KnowledgeNoteCreateView: View {
         }.navigationTitle("New Note").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("Save") { save() }.disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) } } }
     }
     private func save() { let identity = model.knowledgePresentationIdentity; let record = KnowledgeRecordDraft(id: nil, createdAt: nil, updatedAt: nil, kind: .note, scope: scope, provenance: KnowledgeProvenance(actor: .user, source: "ios-note", sessionId: nil, branchId: nil, invocationId: nil, evidence: []), temporal: nil, relations: [], content: .note(KnowledgeNoteContent(title: title, body: noteText.isEmpty ? nil : noteText, fields: nil, role: role, confirmed: confirmed, contraryEvidence: nil, freshness: .current, privacyScope: "private", usageConstraint: nil)))
-        Task { @MainActor in do { _ = try await model.knowledge.createNote(record); guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }; await onComplete(); dismiss() } catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }; self.error = error.localizedDescription } }
+        Task { @MainActor in do { _ = try await model.knowledge.createNote(record, confirmedByUser: confirmed); guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }; await onComplete(); dismiss() } catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }; self.error = error.localizedDescription } }
     }
 }

@@ -49,9 +49,15 @@ final class KnowledgeRPCClient {
         let value: JSONValue = try await request("knowledge.read", Params(id: id, revisionId: revisionID, includeSuppressed: false))
         if value == .null { return nil }; return try value.decode(KnowledgeRecord.self)
     }
-    func readSessionEntry(sessionID: String, entryID: String, offset: Int = 0) async throws -> JSONValue {
-        let params: JSONValue = .object(["sessionId": .string(sessionID), "entryId": .string(entryID), "offset": .number(Double(max(0, offset)))])
-        return try await requestValue("session.history.entry", params, .seconds(20))
+    func readSessionEntry(sessionID: String, entryID: String, offset: Int = 0) async throws -> KnowledgeSessionEntryRead {
+        let requestedOffset = max(0, offset)
+        let params: JSONValue = .object(["sessionId": .string(sessionID), "entryId": .string(entryID), "offset": .number(Double(requestedOffset))])
+        let value: KnowledgeSessionEntryRead = try await request("session.history.entry", params, timeout: .seconds(20))
+        guard value.entryId == entryID, value.offset == requestedOffset,
+              value.totalCharacters >= value.offset,
+              value.text.count <= 20_000,
+              value.nextOffset.map({ $0 > value.offset && $0 <= value.totalCharacters }) ?? true else { throw invalidResponse() }
+        return value
     }
     func readObject(_ reference: KnowledgeObjectRef, offset: Int = 0) async throws -> KnowledgeObjectRead? {
         struct Params: Encodable { let hash: String; let bytes: Int; let mediaType: String; let offset: Int }
@@ -70,11 +76,11 @@ final class KnowledgeRPCClient {
         struct Params: Encodable { let url: String; let scope: KnowledgeScope; let title: String }
         return try await mutate("knowledge.source.capture", parameters: Params(url: url, scope: scope, title: title))
     }
-    func createNote(_ record: KnowledgeRecordDraft, confirmedByUser: Bool = true) async throws -> KnowledgeMutationResult {
+    func createNote(_ record: KnowledgeRecordDraft, confirmedByUser: Bool) async throws -> KnowledgeMutationResult {
         struct Params: Encodable { let record: KnowledgeRecordDraft; let confirmedByUser: Bool }
         return try await mutate("knowledge.note.create", parameters: Params(record: record, confirmedByUser: confirmedByUser))
     }
-    func updateNote(id: String, expectedRevision: String, record: KnowledgeRecordDraft, confirmedByUser: Bool = true) async throws -> KnowledgeMutationResult {
+    func updateNote(id: String, expectedRevision: String, record: KnowledgeRecordDraft, confirmedByUser: Bool) async throws -> KnowledgeMutationResult {
         struct Params: Encodable { let recordId: String; let expectedRevision: String; let record: KnowledgeRecordDraft; let confirmedByUser: Bool }
         return try await mutate("knowledge.note.update", parameters: Params(recordId: id, expectedRevision: expectedRevision, record: record, confirmedByUser: confirmedByUser))
     }
@@ -82,9 +88,9 @@ final class KnowledgeRPCClient {
         struct Params: Encodable { let sourceId: String; let expectedRevision: String }
         return try await mutate("knowledge.source.triage", parameters: Params(sourceId: sourceID, expectedRevision: expectedRevision))
     }
-    func correct(id: String, expectedRevision: String, replacement: KnowledgeRecordDraft, relation: KnowledgeRelation) async throws -> KnowledgeMutationResult {
+    func correct(id: String, expectedRevision: String, replacement: KnowledgeRecordDraft, relation: KnowledgeRelation, confirmedByUser: Bool) async throws -> KnowledgeMutationResult {
         struct Params: Encodable { let recordId: String; let expectedRevision: String; let replacement: KnowledgeRecordDraft; let relation: KnowledgeRelation; let confirmedByUser: Bool }
-        return try await mutate("knowledge.correction", parameters: Params(recordId: id, expectedRevision: expectedRevision, replacement: replacement, relation: relation, confirmedByUser: true))
+        return try await mutate("knowledge.correction", parameters: Params(recordId: id, expectedRevision: expectedRevision, replacement: replacement, relation: relation, confirmedByUser: confirmedByUser))
     }
     func forget(id: String, expectedRevision: String? = nil, reason: String) async throws -> KnowledgeForgetResult {
         struct Params: Encodable { let recordId: String; let expectedRevision: String?; let reason: String }

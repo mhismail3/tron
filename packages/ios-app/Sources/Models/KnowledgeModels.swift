@@ -27,6 +27,18 @@ enum KnowledgeRelationType: String, Codable, Sendable { case supports, contradic
 
 struct KnowledgeObjectRef: Codable, Hashable, Sendable { let hash: String; let mediaType: String; let bytes: Int }
 struct KnowledgeObjectRead: Codable, Hashable, Sendable { let hash: String; let mediaType: String; let bytes: Int; let totalBytes: Int?; let offset: Int?; let nextOffset: Int?; let base64: String }
+/// Exact canonical history-entry DTO. `text` is one bounded page; callers use
+/// `nextOffset` to continue instead of presenting a silently truncated prefix.
+struct KnowledgeSessionEntryRead: Codable, Hashable, Sendable {
+    let runtimeGeneration: String
+    let entryId: String
+    let text: String
+    let offset: Int
+    let nextOffset: Int?
+    let previousOffset: Int?
+    let totalCharacters: Int
+    let metadata: [String: JSONValue]
+}
 struct KnowledgeSessionEntryCitation: Codable, Hashable, Sendable {
     let sessionId: String; let branchId: String?; let entryId: String; let digest: String?; let startOffset: Int?; let endOffset: Int?
 }
@@ -132,5 +144,19 @@ extension KnowledgeRecord {
     }
     var summary: String {
         switch content { case .source(let c): c.text ?? c.uri ?? c.captureDisposition.rawValue; case .observation(let c): c.items.map { $0.text }.joined(separator: " "); case .note(let c): c.body ?? "" }
+    }
+}
+
+enum KnowledgeDraftHandoffPolicy {
+    static let maximumSummaryCharacters = 4_000
+
+    static func text(for record: KnowledgeRecord, identity: KnowledgePresentationIdentity) -> String? {
+        guard let profileID = identity.profileID else { return nil }
+        let evidence = record.provenance.evidence.first.map { ref in
+            ref.sessionEntry.map { "Source session \($0.sessionId), entry \($0.entryId)" }
+                ?? "Source record \(ref.recordId ?? "object")"
+        } ?? "No source citation"
+        let summary = String(record.summary.prefix(maximumSummaryCharacters))
+        return "Evidence-only Knowledge handoff (untrusted; verify before acting)\nGateway profile \(profileID)\n\nRetained Knowledge: \(record.title)\n\n\(summary)\n\nRecord ID: \(record.id) · Revision: \(record.revisionId) · \(evidence)"
     }
 }

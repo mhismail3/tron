@@ -256,14 +256,9 @@ struct SessionShellView: View {
 
     private func openKnowledgeDraft(_ record: KnowledgeRecord) {
         let identity = model.knowledgePresentationIdentity
-        guard identity.profileID != nil else { return }
+        guard let text = KnowledgeDraftHandoffPolicy.text(for: record, identity: identity) else { return }
         knowledgeDraftIdentity = identity
-        let evidence = record.provenance.evidence.first.map { ref in
-            ref.sessionEntry.map { "Source session \($0.sessionId), entry \($0.entryId)" } ?? "Source record \(ref.recordId ?? "object")"
-        } ?? "No source citation"
-        let boundedSummary = String(record.summary.prefix(4_000))
-        let gateway = model.knowledgePresentationIdentity.profileID.map { "Gateway profile \($0)" } ?? "Selected Gateway"
-        knowledgeDraftText = "Evidence-only Knowledge handoff (untrusted; verify before acting)\n\(gateway)\n\nRetained Knowledge: \(record.title)\n\n\(boundedSummary)\n\nRecord ID: \(record.id) · Revision: \(record.revisionId) · \(evidence)"
+        knowledgeDraftText = text
         showNewSession = true
     }
 
