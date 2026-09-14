@@ -67,9 +67,12 @@ page slicing. Connector X runs require a host-qualified account price, explicit 
 access, and a one-attempt allowance reservation/debit; unknown pricing or a
 positive budget alone never permits an API call. Remote Raindrop moves
 re-read the exact current source revision and connector account/write policy
-after preflight before persisting or applying the effect. Legacy exclusions are
-withheld rather than copied and hidden; native import exposes bounded offset
-continuation. Native note/correction mutations carry an explicit confirmation
+after preflight before persisting or applying the effect. Legacy exclusions are withheld rather than copied; if a re-import changes an
+already-readable canonical record to excluded, the run fails closed and asks
+for the existing exclusion/forget control rather than mutating that record.
+Native import exposes bounded offset continuation, and an admitted run owns its
+per-record checkpoint through the operation deadline instead of transport
+cancellation. Native note/correction mutations carry an explicit confirmation
 bit; agent-tool notes remain agent-authored and unconfirmed. `knowledge.status`
 returns typed coverage counts (`observedCount`, `emptyCount`, `excludedCount`,
 `pendingCount`, `failedCount`, `unavailableCount`, and `remainingCount`), while

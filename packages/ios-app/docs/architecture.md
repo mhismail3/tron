@@ -2025,7 +2025,10 @@ search, pages, connector runs, and imports before exposing them to SwiftUI.
 record kind and Personal/Research scope, and loads detail evidence on demand.
 Source object reads use the Gateway's authorization-checked `knowledge.object.read`
 projection and report verified bounded bytes rather than caching a second corpus;
-loaded chunks remain visible and can continue by the returned offset. Session
+loaded chunks remain visible and can continue by the returned offset. Primary
+source objects and retained provider-api/linked-article representations remain
+in the typed DTO and are labeled in the same bounded object reader; corrections
+copy those references rather than dropping canonical evidence. Session
 citations decode the exact Gateway history-entry DTO, render its bounded text
 before navigation, and expose continuation plus the originating-session action
 separately. Import requests carry an explicit offset and exact dry-run plan hash;
@@ -2034,7 +2037,10 @@ until the final selected batch. Detail renders structured field values,
 subjects, validity, qualifications, contrary evidence, and nested record/session
 citations; exact session-entry reads are bounded and displayed before navigation.
 Handoffs carry record/revision and Gateway identity metadata with explicit
-untrusted-evidence wording and a bounded preview. Note confirmation is sent as
+untrusted-evidence wording, bounded structured qualifications/evidence, and a
+bounded preview. The existing New Session owner still owns workspace/model/trust
+inspection and preserves the user's edits; Knowledge records do not infer those
+choices. Note confirmation is sent as
 an explicit user action rather than defaulting an inferred or imported note to
 confirmed; its original provenance remains unchanged.
 Observation configuration requires an explicitly selected existing model and at

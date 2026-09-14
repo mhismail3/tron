@@ -57,6 +57,28 @@ describe("LegacyKnowledgeImporter", () => {
     expect(second.skipped).toBe(1); expect(second.completed).toBe(true); expect(second.progress.remaining).toBe(0); expect((await store.list({ kind: "note" })).records).toHaveLength(0);
   });
 
+  it("fails closed when a re-import changes an accepted source to excluded", async () => {
+    const root = await legacyFixture(); const destination = await mkdtemp(join(tmpdir(), "tron-import-status-conflict-")); roots.push(destination);
+    const store = new KnowledgeStore(new TronWorkspace(destination)); const importer = new LegacyKnowledgeImporter(store, { roots: { "llm-wiki": root } });
+    const dry = await importer.execute({ commandId: "import-status-dry", source: "llm-wiki", scope: { kinds: ["sources"] } });
+    await importer.execute({ commandId: "import-status-run", source: "llm-wiki", expectedPlanHash: dry.planHash, scope: { kinds: ["sources"] } });
+    await writeFile(join(root, "sources", "records", "src-git-only.json"), JSON.stringify({ schema_version: 1, source_id: "src-git-only", representation: "llm-wiki", status: "excluded", captured_at: "2026-01-02T03:04:05Z", content_sha256: "0".repeat(64), metadata: { reference_title: "Now excluded" } }));
+    const changed = await importer.execute({ commandId: "import-status-dry-2", source: "llm-wiki", scope: { kinds: ["sources"] } });
+    await expect(importer.execute({ commandId: "import-status-run-2", source: "llm-wiki", expectedPlanHash: changed.planHash, scope: { kinds: ["sources"] } })).rejects.toThrow("privacy conflict");
+    expect((await store.read("import:llm-wiki:source:src-git-only"))?.content).toMatchObject({ captureDisposition: "complete" });
+  });
+
+  it("settles cancellation after the current item and resumes from its checkpoint", async () => {
+    const root = await legacyFixture(); const destination = await mkdtemp(join(tmpdir(), "tron-import-cancel-")); roots.push(destination);
+    const controller = new AbortController(); let calls = 0;
+    const store = new KnowledgeStore(new TronWorkspace(destination)); const importer = new LegacyKnowledgeImporter(store, { roots: { "llm-wiki": root }, now: () => { calls += 1; if (calls === 1) controller.abort(); return "2026-01-01T00:00:00Z"; } });
+    const dry = await importer.execute({ commandId: "import-cancel-dry", source: "llm-wiki", limit: 2 });
+    const first = await importer.execute({ commandId: "import-cancel-run", source: "llm-wiki", expectedPlanHash: dry.planHash, limit: 2 }, controller.signal);
+    expect(first.failed).toBe(0); expect(first.progress.completed).toBe(1);
+    const retry = await importer.execute({ commandId: "import-cancel-retry", source: "llm-wiki", expectedPlanHash: dry.planHash, limit: 2 });
+    expect(retry.resumed).toBe(1); expect(retry.imported).toBe(1);
+  });
+
   it("records exact batch progress and resumes an interrupted batch idempotently", async () => {
     const root = await legacyFixture(); const destination = await mkdtemp(join(tmpdir(), "tron-import-dest-")); roots.push(destination);
     const importer = new LegacyKnowledgeImporter(new KnowledgeStore(new TronWorkspace(destination)), { roots: { "llm-wiki": root } });

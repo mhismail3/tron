@@ -112,6 +112,7 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertTrue(handoff.contains("Record ID: note-1 · Revision: revision-7"))
         XCTAssertTrue(handoff.contains("Source session session-1, entry entry-1"))
         XCTAssertEqual(handoff.filter { $0 == "x" }.count, 4_000)
+        XCTAssertTrue(handoff.contains("Qualifications: none retained"))
         XCTAssertNil(KnowledgeDraftHandoffPolicy.text(for: record, identity: KnowledgePresentationIdentity(profileID: nil, lifecycleGeneration: nil, connectionID: nil)))
     }
 
@@ -129,7 +130,7 @@ final class KnowledgeModelsTests: XCTestCase {
             schemaVersion: 1, id: "source-1", revisionId: "revision-1", kind: .source, scope: .research,
             createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
             provenance: KnowledgeProvenance(actor: .user, source: nil, sessionId: nil, branchId: nil, invocationId: nil, evidence: []), temporal: nil, relations: [],
-            content: .source(KnowledgeSourceContent(title: "A link", uri: "https://example.com", text: nil, object: nil, mediaType: nil, captureDisposition: .referenceOnly, annotations: nil, sourcePublishedAt: nil, capturedAt: "2026-01-01T00:00:00Z", origin: "manual", origins: [KnowledgeSourceOrigin(kind: .manual, capturedAt: "2026-01-01T00:00:00Z", annotation: "saved", uri: "https://example.com", identity: nil)], identity: KnowledgeSourceIdentity(provider: "raindrop", accountId: "account", itemId: "item"), assessment: KnowledgeSourceAssessment(summary: "A useful source", contribution: nil, whyItMatters: nil, evidenceQuality: .high, freshness: .current, possibleUse: "cite it", generatedAt: "2026-01-01T00:00:00Z", model: "model")))
+            content: .source(KnowledgeSourceContent(title: "A link", uri: "https://example.com", text: nil, object: nil, representations: [KnowledgeSourceRepresentation(kind: .linkedArticle, object: KnowledgeObjectRef(hash: String(repeating: "d", count: 64), mediaType: "text/html", bytes: 4), mediaType: "text/html")], mediaType: nil, captureDisposition: .referenceOnly, annotations: nil, sourcePublishedAt: nil, capturedAt: "2026-01-01T00:00:00Z", origin: "manual", origins: [KnowledgeSourceOrigin(kind: .manual, capturedAt: "2026-01-01T00:00:00Z", annotation: "saved", uri: "https://example.com", identity: nil)], identity: KnowledgeSourceIdentity(provider: "raindrop", accountId: "account", itemId: "item"), assessment: KnowledgeSourceAssessment(summary: "A useful source", contribution: nil, whyItMatters: nil, evidenceQuality: .high, freshness: .current, possibleUse: "cite it", generatedAt: "2026-01-01T00:00:00Z", model: "model")))
         )
         let note = KnowledgeRecord(
             schemaVersion: 1, id: "note-1", revisionId: "revision-1", kind: .note, scope: .personal,
@@ -145,6 +146,7 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertEqual(noteContent.usageConstraint, "Keep private")
         guard case .source(let sourceContent) = decoded[0].content else { return XCTFail("Expected source content") }
         XCTAssertEqual(sourceContent.identity?.itemId, "item")
+        XCTAssertEqual(sourceContent.representations?.first?.kind, .linkedArticle)
         XCTAssertEqual(sourceContent.assessment?.evidenceQuality, .high)
         XCTAssertEqual(sourceContent.origins?.first?.annotation, "saved")
     }
@@ -154,14 +156,28 @@ final class KnowledgeModelsTests: XCTestCase {
             schemaVersion: 1, id: "source-1", revisionId: "revision-4", kind: .source, scope: .research,
             createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
             provenance: KnowledgeProvenance(actor: .connector, source: "raindrop", sessionId: nil, branchId: nil, invocationId: "invoke-1", evidence: []), temporal: nil, relations: [],
-            content: .source(KnowledgeSourceContent(title: "Captured", uri: "https://example.com", text: "original readable text", object: KnowledgeObjectRef(hash: String(repeating: "c", count: 64), mediaType: "text/plain", bytes: 21), mediaType: "text/plain", captureDisposition: .complete, annotations: nil, sourcePublishedAt: nil, capturedAt: "2026-01-01T00:00:00Z", origin: "connector", origins: nil, identity: nil, assessment: nil))
+            content: .source(KnowledgeSourceContent(title: "Captured", uri: "https://example.com", text: "original readable text", object: KnowledgeObjectRef(hash: String(repeating: "c", count: 64), mediaType: "text/plain", bytes: 21), representations: [KnowledgeSourceRepresentation(kind: .providerAPI, object: KnowledgeObjectRef(hash: String(repeating: "d", count: 64), mediaType: "application/json", bytes: 8), mediaType: "application/json"), KnowledgeSourceRepresentation(kind: .linkedArticle, object: KnowledgeObjectRef(hash: String(repeating: "e", count: 64), mediaType: "text/html", bytes: 12), mediaType: "text/html")], mediaType: "text/plain", captureDisposition: .complete, annotations: nil, sourcePublishedAt: nil, capturedAt: "2026-01-01T00:00:00Z", origin: "connector", origins: nil, identity: nil, assessment: nil))
         )
         guard case .source(let corrected) = KnowledgeCorrectionPolicy.content(for: source, replacementText: "the corrected interpretation") else { return XCTFail("Expected source correction") }
         XCTAssertEqual(corrected.text, "original readable text")
         XCTAssertEqual(corrected.object?.hash, String(repeating: "c", count: 64))
+        XCTAssertEqual(corrected.representations?.map(\.kind), [.providerAPI, .linkedArticle])
         XCTAssertEqual(corrected.annotations?.last?.text, "User correction: the corrected interpretation")
         XCTAssertEqual(KnowledgeCorrectionPolicy.provenance(for: source).actor, .user)
         XCTAssertEqual(KnowledgeCorrectionPolicy.provenance(for: source).source, "ios-correction")
         XCTAssertEqual(KnowledgeCorrectionPolicy.provenance(for: source).evidence.last?.revisionId, "revision-4")
+    }
+
+    func testKnowledgeHandoffCarriesBoundedQualificationsAndEvidence() {
+        let record = KnowledgeRecord(
+            schemaVersion: 1, id: "qualified-note", revisionId: "revision-2", kind: .note, scope: .research,
+            createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+            provenance: KnowledgeProvenance(actor: .agent, source: "import", sessionId: nil, branchId: nil, invocationId: nil, evidence: [KnowledgeEvidenceRef(recordId: "source-1", revisionId: "source-r1", sessionEntry: nil, objectHash: nil, locator: "line 4")]), temporal: nil, relations: [],
+            content: .note(KnowledgeNoteContent(title: "Qualified", body: "candidate", fields: [KnowledgeNoteFieldQualification(field: "status", value: .string("historical"), subject: nil, evidence: [KnowledgeEvidenceRef(recordId: "source-1", revisionId: "source-r1", sessionEntry: nil, objectHash: nil, locator: "line 4")], certainty: .historical, validFrom: "2020-01-01", validTo: nil)], role: .fact, confirmed: false, contraryEvidence: nil, freshness: .aging, privacyScope: "private", usageConstraint: nil))
+        )
+        let handoff = KnowledgeDraftHandoffPolicy.text(for: record, identity: KnowledgePresentationIdentity(profileID: "gateway-a", lifecycleGeneration: 1, connectionID: 1))!
+        XCTAssertTrue(handoff.contains("status=historical [historical]"))
+        XCTAssertTrue(handoff.contains("evidence=source-1"))
+        XCTAssertTrue(handoff.contains("Record ID: qualified-note · Revision: revision-2"))
     }
 }

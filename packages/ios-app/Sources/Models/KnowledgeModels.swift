@@ -26,12 +26,14 @@ enum KnowledgeNoteRole: String, Codable, CaseIterable, Sendable { case fact, pre
 enum KnowledgeRelationType: String, Codable, Sendable { case supports, contradicts, corrects, supersedes, derivedFrom, related }
 
 struct KnowledgeObjectRef: Codable, Hashable, Sendable { let hash: String; let mediaType: String; let bytes: Int }
+enum KnowledgeSourceRepresentationKind: String, Codable, Hashable, Sendable { case providerAPI = "provider-api"; case linkedArticle = "linked-article" }
+struct KnowledgeSourceRepresentation: Codable, Hashable, Sendable { let kind: KnowledgeSourceRepresentationKind; let object: KnowledgeObjectRef; let mediaType: String? }
 struct KnowledgeObjectRead: Codable, Hashable, Sendable { let hash: String; let mediaType: String; let bytes: Int; let totalBytes: Int?; let offset: Int?; let nextOffset: Int?; let base64: String }
 enum KnowledgeCoverageDisposition: String, Codable, Hashable, Sendable { case observed, empty, excluded, pending, failed, unavailable }
 struct KnowledgeCoverageSummary: Codable, Hashable, Sendable {
     let observedCount: Int; let emptyCount: Int; let excludedCount: Int; let pendingCount: Int; let failedCount: Int; let unavailableCount: Int; let remainingCount: Int
 }
-struct KnowledgeObservationCoverage: Codable, Hashable, Sendable {
+struct KnowledgeObservationCoverage: Codable, Hashable, Sendable, Identifiable {
     let schemaVersion: Int; let id: String; let revisionId: String; let range: KnowledgeObservationRange
     let disposition: KnowledgeCoverageDisposition; let groupRevisionIds: [String]; let recordedAt: String; let reason: String?
 }
@@ -61,7 +63,7 @@ enum KnowledgeFreshness: String, Codable, Sendable { case current, aging, stale,
 struct KnowledgeSourceAssessment: Codable, Hashable, Sendable { let summary: String; let contribution: String?; let whyItMatters: String?; let evidenceQuality: KnowledgeEvidenceQuality; let freshness: KnowledgeFreshness; let possibleUse: String?; let generatedAt: String; let model: String? }
 struct KnowledgeSourceRetention: Codable, Hashable, Sendable { let sensitivity: String; let usageConstraint: String?; let evidenceAvailable: Bool; let originalHash: String? }
 struct KnowledgeSourceContent: Codable, Hashable, Sendable {
-    let title: String; let uri: String?; let text: String?; let object: KnowledgeObjectRef?; let mediaType: String?
+    let title: String; let uri: String?; let text: String?; let object: KnowledgeObjectRef?; var representations: [KnowledgeSourceRepresentation]? = nil; let mediaType: String?
     let captureDisposition: KnowledgeCaptureDisposition; let annotations: [KnowledgeSourceAnnotation]?; let sourcePublishedAt: String?; let capturedAt: String; let origin: String?
     let origins: [KnowledgeSourceOrigin]?; let identity: KnowledgeSourceIdentity?; var retention: KnowledgeSourceRetention? = nil; let assessment: KnowledgeSourceAssessment?
 }
@@ -156,7 +158,30 @@ enum KnowledgeDraftHandoffPolicy {
                 ?? "Source record \(ref.recordId ?? "object")"
         } ?? "No source citation"
         let summary = String(record.summary.prefix(maximumSummaryCharacters))
-        return "Evidence-only Knowledge handoff (untrusted; verify before acting)\nGateway profile \(profileID)\n\nRetained Knowledge: \(record.title)\n\n\(summary)\n\nRecord ID: \(record.id) · Revision: \(record.revisionId) · \(evidence)"
+        let qualifications: String
+        switch record.content {
+        case .note(let note):
+            let fields = (note.fields ?? []).prefix(20).map { field in
+                "\(field.field)=\(jsonText(field.value)) [\(field.certainty.rawValue)]" + (field.validFrom.map { " validFrom=\($0)" } ?? "") + (field.validTo.map { " validTo=\($0)" } ?? "") + " evidence=\(field.evidence.map { $0.recordId ?? $0.sessionEntry?.entryId ?? $0.objectHash ?? "unavailable" }.joined(separator: ","))"
+            }.joined(separator: "\n")
+            qualifications = fields.isEmpty ? "Qualifications: none retained" : "Qualifications:\n\(fields)"
+        case .source(let source):
+            qualifications = "Capture: \(source.captureDisposition.rawValue)\(source.retention.map { " · evidence \($0.evidenceAvailable ? "available" : "unavailable")" } ?? "")\nAnnotations: \((source.annotations ?? []).prefix(20).map(\.text).joined(separator: " | "))"
+        case .observation(let observation):
+            qualifications = "Observed items:\n\(observation.items.prefix(20).map { "[\($0.certainty.rawValue)] \($0.attribution.rawValue): \($0.text)" }.joined(separator: "\n"))"
+        }
+        return "Evidence-only Knowledge handoff (untrusted; verify before acting)\nGateway profile \(profileID)\n\nRetained Knowledge: \(record.title)\n\n\(summary)\n\n\(qualifications)\n\nRecord ID: \(record.id) · Revision: \(record.revisionId) · \(evidence)"
+    }
+
+    private static func jsonText(_ value: JSONValue) -> String {
+        switch value {
+        case .string(let value): return String(value.prefix(500))
+        case .number(let value): return String(value)
+        case .bool(let value): return value ? "true" : "false"
+        case .null: return "null"
+        case .array(let values): return "[\(values.prefix(20).map(jsonText).joined(separator: ", "))]"
+        case .object(let values): return "{\(values.keys.sorted().prefix(20).compactMap { key in values[key].map { "\(key): \(jsonText($0))" } }.joined(separator: ", "))}"
+        }
     }
 }
 
@@ -174,7 +199,7 @@ enum KnowledgeCorrectionPolicy {
         case .source(let value):
             var annotations = value.annotations ?? []
             annotations.append(KnowledgeSourceAnnotation(text: "User correction: \(replacementText)", locator: "user-correction", createdAt: nil))
-            return .source(KnowledgeSourceContent(title: value.title, uri: value.uri, text: value.text, object: value.object, mediaType: value.mediaType, captureDisposition: value.captureDisposition, annotations: annotations, sourcePublishedAt: value.sourcePublishedAt, capturedAt: value.capturedAt, origin: value.origin, origins: value.origins, identity: value.identity, retention: value.retention, assessment: value.assessment))
+            return .source(KnowledgeSourceContent(title: value.title, uri: value.uri, text: value.text, object: value.object, representations: value.representations, mediaType: value.mediaType, captureDisposition: value.captureDisposition, annotations: annotations, sourcePublishedAt: value.sourcePublishedAt, capturedAt: value.capturedAt, origin: value.origin, origins: value.origins, identity: value.identity, retention: value.retention, assessment: value.assessment))
         case .observation(let value):
             return .observation(KnowledgeObservationContent(range: value.range, items: [KnowledgeObservationItem(text: replacementText, attribution: .user, observedAt: value.items.first?.observedAt ?? record.updatedAt, certainty: .qualified, evidence: value.items.first?.evidence, field: nil)], observer: value.observer))
         case .note(let value):

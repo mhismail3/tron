@@ -160,6 +160,19 @@ describe("KnowledgeService integration", () => {
     expect(await store.read(published.records[0]!.id)).toBeNull();
   });
 
+  it("rejects mixed branched and unbranched reflection cuts before model invocation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const config = await store.configure("service-reflect-branch-config", { ...(await store.config()), observation: { ...(await store.config()).observation, model: "fixture/model" }, eligibility: { ...(await store.config()).eligibility, sessionIds: ["branch-session"] } });
+    const make = async (commandId: string, coverageID: string, branchId: string | undefined, entryID: string) => store.publishObservationGroup({ commandId, expectedConfigRevision: config.revision, coverage: { id: coverageID, range: { sessionId: "branch-session", ...(branchId ? { branchId } : {}), fromEntryId: entryID, toEntryId: entryID, entryIds: [entryID], entryDigest: "a".repeat(64) }, disposition: "observed" }, records: [{ kind: "observation", scope: "personal", provenance: { actor: "agent", sessionId: "branch-session", ...(branchId ? { branchId } : {}), evidence: [] }, relations: [], content: { range: { sessionId: "branch-session", ...(branchId ? { branchId } : {}), fromEntryId: entryID, toEntryId: entryID, entryIds: [entryID], entryDigest: "a".repeat(64) }, items: [{ text: entryID, attribution: "user", observedAt: "2026-01-01T00:00:00Z", certainty: "qualified" }] } }] });
+    const unbranched = await make("service-reflect-unbranched", "service-reflect-unbranched-coverage", undefined, "entry-unbranched");
+    const branched = await make("service-reflect-branched", "service-reflect-branched-coverage", "branch-a", "entry-branched");
+    let calls = 0;
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => ({ ...model(), async reflect() { calls += 1; return "must not run"; } }));
+    await expect(service.invoke({ operation: "knowledge.reflect", request: { commandId: "service-reflect-mixed-branches", sessionId: "branch-session", sourceRevisionIds: [unbranched.records[0]!.revisionId, branched.records[0]!.revisionId] } })).rejects.toMatchObject({ code: "conflict" });
+    expect(calls).toBe(0);
+  });
+
   it("exposes typed connector sweeps to existing Automation tool callers", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));

@@ -3488,6 +3488,14 @@ export class RuntimeSlot {
               entry.type === "message" && entry.message.role === "user" && entry.message === message);
             if (!candidate || candidate.type !== "message") return;
             this.rememberPresentationID(candidate.id, operationID);
+            // Pi can admit a same-agent queued follow-up without emitting a
+            // second agent_start. The canonical user binding is the exact
+            // prospective cut boundary; never fall back to session history.
+            if (!this.observationStarts.has(operationID)) {
+              const canonical = this.canonicalSessionEntries();
+              const entryIndex = canonical.findIndex(entry => entry.id === candidate.id);
+              if (entryIndex >= 0) this.observationStarts.set(operationID, { entryIndex, branchId: this.observationBranchId(canonical) });
+            }
             // The live map is only an optimization. A fast run may already
             // have terminalized and evicted it; recover immutable ownership
             // from the canonical start receipt before binding.

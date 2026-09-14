@@ -95,7 +95,7 @@ function synthesisEvidencePack(record: import("./knowledge-contract.js").Knowled
 
 export interface KnowledgeExtensionSeam {
   connector?: (action: KnowledgeAction, signal?: AbortSignal) => Promise<unknown>;
-  importer?: (action: KnowledgeAction) => Promise<unknown>;
+  importer?: (action: KnowledgeAction, signal?: AbortSignal) => Promise<unknown>;
 }
 
 export interface KnowledgeGenerationModel extends SourceAssessmentModel {
@@ -237,6 +237,13 @@ export class KnowledgeService {
         return this.runOwned("reflection", async signal => {
         const sources = await this.store.observationRevisions(action.request.sessionId, action.request.sourceRevisionIds);
         if (sources.length !== action.request.sourceRevisionIds.length) throw new GatewayError("conflict", "Reflection sources are unavailable or excluded");
+        // Branch identity is part of the evidence cut. Normalize an omitted
+        // branch to null so an unbranched record cannot be combined with a
+        // branched record before model invocation.
+        const branchId = sources[0]?.kind === "observation" ? (sources[0].content.range.branchId ?? null) : null;
+        if (sources.some(record => (record.kind === "observation" ? (record.content.range.branchId ?? null) : null) !== branchId)) {
+          throw new GatewayError("conflict", "Reflection sources must share a branch");
+        }
         const sourceText = sources.map(record => synthesisEvidencePack(record)).join("\n\n");
         if (sourceText.length > Math.min(config.observation.maxInputChars, 48_000)) throw new GatewayError("invalid_request", "Knowledge reflection source pack exceeds its bounded input; select fewer revisions");
         if (signal.aborted) throw new GatewayError("busy", "Knowledge reflection was cancelled", true);
@@ -269,7 +276,11 @@ export class KnowledgeService {
       case "knowledge.import.dry-run":
       case "knowledge.import.run":
         if (!this.extensions.importer) throw new GatewayError("unsupported", "Knowledge importer support is not configured");
-        return this.extensions.importer(action);
+        // A confirmed import owns its bounded operation after admission; a
+        // transport disconnect must not cancel the next checkpoint. Dry-run
+        // reads remain presentation-cancellable.
+        const parentSignal = action.operation === "knowledge.import.run" ? undefined : signal;
+        return this.runOwned("legacy import", ownedSignal => this.extensions.importer!(action, ownedSignal), parentSignal);
     }
   }
 

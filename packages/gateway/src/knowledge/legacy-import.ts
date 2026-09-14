@@ -351,7 +351,7 @@ export class LegacyKnowledgeImporter {
     return { imported: true, revision: result.record.revisionId };
   }
 
-  async execute(request: Extract<KnowledgeAction, { operation: "knowledge.import.dry-run" | "knowledge.import.run" }>["request"] & { operation?: "knowledge.import.dry-run" | "knowledge.import.run" }): Promise<LegacyImportReport> {
+  async execute(request: Extract<KnowledgeAction, { operation: "knowledge.import.dry-run" | "knowledge.import.run" }>["request"] & { operation?: "knowledge.import.dry-run" | "knowledge.import.run" }, signal?: AbortSignal): Promise<LegacyImportReport> {
     const operation = request.operation ?? ("expectedPlanHash" in request ? "knowledge.import.run" : "knowledge.import.dry-run");
     const scope: KnowledgeImportScope | undefined = request.scope; const plan = await this.plan(request.source, scope);
     const scoped = plan.items;
@@ -368,15 +368,29 @@ export class LegacyKnowledgeImporter {
     if (operation !== "knowledge.import.run") return base;
     const runRequest = request as KnowledgeImportRunRequest;
     if (runRequest.expectedPlanHash !== selectedPlanHash) throw new Error("Import plan hash is stale; run dry-run again");
-    const checkpoint = await this.store.beginImport(`import.begin:${runRequest.commandId}`, selectedPlanHash, scoped.map(item => item.id)); base.checkpoint = checkpoint;
-    const done = new Set(checkpoint.completedRecordIds); const sourceRevisions = new Map<string, string>();
-    // These sets were computed from the complete legacy metadata graph before
-    // scope/batch slicing. Never derive privacy from the currently selected
-    // page: source and dependent assertion batches may be run separately.
+    // These sets are computed from the complete legacy metadata graph before
+    // scope/offset slicing, so privacy cannot be bypassed by a later batch.
     const withheldSourceIds = plan.withheldSourceIds;
     const withheldAssertionIds = plan.withheldAssertionIds;
+    // A status change from accepted to excluded is a privacy conflict, not a
+    // normal skipped item: never hide already-imported canonical records or
+    // mutate user-maintained evidence during migration. The caller must first
+    // use the existing exclusion/forget controls, then re-plan the import.
+    for (const item of scoped) {
+      const withheld = (item.kind === "source" && item.excluded === true) || (item.kind === "assertion" && withheldAssertionIds.has(item.legacy.assertion_id));
+      if (!withheld) continue;
+      const existing = await this.store.read(item.id, undefined, true);
+      if (existing && await this.store.read(item.id) !== null) throw new Error(`Import privacy conflict for ${item.id}: existing canonical record requires explicit exclusion or forget before importing changed legacy status`);
+    }
+    const checkpoint = await this.store.beginImport(`import.begin:${runRequest.commandId}`, selectedPlanHash, scoped.map(item => item.id)); base.checkpoint = checkpoint;
+    const done = new Set(checkpoint.completedRecordIds); const sourceRevisions = new Map<string, string>();
     for (const item of selected) { const existing = await this.store.read(item.id, undefined, true); if (existing?.kind === "source" && item.kind === "source" && item.excluded !== true) sourceRevisions.set(item.legacy.source_id, existing.revisionId); }
     for (const item of selected) {
+      if (signal?.aborted) {
+        base.failed += 1;
+        base.warnings.push(`${item.id}: import cancelled before processing`);
+        break;
+      }
       if (done.has(item.id)) { base.resumed += 1; continue; }
       if (item.kind === "source" && item.excluded === true) {
         base.skipped += 1;
@@ -397,7 +411,10 @@ export class LegacyKnowledgeImporter {
         if (item.kind === "source" && item.excluded) base.skipped += 1;
         else if (result.imported) base.imported += 1;
         else base.resumed += 1;
+        // The admitted item owns its receipt/checkpoint. Finish it before
+        // honoring cancellation so a retry cannot observe half-completed work.
         await this.store.markImportRecord(`import.progress:${selectedPlanHash.slice(0, 48)}:${item.id}`.slice(0, 160), selectedPlanHash, item.id); done.add(item.id);
+        if (signal?.aborted) { base.warnings.push(`${item.id}: import cancelled after committed item; remaining items were not started`); break; }
       } catch (error) { base.failed += 1; base.warnings.push(`${item.id}: ${error instanceof Error ? error.message : String(error)}`); break; }
     }
     const final = await this.store.importCheckpoint(selectedPlanHash); if (final) base.checkpoint = final; const completed = final?.completedRecordIds.length ?? done.size;
@@ -406,10 +423,10 @@ export class LegacyKnowledgeImporter {
   }
 }
 
-export function createKnowledgeImporter(store: KnowledgeStore, options: LegacyImporterOptions = {}): (action: KnowledgeAction) => Promise<unknown> {
+export function createKnowledgeImporter(store: KnowledgeStore, options: LegacyImporterOptions = {}): (action: KnowledgeAction, signal?: AbortSignal) => Promise<unknown> {
   const importer = new LegacyKnowledgeImporter(store, options);
-  return async action => {
+  return async (action, signal) => {
     if (action.operation !== "knowledge.import.dry-run" && action.operation !== "knowledge.import.run") throw new Error("Unsupported knowledge importer action");
-    return importer.execute({ ...action.request, operation: action.operation });
+    return importer.execute({ ...action.request, operation: action.operation }, signal);
   };
 }

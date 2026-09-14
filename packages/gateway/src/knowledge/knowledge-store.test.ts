@@ -220,6 +220,17 @@ describe("KnowledgeStore", () => {
     await expect(store.reflect(command("reflect-command-3"), "reflect-session", [first.records[0]!.revisionId], "must fail", configured.revision)).rejects.toThrow("excluded");
   });
 
+  it("rejects root and branched reflection sources at serialized admission", async () => {
+    const { store } = await fixture();
+    const config = await store.configure(command("reflect-branch-config"), { ...(await store.config()), eligibility: { ...(await store.config()).eligibility, sessionIds: ["reflect-branch-session"] } });
+    const publish = async (suffix: string, branchId: string | undefined) => {
+      const range = { sessionId: "reflect-branch-session", ...(branchId ? { branchId } : {}), fromEntryId: `entry-${suffix}`, toEntryId: `entry-${suffix}`, entryIds: [`entry-${suffix}`], entryDigest: "a".repeat(64) };
+      return store.publishObservationGroup({ commandId: command(`reflect-${suffix}`), expectedConfigRevision: config.revision, coverage: { id: `coverage-${suffix}`, range, disposition: "observed" }, records: [{ kind: "observation", scope: "personal", provenance: { actor: "agent", sessionId: range.sessionId, ...(branchId ? { branchId } : {}), evidence: [] }, relations: [], content: { range, items: [{ text: suffix, attribution: "user", observedAt: "2026-01-01T00:00:00Z", certainty: "qualified" }] } }] });
+    };
+    const root = await publish("root", undefined); const branch = await publish("branch", "branch-b");
+    await expect(store.reflect(command("reflect-root-branch"), "reflect-branch-session", [root.records[0]!.revisionId, branch.records[0]!.revisionId], "must fail", config.revision)).rejects.toThrow("share a branch");
+  });
+
   it("does not replace terminal coverage with a fake disposition", async () => {
     const { store } = await fixture();
     const config = await store.config().catch(() => ({ ...DEFAULT_KNOWLEDGE_CONFIG }));

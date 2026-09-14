@@ -688,15 +688,17 @@ export class KnowledgeStore {
       // store mutex: queued work has not yet become an accepted mutation.
       if (signal?.aborted) throw new GatewayError("busy", "Knowledge reflection was cancelled", true);
       if (state.config.revision !== expectedConfigRevision) throw conflict("Knowledge configuration changed while reflection was running");
-      const evidence: KnowledgeEvidenceRef[] = []; const relations: KnowledgeRecord["relations"] = []; let branchId: string | undefined;
+      const evidence: KnowledgeEvidenceRef[] = []; const relations: KnowledgeRecord["relations"] = []; let branchId: string | null = null; let branchInitialized = false;
       const sources: KnowledgeRecord[] = [];
       for (const revision of sourceRevisionIds) {
         let source: KnowledgeRecord | undefined;
         for (const [id, head] of Object.entries(state.records)) if (head.revisionIds.includes(revision)) { source = await this.readRecord(paths, id, revision); break; }
         if (!source || source.kind !== "observation" || source.content.range.sessionId !== sessionId) throw invalid("Reflection source is not an observation in this session");
         if (state.suppressions[source.id]?.excluded || this.excludedRange(state, source.content.range)) throw conflict("Reflection source is excluded");
-        if (branchId !== undefined && branchId !== source.content.range.branchId) throw invalid("Reflection sources must share a branch");
-        branchId = source.content.range.branchId;
+        const sourceBranchId = source.content.range.branchId ?? null;
+        if (branchInitialized && branchId !== sourceBranchId) throw invalid("Reflection sources must share a branch");
+        branchId = sourceBranchId;
+        branchInitialized = true;
         sources.push(source);
         evidence.push({ recordId: source.id, revisionId: source.revisionId });
         relations.push({ type: "derivedFrom", recordId: source.id, revisionId: source.revisionId });
@@ -710,7 +712,7 @@ export class KnowledgeStore {
       const reflectionId = `reflection-${createHash("sha256").update(`${sessionId}\0${branchId ?? ""}`).digest("hex").slice(0, 48)}`;
       const existing = state.records[reflectionId] ? await this.currentRecord(state, paths, reflectionId) : null;
       if (existing && existing.kind !== "note") throw conflict("Reflection identity is occupied by another record kind");
-      const record: KnowledgeRecordDraft & { kind: "note" } = { id: reflectionId, ...(existing ? { createdAt: existing.createdAt } : {}), kind: "note", scope: "personal", provenance: { actor: "agent", source: `reflection:${sourceSetDigest}`, sessionId, ...(branchId === undefined ? {} : { branchId }), evidence }, relations, content: { title: "Session reflection", body: text, role: "synthesis", confirmed: false } };
+      const record: KnowledgeRecordDraft & { kind: "note" } = { id: reflectionId, ...(existing ? { createdAt: existing.createdAt } : {}), kind: "note", scope: "personal", provenance: { actor: "agent", source: `reflection:${sourceSetDigest}`, sessionId, ...(branchId === null ? {} : { branchId }), evidence }, relations, content: { title: "Session reflection", body: text, role: "synthesis", confirmed: false } };
       return this.putRecord(state, paths, record, existing?.revisionId);
     });
   }
