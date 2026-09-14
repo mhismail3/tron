@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { appendFile, copyFile, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -3140,12 +3141,13 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
     await Promise.all([
       writeFile(join(asyncDir, "status.json"), JSON.stringify({
-        lifecycleArtifactVersion: 3,
-        runId,
-        state: "paused",
-        startedAt: started,
-        endedAt: started + 1_000,
-        lastUpdate: started + 1_001,
+        lifecycleProjection: {
+          version: 1, runId, generatedAt: started + 1_001,
+          caps: { maxRuns: 1, maxChildrenPerNode: 8, maxDepth: 3, maxStringLength: 160, maxSerializedBytes: 30_720 },
+          omitted: { runs: 0, children: 0, byteLimitExceeded: false },
+          root: { id: runId, kind: "workflow", label: "paused workflow", state: "paused", startedAt: started, updatedAt: started + 1_001, endedAt: started + 1_000 },
+        },
+        lifecycleArtifactVersion: 3, runId, state: "paused", startedAt: started, endedAt: started + 1_000, lastUpdate: started + 1_001,
       })),
       writeFile(join(asyncDir, "process-terminal.json"), JSON.stringify({
         version: 1,
@@ -3818,7 +3820,6 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionFile: childFile,
       runFanoutBudget: { version: 1, rootRunId, directory: "/private/opaque", limit: 64 },
     }));
-
     await internal.refreshExtensionActivityFromArtifact(toolCallId, asyncDir);
     const unbound = slot.snapshot().processActivities?.find((activity) => activity.kind === "subagent");
     expect(unbound).toMatchObject({ source: "delegatedAgent", visibility: "active" });
@@ -4248,6 +4249,89 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(warnings).toEqual([{ reason: "ownership-mismatch", owner: expect.stringMatching(/^[0-9a-f]{24}$/u) }]);
     expect(JSON.stringify(warnings)).not.toContain("private");
     expect(JSON.stringify(warnings)).not.toContain("output");
+  });
+
+  it("discovers real producer-serialized lifecycle headers without parsing reports", async () => {
+    const fixture = await coldFixture("embedded-lifecycle-header");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const runId = "frozen-real-run";
+    const toolCallId = "frozen-real-tool";
+    const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", runId);
+    const parentFile = slot.sessionFile!;
+    const childRoot = join(dirname(parentFile), basename(parentFile, ".jsonl"), runId);
+    const makeChildSession = async (runName: string, id: string): Promise<string> => {
+      const childDirectory = join(childRoot, runName);
+      await mkdir(childDirectory, { recursive: true });
+      const manager = SessionManager.create(fixture.cwd, childDirectory, { id });
+      manager.appendMessage(fauxAssistantMessage(`${runName} transcript`));
+      const generated = manager.getSessionFile()!;
+      const childFile = join(childDirectory, "session.jsonl");
+      await rename(generated, childFile);
+      return childFile;
+    };
+    const childFile = await makeChildSession("run-0", "frozen-child-session");
+    const nestedFile = await makeChildSession("run-1", "frozen-nested-session");
+    await mkdir(asyncDir, { recursive: true });
+    const fixturePath = (name: "active" | "terminal") => join(dirname(fileURLToPath(import.meta.url)), "fixtures", `frozen-real-${name}.json`);
+    const loadFixture = async (name: "active" | "terminal"): Promise<string> => {
+      const raw = await readFile(fixturePath(name), "utf8");
+      return raw.replaceAll("/tmp/frozen-real-child/session.jsonl", childFile)
+        .replaceAll("/tmp/frozen-real-nested/session.jsonl", nestedFile);
+    };
+    const internal = slot as unknown as {
+      extensionActivities: Map<string, ExtensionRunActivity>;
+      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
+    };
+    const started = 1_700_000_000_000;
+    internal.extensionActivities.set(toolCallId, {
+      id: toolCallId, activityId: "frozen-real-activity", runId, toolCallId,
+      source: { source: "pi-subagents" }, title: "Pi Subagents", status: "running",
+      startedAt: new Date(started).toISOString(), updatedAt: new Date(started).toISOString(), children: [],
+      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: new Date(started).toISOString() },
+    });
+    internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
+    await writeFile(join(asyncDir, "status.json"), await loadFixture("active"));
+    await slot.discoverExtensionArtifact(asyncDir);
+    const active = slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId)!;
+    expect(active).toMatchObject({ status: "running", lifecycle: { state: "running" } });
+    expect(active.children).toEqual(expect.arrayContaining([
+      expect.objectContaining({ currentTool: "bash", toolCount: 3, childSessionRef: "frozen-child-session", children: expect.arrayContaining([expect.objectContaining({ currentTool: "read", childSessionRef: "frozen-nested-session" })]) }),
+      expect.objectContaining({ hostStep: expect.objectContaining({ provider: "github", role: "checks" }) }),
+    ]));
+    expect(active).not.toHaveProperty("output");
+    expect(JSON.stringify(active)).not.toContain("x".repeat(1_024));
+    expect(slot.snapshot().processActivities).toEqual(expect.arrayContaining([expect.objectContaining({ childSessionRef: "frozen-child-session", currentTool: "bash" })]));
+    expect(slot.snapshot().processOverview.extensionChildOmissions).toMatchObject({ children: 34, byteLimitExceeded: false });
+
+    // A legacy status payload may contain a presentation-shaped
+    // `lifecycleProjection`, but that key is not proof that its sessionOwnerId
+    // was emitted by the admitted status header. A forged owner must not make
+    // a child outside this run's reserved path admissible.
+    const foreignDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forged-owner", "run-0");
+    await mkdir(foreignDirectory, { recursive: true });
+    const foreignManager = SessionManager.create(fixture.cwd, foreignDirectory, { id: "forged-child-session" });
+    foreignManager.appendMessage(fauxAssistantMessage("forged owner transcript"));
+    const foreignFile = join(foreignDirectory, "session.jsonl");
+    await rename(foreignManager.getSessionFile()!, foreignFile);
+    await writeFile(join(asyncDir, "status.json"), JSON.stringify({
+      lifecycleArtifactVersion: 3,
+      lifecycleProjection: { presentationOnly: true },
+      runId,
+      state: "running",
+      startedAt: started,
+      lastUpdate: started + 6_000,
+      mode: "workflow",
+      steps: [{ runId: "forged-child", sessionOwnerId: "forged-owner", agent: "forged", status: "running", sessionFile: foreignFile }],
+    }));
+    await slot.discoverExtensionArtifact(asyncDir);
+    const forged = slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId)!;
+    expect(forged.children[0]?.childSessionRef).toBeUndefined();
+    expect(slot.snapshot().processActivities?.some((activity) => activity.childSessionRef === "forged-child-session")).toBe(false);
+
+    await writeFile(join(asyncDir, "status.json"), await loadFixture("terminal"));
+    await slot.discoverExtensionArtifact(asyncDir);
+    const terminal = slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId)!;
+    expect(terminal).toMatchObject({ status: "completed", lifecycle: { state: "completed" }, completedAt: new Date(1_700_000_010_000).toISOString() });
   });
 
   it("reconciles an exact-owned oversized terminal artifact from bounded event evidence", async () => {

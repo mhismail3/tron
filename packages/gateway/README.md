@@ -1639,6 +1639,20 @@ Gateway retries that exact artifact binding on a bounded backoff and once on an 
 request; no ambient path scan or client inference participates. Bare launcher acknowledgements remain hidden until the lifecycle artifact
 contains child execution evidence. This keeps the composer activity overview continuous
 without treating labels or generic extension array positions as ownership.
+
+Async lifecycle artifacts use one canonical `status.json`; its first JSON property is the
+bounded `lifecycleProjection` header. RuntimeSlot reads only a 32 KiB prefix for modern
+artifacts, structurally locates and parses only a complete header value bounded to 30 KiB,
+and never searches later keys or parses report-bearing status. Header-less old
+artifacts retain the bounded legacy reader. A malformed, truncated, mismatched, or schema-invalid
+modern header fails closed rather than fabricating a child or terminal state. Producer
+`partial` is adapted to the existing native `failed` state with `needsAttention`; no new
+native lifecycle value is required. Header root and child activity/timing, bounded omission
+counts, allowlisted host-step metadata, paused process-terminal proof, and exact child session
+evidence are then attached to the existing Gateway-owned terminal/ownership latches. `SessionProcessOverview.extensionChildOmissions`
+distinguishes producer child omissions from Gateway row-cap omissions; it is an additive
+bounded diagnostic and does not promise unlimited native rows.
+
 Absolute session and
 artifact paths, PIDs, environment values, and unbounded task/output data never cross
 the wire. Bounded delegated-output previews conservatively mask environment assignments,

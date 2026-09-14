@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { admitExtensionLifecycleArtifact, boundExtensionActivities, extensionActivityStatusFromTool, extensionLifecycleState, hasForegroundSubagentRunActivity, hasObservedPausedProcessTerminal, hasStructuredExtensionRunActivity, inspectExtensionLifecycleArtifact, normalizeExtensionArtifact, projectExtensionRunActivity, usesForegroundSubagentChildIdentity } from "./extension-run-projection.js";
+import { admitExtensionLifecycleArtifact, boundExtensionActivities, extensionActivityStatusFromTool, extensionLifecycleState, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasObservedPausedProcessTerminal, hasStructuredExtensionRunActivity, inspectExtensionLifecycleArtifact, inspectExtensionLifecycleProjection, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, usesForegroundSubagentChildIdentity } from "./extension-run-projection.js";
 
 const base = {
   id: "tool-call",
@@ -10,6 +10,58 @@ const base = {
   startedAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:02.000Z",
 };
+
+describe("lifecycleProjection header", () => {
+  const projection = {
+    version: 1,
+    runId: "run-1",
+    toolCallId: "tool-1",
+    sessionId: "session-1",
+    generatedAt: 10,
+    caps: { maxRuns: 1, maxChildrenPerNode: 8, maxDepth: 3, maxStringLength: 160, maxSerializedBytes: 32_768 },
+    omitted: { runs: 0, children: 1, byteLimitExceeded: false },
+    root: { id: "run-1", kind: "workflow", label: "workflow", state: "running", startedAt: 1, updatedAt: 2, children: [{ id: "host", kind: "host-step", label: "CI", state: "running", updatedAt: 2, hostStep: { kind: "ci", state: "running", provider: "github" } }] },
+  } as const;
+
+  it("parses only a complete first property and preserves host metadata", () => {
+    const bytes = Buffer.from(JSON.stringify({ lifecycleProjection: projection, steps: [{ report: "x".repeat(300_000) }] }));
+    const parsed = parseExtensionLifecycleProjectionHeader(bytes);
+    expect(inspectExtensionLifecycleProjection(parsed)).toEqual(projection);
+    expect(hasExtensionLifecycleProjectionProperty(bytes)).toBe(true);
+    expect(lifecycleProjectionArtifact(projection).steps[0]).toMatchObject({ hostStep: { provider: "github" } });
+  });
+
+  it("accepts producer-sized Unicode fields without confusing characters with bytes", () => {
+    const label = "é".repeat(160);
+    const unicodeProjection = {
+      ...projection,
+      root: { ...projection.root, label },
+    };
+    expect(inspectExtensionLifecycleProjection(unicodeProjection)).toEqual(unicodeProjection);
+  });
+
+  it("rejects truncated, non-first, and malformed lifecycle headers without legacy parsing", () => {
+    const truncated = Buffer.from('{"lifecycleProjection":{"version":1,"runId":"run-1"');
+    expect(parseExtensionLifecycleProjectionHeader(truncated)).toBeUndefined();
+    expect(hasExtensionLifecycleProjectionProperty(truncated)).toBe(true);
+    const later = Buffer.from(JSON.stringify({ state: "complete", lifecycleProjection: projection }));
+    expect(parseExtensionLifecycleProjectionHeader(later)).toBeUndefined();
+    expect(hasExtensionLifecycleProjectionProperty(later)).toBe(false);
+    expect(inspectExtensionLifecycleProjection({ ...projection, root: { ...projection.root, children: [{ foo: "fake" }] } })).toBeUndefined();
+    expect(inspectExtensionLifecycleProjection({ ...projection, root: { ...projection.root, activity: { currentTool: 42 } } })).toBeUndefined();
+    expect(inspectExtensionLifecycleProjection({ ...projection, root: { ...projection.root, children: [{ ...projection.root.children[0], hostStep: { kind: "ci", state: "done", provider: "github", extra: true } }] } })).toBeUndefined();
+    expect(inspectExtensionLifecycleProjection({ ...projection, root: { ...projection.root, kind: "step" } })).toBeUndefined();
+    expect(inspectExtensionLifecycleProjection({ ...projection, root: { ...projection.root, children: [projection.root.children[0], projection.root.children[0]] } })).toBeUndefined();
+    expect(inspectExtensionLifecycleProjection({ ...projection, root: { ...projection.root, children: [{ ...projection.root.children[0], hostStep: undefined }] } })).toBeUndefined();
+  });
+
+  it("maps producer partial state to the native failed state with honest attention", () => {
+    expect(extensionLifecycleState("partial")).toBe("failed");
+    const partial = { state: "partial", startedAt: 1, lastUpdate: 3, endedAt: 2 };
+    const activity = projectExtensionRunActivity(partial, { ...base, status: "failed", authoritativeStatus: false });
+    expect(activity).toMatchObject({ status: "failed", lifecycle: { state: "failed", attention: "needsAttention" } });
+  });
+});
 
 describe("projectExtensionRunActivity", () => {
   it("normalizes artifact status and timestamps identically for discovery and watcher callers", () => {

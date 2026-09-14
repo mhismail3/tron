@@ -296,6 +296,19 @@ export interface ExtensionRunLifecycle {
 /** Structured, bounded progress emitted by an extension-owned delegated run.
  * This is intentionally presentation-neutral: native clients may render it
  * as a live card while the extension remains the authority for execution. */
+export interface ExtensionRunHostStep {
+  kind: "command" | "ci" | "gate";
+  provider?: string;
+  role?: string;
+  state: "pending" | "running" | "done" | "error" | "cancelled";
+  verdict?: "pass" | "fail" | "inconclusive";
+  reasonCode?: string;
+  detail?: string;
+  target?: string;
+  stale?: boolean;
+  report?: string;
+}
+
 export interface ExtensionRunChild {
   id: string;
   /** Exact producer identity. Absent when `id` is only a compatibility display fallback. */
@@ -321,6 +334,7 @@ export interface ExtensionRunChild {
   durationMs?: number;
   output?: string;
   children?: ExtensionRunChild[];
+  hostStep?: ExtensionRunHostStep;
 }
 
 export interface ExtensionRunActivity {
@@ -348,6 +362,8 @@ export interface ExtensionRunActivity {
   children: ExtensionRunChild[];
   /** Additive rich lifecycle projection; absent on old Gateway snapshots. */
   lifecycle?: ExtensionRunLifecycle;
+  /** Exact bounded child omission reported by the producer header. */
+  lifecycleOmissions?: { children: number; byteLimitExceeded: boolean };
 }
 
 export interface ExtensionActivityDelta {
@@ -415,6 +431,8 @@ export interface SessionProcessOverview {
   visibility: "hidden" | "active" | "recent";
   nearestExpiry?: string;
   omissions?: { count: number; bytes: number; reason: "count" | "bytes" | "countAndBytes" };
+  /** Child omissions are distinct from Gateway row-cap omissions. */
+  extensionChildOmissions?: { children: number; byteLimitExceeded: boolean };
 }
 
 export interface SessionProcessDelta {
