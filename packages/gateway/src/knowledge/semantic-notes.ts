@@ -60,7 +60,7 @@ export async function supersedeSemanticNote(store: KnowledgeStore, input: Semant
 export async function readSourceObject(store: KnowledgeStore, sourceId: string, revisionId?: string): Promise<Uint8Array | null> {
   const source = await store.read(sourceId, revisionId);
   if (!source || source.kind !== "source" || !source.content.object) return null;
-  return store.readObject(source.content.object);
+  return store.readObject(source.content.object, { recordId: source.id, revisionId: source.revisionId });
 }
 
 /** Resolve an object citation through its exact source revision, never by hash alone. */
@@ -68,7 +68,7 @@ export async function readCitedSourceObject(store: KnowledgeStore, citation: Kno
   if (!citation.recordId || !citation.revisionId || !citation.objectHash) return null;
   const source = await store.read(citation.recordId, citation.revisionId);
   if (!source || source.kind !== "source" || source.content.object?.hash !== citation.objectHash) return null;
-  return store.readObject(source.content.object);
+  return store.readObject(source.content.object, { recordId: source.id, revisionId: source.revisionId });
 }
 
 export type NoteMutationRequest = KnowledgeNoteMutationRequest;

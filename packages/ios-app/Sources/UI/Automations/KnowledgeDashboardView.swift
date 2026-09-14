@@ -239,7 +239,7 @@ struct KnowledgeDetailView: View {
             guard requestGeneration == objectRequestGeneration, model.knowledgePresentationIdentity == requestIdentity,
                   activity.allowsPresentationPublication else { return }
             do {
-                let object = try await model.knowledge.readObject(reference, offset: requestedOffset)
+                let object = try await model.knowledge.readObject(reference, recordID: record.id, revisionID: record.revisionId, offset: requestedOffset)
                 guard requestGeneration == objectRequestGeneration, model.knowledgePresentationIdentity == requestIdentity,
                       activity.allowsPresentationPublication else { return }
                 objectLoading = false

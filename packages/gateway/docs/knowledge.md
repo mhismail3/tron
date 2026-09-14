@@ -40,9 +40,12 @@ recreating records.
 Missing state in an established namespace is invalid and is never treated as
 an empty corpus. Missing or malformed/newer state, unsafe ancestors, and
 corrupt record/object files remain visible as failures rather than being
-reset. `readObject()` is bounded and hashes the raw bytes; object media type
-belongs to the reference and does not change byte identity. Existing-object
-reuse and record references perform the same hash and size verification.
+reset. `readObject()` requires the exact committed source record ID and
+revision that owns the requested object or representation; it rechecks current
+privacy/exclusion fences after byte I/O and never authorizes by hash-only corpus
+scanning. It remains bounded and hashes the raw bytes; object media type belongs
+to the reference and does not change byte identity. Existing-object reuse and
+record references perform the same hash and size verification.
 
 ## Record and observation contract
 
@@ -81,8 +84,11 @@ ranges cannot be reflected.
 
 The typed action surface remains the shared Gateway/agent/native DTO. Reads
 return state revisions, and recall distinguishes no-match from unavailable
-store errors. Observation defaults to disabled and the store never chooses a
-provider or model silently. Connector/import DTOs are operation shapes implemented by the installed connector
+store errors. Registered recall text includes bounded dated, attributed,
+qualified evidence and a pinned `knowledge.read` continuation (`id`,
+`revisionId`, and `offset`) whenever the evidence section is incomplete; the
+complete record is never available only through tool details. Observation
+defaults to disabled and the store never chooses a provider or model silently. Connector/import DTOs are operation shapes implemented by the installed connector
 extension. Connector configuration supplies a selected account/collection scope and
 opaque `credentialRef` (`connector:<provider>:<account>`); only the Mac Keychain adapter
 resolves it. Tokens never enter knowledge state, receipts, logs, prompts, iOS models, or

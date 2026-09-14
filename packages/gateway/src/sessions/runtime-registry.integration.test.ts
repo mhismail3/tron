@@ -21,6 +21,9 @@ import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, type ExtensionActivityReceipt } from "./extension-activity-history.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
+import { invocationReceipts } from "./invocation-receipts.js";
+import { KnowledgeStore } from "../knowledge/knowledge-store.js";
+import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { RunMarkerCompletionConflictError, type RunMarkerStore } from "./run-markers.js";
 import { toolSegmentId } from "./projection.js";
 
@@ -9199,6 +9202,69 @@ export default function (pi) {
     expect(slot.isDisposed).toBe(true);
     expect(reopened).not.toBe(slot);
     expect(reopened.id).toBe(sessionId);
+  });
+
+  it("keeps overlapping completed and queued failed observation cuts tied to their invocations", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-runtime-knowledge-overlap-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "project");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ retry: { enabled: false }, compaction: { enabled: false } }));
+    const barrier = () => { let release!: () => void; const promise = new Promise<void>(resolve => { release = resolve; }); return { promise, release, resolve: release }; };
+    const modelStarted = barrier();
+    const releaseModel = barrier();
+    const attentionEntered = barrier();
+    const releaseAttention = barrier();
+    const faux = fauxProvider({ provider: "tron-knowledge-overlap", tokensPerSecond: 100_000 });
+    faux.setResponses([
+      async () => { modelStarted.resolve(); await releaseModel.promise; return fauxAssistantMessage("SYNTHETIC_EARLIER_RESPONSE"); },
+      fauxAssistantMessage("SYNTHETIC_FOLLOWUP_FAILURE", { stopReason: "error", errorMessage: "synthetic controlled failure" }),
+    ]);
+    const admissions: any[] = [];
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => { const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }); runtime.registerNativeProvider(faux.provider); return runtime; },
+      trust: new TrustService(agentDir), broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    registry.setKnowledgeService(new KnowledgeService(new KnowledgeStore(registry.knowledgeWorkspace()), { admit(cut: any) { admissions.push(structuredClone(cut)); }, dispose() {} } as any));
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const selectedModel = faux.getModel();
+    await slot.setModel(selectedModel.provider, selectedModel.id);
+    const originalAttention = slot.hooks.assistantResponseCompleted.bind(slot.hooks);
+    slot.hooks.assistantResponseCompleted = async (...args: any[]) => { attentionEntered.resolve(); await releaseAttention.promise; return originalAttention(...args); };
+    let initial: { operationId: string };
+    let queued: { operationId: string };
+    try {
+      initial = await slot.prompt("SYNTHETIC_INITIAL_TASK");
+      await modelStarted.promise;
+      queued = await slot.prompt("SYNTHETIC_QUEUED_TASK", [], "followUp");
+      releaseModel.resolve();
+      await attentionEntered.promise;
+      await vi.waitFor(() => expect(invocationReceipts(slot.canonicalSessionEntries(), slot.id).some(receipt => receipt.operationId === queued.operationId && receipt.receiptKind === "terminal" && receipt.lifecycle === "failed")).toBe(true), { timeout: 5_000, interval: 10 });
+    } finally {
+      releaseModel.resolve();
+      releaseAttention.resolve();
+    }
+    await vi.waitFor(() => { expect(slot.isBusy).toBe(false); expect(slot.isDrainBusy).toBe(false); }, { timeout: 5_000, interval: 10 });
+    const terminals = invocationReceipts(slot.canonicalSessionEntries(), slot.id).filter(receipt => receipt.receiptKind === "terminal");
+    const firstReceipt = terminals.find(receipt => receipt.operationId === initial.operationId);
+    const nextReceipt = terminals.find(receipt => receipt.operationId === queued.operationId);
+    expect(firstReceipt?.lifecycle).toBe("completed");
+    expect(nextReceipt?.lifecycle).toBe("failed");
+    const first = admissions.find(cut => cut.completionId !== undefined);
+    expect(first, "earlier canonical completion must have its own admitted cut").toBeDefined();
+    expect(first.invocationId).toBe(firstReceipt!.invocationId);
+    expect(first.outcome).toBe(firstReceipt!.lifecycle);
+    expect(first.entries.some((entry: any) => entry.message?.role === "user" && JSON.stringify(entry.message.content).includes("SYNTHETIC_QUEUED_TASK"))).toBe(false);
+    const next = admissions.find(cut => cut.invocationId === nextReceipt!.invocationId);
+    expect(next, "queued failed invocation needs its own exact admission").toBeDefined();
+    expect(next.outcome).toBe("failed");
+    expect(next.entries).not.toHaveLength(0);
+    expect(next.entries.some((entry: any) => entry.message?.role === "user" && JSON.stringify(entry.message.content).includes("SYNTHETIC_QUEUED_TASK"))).toBe(true);
+    expect(faux.state.callCount).toBe(2);
   });
 
   it("cancels an idle eviction when a selected slot is acquired or subscribed before disposal", async () => {

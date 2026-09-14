@@ -496,7 +496,17 @@ export interface KnowledgeImportScope {
 export interface KnowledgeImportDryRunRequest { commandId: string; source: string; scope?: KnowledgeImportScope; limit?: number; offset?: number; }
 export interface KnowledgeImportRunRequest { commandId: string; source: string; scope?: KnowledgeImportScope; expectedPlanHash: string; limit?: number; offset?: number; }
 
-export interface KnowledgeObjectReadRequest { hash: string; bytes: number; mediaType: string; offset?: number; }
+/** Object bytes are authorized by the exact committed record revision that
+ * supplied the object or representation reference. Hashes alone are never a
+ * readable authority. */
+export interface KnowledgeObjectReadRequest {
+  recordId: string;
+  revisionId: string;
+  hash: string;
+  bytes: number;
+  mediaType: string;
+  offset?: number;
+}
 export type KnowledgeAction =
   | { operation: "knowledge.status"; request: Record<string, never> }
   | { operation: "knowledge.observation.coverage"; request: KnowledgeCoverageRequest }

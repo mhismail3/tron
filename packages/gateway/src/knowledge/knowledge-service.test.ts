@@ -110,6 +110,71 @@ describe("KnowledgeService integration", () => {
     expect(text).toContain("sourcePublishedAt");
   });
 
+  it("returns readable text object evidence while keeping binary bytes explicit", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const textObject = await store.putObject(new TextEncoder().encode("OBJECT_TEXT_MARKER"), "text/plain");
+    const source = await store.captureSource({ commandId: "service-object-source", record: { kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "Object source", object: textObject, captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z" } } });
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined));
+    const readable = await service.tool({ action: "readObject", id: source.record.id, revisionId: source.record.revisionId, hash: textObject.hash, mediaType: textObject.mediaType, bytes: textObject.bytes });
+    expect(readable.text).toContain("OBJECT_TEXT_MARKER");
+    expect(readable.text).toContain("offset=0");
+    expect(readable.text).not.toContain("base64");
+    const jsonObject = await store.putObject(new TextEncoder().encode('{"provider":"synthetic"}'), "application/json");
+    const jsonSource = await store.captureSource({ commandId: "service-json-source", record: { kind: "source", scope: "research", provenance: { actor: "connector", evidence: [] }, relations: [], content: { title: "JSON source", object: jsonObject, captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z" } } });
+    const json = await service.tool({ action: "readObject", id: jsonSource.record.id, revisionId: jsonSource.record.revisionId, hash: jsonObject.hash, mediaType: jsonObject.mediaType, bytes: jsonObject.bytes });
+    expect(json.text).toContain('"provider":"synthetic"');
+    const binaryObject = await store.putObject(new Uint8Array([0, 255, 1]), "application/octet-stream");
+    const binarySource = await store.captureSource({ commandId: "service-binary-source", record: { kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "Binary source", object: binaryObject, captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z" } } });
+    const binary = await service.tool({ action: "readObject", id: binarySource.record.id, revisionId: binarySource.record.revisionId, hash: binaryObject.hash, mediaType: binaryObject.mediaType, bytes: binaryObject.bytes });
+    expect(binary.text).toContain("Binary or unsupported media type");
+    expect(binary.text).not.toContain("OBJECT_TEXT_MARKER");
+    const splitObject = await store.putObject(new TextEncoder().encode(`${"HEAD"}${"a".repeat(511_995)}🧭TAIL`), "text/plain");
+    const splitSource = await store.captureSource({ commandId: "service-split-source", record: { kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "Split source", object: splitObject, captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z" } } });
+    let offset = 0;
+    let splitText = "";
+    for (;;) {
+      const page = await service.tool({ action: "readObject", id: splitSource.record.id, revisionId: splitSource.record.revisionId, hash: splitObject.hash, mediaType: splitObject.mediaType, bytes: splitObject.bytes, offset });
+      splitText += page.text;
+      const nextOffset = (page.details as { nextOffset?: number } | null)?.nextOffset;
+      if (nextOffset === undefined) break;
+      expect(nextOffset).toBeGreaterThan(offset);
+      offset = nextOffset;
+    }
+    expect(splitText).toContain("HEAD");
+    expect(splitText).toContain("🧭");
+    expect(splitText).toContain("TAIL");
+  });
+
+  it("returns dated qualified recall evidence and a pinned read continuation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const configured = await store.configure("service-recall-config", { ...(await store.config()), eligibility: { ...(await store.config()).eligibility, sessionIds: ["recall-session"] } });
+    const range = { sessionId: "recall-session", fromEntryId: "recall-entry", toEntryId: "recall-entry", entryIds: ["recall-entry"], entryDigest: "c".repeat(64) };
+    const published = await store.publishObservationGroup({ commandId: "service-recall-source", expectedConfigRevision: configured.revision, coverage: { id: "service-recall-coverage", range, disposition: "observed" }, records: [{ kind: "observation", scope: "personal", provenance: { actor: "agent", sessionId: range.sessionId, evidence: [{ sessionEntry: { sessionId: range.sessionId, entryId: range.fromEntryId } }] }, relations: [], content: { range, items: [{ text: `RECALL_EVIDENCE ${"qualified detail ".repeat(400)} RECALL_TAIL`, attribution: "user", observedAt: "2026-01-02T03:04:05Z", certainty: "qualified", evidence: [{ sessionEntry: { sessionId: range.sessionId, entryId: range.fromEntryId } }] }] } }] });
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined));
+    const recalled = await service.tool({ action: "recall", sessionId: range.sessionId, entryId: range.fromEntryId, limit: 1 });
+    expect(recalled.text).toContain("2026-01-02T03:04:05Z");
+    expect(recalled.text).toContain("qualified");
+    expect(recalled.text).toContain("user: RECALL_EVIDENCE");
+    expect(recalled.text).toContain("entryId");
+    expect(recalled.text).toContain("Continue with action=read");
+    const continuation = recalled.text.match(/Continue with action=read id=([^ ]+) revisionId=([^ ]+) offset=(\d+)\./);
+    expect(continuation).not.toBeNull();
+    let offset = Number(continuation![3]!);
+    let pages = "";
+    for (;;) {
+      const page = await service.tool({ action: "read", id: continuation![1]!, revisionId: continuation![2]!, offset });
+      pages += page.text;
+      const nextOffset = (page.details as { nextOffset?: number } | null)?.nextOffset;
+      if (nextOffset === undefined) break;
+      offset = nextOffset;
+    }
+    expect(offset).toBeGreaterThan(0);
+    expect(pages).toContain("RECALL_TAIL");
+    expect(published.records[0]!.revisionId).toBe(continuation![2]);
+  });
+
   it("synthesizes exact source and note revisions through the registered knowledge tool", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));

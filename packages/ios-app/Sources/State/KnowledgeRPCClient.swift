@@ -63,9 +63,11 @@ final class KnowledgeRPCClient {
         guard record.id == id, revisionID == nil || record.revisionId == revisionID else { throw invalidResponse() }
         return record
     }
-    func readObject(_ reference: KnowledgeObjectRef, offset: Int = 0) async throws -> KnowledgeObjectRead? {
-        struct Params: Encodable { let hash: String; let bytes: Int; let mediaType: String; let offset: Int }
-        let value: JSONValue = try await request("knowledge.object.read", Params(hash: reference.hash, bytes: reference.bytes, mediaType: reference.mediaType, offset: max(0, offset)), timeout: .seconds(30))
+    /// Object bytes require the exact source record revision that owns the
+    /// selected object or representation; a hash alone is not authority.
+    func readObject(_ reference: KnowledgeObjectRef, recordID: String, revisionID: String, offset: Int = 0) async throws -> KnowledgeObjectRead? {
+        struct Params: Encodable { let recordId: String; let revisionId: String; let hash: String; let bytes: Int; let mediaType: String; let offset: Int }
+        let value: JSONValue = try await request("knowledge.object.read", Params(recordId: recordID, revisionId: revisionID, hash: reference.hash, bytes: reference.bytes, mediaType: reference.mediaType, offset: max(0, offset)), timeout: .seconds(30))
         if value == .null { return nil }
         let object = try value.decode(KnowledgeObjectRead.self)
         guard object.hash == reference.hash, object.bytes <= 512_000, object.base64.count <= 700_000,

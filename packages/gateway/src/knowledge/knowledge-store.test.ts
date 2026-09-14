@@ -180,12 +180,30 @@ describe("KnowledgeStore", () => {
   it("verifies object bytes on reuse, reads, and record reference", async () => {
     const { store, home } = await fixture();
     const object = await store.putObject(new TextEncoder().encode("original bytes"), "text/plain");
+    const created = await store.captureSource({ commandId: command("object-reference"), record: { ...source("object reference"), content: { ...source("object reference").content, object } } });
     const objectPath = join(home, "workspace/state/knowledge/objects", object.hash);
     await writeFile(objectPath, "tampered bytes", { mode: 0o600 });
-    await expect(store.readObject(object)).rejects.toThrow(/hash|identity/i);
+    await expect(store.readObject(object, { recordId: created.record.id, revisionId: created.record.revisionId })).rejects.toThrow(/hash|identity/i);
     await expect(store.putObject(new TextEncoder().encode("original bytes"), "text/html")).rejects.toThrow(/hash|identity/i);
     await expect(store.captureSource({ commandId: command("corrupt-reference"), record: { ...source("corrupt"), content: { ...source("corrupt").content, object, text: undefined } } })).rejects.toThrow(/durably captured|bytes/i);
   });
+
+  it("authorizes object bytes by exact source revision after a large unrelated corpus", async () => {
+    const { store } = await fixture();
+    const object = await store.putObject(new TextEncoder().encode("exact retained bytes"), "text/plain");
+    const filler = "x".repeat(1_800_000);
+    for (let index = 0; index < 20; index += 1) {
+      const record = source(`unrelated-${index}`);
+      await store.captureSource({ commandId: command(`large-unrelated-${index}`), record: { ...record, content: { ...record.content, text: filler } } });
+    }
+    const target = await store.captureSource({ commandId: command("large-corpus-target"), record: { ...source("exact target"), content: { ...source("exact target").content, text: undefined, object } } });
+    const authority = { recordId: target.record.id, revisionId: target.record.revisionId };
+    await expect(store.readObject(object, authority)).resolves.toEqual(Buffer.from("exact retained bytes"));
+    await expect(store.readObject(object, { recordId: "unrelated-owner", revisionId: target.record.revisionId })).resolves.toBeNull();
+    await expect(store.readObject(object, { recordId: target.record.id, revisionId: "f".repeat(16) })).resolves.toBeNull();
+    await store.setExclusion(command("large-corpus-exclude"), target.record.id, true, target.record.revisionId, "synthetic privacy fence");
+    await expect(store.readObject(object, authority)).resolves.toBeNull();
+  }, 30_000);
 
   it("rejects missing established state and fences late scope publication", async () => {
     const { store, home } = await fixture();

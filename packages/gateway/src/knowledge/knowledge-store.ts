@@ -186,10 +186,16 @@ function validateState(value: unknown): KnowledgeState {
   }
   return value as KnowledgeState;
 }
+function recordObjectRefs(record: KnowledgeRecord): KnowledgeObjectRef[] {
+  if (record.kind !== "source") return [];
+  return [
+    ...(record.content.object ? [record.content.object] : []),
+    ...(record.content.representations ?? []).map(item => item.object),
+  ];
+}
+
 function recordObjectHashes(record: KnowledgeRecord): string[] {
-  const hashes: string[] = [];
-  if (record.kind === "source" && record.content.object) hashes.push(record.content.object.hash);
-  if (record.kind === "source" && record.content.representations) hashes.push(...record.content.representations.map(item => item.object.hash));
+  const hashes = recordObjectRefs(record).map(object => object.hash);
   for (const evidence of record.provenance.evidence) if (evidence.objectHash) hashes.push(evidence.objectHash);
   if (record.kind === "observation") for (const item of record.content.items) for (const evidence of item.evidence ?? []) if (evidence.objectHash) hashes.push(evidence.objectHash);
   if (record.kind === "note") for (const field of record.content.fields ?? []) for (const evidence of field.evidence) if (evidence.objectHash) hashes.push(evidence.objectHash);
@@ -797,31 +803,33 @@ export class KnowledgeStore {
     return this.mutex.run(async () => { const paths = await this.paths(true); const initialized = await this.load(paths, true); if (!initialized.present) await this.save(paths, initialized.state); const path = join(paths.objects, hash); const existing = await readSecureBytes(path, OBJECT_MAX_BYTES); if (existing) { if (existing.byteLength !== bytes.byteLength || createHash("sha256").update(existing).digest("hex") !== hash) throw new KnowledgeStoreError("invalid", "Existing knowledge object bytes do not match their identity"); return { hash, mediaType, bytes: bytes.byteLength }; } await durableAtomicWriteBytes(path, bytes); return { hash, mediaType, bytes: bytes.byteLength }; });
   }
   private async assertObject(paths: StorePaths, ref: KnowledgeObjectRef): Promise<void> { validateObjectRef(ref); const bytes = await readSecureBytes(join(paths.objects, ref.hash), OBJECT_MAX_BYTES); if (!bytes || bytes.byteLength !== ref.bytes || createHash("sha256").update(bytes).digest("hex") !== ref.hash) throw conflict("Referenced knowledge object bytes are not durably captured"); }
-  async readObject(ref: KnowledgeObjectRef): Promise<Uint8Array | null> {
-    validateObjectRef(ref); const paths = await this.paths(false); const loaded = await this.load(paths, false); if (!loaded.present) return null;
-    // Object hashes are not a public directory index. Require a citation from
-    // a retained, unsuppressed record before exposing bytes.
-    let authorized = false;
-    let scannedRevisions = 0;
-    let scannedBytes = 0;
-    for (const [id, head] of Object.entries(loaded.state.records)) {
-      if (scannedRevisions >= MAX_SCAN_RECORDS || scannedBytes >= MAX_SCAN_BYTES) break;
-      const candidate = await this.readRecord(paths, id, head.latestRevisionId);
-      scannedBytes += Buffer.byteLength(JSON.stringify(candidate), "utf8");
-      if (this.recordExcluded(loaded.state, candidate)) continue;
-      for (const revision of head.revisionIds) {
-        if (scannedRevisions >= MAX_SCAN_RECORDS || scannedBytes >= MAX_SCAN_BYTES) break;
-        const revisionRecord = await this.readRecord(paths, id, revision);
-        scannedRevisions += 1;
-        scannedBytes += Buffer.byteLength(JSON.stringify(revisionRecord), "utf8");
-        if (this.recordExcluded(loaded.state, revisionRecord)) continue;
-        if (recordObjectHashes(revisionRecord).includes(ref.hash)) { authorized = true; break; }
-      }
-      if (authorized) break;
-    }
-    const bytes = await readSecureBytes(join(paths.objects, ref.hash), OBJECT_MAX_BYTES); if (!bytes) return null;
+  private async exactObjectAuthority(paths: StorePaths, state: KnowledgeState, ref: KnowledgeObjectRef, recordId: string, revisionId: string): Promise<boolean> {
+    const head = state.records[recordId];
+    if (!head || !head.revisionIds.includes(revisionId)) return false;
+    const record = await this.readRecord(paths, recordId, revisionId);
+    if (this.recordExcluded(state, record)) return false;
+    // The caller's exact revision is the authority. Do not fall back to a
+    // corpus scan or an evidence hash, since either can authorize an object
+    // after its source has been excluded or replaced.
+    return recordObjectRefs(record).some(candidate => candidate.hash === ref.hash
+      && candidate.bytes === ref.bytes && candidate.mediaType === ref.mediaType);
+  }
+
+  async readObject(ref: KnowledgeObjectRef, authority: { recordId: string; revisionId: string }): Promise<Uint8Array | null> {
+    validateObjectRef(ref);
+    assertKnowledgeId(authority.recordId, "object authority record id");
+    assertKnowledgeId(authority.revisionId, "object authority revision");
+    const paths = await this.paths(false);
+    const initial = await this.load(paths, false);
+    if (!initial.present || !await this.exactObjectAuthority(paths, initial.state, ref, authority.recordId, authority.revisionId)) return null;
+    // Re-read the exact authority after object I/O. A privacy/exclusion fence
+    // published while bytes were being read must win over the earlier check.
+    const bytes = await readSecureBytes(join(paths.objects, ref.hash), OBJECT_MAX_BYTES);
+    if (!bytes) return null;
     if (bytes.byteLength !== ref.bytes || createHash("sha256").update(bytes).digest("hex") !== ref.hash) throw new KnowledgeStoreError("invalid", "Knowledge object failed hash or size verification");
-    return authorized ? bytes : null;
+    const current = await this.load(paths, false);
+    if (!current.present || !await this.exactObjectAuthority(paths, current.state, ref, authority.recordId, authority.revisionId)) return null;
+    return bytes;
   }
   async reconcile(): Promise<KnowledgeReconcileResult> {
     return this.mutex.run(async () => {

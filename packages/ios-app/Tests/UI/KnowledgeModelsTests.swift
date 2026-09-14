@@ -63,14 +63,16 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertEqual(page.nextCursor, "page-2")
         XCTAssertEqual(requests.first?.0, "knowledge.list")
         let object = KnowledgeObjectRef(hash: hash, mediaType: "text/plain", bytes: 10)
-        let firstResult = try await client.readObject(object, offset: 0)
+        let firstResult = try await client.readObject(object, recordID: "source-1", revisionID: "revision-1", offset: 0)
         let first: KnowledgeObjectRead = try XCTUnwrap(firstResult)
         let nextOffset: Int = try XCTUnwrap(first.nextOffset)
-        let secondResult = try await client.readObject(object, offset: nextOffset)
+        let secondResult = try await client.readObject(object, recordID: "source-1", revisionID: "revision-1", offset: nextOffset)
         let second: KnowledgeObjectRead = try XCTUnwrap(secondResult)
         XCTAssertEqual(Data(base64Encoded: first.base64).flatMap { String(data: $0, encoding: .utf8) }, "first")
         XCTAssertEqual(Data(base64Encoded: second.base64).flatMap { String(data: $0, encoding: .utf8) }, "second")
         XCTAssertEqual(requests.compactMap { $0.1.objectValue?["offset"]?.intValue }, [0, 5])
+        XCTAssertEqual(requests.compactMap { $0.1.objectValue?["recordId"]?.stringValue }, ["source-1", "source-1"])
+        XCTAssertEqual(requests.compactMap { $0.1.objectValue?["revisionId"]?.stringValue }, ["revision-1", "revision-1"])
     }
 
     @MainActor

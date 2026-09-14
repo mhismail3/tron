@@ -2024,7 +2024,8 @@ search, pages, connector runs, and imports before exposing them to SwiftUI.
 `KnowledgeDashboardView` presents All Knowledge (including All Links), filters by
 record kind and Personal/Research scope, and loads detail evidence on demand.
 Source object reads use the Gateway's authorization-checked `knowledge.object.read`
-projection and report verified bounded bytes rather than caching a second corpus;
+projection with the exact owning record ID and committed revision, and report
+verified bounded bytes rather than caching a second corpus;
 loaded chunks remain visible and can continue by the returned offset. Primary
 source objects and retained provider-api/linked-article representations remain
 in the typed DTO and are labeled in the same bounded object reader; corrections

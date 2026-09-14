@@ -57,9 +57,13 @@ evidence, and privacy scope, and publishes only an unconfirmed agent-derived
 note after cancellation/configuration/source fences. Knowledge read pages
 continue through complete canonical record sections (including source text,
 fields, retention, origins, representations, and assessments); `details` is
-not the only route to evidence. Retained source objects
-are available only through `knowledge.object.read` after record
-authorization; excluded/forgotten records cannot authorize object reads.
+not the only route to evidence. Registered recall text includes bounded dated,
+attributed, qualified evidence and points to a pinned record/revision read
+continuation when needed. Retained source objects are available only through
+`knowledge.object.read` with the exact owning record ID and committed revision;
+the store rechecks current privacy/exclusion fences after byte I/O and never
+uses a hash-only corpus scan. Excluded/forgotten records cannot authorize
+object reads.
 Legacy imports support explicit `offset` continuation with one checkpoint
 covering the complete admitted plan; page completion is distinct from whole-plan
 completion. They compute excluded-source/dependent assertion closure before

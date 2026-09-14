@@ -43,13 +43,39 @@ function recordLabel(record: import("./knowledge-contract.js").KnowledgeRecord):
   // cursors unable to reach evidence that was only present in `details`.
   const temporal = record.temporal ? ` temporal=${JSON.stringify(record.temporal)}` : "";
   const provenance = ` provenance=${JSON.stringify(record.provenance)} relations=${JSON.stringify(record.relations)}`;
-  if (record.kind === "observation") return `${record.content.items.map(item => `[${item.certainty}] ${item.attribution}: ${item.text}`).join(" ")}${temporal}${provenance} range=${JSON.stringify(record.content.range)} observer=${JSON.stringify(record.content.observer)}`;
+  if (record.kind === "observation") return `range=${JSON.stringify(record.content.range)} observer=${JSON.stringify(record.content.observer)} items=${record.content.items.map(item => `[${item.observedAt}] [${item.certainty}] ${item.attribution}: ${item.text} evidence=${JSON.stringify(item.evidence ?? [])}`).join(" ")}${temporal}${provenance}`;
   if (record.kind === "source") return `${record.content.title} [capture=${record.content.captureDisposition}]${temporal}${provenance} source=${JSON.stringify(record.content)}`;
   return `${record.content.title} [role=${record.content.role} confirmed: ${record.content.confirmed}${record.content.freshness ? ` freshness=${record.content.freshness}` : ""}]${temporal}${provenance} note=${JSON.stringify(record.content)}`;
 }
 
 function recordSummary(record: import("./knowledge-contract.js").KnowledgeRecord): Record<string, unknown> {
   return { id: record.id, revisionId: record.revisionId, kind: record.kind, scope: record.scope, updatedAt: record.updatedAt, evidence: record.provenance.evidence.slice(0, 8) };
+}
+
+function recallEvidenceLabel(record: import("./knowledge-contract.js").KnowledgeRecord): string {
+  if (record.kind !== "observation") return recordLabel(record);
+  const range = record.content.range;
+  const items = record.content.items.slice(0, 3).map((item, index) =>
+    `item[${index}] observedAt=${item.observedAt} attribution=${item.attribution} certainty=${item.certainty} ${item.attribution}: ${item.text.slice(0, 900)} evidence=${JSON.stringify(item.evidence ?? [])}`,
+  );
+  return `OBSERVATION revision=${record.revisionId} session=${range.sessionId} branch=${range.branchId ?? "[root]"} range=${range.fromEntryId}..${range.toEntryId} entryDigest=${range.entryDigest} entryCount=${range.entryIds.length} itemCount=${record.content.items.length} ${items.join(" ") || "items=[none]"} provenance=${JSON.stringify(record.provenance)}`;
+}
+
+type KnowledgeObjectChunk = { mediaType: string; bytes: number; totalBytes: number; offset: number; nextOffset?: number; base64: string };
+
+function objectToolText(result: KnowledgeObjectChunk): string {
+  const continuation = result.nextOffset === undefined ? "complete" : `continue with offset=${result.nextOffset}`;
+  const prefix = `Retained object chunk (offset=${result.offset}, bytes=${result.bytes}, total=${result.totalBytes}; ${continuation})`;
+  const mediaType = result.mediaType.toLocaleLowerCase();
+  if (!mediaType.startsWith("text/") && mediaType !== "application/json" && !mediaType.endsWith("+json")) {
+    return `${prefix}. Binary or unsupported media type ${result.mediaType}; use the exact object-read bytes rather than treating base64 as readable text.`;
+  }
+  const bytes = Buffer.from(result.base64, "base64");
+  const text = bytes.toString("utf8");
+  if (!Buffer.from(text, "utf8").equals(bytes)) {
+    return `${prefix}. Textual media type ${result.mediaType} contains invalid UTF-8; retained bytes remain available through the exact byte continuation.`;
+  }
+  return `${prefix}:\n${text}`;
 }
 
 /** Build an exact, bounded evidence pack. Capture disposition and retained
@@ -193,7 +219,7 @@ export class KnowledgeService {
       case "knowledge.status": return this.store.status();
       case "knowledge.observation.coverage": return this.store.observationCoveragePage(action.request.limit ?? 100, action.request.cursor);
       case "knowledge.object.read": {
-        const bytes = await this.store.readObject({ hash: action.request.hash, mediaType: action.request.mediaType, bytes: action.request.bytes });
+        const bytes = await this.store.readObject({ hash: action.request.hash, mediaType: action.request.mediaType, bytes: action.request.bytes }, { recordId: action.request.recordId, revisionId: action.request.revisionId });
         if (!bytes) return null;
         const offset = action.request.offset ?? 0;
         if (!Number.isSafeInteger(offset) || offset < 0 || offset > bytes.byteLength) throw new GatewayError("invalid_request", "Knowledge object offset is invalid");
@@ -284,6 +310,32 @@ export class KnowledgeService {
     }
   }
 
+  private async readObjectToolChunk(request: { recordId: string; revisionId: string; hash: string; mediaType: string; bytes: number; offset?: number }): Promise<KnowledgeObjectChunk | null> {
+    const first = await this.invoke({ operation: "knowledge.object.read", request } as KnowledgeAction) as KnowledgeObjectChunk | null;
+    if (!first) return null;
+    const mediaType = first.mediaType.toLocaleLowerCase();
+    const textual = mediaType.startsWith("text/") || mediaType === "application/json" || mediaType.endsWith("+json");
+    if (!textual) return first;
+    const bytes = Buffer.from(first.base64, "base64");
+    try { new TextDecoder("utf-8", { fatal: true }).decode(bytes); return first; } catch { /* A scalar may straddle the fixed raw-byte page. */ }
+    if (first.nextOffset === undefined) return first;
+    const next = await this.invoke({ operation: "knowledge.object.read", request: { ...request, offset: first.nextOffset } } as KnowledgeAction) as KnowledgeObjectChunk | null;
+    if (!next || next.offset !== first.nextOffset) return first;
+    const nextBytes = Buffer.from(next.base64, "base64");
+    // Consume only the few bytes needed to complete the scalar. Keeping the
+    // remainder for the advertised offset prevents a 512 KiB page from
+    // silently becoming a megabyte model response.
+    for (let extra = 1; extra <= Math.min(4, nextBytes.byteLength); extra += 1) {
+      const candidate = Buffer.concat([bytes, nextBytes.subarray(0, extra)]);
+      try {
+        new TextDecoder("utf-8", { fatal: true }).decode(candidate);
+        const consumed = candidate.byteLength;
+        return { ...first, bytes: consumed, nextOffset: first.offset + consumed, base64: candidate.toString("base64") };
+      } catch { /* Try the next UTF-8 scalar boundary. */ }
+    }
+    return first;
+  }
+
   async tool(parameters: KnowledgeToolParameters, signal?: AbortSignal): Promise<{ text: string; details: unknown }> {
     const limit = parameters.limit ?? 8;
     switch (parameters.action) {
@@ -295,7 +347,15 @@ export class KnowledgeService {
       case "recall": {
         const request: KnowledgeRecallRequest = { ...(parameters.query ? { query: parameters.query } : {}), ...(parameters.sessionId ? { sessionId: parameters.sessionId } : {}), ...(parameters.entryId ? { entryId: parameters.entryId } : {}), limit };
         const result = await this.store.recall(request);
-        return { text: result.records.map(record => `${record.id} (${record.kind})`).join("\n") || "No knowledge match.", details: { stateRevision: result.stateRevision, availability: result.availability, records: result.records.map(recordSummary), citations: result.citations.slice(0, 32) } };
+        const text = result.records.map(record => {
+          const label = recallEvidenceLabel(record);
+          const page = label.slice(0, 4_000);
+          const completeLabel = recordLabel(record);
+          const continuationOffset = record.kind === "observation" ? 0 : page.length;
+          const continuation = completeLabel.length > 4_000 ? `\nContinue with action=read id=${record.id} revisionId=${record.revisionId} offset=${continuationOffset}.` : "";
+          return `${record.id} (${record.kind}) revision=${record.revisionId}: ${page}${continuation}`;
+        }).join("\n") || "No knowledge match.";
+        return { text, details: { stateRevision: result.stateRevision, availability: result.availability, records: result.records.map(recordSummary), citations: result.citations.slice(0, 32) } };
       }
       case "read": {
         if (!parameters.id) throw new GatewayError("invalid_request", "Knowledge read requires an id");
@@ -309,12 +369,17 @@ export class KnowledgeService {
         return { text: `${JSON.stringify({ ...recordSummary(result), label: page })}${nextOffset === undefined ? "" : `\nContinue with offset=${nextOffset}.`}`, details: { record: result, ...(nextOffset === undefined ? {} : { nextOffset, totalChars: label.length }) } };
       }
       case "readObject": {
+        // `id` is the exact owning source record ID for this action; the RPC
+        // DTO spells the same authority `recordId` to distinguish it from
+        // the object hash.
+        const recordId = parameters.id;
+        const revisionId = parameters.revisionId;
         const hash = parameters.hash;
         const mediaType = parameters.mediaType;
         const bytes = parameters.bytes;
-        if (!hash || !mediaType || typeof bytes !== "number" || !Number.isSafeInteger(bytes) || bytes < 0) throw new GatewayError("invalid_request", "Knowledge object read requires hash, mediaType, and bytes");
-        const result = await this.invoke({ operation: "knowledge.object.read", request: { hash, mediaType, bytes, ...(parameters.offset === undefined ? {} : { offset: parameters.offset }) } } as KnowledgeAction);
-        return { text: result ? `Read retained object chunk (offset=${(result as { offset: number }).offset}, bytes=${(result as { bytes: number }).bytes}, total=${(result as { totalBytes: number }).totalBytes}${(result as { nextOffset?: number }).nextOffset === undefined ? ", complete" : `; continue with offset=${(result as { nextOffset: number }).nextOffset}`}): ${JSON.stringify(result)}` : "Retained object is unavailable.", details: result };
+        if (!recordId || !revisionId || !hash || !mediaType || typeof bytes !== "number" || !Number.isSafeInteger(bytes) || bytes < 0) throw new GatewayError("invalid_request", "Knowledge object read requires id, revisionId, hash, mediaType, and bytes");
+        const result = await this.readObjectToolChunk({ recordId, revisionId, hash, mediaType, bytes, ...(parameters.offset === undefined ? {} : { offset: parameters.offset }) });
+        return { text: result ? objectToolText(result) : "Retained object is unavailable.", details: result };
       }
       case "list": {
         const request: KnowledgeListRequest = { ...(parameters.kind ? { kind: parameters.kind } : {}), ...(parameters.cursor ? { cursor: parameters.cursor } : {}), limit };
