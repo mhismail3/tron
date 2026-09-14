@@ -997,7 +997,7 @@ test("foreign listeners and stale health cannot satisfy replacement", async () =
   let reads = 0;
   await assert.rejects(waitForReplacement({
     oldProcess, expected, oldEpoch: "old-epoch", timeoutMs: 500, naturalGraceMs: 0,
-    readListener: async () => (++reads === 1
+    readListener: async () => (++reads % 2 === 1
       ? { pid: 11, startIdentity: "one" }
       : { pid: 12, startIdentity: "two" }),
     readHealth: async () => ({ ...stale, runtimeEpoch: expected.runtimeEpoch }),

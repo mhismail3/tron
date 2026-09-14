@@ -1,6 +1,23 @@
 import SwiftUI
 import AppKit
 
+struct WizardPresentationRequestFence: Equatable, Sendable {
+    private(set) var latestRequest: UInt64 = 0
+
+    mutating func begin() -> UInt64 {
+        latestRequest &+= 1
+        return latestRequest
+    }
+
+    mutating func retire() {
+        latestRequest &+= 1
+    }
+
+    func accepts(_ request: UInt64) -> Bool {
+        latestRequest == request
+    }
+}
+
 /// Pairing-info step. The shell owns the icon, title, progress pill,
 /// and the bottom action bar (Back / "I'm paired", with the primary
 /// gated by `state.pairingPayload != nil` in `WizardShell`). This view
@@ -14,6 +31,7 @@ struct PairingInfoStep: View {
     @State private var isRefreshing = false
     @State private var copiedField: PairingCopyField?
     @State private var resolvedQRCode: NSImage?
+    @State private var refreshFence = WizardPresentationRequestFence()
 
     /// Why we couldn't render a pairing payload. Drives the warning
     /// panel copy so the user knows whether to wait (server still
@@ -40,6 +58,13 @@ struct PairingInfoStep: View {
             Spacer(minLength: 0)
         }
         .task { await refresh(delayForInitialTransition: true) }
+        .onDisappear {
+            // A cancelled view task may still return from an owner that does
+            // not observe cancellation. Retire its presentation lease before
+            // the successor view can publish anything.
+            refreshFence.retire()
+            isRefreshing = false
+        }
     }
 
     @ViewBuilder
@@ -222,59 +247,71 @@ struct PairingInfoStep: View {
     @MainActor
     private func refresh(delayForInitialTransition: Bool = false) async {
         guard !isRefreshing else { return }
+        let request = refreshFence.begin()
         isRefreshing = true
         failureReason = nil
-        defer { isRefreshing = false }
+        defer {
+            if refreshFence.accepts(request) {
+                isRefreshing = false
+            }
+        }
 
         if delayForInitialTransition, state.pairingPayload == nil {
             try? await Task.sleep(nanoseconds: PairingInfoStepLayout.initialResolveDelayNanoseconds)
-            if Task.isCancelled { return }
+            guard refreshFence.accepts(request), !Task.isCancelled else { return }
         }
 
         // Fresh installs may not have a settings file yet. Prefer live and
         // current-session state, then fall back to server/settings state;
         // cache the selected host for later wrapper and server reads.
+        guard refreshFence.accepts(request), !Task.isCancelled else { return }
         guard let localToken = setup.readBearerToken(), !localToken.isEmpty else {
-            fail(.localAuthenticationFailed)
+            fail(.localAuthenticationFailed, request: request)
             return
         }
 
         var debugAdmission: DebugGatewayObserver.Admission?
         var stableAdmission: StableGatewayObserver.Admission?
         if setup.profile == .debug {
-            switch await setup.observeDebugGateway(localToken) {
+            let observation = await setup.observeDebugGateway(localToken)
+            guard refreshFence.accepts(request), !Task.isCancelled else { return }
+            switch observation {
             case .admitted(let admission):
                 guard admission.pairingTransportAvailable else {
-                    fail(.serverUnreachable)
+                    fail(.serverUnreachable, request: request)
                     return
                 }
                 debugAdmission = admission
             case .unauthorized:
-                fail(.localAuthenticationFailed)
+                fail(.localAuthenticationFailed, request: request)
                 return
             case .unavailable:
-                fail(.serverUnreachable)
+                fail(.serverUnreachable, request: request)
                 return
             }
         } else {
             let pingResult = await setup.pingServer(localToken)
+            guard refreshFence.accepts(request), !Task.isCancelled else { return }
             switch pingResult {
             case .success(let info):
-                guard let admission = await setup.admitStableRuntime(info) else {
-                    fail(.serverUnreachable)
+                let admission = await setup.admitStableRuntime(info)
+                guard refreshFence.accepts(request), !Task.isCancelled else { return }
+                guard let admission else {
+                    fail(.serverUnreachable, request: request)
                     return
                 }
                 stableAdmission = admission
             case .unauthorized:
-                fail(.localAuthenticationFailed)
+                fail(.localAuthenticationFailed, request: request)
                 return
             case .unreachable, .timeout, .malformedResponse:
-                fail(.serverUnreachable)
+                fail(.serverUnreachable, request: request)
                 return
             }
         }
 
         let liveTailscale = await setup.probeTailscale()
+        guard refreshFence.accepts(request), !Task.isCancelled else { return }
         if case .signedIn = liveTailscale {
             state.tailscaleStatus = liveTailscale
         }
@@ -284,39 +321,47 @@ struct PairingInfoStep: View {
         // admission invalidates the pinned pairing presentation rather than
         // publishing a stale endpoint/runtime combination.
         if let admitted = debugAdmission {
-            guard case .admitted(let current) = await setup.observeDebugGateway(localToken),
+            let currentObservation = await setup.observeDebugGateway(localToken)
+            guard refreshFence.accepts(request), !Task.isCancelled else { return }
+            guard case .admitted(let current) = currentObservation,
                   current == admitted else {
-                fail(.serverUnreachable)
+                fail(.serverUnreachable, request: request)
                 return
             }
             debugAdmission = current
         } else if let admitted = stableAdmission {
-            guard let current = await StableGatewayObserver.revalidatePairingAdmission(
+            let current = await StableGatewayObserver.revalidatePairingAdmission(
                 pinned: admitted,
                 token: localToken,
                 ping: setup.pingServer,
                 admit: setup.admitStableRuntime
-            ) else {
-                fail(.serverUnreachable)
+            )
+            guard refreshFence.accepts(request), !Task.isCancelled else { return }
+            guard let current else {
+                fail(.serverUnreachable, request: request)
                 return
             }
             stableAdmission = current
         }
 
+        guard refreshFence.accepts(request), !Task.isCancelled else { return }
         guard let code = setup.readEnrollmentCode() else {
-            fail(.noCode)
+            fail(.noCode, request: request)
             return
         }
 
+        guard refreshFence.accepts(request), !Task.isCancelled else { return }
         guard let host = debugAdmission?.transportHost ?? firstNonEmpty(
             liveTailscale.displayIP,
             state.tailscaleStatus?.displayIP,
             setup.readTailscaleIPFromSettings()
         ) else {
-            fail(.noTailscaleIP)
+            fail(.noTailscaleIP, request: request)
             return
         }
 
+        // This shared host projection belongs to the current presentation
+        // request; an older request must not overwrite a newer admission.
         setup.cacheTailscaleIP(host)
 
         let payload = PairingPayload(
@@ -330,10 +375,11 @@ struct PairingInfoStep: View {
         )
         guard let url = PairingURLBuilder.makeURL(payload),
               let qrImage = QRCodeGenerator.makeImage(payload: url.absoluteString, size: PairingInfoStepLayout.qrSize) else {
-            fail(.qrGenerationFailed)
+            fail(.qrGenerationFailed, request: request)
             return
         }
 
+        guard refreshFence.accepts(request), !Task.isCancelled else { return }
         withAnimation(PairingInfoStepLayout.revealAnimation) {
             resolvedQRCode = qrImage
             state.pairingPayload = payload
@@ -342,7 +388,8 @@ struct PairingInfoStep: View {
     }
 
     @MainActor
-    private func fail(_ reason: PairingFailureReason) {
+    private func fail(_ reason: PairingFailureReason, request: UInt64) {
+        guard refreshFence.accepts(request), !Task.isCancelled else { return }
         resolvedQRCode = nil
         state.pairingPayload = nil
         failureReason = reason
