@@ -35,8 +35,8 @@ describe("knowledge connectors", () => {
     const first = Array.from({ length: 50 }, (_, index) => ({ _id: index + 1, title: `Bookmark ${index}`, link: `https://example.com/${index}`, excerpt: `Excerpt ${index}` }));
     const { store, extension } = await fixture(async (url) => {
       calls += 1;
-      if (url.includes("page=0")) return response({ items: first });
-      if (url.includes("page=1")) return response({ items: [{ _id: 50, title: "Duplicate", link: "https://example.com/49" }, { _id: 51, title: "Bookmark 51", link: "https://example.com/51" }] });
+      if (url.includes("/raindrops/123?page=0")) return response({ items: first });
+      if (url.includes("/raindrops/123?page=1")) return response({ items: [{ _id: 50, title: "Duplicate", link: "https://example.com/49" }, { _id: 51, title: "Bookmark 51", link: "https://example.com/51" }] });
       throw new Error(`unexpected endpoint ${url}`);
     });
     await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("configure"), connector: "raindrop", enabled: true, accountId: "account-1", scope: "123", credentialRef: "connector:raindrop:test-account" } });
@@ -48,10 +48,10 @@ describe("knowledge connectors", () => {
     expect(state?.checkpoint).toBeUndefined();
     expect(state?.pending.map(item => item.id)).toHaveLength(51);
     const result = await extension.invoke({ operation: "knowledge.connector.run", request: { commandId: command("capture"), connector: "raindrop", dryRun: false, limit: 2 } }) as { captured: number; pending: number };
-    expect(result.captured).toBe(2);
-    expect(result.partial).toBe(2);
-    expect(result.pending).toBe(49);
-    expect((await store.list({ kind: "source" })).records).toHaveLength(2);
+    expect(result.captured).toBe(0);
+    expect(result.partial).toBe(1);
+    expect(result.pending).toBe(51);
+    expect((await store.list({ kind: "source" })).records).toHaveLength(1);
   });
 
   it("uses the documented X bookmarks path and exposes authentication failures without token leakage", async () => {

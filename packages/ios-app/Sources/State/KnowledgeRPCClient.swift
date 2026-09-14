@@ -57,7 +57,7 @@ final class KnowledgeRPCClient {
         struct Params: Encodable { let expectedRevision: String?; let record: KnowledgeRecordDraft }
         return try await mutate("knowledge.source.capture", parameters: Params(expectedRevision: expectedRevision, record: record))
     }
-    func captureURL(url: String, title: String, scope: KnowledgeScope) async throws -> KnowledgeMutationResult {
+    func captureURL(url: String, title: String, scope: KnowledgeScope) async throws -> KnowledgeSourceCaptureResult {
         struct Params: Encodable { let url: String; let scope: KnowledgeScope; let title: String }
         return try await mutate("knowledge.source.capture", parameters: Params(url: url, scope: scope, title: title))
     }
@@ -92,9 +92,9 @@ final class KnowledgeRPCClient {
     func connectorStatus(_ connector: String) async throws -> KnowledgeConnectorStatus {
         struct Params: Encodable { let connector: String }; return try await request("knowledge.connector.status", Params(connector: connector))
     }
-    func configureConnector(_ connector: String, enabled: Bool, scope: String? = nil, destination: String? = nil) async throws -> KnowledgeConnectorStatus {
-        struct Params: Encodable { let connector: String; let enabled: Bool; let scope: String?; let destination: String? }
-        return try await mutate("knowledge.connector.configure", parameters: Params(connector: connector, enabled: enabled, scope: scope, destination: destination))
+    func configureConnector(_ connector: String, enabled: Bool, accountID: String? = nil, scope: String? = nil, destination: String? = nil, credentialRef: String? = nil, allowWrites: Bool? = nil, paidAccessApproved: Bool? = nil, paidBudgetCents: Int? = nil, recurringApproved: Bool? = nil) async throws -> KnowledgeConnectorStatus {
+        struct Params: Encodable { let connector: String; let enabled: Bool; let accountId: String?; let scope: String?; let destination: String?; let credentialRef: String?; let allowWrites: Bool?; let paidAccessApproved: Bool?; let paidBudgetCents: Int?; let recurringApproved: Bool? }
+        return try await mutate("knowledge.connector.configure", parameters: Params(connector: connector, enabled: enabled, accountId: accountID, scope: scope, destination: destination, credentialRef: credentialRef, allowWrites: allowWrites, paidAccessApproved: paidAccessApproved, paidBudgetCents: paidBudgetCents, recurringApproved: recurringApproved))
     }
     func runConnector(_ connector: String, dryRun: Bool, limit: Int = 50) async throws -> KnowledgeConnectorRunResult {
         struct Params: Encodable { let connector: String; let dryRun: Bool; let limit: Int }

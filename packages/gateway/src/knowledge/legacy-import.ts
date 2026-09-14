@@ -10,13 +10,14 @@ import { KnowledgeStore, type KnowledgeImportCheckpoint } from "./knowledge-stor
 const execFile = promisify(execFileCallback);
 const MAX_RECORD_FILES = 20_000;
 const MAX_LINE_BYTES = 2 * 1024 * 1024;
+const MAX_TOTAL_INPUT_BYTES = 256 * 1024 * 1024;
 const MAX_EVIDENCE_BYTES = 8 * 1024 * 1024;
 const ID_MAX = 200;
 
 type LegacyStoreName = "personal-os" | "llm-wiki";
 type LegacySource = Record<string, unknown> & { source_id: string; captured_at: string; content_sha256?: string; evidence_path?: string | null; metadata?: Record<string, unknown>; origin?: Record<string, unknown>; representation?: string; sensitivity?: string };
 type LegacyEntity = Record<string, unknown> & { entity_id: string; label: string; kind?: string; aliases?: unknown[]; created_at?: string };
-type LegacyAssertion = Record<string, unknown> & { assertion_id: string; subject_id: string; predicate: string; value?: unknown; evidence?: unknown[]; created_at?: string; observed_at?: string; valid_from?: string; valid_to?: string; status?: string; supersedes?: string; assertion_type?: string; basis?: string; confidence?: string; object_id?: string; depends_on?: string[] };
+type LegacyAssertion = Record<string, unknown> & { assertion_id: string; subject_id: string; predicate: string; value?: unknown; evidence?: unknown[]; created_at?: string; observed_at?: string; valid_from?: string; valid_to?: string; status?: string; supersedes?: string | string[]; assertion_type?: string; basis?: string; confidence?: string; object_id?: string; depends_on?: string[] };
 
 interface SourcePlan {
   kind: "source";
@@ -61,19 +62,25 @@ function stableId(store: LegacyStoreName, kind: string, id: string): string {
   if (value.length <= ID_MAX) return value;
   return `${value.slice(0, 120)}:${createHash("sha256").update(value).digest("hex").slice(0, 48)}`;
 }
-function hash(value: unknown): string { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`).join(",")}}`;
+  return JSON.stringify(value);
+}
+function hash(value: unknown): string { return createHash("sha256").update(stableJson(value)).digest("hex"); }
 function normalizedTimestamp(value: unknown, fallback: string): string {
   if (typeof value !== "string" || !value) return fallback;
   const parsed = new Date(value.includes("T") ? value : `${value}T00:00:00Z`);
   return Number.isNaN(parsed.valueOf()) ? fallback : parsed.toISOString();
 }
 function stringValue(value: unknown, maximum: number): string | undefined { return typeof value === "string" && value.length > 0 ? value.slice(0, maximum) : undefined; }
-function objectValue(value: unknown): JsonValue {
+function objectValue(value: unknown, depth = 0): JsonValue {
+  if (depth > 8) throw new Error("Legacy structured value exceeds its depth bound");
   if (value === null || typeof value === "string" || typeof value === "boolean") return value;
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  if (Array.isArray(value)) return value.slice(0, 100).map(item => objectValue(item));
-  if (typeof value === "object") return Object.fromEntries(Object.entries(value as Record<string, unknown>).slice(0, 100).map(([key, item]) => [key.slice(0, 200), objectValue(item)]));
-  return String(value);
+  if (typeof value === "number") { if (!Number.isFinite(value)) throw new Error("Legacy structured value contains a non-finite number"); return value; }
+  if (Array.isArray(value)) { if (value.length > 100) throw new Error("Legacy structured value exceeds its item bound"); return value.map(item => objectValue(item, depth + 1)); }
+  if (typeof value === "object") { const entries = Object.entries(value as Record<string, unknown>); if (entries.length > 100) throw new Error("Legacy structured value exceeds its field bound"); return Object.fromEntries(entries.map(([key, item]) => { if (key.length > 200) throw new Error("Legacy structured value has an oversized field name"); return [key, objectValue(item, depth + 1)]; })); }
+  throw new Error("Legacy structured value has an unsupported type");
 }
 function mediaType(source: LegacySource): string {
   return stringValue(source.media_type, 160) ?? stringValue(source.metadata?.media_type, 160) ?? "text/plain";
@@ -88,7 +95,7 @@ function safeJsonLine(line: string, path: string, lineNumber: number): unknown {
 async function jsonl<T>(path: string, label: string): Promise<T[]> {
   let stat;
   try { stat = await lstat(path); } catch { return []; }
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_RECORD_FILES * MAX_LINE_BYTES) throw new Error(`${label} is not a safe regular file`);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_TOTAL_INPUT_BYTES) throw new Error(`${label} is not a safe regular file`);
   const text = await readFile(path, "utf8");
   const result: T[] = [];
   for (const [index, line] of text.split(/\r?\n/).entries()) {
@@ -103,11 +110,12 @@ async function jsonl<T>(path: string, label: string): Promise<T[]> {
 async function regularJsonFiles(path: string): Promise<string[]> {
   let entries;
   try { entries = await readdir(path, { withFileTypes: true }); } catch { return []; }
-  const paths: string[] = [];
+  const paths: string[] = []; let totalBytes = 0;
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     if (!/^[A-Za-z0-9._-]+\.json$/.test(entry.name) || !entry.isFile()) continue;
     const item = join(path, entry.name); const stat = await lstat(item);
     if (stat.isSymbolicLink() || !stat.isFile() || stat.size > MAX_LINE_BYTES) throw new Error(`Unsafe legacy source record: ${item}`);
+    totalBytes += stat.size; if (totalBytes > MAX_TOTAL_INPUT_BYTES) throw new Error("Legacy input exceeds its aggregate byte bound");
     paths.push(item);
     if (paths.length > MAX_RECORD_FILES) throw new Error("Legacy source record count exceeds its bound");
   }
@@ -127,7 +135,14 @@ async function gitBlob(root: string, objectId: string): Promise<Uint8Array | und
     return bytes;
   } catch { return undefined; }
 }
-async function evidence(root: string, source: LegacySource): Promise<{ bytes: Uint8Array; mediaType: string; hash: string } | undefined> {
+async function gitPath(root: string, revision: string, relativePath: string): Promise<Uint8Array | undefined> {
+  if (revision === "unversioned" || !relativePath || isAbsolute(relativePath) || relativePath.split(/[\\/]/).includes("..") || relativePath.length > 1_024) return undefined;
+  try {
+    const result = await execFile("git", ["--no-optional-locks", "show", `${revision}:${relativePath}`], { cwd: root, env: GIT_READ_ENV, encoding: "buffer", maxBuffer: MAX_EVIDENCE_BYTES + 1 });
+    const bytes = Buffer.from(result.stdout as unknown as Uint8Array); return bytes.byteLength <= MAX_EVIDENCE_BYTES ? bytes : undefined;
+  } catch { return undefined; }
+}
+async function evidence(root: string, source: LegacySource, revision: string): Promise<{ bytes: Uint8Array; mediaType: string; hash: string } | undefined> {
   const expected = typeof source.content_sha256 === "string" && /^[a-f0-9]{64}$/.test(source.content_sha256) ? source.content_sha256 : undefined;
   let bytes: Uint8Array | undefined;
   const evidencePath = source.evidence_path;
@@ -138,8 +153,13 @@ async function evidence(root: string, source: LegacySource): Promise<{ bytes: Ui
     try { const stat = await lstat(candidate); if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_EVIDENCE_BYTES) return undefined; bytes = await readFile(candidate); } catch { /* Missing retained evidence is intentional. */ }
   }
   if (!bytes) {
-    const blob = stringValue((source.metadata?.legacy_provenance as Record<string, unknown> | undefined)?.git_blob, 80);
+    const provenance = source.metadata?.legacy_provenance as Record<string, unknown> | undefined;
+    const blob = stringValue(provenance?.git_blob, 80);
     if (blob) bytes = await gitBlob(root, blob);
+    if (!bytes) {
+      const path = stringValue(provenance?.git_path ?? provenance?.path, 1_024);
+      if (path) bytes = await gitPath(root, revision, path);
+    }
   }
   if (!bytes) return undefined;
   const actual = createHash("sha256").update(bytes).digest("hex");
@@ -175,8 +195,10 @@ export class LegacyKnowledgeImporter {
     return { root, store };
   }
 
-  private async plan(source: string): Promise<{ root: string; store: LegacyStoreName; revision: string; items: PlanItem[]; planHash: string; warnings: string[] }> {
+  private async plan(source: string, scope?: KnowledgeImportScope): Promise<{ root: string; store: LegacyStoreName; revision: string; items: PlanItem[]; planHash: string; warnings: string[] }> {
     const { root, store } = await this.resolveSource(source); const revision = await gitRevision(root); const warnings: string[] = [];
+    const kinds = scope?.kinds ? new Set(scope.kinds) : undefined; const ids = scope?.ids ? new Set(scope.ids) : undefined;
+    const included = (kind: "sources" | "entities" | "assertions", id: string): boolean => (!kinds || kinds.has(kind)) && (!ids || ids.has(id));
     const receiptByBatch = new Map<string, { id: string; resultRevision?: string }>();
     for (const receiptPath of await regularJsonFiles(join(root, "reviews", "receipts"))) { const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as Record<string, unknown>; const batch = receipt.batch_id; const id = receipt.receipt_id; if (typeof batch === "string" && typeof id === "string") receiptByBatch.set(batch, { id, ...(typeof receipt.result_revision === "string" ? { resultRevision: receipt.result_revision } : {}) }); }
     const sourcePaths = await regularJsonFiles(join(root, "sources", "records")); const sourceRecords: LegacySource[] = [];
@@ -184,18 +206,18 @@ export class LegacyKnowledgeImporter {
       const value = JSON.parse(await readFile(path, "utf8")) as LegacySource;
       if (!value || typeof value.source_id !== "string" || value.status === "excluded") continue;
       if (value.status && value.status !== "accepted") continue;
-      sourceRecords.push(value);
+      if (included("sources", value.source_id)) sourceRecords.push(value);
     }
     sourceRecords.sort((a, b) => a.source_id.localeCompare(b.source_id));
     const items: PlanItem[] = [];
     for (const legacy of sourceRecords) {
-      const retained = await evidence(root, legacy); const warning = retained ? undefined : (legacy.evidence_path || (legacy.metadata?.legacy_provenance as Record<string, unknown> | undefined)?.git_blob) ? `Evidence unavailable or hash-mismatched for ${legacy.source_id}; retained as metadata-only` : `No retained raw evidence for ${legacy.source_id}`;
+      const retained = await evidence(root, legacy, revision); const warning = retained ? undefined : (legacy.evidence_path || (legacy.metadata?.legacy_provenance as Record<string, unknown> | undefined)?.git_blob) ? `Evidence unavailable or hash-mismatched for ${legacy.source_id}; retained as metadata-only` : `No retained raw evidence for ${legacy.source_id}`;
       if (warning) warnings.push(warning);
       const batch = typeof legacy.metadata?.review_batch === "string" ? legacy.metadata.review_batch : undefined; const reviewReceipt = batch ? receiptByBatch.get(batch) : undefined;
       items.push({ kind: "source", legacy, id: stableId(store, "source", legacy.source_id), ...(retained ? { evidence: retained } : {}), ...(reviewReceipt ? { reviewReceipt } : {}), ...(warning ? { warning } : {}) });
     }
     const entities = await jsonl<LegacyEntity>(join(root, "graph", "entities.jsonl"), "legacy entities");
-    for (const legacy of entities.filter(item => typeof item.entity_id === "string" && typeof item.label === "string").sort((a, b) => a.entity_id.localeCompare(b.entity_id))) items.push({ kind: "entity", legacy, id: stableId(store, "entity", legacy.entity_id) });
+    for (const legacy of entities.filter(item => typeof item.entity_id === "string" && typeof item.label === "string" && included("entities", item.entity_id)).sort((a, b) => a.entity_id.localeCompare(b.entity_id))) items.push({ kind: "entity", legacy, id: stableId(store, "entity", legacy.entity_id) });
     const assertions = await jsonl<LegacyAssertion>(join(root, "graph", "assertions.jsonl"), "legacy assertions");
     const auditByAssertion = new Map<string, string>();
     for (const auditPath of await regularJsonFiles(join(root, "audits", "records"))) {
@@ -203,9 +225,9 @@ export class LegacyKnowledgeImporter {
       if (!auditId || !Array.isArray(audit.assertions)) continue;
       for (const assertion of audit.assertions) { const assertionId = (assertion as Record<string, unknown>).assertion_id; if (typeof assertionId === "string") auditByAssertion.set(assertionId, auditId); }
     }
-    for (const legacy of assertions.filter(item => typeof item.assertion_id === "string" && typeof item.subject_id === "string" && typeof item.predicate === "string").sort((a, b) => a.assertion_id.localeCompare(b.assertion_id))) { const auditId = auditByAssertion.get(legacy.assertion_id); items.push({ kind: "assertion", legacy, id: stableId(store, "assertion", legacy.assertion_id), ...(auditId ? { auditId } : {}) }); }
+    for (const legacy of assertions.filter(item => typeof item.assertion_id === "string" && typeof item.subject_id === "string" && typeof item.predicate === "string" && included("assertions", item.assertion_id)).sort((a, b) => a.assertion_id.localeCompare(b.assertion_id))) { const auditId = auditByAssertion.get(legacy.assertion_id); items.push({ kind: "assertion", legacy, id: stableId(store, "assertion", legacy.assertion_id), ...(auditId ? { auditId } : {}) }); }
     if (revision === "unversioned") warnings.push("Legacy checkout has no readable Git HEAD; lineage is marked unversioned");
-    const identity = items.map(item => ({ kind: item.kind, legacyId: item.legacy.kind === "source" ? item.legacy.source_id : item.legacy.kind === "entity" ? item.legacy.entity_id : item.legacy.assertion_id, id: item.id, ...(item.kind === "source" ? { hash: item.legacy.content_sha256 ?? null, evidence: item.evidence?.hash ?? null } : {}) }));
+    const identity = items.map(item => ({ kind: item.kind, legacyId: item.legacy.kind === "source" ? item.legacy.source_id : item.legacy.kind === "entity" ? item.legacy.entity_id : item.legacy.assertion_id, id: item.id, payload: item.legacy, ...(item.kind === "source" ? { hash: item.legacy.content_sha256 ?? null, evidence: item.evidence?.hash ?? null } : {}) }));
     return { root, store, revision, items, planHash: hash({ store, revision, identity }), warnings };
   }
 
@@ -223,12 +245,14 @@ export class LegacyKnowledgeImporter {
 
   private assertionDraft(item: AssertionPlan, sourceRevisions: Map<string, string>, revision: string, importedAt: string, store: LegacyStoreName): KnowledgeRecordDraft & { kind: "note" } {
     const legacy = item.legacy; const createdAt = normalizedTimestamp(legacy.created_at ?? legacy.observed_at, importedAt); const superseded = legacy.status === "superseded";
-    const evidence = (Array.isArray(legacy.evidence) ? legacy.evidence : []).flatMap(raw => { const value = raw as Record<string, unknown>; const sourceId = typeof value.source_id === "string" ? value.source_id : undefined; const sourceRevision = sourceId ? sourceRevisions.get(sourceId) : undefined; return sourceId && sourceRevision ? [{ recordId: stableId(store, "source", sourceId), revisionId: sourceRevision, ...(typeof value.locator === "string" ? { locator: value.locator.slice(0, 512) } : {}) }] : []; });
-    const relations = [{ type: "related" as const, recordId: stableId(store, "entity", legacy.subject_id) }, ...(legacy.object_id ? [{ type: "related" as const, recordId: stableId(store, "entity", legacy.object_id) }] : []), ...(legacy.supersedes ? [{ type: "supersedes" as const, recordId: stableId(store, "assertion", legacy.supersedes) }] : []), ...(legacy.depends_on ?? []).filter(id => typeof id === "string").slice(0, 20).map(id => ({ type: "derivedFrom" as const, recordId: stableId(store, "assertion", id) }))];
+    const rawEvidence = Array.isArray(legacy.evidence) ? legacy.evidence : [];
+    const evidence = rawEvidence.flatMap(raw => { const value = raw as Record<string, unknown>; const sourceId = typeof value.source_id === "string" ? value.source_id : undefined; const sourceRevision = sourceId ? sourceRevisions.get(sourceId) : undefined; return sourceId && sourceRevision ? [{ recordId: stableId(store, "source", sourceId), revisionId: sourceRevision, ...(typeof value.locator === "string" ? { locator: value.locator.slice(0, 512) } : {}) }] : []; });
+    const supersededIds = (Array.isArray(legacy.supersedes) ? legacy.supersedes : legacy.supersedes ? [legacy.supersedes] : []).filter((id): id is string => typeof id === "string").slice(0, 20);
+    const relations = [{ type: "related" as const, recordId: stableId(store, "entity", legacy.subject_id) }, ...(legacy.object_id ? [{ type: "related" as const, recordId: stableId(store, "entity", legacy.object_id) }] : []), ...supersededIds.map(id => ({ type: "supersedes" as const, recordId: stableId(store, "assertion", id) })), ...(legacy.depends_on ?? []).filter(id => typeof id === "string").slice(0, 20).map(id => ({ type: "derivedFrom" as const, recordId: stableId(store, "assertion", id) }))];
     const certainty = store === "llm-wiki" ? "external" as const : superseded || legacy.valid_to ? "historical" as const : legacy.basis === "user-confirmed" ? "confirmed" as const : "candidate" as const;
     const role = legacy.assertion_type === "relationship" || legacy.object_id ? "concept" as const : legacy.predicate.toLowerCase().includes("preference") ? "preference" as const : "fact" as const;
     const usageConstraint = stringValue((legacy as Record<string, unknown>).usage_constraint, 20_000);
-    const fields = [{ field: "value", value: objectValue(legacy.value), subject: stableId(store, "entity", legacy.subject_id), evidence, certainty, ...(legacy.valid_from ? { validFrom: normalizedTimestamp(legacy.valid_from, createdAt) } : {}), ...(legacy.valid_to ? { validTo: normalizedTimestamp(legacy.valid_to, createdAt) } : {}) }, { field: "assertionType", value: String(legacy.assertion_type ?? "unknown"), evidence, certainty: "historical" as const }, { field: "status", value: String(legacy.status ?? "active"), evidence, certainty: "historical" as const }, ...(legacy.confidence ? [{ field: "confidence", value: legacy.confidence, evidence, certainty: "historical" as const }] : [])];
+    const fields = [{ field: "value", value: objectValue(legacy.value), subject: stableId(store, "entity", legacy.subject_id), evidence, certainty, ...(legacy.valid_from ? { validFrom: normalizedTimestamp(legacy.valid_from, createdAt) } : {}), ...(legacy.valid_to ? { validTo: normalizedTimestamp(legacy.valid_to, createdAt) } : {}) }, { field: "assertionType", value: String(legacy.assertion_type ?? "unknown"), evidence, certainty: "historical" as const }, { field: "status", value: String(legacy.status ?? "active"), evidence, certainty: "historical" as const }, { field: "evidenceQualifications", value: rawEvidence.map(value => objectValue(value)), evidence: [], certainty: "historical" as const }, ...(legacy.confidence ? [{ field: "confidence", value: legacy.confidence, evidence, certainty: "historical" as const }] : [])];
     const content = { title: legacy.predicate, ...(superseded ? { body: "Historical assertion retained as superseded; it is not current instruction." } : {}), role, confirmed: legacy.basis === "user-confirmed", privacyScope: store === "llm-wiki" ? "shared" as const : "private" as const, ...(usageConstraint ? { usageConstraint } : {}), fields };
     const review = { ...(item.auditId ? { auditId: item.auditId } : {}), ...(legacy.basis ? { basis: legacy.basis } : {}) };
     return { kind: "note", id: item.id, scope: store === "llm-wiki" ? "research" : "personal", createdAt, updatedAt: createdAt, provenance: { actor: "import", source: `assertion:${legacy.assertion_id}@${revision}`, evidence }, relations, temporal: { ...(legacy.observed_at ? { eventAt: normalizedTimestamp(legacy.observed_at, createdAt) } : {}), ...(legacy.valid_from ? { validFrom: normalizedTimestamp(legacy.valid_from, createdAt) } : {}), ...(legacy.valid_to ? { validTo: normalizedTimestamp(legacy.valid_to, createdAt) } : {}) }, importOrigin: { store, recordId: legacy.assertion_id, revision, importedAt, ...(Object.keys(review).length ? { review } : {}) }, content };
@@ -251,9 +275,9 @@ export class LegacyKnowledgeImporter {
   }
 
   async execute(request: Extract<KnowledgeAction, { operation: "knowledge.import.dry-run" | "knowledge.import.run" }>["request"] & { operation?: "knowledge.import.dry-run" | "knowledge.import.run" }): Promise<LegacyImportReport> {
-    const operation = request.operation ?? ("expectedPlanHash" in request ? "knowledge.import.run" : "knowledge.import.dry-run"); const plan = await this.plan(request.source);
-    const scope: KnowledgeImportScope | undefined = request.scope; const kinds = scope?.kinds ? new Set(scope.kinds) : undefined; const ids = scope?.ids ? new Set(scope.ids) : undefined;
-    const scoped = plan.items.filter(item => (!kinds || kinds.has(item.kind === "source" ? "sources" : item.kind === "entity" ? "entities" : "assertions")) && (!ids || ids.has(item.kind === "source" ? item.legacy.source_id : item.kind === "entity" ? item.legacy.entity_id : item.legacy.assertion_id)));
+    const operation = request.operation ?? ("expectedPlanHash" in request ? "knowledge.import.run" : "knowledge.import.dry-run");
+    const scope: KnowledgeImportScope | undefined = request.scope; const plan = await this.plan(request.source, scope);
+    const scoped = plan.items;
     const requestedLimit = request.limit === undefined ? scoped.length : Math.max(0, Math.min(20_000, Math.floor(request.limit)));
     const selected = scoped.slice(0, requestedLimit); const selectedPlanHash = hash({ base: plan.planHash, scope: scope ?? null, selected: selected.map(item => item.id) });
     const mappings: LegacyImportMapping[] = selected.map(item => ({ legacyId: item.kind === "source" ? item.legacy.source_id : item.kind === "entity" ? item.legacy.entity_id : item.legacy.assertion_id, kind: item.kind === "source" ? "source" : item.kind === "entity" ? "entity" : "assertion", newId: item.id }));

@@ -47,10 +47,11 @@ struct KnowledgeSourceOrigin: Codable, Hashable, Sendable { let kind: KnowledgeS
 enum KnowledgeEvidenceQuality: String, Codable, Sendable { case high, medium, low, none }
 enum KnowledgeFreshness: String, Codable, Sendable { case current, aging, stale, unknown }
 struct KnowledgeSourceAssessment: Codable, Hashable, Sendable { let summary: String; let contribution: String?; let whyItMatters: String?; let evidenceQuality: KnowledgeEvidenceQuality; let freshness: KnowledgeFreshness; let possibleUse: String?; let generatedAt: String; let model: String? }
+struct KnowledgeSourceRetention: Codable, Hashable, Sendable { let sensitivity: String; let usageConstraint: String?; let evidenceAvailable: Bool; let originalHash: String? }
 struct KnowledgeSourceContent: Codable, Hashable, Sendable {
     let title: String; let uri: String?; let text: String?; let object: KnowledgeObjectRef?; let mediaType: String?
     let captureDisposition: KnowledgeCaptureDisposition; let annotations: [KnowledgeSourceAnnotation]?; let sourcePublishedAt: String?; let capturedAt: String; let origin: String?
-    let origins: [KnowledgeSourceOrigin]?; let identity: KnowledgeSourceIdentity?; let assessment: KnowledgeSourceAssessment?
+    let origins: [KnowledgeSourceOrigin]?; let identity: KnowledgeSourceIdentity?; var retention: KnowledgeSourceRetention? = nil; let assessment: KnowledgeSourceAssessment?
 }
 struct KnowledgeObservationRange: Codable, Hashable, Sendable {
     let sessionId: String; let branchId: String?; let fromEntryId: String; let toEntryId: String; let entryIds: [String]; let entryDigest: String; let projectId: String?; let invocationIds: [String]?
@@ -78,12 +79,14 @@ enum KnowledgeRecordContent: Codable, Hashable, Sendable {
     }
     private enum ProbeKeys: String, CodingKey { case range, role }
 }
+struct KnowledgeImportOrigin: Codable, Hashable, Sendable { let store: String; let recordId: String; let revision: String; let importedAt: String; let review: KnowledgeImportReview? }
+struct KnowledgeImportReview: Codable, Hashable, Sendable { let batch: String?; let auditId: String?; let receiptId: String?; let resultRevision: String?; let basis: String? }
 struct KnowledgeRecord: Codable, Hashable, Identifiable, Sendable {
     let schemaVersion: Int; let id: String; let revisionId: String; let kind: KnowledgeRecordKind; let scope: KnowledgeScope; let createdAt: String; let updatedAt: String
-    let provenance: KnowledgeProvenance; let temporal: KnowledgeTemporalQualification?; let relations: [KnowledgeRelation]; let content: KnowledgeRecordContent
+    let provenance: KnowledgeProvenance; let temporal: KnowledgeTemporalQualification?; let relations: [KnowledgeRelation]; var importOrigin: KnowledgeImportOrigin? = nil; let content: KnowledgeRecordContent
 }
 struct KnowledgeRecordDraft: Codable, Hashable, Sendable {
-    let id: String?; let createdAt: String?; let updatedAt: String?; let kind: KnowledgeRecordKind; let scope: KnowledgeScope; let provenance: KnowledgeProvenance; let temporal: KnowledgeTemporalQualification?; let relations: [KnowledgeRelation]; let content: KnowledgeRecordContent
+    let id: String?; let createdAt: String?; let updatedAt: String?; let kind: KnowledgeRecordKind; let scope: KnowledgeScope; let provenance: KnowledgeProvenance; let temporal: KnowledgeTemporalQualification?; let relations: [KnowledgeRelation]; var importOrigin: KnowledgeImportOrigin? = nil; let content: KnowledgeRecordContent
 }
 
 struct KnowledgeEligibility: Codable, Hashable, Sendable { var sessionIds: [String]; var projectIds: [String]; var excludedSessionIds: [String]; var excludedProjectIds: [String] }
@@ -99,14 +102,23 @@ struct KnowledgeSearchHit: Codable, Hashable, Sendable { let record: KnowledgeRe
 struct KnowledgeSearchResponse: Codable, Hashable, Sendable { let hits: [KnowledgeSearchHit]; let stateRevision: Int; let indexState: String }
 struct KnowledgeRecallResponse: Codable, Hashable, Sendable { let records: [KnowledgeRecord]; let citations: [KnowledgeEvidenceRef]; let stateRevision: Int; let availability: String }
 struct KnowledgeMutationResult: Codable, Hashable, Sendable { let record: KnowledgeRecord; let stateRevision: Int }
+/// URL capture is owned by the Gateway source adapter and therefore returns
+/// capture metadata rather than the generic record-mutation envelope.
+struct KnowledgeSourceCaptureResult: Codable, Hashable, Sendable { let record: KnowledgeRecord; let duplicate: Bool; let fetched: Bool; let assessmentError: String? }
 struct KnowledgeForgetResult: Codable, Hashable, Sendable { let forgotten: Bool; let recordId: String; let stateRevision: Int }
 struct KnowledgeExclusionResult: Codable, Hashable, Sendable { let recordId: String; let excluded: Bool; let stateRevision: Int }
 struct KnowledgeConnectorStatus: Codable, Hashable, Sendable {
-    let connector: String; let available: Bool; let configured: Bool; let enabled: Bool; let writesEnabled: Bool; let state: String; let detail: String?; let lastRunAt: String?
+    let connector: String; let configured: Bool; let enabled: Bool; let health: String; let accountId: String?; let scope: String?; let lastRunAt: String?; let lastError: String?; let remaining: Int; let pending: Int; let paidBudgetCents: Int; let allowWrites: Bool; let recurringApproved: Bool; let paidAccessApproved: Bool
+    var available: Bool { true }
+    var writesEnabled: Bool { allowWrites }
+    var state: String { health }
+    var detail: String? { lastError }
 }
-struct KnowledgeConnectorRunResult: Codable, Hashable, Sendable { let dryRun: Bool; let connector: String; let discovered: Int; let captured: Int; let pending: Int; let detail: String? }
-struct KnowledgeImportPlan: Codable, Hashable, Sendable { let source: String; let planHash: String; let total: Int; let accepted: Int; let skipped: Int; let detail: String? }
-struct KnowledgeImportResult: Codable, Hashable, Sendable { let source: String; let imported: Int; let skipped: Int; let detail: String? }
+struct KnowledgeConnectorRunResult: Codable, Hashable, Sendable { let dryRun: Bool; let connector: String; let discovered: Int; let captured: Int?; let pending: Int; let remaining: Int?; let health: String; let partial: Int?; let error: String? }
+struct KnowledgeImportPlan: Codable, Hashable, Sendable { let operation: String; let source: String; let planHash: String; let planned: Int; let selected: Int; let imported: Int; let resumed: Int; let skipped: Int; let failed: Int; let completed: Bool; let progress: KnowledgeImportProgress; let mappings: [KnowledgeImportMapping]; let warnings: [String] }
+struct KnowledgeImportProgress: Codable, Hashable, Sendable { let completed: Int; let remaining: Int; let total: Int }
+struct KnowledgeImportMapping: Codable, Hashable, Sendable { let legacyId: String; let kind: String; let newId: String }
+struct KnowledgeImportResult: Codable, Hashable, Sendable { let operation: String; let source: String; let planHash: String; let planned: Int; let selected: Int; let imported: Int; let resumed: Int; let skipped: Int; let failed: Int; let completed: Bool; let progress: KnowledgeImportProgress; let mappings: [KnowledgeImportMapping]; let warnings: [String] }
 struct KnowledgeTriageResult: Codable, Hashable, Sendable { let source: KnowledgeRecord; let assessment: KnowledgeSourceAssessment }
 
 struct KnowledgeListRequest: Encodable, Sendable { let kind: KnowledgeRecordKind?; let scope: KnowledgeScope?; let includeSuppressed: Bool; let cursor: String?; let limit: Int }

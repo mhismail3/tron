@@ -124,7 +124,7 @@ object hashes are not an object browsing API.
 
 ## Connector boundaries
 
-Raindrop reads `/rest/v1/collection/{collectionId}/items` in bounded pages; X reads
+Raindrop reads the official `/rest/v1/raindrops/{collectionId}` endpoint in bounded pages; X reads
 `/2/users/{userId}/bookmarks` with the provider pagination token. Discovered provider IDs
 and pending metadata are persisted before checkpoint advancement, so pagination shifts do
 not silently skip work. Items use shared URL capture/store with explicit partial or
@@ -133,17 +133,25 @@ rate-limit, remaining, and last-error health. Remote Raindrop moves are disabled
 default and require a locally verified raw object plus readable extraction, explicit write
 approval, a durable pending receipt before PUT, and exact post-effect reconciliation.
 X exposes no folder moves, browser fallback, automatic unbookmarking, purchases, or
-recharge. A complete label alone is never sufficient for remote acknowledgment.
+recharge. A complete label alone is never sufficient for remote acknowledgment. Connector
+runs are serialized per provider; pending discovery is advanced only after the complete
+bounded page is durably retained, and incomplete/partial captures remain pending for
+retry. Paid budgets are rejected until a provider operation has an explicit maintained
+price; approval flags never imply unknown spend.
 
 ## Legacy import
 
 `LegacyKnowledgeImporter` is installed through the `KnowledgeExtensionSeam.importer`
-registration. It accepts only an explicitly named, configured `personal-os` or
+registration. Hosts configure the named `personal-os` and `llm-wiki` roots with
+`TRON_PERSONAL_OS_ROOT` and `TRON_LLM_WIKI_ROOT`; the iOS surface only offers those
+names and never sends arbitrary filesystem paths. It accepts only an explicitly named, configured `personal-os` or
 `llm-wiki` checkout and a bounded `KnowledgeImportScope` (record families and/or
 exact legacy IDs); it never scans an arbitrary path or invokes legacy wrappers.
-Dry-run returns a deterministic plan hash and stable mappings. Run requires that
-hash and records exact selected batch membership and completed IDs in the
-knowledge store, so a crash can resume without creating a second record.
+Dry-run returns a deterministic plan hash over selected payloads, evidence hashes,
+and stable mappings. Run requires that hash and records exact selected batch membership
+and completed IDs in the knowledge store, so a crash can resume without creating a
+second record. Structured assertion evidence qualifications and list-valued supersession
+are preserved as attributed historical material.
 
 Legacy source, entity, and assertion IDs are retained in `importOrigin` together
 with the pinned Git revision and import time. Source capture disposition is

@@ -438,6 +438,9 @@ export interface KnowledgeConnectorStatus {
   remaining: number;
   pending: number;
   paidBudgetCents: number;
+  allowWrites: boolean;
+  recurringApproved: boolean;
+  paidAccessApproved: boolean;
 }
 export interface KnowledgeImportScope {
   /** Explicitly limits which legacy record families may be admitted. */

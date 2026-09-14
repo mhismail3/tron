@@ -168,6 +168,7 @@ struct KnowledgeConnectorsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var identity: KnowledgePresentationIdentity?
     @State private var statuses: [String: KnowledgeConnectorStatus] = [:]
+    @State private var configuring: String?
     @State private var message: String?
     var body: some View {
         NavigationStack {
@@ -176,25 +177,59 @@ struct KnowledgeConnectorsView: View {
                     Label(connector == "x" ? "X" : "Raindrop", systemImage: "link").font(.headline)
                     Text(statuses[connector]?.detail ?? "Checking status…").font(.footnote).foregroundStyle(Color.tronTextSecondary)
                     if statuses[connector]?.writesEnabled == false { Text("Remote writes disabled").font(.caption).foregroundStyle(Color.tronAmber) }
-                    HStack { Button("Refresh") { refresh(connector) }.buttonStyle(.bordered); Button("Configure") { configure(connector) }.buttonStyle(.bordered).disabled(statuses[connector]?.available == false); Button("Run") { run(connector) }.buttonStyle(.borderedProminent).disabled(statuses[connector]?.configured != true) }
+                    HStack { Button("Refresh") { refresh(connector) }.buttonStyle(.bordered); Button("Configure") { configuring = connector }.buttonStyle(.bordered); Button("Run") { run(connector) }.buttonStyle(.borderedProminent).disabled(statuses[connector]?.configured != true) }
                 }.padding(.vertical, 8)
             }
             .navigationTitle("Connectors")
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .task { refresh("raindrop"); refresh("x") }
+            .sheet(isPresented: Binding(get: { configuring != nil }, set: { if !$0 { configuring = nil } })) {
+                if let connector = configuring { KnowledgeConnectorEditView(connector: connector, status: statuses[connector]) { configuring = nil; refresh(connector) }.environment(model) }
+            }
             .alert("Connector", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) { Button("OK") {} } message: { Text(message ?? "") }
         }
     }
-    private func refresh(_ connector: String) { guard activity.allowsPresentationPublication else { return }; let requestIdentity = model.knowledgePresentationIdentity; Task { @MainActor in do { let status = try await model.knowledge.connectorStatus(connector); guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; identity = requestIdentity; statuses[connector] = status } catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; statuses[connector] = KnowledgeConnectorStatus(connector: connector, available: false, configured: false, enabled: false, writesEnabled: false, state: "unavailable", detail: error.localizedDescription, lastRunAt: nil) } } }
-    private func configure(_ connector: String) { guard activity.allowsPresentationPublication else { return }; let requestIdentity = identity ?? model.knowledgePresentationIdentity; Task { @MainActor in do { let status = try await model.knowledge.configureConnector(connector, enabled: true); guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; statuses[connector] = status } catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; message = error.localizedDescription } } }
-    private func run(_ connector: String) { guard let status = statuses[connector], status.configured, activity.allowsPresentationPublication else { return }; let requestIdentity = identity ?? model.knowledgePresentationIdentity; Task { @MainActor in do { let result = try await model.knowledge.runConnector(connector, dryRun: false); guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; message = result.detail ?? "Run accepted." } catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; message = error.localizedDescription } } }
+    private func refresh(_ connector: String) { guard activity.allowsPresentationPublication else { return }; let requestIdentity = model.knowledgePresentationIdentity; Task { @MainActor in do { let status = try await model.knowledge.connectorStatus(connector); guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; identity = requestIdentity; statuses[connector] = status } catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; statuses[connector] = nil; message = error.localizedDescription } } }
+    private func run(_ connector: String) { guard let status = statuses[connector], status.configured, activity.allowsPresentationPublication else { return }; let requestIdentity = identity ?? model.knowledgePresentationIdentity; Task { @MainActor in do { let result = try await model.knowledge.runConnector(connector, dryRun: false); guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; message = result.error ?? "Run accepted (\(result.pending) pending)." } catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; message = error.localizedDescription } } }
 }
+
+private struct KnowledgeConnectorEditView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let connector: String
+    let status: KnowledgeConnectorStatus?
+    let onSaved: () -> Void
+    @State private var enabled: Bool
+    @State private var accountID: String
+    @State private var scope: String
+    @State private var destination = ""
+    @State private var credentialRef = ""
+    @State private var allowWrites: Bool
+    @State private var paidAccessApproved: Bool
+    @State private var recurringApproved: Bool
+    @State private var error: String?
+    init(connector: String, status: KnowledgeConnectorStatus?, onSaved: @escaping () -> Void) {
+        self.connector = connector; self.status = status; self.onSaved = onSaved
+        _enabled = State(initialValue: status?.enabled ?? false); _accountID = State(initialValue: status?.accountId ?? ""); _scope = State(initialValue: status?.scope ?? ""); _allowWrites = State(initialValue: status?.allowWrites ?? false); _paidAccessApproved = State(initialValue: status?.paidAccessApproved ?? false); _recurringApproved = State(initialValue: status?.recurringApproved ?? false)
+    }
+    var body: some View {
+        NavigationStack { Form {
+            Section("Account") { Toggle("Enabled", isOn: $enabled); TextField("Account ID", text: $accountID); TextField(connector == "raindrop" ? "Collection ID" : "User ID", text: $scope); SecureField("Mac Keychain reference", text: $credentialRef); Text("Credentials stay in the Mac Keychain; this is only an opaque reference.").font(.footnote).foregroundStyle(Color.tronTextSecondary) }
+            if connector == "raindrop" { Section("Remote policy") { TextField("Destination collection (optional)", text: $destination); Toggle("Allow reversible moves", isOn: $allowWrites); Text("Moves require a complete local capture and verified remote state.").font(.footnote).foregroundStyle(Color.tronTextSecondary) } }
+            Section("Access") { Toggle("Paid access approved", isOn: $paidAccessApproved); Toggle("Recurring runs approved", isOn: $recurringApproved) }
+            if let error { Text(error).foregroundStyle(.red) }
+        }.navigationTitle(connector == "x" ? "X connector" : "Raindrop connector").toolbar { ToolbarItem(placement: .confirmationAction) { Button("Save") { save() } } } }
+    }
+    private func save() { Task { @MainActor in do { _ = try await model.knowledge.configureConnector(connector, enabled: enabled, accountID: accountID.nilIfEmpty, scope: scope.nilIfEmpty, destination: destination.nilIfEmpty, credentialRef: credentialRef.nilIfEmpty, allowWrites: allowWrites, paidAccessApproved: paidAccessApproved, recurringApproved: recurringApproved); onSaved(); dismiss() } catch let caught { error = caught.localizedDescription } } }
+}
+
+private extension String { var nilIfEmpty: String? { isEmpty ? nil : self } }
 
 struct KnowledgeImportView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var activity
     @Environment(\.dismiss) private var dismiss
-    @State private var path = ""
+    @State private var source = "personal-os"
     @State private var plan: KnowledgeImportPlan?
     @State private var message: String?
     @State private var confirmExecute = false
@@ -202,15 +237,15 @@ struct KnowledgeImportView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Read-only dry run") { TextField("Authorized source path", text: $path).textInputAutocapitalization(.never); Button("Inspect import") { dryRun() }.disabled(path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
-                if let plan { Section("Inspected plan") { LabeledContent("Items", value: "\(plan.total)"); LabeledContent("Accepted", value: "\(plan.accepted)"); LabeledContent("Skipped", value: "\(plan.skipped)"); Text("Plan hash: \(plan.planHash)").font(.caption).textSelection(.enabled); Button("Import accepted items") { confirmExecute = true } } }
+                Section("Read-only dry run") { Picker("Named source", selection: $source) { Text("Personal OS").tag("personal-os"); Text("LLM Wiki").tag("llm-wiki") }; Text("Only a deliberately configured named root on this Gateway can be read.").font(.footnote).foregroundStyle(Color.tronTextSecondary); Button("Inspect import") { dryRun() } }
+                if let plan { Section("Inspected plan") { LabeledContent("Items", value: "\(plan.selected)"); LabeledContent("Warnings", value: "\(plan.warnings.count)"); LabeledContent("Skipped", value: "\(plan.skipped)"); Text("Plan hash: \(plan.planHash)").font(.caption).textSelection(.enabled); Button("Import accepted items") { confirmExecute = true } } }
                 if let message { Text(message).foregroundStyle(Color.tronTextSecondary) }
             }.navigationTitle("Import Knowledge").toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .confirmationDialog("Execute this exact inspected import?", isPresented: $confirmExecute) { Button("Import", role: .destructive) { if let plan { execute(plan) } }; Button("Cancel", role: .cancel) {} }
         }
     }
-    private func dryRun() { guard activity.allowsPresentationPublication else { return }; let source = path; let requestIdentity = model.knowledgePresentationIdentity; Task { @MainActor in do { let value = try await model.knowledge.importDryRun(source: source); guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; identity = requestIdentity; plan = value; message = nil } catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; message = error.localizedDescription } } }
-    private func execute(_ plan: KnowledgeImportPlan) { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == (identity ?? model.knowledgePresentationIdentity) else { message = "Gateway changed; inspect the source again."; return }; let requestIdentity = identity ?? model.knowledgePresentationIdentity; Task { @MainActor in do { let value = try await model.knowledge.importRun(source: plan.source, planHash: plan.planHash); guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; message = value.detail ?? "Import complete." } catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; message = error.localizedDescription } } }
+    private func dryRun() { guard activity.allowsPresentationPublication else { return }; let source = source; let requestIdentity = model.knowledgePresentationIdentity; Task { @MainActor in do { let value = try await model.knowledge.importDryRun(source: source); guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; identity = requestIdentity; plan = value; message = nil } catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; message = error.localizedDescription } } }
+    private func execute(_ plan: KnowledgeImportPlan) { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == (identity ?? model.knowledgePresentationIdentity) else { message = "Gateway changed; inspect the source again."; return }; let requestIdentity = identity ?? model.knowledgePresentationIdentity; Task { @MainActor in do { let value = try await model.knowledge.importRun(source: plan.source, planHash: plan.planHash); guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; message = value.completed ? "Import complete (\(value.imported) imported)." : "Import paused (\(value.progress.remaining) remaining)." } catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; message = error.localizedDescription } } }
 }
 
 private struct KnowledgeCorrectionView: View {

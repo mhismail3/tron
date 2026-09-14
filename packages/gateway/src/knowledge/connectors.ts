@@ -1,6 +1,7 @@
 import type { KnowledgeConnectorConfigurationRequest, KnowledgeConnectorRunRequest, KnowledgeConnectorState, KnowledgeConnectorStatus, KnowledgeAction, KnowledgeRecord } from "./knowledge-contract.js";
 import { captureSource, isVerifiedSourceCapture } from "./source-capture.js";
 import { GatewayError } from "../errors.js";
+import { AsyncMutex } from "../util/async-mutex.js";
 import type { KnowledgeStore } from "./knowledge-store.js";
 import type { ConnectorCredentialStore } from "./connector-credentials.js";
 
@@ -38,10 +39,19 @@ function url(value: unknown): string | undefined { if (typeof value !== "string"
 function retryable(status: number): boolean { return status === 408 || status === 425 || status === 429 || status >= 500; }
 function authFailure(status: number): boolean { return status === 401 || status === 403; }
 
+async function boundedResponseText(response: Response): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader(); const chunks: Uint8Array[] = []; let total = 0;
+  try {
+    for (;;) { const next = await reader.read(); if (next.done) break; if (!next.value) continue; const remaining = BODY_LIMIT - total; if (next.value.byteLength > remaining) { if (remaining > 0) chunks.push(next.value.slice(0, remaining)); await reader.cancel(); total = BODY_LIMIT; break; } chunks.push(next.value); total += next.value.byteLength; if (total === BODY_LIMIT) { await reader.cancel(); break; } }
+  } finally { reader.releaseLock(); }
+  const bytes = new Uint8Array(total); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return new TextDecoder().decode(bytes);
+}
 async function defaultHTTP(input: string, init: { method?: "GET" | "PUT" | "POST" | "DELETE"; headers: Record<string, string>; body?: string; signal: AbortSignal }): Promise<ConnectorHTTPResponse> {
-  const response = await fetch(input, { method: init.method ?? "GET", headers: init.headers, ...(init.body !== undefined ? { body: init.body } : {}), redirect: "error", signal: init.signal });
-  const body = await response.text();
-  return { status: response.status, headers: response.headers, body: body.slice(0, BODY_LIMIT) };
+  const timeout = AbortSignal.timeout(15_000); const signal = AbortSignal.any([init.signal, timeout]);
+  const response = await fetch(input, { method: init.method ?? "GET", headers: init.headers, ...(init.body !== undefined ? { body: init.body } : {}), redirect: "error", signal });
+  return { status: response.status, headers: response.headers, body: await boundedResponseText(response) };
 }
 
 async function requestJson(http: ConnectorHTTP, endpoint: string, token: string, options: { method?: "GET" | "PUT" | "POST" | "DELETE"; body?: unknown; sleep: (milliseconds: number) => Promise<void>; signal: AbortSignal }): Promise<{ status: number; value: any; headers: Headers }> {
@@ -64,7 +74,7 @@ function initial(connector: Connector): KnowledgeConnectorState {
 }
 function stateStatus(state: KnowledgeConnectorState | undefined, connector: Connector): KnowledgeConnectorStatus {
   const value = state ?? initial(connector);
-  return { connector, configured: Boolean(value.credentialRef && value.accountId && value.scope), enabled: value.enabled, health: value.health, ...(value.accountId ? { accountId: value.accountId } : {}), ...(value.scope ? { scope: value.scope } : {}), ...(value.lastRunAt ? { lastRunAt: value.lastRunAt } : {}), ...(value.lastError ? { lastError: value.lastError } : {}), remaining: value.remaining, pending: value.pending.length, paidBudgetCents: value.paidBudgetCents };
+  return { connector, configured: Boolean(value.credentialRef && value.accountId && value.scope), enabled: value.enabled, health: value.health, ...(value.accountId ? { accountId: value.accountId } : {}), ...(value.scope ? { scope: value.scope } : {}), ...(value.lastRunAt ? { lastRunAt: value.lastRunAt } : {}), ...(value.lastError ? { lastError: value.lastError } : {}), remaining: value.remaining, pending: value.pending.length, paidBudgetCents: value.paidBudgetCents, allowWrites: value.allowWrites, recurringApproved: value.recurringApproved, paidAccessApproved: value.paidAccessApproved };
 }
 function parseCollection(item: RaindropItemDTO): string | undefined {
   if (!item.collection || typeof item.collection !== "object") return undefined;
@@ -83,14 +93,16 @@ export class KnowledgeConnectorExtension {
   private readonly http: ConnectorHTTP;
   private readonly sleep: (milliseconds: number) => Promise<void>;
   private readonly now: () => string;
+  private readonly lanes = new Map<Connector, AsyncMutex>();
   constructor(private readonly store: KnowledgeStore, private readonly options: KnowledgeConnectorOptions) {
     this.http = options.http ?? defaultHTTP; this.sleep = options.sleep ?? (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))); this.now = options.now ?? (() => new Date().toISOString());
   }
+  private lane(connector: Connector): AsyncMutex { const existing = this.lanes.get(connector); if (existing) return existing; const created = new AsyncMutex(); this.lanes.set(connector, created); return created; }
 
   async invoke(action: KnowledgeAction): Promise<unknown> {
     if (action.operation === "knowledge.connector.configure") return this.configure(action.request);
     if (action.operation === "knowledge.connector.status") return stateStatus(await this.store.connectorState(action.request.connector), action.request.connector);
-    if (action.operation === "knowledge.connector.run") return this.run(action.request);
+    if (action.operation === "knowledge.connector.run") return this.lane(action.request.connector).run(() => this.run(action.request));
     throw bad("Unsupported knowledge connector operation");
   }
 
@@ -111,6 +123,10 @@ export class KnowledgeConnectorExtension {
   private async run(request: KnowledgeConnectorRunRequest): Promise<Record<string, unknown>> {
     const connector = request.connector; const current = await this.store.connectorState(connector);
     if (!current?.enabled || !current.credentialRef || !current.accountId || !current.scope) throw new GatewayError("unsupported", `Knowledge ${connector} connector is not configured`);
+    // No connector operation currently has a maintained paid-price contract.
+    // Keep the stored budget authoritative and reject paid work rather than
+    // guessing a provider cost.
+    if (current.paidBudgetCents > 0) throw new GatewayError("unsupported", "Paid connector operations are unavailable without a priced operation");
     const token = await this.options.credentials.read(current.credentialRef);
     if (!token) { await this.store.updateConnectorState(command(request.commandId, "auth"), connector, state => ({ ...(state ?? current), health: "auth-error", lastError: "Credential reference is unavailable", lastRunAt: this.now() })); throw new GatewayError("unsupported", "Connector credential is unavailable"); }
     const limit = Math.min(request.limit ?? MAX_ITEMS, MAX_ITEMS); if (!Number.isSafeInteger(limit) || limit < 1) throw bad("Connector limit is invalid");
@@ -128,7 +144,12 @@ export class KnowledgeConnectorExtension {
       for (const item of [...state.pending].slice(0, limit)) {
         try {
           const result = await captureSource(this.store, { commandId: command(request.commandId, `capture-${item.id}`), url: item.url, scope: "research", title: item.title, origin: "connector", identity: { provider: connector, accountId: state.accountId!, itemId: item.id }, ...(item.annotation ? { annotations: [{ text: item.annotation }] } : {}) }, { ...(this.options.sourceFetch ? { fetcher: (sourceUrl, init) => this.options.sourceFetch!(sourceUrl.toString(), item.excerpt, init?.signal ?? new AbortController().signal) } : {}), ...(this.options.resolveHost ? { resolveHost: this.options.resolveHost } : {}) });
-          captured += 1; if (result.record.content.captureDisposition !== "complete") partial += 1;
+          if (result.record.content.captureDisposition !== "complete") { partial += 1; lastError = `Capture for ${item.id} is ${result.record.content.captureDisposition}`; break; }
+          if (connector === "raindrop" && state.allowWrites && state.destination && item.collectionId && item.collectionId !== state.destination) {
+            const moved = await this.moveRaindrop({ commandId: command(request.commandId, `move-${item.id}`), itemId: item.id, source: result.record, destination: state.destination });
+            if (moved.status !== "moved") { lastError = moved.status === "unsupported" ? "Approved Raindrop move is unavailable" : "Raindrop move could not be verified"; break; }
+          }
+          captured += 1;
           state = await this.store.updateConnectorState(command(request.commandId, `done-${item.id}`), connector, value => { const next = value ?? state; return { ...next, pending: next.pending.filter(candidate => candidate.id !== item.id), capturedIds: [...new Set([...next.capturedIds, item.id])].slice(-2_000), remaining: Math.max(0, next.pending.length - 1) }; });
         } catch (error) { lastError = error instanceof Error ? error.message : "Connector capture failed"; break; }
       }
@@ -145,11 +166,22 @@ export class KnowledgeConnectorExtension {
   private async discover(connector: Connector, state: KnowledgeConnectorState, token: string, limit: number, signal: AbortSignal): Promise<{ discovered: number }> {
     let cursor = state.checkpoint; let discovered = 0; const seen = new Set([...state.pending.map(item => item.id), ...state.capturedIds]);
     for (let page = 0; page < 10 && discovered < limit; page += 1) {
-      const result = connector === "raindrop" ? await requestJson(this.http, `https://api.raindrop.io/rest/v1/collection/${encodeURIComponent(state.scope!)}/items?page=${cursor ? encodeURIComponent(cursor) : "0"}&perpage=${MAX_PAGE}`, token, { sleep: this.sleep, signal }) : await requestJson(this.http, `https://api.x.com/2/users/${encodeURIComponent(state.scope!)}/bookmarks?max_results=${MAX_PAGE}${cursor ? `&pagination_token=${encodeURIComponent(cursor)}` : ""}&tweet.fields=created_at,entities,author_id`, token, { sleep: this.sleep, signal });
-      const items = connector === "raindrop" ? parseRaindrop(result.value) : parseX(result.value); const fresh = items.filter(item => !seen.has(item.id)).slice(0, limit - discovered); const next = connector === "raindrop" ? (items.length >= MAX_PAGE ? String((Number(cursor ?? "0") || 0) + 1) : undefined) : text(result.value?.meta?.next_token, 512);
-      await this.store.updateConnectorState(`connector-discover-${connector}-${Date.now()}-${page}`, connector, value => { const nextState = { ...(value ?? state), pending: [...value?.pending ?? [], ...fresh].slice(0, 500), remaining: (value?.pending.length ?? 0) + fresh.length }; if (next) nextState.checkpoint = next; else delete nextState.checkpoint; return nextState; });
-      discovered += fresh.length; fresh.forEach(item => seen.add(item.id));
-      if (!next || items.length === 0) break;
+      const result = connector === "raindrop" ? await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrops/${encodeURIComponent(state.scope!)}?page=${cursor ? encodeURIComponent(cursor) : "0"}&perpage=${MAX_PAGE}`, token, { sleep: this.sleep, signal }) : await requestJson(this.http, `https://api.x.com/2/users/${encodeURIComponent(state.scope!)}/bookmarks?max_results=${MAX_PAGE}${cursor ? `&pagination_token=${encodeURIComponent(cursor)}` : ""}&tweet.fields=created_at,entities,author_id`, token, { sleep: this.sleep, signal });
+      const items = connector === "raindrop" ? parseRaindrop(result.value) : parseX(result.value);
+      const fresh = items.filter(item => !seen.has(item.id));
+      const next = connector === "raindrop" ? (items.length >= MAX_PAGE ? String((Number(cursor ?? "0") || 0) + 1) : undefined) : text(result.value?.meta?.next_token, 512);
+      let persisted = 0;
+      await this.store.updateConnectorState(`connector-discover-${connector}-${Date.now()}-${page}`, connector, value => {
+        const prior = value ?? state; const capacity = Math.max(0, 500 - prior.pending.length); const batch = fresh.slice(0, capacity);
+        persisted = batch.length;
+        const nextState = { ...prior, pending: [...prior.pending, ...batch], remaining: prior.pending.length + batch.length };
+        // Advance only after every discovered item from this page is durable;
+        // otherwise retry the same provider page instead of silently skipping.
+        if (batch.length === fresh.length && next) nextState.checkpoint = next; else if (!next && batch.length === fresh.length) delete nextState.checkpoint;
+        return nextState;
+      });
+      discovered += persisted; fresh.slice(0, persisted).forEach(item => seen.add(item.id));
+      if (persisted < fresh.length || !next || items.length === 0 || discovered >= limit) break;
       cursor = next;
     }
     return { discovered };
@@ -160,6 +192,7 @@ export class KnowledgeConnectorExtension {
     const state = await this.store.connectorState(connector); if (!state) return stateStatus(undefined, connector);
     const pending = state.pendingRemote;
     if (!pending || connector !== "raindrop" || !state.credentialRef) return stateStatus(state, connector);
+    if (state.paidBudgetCents > 0) return stateStatus(state, connector);
     const token = await this.options.credentials.read(state.credentialRef);
     if (!token) return stateStatus(state, connector);
     try {
@@ -182,6 +215,7 @@ export class KnowledgeConnectorExtension {
     if (!isVerifiedSourceCapture(input.source)) return { status: "unsupported" };
     const state = await this.store.connectorState("raindrop"); if (!state?.enabled || !state.allowWrites || !state.credentialRef) return { status: "unsupported" };
     if (!state.destination || state.destination !== input.destination) return { status: "conflict" };
+    if (state.paidBudgetCents > 0) return { status: "unsupported" };
     const token = await this.options.credentials.read(state.credentialRef); if (!token) return { status: "unsupported" };
     const pending = { operationId: input.commandId, itemId: input.itemId, action: "move" as const, basisRecordId: input.source.id, originalCollectionId: state.scope!, destination: input.destination, createdAt: this.now() };
     await this.store.updateConnectorState(input.commandId, "raindrop", current => ({ ...(current ?? state), pendingRemote: pending }));
