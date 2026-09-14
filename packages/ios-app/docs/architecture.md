@@ -786,7 +786,8 @@ An unchanged exact block retains identity and its subtree-local interaction stat
 content or block type resets identity, intentionally clearing `CodeBlock` copy confirmation and any
 other stale subtree state rather than transferring it to different source. Code-copy feedback is owned by
 that mounted block's lifecycle: its view task resets only the current tap generation after 1.2 seconds,
-and disappearance retires the mount before any delayed reset can publish. The projection worker now
+and disappearance retires the mount before any delayed reset can publish; a retained block reactivates
+that same owner on appearance before accepting another tap. The projection worker now
 prepares exact-source Markdown documents and attributed thinking segments off-MainActor under one
 shared disposable LRU: 4 MiB accounted source/presentation bytes, 512 Markdown revisions, 4,096
 thinking segments, and 320,000 bytes per source. Two preparations may run concurrently; one projection

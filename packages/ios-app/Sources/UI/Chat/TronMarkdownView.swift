@@ -123,6 +123,12 @@ final class CodeCopyFeedbackLifecycle {
         generation &+= 1
     }
 
+    func appear() {
+        // SwiftUI can retain this owner across disappearance. Retirement has
+        // already advanced the generation, so old resets remain inadmissible.
+        mounted = true
+    }
+
     func disappear() {
         mounted = false
         generation &+= 1
@@ -179,6 +185,7 @@ private struct CodeBlock: View {
             // and mount fence in one shipping path for every configuration.
             _ = await copyFeedback.resetIfCurrent(taskGeneration)
         }
+        .onAppear { copyFeedback.appear() }
         .onDisappear { copyFeedback.disappear() }
     }
 }

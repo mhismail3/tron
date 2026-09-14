@@ -29,8 +29,15 @@ struct ChatTranscriptPresentationStoreTests {
         }
         try await disappearanceGate.waitForEntry()
         successor.disappear()
+        #expect(!successor.copied)
+        // Reuse the same owner, as SwiftUI does when a retained row reappears.
+        // Reactivation must not authorize the predecessor's suspended reset.
+        successor.appear()
+        successor.markCopied()
         await disappearanceGate.release()
         #expect(!(await successorReset.value))
+        #expect(successor.copied)
+        #expect(await successor.resetIfCurrent(successor.generation))
         #expect(!successor.copied)
     }
 
