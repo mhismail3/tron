@@ -1898,24 +1898,30 @@ final class AppModel {
     func refreshDevices() async {
         struct Response: Decodable { let devices: [PairedDevice] }
         guard !Task.isCancelled else { return }
-        let connectionID = await client.activeConnectionID()
+        // Advance the read owner before the first suspension. A newer read may
+        // enter while the client actor supplies the captured epoch.
         deviceLoadGeneration &+= 1
         let generation = deviceLoadGeneration
+        let connection = await client.activeConnectionAdmission()
         do {
             let response: Response = try await client.request(
                 "device.list",
                 EmptyParams(),
-                expectedEpochID: connectionID
+                expectedConnection: connection
             )
             let admitted = try PairedDeviceCatalogPolicy.admit(response.devices)
+            guard !Task.isCancelled, deviceLoadGeneration == generation else { return }
+            let currentConnection = await client.activeConnectionAdmission()
             guard !Task.isCancelled,
                   deviceLoadGeneration == generation,
-                  await client.activeConnectionID() == connectionID else { return }
+                  currentConnection == connection else { return }
             pairedDevices = admitted
         } catch {
+            guard !Task.isCancelled, deviceLoadGeneration == generation else { return }
+            let currentConnection = await client.activeConnectionAdmission()
             guard !Task.isCancelled,
                   deviceLoadGeneration == generation,
-                  await client.activeConnectionID() == connectionID else { return }
+                  currentConnection == connection else { return }
             surface(error)
         }
     }

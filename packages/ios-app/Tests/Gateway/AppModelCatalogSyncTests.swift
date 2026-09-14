@@ -442,6 +442,26 @@ struct AppModelCatalogSyncTests {
         }
     }
 
+    @Test("newer paired-device reads own success publication")
+    func newerDeviceReadWins() async throws {
+        try await withHarness { harness in
+            let older = Task { await harness.model.refreshDevices() }
+            let olderRequest = try await request(harness.socket, index: 1)
+            let newer = Task { await harness.model.refreshDevices() }
+            let newerRequest = try await request(harness.socket, index: 2)
+            let newerDevices = [PairedDevice(
+                id: "newer-device", name: "Newer Phone", createdAt: "2026-09-11T00:00:00Z"
+            )]
+            await harness.socket.enqueue(deviceResponse(id: newerRequest.id, devices: newerDevices))
+            await newer.value
+            await harness.socket.enqueue(deviceResponse(id: olderRequest.id, devices: [PairedDevice(
+                id: "older-device", name: "Older Phone", createdAt: "2026-09-10T00:00:00Z"
+            )]))
+            await older.value
+            #expect(harness.model.pairedDevices == newerDevices)
+        }
+    }
+
     enum OptionalRead: CaseIterable, Sendable { case settings, providers, devices }
 
     @Test("a cancelled optional read cannot supersede a current read before entry", arguments: OptionalRead.allCases)
@@ -634,6 +654,15 @@ struct AppModelCatalogSyncTests {
                 "firstMessage": .string(id),
             ])
         )
+    }
+
+    private func deviceResponse(id: String, devices: [PairedDevice]) -> Data {
+        let encoded = try! JSONEncoder.gateway.encode(devices)
+        let rawDevices = try! JSONSerialization.jsonObject(with: encoded)
+        return try! JSONSerialization.data(withJSONObject: [
+            "type": "response", "id": id, "ok": true,
+            "result": ["devices": rawDevices],
+        ])
     }
 
     private func response(

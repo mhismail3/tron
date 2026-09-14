@@ -638,6 +638,26 @@ struct GatewayClientTransportTests {
         }
     }
 
+    @Test("a disconnected epoch admission cannot cross a replacement connection")
+    func disconnectedEpochAdmissionCannotCrossReplacement() async throws {
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        let admission = await client.activeConnectionAdmission()
+        #expect(admission.connectionID == nil)
+
+        await socket.enqueue(helloFrame())
+        _ = try await client.connect(profile: profile, token: "token")
+        await #expect(throws: GatewayDefinitelyNotSentError.self) {
+            try await client.requestValue(
+                "test.echo",
+                EmptyParams(),
+                expectedConnection: admission
+            )
+        }
+        #expect(await socket.sentFrames().count == 1)
+        await client.close()
+    }
+
     @Test("handshake deadline closes a socket stalled in hello send")
     func stalledHelloSendIsRetiredAtDeadline() async throws {
         try await withTestWatchdog {
