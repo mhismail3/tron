@@ -458,7 +458,7 @@ struct QueuedMessageRow: View {
             }
             ChatPromptCard(
                 behavior: behavior,
-                text: message.text,
+                text: UserPromptPresentationPolicy.promptDisplayText(message.resourceInvocation) ?? message.text,
                 detail: "\(deliveryDetail) · \(position) of \(total)",
                 isInteractive: isManageable,
                 onActivate: isManageable && !isMutating ? onEdit : nil,

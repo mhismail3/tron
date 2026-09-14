@@ -1982,6 +1982,15 @@ scope, so directly authored project resources show both User and Project. Picker
 selected-chip, and detail titles share the same badge policy and styling.
 Detail sheets can resolve provenance from their
 admitted response when opened from a canonical transcript chip.
+Receipt-bound prompt-template user messages display only unaltered invocation
+arguments rather than expanded template instructions. The chip identifies the
+prompt; no placeholder or empty user bubble is added for a prompt-only message.
+The same display-only policy applies to optimistic, pending, queued, and
+Automation prompt containers. Canonical transcript bytes, invocation identity,
+queue editing, submission, and attachment identities remain unchanged; snapshots
+and history rederive the input text from resource provenance, never text matching.
+Messages without prompt provenance, skills, and commands keep their existing
+presentation. The resource chip still opens the template detail sheet.
 `ChatViewScrollHarnessTests.coveredChatDefersComposerCatalog` drives real command
 responses under a native managed sheet or an explicitly inactive hosted scene and
 checks suppressed worker admission, retained picker data, current canonical intake,

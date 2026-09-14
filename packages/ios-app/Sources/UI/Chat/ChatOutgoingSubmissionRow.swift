@@ -129,6 +129,10 @@ private struct ChatPromptActivationModifier: ViewModifier {
 struct ChatPendingPromptRow: View, Equatable {
     let presentation: ChatPendingPromptPresentation
 
+    private var displayText: String {
+        UserPromptPresentationPolicy.promptDisplayText(presentation.resourceInvocation) ?? presentation.text
+    }
+
     var body: some View {
         if presentation.usesQueuedCardVisual {
             HStack(alignment: .top, spacing: 10) {
@@ -149,8 +153,8 @@ struct ChatPendingPromptRow: View, Equatable {
                         .font(TronTypography.caption)
                         .foregroundStyle(Color.tronTextSecondary)
                         .accessibilityLabel(presentation.statusTitle)
-                    if !presentation.text.isEmpty {
-                        UserPromptText(text: presentation.text)
+                    if !displayText.isEmpty {
+                        UserPromptText(text: displayText)
                             .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
                             .padding(.top, ChatPromptContainerStyle.topPadding)
                             .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
@@ -169,7 +173,7 @@ struct ChatPendingPromptRow: View, Equatable {
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
             .accessibilityElement(children: .contain)
-            .accessibilityLabel(presentation.text.isEmpty ? presentation.statusTitle : "\(presentation.statusTitle): \(presentation.text)")
+            .accessibilityLabel(displayText.isEmpty ? presentation.statusTitle : "\(presentation.statusTitle): \(displayText)")
         }
     }
 
@@ -181,7 +185,7 @@ struct ChatPendingPromptRow: View, Equatable {
             attachments: presentation.attachments
         )
         let attachmentLabel = QueuedMessageAttachmentPresentation.accessibilityLabel(chips: chips)
-        return [presentation.statusTitle, presentation.text.isEmpty ? nil : presentation.text, attachmentLabel.isEmpty ? nil : attachmentLabel]
+        return [presentation.statusTitle, displayText.isEmpty ? nil : displayText, attachmentLabel.isEmpty ? nil : attachmentLabel]
             .compactMap { $0 }
             .joined(separator: ": ")
     }
@@ -201,7 +205,7 @@ struct ChatPendingPromptRow: View, Equatable {
             ChatPromptCard(
                 behavior: presentation.cardBehavior,
                 title: presentation.cardTitle,
-                text: presentation.text,
+                text: displayText,
                 detail: presentation.cardDetail,
                 attachmentContent: {
                     if !chips.isEmpty {
@@ -225,6 +229,10 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
     let presentation: ChatOutgoingSubmissionPresentation
     let attachments: [PendingAttachment]
 
+    private var displayText: String {
+        UserPromptPresentationPolicy.promptDisplayText(presentation.resourceInvocation) ?? presentation.text
+    }
+
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.presentation == rhs.presentation && lhs.attachments == rhs.attachments
     }
@@ -238,7 +246,7 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                     ChatPromptCard(
                         behavior: presentation.cardBehavior,
                         title: presentation.cardTitle,
-                        text: presentation.text,
+                        text: displayText,
                         detail: presentation.cardDetail,
                         attachmentContent: { queuedAttachmentChips },
                         statusContent: { EmptyView() }
@@ -256,8 +264,8 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
             VStack(alignment: .trailing, spacing: 4) {
                 resourceChip
                 attachmentStrip
-                if !presentation.text.isEmpty {
-                    UserPromptText(text: presentation.text)
+                if !displayText.isEmpty {
+                    UserPromptText(text: displayText)
                         .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
                         .padding(.top, ChatPromptContainerStyle.topPadding)
                         .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
@@ -276,7 +284,7 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
         return [
             presentation.statusTitle,
             resourceAccessibilityLabel,
-            presentation.text.isEmpty ? nil : presentation.text,
+            displayText.isEmpty ? nil : displayText,
             attachmentLabel.isEmpty ? nil : attachmentLabel,
         ]
         .compactMap { $0 }
@@ -345,9 +353,9 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
         [
             presentation.statusTitle,
             resourceAccessibilityLabel,
-            presentation.text.isEmpty
+            displayText.isEmpty
                 ? (attachments.isEmpty ? nil : "Prompt attachments")
-                : presentation.text,
+                : displayText,
         ]
         .compactMap { $0 }
         .joined(separator: ": ")

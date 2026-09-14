@@ -36,6 +36,14 @@ private struct ChatMessageGrowthIdentity: Equatable {
 }
 
 enum UserPromptPresentationPolicy {
+    /// Display only: invocation arguments retain the user's original text even
+    /// after the runtime expands a template. Never infer or strip template
+    /// content by matching strings, and never use this preview for submission.
+    static func promptDisplayText(_ resource: ComposerResourceInvocation?) -> String? {
+        guard let resource, resource.source == .prompt else { return nil }
+        return resource.arguments
+    }
+
     static func visibleText(_ text: String?, hasAttachments: Bool = false) -> String? {
         guard let text,
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -49,7 +57,9 @@ enum AutomationPromptPresentationPolicy {
     static let operationNamespace = "automation:"
 
     static func visibleText(_ item: TranscriptItem) -> String? {
-        UserPromptPresentationPolicy.visibleText(item.text)
+        UserPromptPresentationPolicy.visibleText(
+            UserPromptPresentationPolicy.promptDisplayText(item.semantic?.resourceInvocation) ?? item.text
+        )
     }
 
     /// Automation identity comes only from the exact Gateway-authored

@@ -1033,6 +1033,41 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testPromptTemplateRowCollapsesExpandedContentWithoutChangingInput() async throws {
+        let expanded = String(repeating: "Review the implementation for correctness and preserve every important behavior.\n", count: 80)
+        let content = ContentPart(id: "prompt-text", ordinal: 0, thinkingRunOrdinal: nil,
+                                  type: .text, text: expanded, attachment: nil, redacted: nil,
+                                  mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil)
+        let resource = ComposerResourceInvocation(source: .prompt, name: "code_review", arguments: "Focus on cancellation and cleanup.")
+        try await withModel { model in
+            for bound in [true, false] {
+                let item = TranscriptItem.message(MessageTranscriptItem(
+                    id: "prompt-row", parentId: nil, timestamp: "2026-01-01T00:00:00Z",
+                    kind: .message, role: .user, presentationId: "prompt-row", content: [content],
+                    semantic: bound ? ChatSemanticMetadata(
+                        direction: .inboundContext, contextEffect: .modelInput,
+                        delivery: .stored, visibility: .visible, kind: .resourcePrompt,
+                        origin: .init(kind: .user, confidence: .boundary), sequence: 1, resourceInvocation: resource
+                    ) : nil
+                ))
+                try await self.withSheet(ScrollView {
+                    TranscriptRow(item: item).padding(16)
+                }.environment(model)) { controller in
+                    let scroll = try XCTUnwrap(self.views(of: UIScrollView.self, in: controller.view).first)
+                    if bound {
+                        XCTAssertLessThan(scroll.contentSize.height, 300)
+                        self.capture(controller, name: "prompt-template-chip-and-input")
+                    } else {
+                        // Identical text without resource provenance must stay
+                        // readable; a blanket text truncation would fail here.
+                        XCTAssertGreaterThan(scroll.contentSize.height, 500)
+                    }
+                    XCTAssertEqual(item.content, [content])
+                }
+            }
+        }
+    }
+
     func testComposerResourceDetailsKeepMetadataSecondaryAndMatchToolbarPaint() async throws {
         try await withModel { model in
             for (source, accent): (CommandInfo.Source, Color) in [(.skill, .tronCyan), (.prompt, .tronPurple), (.extension, .tronIndigo)] {

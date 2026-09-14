@@ -2277,10 +2277,27 @@ enum ChatTranscriptPresentation {
         (item.content ?? []).filter { $0.type == .image || $0.attachment != nil }
     }
 
-    /// Coalesces only adjacent canonical thinking parts. The transcript remains
-    /// authoritative; this projection simply turns line-oriented progress into
-    /// one readable paragraph while preserving stable identities for animation.
+    /// Projects original prompt arguments and coalesces adjacent thinking parts for
+    /// display. Canonical content stays authoritative and stable part identities
+    /// remain attached to the same visible content across rederivation.
     static func messageParts(in item: TranscriptItem) -> [ChatMessagePart] {
+        if item.role == .user,
+           let text = UserPromptPresentationPolicy.promptDisplayText(item.semantic?.resourceInvocation) {
+            // Keep canonical bytes and attachment identities untouched. One
+            // display part replaces all expanded template text, including
+            // prompts whose expansion contains multiple text blocks.
+            let originalText = item.content?.first { $0.type == .text && $0.attachment == nil }
+            let input = ContentPart(
+                id: originalText?.id ?? "\(item.id):prompt-input",
+                ordinal: originalText?.ordinal ?? 0,
+                thinkingRunOrdinal: nil, type: .text, text: text,
+                attachment: nil, redacted: nil, mimeType: nil, blobId: nil,
+                toolCallId: nil, name: nil, arguments: nil
+            )
+            return [.content(input)] + (item.content ?? [])
+                .filter { $0.type != .text || $0.attachment != nil }
+                .map(ChatMessagePart.content)
+        }
         var projected: [ChatMessagePart] = []
         var thinkingSegments: [ChatThinkingSegment] = []
         var thinkingRunID: String?

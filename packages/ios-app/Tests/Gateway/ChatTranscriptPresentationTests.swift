@@ -1147,6 +1147,53 @@ struct ChatTranscriptPresentationTests {
         #expect(UserPromptPresentationPolicy.visibleText("visible") == "visible")
     }
 
+    @Test("prompt chips keep only typed arguments and attachment identities without changing canonical input",
+          arguments: ["", "Check these changes.\nKeep $@ and [Review] literally."])
+    func promptInputProjection(arguments: String) throws {
+        let resource = ComposerResourceInvocation(source: .prompt, name: "review_changes", arguments: arguments)
+        let content = try JSONDecoder.gateway.decode([ContentPart].self, from: Data(#"[{"id":"expanded-1","ordinal":0,"type":"text","text":"Template instructions before arguments"},{"id":"file","ordinal":1,"type":"text","text":"File context","attachment":{"name":"notes.txt","mimeType":"text/plain","size":12},"blobId":"file-blob"},{"id":"expanded-2","ordinal":2,"type":"text","text":"Template instructions after arguments"},{"id":"image","ordinal":3,"type":"image","mimeType":"image/png","blobId":"image-blob"}]"#.utf8))
+        func item(source: ComposerResourceInvocation.Source?, role: TranscriptItem.Role = .user) -> TranscriptItem {
+            .message(MessageTranscriptItem(
+                id: "prompt-entry", parentId: nil, timestamp: "2026-01-01T00:00:00Z",
+                kind: .message, role: role, presentationId: "prompt-entry", content: content,
+                semantic: source.map { source in
+                    ChatSemanticMetadata(
+                        direction: .inboundContext, contextEffect: .modelInput, delivery: .stored,
+                        visibility: .visible, kind: .resourcePrompt,
+                        origin: .init(kind: .user, confidence: .boundary), sequence: 1,
+                        resourceInvocation: .init(source: source, name: resource.name, arguments: arguments)
+                    )
+                }
+            ))
+        }
+        let canonical = item(source: .prompt)
+        let encoder = JSONEncoder.gateway
+        encoder.outputFormatting = [.sortedKeys]
+        let originalBytes = try encoder.encode(canonical)
+        let expected = arguments
+        let parts = ChatTranscriptPresentation.messageParts(in: canonical).compactMap { part -> ContentPart? in
+            if case .content(let content) = part { return content }
+            return nil
+        }
+        #expect(parts.map(\.id) == ["expanded-1", "file", "image"])
+        #expect(parts.first?.text == expected)
+        #expect(Array(parts.dropFirst()) == content.filter { $0.attachment != nil || $0.type == .image })
+        #expect(UserPromptPresentationPolicy.visibleText(parts.first?.text) == (arguments.isEmpty ? nil : arguments))
+        #expect(AutomationPromptPresentationPolicy.visibleText(canonical) == (arguments.isEmpty ? nil : arguments))
+        #expect(try encoder.encode(canonical) == originalBytes)
+        #expect(canonical.semantic?.resourceInvocation == resource)
+        // A snapshot/history round trip and identical-looking text without
+        // provenance cannot change this presentation-only decision.
+        let restored = try JSONDecoder.gateway.decode(TranscriptItem.self, from: originalBytes)
+        #expect(ChatTranscriptPresentation.messageParts(in: restored) == ChatTranscriptPresentation.messageParts(in: canonical))
+        for source: ComposerResourceInvocation.Source? in [nil, .skill, .extension] {
+            #expect(ChatTranscriptPresentation.messageParts(in: item(source: source)) == content.map(ChatMessagePart.content))
+        }
+        #expect(ChatTranscriptPresentation.messageParts(in: item(source: .prompt, role: .assistant)) == content.map(ChatMessagePart.content))
+        #expect(UserPromptPresentationPolicy.promptDisplayText(nil) == nil)
+        #expect(UserPromptPresentationPolicy.promptDisplayText(resource) == expected)
+    }
+
     @Test("attachment menu availability requires authority, not transcript settlement")
     func attachmentAvailability() {
         #expect(ChatAttachmentAvailabilityPolicy.actionsEnabled(

@@ -1125,7 +1125,7 @@ Producer-triggered extension/subagent session messages remain one tool-height st
 icon, status, and duration when supplied; tapping retains the complete message, provenance, and payload sheet.
 Under Reduce Motion picker height installs without spatial motion; with VoiceOver, picker rows, info controls, and
 skill removal are separately reachable. Text, one selected skill/prompt, photos, and files must each independently
-enable Send; resource-only and attachment-only submissions show their chips without an empty user bubble. Ordinary
+enable Send; attachment-only submissions show their chips without an empty user bubble. Prompt-template submissions show the original typed text as entered, never a placeholder or the expanded instructions; with no input text, only the prompt chip and any attachments remain. Verify this remains stable across optimistic → pending/queued → canonical handoff and history reload, with files/photos retained; the chip still opens the template contents. Template substitution determines model-input ordering, not when the chip was added. Queue editing and sending retain raw arguments; the display-only suppression never changes model input. Skill-only submissions retain their existing chip-only presentation. Ordinary
 skill/prompt, photo, and file chips translate together inside the same full-height outgoing row, while Reduce Motion and
 queued card shapes retain their existing nonspatial entrance. Begin an attachment upload and verify Send disables; a
 stale send action must retain text and skill, then retry exactly once after upload completion. The 40-point plus
