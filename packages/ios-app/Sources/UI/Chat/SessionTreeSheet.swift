@@ -264,7 +264,7 @@ struct SessionTreeSheet: View {
                         Text(snapshot.phase.rawValue.capitalized).font(TronTypography.secondaryCodeDescription)
                     }
                 }
-                Text("Recorded activity across all branches. Tap an entry for full content; use its menu to continue, fork or bookmark.")
+                Text("Activity across all branches, newest first. Tap an entry for full content; use its menu to continue, fork or bookmark.")
                     .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
             }
         }
@@ -319,29 +319,15 @@ struct SessionHistoryPagingControls: View {
     let location: String
     let select: (SessionHistoryCursor) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(page.rangeDescription)
-                .font(TronTypography.secondaryDescription)
-                .foregroundStyle(Color.tronTextSecondary)
-                .contentTransition(.opacity)
-                .accessibilityIdentifier("history-range-\(location)")
-            if !page.nodes.isEmpty {
-                Text("Newest recorded first")
-                    .font(TronTypography.secondaryDescription)
-                    .foregroundStyle(Color.tronTextMuted)
-            }
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+        layout {
             if page.older != nil || page.newer != nil {
-                HStack(spacing: 12) {
-                    if let newer = page.newer {
-                        Button { select(newer) } label: {
-                            TronInlineActionLabel("Newer entries", icon: "arrow.up", accent: .tronSessionTeal)
-                        }
-                        .accessibilityIdentifier("history-newer-\(location)")
-                        .transition(.opacity)
-                    }
-                    Spacer(minLength: 0)
+                HStack(spacing: 6) {
                     if let older = page.older {
                         Button { select(older) } label: {
                             TronInlineActionLabel("Older entries", icon: "arrow.down", accent: .tronSessionTeal)
@@ -349,9 +335,26 @@ struct SessionHistoryPagingControls: View {
                         .accessibilityIdentifier("history-older-\(location)")
                         .transition(.opacity)
                     }
+                    if let newer = page.newer {
+                        Button { select(newer) } label: {
+                            TronInlineActionLabel("Newer entries", icon: "arrow.up", accent: .tronSessionTeal)
+                        }
+                        .accessibilityIdentifier("history-newer-\(location)")
+                        .transition(.opacity)
+                    }
                 }
+                .controlSize(.small)
+                .fixedSize(horizontal: true, vertical: false)
                 .buttonStyle(.plain).disabled(!enabled)
             }
+            Text(page.rangeDescription)
+                .foregroundStyle(Color.tronTextSecondary)
+                .contentTransition(.opacity)
+                .accessibilityIdentifier("history-range-\(location)")
+                .font(TronTypography.secondaryDescription)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(.vertical, 8)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: page.rangeDescription)

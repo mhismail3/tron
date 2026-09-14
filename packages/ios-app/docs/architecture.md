@@ -1757,8 +1757,8 @@ Canonical append order, not device timestamps, resolves ties and clock skew. Mes
 responses, custom logs, compactions, branch summaries, model/thinking changes and bookmark receipts share
 icon-free rows with semantic color and actual content previews. There is no separate Timeline/Branches/Log
 mode or duplicated History heading. `SessionHistoryStore` retains one at-most-100-row window from
-`session.history.list`. Matching teal icon pills and exact one-based canonical entry ranges appear above
-and below each batch; ranges come from admitted cursor ordinals and the response total, not a page number
+`session.history.list`. Matching compact teal icon pills (Older then Newer, grouped left) and exact one-based canonical entry ranges (right aligned and vertically centered) appear above
+and below each batch. Pills retain 44-point tap targets; accessibility text sizes stack the controls and range rather than squeezing them. Ranges come from admitted cursor ordinals and the response total, not a page number
 inferred from a moving head. On successful explicit Older/Newer navigation or Reload, the store commits the
 new window and a new native scroll viewport identity in one fenced MainActor turn. SwiftUI materializes the
 new lazy stack at its initial top and crossfades the batch, labels and controls; this deliberately replaces
