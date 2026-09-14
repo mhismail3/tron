@@ -714,6 +714,18 @@ struct AutomationDashboardProfile: Identifiable, Hashable, Sendable {
     let label: String
     let state: DashboardServerConnectionState
     let capabilities: Set<String>
+    /// Connection identity is part of timeline admission. A reconnect with
+    /// the same profile must not allow a prior timeline task to be treated as
+    /// current merely because its capabilities are unchanged.
+    let connectionID: Int?
+
+    init(id: String, label: String, state: DashboardServerConnectionState, capabilities: Set<String>, connectionID: Int? = nil) {
+        self.id = id
+        self.label = label
+        self.state = state
+        self.capabilities = capabilities
+        self.connectionID = connectionID
+    }
 }
 
 enum AutomationEndpointAdmissionPolicy {

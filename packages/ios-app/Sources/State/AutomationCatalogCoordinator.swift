@@ -7,6 +7,18 @@ struct AutomationGatewayEndpoint: Identifiable, Sendable {
     var id: String { profile.id }
 }
 
+struct AutomationTimelineAdmissionKey: Equatable, Hashable, Sendable {
+    struct Endpoint: Equatable, Hashable, Sendable {
+        let profileID: String
+        let connectionID: Int?
+        let state: DashboardServerConnectionState
+        let capabilities: Set<String>
+        let catalogRevision: Int?
+    }
+
+    let endpoints: [Endpoint]
+}
+
 private enum AutomationCatalogTraversalPolicy {
     static let maximumPages = 16
     static let maximumProfiles = 128
@@ -33,6 +45,24 @@ final class AutomationCatalogCoordinator {
 
     var summaries: [(profile: AutomationDashboardProfile, summary: GatewayAutomationSummary)] {
         buckets.flatMap { bucket in bucket.summaries.map { (bucket.profile, $0) } }
+    }
+
+    /// Only timeline-affecting admission facts participate in this key. Failure
+    /// text and retained stale rows are intentionally excluded, so publishing
+    /// an equivalent catalog cannot cancel and restart an active timeline read.
+    var timelineAdmissionKey: AutomationTimelineAdmissionKey {
+        let known = Dictionary(uniqueKeysWithValues: buckets.map { ($0.id, $0.catalogRevision) })
+        return AutomationTimelineAdmissionKey(endpoints: allEndpoints()
+            .filter { AutomationEndpointAdmissionPolicy.admitsTimeline($0.profile) }
+            .map {
+                .init(
+                    profileID: $0.profile.id,
+                    connectionID: $0.profile.connectionID,
+                    state: $0.profile.state,
+                    capabilities: $0.profile.capabilities,
+                    catalogRevision: known[$0.profile.id]
+                )
+            })
     }
 
     func endpoint(for profileID: String) -> AutomationGatewayEndpoint? {

@@ -209,7 +209,11 @@ struct AutomationsDashboardView: View {
                 timelineRefreshIndicatorVisible = true
             }
         }
-        .onChange(of: model.automationCatalog.buckets) { _, _ in
+        .onChange(of: model.automationCatalog.timelineAdmissionKey) { _, _ in
+            // A catalog publication refreshes the timeline only when its
+            // endpoint, connection, capability, or authoritative revision
+            // changes. Failure text and retained stale rows are not timeline
+            // inputs and must not restart an in-flight read.
             if mode == .upcoming { timeline?.load(start: selectedDate) }
         }
         .onChange(of: mode) { _, nextMode in

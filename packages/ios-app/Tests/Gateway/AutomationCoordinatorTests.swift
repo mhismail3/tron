@@ -43,6 +43,26 @@ private final class DeferredTimelineRequest {
 @Suite("Automation catalog ownership")
 @MainActor
 struct AutomationCoordinatorTests {
+    @Test("timeline admission changes only for endpoint, connection, capability, or revision facts")
+    func timelineAdmissionKey() {
+        let base = AutomationTimelineAdmissionKey.Endpoint(
+            profileID: "profile", connectionID: 7, state: .connected,
+            capabilities: [AutomationAdmissionPolicy.capability, AutomationAdmissionPolicy.timelineCapability],
+            catalogRevision: 3
+        )
+        let same = AutomationTimelineAdmissionKey(endpoints: [base])
+        #expect(same == AutomationTimelineAdmissionKey(endpoints: [base]))
+        #expect(same != AutomationTimelineAdmissionKey(endpoints: [
+            .init(profileID: "profile", connectionID: 8, state: .connected, capabilities: base.capabilities, catalogRevision: 3)
+        ]))
+        #expect(same != AutomationTimelineAdmissionKey(endpoints: [
+            .init(profileID: "profile", connectionID: 7, state: .connected, capabilities: base.capabilities, catalogRevision: 4)
+        ]))
+        #expect(same != AutomationTimelineAdmissionKey(endpoints: [
+            .init(profileID: "profile", connectionID: 7, state: .connected, capabilities: [AutomationAdmissionPolicy.capability], catalogRevision: 3)
+        ]))
+    }
+
     @Test("only connected compatible Gateways enter Automation projections")
     func endpointAdmission() {
         let connected = profile()

@@ -135,6 +135,13 @@ final class DashboardGatewayConnectionPool {
         return await entry.client.activeConnectionID()
     }
 
+    /// MainActor projection used only for bounded presentation admission keys.
+    /// The pool's connection entry remains the authority; this is not a cache
+    /// of transport state and is refreshed whenever the pool publishes.
+    func connectionIDSnapshot(for profileID: String) -> Int? {
+        entries[profileID]?.connectionID
+    }
+
     func request(
         profileID: String,
         method: String,
