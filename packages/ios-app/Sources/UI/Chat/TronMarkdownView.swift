@@ -104,6 +104,7 @@ private struct CodeBlock: View {
     let code: String
     let streaming: Bool
     @State private var copied = false
+    @State private var copyGeneration = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -115,7 +116,7 @@ private struct CodeBlock: View {
                 Button {
                     UIPasteboard.general.string = code
                     copied = true
-                    Task { try? await Task.sleep(for: .seconds(1.2)); copied = false }
+                    copyGeneration &+= 1
                 } label: {
                     Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
                         .font(TronFont.body(10, weight: .medium))
@@ -130,6 +131,18 @@ private struct CodeBlock: View {
         }
         .background(Color.tronSurfaceElevated, in: RoundedRectangle(cornerRadius: 9))
         .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.tronBorder, lineWidth: 0.5))
+        .task(id: copyGeneration) {
+            guard copyGeneration != 0 else { return }
+            do {
+                try await Task.sleep(for: .seconds(1.2))
+                guard !Task.isCancelled else { return }
+                copied = false
+            } catch {
+                // The task is presentation-owned; disappearance or a newer
+                // tap cancels this reset and must not publish stale state.
+            }
+        }
+        .onDisappear { copied = false }
     }
 }
 

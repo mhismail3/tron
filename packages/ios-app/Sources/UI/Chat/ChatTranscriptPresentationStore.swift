@@ -998,15 +998,43 @@ private actor ChatTranscriptProjectionWorker {
             hiddenThinkingLabel = tag.hiddenThinkingLabel
             isCachedProjection = snapshot.isCachedProjection == true
         }
+
+        /// Tool payload patches change `toolExecutions`, but not text inputs.
+        /// Keep every other preparation dependency explicit.
+        var textPreparationKey: TextPreparationKey {
+            TextPreparationKey(
+                canonical: canonical, phase: phase,
+                acceptsQueuedPrompts: acceptsQueuedPrompts,
+                activeToolSegmentId: activeToolSegmentId,
+                streaming: streaming,
+                hiddenThinkingLabel: hiddenThinkingLabel,
+                isCachedProjection: isCachedProjection
+            )
+        }
+    }
+
+    private struct TextPreparationKey: Equatable, Sendable {
+        let canonical: CanonicalKey
+        let phase: SessionPhase
+        let acceptsQueuedPrompts: Bool?
+        let activeToolSegmentId: String?
+        let streaming: TranscriptItem?
+        let hiddenThinkingLabel: String?
+        let isCachedProjection: Bool
     }
 
     private struct Basis: Sendable {
         let scope: Scope
         let projectionKey: ProjectionKey
+        let textPreparationKey: TextPreparationKey
         let canonicalKey: CanonicalKey
         let candidate: ChatTranscriptProjectionCandidate
         let preparedText: ChatTextPreparationSnapshot
         let preparedTextByRenderedID: [String: ChatTextPreparationSnapshot]
+        /// Memory pressure intentionally invalidates preparation without
+        /// invalidating the projection basis. A later build must take the
+        /// bounded cold-preparation path rather than reuse empty slices.
+        let preparedTextAvailable: Bool
     }
 
     private let performanceSignposts: any PerformanceSignposting
@@ -1073,10 +1101,12 @@ private actor ChatTranscriptProjectionWorker {
             self.basis = Basis(
                 scope: basis.scope,
                 projectionKey: basis.projectionKey,
+                textPreparationKey: basis.textPreparationKey,
                 canonicalKey: basis.canonicalKey,
                 candidate: basis.candidate,
                 preparedText: emptyPreparation,
-                preparedTextByRenderedID: slices
+                preparedTextByRenderedID: slices,
+                preparedTextAvailable: false
             )
         }
     }
@@ -1104,7 +1134,8 @@ private actor ChatTranscriptProjectionWorker {
 
         let projectionKey = ProjectionKey(tag: tag, snapshot: snapshot)
         let canonicalKey = CanonicalKey(tag: tag)
-        if let basis, basis.scope == scope, basis.projectionKey == projectionKey {
+        if let basis, basis.scope == scope, basis.projectionKey == projectionKey,
+           basis.preparedTextAvailable {
             return BuiltChatTranscript(
                 installed: installedTranscript(
                     snapshot: snapshot,
@@ -1113,6 +1144,7 @@ private actor ChatTranscriptProjectionWorker {
                     tag: tag,
                     timeline: basis.candidate.timeline,
                     toolPayloads: basis.candidate.toolPayloads,
+                    runtimeItems: basis.candidate.runtimeItems,
                     preparedTextByRenderedID: basis.preparedTextByRenderedID
                 ),
                 kernelIsConsistent: basis.candidate.isValid
@@ -1155,39 +1187,54 @@ private actor ChatTranscriptProjectionWorker {
                     tag: tag,
                     timeline: candidate.timeline,
                     toolPayloads: candidate.toolPayloads,
+                    runtimeItems: candidate.runtimeItems,
                     preparedTextByRenderedID: [:]
                 ),
                 kernelIsConsistent: false
             )
         }
         let admittedTextPreparationGeneration = textPreparationGeneration
-        let prepared = await textPreparationCache.prepare(
-            ChatTextPreparationPolicy.sources(in: snapshot),
-            cacheEpoch: cacheEpoch
-        )
-        guard !Task.isCancelled else { return nil }
+        let canReusePreparedText = candidate.workReport.mode == .toolPayloadPatch
+            && basis?.scope == scope
+            && basis?.textPreparationKey == projectionKey.textPreparationKey
+            && basis?.preparedTextAvailable == true
         let preparedText: ChatTextPreparationSnapshot
-        if admittedTextPreparationGeneration == textPreparationGeneration {
-            preparedText = prepared.withHiddenThinkingLabel(tag.hiddenThinkingLabel)
+        let slices: [String: ChatTextPreparationSnapshot]
+        if canReusePreparedText, let basis {
+            // A tool payload patch changes descriptors only. Exact scope and
+            // preparation inputs prove that the existing bounded text slices
+            // remain valid; tool payloads are installed separately.
+            preparedText = basis.preparedText
+            slices = basis.preparedTextByRenderedID
         } else {
-            preparedText = .empty
-            await textPreparationCache.removeAll()
+            let prepared = await textPreparationCache.prepare(
+                ChatTextPreparationPolicy.sources(in: snapshot),
+                cacheEpoch: cacheEpoch
+            )
+            guard !Task.isCancelled else { return nil }
+            if admittedTextPreparationGeneration == textPreparationGeneration {
+                preparedText = prepared.withHiddenThinkingLabel(tag.hiddenThinkingLabel)
+            } else {
+                preparedText = .empty
+                await textPreparationCache.removeAll()
+            }
+            // Preparation itself is bounded to the canonical render-critical
+            // tail; explicitly paged older rows use the exact cold parser.
+            slices = Dictionary(uniqueKeysWithValues: candidate.timeline.items
+                .suffix(ChatTranscriptPageRequest.maximumItemCount)
+                .map { item in (item.id, preparedText.slice(for: item)) })
         }
-        // Preparation itself is bounded to the canonical render-critical tail.
-        // Slice only a matching bounded row tail as well; explicitly paged older
-        // rows use the exact cold parser instead of imposing O(history) work on
-        // every 150 ms live projection flush.
-        let slices = Dictionary(uniqueKeysWithValues: candidate.timeline.items
-            .suffix(ChatTranscriptPageRequest.maximumItemCount)
-            .map { item in (item.id, preparedText.slice(for: item)) })
+        guard !Task.isCancelled else { return nil }
         if cacheEpoch >= retiredBeforeEpoch, cacheEpoch == newestCacheEpoch {
             basis = Basis(
                 scope: scope,
                 projectionKey: projectionKey,
+                textPreparationKey: projectionKey.textPreparationKey,
                 canonicalKey: canonicalKey,
                 candidate: candidate,
                 preparedText: preparedText,
-                preparedTextByRenderedID: slices
+                preparedTextByRenderedID: slices,
+                preparedTextAvailable: admittedTextPreparationGeneration == textPreparationGeneration
             )
         }
         return BuiltChatTranscript(
@@ -1198,6 +1245,7 @@ private actor ChatTranscriptProjectionWorker {
                 tag: tag,
                 timeline: candidate.timeline,
                 toolPayloads: candidate.toolPayloads,
+                runtimeItems: candidate.runtimeItems,
                 preparedTextByRenderedID: slices
             ),
             kernelIsConsistent: candidate.isValid
@@ -1211,6 +1259,7 @@ private actor ChatTranscriptProjectionWorker {
         tag: ChatTranscriptProjectionTag,
         timeline: ChatTranscriptTimeline,
         toolPayloads: ChatToolPayloadIndex,
+        runtimeItems: [ChatTranscriptRenderItem],
         preparedTextByRenderedID: [String: ChatTextPreparationSnapshot]
     ) -> InstalledChatTranscript {
         InstalledChatTranscript(
@@ -1218,7 +1267,7 @@ private actor ChatTranscriptProjectionWorker {
             handoff: handoff,
             timeline: timeline,
             toolPayloads: toolPayloads,
-            runtimeItems: ChatTranscriptProjectionKernel.runtimeItems(in: snapshot),
+            runtimeItems: runtimeItems,
             preparedTextByRenderedID: preparedTextByRenderedID,
             queuedMessages: snapshot.displayedQueuedMessages,
             queuePresentationIDByOperationID: queuePresentationIDByOperationID,
@@ -1353,7 +1402,7 @@ final class ChatTranscriptPresentationStore {
            installed.queuedMessages == snapshot.displayedQueuedMessages,
            installed.queueRevision == snapshot.queueRevision,
            installed.supportsQueueManagement == tag.queueManagementCapability,
-           installed.runtimeItems == ChatTranscriptProjectionKernel.runtimeItems(in: snapshot) {
+           installed.runtimeItems == tag.layoutIdentity.runtimeItems {
             let replacement = installed.replacingLifecycle(
                 tag: tag,
                 handoff: frozenHandoff,
