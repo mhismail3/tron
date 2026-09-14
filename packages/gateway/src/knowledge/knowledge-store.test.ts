@@ -28,7 +28,7 @@ const source = (title: string): KnowledgeRecordDraft & { kind: "source" } => ({
 });
 const observation = (sessionId: string, fromEntryId: string): KnowledgeRecordDraft & { kind: "observation" } => ({
   kind: "observation", scope: "personal", provenance: { actor: "agent", sessionId, evidence: [] }, relations: [],
-  content: { range: { sessionId, fromEntryId, toEntryId: fromEntryId }, items: [{ text: "The user corrected the plan", attribution: "user", observedAt: "2026-01-01T00:00:00Z", certainty: "certain" }] },
+  content: { range: { sessionId, fromEntryId, toEntryId: fromEntryId, entryIds: [fromEntryId], entryDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }, items: [{ text: "The user corrected the plan", attribution: "user", observedAt: "2026-01-01T00:00:00Z", certainty: "certain" }] },
 });
 
 function command(suffix: string): string { return `knowledge-test-${suffix}`; }
@@ -71,7 +71,7 @@ describe("KnowledgeStore", () => {
   it("publishes observation coverage with its group and recovers failed coverage", async () => {
     const { store } = await fixture();
     const failed = await store.setCoverage({ commandId: command("coverage-failed"), coverage: {
-      id: "coverage-1", range: { sessionId: "session-1", fromEntryId: "entry-1", toEntryId: "entry-1" }, disposition: "failed", groupRevisionIds: [],
+      id: "coverage-1", range: { sessionId: "session-1", fromEntryId: "entry-1", toEntryId: "entry-1", entryIds: ["entry-1"], entryDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }, disposition: "failed", groupRevisionIds: [],
     }});
     expect((await store.coverage("coverage-1"))?.disposition).toBe("failed");
     const published = await store.publishObservationGroup({ commandId: command("coverage-recover"), expectedCoverageRevision: failed.coverage.revisionId, coverage: {
@@ -108,6 +108,54 @@ describe("KnowledgeStore", () => {
       kind: "note", scope: "personal", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "blocked", role: "fact", confirmed: false },
     }})).rejects.toThrow();
     expect(JSON.parse(await readFile(statePath, "utf8"))).toEqual({ schemaVersion: 2 });
+  });
+
+  it("searches beyond the presentation page before applying its result limit", async () => {
+    const { store } = await fixture();
+    for (let index = 0; index < 55; index += 1) await store.captureSource({ commandId: command(`page-${index}`), record: source(index === 54 ? "needle beyond page" : `ordinary source ${index}`) });
+    const result = await store.search({ query: "needle", limit: 1 });
+    expect(result.hits).toHaveLength(1);
+    expect(result.hits[0]?.record.content).toMatchObject({ title: "needle beyond page" });
+  });
+
+  it("invalidates forgotten mutation receipts and leaves no forgotten body bytes", async () => {
+    const { store, home } = await fixture();
+    const created = await store.captureSource({ commandId: command("forget-receipt"), record: { ...source("private receipt body"), id: "forgotten-record" } });
+    await store.forget(command("forget-receipt-action"), created.record.id, "privacy request", created.record.revisionId);
+    const state = await readFile(join(home, "workspace/state/knowledge/state.json"), "utf8");
+    expect(state).not.toContain("private receipt body");
+    await expect(store.captureSource({ commandId: command("forget-receipt"), record: { ...source("private receipt body"), id: "forgotten-record" } })).rejects.toThrow("forgotten");
+  });
+
+  it("verifies object bytes on reuse, reads, and record reference", async () => {
+    const { store, home } = await fixture();
+    const object = await store.putObject(new TextEncoder().encode("original bytes"), "text/plain");
+    const objectPath = join(home, "workspace/state/knowledge/objects", object.hash);
+    await writeFile(objectPath, "tampered bytes", { mode: 0o600 });
+    await expect(store.readObject(object)).rejects.toThrow(/hash|identity/i);
+    await expect(store.putObject(new TextEncoder().encode("original bytes"), "text/html")).rejects.toThrow(/hash|identity/i);
+    await expect(store.captureSource({ commandId: command("corrupt-reference"), record: { ...source("corrupt"), content: { ...source("corrupt").content, object, text: undefined } } })).rejects.toThrow(/durably captured|bytes/i);
+  });
+
+  it("rejects missing established state and fences late scope publication", async () => {
+    const { store, home } = await fixture();
+    await store.captureSource({ commandId: command("state-seed"), record: source("state seed") });
+    await rm(join(home, "workspace/state/knowledge/state.json"));
+    expect((await store.status()).state).toBe("invalid");
+
+    const fresh = await fixture();
+    await fresh.store.setScopeExclusion(command("scope-exclude"), { sessionId: "excluded-session" }, true, "user excluded session");
+    const range = { sessionId: "excluded-session", fromEntryId: "entry-1", toEntryId: "entry-1", entryIds: ["entry-1"], entryDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" };
+    await expect(fresh.store.publishObservationGroup({ commandId: command("late-publication"), coverage: { id: "late", range, disposition: "observed" }, records: [observation("excluded-session", "entry-1")] })).rejects.toThrow("excluded");
+    await fresh.workspace.dispose();
+  });
+
+  it("reflects exact source record revisions within one session input identity", async () => {
+    const { store } = await fixture();
+    const published = await store.publishObservationGroup({ commandId: command("reflect-source"), coverage: { id: "reflect-coverage", range: observation("reflect-session", "entry-1").content.range, disposition: "observed" }, records: [observation("reflect-session", "entry-1")] });
+    const reflected = await store.reflect(command("reflect-command"), "reflect-session", [published.records[0]!.revisionId], "bounded handoff");
+    expect(reflected.record.provenance.evidence).toEqual([{ recordId: published.records[0]!.id, revisionId: published.records[0]!.revisionId }]);
+    expect(reflected.record.relations).toEqual([{ type: "derivedFrom", recordId: published.records[0]!.id, revisionId: published.records[0]!.revisionId }]);
   });
 
   it("keeps observation disabled until an explicit model is configured", async () => {
