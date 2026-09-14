@@ -1380,6 +1380,9 @@ struct AppModelPerformanceSignpostTests {
         excluding handled: Set<String> = []
     ) async throws -> Int {
         var pending = Set(["provider.list", "model.list", "session.commands"]).subtracting(handled)
+        let commandRequestsBefore = (await socket.sentFrames()).filter { frame in
+            (try? JSONDecoder.gateway.decode(JSONValue.self, from: frame).objectValue?["method"]?.stringValue) == "session.commands"
+        }.count
         var index = firstFrameIndex
         while !pending.isEmpty {
             let next = try await request(in: socket, frameIndex: index)
@@ -1391,6 +1394,15 @@ struct AppModelPerformanceSignpostTests {
             pending.remove(next.method)
             await socket.enqueue(successResponse(id: next.id, result: result))
         }
+        // This helper owns the real open-to-refresh path. A duplicate command
+        // admission is otherwise easy to miss because the set above removes
+        // both requests under one method name.
+        let commandRequests = (await socket.sentFrames()).compactMap { frame -> Request? in
+            guard let value = try? JSONDecoder.gateway.decode(JSONValue.self, from: frame),
+                  value.objectValue?["method"]?.stringValue == "session.commands" else { return nil }
+            return try? request(from: value)
+        }.count
+        #expect(commandRequests - commandRequestsBefore == (handled.contains("session.commands") ? 0 : 1))
         return index
     }
 
@@ -1410,6 +1422,10 @@ struct AppModelPerformanceSignpostTests {
     private func request(in socket: ScriptedGatewaySocket, frameIndex: Int) async throws -> Request {
         try await socket.waitUntilSent(count: frameIndex + 1)
         let frame = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[frameIndex])
+        return try request(from: frame)
+    }
+
+    private func request(from frame: JSONValue) throws -> Request {
         let object = try #require(frame.objectValue)
         return Request(
             id: try #require(object["id"]?.stringValue),
