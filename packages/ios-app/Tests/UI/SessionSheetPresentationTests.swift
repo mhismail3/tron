@@ -1178,6 +1178,49 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testSceneDeactivationRetiresMenusSynchronously() async throws {
+        try await withSheet(Text("Scene lifecycle fixture")) { controller in
+            let delegate = ContextMenuRetirementDelegate()
+            let menu = RecordingContextMenuInteraction(delegate: delegate)
+            controller.view.addInteraction(menu)
+            defer { controller.view.removeInteraction(menu) }
+            let scene = try XCTUnwrap(controller.view.window?.windowScene)
+            let lifecycle = AppDelegate()
+            withExtendedLifetime(lifecycle) {
+                NotificationCenter.default.post(name: UIScene.willDeactivateNotification, object: scene)
+                XCTAssertGreaterThan(menu.dismissalCount, 0, "Must dismiss before notification delivery returns, not in a later Task")
+                NotificationCenter.default.post(name: UIScene.didActivateNotification, object: scene)
+            }
+        }
+    }
+
+    func testContextMenuRetirementIsScopedAndDoesNotPerformActions() {
+        let delegate = ContextMenuRetirementDelegate()
+        let root = UIView()
+        let child = UIView()
+        let grandchild = UIView()
+        let unrelated = UIView()
+        root.addSubview(child)
+        child.addSubview(grandchild)
+        let menus = (0..<4).map { _ in RecordingContextMenuInteraction(delegate: delegate) }
+        for (view, menu) in zip([root, child, grandchild, unrelated], menus) { view.addInteraction(menu) }
+        let ordinaryInteraction = UIEditMenuInteraction(delegate: nil)
+        child.addInteraction(ordinaryInteraction)
+
+        // Dismissal can detach a subtree. Every captured descendant still has
+        // to retire, and another scene's hierarchy must remain untouched.
+        menus[0].onDismiss = {
+            grandchild.removeFromSuperview()
+            child.removeFromSuperview()
+        }
+        AppDelegate.dismissContextMenus(in: root)
+        XCTAssertEqual(menus.map(\.dismissalCount), [1, 1, 1, 0])
+        XCTAssertTrue(child.interactions.contains { $0 === ordinaryInteraction })
+        AppDelegate.dismissContextMenus(in: root)
+        XCTAssertEqual(menus.map(\.dismissalCount), [2, 1, 1, 0])
+        XCTAssertEqual(delegate.configurationRequests, 0, "Retirement must not open or execute a menu")
+    }
+
     func testOutgoingAndQueuedCopyMenusRetainOneNativeOwner() async throws {
         let arguments = "  Copy this exact input\nnot the template. 👋  "
         let resource = ComposerResourceInvocation(source: .prompt, name: "review", arguments: arguments)
@@ -1612,6 +1655,27 @@ final class SessionSheetPresentationTests: XCTestCase {
 
     private func views<T: UIView>(of type: T.Type, in root: UIView) -> [T] {
         ((root as? T).map { [$0] } ?? []) + root.subviews.flatMap { views(of: type, in: $0) }
+    }
+}
+
+@MainActor
+private final class RecordingContextMenuInteraction: UIContextMenuInteraction {
+    var dismissalCount = 0
+    var onDismiss: (() -> Void)?
+    override func dismissMenu() {
+        dismissalCount += 1
+        onDismiss?()
+        super.dismissMenu()
+    }
+}
+
+@MainActor
+private final class ContextMenuRetirementDelegate: NSObject, UIContextMenuInteractionDelegate {
+    var configurationRequests = 0
+    func contextMenuInteraction(_ interaction: UIContextMenuInteraction,
+                                configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {
+        configurationRequests += 1
+        return nil
     }
 }
 
