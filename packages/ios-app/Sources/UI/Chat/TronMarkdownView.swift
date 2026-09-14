@@ -1,6 +1,16 @@
 import SwiftUI
 import UIKit
 
+#if HOSTED_TEST
+/// The view task uses the same generation rule; keeping the rule pure makes
+/// delayed two-tap and retirement behavior testable without launching a UI.
+enum CodeCopyFeedbackPolicy {
+    static func mayReset(taskGeneration: Int, currentGeneration: Int, isMounted: Bool) -> Bool {
+        isMounted && taskGeneration == currentGeneration
+    }
+}
+#endif
+
 struct TronMarkdownView: View {
     let document: MarkdownPresentation.Document
     let streaming: Bool
@@ -132,10 +142,18 @@ private struct CodeBlock: View {
         .background(Color.tronSurfaceElevated, in: RoundedRectangle(cornerRadius: 9))
         .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.tronBorder, lineWidth: 0.5))
         .task(id: copyGeneration) {
-            guard copyGeneration != 0 else { return }
+            let taskGeneration = copyGeneration
+            guard taskGeneration != 0 else { return }
             do {
                 try await Task.sleep(for: .seconds(1.2))
                 guard !Task.isCancelled else { return }
+                #if HOSTED_TEST
+                guard CodeCopyFeedbackPolicy.mayReset(
+                    taskGeneration: taskGeneration,
+                    currentGeneration: copyGeneration,
+                    isMounted: true
+                ) else { return }
+                #endif
                 copied = false
             } catch {
                 // The task is presentation-owned; disappearance or a newer

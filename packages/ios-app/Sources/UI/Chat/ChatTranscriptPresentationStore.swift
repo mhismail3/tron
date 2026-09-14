@@ -930,6 +930,9 @@ enum ChatTranscriptPresentationStoreError: Error, Equatable, Sendable, Localized
 }
 
 #if HOSTED_TEST
+/// Deterministic `HOSTED_TEST`-only preparation invocation seam.
+typealias ChatTextPreparationWorkRecorder = @Sendable () -> Void
+
 /// Deterministic `HOSTED_TEST`-only scheduling seam. It may delay the real
 /// production kernel but cannot replace or manufacture projection output.
 typealias ChatTranscriptProjectionWorkGate = @Sendable (ChatTranscriptProjectionTag) -> Void
@@ -1039,6 +1042,9 @@ private actor ChatTranscriptProjectionWorker {
 
     private let performanceSignposts: any PerformanceSignposting
     private let workRecorder: ChatTranscriptProjectionWorkRecorder?
+    #if HOSTED_TEST
+    private let textPreparationWorkRecorder: ChatTextPreparationWorkRecorder?
+    #endif
     private let textPreparationCache = ChatTextPreparationCache()
     #if HOSTED_TEST
     private let workGate: ChatTranscriptProjectionWorkGate?
@@ -1053,10 +1059,12 @@ private actor ChatTranscriptProjectionWorker {
     init(
         performanceSignposts: any PerformanceSignposting,
         workRecorder: ChatTranscriptProjectionWorkRecorder?,
+        textPreparationWorkRecorder: ChatTextPreparationWorkRecorder?,
         workGate: ChatTranscriptProjectionWorkGate?
     ) {
         self.performanceSignposts = performanceSignposts
         self.workRecorder = workRecorder
+        self.textPreparationWorkRecorder = textPreparationWorkRecorder
         self.workGate = workGate
     }
     #else
@@ -1207,6 +1215,9 @@ private actor ChatTranscriptProjectionWorker {
             preparedText = basis.preparedText
             slices = basis.preparedTextByRenderedID
         } else {
+            #if HOSTED_TEST
+            textPreparationWorkRecorder?()
+            #endif
             let prepared = await textPreparationCache.prepare(
                 ChatTextPreparationPolicy.sources(in: snapshot),
                 cacheEpoch: cacheEpoch
@@ -1343,13 +1354,15 @@ final class ChatTranscriptPresentationStore {
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
         workRecorder: ChatTranscriptProjectionWorkRecorder? = nil,
         installationFrameScheduler: DisplayFrameScheduler? = nil,
-        workGate: ChatTranscriptProjectionWorkGate? = nil
+        workGate: ChatTranscriptProjectionWorkGate? = nil,
+        textPreparationWorkRecorder: ChatTextPreparationWorkRecorder? = nil
     ) {
         self.maximumWaiters = max(1, maximumWaiters)
         self.installationFrameScheduler = installationFrameScheduler
         projectionWorker = ChatTranscriptProjectionWorker(
             performanceSignposts: performanceSignposts,
             workRecorder: workRecorder,
+            textPreparationWorkRecorder: textPreparationWorkRecorder,
             workGate: workGate
         )
     }

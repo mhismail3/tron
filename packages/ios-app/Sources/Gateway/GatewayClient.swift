@@ -1056,13 +1056,17 @@ actor GatewayClient {
         _ params: P,
         as responseType: R.Type = R.self,
         timeout: Duration = .seconds(30),
-        expectedEpochID: Int
+        expectedEpochID: Int,
+        diagnosticPurpose: String? = nil,
+        diagnosticPage: Int? = nil
     ) async throws -> R {
         let value = try await requestValue(
             method,
             params,
             timeout: timeout,
-            expectedEpochID: expectedEpochID
+            expectedEpochID: expectedEpochID,
+            diagnosticPurpose: diagnosticPurpose,
+            diagnosticPage: diagnosticPage
         )
         return try GatewayResponseDecoding.decode(value, as: responseType, method: method)
     }
@@ -1087,13 +1091,17 @@ actor GatewayClient {
         _ method: String,
         _ params: P,
         timeout: Duration = .seconds(30),
-        expectedEpochID: Int
+        expectedEpochID: Int,
+        diagnosticPurpose: String? = nil,
+        diagnosticPage: Int? = nil
     ) async throws -> JSONValue {
         try await requestValue(
             method,
             params,
             timeout: timeout,
-            epochExpectation: .id(expectedEpochID)
+            epochExpectation: .id(expectedEpochID),
+            diagnosticPurpose: diagnosticPurpose,
+            diagnosticPage: diagnosticPage
         )
     }
 

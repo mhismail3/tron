@@ -5,6 +5,13 @@ import Testing
 @MainActor
 @Suite("Chat transcript presentation store")
 struct ChatTranscriptPresentationStoreTests {
+    @Test("copy feedback resets only the latest mounted tap")
+    func copyFeedbackLatestTapAndRetirement() {
+        #expect(CodeCopyFeedbackPolicy.mayReset(taskGeneration: 1, currentGeneration: 1, isMounted: true))
+        #expect(!CodeCopyFeedbackPolicy.mayReset(taskGeneration: 1, currentGeneration: 2, isMounted: true))
+        #expect(!CodeCopyFeedbackPolicy.mayReset(taskGeneration: 2, currentGeneration: 2, isMounted: false))
+    }
+
     @Test("runtime and streaming rows install in live region, never committed ledger")
     func runtimeRowsNeverEnterCommittedLedger() async throws {
         try await withTestWatchdog { @MainActor in
@@ -815,7 +822,10 @@ struct ChatTranscriptPresentationStoreTests {
                 presentationGeneration: 7,
                 queuePresentationIDByOperationID: aliases
             )
-            let store = ChatTranscriptPresentationStore()
+            let preparations = PreparationCallRecorder()
+            let store = ChatTranscriptPresentationStore(
+                textPreparationWorkRecorder: preparations.record
+            )
 
             store.submit(
                 snapshot: snapshot,
@@ -837,6 +847,22 @@ struct ChatTranscriptPresentationStoreTests {
             #expect(store.installed?.preparedText(for: textRow) == .empty)
             #expect(store.installed?.queuePresentationIDByOperationID == aliases)
             #expect(store.lifecycleEntranceIsConsumed(id: "local-presentation"))
+
+            // Memory pressure invalidates prepared text but retains the mounted
+            // projection; the next newer submission must rebuild preparation.
+            snapshot.revision += 1
+            snapshot.eventSequence += 1
+            snapshot.phase = .running
+            let recoveredTag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 7,
+                queuePresentationIDByOperationID: aliases
+            )
+            store.submit(snapshot: snapshot, handoff: .none,
+                         queuePresentationIDByOperationID: aliases, tag: recoveredTag)
+            _ = try await store.waitForInstall(of: recoveredTag)
+            #expect(preparations.count == 2)
+            #expect(store.installed?.preparedText(for: textRow) != .empty)
         }
     }
 
@@ -1276,7 +1302,10 @@ struct ChatTranscriptPresentationStoreTests {
             snapshot.phase = .running
             snapshot.streaming = try streamingMessage(update: 0)
             snapshot.extensionPresentation.semanticState.hiddenThinkingLabel = "Reasoning"
-            let store = ChatTranscriptPresentationStore()
+            let preparations = PreparationCallRecorder()
+            let store = ChatTranscriptPresentationStore(
+                textPreparationWorkRecorder: preparations.record
+            )
             var tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 12)
             store.submit(snapshot: snapshot, tag: tag)
             _ = try await store.waitForInstall(of: tag)
@@ -1287,6 +1316,7 @@ struct ChatTranscriptPresentationStoreTests {
             store.submit(snapshot: snapshot, tag: tag)
             let updated = try await store.waitForInstall(of: tag)
             #expect(updated.preparedTextByRenderedID.values.contains { $0.hiddenThinkingLabel == "Thoughts" })
+            #expect(preparations.count == 2)
         }
     }
 
@@ -1307,7 +1337,10 @@ struct ChatTranscriptPresentationStoreTests {
             snapshot.transcriptStart = 0
             snapshot.transcriptTotal = 1
             snapshot.toolExecutions = []
-            let store = ChatTranscriptPresentationStore()
+            let preparations = PreparationCallRecorder()
+            let store = ChatTranscriptPresentationStore(
+                textPreparationWorkRecorder: preparations.record
+            )
             var tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 14)
             store.submit(snapshot: snapshot, tag: tag)
             let active = try await store.waitForInstall(of: tag)
@@ -1328,6 +1361,7 @@ struct ChatTranscriptPresentationStoreTests {
             }
             #expect(replacedRun.id == activeRun.id)
             #expect(replacedRun.tools.first?.subtitle == "Interrupted")
+            #expect(preparations.count == 2)
             #expect(!replacedRun.isRunning)
         }
     }
@@ -2172,7 +2206,11 @@ struct ChatTranscriptPresentationStoreTests {
                 progressSequence: 1
             )]
             let reports = StoreProjectionWorkRecorder()
-            let store = ChatTranscriptPresentationStore(workRecorder: reports.record)
+            let preparations = PreparationCallRecorder()
+            let store = ChatTranscriptPresentationStore(
+                workRecorder: reports.record,
+                textPreparationWorkRecorder: preparations.record
+            )
             var tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 24)
             store.submit(snapshot: snapshot, tag: tag)
             _ = try await store.waitForInstall(of: tag)
@@ -2196,6 +2234,9 @@ struct ChatTranscriptPresentationStoreTests {
             store.submit(snapshot: snapshot, tag: tag)
             _ = try await store.waitForInstall(of: tag)
             #expect(reports.modes == [.cold, .toolPayloadPatch])
+            // A payload-only patch changes tool presentation data but not
+            // Markdown/thinking inputs, so preparation runs only for the cold build.
+            #expect(preparations.count == 1)
 
             store.reset()
             snapshot.eventSequence += 1
@@ -2219,6 +2260,7 @@ struct ChatTranscriptPresentationStoreTests {
                 .cold, .toolPayloadPatch, .cold, .cold, .cold,
             ])
             #expect(store.installed?.timeline == ChatTranscriptPresentation.timeline(in: snapshot))
+            #expect(preparations.count == 4)
         }
     }
 
@@ -2531,6 +2573,15 @@ private func streamingMessage(update: Int) throws -> TranscriptItem {
         {"id":"streaming","parentId":null,"presentationId":"stream:store","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"thinking","ordinal":0,"thinkingRunOrdinal":0,"type":"thinking","text":"Working"},{"id":"answer","ordinal":1,"type":"text","text":"update-\(update)"}]}
         """.utf8)
     )
+}
+
+private final class PreparationCallRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var calls = 0
+
+    var count: Int { lock.withLock { calls } }
+
+    func record() { lock.withLock { calls += 1 } }
 }
 
 private final class StoreProjectionWorkRecorder: @unchecked Sendable {

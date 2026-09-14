@@ -1394,9 +1394,10 @@ struct AppModelPerformanceSignpostTests {
             pending.remove(next.method)
             await socket.enqueue(successResponse(id: next.id, result: result))
         }
-        // This helper owns the real open-to-refresh path. A duplicate command
-        // admission is otherwise easy to miss because the set above removes
-        // both requests under one method name.
+        // This helper owns the real open-to-refresh path. Give tasks that were
+        // released by the final provider/command response a bounded scheduling
+        // window before checking for a second command admission.
+        for _ in 0..<32 { await Task.yield() }
         let commandRequests = (await socket.sentFrames()).compactMap { frame -> Request? in
             guard let value = try? JSONDecoder.gateway.decode(JSONValue.self, from: frame),
                   value.objectValue?["method"]?.stringValue == "session.commands" else { return nil }

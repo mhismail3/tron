@@ -178,13 +178,15 @@ enum NotificationInboxGatewayClient {
         var unreadCount: Int?
         var retained: [GatewayNotificationInboxItem] = []
         var retainedBytes = 0
-        for _ in 0..<12 {
+        for pageNumber in 1...12 {
             try Task.checkCancellation()
             guard await client.activeConnectionID() == connectionID else { throw CancellationError() }
             let page: GatewayNotificationInboxPage = try await client.request(
                 "notification.inbox.list",
                 ListParams(cursor: cursor, limit: NotificationInboxAdmissionPolicy.maximumPageCount),
-                expectedEpochID: connectionID
+                expectedEpochID: connectionID,
+                diagnosticPurpose: "notification-page",
+                diagnosticPage: pageNumber
             )
             #if HOSTED_TEST
             await hostedAfterPage?()

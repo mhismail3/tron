@@ -1465,6 +1465,9 @@ struct GatewayClientTransportTests {
         try await withTestWatchdog {
             let sockets = [ScriptedGatewaySocket(), ScriptedGatewaySocket()]
             let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: sockets).factory)
+            let capture = DiagnosticCaptureCoordinator()
+            await client.installDiagnosticCaptureSink(capture)
+            #expect(capture.start(duration: .seconds(30)))
             let gate = TestReadGate()
             var read: Task<NotificationInboxGatewayClient.Snapshot, Error>?
             var responder: Task<Void, Error>?
@@ -1481,6 +1484,10 @@ struct GatewayClientTransportTests {
                 let id = try #require(request.objectValue?["id"]?.stringValue)
                 await sockets[0].enqueue(responseFrame(id: id, result: inboxPage(id: "notification-old", nextCursor: "next-page")))
                 try await gate.waitForEntry()
+                let report = try #require(capture.stop())
+                let pageEvent = try #require(report.events.first { $0.name == "notification.inbox.list" })
+                #expect(pageEvent.purpose == "notification-page")
+                #expect(pageEvent.page == 1)
                 await sockets[1].enqueue(helloFrame())
                 _ = try await client.connect(profile: profile, token: "synthetic-token")
                 responder = Task {
