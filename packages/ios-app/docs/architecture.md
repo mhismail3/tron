@@ -1314,21 +1314,19 @@ while retaining only the bounded profile/session text draft. Share intake captur
 staged uploads, and clears the shared payload only after confirmed prompt admission. Dashboard
 imports use the explicit default workspace rather than a hidden transcript selection. In-app
 notification projection is disposable and bounded to eight entries, 4 KiB per message, and 16 KiB total.
-`InAppNoticeCenter` is the single AppModel-owned, monotonic-clock-driven center: it coalesces keyed
-progress, orders foreground cards by priority while preserving FIFO ties, stacks at most three visible cards,
-starts automatic dwell only when a card is foremost, and pauses timers while inactive, backgrounded, or interacted
-with. Unkeyed semantic duplicates coalesce without extending the original deadline, so repeated identical failures
-cannot pin a passive card. Passive cards are always normalized to a short automatic dwell; persistent lifetime is
-reserved for cards with an explicit action. Typed app, presentation, and exact session scopes retire with their owner. One non-key, transparent,
+`InAppNoticeCenter` is the single AppModel-owned, monotonic-clock-driven center. It presents one readable
+card at a time in FIFO order; up to two decorative backing shapes indicate pending feedback without exposing
+another card's text. Higher-priority arrivals never interrupt the current card. Overflow sheds the lowest-priority
+pending notice, preserving the reader and bounding the queue. Keyed updates retain position and the original
+visible deadline; semantic duplicates do not extend it either. Replacement enforces the same aggregate byte bound
+as admission. All notices are informational: there is no action/handler or persistent-lifetime API. A single
+identity/token-fenced timer starts when a card becomes foremost, clamps dwell to 2–12 seconds (normally four,
+eight for errors), and retains only remaining reading time across inactive/background transitions. Touches cannot
+pause expiration. Typed app, presentation, and exact session scopes retire with their owner. One non-key, transparent,
 pass-through window per app scene owns `InAppNoticeHost` above app sheets, so notice coordinates never transfer into
 a presented sheet or follow its interactive drag. Content and blur modifiers do not install notice hosts. The window
 receives the existing AppModel-owned center, forwards touches outside the bounded notice region, and is retired with
-its scene; it never creates another notice store. The host discovers the foremost visible navigation bar in the scene and uses the compact card height only as a toolbar reference; its top edge is clamped below the overlay window's safe-area/status region, so multiline content and accessibility-sized actions grow downward without moving the first line. It retains 80 points for its leading and trailing controls. Notices use an opaque surface backing under regular tinted Liquid Glass. Short notices are capsules; expanded notices retain soft
-32-point corners, slightly reduced title/body/action type, readable secondary copy, and shared inline capsule actions with 44-point targets.
-They accept input only on the foremost card, and dismiss with an easy horizontal swipe in either direction or an upward swipe; downward-only and ambiguous/tiny drags do not dismiss. Interaction pauses dwell timers for either gesture direction. Accessibility Dynamic Type uses a vertical
-action layout. Passive errors expire after roughly eight seconds, while action-bearing errors are persistent and expose
-native actions. Keyed restart, update, rollback, and package-progress cards refresh their short dwell when replacement
-status arrives. A session opening assigns notices to its pending presentation generation,
+its scene; it never creates another notice store. The host discovers the foremost visible navigation bar in the scene and uses the compact card height only as a toolbar reference; its top edge is clamped below the overlay window's safe-area/status region, so multiline content grows downward without moving the first line. It retains 80 points for its leading and trailing controls at ordinary type sizes; accessibility sizes use 16-point side insets and move below the toolbar instead. Every notice uses the same 24-point continuous corners, 18/12-point padding, title/body typography, and opaque surface backing under regular tinted Liquid Glass; only the semantic icon/tint changes. The leading icon is vertically centered against the complete text block, including multiline details. Titles wrap to three lines and details to four, with the full text available to VoiceOver. The next card enters only after the old text is removed, preventing transition overlap. Notices have no buttons or tap actions; an optional horizontal/upward swipe or accessibility dismissal advances the queue without pausing its timer. Retry Connection and Logs remain in Settings; failed conversation synchronization is retried in Manage Session, and the dashboard session list supports pull-to-refresh. Notices never own navigation or recovery commands. `InAppNoticeCenterTests` cover burst ordering, finite expiry, duplicates/replacements, overflow, retirement, and background resume; `SessionSheetPresentationTests` capture compact/detailed queues in both appearances and check absence of native controls. A session opening assigns notices to its pending presentation generation,
 then retires the previous exact session scope when replacement mounts. Destructive,
 security, text-entry, and ambiguous decisions remain modal.
 The queued-message editor uses the shared settings selection row and native menu for delivery, standard multiline

@@ -117,12 +117,15 @@ struct AppModelEventTests {
                 #expect(model.connectionState == .connected)
                 #expect(!model.visibleNotices.contains { $0.replacement?.key == .gatewayRecovery })
                 #expect(await socket.closeInvocationCount() == 0)
-                let notice = try #require(model.visibleNotices.first { $0.replacement?.key == .sessionCatchUp && !$0.actions.isEmpty })
+                let notice = try #require(model.noticeCenter.notices.first { $0.replacement?.key == .sessionCatchUp })
+                #expect(notice.lifetime == .automatic(.seconds(12)))
                 #expect(!model.admitsLiveSessionCommands(target))
                 #expect(model.selectedSnapshot?.transcript.map(\.id) == snapshot.transcript.map(\.id))
                 for _ in 0..<20 { await model.handle(GatewayEvent(type: "event", topic: "transport.resyncRequired", sessionId: snapshot.sessionId, payload: .object([:]))) }
                 #expect(await socket.sentFrames().count == 2)
-                model.noticeCenter.performAction(try #require(notice.actions.first), for: notice.id)
+                // Recovery belongs to Manage Session, not the transient notice.
+                let retryTask = Task { await model.retryConversationSynchronization(target: target) }
+                defer { retryTask.cancel() }
                 try await socket.waitUntilSent(count: 3)
                 let retried = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[2])
                 let snapshotValue = try JSONDecoder.gateway.decode(JSONValue.self, from: JSONEncoder.gateway.encode(snapshot))

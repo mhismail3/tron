@@ -638,6 +638,7 @@ struct SessionShellView: View {
             sessionSections
         }
         .listStyle(.plain)
+        .refreshable { _ = await model.retrySessionCatalog() }
         .environment(\.defaultMinListRowHeight, 38)
         .contentMargins(.top, 6)
         .contentMargins(.bottom, 92)

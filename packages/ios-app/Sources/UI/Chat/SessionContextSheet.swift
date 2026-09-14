@@ -218,6 +218,18 @@ struct SessionContextSheet: View {
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     if let snapshot = displayedPresentation {
+                        if model.connectionState == .connected,
+                           let target = model.presentationTarget(for: sessionID),
+                           !model.admitsLiveSessionCommands(target) {
+                            TronPlaceholderState(
+                                title: "Conversation needs to catch up",
+                                detail: "Your conversation and draft are retained.",
+                                icon: "arrow.triangle.2.circlepath",
+                                actionTitle: "Retry Conversation"
+                            ) {
+                                Task { _ = await model.retryConversationSynchronization(target: target) }
+                            }
+                        }
                         SessionContextUsageCard(snapshot: snapshot)
                         modelSummaryCard(snapshot)
                         sessionSection(snapshot)

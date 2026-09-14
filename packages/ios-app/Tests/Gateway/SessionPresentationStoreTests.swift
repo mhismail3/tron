@@ -2494,7 +2494,7 @@ struct SessionPresentationStoreTests {
             }
             #expect((await socket.sentFrames()).count == 7)
             #expect(model.visibleNotices.last?.title.contains("session.open") == true)
-            #expect(model.visibleNotices.last?.actions.contains(where: { $0.id == "view-logs" }) == true)
+            #expect(model.visibleNotices.last?.lifetime == .automatic(.seconds(8)))
             await client.close()
         }
     }

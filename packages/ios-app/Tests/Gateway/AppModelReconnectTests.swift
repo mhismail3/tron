@@ -874,7 +874,8 @@ struct AppModelReconnectTests {
         displayClock.advance(by: .seconds(2))
         for _ in 0..<10 { await Task.yield() }
         let warning = try #require(model.visibleNotices.first { $0.replacement?.key == .gatewayRecovery })
-        #expect(Set(warning.actions.map(\.title)) == Set(["Retry", "View Logs"]))
+        #expect(warning.lifetime == .automatic(.seconds(8)))
+        #expect(warning.message?.contains("Settings") == true)
         let target = SessionPresentationIdentity(sessionID: "unmounted", generation: 1)
         #expect(!model.admitsLiveSessionCommands(target))
         await model.teardown()

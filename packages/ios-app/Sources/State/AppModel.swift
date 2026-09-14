@@ -229,7 +229,6 @@ final class AppModel {
     var authPrompt: AuthPromptState? { providerAuth.prompt }
     var authEvent: AuthEventState? { providerAuth.event }
     let noticeCenter: InAppNoticeCenter
-    private(set) var logsPresentationRequested = false
     var visibleNotices: [InAppNoticeCenter.Notice] { noticeCenter.visibleNotices }
     var context: JSONValue? { sessionPresentation.context }
     var sessionTree: [SessionTreeNode] { sessionPresentation.sessionTree }
@@ -1095,8 +1094,6 @@ final class AppModel {
                   self.connectionState != .unpaired,
                   self.connectionState != .unauthorized else { return }
             self.recoveryDisplayNoticeEpisode = episode
-            let retry = InAppNoticeCenter.Action(id: "retry-gateway", title: "Retry", role: .normal)
-            let logs = InAppNoticeCenter.Action(id: "view-gateway-logs", title: "View Logs", role: .normal)
             self.noticeCenter.post(
                 .init(
                     id: self.uuidSource.next(),
@@ -1105,28 +1102,9 @@ final class AppModel {
                     role: .warning,
                     priority: .high,
                     title: "Gateway connection unavailable",
-                    message: "Tron kept your conversation and draft. Retry when the Mac or network is reachable; Send stays disabled until the session is synchronized.",
-                    lifetime: .persistent,
-                    actions: [retry, logs]
-                ),
-                handlers: [
-                    retry.id: { [weak self] in
-                        guard let self,
-                              self.recoveryDisplayNoticeEpisode == episode,
-                              self.recoveryDisplayProfileID == profileID,
-                              self.profiles.selected?.id == profileID else { return }
-                        self.recoveryDisplayNoticeEpisode = nil
-                        self.recoveryDisplayTask?.cancel()
-                        self.recoveryDisplayTask = nil
-                        self.retryGatewayConnection(for: self.profiles.selected!)
-                    },
-                    logs.id: { [weak self] in
-                        guard let self,
-                              self.recoveryDisplayNoticeEpisode == episode,
-                              self.recoveryDisplayProfileID == profileID else { return }
-                        self.logsPresentationRequested = true
-                    }
-                ]
+                    message: "Your conversation and draft are retained. Retry Connection and Logs are available in Settings.",
+                    lifetime: .automatic(.seconds(8))
+                )
             )
         }
     }
@@ -1142,14 +1120,9 @@ final class AppModel {
 
     func presentError(
         _ message: String,
-        viewLogs: Bool = false,
         scope: InAppNoticeScope = .app,
         replacing key: InAppNoticeKey? = nil
     ) {
-        let action: InAppNoticeCenter.Action? = viewLogs
-            ? .init(id: "view-logs", title: "View Logs", role: .normal)
-            : nil
-        let lifetime: InAppNoticeCenter.Lifetime = viewLogs ? .persistent : .automatic(.seconds(8))
         let id = uuidSource.next()
         noticeCenter.post(
             .init(
@@ -1159,12 +1132,8 @@ final class AppModel {
                 role: .error,
                 priority: .high,
                 title: message,
-                lifetime: lifetime,
-                actions: action.map { [$0] } ?? []
-            ),
-            handlers: viewLogs ? ["view-logs": { [weak self] in
-                self?.logsPresentationRequested = true
-            }] : [:]
+                lifetime: .automatic(.seconds(8))
+            )
         )
     }
 
@@ -1176,7 +1145,6 @@ final class AppModel {
         let diagnostic = (error as? GatewayFailure)?.code == "invalid_response"
         presentError(
             error.localizedDescription,
-            viewLogs: diagnostic,
             scope: scope,
             replacing: key
         )
@@ -1185,8 +1153,6 @@ final class AppModel {
             scheduleDiagnosticPersistence()
         }
     }
-
-    func consumeLogsPresentationRequest() { logsPresentationRequested = false }
 
     func presentConfigurationActionError(_ error: Error) {
         guard !(error is CancellationError) else { return }
@@ -1504,15 +1470,11 @@ final class AppModel {
             revision: result.revision,
             retryAttempt: catalogRefreshFailedAttempts
         )
-        let retry = InAppNoticeCenter.Action(id: "retry-session-list", title: "Retry Session List", role: .normal)
         noticeCenter.post(.init(id: uuidSource.next(),
             replacement: InAppNoticeReplacement(key: .sessionCatalogCatchUp, scope: .app), scope: .app,
             role: .warning, priority: .high, title: "Session list unavailable",
-            message: "Showing last-known sessions. Synchronized conversations can remain usable while this list catches up.",
-            lifetime: .persistent, actions: [retry]), handlers: [retry.id: { [weak self] in
-                guard let self, self.currentCatalogLoadKey() == key else { return }
-                Task { [weak self] in _ = await self?.retryCatalog(ownedBy: key) }
-            }])
+            message: "Showing last-known sessions. Pull to refresh to try again.",
+            lifetime: .automatic(.seconds(8))))
     }
 
     private func currentCatalogLoadKey() -> SessionCatalogLoadKey? {
@@ -4255,27 +4217,17 @@ extension AppModel: SessionPresentationStoreDelegate {
         composerDrafts.failOperation(operationID, target: target)
     }
 
+    func retryConversationSynchronization(target: SessionPresentationIdentity) async -> Bool {
+        guard connectionState == .connected, sessionPresentation.mountedTarget == target else { return false }
+        return await sessionPresentation.retryMountedSynchronization(target: target)
+    }
+
     func sessionPresentationStorePostNotice(
         _ message: String,
         replacing key: InAppNoticeKey?,
         role: InAppNoticeCenter.Role,
         scope: InAppNoticeScope?
     ) {
-        if key == .sessionCatchUp, role == .warning,
-           let target = sessionPresentation.mountedTarget, let admission = lifecycle.admission {
-            let retry = InAppNoticeCenter.Action(id: "retry-session-sync", title: "Retry Conversation", role: .normal)
-            let noticeScope = scope ?? .app
-            noticeCenter.post(.init(id: uuidSource.next(), replacement: InAppNoticeReplacement(key: .sessionCatchUp, scope: noticeScope),
-                scope: noticeScope, role: .warning, priority: .high, title: "Conversation could not catch up",
-                message: message, lifetime: .persistent, actions: [retry]), handlers: [retry.id: { [weak self] in
-                    guard let self, self.lifecycle.admits(admission), self.sessionPresentation.mountedTarget == target else { return }
-                    Task { [weak self] in
-                        guard let self, self.lifecycle.admits(admission) else { return }
-                        _ = await self.sessionPresentation.retryMountedSynchronization(target: target)
-                    }
-                }])
-            return
-        }
         let lifetime: InAppNoticeCenter.Lifetime = if key == .sessionCatchUp {
             .automatic(.seconds(12))
         } else if role == .error {
@@ -4385,7 +4337,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         if succeeded { foregroundReconciliationGeneration &+= 1 }
         if succeeded || connectionState == .connected {
             // A responsive transport is not an outage. The mounted owner keeps
-            // failed synchronization fenced and offers Retry Conversation.
+            // failed synchronization fenced; Manage Session owns Retry Conversation.
             finishRecoveryDisplayEpisode()
         } else {
             beginRecoveryDisplayEpisodeIfNeeded()

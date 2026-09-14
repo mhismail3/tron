@@ -6,19 +6,20 @@ import UIKit
 struct InAppNoticeHost: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var showLogs = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var toolbarCenterY: CGFloat?
 
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .topLeading) {
-                InAppNoticeStack(notices: model.visibleNotices, reduceMotion: reduceMotion)
+                InAppNoticeStack(notices: model.noticeCenter.notices, reduceMotion: reduceMotion)
                     .frame(width: proxy.size.width)
                     // Anchor by the top so multiline cards grow downward,
                     // rather than moving their first line into the status area.
                     .offset(y: InAppNoticeLayout.topEdge(
                         safeAreaTop: proxy.safeAreaInsets.top,
-                        toolbarCenterY: toolbarCenterY
+                        toolbarCenterY: toolbarCenterY,
+                        accessibilitySize: dynamicTypeSize.isAccessibilitySize
                     ))
                 NoticeToolbarAlignmentReader { centerY in
                     guard toolbarCenterY.map({ abs($0 - centerY) > 0.5 }) ?? true else { return }
@@ -29,45 +30,25 @@ struct InAppNoticeHost: View {
             }
         }
         .ignoresSafeArea()
-        .onAppear { consumeLogsIfOwner() }
-        .onChange(of: model.logsPresentationRequested) { _, _ in consumeLogsIfOwner() }
-        .tronManagedSheet(
-            isPresented: $showLogs,
-            identity: "notice.gateway-logs"
-        ) {
-            NavigationStack {
-                GatewayLogsSettingsView()
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button { showLogs = false } label: {
-                                TronToolbarTextLabel("Done", systemImage: "checkmark")
-                            }
-                            .tronToolbarAction()
-                        }
-                    }
-            }
-        }
-    }
-
-    private func consumeLogsIfOwner() {
-        guard model.logsPresentationRequested else { return }
-        model.consumeLogsPresentationRequest()
-        showLogs = true
     }
 }
 
 enum InAppNoticeLayout {
+    static let cornerRadius: CGFloat = 24
     // Leaves enough room for the shell's leading/trailing toolbar controls.
     static let horizontalControlReservation: CGFloat = 80
     static let fallbackToolbarHalfHeight: CGFloat = 22
     static let safeAreaSpacing: CGFloat = 8
 
     /// Uses the compact card height as the toolbar reference. This stays
-    /// stable when the foremost card gains body lines or action rows.
-    static func topEdge(safeAreaTop: CGFloat, toolbarCenterY: CGFloat?) -> CGFloat {
+    /// stable when the foremost card gains body lines.
+    static func topEdge(safeAreaTop: CGFloat, toolbarCenterY: CGFloat?, accessibilitySize: Bool = false) -> CGFloat {
         let toolbarAlignedTop = (toolbarCenterY ?? safeAreaTop + fallbackToolbarHalfHeight)
             - fallbackToolbarHalfHeight
+        // Larger type uses the available width below, rather than between,
+        // toolbar controls so ordinary words need not wrap mid-word.
         return max(safeAreaTop + safeAreaSpacing, toolbarAlignedTop)
+            + (accessibilitySize ? fallbackToolbarHalfHeight * 2 : 0)
     }
 }
 
@@ -121,37 +102,53 @@ private extension EnvironmentValues {
 }
 
 private struct InAppNoticeStack: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let notices: [InAppNoticeCenter.Notice]
     let reduceMotion: Bool
 
     var body: some View {
         GlassEffectContainer(spacing: 8) {
             ZStack(alignment: .top) {
-                ForEach(Array(notices.enumerated()), id: \.element.id) { index, notice in
-                    InAppNoticeCard(notice: notice, index: index, reduceMotion: reduceMotion)
-                        .scaleEffect(index == 0 ? 1 : 1 - CGFloat(index) * 0.035, anchor: .top)
-                        .offset(y: CGFloat(index) * 9)
-                        .opacity(index == 0 ? 1 : max(0.45, 0.78 - CGFloat(index) * 0.12))
-                        .zIndex(Double(notices.count - index))
+                if let notice = notices.first {
+                    InAppNoticeCard(notice: notice, reduceMotion: reduceMotion)
+                        .id(notice.id)
+                        // Retire old text immediately; only the next card enters.
+                        .transition(.asymmetric(
+                            insertion: reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity),
+                            removal: .identity
+                        ))
+                        .background {
+                            // Pending notices are silhouettes, never competing text.
+                            // The foreground card owns their geometry, including Dynamic Type.
+                            ForEach(0..<min(2, max(0, notices.count - 1)), id: \.self) { index in
+                                RoundedRectangle(cornerRadius: InAppNoticeLayout.cornerRadius, style: .continuous)
+                                    .fill(Color.tronSurfaceElevated)
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: InAppNoticeLayout.cornerRadius, style: .continuous)
+                                            .strokeBorder(Color.tronTextSecondary.opacity(0.15))
+                                    }
+                                    .offset(y: CGFloat(index + 1) * 6)
+                                    .zIndex(-Double(index + 1))
+                            }
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                        }
                 }
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, InAppNoticeLayout.horizontalControlReservation)
+        .padding(.horizontal, dynamicTypeSize.isAccessibilitySize ? 16 : InAppNoticeLayout.horizontalControlReservation)
         .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: notices)
     }
 }
 
 private struct InAppNoticeCard: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.noticeOverlayInteractionRegistry) private var interactionRegistry
     let notice: InAppNoticeCenter.Notice
-    let index: Int
     let reduceMotion: Bool
     @State private var dragX: CGFloat = 0
     @State private var dragY: CGFloat = 0
-    @GestureState private var interactionActive = false
 
     private var accent: Color {
         switch notice.role {
@@ -170,20 +167,10 @@ private struct InAppNoticeCard: View {
         case .info: "info.circle.fill"
         }
     }
-    private var isCompactPill: Bool {
-        notice.message == nil && notice.actions.isEmpty
-    }
-    private var cornerRadius: CGFloat {
-        // Short notices remain capsules; expanded notices keep the same soft
-        // ends without clipping multiline copy or accessible action targets.
-        isCompactPill ? 1_000 : 32
-    }
-    private var contentAlignment: VerticalAlignment {
-        isCompactPill ? .center : .top
-    }
+    private let cornerRadius = InAppNoticeLayout.cornerRadius
 
     var body: some View {
-        HStack(alignment: contentAlignment, spacing: 9) {
+        HStack(alignment: .center, spacing: 9) {
             Image(systemName: symbol)
                 .font(TronTypography.headline)
                 .foregroundStyle(accent)
@@ -192,53 +179,36 @@ private struct InAppNoticeCard: View {
                 Text(notice.title)
                     .font(TronTypography.sans(size: TronTypography.sizeBody - 0.5, weight: .semibold))
                     .foregroundStyle(Color.tronTextPrimary)
+                    .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
                 if let message = notice.message {
                     Text(message)
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM - 0.5))
                         .foregroundStyle(Color.tronTextSecondary)
+                        .lineLimit(4)
                         .fixedSize(horizontal: false, vertical: true)
-                }
-                if !notice.actions.isEmpty {
-                    Group {
-                        if dynamicTypeSize.isAccessibilitySize {
-                            actionButtons(.vertical)
-                        } else {
-                            ViewThatFits(in: .horizontal) {
-                                actionButtons(.horizontal)
-                                actionButtons(.vertical)
-                            }
-                        }
-                    }
-                    // Keep the action row visually close to the copy; the
-                    // label retains its full compact-pill hit target.
-                    .padding(.top, 0)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 18)
-        // Action-bearing cards use a tighter outer inset above and below the
-        // buttons without changing their accessible control geometry.
-        .padding(.vertical, notice.actions.isEmpty ? 12 : 9)
+        .padding(.vertical, 12)
         .frame(maxWidth: 420, minHeight: 44, alignment: .leading)
         .background(
-            Color.tronSurfaceElevated.opacity(index == 0 ? 0.88 : 0.76),
+            Color.tronSurfaceElevated.opacity(0.96),
             in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         )
         .glassEffect(
-            .regular.tint(accent.opacity(index == 0 ? 0.26 : 0.16)),
+            .regular.tint(accent.opacity(0.26)),
             in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         )
         .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .offset(x: dragX, y: dragY)
-        .simultaneousGesture(index == 0 ? swipeGesture : nil)
-        .allowsHitTesting(index == 0)
-        .accessibilityHidden(index != 0)
-        .accessibilityElement(children: notice.actions.isEmpty ? .combine : .contain)
+        .simultaneousGesture(swipeGesture)
+        .accessibilityElement(children: .combine)
         .accessibilityIdentifier("in-app-notice-card")
         .accessibilityLabel([notice.title, notice.message].compactMap { $0 }.joined(separator: ". "))
-        .accessibilityAddTraits(notice.actions.isEmpty ? .isStaticText : [])
+        .accessibilityAddTraits(.isStaticText)
         .accessibilityAction(named: "Dismiss notification") { model.noticeCenter.dismiss(notice.id) }
         .onGeometryChange(for: CGRect.self) { proxy in
             proxy.frame(in: .named(NoticeOverlayCoordinateSpace.name))
@@ -248,43 +218,16 @@ private struct InAppNoticeCard: View {
         .onAppear { announceIfNeeded() }
         .onDisappear {
             interactionRegistry?.removeFrame(for: notice.id)
-            model.noticeCenter.setInteraction(notice.id, active: false)
         }
-        .onChange(of: interactionActive) { _, active in
-            model.noticeCenter.setInteraction(notice.id, active: active)
-        }
-        .onChange(of: index) { _, _ in announceIfNeeded() }
         .onChange(of: notice) { _, _ in
             dragX = 0
             dragY = 0
             announceIfNeeded()
         }
-        .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
-    }
-
-    @ViewBuilder
-    private func actionButtons(_ axis: Axis) -> some View {
-        let layout = axis == .horizontal
-            ? AnyLayout(HStackLayout(spacing: 8))
-            : AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
-        layout {
-            ForEach(notice.actions) { action in
-                Button { model.noticeCenter.performAction(action, for: notice.id) } label: {
-                    TronInlineActionLabel(
-                        action.title,
-                        fontSize: TronTypography.sizeBodySM - 0.5,
-                        accent: action.role == .destructive ? .tronError : accent
-                    )
-                }
-                .buttonStyle(.plain)
-                .controlSize(.small)
-            }
-        }
     }
 
     private var swipeGesture: some Gesture {
         DragGesture(minimumDistance: 12)
-            .updating($interactionActive) { _, active, _ in active = true }
             .onChanged { value in
                 let horizontal = max(abs(value.translation.width), abs(value.predictedEndTranslation.width))
                 let upward = max(-value.translation.height, -value.predictedEndTranslation.height)
@@ -318,7 +261,7 @@ private struct InAppNoticeCard: View {
     }
 
     private func announceIfNeeded() {
-        guard index == 0, model.noticeCenter.markForegroundAnnounced(notice.id) else { return }
+        guard model.noticeCenter.markForegroundAnnounced(notice.id) else { return }
         AccessibilityNotification.Announcement(
             [notice.title, notice.message].compactMap { $0 }.joined(separator: ". ")
         ).post()
@@ -522,9 +465,6 @@ private final class NoticeOverlayWindow: UIWindow {
     var interactionRegistry: NoticeOverlayInteractionRegistry?
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        if rootViewController?.presentedViewController != nil {
-            return super.hitTest(point, with: event)
-        }
         guard interactionRegistry?.contains(
             point,
             noticeID: model?.noticeCenter.foremostNoticeID

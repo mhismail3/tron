@@ -741,6 +741,38 @@ final class SessionSheetPresentationTests: XCTestCase {
         XCTAssertGreaterThan(try XCTUnwrap(long.uiImage).size.height, try XCTUnwrap(short.uiImage).size.height + 100)
     }
 
+    func testNoticeBurstPresentsOneInformationalCardAtATime() async throws {
+        for (scheme, size) in [(ColorScheme.light, DynamicTypeSize.large), (.dark, .large), (.dark, .accessibility3)] {
+            try await withModel { model in
+                defer { model.noticeCenter.dismissAll() }
+                model.postNotice("The Mac gateway is offline.", role: .error, lifetime: .automatic(.seconds(12)))
+                model.noticeCenter.post(.init(id: UUID(), role: .warning,
+                    title: "Gateway connection unavailable",
+                    message: "Your conversation and draft are retained. Retry Connection and Logs are available in Settings.",
+                    lifetime: .automatic(.seconds(12))))
+                model.postNotice("Gateway update accepted.", role: .success, lifetime: .automatic(.seconds(12)))
+                try await self.withSheet(
+                    ZStack {
+                        Color.tronBackground
+                        InAppNoticeHost().environment(model)
+                    }.preferredColorScheme(scheme).dynamicTypeSize(size)
+                ) { controller in
+                    XCTAssertEqual(model.visibleNotices.map(\.title), ["The Mac gateway is offline."])
+                    XCTAssertTrue(self.views(of: UIControl.self, in: controller.view).isEmpty,
+                                  "Information-only notices must not install buttons")
+                    self.capture(controller, name: "notice-burst-compact-\(scheme)-\(size)")
+                    model.noticeCenter.dismissVisible()
+                    for _ in 0..<20 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+                    XCTAssertEqual(model.visibleNotices.map(\.title), ["Gateway connection unavailable"])
+                    XCTAssertTrue(self.views(of: UIControl.self, in: controller.view).isEmpty)
+                    self.capture(controller, name: "notice-burst-detail-\(scheme)-\(size)")
+                    model.noticeCenter.dismissVisible()
+                    XCTAssertEqual(model.visibleNotices.map(\.title), ["Gateway update accepted."])
+                }
+            }
+        }
+    }
+
     func testMarkdownTablesRenderInlineStylesInBothAppearances() async throws {
         let markdown = """
         | **Priority** | *Finding* |

@@ -6,13 +6,12 @@ import Testing
 @MainActor
 struct InAppNoticeCenterTests {
     private func notice(_ title: String, id: UUID = UUID(), replacement: InAppNoticeReplacement? = nil,
-                        lifetime: InAppNoticeCenter.Lifetime = .persistent,
+                        lifetime: InAppNoticeCenter.Lifetime = .standard,
                         priority: InAppNoticeCenter.Priority = .normal,
                         scope: InAppNoticeScope = .app,
-                        role: InAppNoticeCenter.Role = .info,
-                        actions: [InAppNoticeCenter.Action] = []) -> InAppNoticeCenter.Notice {
+                        role: InAppNoticeCenter.Role = .info) -> InAppNoticeCenter.Notice {
         .init(id: id, replacement: replacement, scope: scope, role: role, priority: priority,
-              title: title, lifetime: lifetime, actions: actions)
+              title: title, lifetime: lifetime)
     }
 
     @Test("count, UTF-8 storage, and visible stack remain bounded")
@@ -28,16 +27,20 @@ struct InAppNoticeCenterTests {
         #expect(center.notices.count == before)
     }
 
-    @Test("priority orders foreground while equal priorities remain FIFO")
+    @Test("FIFO never preempts the current card even for a higher priority arrival")
     func priorityOrdering() {
         let center = InAppNoticeCenter()
         center.post(notice("low", priority: .low)); center.post(notice("normal"))
         center.post(notice("high", priority: .high)); center.post(notice("normal-2"))
-        #expect(center.visibleNotices.map(\.title) == ["high", "normal", "normal-2"])
+        #expect(center.visibleNotices.map(\.title) == ["low"])
+        center.dismissVisible()
+        #expect(center.visibleNotices.map(\.title) == ["normal"])
+        center.dismissVisible()
+        #expect(center.visibleNotices.map(\.title) == ["high"])
     }
 
-    @Test("keyed replacement refreshes identity and full lifetime")
-    func keyedReplacementRefreshesLifetime() async throws {
+    @Test("keyed replacement preserves identity and cannot extend the visible deadline")
+    func keyedReplacementPreservesDeadline() async throws {
         let clock = ManualClock(); let center = InAppNoticeCenter(clock: clock.clock)
         defer { center.dismissAll() }
         let replacement = InAppNoticeReplacement(key: .packageProgress, scope: .app)
@@ -45,9 +48,9 @@ struct InAppNoticeCenterTests {
         try await waitForTimer(clock)
         clock.advance(by: .seconds(3)); center.post(notice("second", replacement: replacement, lifetime: .automatic(.seconds(5))))
         try await waitForTimer(clock)
-        clock.advance(by: .seconds(3))
-        #expect(center.notices.contains(where: { $0.id == id }))
-        clock.advance(by: .seconds(5))
+        #expect(center.notices.first?.id == id)
+        #expect(clock.recordedSleeps() == [.seconds(5)])
+        clock.advance(by: .seconds(2))
         try await waitForNoticeCount(0, in: center)
         #expect(center.notices.isEmpty)
     }
@@ -80,8 +83,8 @@ struct InAppNoticeCenterTests {
         #expect(center.notices.isEmpty)
     }
 
-    @Test("a single passive persistent notice is bounded to a standard dwell")
-    func passivePersistentNoticeExpires() async throws {
+    @Test("standard informational feedback expires automatically")
+    func standardNoticeExpires() async throws {
         let clock = ManualClock(); let center = InAppNoticeCenter(clock: clock.clock)
         defer { center.dismissAll() }
         center.post(notice("passive"))
@@ -92,24 +95,29 @@ struct InAppNoticeCenterTests {
         #expect(center.notices.isEmpty)
     }
 
-    @Test("an actionable persistent notice remains available")
-    func actionablePersistentNoticeRemains() async {
+    @Test("invalid or excessive durations cannot create indefinite feedback", arguments: [Duration.zero, .seconds(-1), .seconds(86_400)])
+    func allLifetimesAreFinite(duration: Duration) async throws {
         let clock = ManualClock(); let center = InAppNoticeCenter(clock: clock.clock)
-        let action = InAppNoticeCenter.Action(id: "open", title: "Open", role: .normal)
-        center.post(notice("actionable", actions: [action]))
-        clock.advance(by: .seconds(30)); await Task.yield()
-        #expect(center.notices.first?.lifetime == .persistent)
-        #expect(center.notices.count == 1)
-        #expect(clock.activeSleeperCount() == 0)
+        defer { center.dismissAll() }
+        center.post(notice("bounded", lifetime: .automatic(duration)))
+        try await waitForTimer(clock)
+        clock.advance(by: .seconds(12))
+        try await waitForNoticeCount(0, in: center)
     }
 
-    @Test("manual dismissal removes an actionable persistent notice")
-    func actionablePersistentNoticeCanBeDismissed() {
-        let center = InAppNoticeCenter()
-        let action = InAppNoticeCenter.Action(id: "retry", title: "Retry", role: .normal)
-        let id = center.post(notice("session list unavailable", actions: [action]))
+    @Test("manual dismissal advances the queue and stale expiry cannot dismiss its successor")
+    func dismissalAdvancesQueue() async throws {
+        let clock = ManualClock(); let center = InAppNoticeCenter(clock: clock.clock)
+        defer { center.dismissAll() }
+        let id = center.post(notice("first", lifetime: .automatic(.seconds(2))))
+        center.post(notice("second", lifetime: .automatic(.seconds(5))))
+        try await waitForTimer(clock)
         center.dismiss(id)
-        #expect(center.notices.isEmpty)
+        try await waitForTimer(clock)
+        clock.advance(by: .seconds(2))
+        #expect(center.visibleNotices.map(\.title) == ["second"])
+        clock.advance(by: .seconds(3))
+        try await waitForNoticeCount(0, in: center)
     }
 
     @Test("hidden automatic notices wait until foreground")
@@ -128,48 +136,51 @@ struct InAppNoticeCenterTests {
         #expect(center.notices.isEmpty)
     }
 
-    @Test("overflow never retains actionless newly rejected timer")
-    func overflowDoesNotRetainRejectedTimer() async throws {
+    @Test("overflow sheds low priority pending notices without preempting the reader")
+    func overflowProtectsHead() {
         let center = InAppNoticeCenter()
-        let action = InAppNoticeCenter.Action(id: "keep", title: "Keep", role: .normal)
-        for i in 0..<InAppNoticeCenter.maximumCount { center.post(notice("action-\(i)", actions: [action])) }
-        center.post(notice("rejected", lifetime: .automatic(.seconds(2))))
+        defer { center.dismissAll() }
+        center.post(notice("reading", priority: .low))
+        for i in 1..<InAppNoticeCenter.maximumCount { center.post(notice("pending-\(i)", priority: .high)) }
+        center.post(notice("rejected", priority: .low))
+        #expect(center.foremostNoticeID == center.notices.first?.id)
+        #expect(center.visibleNotices.first?.title == "reading")
+        #expect(center.notices.count == InAppNoticeCenter.maximumCount)
         #expect(!center.notices.contains(where: { $0.title == "rejected" }))
     }
 
-    @Test("duplicates include scope role and actions")
+    @Test("duplicates distinguish scope and role, not delivery priority or dwell")
     func duplicatesIncludeSemanticFields() {
-        let center = InAppNoticeCenter(); let action = InAppNoticeCenter.Action(id: "go", title: "Go", role: .normal)
+        let center = InAppNoticeCenter()
+        defer { center.dismissAll() }
         center.post(notice("same", scope: .app))
         center.post(notice("same", scope: .presentation(UUID())))
-        center.post(notice("same", actions: [action]))
+        center.post(notice("same", role: .error))
         center.post(notice("same", priority: .high))
         center.post(notice("same", lifetime: .automatic(.seconds(3))))
-        #expect(center.notices.count == 5)
+        #expect(center.notices.count == 3)
     }
 
-    @Test("actions must be declared and execute once")
-    func actionsMustBeDeclared() {
-        let center = InAppNoticeCenter(); var executions = 0
-        let declared = InAppNoticeCenter.Action(id: "retry", title: "Retry", role: .normal)
-        let undeclared = InAppNoticeCenter.Action(id: "other", title: "Other", role: .normal)
-        let id = center.post(notice("failed", actions: [declared]), handlers: ["retry": { executions += 1 }])
-        center.performAction(undeclared, for: id); #expect(center.notices.count == 1)
-        center.performAction(declared, for: id); center.performAction(declared, for: id)
-        #expect(executions == 1); #expect(center.notices.isEmpty)
+    @Test("a larger keyed replacement still enforces the aggregate byte bound")
+    func replacementEnforcesBounds() {
+        let center = InAppNoticeCenter()
+        defer { center.dismissAll() }
+        let key = InAppNoticeReplacement(key: .gatewayRecovery, scope: .app)
+        center.post(notice("first", replacement: key))
+        for i in 0..<7 { center.post(notice(String(repeating: "x", count: 2_000) + "\(i)")) }
+        center.post(notice(String(repeating: "z", count: 4_096), replacement: key))
+        #expect(center.totalBytes <= InAppNoticeCenter.maximumTotalBytes)
+        #expect(center.notices.first?.replacement == key)
     }
 
-    @Test("background and interaction pause retain remaining lifetime")
-    func backgroundAndInteractionPause() async throws {
+    @Test("background pauses only the remaining reading time")
+    func backgroundPause() async throws {
         let clock = ManualClock(); let center = InAppNoticeCenter(clock: clock.clock)
         defer { center.dismissAll() }
         center.post(notice("held", lifetime: .automatic(.seconds(5))))
-        let id = try #require(center.notices.first?.id)
         try await waitForTimer(clock); clock.advance(by: .seconds(2)); center.setBackgrounded(true)
         clock.advance(by: .seconds(10)); await Task.yield(); #expect(center.notices.count == 1)
-        center.setBackgrounded(false); center.setInteraction(id, active: true); clock.advance(by: .seconds(10)); await Task.yield()
-        #expect(center.notices.count == 1)
-        center.setInteraction(id, active: false); try await waitForTimer(clock)
+        center.setBackgrounded(false); try await waitForTimer(clock)
         clock.advance(by: .seconds(3))
         try await waitForNoticeCount(0, in: center)
         #expect(center.notices.isEmpty)
@@ -185,6 +196,23 @@ struct InAppNoticeCenterTests {
         try await withTestWatchdog { @MainActor in
             while center.notices.count != count { try await Task.sleep(for: .milliseconds(1)) }
         }
+    }
+
+    @Test("a full burst drains in FIFO order with a fresh bounded dwell per card")
+    func burstDrains() async throws {
+        let clock = ManualClock(); let center = InAppNoticeCenter(clock: clock.clock)
+        defer { center.dismissAll() }
+        for index in 0..<InAppNoticeCenter.maximumCount {
+            center.post(notice("notice-\(index)", lifetime: .automatic(.seconds(2))))
+        }
+        for index in 0..<InAppNoticeCenter.maximumCount {
+            #expect(center.visibleNotices.map(\.title) == ["notice-\(index)"])
+            try await waitForTimer(clock)
+            clock.advance(by: .seconds(2))
+            try await waitForNoticeCount(InAppNoticeCenter.maximumCount - index - 1, in: center)
+        }
+        #expect(center.notices.isEmpty)
+        #expect(clock.activeSleeperCount() == 0)
     }
 
     @Test("scope retirement dismisses only owned notices")
@@ -239,6 +267,7 @@ struct InAppNoticePresentationPolicyTests {
         #expect(InAppNoticeLayout.topEdge(safeAreaTop: 59, toolbarCenterY: 81) == 67)
         #expect(InAppNoticeLayout.topEdge(safeAreaTop: 59, toolbarCenterY: 300) == 278)
         #expect(InAppNoticeLayout.topEdge(safeAreaTop: 59, toolbarCenterY: nil) == 67)
+        #expect(InAppNoticeLayout.topEdge(safeAreaTop: 59, toolbarCenterY: 81, accessibilitySize: true) == 111)
     }
 
 }

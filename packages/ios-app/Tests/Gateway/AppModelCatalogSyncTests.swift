@@ -36,7 +36,8 @@ struct AppModelCatalogSyncTests {
             await Task.yield()
             #expect((await harness.socket.sentFrames()).count == sentAfterFailures)
             let notice = try #require(harness.model.visibleNotices.first { $0.replacement?.key == .sessionCatalogCatchUp })
-            #expect(notice.actions.map(\.title) == ["Retry Session List"])
+            #expect(notice.lifetime == .automatic(.seconds(8)))
+            #expect(notice.message?.contains("Pull to refresh") == true)
             let cancelledRetry = Task { await harness.model.retrySessionCatalog() }
             cancelledRetry.cancel()
             #expect(await cancelledRetry.value == .retained)
