@@ -189,9 +189,12 @@ final class SettingsTrustCoordinator {
     }
 
     private func admits(_ admission: SettingsLoadAdmission) async -> Bool {
-        !Task.isCancelled && profileGeneration == admission.profileGeneration
-            && settingsLoadGenerationByTarget[admission.target] == admission.targetGeneration
-            && await client.activeConnectionID() == admission.connectionID
+        guard !Task.isCancelled,
+              profileGeneration == admission.profileGeneration,
+              settingsLoadGenerationByTarget[admission.target] == admission.targetGeneration else {
+            return false
+        }
+        return await client.activeConnectionID() == admission.connectionID
     }
 
     private func requireProfile(_ admittedProfileGeneration: Int) throws {

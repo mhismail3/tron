@@ -128,7 +128,7 @@ def development_udid(arguments: argparse.Namespace) -> str | None:
         raise DestinationError(f"Development simulator marker is unreadable: {arguments.development_state}: {error}") from error
     lines = value.splitlines()
     udid = lines[0].strip() if lines else ""
-    if len(lines) != 1 or not re.fullmatch(r"[0-9A-Fa-f-]{36}", udid):
+    if len(lines) != 1 or not re.fullmatch(r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}", udid):
         raise DestinationError(f"Development simulator marker is empty or invalid: {arguments.development_state}")
     return udid
 
@@ -182,7 +182,7 @@ def owned_identity_matches(document: dict[str, Any], marker: dict[str, Any]) -> 
     )
 
 
-def delete_owned(marker_path: Path, dev_udid: str | None) -> None:
+def delete_owned(marker_path: Path, arguments: argparse.Namespace) -> None:
     marker = load_marker(marker_path)
     if marker is None:
         return
@@ -194,11 +194,11 @@ def delete_owned(marker_path: Path, dev_udid: str | None) -> None:
         # Check immediately before either destructive simctl boundary. The
         # Development marker can change while inventory is being inspected;
         # never shut down or delete a simulator that has become its owner.
-        if marker["udid"] == dev_udid:
+        if marker["udid"] == development_udid(arguments):
             raise DestinationError("refusing to delete the remembered Development simulator")
         if current[1].get("state") == "Booted":
             simctl("shutdown", marker["udid"])
-        if marker["udid"] == dev_udid:
+        if marker["udid"] == development_udid(arguments):
             raise DestinationError("refusing to delete the remembered Development simulator")
         simctl("delete", marker["udid"])
     marker_path.unlink(missing_ok=True)
@@ -226,11 +226,11 @@ def provision(arguments: argparse.Namespace) -> dict[str, Any]:
             if current is not None:
                 # Stale recovery is destructive too: apply the Development
                 # exclusion at each simctl boundary, not just on validation.
-                if marker["udid"] == dev_udid:
+                if marker["udid"] == development_udid(arguments):
                     raise DestinationError("refusing to delete the remembered Development simulator")
                 if current[1].get("state") == "Booted":
                     simctl("shutdown", marker["udid"])
-                if marker["udid"] == dev_udid:
+                if marker["udid"] == development_udid(arguments):
                     raise DestinationError("refusing to delete the remembered Development simulator")
                 simctl("delete", marker["udid"])
             arguments.marker.unlink(missing_ok=True)
@@ -288,7 +288,7 @@ def main() -> int:
     arguments = parse_args()
     try:
         if arguments.command == "delete":
-            delete_owned(arguments.marker, development_udid(arguments))
+            delete_owned(arguments.marker, arguments)
             return 0
         if arguments.command == "provision":
             details = provision(arguments)

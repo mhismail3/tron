@@ -15,15 +15,16 @@ struct ChatTextPreparationTests {
         #expect(ChatTextPreparationPolicy.maximumNewThinkingPreparationsPerProjection == 128)
     }
 
-    @Test("retired preparation epochs cannot admit into a successor cache")
-    func retiredEpochCannotAdmit() async {
+    @Test("retired preparation epochs preserve the successor boundary")
+    func retiredEpochPreservesSuccessorBoundary() async {
         let cache = ChatTextPreparationCache()
         let source = ChatTextPreparationSource(
             identity: .init(kind: .markdown, value: "epoch"),
             source: "**current**"
         )
         await cache.retire(before: 3)
-        #expect((await cache.prepare([source], cacheEpoch: 3)).markdown.isEmpty)
+        #expect((await cache.prepare([source], cacheEpoch: 2)).markdown.isEmpty)
+        #expect((await cache.prepare([source], cacheEpoch: 3)).markdown.count == 1)
         #expect((await cache.prepare([source], cacheEpoch: 4)).markdown.count == 1)
         await cache.retire(before: 3)
         #expect((await cache.prepare([source], cacheEpoch: 4)).markdown.count == 1)

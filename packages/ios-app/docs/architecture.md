@@ -275,7 +275,9 @@ Ordinary projection updates do not relabel or disable the pill. It installs only
 containing session, mounted presentation, runtime, canonical/timeline generations, and paging
 bounds/edge identity. It retains at most one installed, one frame-gated ready candidate, one building,
 and one pending immutable snapshot/timeline; every slot is disposable projection state, not a session
-mirror or event journal.
+mirror or event journal. Text-preparation retirement uses the same half-open epoch contract as
+projection installation: entries older than the retirement boundary are removed, while the boundary
+epoch remains admissible for its successor build even when retirement delivery is delayed.
 One deterministic `ChatTranscriptProjectionKernel` converts exact canonical entries into ordered
 raw atoms and then globally assembles call/result joins, bootstrap filtering, barriers, grouping,
 and semantic maps. Message presentation IDs and required content/thinking-run ordinals arrive from

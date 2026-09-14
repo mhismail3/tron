@@ -155,6 +155,7 @@ final class ChatMediaLoader {
         let token: UInt64
         let invalidationGeneration: UInt64
         let task: Task<(UIImage, Int), Error>
+        var waiters: Int
     }
 
     private enum PreviewKind: Hashable, Sendable {
@@ -291,7 +292,9 @@ final class ChatMediaLoader {
         }
 
         let flight: ThumbnailFlight
-        if let existing = thumbnailFlights[identity] {
+        if var existing = thumbnailFlights[identity] {
+            existing.waiters += 1
+            thumbnailFlights[identity] = existing
             flight = existing
         } else {
             guard thumbnailFlights.count < ChatMediaPolicy.maximumThumbnailFlights else {
@@ -314,14 +317,27 @@ final class ChatMediaLoader {
             flight = ThumbnailFlight(
                 token: token,
                 invalidationGeneration: invalidationGeneration,
-                task: task
+                task: task,
+                waiters: 1
             )
             thumbnailFlights[identity] = flight
+            Task { [weak self] in
+                _ = await task.result
+                self?.retireCompletedThumbnailFlight(identity: identity, token: token)
+            }
             hostedNotifyMediaCounts()
         }
 
+        var taskCompleted = false
         do {
-            let value = try await flight.task.value
+            let value: (UIImage, Int)
+            do {
+                value = try await flight.task.value
+                taskCompleted = true
+            } catch {
+                taskCompleted = true
+                throw error
+            }
             // A cancelled consumer must not publish or evict the shared flight;
             // another owner may still be waiting on the same identity.
             try Task.checkCancellation()
@@ -335,11 +351,38 @@ final class ChatMediaLoader {
             }
             return value.0
         } catch {
-            if !Task.isCancelled, thumbnailFlights[identity]?.token == flight.token {
+            if Task.isCancelled {
+                if taskCompleted { finishCancelledThumbnailWaiter(identity: identity, token: flight.token) }
+                else { removeCancelledThumbnailWaiter(identity: identity, token: flight.token) }
+            } else if thumbnailFlights[identity]?.token == flight.token {
                 thumbnailFlights[identity] = nil
+                hostedNotifyMediaCounts()
             }
             throw error
         }
+    }
+
+    private func removeCancelledThumbnailWaiter(identity: ChatMediaIdentity, token: UInt64) {
+        guard var flight = thumbnailFlights[identity], flight.token == token else { return }
+        flight.waiters = max(0, flight.waiters - 1)
+        thumbnailFlights[identity] = flight
+    }
+
+    private func finishCancelledThumbnailWaiter(identity: ChatMediaIdentity, token: UInt64) {
+        guard var flight = thumbnailFlights[identity], flight.token == token else { return }
+        flight.waiters = max(0, flight.waiters - 1)
+        if flight.waiters == 0 {
+            thumbnailFlights[identity] = nil
+            hostedNotifyMediaCounts()
+        } else {
+            thumbnailFlights[identity] = flight
+        }
+    }
+
+    private func retireCompletedThumbnailFlight(identity: ChatMediaIdentity, token: UInt64) {
+        guard let flight = thumbnailFlights[identity], flight.token == token, flight.waiters == 0 else { return }
+        thumbnailFlights[identity] = nil
+        hostedNotifyMediaCounts()
     }
 
     /// Locally staged composer images share the same single preparation slot as

@@ -286,9 +286,9 @@ describe("v3 Worker boundary", () => {
     let bodyHashes = 0;
     vi.spyOn(crypto.subtle, "digest").mockImplementation(async (algorithm, data) => {
       const result = await digest(algorithm, data);
-      // HMAC authenticates the first body hash. The second precedes durable
-      // dispatch admission; freeze there without bypassing real authentication.
-      if (new TextDecoder().decode(data) === notification.body && ++bodyHashes === 2) {
+      // Freeze after authentication's single body hash, without bypassing
+      // the real admission boundary.
+      if (new TextDecoder().decode(data) === notification.body && ++bodyHashes === 1) {
         entered.resolve();
         await release.promise;
       }
@@ -302,7 +302,7 @@ describe("v3 Worker boundary", () => {
         expect(registered.status).toBe(201);
         release.resolve();
         expect(await (await pending).json()).toMatchObject({ status: "accepted_by_apns" });
-        expect(bodyHashes).toBe(2);
+        expect(bodyHashes).toBe(1);
         expect(providerFetch.mock.calls.map(([url]) => url)).toEqual([
           `https://api.sandbox.push.apple.com/3/device/${replacementToken}`,
         ]);

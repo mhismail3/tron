@@ -283,10 +283,10 @@ actor ChatTextPreparationCache {
         cacheEpoch: Int = 0
     ) async -> ChatTextPreparationSnapshot {
         let newest = newestSources(requested)
-        guard cacheEpoch > retiredBeforeEpoch else { return snapshot(for: newest) }
+        guard cacheEpoch >= retiredBeforeEpoch else { return snapshot(for: newest) }
         var allMisses: [ChatTextPreparationSource] = []
         for source in newest {
-            guard !Task.isCancelled, cacheEpoch > retiredBeforeEpoch else {
+            guard !Task.isCancelled, cacheEpoch >= retiredBeforeEpoch else {
                 return snapshot(for: newest)
             }
             guard source.source.utf8.count <= ChatTextPreparationPolicy.maximumSourceBytes else {
@@ -310,7 +310,7 @@ actor ChatTextPreparationCache {
         var admittedMarkdownMisses = 0
         var admittedThinkingMisses = 0
         for source in allMisses.reversed() {
-            guard !Task.isCancelled, cacheEpoch > retiredBeforeEpoch else {
+            guard !Task.isCancelled, cacheEpoch >= retiredBeforeEpoch else {
                 return snapshot(for: newest)
             }
             switch source.identity.kind {
@@ -328,7 +328,7 @@ actor ChatTextPreparationCache {
 
         var start = 0
         while start < misses.count {
-            guard !Task.isCancelled, cacheEpoch > retiredBeforeEpoch else {
+            guard !Task.isCancelled, cacheEpoch >= retiredBeforeEpoch else {
                 return snapshot(for: newest)
             }
             let end = min(
@@ -348,11 +348,11 @@ actor ChatTextPreparationCache {
             // The selected batch is admitted oldest-to-newest. A retired
             // projection may finish a non-cooperative parser, but it cannot
             // admit that batch into this or a successor cache epoch.
-            guard !Task.isCancelled, cacheEpoch > retiredBeforeEpoch else {
+            guard !Task.isCancelled, cacheEpoch >= retiredBeforeEpoch else {
                 return snapshot(for: newest)
             }
             for source in batch {
-                guard !Task.isCancelled, cacheEpoch > retiredBeforeEpoch else {
+                guard !Task.isCancelled, cacheEpoch >= retiredBeforeEpoch else {
                     return snapshot(for: newest)
                 }
                 if let value = prepared.first(where: { $0.source.identity == source.identity }) {
@@ -365,13 +365,13 @@ actor ChatTextPreparationCache {
         return snapshot(for: newest)
     }
 
-    /// Retires all entries and in-flight admissions through this projection
-    /// epoch. Newer epochs remain valid if retirement is delivered after a
-    /// successor has already started.
+    /// Retires all entries and in-flight admissions before this projection
+    /// epoch. The boundary epoch remains valid for its successor even when
+    /// retirement is delivered after that work has started.
     func retire(before epoch: Int) {
         guard epoch > retiredBeforeEpoch else { return }
         retiredBeforeEpoch = epoch
-        let retired = entries.filter { $0.value.cacheEpoch <= epoch }.map(\.key)
+        let retired = entries.filter { $0.value.cacheEpoch < epoch }.map(\.key)
         for identity in retired { remove(identity) }
     }
 
@@ -423,7 +423,7 @@ actor ChatTextPreparationCache {
 
     private func admit(_ prepared: Prepared, cacheEpoch: Int) {
         guard !Task.isCancelled,
-              cacheEpoch > retiredBeforeEpoch,
+              cacheEpoch >= retiredBeforeEpoch,
               prepared.accountedBytes <= ChatTextPreparationPolicy.maximumAccountedBytes else { return }
         remove(prepared.source.identity)
         accessOrdinal &+= 1

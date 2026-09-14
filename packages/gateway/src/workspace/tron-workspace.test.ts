@@ -173,4 +173,19 @@ describe("Tron internal workspace", () => {
     expect(await value.describe()).toMatchObject({ available: false, reason: "closed" });
     expect((await owner(home).describe()).available).toBe(true);
   });
+
+  it("retains a failed lock release for a later disposal retry", async () => {
+    const home = join(await fixture(), "home");
+    let attempts = 0;
+    const release = vi.fn(async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("release failed");
+    });
+    vi.spyOn(lockfile, "lock").mockResolvedValue(release);
+    const value = owner(home);
+    expect((await value.describe()).available).toBe(true);
+    await expect(value.dispose()).rejects.toThrow("release failed");
+    await expect(value.dispose()).resolves.toBeUndefined();
+    expect(release).toHaveBeenCalledTimes(2);
+  });
 });

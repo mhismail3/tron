@@ -53,6 +53,8 @@ if command == 'create':
     path.write_text(json.dumps(doc)); print(udid); raise SystemExit(0)
 if command in ('boot', 'shutdown', 'delete'):
     udid = args[1]
+    if command == 'shutdown' and os.environ.get('FAKE_DEVELOPMENT_ON_SHUTDOWN'):
+        Path(os.environ['FAKE_DEVELOPMENT_ON_SHUTDOWN']).write_text(udid + '\\n')
     found = False
     for runtime, devices in doc['devices'].items():
         for device in list(devices):
@@ -94,9 +96,11 @@ raise SystemExit(2)
             "--development-state", str(self.development),
         ]
 
-    def invoke(self, action: str, *, name: str = "Tron iOS Tests") -> subprocess.CompletedProcess[str]:
+    def invoke(self, action: str, *, name: str = "Tron iOS Tests", development_on_shutdown: bool = False) -> subprocess.CompletedProcess[str]:
         environment = os.environ.copy()
         environment.update({"TRON_IOS_XCRUN": str(self.fake_xcrun), "FAKE_SIMCTL_INVENTORY": str(self.inventory_path)})
+        if development_on_shutdown:
+            environment["FAKE_DEVELOPMENT_ON_SHUTDOWN"] = str(self.development)
         return subprocess.run(self.command(action, name=name), env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     def owned_marker(self, udid: str = UDID_A, *, runtime: str = RUNTIME_ID, name: str = "Tron iOS Tests") -> dict[str, object]:
@@ -184,36 +188,40 @@ raise SystemExit(2)
         self.assertEqual(result.returncode, 66)
         self.assertIn("Development simulator", result.stderr)
 
-    def test_direct_delete_refuses_development_overlap_without_mutation(self) -> None:
+    def test_direct_delete_refuses_development_overlap_before_delete(self) -> None:
         _, device = self.device(UDID_A, state="Booted")
         self.write_inventory(devices={RUNTIME_ID: [device]})
         self.marker.write_text(json.dumps(self.owned_marker()))
-        self.development.write_text(UDID_A + "\n")
-        before = self.inventory_path.read_text()
-        result = self.invoke("delete")
+        self.development.unlink(missing_ok=True)
+        result = self.invoke("delete", development_on_shutdown=True)
         self.assertEqual(result.returncode, 66)
         self.assertIn("remembered Development", result.stderr)
-        self.assertEqual(self.inventory_path.read_text(), before)
+        after = json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID]
+        self.assertEqual(len(after), 1)
+        self.assertEqual(after[0]["udid"], UDID_A)
+        self.assertEqual(after[0]["state"], "Shutdown")
         self.assertTrue(self.marker.exists())
 
-    def test_stale_recovery_refuses_development_overlap_without_mutation(self) -> None:
+    def test_stale_recovery_refuses_development_overlap_before_delete(self) -> None:
         old_runtime = "com.apple.CoreSimulator.SimRuntime.iOS-26-1"
         _, device = self.device(UDID_A, runtime=old_runtime, state="Booted")
         self.write_inventory(devices={old_runtime: [device], RUNTIME_ID: []})
         self.marker.write_text(json.dumps(self.owned_marker(runtime=old_runtime)))
-        self.development.write_text(UDID_A + "\n")
-        before = self.inventory_path.read_text()
-        result = self.invoke("provision")
+        self.development.unlink(missing_ok=True)
+        result = self.invoke("provision", development_on_shutdown=True)
         self.assertEqual(result.returncode, 66)
         self.assertIn("remembered Development", result.stderr)
-        self.assertEqual(self.inventory_path.read_text(), before)
+        after = json.loads(self.inventory_path.read_text())["devices"][old_runtime]
+        self.assertEqual(len(after), 1)
+        self.assertEqual(after[0]["udid"], UDID_A)
+        self.assertEqual(after[0]["state"], "Shutdown")
         self.assertTrue(self.marker.exists())
 
     def test_empty_or_unreadable_development_marker_fails_closed(self) -> None:
         _, device = self.device(UDID_A)
         self.write_inventory(devices={RUNTIME_ID: [device]})
         self.marker.write_text(json.dumps(self.owned_marker()))
-        for value in ("", "not-a-udid\n", UDID_A + "\nextra\n"):
+        for value in ("", "not-a-udid\n", "-" * 36, UDID_A + "\nextra\n"):
             with self.subTest(value=value):
                 self.development.write_text(value)
                 before = self.inventory_path.read_text()
@@ -360,6 +368,8 @@ exit 0
 
     def test_summary_validation_requires_real_passing_count(self) -> None:
         result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = self.invoke(summary='{"passedTests":2,"failedTests":0,"skippedTests":1,"totalTestCount":3}')
         self.assertEqual(result.returncode, 0, result.stderr)
         result = self.invoke(summary='{"passedTests":0,"failedTests":0,"skippedTests":1,"totalTestCount":1}')
         self.assertEqual(result.returncode, 65, result.stderr)

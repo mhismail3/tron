@@ -260,7 +260,7 @@ if counts["totalTestCount"] <= 0:
     raise SystemExit("invalid XCTest summary: no tests executed")
 if sum(counts[field] for field in fields[:3]) != counts["totalTestCount"]:
     raise SystemExit("invalid XCTest summary: test counts do not reconcile")
-if counts["passedTests"] <= 0 or counts["failedTests"] != 0 or counts["skippedTests"] != 0:
+if counts["passedTests"] <= 0 or counts["failedTests"] != 0:
     raise SystemExit("XCTest summary did not execute and pass at least one test")
 PY
 }

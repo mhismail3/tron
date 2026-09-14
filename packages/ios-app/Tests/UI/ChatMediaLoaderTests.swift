@@ -158,7 +158,7 @@ struct ChatMediaLoaderTests {
         #expect(loader.metrics().thumbnailFlights == 0)
     }
 
-    @Test("a cancelled thumbnail consumer cannot publish or retire a shared flight")
+    @Test("a cancelled thumbnail consumer releases a completed flight without a follow-up")
     func cancelledThumbnailConsumer() async throws {
         let fixture = try SessionScenarioBuilder(seed: 6_302).generatedImageFixture(
             format: .png,
@@ -177,11 +177,9 @@ struct ChatMediaLoaderTests {
         first.cancel()
         await gate.release()
         await #expect(throws: CancellationError.self) { try await first.value }
-        #expect(loader.metrics().thumbnailFlights == 1)
-
-        _ = try await loader.thumbnail(for: identity)
-        #expect(loader.metrics().thumbnailCount == 1)
+        // No later request is needed to retire the completed shared flight.
         #expect(loader.metrics().thumbnailFlights == 0)
+        #expect(loader.metrics().thumbnailCount == 0)
     }
 
     @Test("the 33rd distinct thumbnail flight is rejected without starting work")

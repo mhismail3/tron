@@ -70,7 +70,6 @@ jobs:
           python3 scripts/test-ios-gateway-e2e-xctestrun.py
       - name: Test isolated development lifecycle tooling
         run: |
-          node --test scripts/tron-dev-state.test.mjs
           scripts/tron-dev-toolchain.test.sh
           scripts/verify-ci-toolchain.test.sh
       - run: python3 scripts/check-documentation-policy.py
@@ -124,6 +123,8 @@ jobs:
         working-directory: packages/gateway
       - run: npm run build
         working-directory: packages/gateway
+      - name: Test macOS development lifecycle state tooling
+        run: node --test scripts/tron-dev-state.test.mjs
       - run: node --test scripts/gateway-payload-deploy.test.mjs
       - run: npm test
         working-directory: packages/gateway
