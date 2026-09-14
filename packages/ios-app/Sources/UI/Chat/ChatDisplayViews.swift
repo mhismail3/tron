@@ -493,11 +493,12 @@ private struct DisplayInlineImageChip: View {
             source: transcriptReady ? mediaIdentity : nil,
             presentationActive: transcriptReady && presentationActivity.allowsPresentationPublication
         )) {
+            // The task owns its request fence. Separate onChange callbacks can
+            // invalidate the newly started load without changing its task ID,
+            // stranding the spinner until another presentation transition.
+            loadGeneration &+= 1
             await loadThumbnail(generation: loadGeneration)
         }
-        .onChange(of: mediaIdentity) { _, _ in loadGeneration &+= 1 }
-        .onChange(of: presentationActivity.allowsPresentationPublication) { _, _ in loadGeneration &+= 1 }
-        .onChange(of: transcriptReady) { _, _ in loadGeneration &+= 1 }
         .accessibilityElement(children: .contain)
     }
 
@@ -559,15 +560,17 @@ private struct DisplayInlineImageChip: View {
             guard !Task.isCancelled,
                   generation == loadGeneration,
                   mediaIdentity == identity,
+                  transcriptReady,
                   presentationActivity.allowsPresentationPublication else { return }
             image = loaded
             loadedIdentity = identity
-        } catch is CancellationError {
-            return
         } catch {
+            // Only retirement of this view task is silent. A dependency that
+            // cancels a still-current request must not leave a permanent spinner.
             guard !Task.isCancelled,
                   generation == loadGeneration,
                   mediaIdentity == identity,
+                  transcriptReady,
                   presentationActivity.allowsPresentationPublication else { return }
             failed = true
             loadedIdentity = identity

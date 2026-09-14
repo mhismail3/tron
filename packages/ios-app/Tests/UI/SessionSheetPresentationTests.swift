@@ -1,4 +1,5 @@
 import SwiftUI
+import Observation
 import UIKit
 import XCTest
 import WebKit
@@ -1087,6 +1088,51 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testInlinePhotoLoadsAfterReadinessAndResumeWithoutAnotherSheet() async throws {
+        for mode in 0..<4 {
+            let arrived = expectation(description: "Thumbnail HTTP request \(mode)")
+            let release = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            defer { release.continuation.finish() }
+            let fixture = try SessionScenarioBuilder(seed: 6_321).generatedImageFixture(
+                format: .jpeg, pixelWidth: 100, pixelHeight: 100, orientation: .up)
+            let gateway = ProcessSheetGatewayFixture(transport: .init { request, _ in
+                arrived.fulfill()
+                var iterator = release.stream.makeAsyncIterator()
+                _ = await iterator.next()
+                if mode == 3 { throw CancellationError() }
+                return (fixture.encodedData, HTTPURLResponse(url: request.url!, statusCode: 200,
+                    httpVersion: nil, headerFields: ["Content-Type": "image/jpeg"])!)
+            })
+            try await withModel(client: gateway.client) { model in
+                try await gateway.connect(model: model)
+                let display = DisplayProjection(displayId: "photo", title: "Photo", altText: "Preview", kind: .image,
+                    presentation: .init(requestedSurface: .inline, inlineTapAction: .sheet),
+                    eligibleSurfaces: [.inline, .sheet], fallbackText: "Unavailable",
+                    artifact: .init(id: "11111111-2222-4333-8444-555555555555", name: "image.jpg", mimeType: "image/jpeg",
+                                    size: fixture.encodedData.count, kind: .image))
+                let state = InlinePhotoResumeFixture.State(ready: mode == 1, active: mode == 0)
+                let identity = try XCTUnwrap(model.chatMediaIdentity(blobID: "11111111-2222-4333-8444-555555555555", sessionID: "photo-fixture"))
+                try await self.withSheet(InlinePhotoResumeFixture(tool: self.routingTool(id: "photo", display: display).descriptor,
+                                                                 state: state).environment(model)) { controller in
+                    XCTAssertFalse(self.views(of: UIActivityIndicatorView.self, in: controller.view).isEmpty)
+                    state.ready = true
+                    state.active = true
+                    let request = await XCTWaiter.fulfillment(of: [arrived], timeout: 3)
+                    XCTAssertEqual(request, .completed)
+                    // Finish the appearance/readiness callbacks before allowing the
+                    // real loader's response to publish. No sheet or tap wakes it.
+                    for _ in 0..<3 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+                    release.continuation.yield(())
+                    try await self.waitForRouting {
+                        (mode == 3 || model.chatMedia.cachedThumbnail(for: identity) != nil)
+                            && self.views(of: UIActivityIndicatorView.self, in: controller.view).isEmpty
+                    }
+                }
+                await model.teardown()
+            }
+        }
+    }
+
     func testInlinePhotoLoadingSpinnerIsEmerald() async throws {
         let display = DisplayProjection(displayId: "photo", title: "Photo", altText: "Preview", kind: .image,
             presentation: .init(requestedSurface: .inline, inlineTapAction: .sheet),
@@ -1749,6 +1795,22 @@ final class SessionSheetPresentationTests: XCTestCase {
 
     private func views<T: UIView>(of type: T.Type, in root: UIView) -> [T] {
         ((root as? T).map { [$0] } ?? []) + root.subviews.flatMap { views(of: type, in: $0) }
+    }
+}
+
+private struct InlinePhotoResumeFixture: View {
+    @MainActor @Observable final class State {
+        var ready: Bool
+        var active: Bool
+        init(ready: Bool, active: Bool) { self.ready = ready; self.active = active }
+    }
+    let tool: ChatToolDescriptor
+    let state: State
+    var body: some View {
+        DisplayToolView(tool: tool, onOpenTechnicalDetails: {})
+            .environment(\.displayTranscriptReady, state.ready)
+            .environment(\.tronPresentationActivity, state.active ? .active : .covered)
+            .environment(\.canonicalResourceSessionID, "photo-fixture")
     }
 }
 

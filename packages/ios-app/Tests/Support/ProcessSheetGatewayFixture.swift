@@ -8,8 +8,9 @@ final class ProcessSheetGatewayFixture {
     let client: GatewayClient
     let profile = GatewayProfile(id: "process-sheet", label: "Fixture", host: "localhost", port: 9847, machineId: "fixture")
 
-    init() {
-        client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+    init(transport: BoundedHTTPDataTransport = .urlSession) {
+        client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                               boundedHTTPDataTransport: transport)
     }
 
     func connect(model: AppModel? = nil, capabilities: [String] = []) async throws {
