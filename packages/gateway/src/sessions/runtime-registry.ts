@@ -474,6 +474,9 @@ export class RuntimeRegistry {
   private drainFingerprint = "";
   private shutdownState: "active" | "shuttingDown" | "disposed" = "active";
   private disposalPromise: Promise<void> | undefined;
+  private blobsDisposed = false;
+  private exportsDisposed = false;
+  private workspaceDisposed = false;
 
   constructor(
     private readonly options: {
@@ -3632,7 +3635,16 @@ export class RuntimeRegistry {
     if (this.artifactDiscoveryTimer) clearInterval(this.artifactDiscoveryTimer);
     const operation = this.performDispose();
     this.disposalPromise = operation;
-    return operation;
+    try {
+      await operation;
+    } catch (error) {
+      // Keep shuttingDown admission closed, but do not memoize a failed
+      // retirement forever. Successful slots/stores remain retired; failed
+      // owners stay in place for the next attempt and surface the original
+      // error again if that attempt also fails.
+      if (this.disposalPromise === operation) this.disposalPromise = undefined;
+      throw error;
+    }
   }
 
   private async performDispose(): Promise<void> {
@@ -3654,8 +3666,24 @@ export class RuntimeRegistry {
     if (failures.length > 0) {
       throw new AggregateError(failures, "One or more session runtimes failed to shut down");
     }
-    await Promise.all([this.blobs.dispose(), this.exports.dispose(), this.workspace.dispose()]);
+    await this.disposeSharedStores();
     this.shutdownState = "disposed";
+  }
+
+  private async disposeSharedStores(): Promise<void> {
+    const pending: Promise<void>[] = [];
+    if (!this.blobsDisposed) {
+      pending.push(this.blobs.dispose().then(() => { this.blobsDisposed = true; }));
+    }
+    if (!this.exportsDisposed) {
+      pending.push(this.exports.dispose().then(() => { this.exportsDisposed = true; }));
+    }
+    if (!this.workspaceDisposed) {
+      pending.push(this.workspace.dispose().then(() => { this.workspaceDisposed = true; }));
+    }
+    const results = await Promise.allSettled(pending);
+    const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failure) throw failure.reason;
   }
 
   private beginSlotAdmission(): () => void {

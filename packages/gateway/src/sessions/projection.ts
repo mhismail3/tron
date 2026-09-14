@@ -9,14 +9,18 @@ type TranscriptSessionReader = Pick<SessionManager, "getBranch"> & Partial<Pick<
  * persisted this exact result, callers must not publish a second runtime copy,
  * even when the result is outside the bounded transcript tail.
  */
-export function canonicalToolResultCallIDs(manager: TranscriptSessionReader): ReadonlySet<string> {
+export function canonicalToolResultCallIDsFromBranch(branch: readonly SessionEntry[]): ReadonlySet<string> {
   const result = new Set<string>();
-  for (const entry of manager.getBranch()) {
+  for (const entry of branch) {
     if (entry.type === "message" && entry.message.role === "toolResult") {
       result.add(entry.message.toolCallId);
     }
   }
   return result;
+}
+
+export function canonicalToolResultCallIDs(manager: TranscriptSessionReader): ReadonlySet<string> {
+  return canonicalToolResultCallIDsFromBranch(manager.getBranch());
 }
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { GatewayError } from "../errors.js";
@@ -1542,13 +1546,14 @@ export function projectTree(manager: SessionManager, blobs: BlobStore): SessionT
 function projectableTranscriptEntries(
   manager: TranscriptSessionReader,
   presentationIDs?: ReadonlyMap<string, string>,
+  branchCut?: SessionEntry[],
 ): {
   branch: SessionEntry[];
   entries: SessionEntry[];
   contextDelivery: ReadonlyMap<string, ContextDeliveryMetadata>;
   toolSegmentIDs: ReadonlyMap<string, string>;
 } {
-  const branch = manager.getBranch();
+  const branch = branchCut ?? manager.getBranch();
   const contextDelivery = contextDeliveryMetadataByEntry(branch);
   const entries: SessionEntry[] = [];
   const toolSegmentIDs = new Map<string, string>();
@@ -1714,10 +1719,12 @@ export function projectTranscriptPage(
   toolLabels?: ReadonlyMap<string, string>,
   bashMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
   forkAnchor?: ForkBoundaryAnchor,
+  branchCut?: SessionEntry[],
 ): TranscriptPage {
   const { branch, entries, contextDelivery, toolSegmentIDs } = projectableTranscriptEntries(
     manager,
     presentationIDs,
+    branchCut,
   );
   // Reuse this operation's canonical branch cut for receipts as well as rows.
   // Reacquiring it repeats the pinned SDK's full ancestry walk on every page.

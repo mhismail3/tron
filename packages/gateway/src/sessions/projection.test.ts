@@ -14,6 +14,7 @@ import {
   boundCommandContent,
   boundStreamingProgressItem,
   canonicalToolResultCallIDs,
+  canonicalToolResultCallIDsFromBranch,
   COMMAND_CATALOG_BYTES,
   COMMAND_CATALOG_ITEMS,
   COMMAND_CATALOG_STRING_BYTES,
@@ -136,7 +137,24 @@ describe("canonical branch acquisition", () => {
       [{ id: `${userID}:0`, ordinal: 0, type: "text", text: "Input" }],
       [{ id: `${resultID}:0`, ordinal: 0, type: "text", text: "Result" }],
     ]);
-    if (!Array.isArray(projection)) expect(projection).toMatchObject({ start: 0, end: 2, total: 2 });
+    if (!Array.isArray(projection)) {
+      expect(projection).toMatchObject({ start: 0, end: 2, total: 2 });
+      const branchCut = manager.getBranch();
+      const suppliedCut = projectTranscriptPage(
+        { getBranch: () => { throw new Error("unexpected second branch walk"); } },
+        blobs,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        branchCut,
+      );
+      expect(suppliedCut.items.map(item => item.id)).toEqual(items.map(item => item.id));
+    }
     expect(JSON.stringify(manager.getBranch())).toBe(original);
     // Count the real SDK boundary, not an internal projection counter. Both
     // row filtering and invocation binding must consume the same branch cut.
@@ -145,6 +163,13 @@ describe("canonical branch acquisition", () => {
 });
 
 describe("canonical tool ownership", () => {
+  it("recognizes exact tool-result call IDs from a supplied branch cut", () => {
+    const branch = [
+      { type: "message", message: { role: "toolResult", toolCallId: "call-cut" } },
+    ] as any;
+    expect([...canonicalToolResultCallIDsFromBranch(branch)]).toEqual(["call-cut"]);
+  });
+
   it("recognizes exact tool-result call IDs across the full branch", () => {
     const manager = {
       getBranch: () => [
