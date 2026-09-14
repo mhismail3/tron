@@ -971,9 +971,9 @@ struct StaticDisplayWebView: UIViewRepresentable {
         view.isOpaque = false
         view.backgroundColor = UIColor(Color.tronBackground)
         view.scrollView.backgroundColor = UIColor(Color.tronBackground)
-        // The document sheet owns the custom top blur. WebKit's automatic
-        // edge treatment can add a hard cutoff and dividing line beneath it.
-        view.scrollView.topEdgeEffect.isHidden = true
+        // Keep WebKit's native edge treatment soft alongside the sheet's
+        // custom blur; automatic can resolve to a hard cutoff and dividing line.
+        view.scrollView.topEdgeEffect.style = .soft
         return view
     }
 
