@@ -185,21 +185,12 @@ private struct QueueEditingUnavailableSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 12) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(TronTypography.sans(size: 28, weight: .semibold))
-                    .foregroundStyle(Color.tronAmber)
-                    .accessibilityHidden(true)
-                Text("Queue Editing Unavailable")
-                    .font(TronTypography.sheetSectionHeader)
-                    .foregroundStyle(Color.tronTextPrimary)
-                Text("Queue management is no longer available for this Gateway commit.")
-                    .font(TronTypography.secondaryDescription)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(24)
+            TronPlaceholderState(
+                title: "Queue Editing Unavailable",
+                detail: "Queue management is no longer available for this Gateway commit.",
+                icon: "exclamationmark.triangle.fill",
+                accent: .tronAmber
+            )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .tronTopBlurSurface()
             .accessibilityElement(children: .combine)

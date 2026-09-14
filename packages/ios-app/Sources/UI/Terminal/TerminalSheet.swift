@@ -17,7 +17,11 @@ struct TerminalSheet: View {
         NavigationStack {
             Group {
                 if let error = controller.error, controller.terminal == nil {
-                    ContentUnavailableView("Terminal unavailable", systemImage: "terminal", description: Text(error))
+                    ScrollView {
+                        TronPlaceholderState(title: "Terminal unavailable", detail: error,
+                                             icon: "terminal", accent: terminalAccent)
+                    }
+                    .scrollEdgeEffectStyle(.soft, for: .all)
                 } else if let terminal = controller.terminal {
                     let replay = model.terminalReplay(for: terminal.id)
                     NativeTerminal(

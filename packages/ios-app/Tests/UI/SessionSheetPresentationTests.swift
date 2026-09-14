@@ -677,6 +677,70 @@ final class SessionSheetPresentationTests: XCTestCase {
         return pixel
     }
 
+    func testPlaceholderStatesUseInheritedAndSemanticAccents() throws {
+        for scheme: ColorScheme in [.light, .dark] {
+            for explicitAccent: Color? in [nil, .tronSessionTeal] {
+                let renderer = ImageRenderer(content: TronPlaceholderState(
+                    title: "Resources Unavailable",
+                    detail: "Reload the session resources and try again.",
+                    icon: "shippingbox.fill", accent: explicitAccent
+                )
+                .tronSettingsVisualTheme(accent: .tronPurple)
+                .environment(\.colorScheme, scheme)
+                .frame(width: 320)
+                .background(Color.tronBackground))
+                renderer.scale = 1
+                let image = try XCTUnwrap(renderer.uiImage?.cgImage)
+                var pixels = [UInt8](repeating: 0, count: image.width * image.height * 4)
+                try pixels.withUnsafeMutableBytes { buffer in
+                    let context = try XCTUnwrap(CGContext(data: buffer.baseAddress, width: image.width, height: image.height,
+                        bitsPerComponent: 8, bytesPerRow: image.width * 4,
+                        space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+                    context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+                }
+                let traits = UITraitCollection(userInterfaceStyle: scheme == .dark ? .dark : .light)
+                var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+                UIColor(explicitAccent ?? .tronPurple).resolvedColor(with: traits).getRed(&r, green: &g, blue: &b, alpha: &a)
+                var matches = 0
+                for index in stride(from: 0, to: pixels.count, by: 4) {
+                    let red = abs(CGFloat(pixels[index]) / 255 - r)
+                    let green = abs(CGFloat(pixels[index + 1]) / 255 - g)
+                    let blue = abs(CGFloat(pixels[index + 2]) / 255 - b)
+                    if red < 0.08, green < 0.08, blue < 0.08 { matches += 1 }
+                }
+                XCTAssertGreaterThan(matches, 8, "Placeholder icon must inherit the sheet hue unless its category supplies one")
+            }
+        }
+    }
+
+    func testPlaceholderStatesWrapLongDetailsAndPresentThemedRecovery() async throws {
+        for scheme: ColorScheme in [.light, .dark] {
+            try await withSheet(TronDocumentSheet(title: "Sheet states") {
+                ScrollView {
+                    VStack(spacing: 8) {
+                        TronPlaceholderState(title: "Terminal unavailable",
+                            detail: "The connection could not be established. Check the Gateway connection and open the terminal again.",
+                            icon: "terminal", accent: .tronEmerald)
+                        TronPlaceholderState(title: "Resources Unavailable",
+                            detail: "Reload the session resources and try again.",
+                            icon: "shippingbox", accent: .tronSessionTeal)
+                        TronPlaceholderState(title: "History unavailable", detail: "Reconnect to load recorded subagents.",
+                            icon: "clock.arrow.circlepath", accent: .tronSubagent, actionTitle: "Reload", action: {})
+                    }
+                }
+                .tronScrollEdgeChrome()
+            }.presentationDetents([.large]).preferredColorScheme(scheme)) { controller in
+                XCTAssertEqual(self.views(of: VariableBackdropBlurView.self, in: controller.view).count, 1)
+                self.capture(controller, name: "themed-sheet-states-\(scheme)")
+            }
+        }
+        let short = ImageRenderer(content: TronPlaceholderState(title: "Unavailable", detail: "Short detail", icon: "terminal").frame(width: 220))
+        let long = ImageRenderer(content: TronPlaceholderState(title: "Unavailable",
+            detail: String(repeating: "Long failure descriptions must wrap without truncation. ", count: 8), icon: "terminal").frame(width: 220))
+        XCTAssertGreaterThan(try XCTUnwrap(long.uiImage).size.height, try XCTUnwrap(short.uiImage).size.height + 100)
+    }
+
     func testHTMLDocumentUsesOnlyCustomTopBlur() async throws {
         let html = "<meta name='viewport' content='width=device-width, initial-scale=1'><style>body{background:#102720;color:#e0f0ea;font:24px system-ui;padding:20px}p{margin:40px 0}</style><h1>HTML preview</h1>"
             + String(repeating: "<p>Scrollable document content beneath the custom blur.</p>", count: 30)

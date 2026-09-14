@@ -218,10 +218,11 @@ struct ProjectResourcesView: View {
                                 .frame(maxWidth: .infinity)
                         }
                     } else {
-                        ContentUnavailableView(
-                            "Resources Unavailable",
-                            systemImage: "shippingbox",
-                            description: Text("Reload the session resources and try again.")
+                        TronPlaceholderState(
+                            title: "Resources Unavailable",
+                            detail: "Reload the session resources and try again.",
+                            icon: "shippingbox",
+                            accent: .tronSessionTeal
                         )
                     }
                 }

@@ -180,24 +180,13 @@ struct NotificationInboxView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: TronSpacing.md) {
-            Image(systemName: filter == .unread ? "bell.slash" : "bell")
-                .font(TronTypography.sans(size: 34, weight: .medium))
-                .foregroundStyle(Color.tronTextMuted)
-                .symbolRenderingMode(.hierarchical)
-            Text(filter == .unread ? "No unread notifications" : "No notifications yet")
-                .font(TronTypography.headline)
-                .foregroundStyle(Color.tronTextPrimary)
-                .multilineTextAlignment(.center)
-            Text(emptyDescription)
-                .font(TronTypography.bodySM)
-                .foregroundStyle(Color.tronTextSecondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, minHeight: 280)
-        .padding(.horizontal, TronSpacing.xl)
-        .accessibilityElement(children: .combine)
+        TronPlaceholderState(
+            title: filter == .unread ? "No unread notifications" : "No notifications yet",
+            detail: emptyDescription,
+            icon: filter == .unread ? "bell.slash" : "bell",
+            accent: .tronEmerald
+        )
+        .frame(minHeight: 280)
     }
 
     private var viewMoreRow: some View {
@@ -344,17 +333,12 @@ private struct NotificationInboxHistoryView: View {
     }
 
     private var historyEmptyState: some View {
-        VStack(spacing: TronSpacing.md) {
-            Image(systemName: filter == .unread ? "bell.slash" : "clock.arrow.circlepath")
-                .font(TronTypography.sans(size: 34, weight: .medium))
-                .foregroundStyle(Color.tronTextMuted)
-                .symbolRenderingMode(.hierarchical)
-            Text(filter == .unread ? "No unread notifications" : "No notification history")
-                .font(TronTypography.headline)
-                .foregroundStyle(Color.tronTextPrimary)
-        }
-        .frame(maxWidth: .infinity, minHeight: 280)
-        .accessibilityElement(children: .combine)
+        TronPlaceholderState(
+            title: filter == .unread ? "No unread notifications" : "No notification history",
+            icon: filter == .unread ? "bell.slash" : "clock.arrow.circlepath",
+            accent: .tronEmerald
+        )
+        .frame(minHeight: 280)
     }
 }
 

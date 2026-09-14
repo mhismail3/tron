@@ -474,23 +474,8 @@ struct AutomationsDashboardView: View {
     }
 
     private func emptyState(icon: String, title: String, message: String) -> some View {
-        VStack(spacing: TronSpacing.md) {
-            Image(systemName: icon)
-                .font(TronTypography.sans(size: 38, weight: .medium))
-                .foregroundStyle(Color.tronTextMuted)
-                .symbolRenderingMode(.hierarchical)
-            Text(title)
-                .font(TronTypography.headline)
-                .foregroundStyle(Color.tronTextPrimary)
-            Text(message)
-                .font(TronTypography.bodySM)
-                .foregroundStyle(Color.tronTextSecondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, minHeight: 280)
-        .padding(.horizontal, TronSpacing.xl)
-        .accessibilityElement(children: .combine)
+        TronPlaceholderState(title: title, detail: message, icon: icon, accent: .tronAutomation)
+            .frame(minHeight: 280)
     }
 
     private func targetLabel(profileID: String, target: GatewayAutomationTarget) -> String {

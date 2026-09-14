@@ -269,46 +269,11 @@ private struct SessionProcessPlaceholder: View {
     var actionTitle: String?
     var action: (() -> Void)?
 
-    init(
-        title: String,
-        detail: String,
-        icon: String,
-        actionTitle: String? = nil,
-        action: (() -> Void)? = nil
-    ) {
-        self.title = title
-        self.detail = detail
-        self.icon = icon
-        self.actionTitle = actionTitle
-        self.action = action
-    }
-
     var body: some View {
         TronGlassCard(accent: .tronSlate) {
-            VStack(spacing: 10) {
-                Image(systemName: icon)
-                    .font(TronTypography.sans(size: TronTypography.sizeXXL, weight: .semibold))
-                    .foregroundStyle(Color.tronTextMuted)
-                    .accessibilityHidden(true)
-                Text(title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .multilineTextAlignment(.center)
-                Text(detail)
-                    .font(TronTypography.bodySM)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let actionTitle, let action {
-                    Button(actionTitle, action: action)
-                        .buttonStyle(TronActionButtonStyle(expands: false))
-                }
-            }
-            .padding(TronSpacing.xl)
-            .frame(maxWidth: .infinity)
+            TronPlaceholderState(title: title, detail: detail, icon: icon, accent: .tronSubagent,
+                                 actionTitle: actionTitle, action: action)
         }
-        .accessibilityElement(children: action == nil ? .combine : .contain)
-        .accessibilityLabel(action == nil ? "\(title). \(detail)" : title)
     }
 }
 

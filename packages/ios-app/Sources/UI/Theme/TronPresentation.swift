@@ -1925,6 +1925,48 @@ struct TronPulseLoadingIndicator: View {
     }
 }
 
+/// Full-content empty and unavailable states share typography, not a nested card.
+/// Inline explanations and actionable settings errors remain captions/notices.
+struct TronPlaceholderState: View {
+    let title: String
+    var detail: String? = nil
+    let icon: String
+    var accent: Color? = nil
+    var actionTitle: String? = nil
+    var action: (() -> Void)? = nil
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+
+    var body: some View {
+        VStack(spacing: TronSpacing.md) {
+            VStack(spacing: TronSpacing.md) {
+                Image(systemName: icon)
+                    .font(TronTypography.sans(size: 34, weight: .medium))
+                    .foregroundStyle(accent ?? settingsTheme?.accent ?? .tronSlate)
+                    .symbolRenderingMode(.hierarchical)
+                    .accessibilityHidden(true)
+                Text(title)
+                    .font(TronTypography.headline)
+                    .foregroundStyle(Color.tronTextPrimary)
+                if let detail, !detail.isEmpty {
+                    Text(detail)
+                        .font(TronTypography.bodySM)
+                        .foregroundStyle(Color.tronTextSecondary)
+                }
+            }
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityElement(children: .combine)
+            // Keep recovery independently reachable by VoiceOver.
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .buttonStyle(TronActionButtonStyle(expands: false))
+            }
+        }
+        .padding(TronSpacing.xl)
+        .frame(maxWidth: .infinity)
+    }
+}
+
 struct TronLoadingState: View {
     let label: String
     var accent: Color = .tronEmerald

@@ -409,6 +409,17 @@ action is deliberately icon-only and retains an explicit accessibility label. Te
 identity follows the stable provider draft ID, not the identifier being typed. Each row has one Configure
 capsule; a leading Remove action inside its editor opens `TronConfirmationSheet`. Provider field bindings
 resolve by UUID and cannot update a removed or reordered neighbor during dismissal.
+Full-content empty/unavailable states use `TronPlaceholderState`: Tron headline/body typography,
+wrapping secondary details, a decorative category-colored icon, and an independently accessible recovery
+button when the owner supplies one. An explicit category accent wins over the inherited settings theme;
+otherwise the sheet theme supplies the hue. Terminal and Project Resources do not use native
+`ContentUnavailableView`. Notifications/history, Automations, Packages, queue editing, and subagent
+placeholders share this composition; subagents retain their owning glass surface. Loading stays with
+`TronLoadingState`/the Tron pulse. Compact picker misses, inline resource/file notices, and camera/media
+overlays retain their existing themed geometry and contrast rather than expanding into full-page states.
+`SessionSheetPresentationTests` checks light/dark inherited and explicit icon colors, long-detail wrapping,
+and mounted placeholder previews; recovery ownership and loading/error transitions remain unchanged.
+
 Passive Settings explanations use `TronSettingsCaption` / `tronSettingsCaption` immediately below their
 owning group or action, with no glass container or icon. `TronSettingsNotice` is reserved for actionable
 failures, using the shared icon column, reading typography and right-aligned Retry pill. Do not introduce

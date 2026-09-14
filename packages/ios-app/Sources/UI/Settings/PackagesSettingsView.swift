@@ -182,15 +182,11 @@ struct PackagesSettingsView: View {
                             }
                         }
                     } else if packageError == nil {
-                        VStack(spacing: 10) {
-                            Image(systemName: "shippingbox").font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
-                            Text("No packages configured").font(TronTypography.headline)
-                            Text("Use Reload or install a package below.")
-                                .font(TronTypography.bodySM)
-                                .foregroundStyle(Color.tronTextPrimary)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 24)
+                        TronPlaceholderState(
+                            title: "No packages configured",
+                            detail: "Use Reload or install a package below.",
+                            icon: "shippingbox"
+                        )
                     }
                 }
 
