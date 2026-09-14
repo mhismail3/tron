@@ -1580,6 +1580,7 @@ struct ChatViewScrollHarnessTests {
                         && $0.observation.visibleRowIDs.contains(tailSemanticID)
                         && $0.nativeRows.contains { $0.semanticID == tailSemanticID && $0.isVisible }
                         && $0.observation.geometry.distanceFromBottom <= 2
+                        && ((try? harness.nativeTranscriptDistanceFromTail()) ?? .infinity) <= 2
                 }
                 let resumedTail = try #require(resumed.nativeRows.first {
                     $0.semanticID == tailSemanticID && $0.isVisible
