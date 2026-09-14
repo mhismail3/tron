@@ -767,7 +767,11 @@ Rendered identity spines and sets are cached/split so ordinary text/thinking/ima
 share the canonical rows and identities while the kernel constructs only the isolated live suffix.
 Markdown has one pure `Sendable` cold presentation model. It classifies the existing block dialect,
 constructs each inline `AttributedString` once with the established plain-`Text` fallback, and supplies
-the exact immutable document to `TronMarkdownView`; tables intentionally remain raw cell `Text`.
+the exact immutable document to `TronMarkdownView`. Table header and body cells use that same prepared
+inline representation, preserving bold, italic, combined emphasis, strikethrough, inline code, links,
+and escaped literals instead of displaying Markdown delimiters. Their attributed storage participates
+in the existing document byte accounting; rendering does not reparse cell strings. Table sizing,
+horizontal scrolling, ragged-row padding, and block identities remain unchanged.
 Block and list identities combine exact content with UTF-8 source ranges, so equal duplicates remain
 distinct. Code-header progress is eligible only for the one unterminated fence while its owning response
 is still streaming; closed fences settle immediately and every fence is terminal when the response settles.

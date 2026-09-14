@@ -66,7 +66,7 @@ enum MarkdownPresentation: Sendable {
             case code(language: String?, code: String)
             case quote(Inline)
             case list([ListItem])
-            case table([[String]])
+            case table([[Inline]])
             case rule
 
             var accountedByteCount: Int {
@@ -81,7 +81,7 @@ enum MarkdownPresentation: Sendable {
                     items.reduce(0) { $0 + $1.accountedByteCount }
                 case .table(let rows):
                     rows.reduce(0) { total, row in
-                        total + row.reduce(0) { $0 + $1.utf8.count }
+                        total + row.reduce(0) { $0 + $1.accountedByteCount }
                     }
                 case .rule:
                     0
@@ -217,7 +217,9 @@ enum MarkdownPresentation: Sendable {
                         index += 1
                     }
                     append(
-                        .table(rows),
+                        // Prepare cell styling once with the rest of the document,
+                        // rather than reparsing Markdown during SwiftUI layout.
+                        .table(rows.map { $0.map { Inline(source: $0) } }),
                         lines: lines,
                         start: start,
                         end: index,

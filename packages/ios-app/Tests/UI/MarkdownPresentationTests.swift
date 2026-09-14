@@ -50,7 +50,7 @@ struct MarkdownPresentationTests {
         #expect(items.map(\.inline.source) == ["one", "two"])
         #expect(code == " code  ")
         #expect(!document.blocks[3].isOpenCodeFence)
-        #expect(rows == [["a", "b"], ["c", "d"]])
+        #expect(rows.map { $0.map(\.source) } == [["a", "b"], ["c", "d"]])
     }
 
     @Test("equal duplicate blocks and list items remain distinct by exact source range")
@@ -146,14 +146,14 @@ struct MarkdownPresentationTests {
         #expect(inline.accessibilitySource == inline.source)
     }
 
-    @Test("tables retain raw Text cells, escaped-pipe splitting, and paragraph promotion quirks")
+    @Test("tables retain exact cell sources, escaped-pipe splitting, and paragraph promotion quirks")
     func tableQuirks() throws {
         let escaped = MarkdownPresentation.Document(source: "a\\|b | c\n---|---|---\nx\\|y | z")
         guard case .table(let rows) = try #require(escaped.blocks.first).kind else {
             Issue.record("escaped-pipe fixture was not promoted to a table")
             return
         }
-        #expect(rows == [["a\\", "b", "c"], ["x\\", "y", "z"]])
+        #expect(rows.map { $0.map(\.source) } == [["a\\", "b", "c"], ["x\\", "y", "z"]])
 
         let absorbed = MarkdownPresentation.Document(source: "intro\nh|v\n-|-")
         guard case .paragraph(let paragraph) = try #require(absorbed.blocks.first).kind else {
@@ -162,6 +162,38 @@ struct MarkdownPresentationTests {
         }
         #expect(absorbed.blocks.count == 1)
         #expect(paragraph.source == "intro\nh|v\n-|-")
+    }
+
+    @Test("table headers and body cells prepare inline Markdown styling and account for its storage")
+    func styledTableCells() throws {
+        let source = "| **Header** | *Emphasis* |\n| --- | --- |\n| **bold** and *italic* | ~~removed~~ and `code` |\n| [link](https://example.com) | ***both*** and \\*literal\\* |\n| short |"
+        let document = MarkdownPresentation.Document(source: source)
+        guard case .table(let rows) = try #require(document.blocks.first).kind else {
+            Issue.record("Expected table")
+            return
+        }
+        #expect(rows.count == 4)
+        #expect(rows.last?.count == 1)
+        #expect(rows[0][0].source == "**Header**")
+        let header = try #require(rows[0][0].attributedString)
+        #expect(String(header.characters) == "Header")
+        #expect(header.runs.contains { $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true })
+        let body = try #require(rows[1][0].attributedString)
+        #expect(String(body.characters) == "bold and italic")
+        #expect(body.runs.contains { $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true })
+        #expect(body.runs.contains { $0.inlinePresentationIntent?.contains(.emphasized) == true })
+        let code = try #require(rows[1][1].attributedString)
+        #expect(code.runs.contains { $0.inlinePresentationIntent?.contains(.strikethrough) == true })
+        #expect(code.runs.contains { $0.inlinePresentationIntent?.contains(.code) == true })
+        let link = try #require(rows[2][0].attributedString)
+        #expect(link.runs.first?.link == URL(string: "https://example.com"))
+        let nested = try #require(rows[2][1].attributedString)
+        #expect(String(nested.characters) == "both and *literal*")
+        #expect(nested.runs.contains {
+            $0.inlinePresentationIntent?.contains([.stronglyEmphasized, .emphasized]) == true
+        })
+        #expect(document.blocks[0].kind.accountedByteCount == rows.flatMap { $0 }.reduce(0) { $0 + $1.accountedByteCount })
+        #expect(document.source == source)
     }
 
     @Test("UTF-8 ranges use byte boundaries without changing Unicode source")

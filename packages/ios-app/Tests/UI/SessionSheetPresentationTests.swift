@@ -741,6 +741,32 @@ final class SessionSheetPresentationTests: XCTestCase {
         XCTAssertGreaterThan(try XCTUnwrap(long.uiImage).size.height, try XCTUnwrap(short.uiImage).size.height + 100)
     }
 
+    func testMarkdownTablesRenderInlineStylesInBothAppearances() async throws {
+        let markdown = """
+        | **Priority** | *Finding* |
+        | --- | --- |
+        | **1** | **Bold** and *italic* |
+        | **2** | ~~Removed~~ and `code` |
+        | **3** | ***Combined emphasis*** |
+        | **4** | [A link](https://example.com) |
+        | **5** | Plain text |
+        | short |
+        """
+        for scheme: ColorScheme in [.light, .dark] {
+            for streaming in [false, true] {
+                try await withSheet(TronDocumentSheet(title: "Table formatting") {
+                    ScrollView {
+                        TronMarkdownView(text: markdown, streaming: streaming).padding(20)
+                    }.tronScrollEdgeChrome()
+                }.preferredColorScheme(scheme)) { controller in
+                    let scrolls = self.views(of: UIScrollView.self, in: controller.view)
+                    XCTAssertGreaterThanOrEqual(scrolls.count, 2, "Keep the table's horizontal scroll owner inside the document")
+                    self.capture(controller, name: "markdown-table-styles-\(scheme)-\(streaming)")
+                }
+            }
+        }
+    }
+
     func testHTMLDocumentUsesOnlyCustomTopBlur() async throws {
         let html = "<meta name='viewport' content='width=device-width, initial-scale=1'><style>body{background:#102720;color:#e0f0ea;font:24px system-ui;padding:20px}p{margin:40px 0}</style><h1>HTML preview</h1>"
             + String(repeating: "<p>Scrollable document content beneath the custom blur.</p>", count: 30)

@@ -89,12 +89,6 @@ struct TronMarkdownView: View {
         )
     }
 
-    private func inline(_ value: MarkdownPresentation.Inline) -> Text {
-        if let attributed = value.attributedString {
-            return Text(attributed)
-        }
-        return Text(value.source)
-    }
 }
 
 extension View {
@@ -140,8 +134,14 @@ private struct CodeBlock: View {
 }
 
 private struct MarkdownTable: View {
-    let rows: [[String]]
+    let rows: [[MarkdownPresentation.Inline]]
     private var widths: Int { rows.map(\.count).max() ?? 0 }
+
+    private func cell(_ value: MarkdownPresentation.Inline?) -> Text {
+        guard let value else { return Text("") }
+        if let attributed = value.attributedString { return Text(attributed) }
+        return Text(value.source)
+    }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: true) {
@@ -149,7 +149,7 @@ private struct MarkdownTable: View {
                 ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
                     GridRow {
                         ForEach(0..<widths, id: \.self) { column in
-                            Text(column < row.count ? row[column] : "")
+                            cell(column < row.count ? row[column] : nil)
                                 .font(TronFont.body(12, weight: rowIndex == 0 ? .semibold : .regular))
                                 .padding(.vertical, 2)
                         }
