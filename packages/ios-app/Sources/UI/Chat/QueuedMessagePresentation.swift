@@ -426,6 +426,10 @@ struct QueuedMessageRow: View {
         behavior == .steer ? "After the current turn" : "After current work"
     }
 
+    private var displayText: String {
+        UserPromptPresentationPolicy.promptDisplayText(message.resourceInvocation) ?? message.text
+    }
+
     var body: some View {
         // Queue cards use the same single bounded layout as prompt bubbles;
         // switching between intrinsic and wrapped ViewThatFits branches after
@@ -433,6 +437,7 @@ struct QueuedMessageRow: View {
         card.fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: UserPromptTextLayoutPolicy.maximumWidth, alignment: .trailing)
         .contextMenu {
+            ChatMessageCopyButton(text: displayText)
             if isManageable && !isMutating {
                 if canMoveEarlier {
                     Button("Move earlier", systemImage: "arrow.up") { onMove(-1) }
@@ -458,7 +463,7 @@ struct QueuedMessageRow: View {
             }
             ChatPromptCard(
                 behavior: behavior,
-                text: UserPromptPresentationPolicy.promptDisplayText(message.resourceInvocation) ?? message.text,
+                text: displayText,
                 detail: "\(deliveryDetail) · \(position) of \(total)",
                 isInteractive: isManageable,
                 onActivate: isManageable && !isMutating ? onEdit : nil,

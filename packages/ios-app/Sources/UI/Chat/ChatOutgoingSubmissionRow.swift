@@ -1,6 +1,34 @@
 import SwiftUI
 import UIKit
 
+/// Attach to the bounded message surface, never the full-width row or resource
+/// chips. The caller supplies displayed text so prompt expansion stays private.
+struct ChatMessageCopyMenu: ViewModifier {
+    let text: String
+
+    func body(content: Content) -> some View {
+        content
+            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: ChatPromptContainerStyle.cornerRadius))
+            .contextMenu {
+                ChatMessageCopyButton(text: text)
+            }
+    }
+}
+
+/// Reused inside the queue's existing menu so a second long-press owner cannot
+/// hide its reorder/clear actions. Empty, attachment-only messages have no Copy.
+struct ChatMessageCopyButton: View {
+    let text: String
+
+    var body: some View {
+        if !text.isEmpty {
+            Button("Copy", systemImage: "doc.on.doc") {
+                UIPasteboard.general.string = text
+            }
+        }
+    }
+}
+
 /// Shared behavior-aware visual core for queued-kind prompt lifecycles. The
 /// surrounding shell owns whether facts are optimistic, pending, or
 /// authoritative; this card never invents queue position or edit capability.
@@ -159,6 +187,7 @@ struct ChatPendingPromptRow: View, Equatable {
                             .padding(.top, ChatPromptContainerStyle.topPadding)
                             .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
                             .modifier(UserPromptGlassModifier())
+                            .modifier(ChatMessageCopyMenu(text: displayText))
                     }
                     let attachmentChips = QueuedMessageAttachmentPresentation.chips(
                         attachmentCount: presentation.attachmentCount,
@@ -217,6 +246,7 @@ struct ChatPendingPromptRow: View, Equatable {
                 },
                 statusContent: { EmptyView() }
             )
+            .modifier(ChatMessageCopyMenu(text: displayText))
         }
     }
 }
@@ -251,6 +281,7 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                         attachmentContent: { queuedAttachmentChips },
                         statusContent: { EmptyView() }
                     )
+                    .modifier(ChatMessageCopyMenu(text: displayText))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
@@ -270,6 +301,7 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                         .padding(.top, ChatPromptContainerStyle.topPadding)
                         .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
                         .modifier(UserPromptGlassModifier())
+                        .modifier(ChatMessageCopyMenu(text: displayText))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)

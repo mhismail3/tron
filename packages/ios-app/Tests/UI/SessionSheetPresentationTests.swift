@@ -1178,6 +1178,67 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testOutgoingAndQueuedCopyMenusRetainOneNativeOwner() async throws {
+        let arguments = "  Copy this exact input\nnot the template. 👋  "
+        let resource = ComposerResourceInvocation(source: .prompt, name: "review", arguments: arguments)
+        for behavior: String? in [nil, "steer", "followUp"] {
+            let submission = ComposerSubmissionSnapshot(target: .init(sessionID: "copy", generation: 1),
+                textRevision: 1, outgoingText: "Expanded template", resourceInvocation: resource,
+                attachmentIDs: [], behavior: behavior, localNonce: 1)
+            try await withSheet(ChatOutgoingSubmissionRow(
+                presentation: .init(snapshot: submission, transportActive: true), attachments: [])) { controller in
+                let interactions = self.views(of: UIView.self, in: controller.view).flatMap(\.interactions)
+                    .compactMap { $0 as? UIContextMenuInteraction }
+                XCTAssertEqual(interactions.count, 1)
+                XCTAssertTrue(self.views(of: UILabel.self, in: controller.view).contains { $0.text == arguments })
+            }
+        }
+        let message = SessionSnapshot.QueuedMessage(id: "copy-queue", behavior: .steer,
+            text: "Expanded template", attachmentCount: 0, resourceInvocation: resource)
+        for availability: QueuedMessageManagementAvailability in [.available, .requiresGatewayUpdate, .invalidProjection] {
+            for mutating in [false, true] {
+                try await withSheet(QueuedMessageRow(message: message, position: 2, total: 3,
+                    managementAvailability: availability, isMutating: mutating,
+                    onEdit: { XCTFail("Long-press registration must not edit") },
+                    onClear: { XCTFail("Long-press registration must not clear") },
+                    canMoveEarlier: true, canMoveLater: true,
+                    onMove: { _ in XCTFail("Long-press registration must not reorder") })) { controller in
+                    let interactions = self.views(of: UIView.self, in: controller.view).flatMap(\.interactions)
+                        .compactMap { $0 as? UIContextMenuInteraction }
+                    XCTAssertEqual(interactions.count, 1, "Copy must join the queue menu, never shadow its management actions")
+                    XCTAssertTrue(self.views(of: UILabel.self, in: controller.view).contains { $0.text == arguments })
+                }
+            }
+        }
+    }
+
+    func testPendingPromptCopyMenuUsesNativeInteractionAcrossCardStates() async throws {
+        let arguments = "  Preserve whitespace\n\tand Unicode: café 👋  "
+        for behavior: SessionSnapshot.QueuedMessage.Behavior? in [nil, .steer, .followUp] {
+            let pending = SessionSnapshot.PendingPrompt(
+                id: "copy-pending", createdAt: nil, behavior: behavior,
+                text: "Expanded template must not be copied", attachmentCount: 0,
+                resourceInvocation: .init(source: .prompt, name: "review", arguments: arguments)
+            )
+            try await withSheet(ChatPendingPromptRow(presentation: .init(snapshot: pending, isCompacting: false))) { controller in
+                let interactions = self.views(of: UIView.self, in: controller.view).flatMap(\.interactions)
+                    .compactMap { $0 as? UIContextMenuInteraction }
+                XCTAssertEqual(interactions.count, 1, "One native menu belongs to the bounded message surface")
+                let texts = self.views(of: UILabel.self, in: controller.view).compactMap(\.text)
+                XCTAssertTrue(texts.contains(arguments))
+                XCTAssertFalse(texts.contains(pending.text))
+            }
+        }
+        let empty = SessionSnapshot.PendingPrompt(id: "copy-empty", createdAt: nil, behavior: nil,
+            text: "Expanded template must not be copied", attachmentCount: 0,
+            resourceInvocation: .init(source: .prompt, name: "review", arguments: ""))
+        try await withSheet(ChatPendingPromptRow(presentation: .init(snapshot: empty, isCompacting: false))) { controller in
+            let interactions = self.views(of: UIView.self, in: controller.view).flatMap(\.interactions)
+                .compactMap { $0 as? UIContextMenuInteraction }
+            XCTAssertTrue(interactions.isEmpty, "A chip-only prompt must retain the resource action, not an empty Copy menu")
+        }
+    }
+
     func testPromptTemplateRowCollapsesExpandedContentWithoutChangingInput() async throws {
         let expanded = String(repeating: "Review the implementation for correctness and preserve every important behavior.\n", count: 80)
         let content = ContentPart(id: "prompt-text", ordinal: 0, thinkingRunOrdinal: nil,
@@ -1208,6 +1269,9 @@ final class SessionSheetPresentationTests: XCTestCase {
                         XCTAssertGreaterThan(scroll.contentSize.height, 500)
                     }
                     XCTAssertEqual(item.content, [content])
+                    let interactions = self.views(of: UIView.self, in: controller.view).flatMap(\.interactions)
+                        .compactMap { $0 as? UIContextMenuInteraction }
+                    XCTAssertEqual(interactions.count, 1, "Canonical user text must expose one native Copy menu")
                 }
             }
         }

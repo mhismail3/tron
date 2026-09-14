@@ -222,6 +222,7 @@ struct TranscriptRow: View, Equatable {
                                         .padding(.top, ChatPromptContainerStyle.topPadding)
                                         .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
                                         .modifier(UserPromptGlassModifier())
+                                        .modifier(ChatMessageCopyMenu(text: text))
                                 }
                             } else {
                                 MarkdownText(
