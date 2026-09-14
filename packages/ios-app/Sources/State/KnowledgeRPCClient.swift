@@ -70,21 +70,21 @@ final class KnowledgeRPCClient {
         struct Params: Encodable { let url: String; let scope: KnowledgeScope; let title: String }
         return try await mutate("knowledge.source.capture", parameters: Params(url: url, scope: scope, title: title))
     }
-    func createNote(_ record: KnowledgeRecordDraft) async throws -> KnowledgeMutationResult {
-        struct Params: Encodable { let record: KnowledgeRecordDraft }
-        return try await mutate("knowledge.note.create", parameters: Params(record: record))
+    func createNote(_ record: KnowledgeRecordDraft, confirmedByUser: Bool = true) async throws -> KnowledgeMutationResult {
+        struct Params: Encodable { let record: KnowledgeRecordDraft; let confirmedByUser: Bool }
+        return try await mutate("knowledge.note.create", parameters: Params(record: record, confirmedByUser: confirmedByUser))
     }
-    func updateNote(id: String, expectedRevision: String, record: KnowledgeRecordDraft) async throws -> KnowledgeMutationResult {
-        struct Params: Encodable { let recordId: String; let expectedRevision: String; let record: KnowledgeRecordDraft }
-        return try await mutate("knowledge.note.update", parameters: Params(recordId: id, expectedRevision: expectedRevision, record: record))
+    func updateNote(id: String, expectedRevision: String, record: KnowledgeRecordDraft, confirmedByUser: Bool = true) async throws -> KnowledgeMutationResult {
+        struct Params: Encodable { let recordId: String; let expectedRevision: String; let record: KnowledgeRecordDraft; let confirmedByUser: Bool }
+        return try await mutate("knowledge.note.update", parameters: Params(recordId: id, expectedRevision: expectedRevision, record: record, confirmedByUser: confirmedByUser))
     }
     func triage(sourceID: String, expectedRevision: String) async throws -> KnowledgeTriageResult {
         struct Params: Encodable { let sourceId: String; let expectedRevision: String }
         return try await mutate("knowledge.source.triage", parameters: Params(sourceId: sourceID, expectedRevision: expectedRevision))
     }
     func correct(id: String, expectedRevision: String, replacement: KnowledgeRecordDraft, relation: KnowledgeRelation) async throws -> KnowledgeMutationResult {
-        struct Params: Encodable { let recordId: String; let expectedRevision: String; let replacement: KnowledgeRecordDraft; let relation: KnowledgeRelation }
-        return try await mutate("knowledge.correction", parameters: Params(recordId: id, expectedRevision: expectedRevision, replacement: replacement, relation: relation))
+        struct Params: Encodable { let recordId: String; let expectedRevision: String; let replacement: KnowledgeRecordDraft; let relation: KnowledgeRelation; let confirmedByUser: Bool }
+        return try await mutate("knowledge.correction", parameters: Params(recordId: id, expectedRevision: expectedRevision, replacement: replacement, relation: relation, confirmedByUser: true))
     }
     func forget(id: String, expectedRevision: String? = nil, reason: String) async throws -> KnowledgeForgetResult {
         struct Params: Encodable { let recordId: String; let expectedRevision: String?; let reason: String }

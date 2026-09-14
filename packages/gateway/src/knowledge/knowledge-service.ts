@@ -159,7 +159,13 @@ export class KnowledgeService {
         return this.store.reflect(action.request.commandId, action.request.sessionId, action.request.sourceRevisionIds, text);
         });
       }
-      case "knowledge.correction": return this.store.correct(action.request.commandId, action.request.recordId, action.request.expectedRevision, { ...action.request.replacement, provenance: { ...action.request.replacement.provenance, actor: "user" as const } }, action.request.relation);
+      case "knowledge.correction": {
+        const replacement = action.request.replacement;
+        const normalized = replacement.kind === "note"
+          ? { ...replacement, provenance: { ...replacement.provenance, actor: "user" as const }, content: { ...replacement.content, confirmed: action.request.confirmedByUser === true && replacement.content.confirmed } }
+          : { ...replacement, provenance: { ...replacement.provenance, actor: "user" as const } };
+        return this.store.correct(action.request.commandId, action.request.recordId, action.request.expectedRevision, normalized, action.request.relation);
+      }
       case "knowledge.forget": return this.store.forget(action.request.commandId, action.request.recordId, action.request.reason, action.request.expectedRevision);
       case "knowledge.exclusion":
         if (action.request.recordId) return this.store.setExclusion(action.request.commandId, action.request.recordId, action.request.excluded, action.request.expectedRevision, action.request.reason);

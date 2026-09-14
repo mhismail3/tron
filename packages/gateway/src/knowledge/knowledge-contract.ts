@@ -345,6 +345,8 @@ export interface KnowledgeNoteMutationRequest {
 
 export interface KnowledgeCorrectionRequest {
   commandId: string;
+  /** Set only by the trusted native confirmation owner. */
+  confirmedByUser?: boolean;
   recordId: string;
   expectedRevision: string;
   replacement: KnowledgeRecordDraft;

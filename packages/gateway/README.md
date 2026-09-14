@@ -57,7 +57,8 @@ positive budget alone never permits an API call. Remote Raindrop moves
 preflight the exact incoming provider/account/item origin and readable source
 revision before persisting or applying the effect. Legacy exclusions are
 withheld rather than copied and hidden; native import exposes bounded offset
-continuation.
+continuation. Native note/correction mutations carry an explicit confirmation
+bit; agent-tool notes remain agent-authored and unconfirmed.
 
 ## Pi SDK maintenance
 
