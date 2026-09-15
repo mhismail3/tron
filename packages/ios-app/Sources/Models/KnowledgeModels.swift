@@ -83,7 +83,9 @@ final class KnowledgeCoveragePresentationStore {
             }
             if cursor == nil { cuts = page.coverage } else { cuts.append(contentsOf: page.coverage.filter { !cuts.contains($0) }) }
             nextCursor = page.nextCursor; stateRevision = page.stateRevision; loading = false
-        } catch is CancellationError { return }
+        } catch is CancellationError {
+            if ticket == generation { loading = false }
+        }
         catch {
             guard ticket == generation, isCurrent() else { return }
             self.error = error.localizedDescription; loading = false
@@ -107,6 +109,17 @@ struct KnowledgeObjectReaderState: Sendable {
     var bytes = Data(); var totalBytes: Int?; var nextOffset: Int?; var loading = false; var error: String?; var generation = 0
 }
 
+enum KnowledgeObjectPresentationPolicy {
+    static func renderedText(_ bytes: Data, mediaType: String, label: String) -> String {
+        let type = mediaType.lowercased()
+        if type.hasPrefix("text/") || type == "application/json" || type == "application/xml" {
+            if let text = String(data: bytes, encoding: .utf8) { return text }
+            return String(decoding: bytes, as: UTF8.self)
+        }
+        return "Binary \(label) (\(bytes.count) bytes loaded)"
+    }
+}
+
 /// Owns linked-record reads for the active detail. A late response cannot
 /// navigate after a newer citation, dismissal, or Gateway profile change.
 @MainActor @Observable
@@ -127,7 +140,9 @@ final class KnowledgeLinkedRecordReaderStore {
             guard !Task.isCancelled, ticket == generation, generation == ownerGeneration, isCurrent() else { return }
             loading = false
             if let value { record = value } else { error = "Linked record is unavailable, excluded, or forgotten. Retry from this detail." }
-        } catch is CancellationError { return }
+        } catch is CancellationError {
+            if ticket == generation, generation == ownerGeneration { loading = false }
+        }
         catch {
             guard ticket == generation, generation == ownerGeneration, isCurrent() else { return }
             loading = false; self.error = error.localizedDescription
@@ -135,15 +150,25 @@ final class KnowledgeLinkedRecordReaderStore {
     }
 }
 
-/// One reader state per exact record revision and representation. Continuation
-/// offsets are never shared across primary/API/article objects.
+/// One bounded reader state for the currently selected exact record revision
+/// and representation. Continuation offsets are never shared across objects,
+/// and changing selection releases the prior representation.
 @MainActor @Observable
 final class KnowledgeObjectReaderStore {
+    // A detail can switch representations, but it only owns one bounded byte
+    // buffer at a time. Keeping old revisions here would turn a presentation
+    // projection into an unbounded corpus cache.
     private(set) var states: [KnowledgeObjectSelectionKey: KnowledgeObjectReaderState] = [:]
+    private var activeKey: KnowledgeObjectSelectionKey?
     private var generation = 0
 
-    func state(for key: KnowledgeObjectSelectionKey) -> KnowledgeObjectReaderState { states[key] ?? KnowledgeObjectReaderState() }
-    func suspend() { generation &+= 1 }
+    func state(for key: KnowledgeObjectSelectionKey) -> KnowledgeObjectReaderState { activeKey == key ? (states[key] ?? KnowledgeObjectReaderState()) : KnowledgeObjectReaderState() }
+    func suspend() {
+        generation &+= 1
+        guard let activeKey, var state = states[activeKey] else { return }
+        state.loading = false
+        states[activeKey] = state
+    }
 
     func load(
         _ key: KnowledgeObjectSelectionKey,
@@ -152,15 +177,31 @@ final class KnowledgeObjectReaderStore {
         isCurrent: @MainActor () -> Bool
     ) async {
         guard !Task.isCancelled, isCurrent() else { return }
+        if activeKey != key {
+            states.removeAll(keepingCapacity: true)
+            activeKey = key
+        }
         var current = states[key] ?? KnowledgeObjectReaderState()
         current.generation &+= 1; let ticket = current.generation; let ownerGeneration = generation
         current.loading = true; current.error = nil; states[key] = current
         let requestedOffset = max(0, offset)
         do {
             let value = try await request(key.reference, requestedOffset)
-            guard !Task.isCancelled, generation == ownerGeneration, isCurrent(), states[key]?.generation == ticket else { return }
-            guard let value, let bytes = Data(base64Encoded: value.base64) else {
-                states[key]?.loading = false; states[key]?.error = "Retained object is unavailable or excluded."; return
+            guard !Task.isCancelled, generation == ownerGeneration, isCurrent(), activeKey == key, states[key]?.generation == ticket else { return }
+            guard let value, let bytes = Data(base64Encoded: value.base64),
+                  value.hash == key.reference.hash,
+                  value.mediaType == key.reference.mediaType,
+                  value.bytes >= 0, value.bytes <= 512_000,
+                  value.totalBytes == key.reference.bytes, value.totalBytes! >= 0, value.totalBytes! <= 512_000,
+                  value.offset == requestedOffset,
+                  bytes.count == value.bytes,
+                  value.offset! <= value.totalBytes! - value.bytes,
+                  (value.nextOffset == nil
+                    ? value.offset! + value.bytes == value.totalBytes!
+                    : value.nextOffset == value.offset! + value.bytes && value.nextOffset! > value.offset! && value.nextOffset! <= value.totalBytes!) else {
+                states[key]?.loading = false
+                states[key]?.error = "Retained object response is invalid."
+                return
             }
             var updated = states[key] ?? KnowledgeObjectReaderState()
             guard requestedOffset == 0 || requestedOffset == updated.bytes.count else {
@@ -168,9 +209,13 @@ final class KnowledgeObjectReaderStore {
             }
             if requestedOffset == 0 { updated.bytes = bytes } else { updated.bytes.append(bytes) }
             updated.totalBytes = value.totalBytes; updated.nextOffset = value.nextOffset; updated.loading = false; states[key] = updated
-        } catch is CancellationError { return }
+        } catch is CancellationError {
+            // Cancellation must not leave the button disabled when the detail
+            // becomes active again. A newer request still owns its own ticket.
+            if generation == ownerGeneration, activeKey == key, states[key]?.generation == ticket { states[key]?.loading = false }
+        }
         catch {
-            guard generation == ownerGeneration, isCurrent(), states[key]?.generation == ticket else { return }
+            guard generation == ownerGeneration, isCurrent(), activeKey == key, states[key]?.generation == ticket else { return }
             states[key]?.loading = false; states[key]?.error = error.localizedDescription
         }
     }

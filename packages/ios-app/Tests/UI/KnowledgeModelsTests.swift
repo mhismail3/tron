@@ -54,12 +54,12 @@ final class KnowledgeModelsTests: XCTestCase {
                 return .object(["records": .array([]), "nextCursor": .string("page-2"), "stateRevision": .number(7)])
             case "knowledge.object.read":
                 let offset = parameters.objectValue?["offset"]?.intValue ?? 0
-                let text = offset == 0 ? "first" : "second"
+                let text = offset == 0 ? "first-" : "second"
                 let bytes = Data(text.utf8).base64EncodedString()
                 return .object([
                     "hash": .string(hash), "mediaType": .string("text/plain"),
-                    "bytes": .number(Double(text.utf8.count)), "totalBytes": .number(10),
-                    "offset": .number(Double(offset)), "nextOffset": offset == 0 ? .number(5) : .null,
+                    "bytes": .number(Double(text.utf8.count)), "totalBytes": .number(12),
+                    "offset": .number(Double(offset)), "nextOffset": offset == 0 ? .number(6) : .null,
                     "base64": .string(bytes)
                 ])
             default:
@@ -70,17 +70,42 @@ final class KnowledgeModelsTests: XCTestCase {
         let page = try await client.list(limit: 100)
         XCTAssertEqual(page.nextCursor, "page-2")
         XCTAssertEqual(requests.first?.0, "knowledge.list")
-        let object = KnowledgeObjectRef(hash: hash, mediaType: "text/plain", bytes: 10)
+        let object = KnowledgeObjectRef(hash: hash, mediaType: "text/plain", bytes: 12)
         let firstResult = try await client.readObject(object, recordID: "source-1", revisionID: "revision-1", offset: 0)
         let first: KnowledgeObjectRead = try XCTUnwrap(firstResult)
         let nextOffset: Int = try XCTUnwrap(first.nextOffset)
         let secondResult = try await client.readObject(object, recordID: "source-1", revisionID: "revision-1", offset: nextOffset)
         let second: KnowledgeObjectRead = try XCTUnwrap(secondResult)
-        XCTAssertEqual(Data(base64Encoded: first.base64).flatMap { String(data: $0, encoding: .utf8) }, "first")
+        XCTAssertEqual(Data(base64Encoded: first.base64).flatMap { String(data: $0, encoding: .utf8) }, "first-")
         XCTAssertEqual(Data(base64Encoded: second.base64).flatMap { String(data: $0, encoding: .utf8) }, "second")
-        XCTAssertEqual(requests.compactMap { $0.1.objectValue?["offset"]?.intValue }, [0, 5])
+        XCTAssertEqual(requests.compactMap { $0.1.objectValue?["offset"]?.intValue }, [0, 6])
         XCTAssertEqual(requests.compactMap { $0.1.objectValue?["recordId"]?.stringValue }, ["source-1", "source-1"])
         XCTAssertEqual(requests.compactMap { $0.1.objectValue?["revisionId"]?.stringValue }, ["revision-1", "revision-1"])
+    }
+
+    @MainActor
+    func testKnowledgeRPCRejectsMalformedObjectEnvelope() async {
+        let hash = String(repeating: "c", count: 64)
+        let client = KnowledgeRPCClient(request: { method, _, _ in
+            XCTAssertEqual(method, "knowledge.object.read")
+            return .object(["hash": .string(hash), "mediaType": .string("text/plain"), "bytes": .number(4), "totalBytes": .number(6), "offset": .number(0), "nextOffset": .null, "base64": .string(Data("four".utf8).base64EncodedString())])
+        })
+        do {
+            _ = try await client.readObject(KnowledgeObjectRef(hash: hash, mediaType: "text/plain", bytes: 6), recordID: "source", revisionID: "revision")
+            XCTFail("Malformed final chunk must be rejected")
+        } catch let error as GatewayFailure {
+            XCTAssertEqual(error.code, "invalid_response")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testPartialUTF8TextRemainsTextualUntilTheNextChunkArrives() {
+        let prefix = Data([0x63, 0x61, 0x66, 0xC3])
+        let rendered = KnowledgeObjectPresentationPolicy.renderedText(prefix, mediaType: "text/plain", label: "source")
+        XCTAssertFalse(rendered.contains("Binary"))
+        XCTAssertTrue(rendered.hasPrefix("caf"))
+        XCTAssertEqual(KnowledgeObjectPresentationPolicy.renderedText(Data([0x00, 0x01]), mediaType: "application/octet-stream", label: "source"), "Binary source (2 bytes loaded)")
     }
 
     @MainActor
@@ -139,43 +164,64 @@ final class KnowledgeModelsTests: XCTestCase {
 
     @MainActor
     func testObjectReaderOwnerKeepsMultichunkRepresentationsAndRetiresLateResponse() async {
-        let primary = KnowledgeObjectRef(hash: String(repeating: "p", count: 64), mediaType: "text/plain", bytes: 10)
+        let primary = KnowledgeObjectRef(hash: String(repeating: "p", count: 64), mediaType: "text/plain", bytes: 12)
         let article = KnowledgeObjectRef(hash: String(repeating: "a", count: 64), mediaType: "text/html", bytes: 7)
         let primaryKey = KnowledgeObjectSelectionKey(recordID: "source", revisionID: "revision", reference: primary)
         let articleKey = KnowledgeObjectSelectionKey(recordID: "source", revisionID: "revision", reference: article)
         let store = KnowledgeObjectReaderStore()
-        let delayed = Task { @MainActor in
-            await store.load(primaryKey, offset: 0, request: { reference, offset in
-                try await Task.sleep(for: .milliseconds(80))
-                let text = offset == 0 ? "first-" : "second"
-                return KnowledgeObjectRead(hash: reference.hash, mediaType: reference.mediaType, bytes: Data(text.utf8).count, totalBytes: 10, offset: offset, nextOffset: offset == 0 ? 6 : nil, base64: Data(text.utf8).base64EncodedString())
-            }, isCurrent: { true })
-        }
+        await store.load(primaryKey, offset: 0, request: { reference, offset in
+            KnowledgeObjectRead(hash: reference.hash, mediaType: reference.mediaType, bytes: 6, totalBytes: 12, offset: offset, nextOffset: 6, base64: Data("first-".utf8).base64EncodedString())
+        }, isCurrent: { true })
+        await store.load(primaryKey, offset: 6, request: { reference, offset in
+            KnowledgeObjectRead(hash: reference.hash, mediaType: reference.mediaType, bytes: 6, totalBytes: 12, offset: offset, nextOffset: nil, base64: Data("second".utf8).base64EncodedString())
+        }, isCurrent: { true })
+        XCTAssertEqual(String(data: store.state(for: primaryKey).bytes, encoding: .utf8), "first-second")
         await store.load(articleKey, offset: 0, request: { reference, offset in
             KnowledgeObjectRead(hash: reference.hash, mediaType: reference.mediaType, bytes: 7, totalBytes: 7, offset: offset, nextOffset: nil, base64: Data("ARTICLE".utf8).base64EncodedString())
         }, isCurrent: { true })
-        await delayed.value
-        await store.load(primaryKey, offset: 6, request: { reference, offset in
-            KnowledgeObjectRead(hash: reference.hash, mediaType: reference.mediaType, bytes: 4, totalBytes: 10, offset: offset, nextOffset: nil, base64: Data("second".utf8).base64EncodedString())
-        }, isCurrent: { true })
+        XCTAssertEqual(String(data: store.state(for: primaryKey).bytes, encoding: .utf8), "")
         let stale = Task { @MainActor in
             await store.load(articleKey, offset: 0, request: { reference, offset in
                 try await Task.sleep(for: .milliseconds(80))
-                return KnowledgeObjectRead(hash: reference.hash, mediaType: reference.mediaType, bytes: 5, totalBytes: 7, offset: offset, nextOffset: nil, base64: Data("STALE".utf8).base64EncodedString())
+                return KnowledgeObjectRead(hash: reference.hash, mediaType: reference.mediaType, bytes: 7, totalBytes: 7, offset: offset, nextOffset: nil, base64: Data("STALE!!".utf8).base64EncodedString())
             }, isCurrent: { true })
         }
         try? await Task.sleep(for: .milliseconds(5))
         await store.load(articleKey, offset: 0, request: { reference, offset in
-            KnowledgeObjectRead(hash: reference.hash, mediaType: reference.mediaType, bytes: 5, totalBytes: 7, offset: offset, nextOffset: nil, base64: Data("FRESH".utf8).base64EncodedString())
+            KnowledgeObjectRead(hash: reference.hash, mediaType: reference.mediaType, bytes: 7, totalBytes: 7, offset: offset, nextOffset: nil, base64: Data("FRESH!!".utf8).base64EncodedString())
         }, isCurrent: { true })
         await stale.value
-        XCTAssertEqual(String(data: store.state(for: articleKey).bytes, encoding: .utf8), "FRESH")
-        XCTAssertEqual(String(data: store.state(for: primaryKey).bytes, encoding: .utf8), "first-second")
+        XCTAssertEqual(String(data: store.state(for: articleKey).bytes, encoding: .utf8), "FRESH!!")
+        XCTAssertTrue(store.state(for: primaryKey).bytes.isEmpty, "Switching representations releases the previous bounded reader")
         XCTAssertNil(store.state(for: primaryKey).nextOffset)
     }
 
     @MainActor
+    func testObjectReaderRejectsInconsistentEnvelopeAndRetiresLoadingOnSuspend() async {
+        let reference = KnowledgeObjectRef(hash: String(repeating: "h", count: 64), mediaType: "text/plain", bytes: 6)
+        let key = KnowledgeObjectSelectionKey(recordID: "source", revisionID: "revision", reference: reference)
+        let store = KnowledgeObjectReaderStore()
+        let request = Task { @MainActor in
+            await store.load(key, offset: 0, request: { _, _ in
+                try await Task.sleep(for: .milliseconds(80))
+                return KnowledgeObjectRead(hash: reference.hash, mediaType: reference.mediaType, bytes: 4, totalBytes: 6, offset: 0, nextOffset: nil, base64: Data("four".utf8).base64EncodedString())
+            }, isCurrent: { true })
+        }
+        store.suspend()
+        await request.value
+        XCTAssertFalse(store.state(for: key).loading)
+
+        await store.load(key, offset: 0, request: { _, _ in
+            KnowledgeObjectRead(hash: reference.hash, mediaType: reference.mediaType, bytes: 4, totalBytes: 6, offset: 0, nextOffset: nil, base64: Data("four".utf8).base64EncodedString())
+        }, isCurrent: { true })
+        XCTAssertEqual(store.state(for: key).error, "Retained object response is invalid.")
+    }
+
+    @MainActor
     func testLinkedRecordReaderPublishesVisibleUnavailableAndRetiresOlderCitation() async {
+        let cancelledStore = KnowledgeLinkedRecordReaderStore()
+        await cancelledStore.load(id: "cancelled", revisionID: nil, request: { _, _ in throw CancellationError() }, isCurrent: { true })
+        XCTAssertFalse(cancelledStore.loading)
         let store = KnowledgeLinkedRecordReaderStore()
         await store.load(id: "missing", revisionID: "revision-a", request: { _, _ in nil }, isCurrent: { true })
         XCTAssertEqual(store.error, "Linked record is unavailable, excluded, or forgotten. Retry from this detail.")
@@ -232,10 +278,16 @@ final class KnowledgeModelsTests: XCTestCase {
     func testImportPresentationDoesNotClaimWholeCorpusAfterOneBatch() {
         XCTAssertEqual(KnowledgeImportPresentationPolicy.corpusProgress(planned: 120, selected: 50, offset: 0), "50 of 120")
         let plan = KnowledgeImportPlan(operation: "dry-run", source: "synthetic", planHash: "plan", planned: 120, selected: 50, imported: 0, resumed: 0, skipped: 0, failed: 0, completed: false, progress: KnowledgeImportProgress(completed: 0, remaining: 50, total: 50), mappings: [], warnings: [])
-        let result = KnowledgeImportResult(operation: "run", source: "synthetic", planHash: "plan", planned: 120, selected: 50, imported: 50, resumed: 0, skipped: 0, failed: 0, completed: true, progress: KnowledgeImportProgress(completed: 50, remaining: 0, total: 50), mappings: [], warnings: [])
-        XCTAssertEqual(KnowledgeImportPresentationPolicy.completionMessage(plan: plan, result: result, offset: 0), "Batch complete (through 50 of 120); inspect the next batch to continue.")
+        let result = KnowledgeImportResult(operation: "run", source: "synthetic", planHash: "plan", planned: 120, selected: 50, imported: 50, resumed: 0, skipped: 0, failed: 0, completed: false, progress: KnowledgeImportProgress(completed: 50, remaining: 70, total: 120), mappings: [], warnings: [])
+        XCTAssertEqual(KnowledgeImportPresentationPolicy.completionMessage(plan: plan, result: result, offset: 0), "Batch complete (50 of 120); continuing with 70 remaining.")
         let failed = KnowledgeImportResult(operation: "run", source: "synthetic", planHash: "plan", planned: 120, selected: 50, imported: 49, resumed: 0, skipped: 0, failed: 1, completed: false, progress: KnowledgeImportProgress(completed: 49, remaining: 1, total: 50), mappings: [], warnings: [])
         XCTAssertTrue(KnowledgeImportPresentationPolicy.completionMessage(plan: plan, result: failed, offset: 0).contains("incomplete"))
+
+        let widePlan = KnowledgeImportPlan(operation: "dry-run", source: "personal-os", planHash: "wide-plan", planned: 53, selected: 50, imported: 0, resumed: 0, skipped: 0, failed: 0, completed: true, progress: KnowledgeImportProgress(completed: 0, remaining: 53, total: 53), mappings: [], warnings: [])
+        let partial = KnowledgeImportResult(operation: "run", source: "personal-os", planHash: "wide-plan", planned: 53, selected: 53, imported: 49, resumed: 0, skipped: 0, failed: 1, completed: false, progress: KnowledgeImportProgress(completed: 49, remaining: 4, total: 53), mappings: [], warnings: [])
+        XCTAssertTrue(KnowledgeImportPresentationPolicy.completionMessage(plan: widePlan, result: partial, offset: 0).contains("retry"))
+        let resumed = KnowledgeImportResult(operation: "run", source: "personal-os", planHash: "wide-plan", planned: 53, selected: 53, imported: 4, resumed: 49, skipped: 0, failed: 0, completed: true, progress: KnowledgeImportProgress(completed: 53, remaining: 0, total: 53), mappings: [], warnings: [])
+        XCTAssertEqual(KnowledgeImportPresentationPolicy.completionMessage(plan: widePlan, result: resumed, offset: 0), "Import complete (4 imported).")
     }
 
     func testSourceAndNoteUseTheCommonDiscriminatedContentShape() throws {

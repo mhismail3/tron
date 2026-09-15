@@ -67,13 +67,22 @@ final class KnowledgeRPCClient {
     /// selected object or representation; a hash alone is not authority.
     func readObject(_ reference: KnowledgeObjectRef, recordID: String, revisionID: String, offset: Int = 0) async throws -> KnowledgeObjectRead? {
         struct Params: Encodable { let recordId: String; let revisionId: String; let hash: String; let bytes: Int; let mediaType: String; let offset: Int }
-        let value: JSONValue = try await request("knowledge.object.read", Params(recordId: recordID, revisionId: revisionID, hash: reference.hash, bytes: reference.bytes, mediaType: reference.mediaType, offset: max(0, offset)), timeout: .seconds(30))
+        let requestedOffset = max(0, offset)
+        guard reference.bytes >= 0, reference.bytes <= 512_000, !reference.hash.isEmpty, !reference.mediaType.isEmpty else { throw invalidResponse() }
+        let value: JSONValue = try await request("knowledge.object.read", Params(recordId: recordID, revisionId: revisionID, hash: reference.hash, bytes: reference.bytes, mediaType: reference.mediaType, offset: requestedOffset), timeout: .seconds(30))
         if value == .null { return nil }
         let object = try value.decode(KnowledgeObjectRead.self)
-        guard object.hash == reference.hash, object.bytes <= 512_000, object.base64.count <= 700_000,
-              object.offset != nil, object.totalBytes != nil,
-              object.offset == max(0, offset), object.totalBytes == reference.bytes,
-              object.nextOffset == nil || (object.nextOffset! > object.offset! && object.nextOffset! <= object.totalBytes!) else { throw invalidResponse() }
+        guard let decoded = Data(base64Encoded: object.base64),
+              object.hash == reference.hash,
+              object.mediaType == reference.mediaType,
+              object.bytes >= 0, object.bytes <= 512_000,
+              object.totalBytes == reference.bytes, object.totalBytes! >= 0, object.totalBytes! <= 512_000,
+              object.offset == requestedOffset,
+              decoded.count == object.bytes,
+              object.offset! <= object.totalBytes! - object.bytes,
+              (object.nextOffset == nil
+                ? object.offset! + object.bytes == object.totalBytes!
+                : object.nextOffset == object.offset! + object.bytes && object.nextOffset! > object.offset! && object.nextOffset! <= object.totalBytes!) else { throw invalidResponse() }
         return object
     }
     func configure(_ config: KnowledgeConfig) async throws -> KnowledgeConfig {
