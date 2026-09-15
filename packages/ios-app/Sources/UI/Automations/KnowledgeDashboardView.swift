@@ -52,19 +52,74 @@ struct KnowledgeDashboardView: View {
     @State private var importSheet = false
     @State private var captureSheet = false
     @State private var noteSheet = false
+    @State private var showingFilters = false
+    @State private var showingSearch = false
+
+    private var filterSummary: String {
+        let summary = [kind?.label, scope?.label].compactMap { $0 }.joined(separator: " · ")
+        return summary.isEmpty ? "All knowledge" : summary
+    }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) { Button("All Links") { kind = .source; scope = nil }.font(.caption.weight(kind == .source && scope == nil ? .bold : .regular)); Button("Observations") { kind = .observation; scope = nil }.font(.caption.weight(kind == .observation ? .bold : .regular)); Button("Personal") { scope = .personal; kind = nil }.font(.caption.weight(scope == .personal ? .bold : .regular)); Button("Research") { scope = .research; kind = nil }.font(.caption.weight(scope == .research ? .bold : .regular)) }.padding(.horizontal, 16).padding(.top, 8)
-            HStack { Picker("Type", selection: $kind) { Text("All").tag(KnowledgeRecordKind?.none); ForEach(KnowledgeRecordKind.allCases, id: \.self) { Text($0.label).tag(Optional($0)) } }.pickerStyle(.menu); Picker("Scope", selection: $scope) { Text("All scopes").tag(KnowledgeScope?.none); ForEach(KnowledgeScope.allCases, id: \.self) { Text($0.label).tag(Optional($0)) } }.pickerStyle(.menu); Spacer(); if revision > 0 { Text("r\(revision)").font(.caption).foregroundStyle(Color.tronTextSecondary) } }.padding(.horizontal, 16).padding(.vertical, 8)
-            if let status { coverageSummary(status) }
-            if let error { ContentUnavailableView("Knowledge unavailable", systemImage: "externaldrive.badge.xmark", description: Text(error)) }
-            else if records.isEmpty && !loading { ContentUnavailableView("No knowledge yet", systemImage: "book.closed", description: Text("Observations, links, and notes retained by this Gateway will appear here.")) }
-            else { List { ForEach(records) { record in Button { selected = record; selectedIdentity = model.knowledgePresentationIdentity } label: { KnowledgeRecordRow(record: record) }.buttonStyle(.plain).listRowBackground(Color.clear) }; if nextCursor != nil { Button(loadingMore ? "Loading…" : "Load more") { loadMore() }.frame(maxWidth: .infinity).listRowBackground(Color.clear) } }.listStyle(.plain).overlay { if loading { ProgressView() } } }
-        }.background(Color.tronBackground).navigationTitle("Knowledge").navigationBarTitleDisplayMode(.inline)
-        .toolbar { ToolbarItem(placement: .topBarLeading) { DashboardModeMenuButton(mode: .knowledge, onSelect: onSelectDashboard).frame(width: 34, height: 34) }; ToolbarItem(placement: .topBarTrailing) { Menu { Button("Observation configuration", systemImage: "eye") { configSheet = true }; Button("Connectors", systemImage: "arrow.triangle.2.circlepath") { connectorSheet = true }; Button("Capture URL", systemImage: "link.badge.plus") { captureSheet = true }; Button("New note", systemImage: "note.text.badge.plus") { noteSheet = true }; Button("Import legacy records", systemImage: "square.and.arrow.down") { importSheet = true } } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Knowledge actions") } }
-        .searchable(text: $search, prompt: "Search Knowledge")
-        .navigationDestination(item: $selected) { record in KnowledgeDetailView(record: record, origin: selectedIdentity ?? model.knowledgePresentationIdentity, onChanged: reload, onOpenDraft: openDraft, onOpenSession: onOpenSession) }
+        ZStack(alignment: .bottom) {
+            VStack(spacing: 0) {
+                if let status { coverageSummary(status) }
+                dashboardContent
+            }
+            TronTopBlurOverlay(style: .dashboard)
+            if !showingSearch {
+                HStack(spacing: TronSpacing.md) {
+                    Button { showingFilters = true } label: {
+                        TronInlineActionLabel(filterSummary, icon: "line.3.horizontal.decrease.circle", accent: .tronKnowledge)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Knowledge filters")
+                    .accessibilityValue(filterSummary)
+                    Spacer()
+                    Button { showingSearch = true } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    .buttonStyle(TronIconButtonStyle(accent: .tronKnowledge, size: 48))
+                    .accessibilityLabel("Search Knowledge")
+                }
+                .padding(.horizontal, TronSpacing.xlarge)
+                .padding(.bottom, TronSpacing.md)
+            } else {
+                TronSearchBar(text: $search, prompt: "Search Knowledge", accent: .tronKnowledge,
+                              focusOnAppear: true, onClose: { showingSearch = false })
+                    .padding(.horizontal, TronSpacing.xlarge)
+                    .padding(.bottom, TronSpacing.md)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .background(Color.tronBackground)
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                DashboardModeMenuButton(mode: .knowledge, onSelect: onSelectDashboard)
+                    .frame(width: 34, height: 34)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button("Observation configuration", systemImage: "eye") { configSheet = true }
+                    Button("Connectors", systemImage: "arrow.triangle.2.circlepath") { connectorSheet = true }
+                    Button("Capture URL", systemImage: "link.badge.plus") { captureSheet = true }
+                    Button("New note", systemImage: "note.text.badge.plus") { noteSheet = true }
+                    Button("Import legacy records", systemImage: "square.and.arrow.down") { importSheet = true }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .foregroundStyle(Color.tronKnowledge)
+                }
+                .accessibilityLabel("Knowledge actions")
+            }
+        }
+        .tronPresentation()
+        .tronSettingsVisualTheme(accent: .tronKnowledge)
+        .navigationDestination(item: $selected) { record in
+            KnowledgeDetailView(record: record, origin: selectedIdentity ?? model.knowledgePresentationIdentity,
+                                onChanged: reload, onOpenDraft: openDraft, onOpenSession: onOpenSession)
+        }
         .onChange(of: model.knowledgePresentationIdentity) { _, _ in
             // Retire both the visible page and any manually spawned page task;
             // the next task must carry the new Gateway identity from its start.
@@ -73,54 +128,139 @@ struct KnowledgeDashboardView: View {
             coverageStore.reset()
             records.removeAll(); selected = nil; selectedIdentity = nil; revision = 0; nextCursor = nil; status = nil; error = nil
         }
-        .sheet(isPresented: $configSheet) { KnowledgeConfigurationView().environment(model) }
-        .sheet(isPresented: $connectorSheet) { KnowledgeConnectorsView().environment(model) }
-        .sheet(isPresented: $importSheet) { KnowledgeImportView().environment(model) }
-        .sheet(isPresented: $captureSheet) { KnowledgeCaptureView { captureSheet = false; await reload() }.environment(model) }
-        .sheet(isPresented: $noteSheet) { KnowledgeNoteCreateView { noteSheet = false; await reload() }.environment(model) }
-        .task(id: "\(kind?.rawValue ?? "all")/\(scope?.rawValue ?? "all")/\(search)/\(activity.allowsPresentationPublication)/\(model.knowledgePresentationIdentity.profileID ?? "none")/\(model.knowledgePresentationIdentity.lifecycleGeneration ?? -1)/\(model.knowledgePresentationIdentity.connectionID ?? -1)") { guard activity.allowsPresentationPublication else { return }; await reload() }
+        .tronManagedSheet(isPresented: $showingFilters, identity: "knowledge.filters") {
+            knowledgeFilterSheet
+        }
+        .tronManagedSheet(isPresented: $configSheet, identity: "knowledge.configuration") {
+            KnowledgeConfigurationView().environment(model)
+        }
+        .tronManagedSheet(isPresented: $connectorSheet, identity: "knowledge.connectors") {
+            KnowledgeConnectorsView().environment(model)
+        }
+        .tronManagedSheet(isPresented: $importSheet, identity: "knowledge.import") {
+            KnowledgeImportView().environment(model)
+        }
+        .tronManagedSheet(isPresented: $captureSheet, identity: "knowledge.capture") {
+            KnowledgeCaptureView { captureSheet = false; await reload() }.environment(model)
+        }
+        .tronManagedSheet(isPresented: $noteSheet, identity: "knowledge.note") {
+            KnowledgeNoteCreateView { noteSheet = false; await reload() }.environment(model)
+        }
+        .task(id: "\(kind?.rawValue ?? "all")/\(scope?.rawValue ?? "all")/\(search)/\(activity.allowsPresentationPublication)/\(model.knowledgePresentationIdentity.profileID ?? "none")/\(model.knowledgePresentationIdentity.lifecycleGeneration ?? -1)/\(model.knowledgePresentationIdentity.connectionID ?? -1)") {
+            guard activity.allowsPresentationPublication else { return }
+            await reload()
+        }
         .refreshable { await reload() }
+    }
+
+    @ViewBuilder
+    private var dashboardContent: some View {
+        if let error {
+            TronPlaceholderState(title: "Knowledge unavailable", detail: error,
+                                 icon: "externaldrive.badge.xmark", accent: .tronKnowledge)
+        } else if records.isEmpty && !loading {
+            TronPlaceholderState(title: "No knowledge yet",
+                                 detail: "Observations, links, and notes retained by this Gateway will appear here.",
+                                 icon: "book.closed", accent: .tronKnowledge)
+        } else {
+            List {
+                ForEach(records) { record in
+                    Button {
+                        selected = record
+                        selectedIdentity = model.knowledgePresentationIdentity
+                    } label: {
+                        KnowledgeRecordRow(record: record)
+                    }
+                    .buttonStyle(.plain)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                }
+                if nextCursor != nil {
+                    Button(loadingMore ? "Loading…" : "Load more") { loadMore() }
+                        .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
+                        .frame(maxWidth: .infinity)
+                        .listRowBackground(Color.clear)
+                }
+            }
+            .listStyle(.plain)
+            .tronCollectionSurface()
+            // Collection chrome has an emerald historical default; Knowledge
+            // must explicitly restore its identity after opting into it.
+            .tint(Color.tronKnowledge)
+            .tronScrollEdgeChrome()
+            .overlay {
+                if loading { TronLoadingState(label: "Loading Knowledge…", accent: .tronKnowledge) }
+            }
+        }
+    }
+
+    private var knowledgeFilterSheet: some View {
+        TronDashboardFilterSheet(title: "Knowledge filters", accent: .tronKnowledge,
+                                 detents: [.medium, .large], onDone: { showingFilters = false }) {
+            TronDashboardFilterSectionTitle(title: "Type", detail: "Choose which retained records to browse.")
+            TronDashboardFilterOption(title: "All types", selected: kind == nil, accent: .tronKnowledge,
+                                      inactiveAccent: .tronSlate) { kind = nil }
+            ForEach(KnowledgeRecordKind.allCases, id: \.self) { value in
+                TronDashboardFilterOption(title: value.label, detail: value.rawValue,
+                                          selected: kind == value, accent: .tronKnowledge,
+                                          inactiveAccent: .tronSlate) { kind = value }
+            }
+            TronDashboardFilterSectionTitle(title: "Scope", detail: "Narrow results without losing the current type selection.")
+            TronDashboardFilterOption(title: "All scopes", selected: scope == nil, accent: .tronKnowledge,
+                                      inactiveAccent: .tronSlate) { scope = nil }
+            ForEach(KnowledgeScope.allCases, id: \.self) { value in
+                TronDashboardFilterOption(title: value.label, detail: value.rawValue,
+                                          selected: scope == value, accent: .tronKnowledge,
+                                          inactiveAccent: .tronSlate) { scope = value }
+            }
+        }
     }
     @ViewBuilder
     private func coverageSummary(_ status: KnowledgeStatus) -> some View {
         let coverage = status.coverage
-        VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Label("Observation coverage", systemImage: "eye").font(.headline)
-                    Spacer()
-                    Text("\(coverage.observedCount + coverage.emptyCount + coverage.excludedCount) settled")
-                        .font(.caption).foregroundStyle(Color.tronTextSecondary)
-                }
-                Text("Observed \(coverage.observedCount) · Empty \(coverage.emptyCount) · Excluded \(coverage.excludedCount)")
-                    .font(.caption).foregroundStyle(Color.tronTextSecondary)
-                if coverage.remainingCount > 0 {
-                    Label("\(coverage.remainingCount) cuts need attention (pending \(coverage.pendingCount), failed \(coverage.failedCount), unavailable \(coverage.unavailableCount))", systemImage: "exclamationmark.triangle")
-                        .font(.caption).foregroundStyle(Color.tronAmber)
-                    ForEach(coverageStore.cuts.filter { $0.disposition == .pending || $0.disposition == .failed || $0.disposition == .unavailable }) { cut in
-                        HStack(alignment: .top) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("\(cut.disposition.rawValue.capitalized) · \(cut.id)").font(.caption.bold())
-                                Text("\(cut.range.fromEntryId)…\(cut.range.toEntryId) · \(cut.reason ?? "No reason recorded")")
-                                    .font(.caption2).foregroundStyle(Color.tronTextSecondary)
-                            }
-                            Spacer()
-                            Button("Open") { onOpenSession(cut.range.sessionId, cut.range.fromEntryId) }.font(.caption)
-                        }
-                    }
-                } else {
-                    Text("No pending, failed, or unavailable observation cuts.")
-                        .font(.caption).foregroundStyle(Color.tronTextSecondary)
-                }
-                if let coverageError = coverageStore.error {
-                    Label("Coverage unavailable: \(coverageError)", systemImage: "exclamationmark.triangle")
-                        .font(.caption).foregroundStyle(Color.tronAmber)
-                }
+        VStack(alignment: .leading, spacing: TronSpacing.md) {
+            HStack(alignment: .firstTextBaseline) {
+                Label("Observation coverage", systemImage: "eye")
+                    .font(TronTypography.sheetSectionHeader)
+                    .foregroundStyle(Color.tronKnowledge)
+                Spacer(minLength: TronSpacing.md)
+                Text("\(coverage.observedCount + coverage.emptyCount + coverage.excludedCount) settled")
+                    .font(TronTypography.secondaryCodeDescription)
+                    .foregroundStyle(Color.tronTextMuted)
             }
-            .padding(.horizontal, 16).padding(.vertical, 10)
-            .background(Color.tronBackground.opacity(0.96), in: RoundedRectangle(cornerRadius: 12))
-            .padding(.horizontal, 16).padding(.top, 8)
-            if coverageStore.loading { ProgressView("Loading coverage…").font(.caption) }
+            Text("Observed \(coverage.observedCount) · Empty \(coverage.emptyCount) · Excluded \(coverage.excludedCount)")
+                .font(TronTypography.secondaryDescription)
+                .foregroundStyle(Color.tronTextSecondary)
+            if coverage.remainingCount > 0 {
+                TronSettingsNotice(
+                    message: "\(coverage.remainingCount) cuts need attention (pending \(coverage.pendingCount), failed \(coverage.failedCount), unavailable \(coverage.unavailableCount))",
+                    accent: .tronAmber
+                )
+                ForEach(coverageStore.cuts.filter { $0.disposition == .pending || $0.disposition == .failed || $0.disposition == .unavailable }) { cut in
+                    HStack(alignment: .top, spacing: TronSpacing.md) {
+                        VStack(alignment: .leading, spacing: TronSpacing.xs) {
+                            Text("\(cut.disposition.rawValue.capitalized) · \(cut.id)")
+                                .font(TronTypography.secondaryCodeDescription)
+                                .foregroundStyle(Color.tronTextPrimary)
+                            Text("\(cut.range.fromEntryId)…\(cut.range.toEntryId) · \(cut.reason ?? "No reason recorded")")
+                                .font(TronTypography.caption)
+                                .foregroundStyle(Color.tronTextSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: TronSpacing.md)
+                        Button("Open") { onOpenSession(cut.range.sessionId, cut.range.fromEntryId) }
+                            .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
+                    }
+                }
+            } else {
+                Text("No pending, failed, or unavailable observation cuts.")
+                    .font(TronTypography.secondaryDescription)
+                    .foregroundStyle(Color.tronTextSecondary)
+            }
+            if let coverageError = coverageStore.error {
+                TronSettingsNotice(message: "Coverage unavailable: \(coverageError)", accent: .tronAmber)
+            }
+            if coverageStore.loading { TronLoadingState(label: "Loading coverage…", accent: .tronKnowledge) }
             if coverageStore.nextCursor != nil {
                 Button(coverageStore.loading ? "Loading…" : "Inspect more coverage") {
                     let identity = model.knowledgePresentationIdentity
@@ -130,10 +270,14 @@ struct KnowledgeDashboardView: View {
                             isCurrent: { activity.allowsPresentationPublication && model.knowledgePresentationIdentity == identity })
                     }
                 }
-                .font(.caption)
+                .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
                 .disabled(coverageStore.loading || !activity.allowsPresentationPublication)
             }
         }
+        .padding(TronSpacing.xl)
+        .tronGlassSurface(accent: .tronKnowledge, tintOpacity: 0.10)
+        .padding(.horizontal, TronSpacing.xlarge)
+        .padding(.top, TronSpacing.md)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Observation coverage. Observed \(coverage.observedCount), empty \(coverage.emptyCount), excluded \(coverage.excludedCount), remaining \(coverage.remainingCount)")
     }
@@ -184,7 +328,44 @@ struct KnowledgeDashboardView: View {
 
 private struct KnowledgeRecordRow: View {
     let record: KnowledgeRecord
-    var body: some View { HStack(alignment: .top, spacing: 12) { Image(systemName: record.kind.icon).foregroundStyle(Color.tronEmerald).frame(width: 24); VStack(alignment: .leading, spacing: 4) { Text(record.title).font(.headline).foregroundStyle(Color.tronTextPrimary).lineLimit(2); Text(record.summary).font(.subheadline).foregroundStyle(Color.tronTextSecondary).lineLimit(3); Text("\(record.kind.label) · \(record.scope.label) · \(record.updatedAt)").font(.caption).foregroundStyle(Color.tronTextSecondary).lineLimit(1) }; Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(Color.tronTextSecondary) }.padding(.vertical, 8).contentShape(Rectangle()) }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: TronSpacing.xl) {
+            Image(systemName: record.kind.icon)
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                .foregroundStyle(Color.tronKnowledge)
+                .frame(width: TronSettingsLayoutPolicy.iconSize, height: TronSettingsLayoutPolicy.iconSize)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: TronSpacing.xs) {
+                Text(record.title)
+                    .font(TronTypography.headline)
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(record.summary)
+                    .font(TronTypography.bodySM)
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("\(record.kind.label) · \(record.scope.label) · \(record.updatedAt)")
+                    .font(TronTypography.secondaryCodeDescription)
+                    .foregroundStyle(Color.tronTextMuted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .layoutPriority(1)
+            Spacer(minLength: TronSpacing.md)
+            Image(systemName: "chevron.right")
+                .font(TronTypography.caption)
+                .foregroundStyle(Color.tronKnowledge)
+                .accessibilityHidden(true)
+        }
+        .padding(.horizontal, TronSpacing.xl)
+        .padding(.vertical, TronSpacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .tronScrollSurface(accent: .tronKnowledge, tintOpacity: 0.08)
+        .contentShape(Rectangle())
+    }
 }
 
 struct KnowledgeDetailView: View {
@@ -216,24 +397,190 @@ struct KnowledgeDetailView: View {
     @State private var objectReaders = KnowledgeObjectReaderStore()
     @State private var linkedReader = KnowledgeLinkedRecordReaderStore()
     private var admitsOrigin: Bool { model.knowledgePresentationIdentity == origin && activity.allowsPresentationPublication }
-    var body: some View { ScrollView { VStack(alignment: .leading, spacing: 16) { Text(currentRecord.title).font(.title2.bold()); Label("\(currentRecord.kind.label) · \(currentRecord.scope.label)", systemImage: currentRecord.kind.icon).foregroundStyle(Color.tronEmerald); Text(currentRecord.summary).textSelection(.enabled); recordMetadata; sourceLink; noteMetadata; evidence; observationItems; if let reflectedHandoff { VStack(alignment: .leading, spacing: 8) { Text("Generated reflected handoff").font(.headline); Text(reflectedHandoff.summary).font(.callout).textSelection(.enabled); Button("Start editable session from handoff") { onOpenDraft(reflectedHandoff) }.buttonStyle(.bordered) } }; if case .note(let note) = currentRecord.content, editing { TextEditor(text: $noteBody).frame(minHeight: 180).overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.3))); Button("Save note") { saveNote(note) }.buttonStyle(.borderedProminent) }; if let message { Text(message).font(.footnote).foregroundStyle(Color.tronTextSecondary) } }.padding(20) }.background(Color.tronBackground).navigationTitle("Detail").navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .topBarTrailing) { Menu { Button("Start editable session", systemImage: "plus.bubble") { onOpenDraft(currentRecord) }; if currentRecord.kind == .note { Button(editing ? "Cancel editing" : "Edit note", systemImage: "pencil") { editing.toggle(); if editing, case .note(let note) = currentRecord.content { noteBody = note.body ?? "" } } }; if currentRecord.kind == .source { Button("Assess with current interests", systemImage: "sparkles") { triage() } }; Button("Correct record", systemImage: "arrow.triangle.2.circlepath") { correctionSheet = true }; Button("Exclude from Knowledge", systemImage: "eye.slash") { exclude() }; Button("Forget permanently", systemImage: "trash", role: .destructive) { forgetConfirmation = true } } label: { Image(systemName: "ellipsis.circle") } } }.confirmationDialog("Forget this record?", isPresented: $forgetConfirmation) { Button("Forget", role: .destructive) { forget() } }.sheet(isPresented: $correctionSheet) { KnowledgeCorrectionView(record: currentRecord, origin: origin) { updated in guard admitsOrigin else { return }; currentRecord = updated; await onChanged(); correctionSheet = false } }.navigationDestination(item: Binding(get: { linkedReader.record }, set: { _ in linkedReader.clear() })) { linked in KnowledgeDetailView(record: linked, origin: origin, onChanged: onChanged, onOpenDraft: onOpenDraft, onOpenSession: onOpenSession) }.onDisappear { objectReaders.suspend(); linkedReader.suspend() } }
-    @ViewBuilder private var recordMetadata: some View { VStack(alignment: .leading, spacing: 6) { Text("Revision: \(currentRecord.revisionId)").font(.caption); if let temporal = currentRecord.temporal { Text([temporal.eventAt.map { "event \($0)" }, temporal.validFrom.map { "valid from \($0)" }, temporal.validTo.map { "valid to \($0)" }, temporal.reviewDue.map { "review \($0)" }].compactMap { $0 }.joined(separator: " · ")).font(.caption) } }; if case .source(let source) = currentRecord.content { Text("Capture: \(source.captureDisposition.rawValue)").font(.caption); if source.captureDisposition != .complete { Label("Evidence is \(source.captureDisposition.rawValue); generated text is not proof.", systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(Color.tronAmber) } }; if case .note(let note) = currentRecord.content, let fields = note.fields { VStack(alignment: .leading, spacing: 8) { Text("Structured qualifications").font(.headline); ForEach(Array(fields.enumerated()), id: \.offset) { _, field in VStack(alignment: .leading, spacing: 3) { Text(field.field).font(.subheadline.bold()); Text("Value: \(jsonText(field.value))").font(.callout); if let subject = field.subject { Text("Subject: \(subject)").font(.caption) }; Text("\(field.certainty.rawValue)\(field.validFrom.map { " · from \($0)" } ?? "")\(field.validTo.map { " · to \($0)" } ?? "")").font(.caption).foregroundStyle(Color.tronTextSecondary); citationLinks(field.evidence) } } } } }
+
+    var body: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: TronSpacing.section) {
+                TronSettingsGroup("Record", accent: .tronKnowledge) {
+                    VStack(alignment: .leading, spacing: TronSpacing.md) {
+                        Text(currentRecord.title)
+                            .font(TronTypography.largeTitle)
+                            .foregroundStyle(Color.tronTextPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Label("\(currentRecord.kind.label) · \(currentRecord.scope.label)", systemImage: currentRecord.kind.icon)
+                            .font(TronTypography.secondaryDescription)
+                            .foregroundStyle(Color.tronKnowledge)
+                        Text(currentRecord.summary)
+                            .font(TronTypography.body)
+                            .foregroundStyle(Color.tronTextPrimary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                recordMetadata
+                sourceLink
+                noteMetadata
+                evidence
+                observationItems
+                if let reflectedHandoff {
+                    TronSettingsGroup("Generated reflected handoff", accent: .tronKnowledge) {
+                        VStack(alignment: .leading, spacing: TronSpacing.md) {
+                            Text(reflectedHandoff.summary)
+                                .font(TronTypography.body)
+                                .foregroundStyle(Color.tronTextPrimary)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button("Start editable session from handoff") { onOpenDraft(reflectedHandoff) }
+                                .buttonStyle(TronActionButtonStyle(accent: .tronKnowledge))
+                        }
+                    }
+                }
+                if case .note(let note) = currentRecord.content, editing {
+                    TronSettingsGroup("Edit note", accent: .tronKnowledge) {
+                        VStack(alignment: .leading, spacing: TronSpacing.md) {
+                            TextEditor(text: $noteBody)
+                                .frame(minHeight: 180)
+                                .tronTextEditor()
+                            Button("Save note") { saveNote(note) }
+                                .buttonStyle(TronActionButtonStyle(role: .primary, accent: .tronKnowledge))
+                        }
+                    }
+                }
+                if let message {
+                    Text(message)
+                        .font(TronTypography.secondaryDescription)
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.horizontal, TronSpacing.xlarge)
+            .padding(.vertical, TronSpacing.large)
+        }
+        .background(Color.tronBackground)
+        .tronScrollEdgeChrome()
+        .tronNavigationTitle("Knowledge detail", accent: .tronKnowledge)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button("Start editable session", systemImage: "plus.bubble") { onOpenDraft(currentRecord) }
+                    if currentRecord.kind == .note {
+                        Button(editing ? "Cancel editing" : "Edit note", systemImage: "pencil") {
+                            editing.toggle()
+                            if editing, case .note(let note) = currentRecord.content { noteBody = note.body ?? "" }
+                        }
+                    }
+                    if currentRecord.kind == .source { Button("Assess with current interests", systemImage: "sparkles") { triage() } }
+                    Button("Correct record", systemImage: "arrow.triangle.2.circlepath") { correctionSheet = true }
+                    Button("Exclude from Knowledge", systemImage: "eye.slash") { exclude() }
+                    Button("Forget permanently", systemImage: "trash", role: .destructive) { forgetConfirmation = true }
+                } label: { Image(systemName: "ellipsis.circle").foregroundStyle(Color.tronKnowledge) }
+                .accessibilityLabel("Knowledge record actions")
+            }
+        }
+        .tronPresentation()
+        .tronSettingsVisualTheme(accent: .tronKnowledge)
+        .confirmationDialog("Forget this record?", isPresented: $forgetConfirmation) {
+            Button("Forget", role: .destructive) { forget() }
+        }
+        .tronManagedSheet(isPresented: $correctionSheet, identity: "knowledge.correction.\(currentRecord.id)") {
+            KnowledgeCorrectionView(record: currentRecord, origin: origin) { updated in
+                // A managed child temporarily owns presentation publication while
+                // its covered detail keeps data ownership. Identity, rather than
+                // the parent's publication flag, admits this legitimate callback.
+                guard model.knowledgePresentationIdentity == origin else { return }
+                currentRecord = updated
+                await onChanged()
+                correctionSheet = false
+            }
+        }
+        .navigationDestination(item: Binding(get: { linkedReader.record }, set: { _ in linkedReader.clear() })) { linked in
+            KnowledgeDetailView(record: linked, origin: origin, onChanged: onChanged,
+                                onOpenDraft: onOpenDraft, onOpenSession: onOpenSession)
+        }
+        .onDisappear { objectReaders.suspend(); linkedReader.suspend() }
+    }
+    @ViewBuilder private var recordMetadata: some View {
+        TronSettingsGroup("Metadata", accent: .tronKnowledge) {
+            VStack(alignment: .leading, spacing: TronSpacing.sm) {
+                Text("Revision: \(currentRecord.revisionId)")
+                    .font(TronTypography.secondaryCodeDescription)
+                    .foregroundStyle(Color.tronKnowledgeText)
+                    .textSelection(.enabled)
+                if let temporal = currentRecord.temporal {
+                    Text([temporal.eventAt.map { "event \($0)" }, temporal.validFrom.map { "valid from \($0)" }, temporal.validTo.map { "valid to \($0)" }, temporal.reviewDue.map { "review \($0)" }].compactMap { $0 }.joined(separator: " · "))
+                        .font(TronTypography.secondaryCodeDescription)
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .textSelection(.enabled)
+                }
+                if case .source(let source) = currentRecord.content {
+                    Text("Capture: \(source.captureDisposition.rawValue)")
+                        .font(TronTypography.secondaryDescription)
+                        .foregroundStyle(Color.tronTextSecondary)
+                    if source.captureDisposition != .complete {
+                        Label("Evidence is \(source.captureDisposition.rawValue); generated text is not proof.", systemImage: "exclamationmark.triangle")
+                            .font(TronTypography.secondaryDescription)
+                            .foregroundStyle(Color.tronAmber)
+                    }
+                }
+                if case .note(let note) = currentRecord.content, let fields = note.fields {
+                    Text("Structured qualifications")
+                        .font(TronTypography.sheetSectionHeader)
+                        .foregroundStyle(Color.tronKnowledge)
+                    ForEach(Array(fields.enumerated()), id: \.offset) { _, field in
+                        VStack(alignment: .leading, spacing: TronSpacing.xs) {
+                            Text(field.field).font(TronTypography.bodySM.bold()).foregroundStyle(Color.tronTextPrimary)
+                            Text("Value: \(jsonText(field.value))").font(TronTypography.body).foregroundStyle(Color.tronTextPrimary).textSelection(.enabled)
+                            if let subject = field.subject { Text("Subject: \(subject)").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary) }
+                            Text("\(field.certainty.rawValue)\(field.validFrom.map { " · from \($0)" } ?? "")\(field.validTo.map { " · to \($0)" } ?? "")")
+                                .font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
+                            citationLinks(field.evidence)
+                        }
+                    }
+                }
+            }
+        }
+    }
     @ViewBuilder private var sourceLink: some View {
         if case .source(let source) = currentRecord.content {
-            if let uri = source.uri, let url = URL(string: uri) { Link(uri, destination: url).font(.callout) }
+            if let uri = source.uri, let url = URL(string: uri) {
+                Link(uri, destination: url)
+                    .font(TronTypography.bodySM)
+                    .foregroundStyle(Color.tronKnowledgeText)
+                    .textSelection(.enabled)
+            }
             if let object = source.object { objectReader(object, label: "retained source") }
-            if let retention = source.retention { Text("Retention: \(retention.sensitivity) · evidence \(retention.evidenceAvailable ? "available" : "unavailable")").font(.caption).foregroundStyle(Color.tronTextSecondary) }
+            if let retention = source.retention {
+                Text("Retention: \(retention.sensitivity) · evidence \(retention.evidenceAvailable ? "available" : "unavailable")")
+                    .font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
+            }
             if let representations = source.representations, !representations.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Retained representations").font(.headline)
+                TronSettingsGroup("Retained representations", accent: .tronKnowledge) {
                     ForEach(Array(representations.enumerated()), id: \.offset) { _, representation in
                         objectReader(representation.object, label: representation.kind == .providerAPI ? "provider API" : "linked article")
                     }
                 }
             }
-            if let annotations = source.annotations, !annotations.isEmpty { VStack(alignment: .leading, spacing: 5) { Text("Annotations and corrections").font(.headline); ForEach(Array(annotations.enumerated()), id: \.offset) { _, annotation in Text(annotation.text).font(.callout).textSelection(.enabled) } } }
-            if let identity = source.identity { Text("\(identity.provider) · account \(identity.accountId) · item \(identity.itemId)").font(.caption).foregroundStyle(Color.tronTextSecondary) }
-            if let assessment = source.assessment { VStack(alignment: .leading, spacing: 6) { Text("Assessment").font(.headline); Text(assessment.summary); if let contribution = assessment.contribution { Text("Contribution: \(contribution)") }; if let use = assessment.possibleUse { Text("Possible use: \(use)") }; Text("Evidence \(assessment.evidenceQuality.rawValue) · Freshness \(assessment.freshness.rawValue)").font(.caption).foregroundStyle(Color.tronTextSecondary) } }
+            if let annotations = source.annotations, !annotations.isEmpty {
+                TronSettingsGroup("Annotations and corrections", accent: .tronKnowledge) {
+                    ForEach(Array(annotations.enumerated()), id: \.offset) { _, annotation in
+                        Text(annotation.text).font(TronTypography.body).foregroundStyle(Color.tronTextPrimary).textSelection(.enabled)
+                    }
+                }
+            }
+            if let identity = source.identity {
+                Text("\(identity.provider) · account \(identity.accountId) · item \(identity.itemId)")
+                    .font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextSecondary).textSelection(.enabled)
+            }
+            if let assessment = source.assessment {
+                TronSettingsGroup("Assessment", accent: .tronKnowledge) {
+                    VStack(alignment: .leading, spacing: TronSpacing.sm) {
+                        Text(assessment.summary).font(TronTypography.body).foregroundStyle(Color.tronTextPrimary).fixedSize(horizontal: false, vertical: true)
+                        if let contribution = assessment.contribution { Text("Contribution: \(contribution)").font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary) }
+                        if let use = assessment.possibleUse { Text("Possible use: \(use)").font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary) }
+                        Text("Evidence \(assessment.evidenceQuality.rawValue) · Freshness \(assessment.freshness.rawValue)").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
+                    }
+                }
+            }
         }
     }
     @ViewBuilder private func objectReader(_ reference: KnowledgeObjectRef, label: String) -> some View {
@@ -242,24 +589,77 @@ struct KnowledgeDetailView: View {
         Button(state.bytes.isEmpty ? "Open \(label) (\(reference.bytes) bytes)" : "Load \(label)") {
             readObject(reference, offset: state.nextOffset ?? 0)
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
         .disabled(state.loading || (state.nextOffset == nil && !state.bytes.isEmpty))
-        if state.loading { ProgressView().controlSize(.small) }
-        if let error = state.error { Text(error).font(.footnote).foregroundStyle(Color.tronAmber) }
+        if state.loading { TronLoadingState(label: "Loading \(label)…", accent: .tronKnowledge) }
+        if let error = state.error { Text(error).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronAmber).fixedSize(horizontal: false, vertical: true) }
         if !state.bytes.isEmpty {
             Text(KnowledgeObjectPresentationPolicy.renderedText(state.bytes, mediaType: reference.mediaType, label: label))
-                .font(.footnote.monospaced()).textSelection(.enabled)
+                .font(TronTypography.codeBlock).foregroundStyle(Color.tronTextPrimary).textSelection(.enabled)
+                .padding(TronSpacing.md).tronGlassSurface(accent: .tronKnowledge, tintOpacity: 0.06)
             if let next = state.nextOffset {
-                Text("Loaded \(state.bytes.count) of \(state.totalBytes ?? reference.bytes) bytes.").font(.caption).foregroundStyle(Color.tronTextSecondary)
-                Button("Load next \(label) chunk (offset \(next))") { readObject(reference, offset: next) }.buttonStyle(.bordered)
-            } else { Text("Complete \(label) loaded (\(state.bytes.count) bytes).").font(.caption).foregroundStyle(Color.tronTextSecondary) }
+                Text("Loaded \(state.bytes.count) of \(state.totalBytes ?? reference.bytes) bytes.").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
+                Button("Load next \(label) chunk (offset \(next))") { readObject(reference, offset: next) }.buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
+            } else { Text("Complete \(label) loaded (\(state.bytes.count) bytes).").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary) }
         }
     }
-    private var evidence: some View { VStack(alignment: .leading, spacing: 8) { Text("Evidence").font(.headline); citationLinks(currentRecord.provenance.evidence); if case .observation(let observation) = currentRecord.content { ForEach(Array(observation.items.enumerated()), id: \.offset) { _, item in citationLinks(item.evidence ?? []) } }; if case .note(let note) = currentRecord.content, let contrary = note.contraryEvidence { Text("Contrary evidence").font(.subheadline.bold()).foregroundStyle(Color.tronAmber); citationLinks(contrary) }; if let evidenceMessage { Text(evidenceMessage).font(.footnote).foregroundStyle(Color.tronTextSecondary) }; if linkedReader.loading { ProgressView("Opening linked evidence…").font(.footnote) }; if let linkedRecordError = linkedReader.error { Text(linkedRecordError).font(.footnote).foregroundStyle(Color.tronAmber) } } }
-    @ViewBuilder private func citationLinks(_ refs: [KnowledgeEvidenceRef]) -> some View { ForEach(Array(refs.enumerated()), id: \.offset) { _, ref in if let citation = ref.sessionEntry { Button("Open originating session · \(citation.entryId)") { openSessionEvidence(citation) }.font(.footnote) } else if let recordID = ref.recordId { Button("Open record \(recordID) · revision \(ref.revisionId ?? "latest")") { openLinkedRecord(id: recordID, revisionID: ref.revisionId) }.font(.footnote) } else if let hash = ref.objectHash { Text("Retained object \(hash.prefix(12))…").font(.footnote).foregroundStyle(Color.tronTextSecondary) } else { Text("Evidence unavailable").font(.footnote).foregroundStyle(Color.tronAmber) } } }
+    private var evidence: some View {
+        TronSettingsGroup("Evidence", accent: .tronKnowledge) {
+            VStack(alignment: .leading, spacing: TronSpacing.md) {
+                citationLinks(currentRecord.provenance.evidence)
+                if case .observation(let observation) = currentRecord.content {
+                    ForEach(Array(observation.items.enumerated()), id: \.offset) { _, item in citationLinks(item.evidence ?? []) }
+                }
+                if case .note(let note) = currentRecord.content, let contrary = note.contraryEvidence {
+                    Text("Contrary evidence").font(TronTypography.bodySM.bold()).foregroundStyle(Color.tronAmber)
+                    citationLinks(contrary)
+                }
+                if let evidenceMessage { Text(evidenceMessage).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary) }
+                if linkedReader.loading { TronLoadingState(label: "Opening linked evidence…", accent: .tronKnowledge) }
+                if let linkedRecordError = linkedReader.error { Text(linkedRecordError).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronAmber) }
+            }
+        }
+    }
+    @ViewBuilder private func citationLinks(_ refs: [KnowledgeEvidenceRef]) -> some View {
+        ForEach(Array(refs.enumerated()), id: \.offset) { _, ref in
+            if let citation = ref.sessionEntry {
+                Button("Open originating session · \(citation.entryId)") { openSessionEvidence(citation) }
+                    .buttonStyle(TronRowButtonStyle(accent: .tronKnowledge))
+            } else if let recordID = ref.recordId {
+                Button("Open record \(recordID) · revision \(ref.revisionId ?? "latest")") { openLinkedRecord(id: recordID, revisionID: ref.revisionId) }
+                    .buttonStyle(TronRowButtonStyle(accent: .tronKnowledge))
+            } else if let hash = ref.objectHash {
+                Text("Retained object \(hash.prefix(12))…").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextSecondary).textSelection(.enabled)
+            } else {
+                Text("Evidence unavailable").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronAmber)
+            }
+        }
+    }
     private func jsonText(_ value: JSONValue) -> String { switch value { case .string(let value): return value; case .number(let value): return String(value); case .bool(let value): return value ? "true" : "false"; case .null: return "null"; case .array(let values): return "[\(values.prefix(20).map(jsonText).joined(separator: ", "))]"; case .object(let values): return "{\(values.keys.sorted().prefix(20).compactMap { key in values[key].map { "\(key): \(jsonText($0))" } }.joined(separator: ", "))}" } }
-    @ViewBuilder private var noteMetadata: some View { if case .note(let note) = currentRecord.content { if let freshness = note.freshness { Text("Freshness: \(freshness.rawValue)").font(.caption).foregroundStyle(Color.tronTextSecondary) }; if let contrary = note.contraryEvidence, !contrary.isEmpty { Text("Contrary evidence retained: \(contrary.count)").font(.caption).foregroundStyle(Color.tronAmber) } } }
-    @ViewBuilder private var observationItems: some View { if case .observation(let observation) = currentRecord.content { VStack(alignment: .leading, spacing: 8) { Text("Observed items").font(.headline); Text("Entries \(observation.range.fromEntryId)…\(observation.range.toEntryId) · digest \(observation.range.entryDigest.prefix(12))…").font(.caption).foregroundStyle(Color.tronTextSecondary); ForEach(Array(observation.items.enumerated()), id: \.offset) { _, item in Text("\(item.attribution.rawValue.capitalized) · \(item.certainty.rawValue): \(item.text)").font(.callout) }; Button("Reflect bounded handoff") { reflect(observation) }.buttonStyle(.bordered) } } }
+    @ViewBuilder private var noteMetadata: some View {
+        if case .note(let note) = currentRecord.content {
+            VStack(alignment: .leading, spacing: TronSpacing.sm) {
+                if let freshness = note.freshness { Text("Freshness: \(freshness.rawValue)").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary) }
+                if let contrary = note.contraryEvidence, !contrary.isEmpty { Text("Contrary evidence retained: \(contrary.count)").font(TronTypography.caption).foregroundStyle(Color.tronAmber) }
+            }
+        }
+    }
+    @ViewBuilder private var observationItems: some View {
+        if case .observation(let observation) = currentRecord.content {
+            TronSettingsGroup("Observed items", accent: .tronKnowledge) {
+                VStack(alignment: .leading, spacing: TronSpacing.md) {
+                    Text("Entries \(observation.range.fromEntryId)…\(observation.range.toEntryId) · digest \(observation.range.entryDigest.prefix(12))…")
+                        .font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextSecondary).textSelection(.enabled)
+                    ForEach(Array(observation.items.enumerated()), id: \.offset) { _, item in
+                        Text("\(item.attribution.rawValue.capitalized) · \(item.certainty.rawValue): \(item.text)")
+                            .font(TronTypography.body).foregroundStyle(Color.tronTextPrimary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Button("Reflect bounded handoff") { reflect(observation) }
+                        .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
+                }
+            }
+        }
+    }
     private func readObject(_ reference: KnowledgeObjectRef, offset: Int) {
         guard admitsOrigin else { evidenceMessage = "Gateway changed; reopen this entry."; return }
         let key = KnowledgeObjectSelectionKey(recordID: currentRecord.id, revisionID: currentRecord.revisionId, reference: reference)
@@ -328,27 +728,38 @@ struct KnowledgeConfigurationView: View {
         NavigationStack {
             Form {
                 Section("Observer") {
-                    Toggle("Observe selected conversations", isOn: Binding(get: { config?.observation.enabled ?? false }, set: { config?.observation.enabled = $0 }))
+                    TronToggleRow(icon: "eye", title: "Observe selected conversations",
+                                   detail: "Run bounded observation for the selected scope.", accent: .tronKnowledge,
+                                   isOn: Binding(get: { config?.observation.enabled ?? false }, set: { config?.observation.enabled = $0 }))
                         .disabled(config?.observation.enabled != true && (chosenModel == nil || !hasScope))
-                    Text(chosenModel.map { "Selected model: \($0.provider)/\($0.id)" } ?? "Choose an existing configured model before enabling observation.").font(.footnote).foregroundStyle(Color.tronTextSecondary)
+                    Text(chosenModel.map { "Selected model: \($0.provider)/\($0.id)" } ?? "Choose an existing configured model before enabling observation.").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
                     ModelPicker(selection: $chosenModel, models: model.providerCatalog(for: .global)?.models.filter { $0.available } ?? []).frame(minHeight: 160)
                 }
-                Section("Current interests") { TextEditor(text: $interestsText).frame(minHeight: 100); Text("One interest per line, up to 50. Interests guide source triage and do not enable observation.").font(.footnote).foregroundStyle(Color.tronTextSecondary) }
+                Section("Current interests") { TextEditor(text: $interestsText).frame(minHeight: 100).tronTextEditor(); Text("One interest per line, up to 50. Interests guide source triage and do not enable observation.").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary) }
                 Section("Existing sessions") {
-                    if model.sessions.isEmpty { Text("No sessions are available on this Gateway.").font(.footnote).foregroundStyle(Color.tronTextSecondary) }
+                    if model.sessions.isEmpty { Text("No sessions are available on this Gateway.").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary) }
                     ForEach(model.sessions.prefix(100)) { session in
-                        Toggle(session.title, isOn: Binding(get: { selectedSessionIDs.contains(session.id) }, set: { if $0 { selectedSessionIDs.insert(session.id) } else { selectedSessionIDs.remove(session.id) } }))
+                        TronToggleRow(icon: "bubble.left.and.bubble.right", title: session.title,
+                                      accent: .tronKnowledge,
+                                      isOn: Binding(get: { selectedSessionIDs.contains(session.id) }, set: { if $0 { selectedSessionIDs.insert(session.id) } else { selectedSessionIDs.remove(session.id) } }))
                     }
                 }
                 Section("Existing projects") {
-                    if let workspace = model.workspace { ForEach(workspace.entries.filter { $0.kind == .directory }.prefix(100)) { entry in Toggle(entry.name, isOn: Binding(get: { selectedProjectIDs.contains(entry.path) }, set: { if $0 { selectedProjectIDs.insert(entry.path) } else { selectedProjectIDs.remove(entry.path) } })) } }
-                    Text("An empty allowlist means no eligible scope. Select at least one existing session or project; exclusions override these choices.").font(.footnote).foregroundStyle(Color.tronTextSecondary)
+                    if let workspace = model.workspace { ForEach(workspace.entries.filter { $0.kind == .directory }.prefix(100)) { entry in
+                        TronToggleRow(icon: "folder", title: entry.name,
+                                      accent: .tronKnowledge,
+                                      isOn: Binding(get: { selectedProjectIDs.contains(entry.path) }, set: { if $0 { selectedProjectIDs.insert(entry.path) } else { selectedProjectIDs.remove(entry.path) } }))
+                    } }
+                    Text("An empty allowlist means no eligible scope. Select at least one existing session or project; exclusions override these choices.").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
                     if !hasScope { Label("No scope selected", systemImage: "exclamationmark.triangle").foregroundStyle(Color.tronAmber) }
                 }
-                if let error { Text(error).foregroundStyle(.red) }
+                if let error { Text(error).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronError) }
             }
-            .navigationTitle("Observation configuration")
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button(saving ? "Saving…" : "Save") { save() }.disabled(!canSave || saving) } }
+            .tronNavigationTitle("Observation configuration", accent: .tronKnowledge)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button(saving ? "Saving…" : "Save") { save() }.disabled(!canSave || saving).foregroundStyle(Color.tronKnowledge) } }
+            .tronPresentation()
+            .tronSettingsVisualTheme(accent: .tronKnowledge)
+            .tronTopBlur(.sheet)
             .task { await load() }
         }
     }
@@ -396,18 +807,41 @@ struct KnowledgeConnectorsView: View {
     var body: some View {
         NavigationStack {
             List(["raindrop", "x"], id: \.self) { connector in
-                VStack(alignment: .leading, spacing: 8) {
-                    Label(connector == "x" ? "X" : "Raindrop", systemImage: "link").font(.headline)
-                    Text(statuses[connector]?.detail ?? "Checking status…").font(.footnote).foregroundStyle(Color.tronTextSecondary)
-                    if statuses[connector]?.writesEnabled == false { Text("Remote writes disabled").font(.caption).foregroundStyle(Color.tronAmber) }
-                    HStack { Button("Refresh") { refresh(connector) }.buttonStyle(.bordered); Button("Configure") { configuring = connector }.buttonStyle(.bordered); Button("Run") { run(connector) }.buttonStyle(.borderedProminent).disabled(statuses[connector]?.configured != true) }
-                }.padding(.vertical, 8)
+                TronSettingsGroup(connector == "x" ? "X" : "Raindrop", detail: statuses[connector]?.detail ?? "Checking status…", accent: .tronKnowledge) {
+                    VStack(alignment: .leading, spacing: TronSpacing.md) {
+                        if statuses[connector]?.writesEnabled == false {
+                            Label("Remote writes disabled", systemImage: "exclamationmark.triangle")
+                                .font(TronTypography.secondaryDescription)
+                                .foregroundStyle(Color.tronAmber)
+                        }
+                        HStack(spacing: TronSpacing.md) {
+                            Button("Refresh") { refresh(connector) }
+                                .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
+                            Button("Configure") { configuring = connector }
+                                .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
+                            Button("Run") { run(connector) }
+                                .buttonStyle(TronActionButtonStyle(role: .primary, expands: false, accent: .tronKnowledge))
+                                .disabled(statuses[connector]?.configured != true)
+                        }
+                    }
+                }
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
-            .navigationTitle("Connectors")
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .listStyle(.plain)
+            .tronCollectionSurface()
+            .tint(Color.tronKnowledge)
+            .tronScrollEdgeChrome()
+            .tronNavigationTitle("Connectors", accent: .tronKnowledge)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.foregroundStyle(Color.tronKnowledge) } }
+            .tronPresentation()
+            .tronSettingsVisualTheme(accent: .tronKnowledge)
+            .tronTopBlur(.sheet)
             .task { refresh("raindrop"); refresh("x") }
-            .sheet(isPresented: Binding(get: { configuring != nil }, set: { if !$0 { configuring = nil } })) {
-                if let connector = configuring { KnowledgeConnectorEditView(connector: connector, status: statuses[connector]) { configuring = nil; refresh(connector) }.environment(model) }
+            .tronManagedSheet(isPresented: Binding(get: { configuring != nil }, set: { if !$0 { configuring = nil } }), identity: "knowledge.connector.edit") {
+                if let connector = configuring {
+                    KnowledgeConnectorEditView(connector: connector, status: statuses[connector]) { configuring = nil; refresh(connector) }.environment(model)
+                }
             }
             .alert("Connector", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) { Button("OK") {} } message: { Text(message ?? "") }
         }
@@ -460,11 +894,11 @@ private struct KnowledgeConnectorEditView: View {
     }
     var body: some View {
         NavigationStack { Form {
-            Section("Account") { Toggle("Enabled", isOn: $enabled); TextField("Account ID", text: $accountID); TextField(connector == "raindrop" ? "Collection ID" : "User ID", text: $scope); SecureField("Mac Keychain reference", text: $credentialRef); Text("Credentials stay in the Mac Keychain; this is only an opaque reference.").font(.footnote).foregroundStyle(Color.tronTextSecondary) }
-            if connector == "raindrop" { Section("Remote policy") { TextField("Destination collection (optional)", text: $destination); Toggle("Allow reversible moves", isOn: $allowWrites); Text("Moves require a complete local capture and verified remote state.").font(.footnote).foregroundStyle(Color.tronTextSecondary) } }
+            Section("Account") { Toggle("Enabled", isOn: $enabled); TextField("Account ID", text: $accountID).tronField(monospaced: true); TextField(connector == "raindrop" ? "Collection ID" : "User ID", text: $scope).tronField(monospaced: true); SecureField("Mac Keychain reference", text: $credentialRef).tronField(monospaced: true); Text("Credentials stay in the Mac Keychain; this is only an opaque reference.").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary) }
+            if connector == "raindrop" { Section("Remote policy") { TextField("Destination collection (optional)", text: $destination).tronField(monospaced: true); Toggle("Allow reversible moves", isOn: $allowWrites); Text("Moves require a complete local capture and verified remote state.").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary) } }
             Section("Access") { Toggle("Paid access approved", isOn: $paidAccessApproved); Toggle("Recurring runs approved", isOn: $recurringApproved) }
-            if let error { Text(error).foregroundStyle(.red) }
-        }.navigationTitle(connector == "x" ? "X connector" : "Raindrop connector").toolbar { ToolbarItem(placement: .confirmationAction) { Button(saving ? "Saving…" : "Save") { save() }.disabled(saving) } } }
+            if let error { Text(error).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronError) }
+        }.tronNavigationTitle(connector == "x" ? "X connector" : "Raindrop connector", accent: .tronKnowledge).tronSettingsVisualTheme(accent: .tronKnowledge).toolbar { ToolbarItem(placement: .confirmationAction) { Button(saving ? "Saving…" : "Save") { save() }.disabled(saving).foregroundStyle(Color.tronKnowledge) } } }
     }
     private func save() {
         guard !saving else { return }
@@ -508,10 +942,10 @@ struct KnowledgeImportView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Read-only dry run") { Picker("Named source", selection: $source) { Text("Personal OS").tag("personal-os"); Text("LLM Wiki").tag("llm-wiki") }; Text("Only a deliberately configured named root on this Gateway can be read.").font(.footnote).foregroundStyle(Color.tronTextSecondary); Button("Inspect import") { offset = 0; dryRun(offset: 0) } }
-                if let plan, planOffset == offset, planSource == source { Section("Inspected import plan") { LabeledContent("Corpus progress", value: progress.map { "\($0.completed) of \($0.total)" } ?? "0 of \(plan.planned)"); LabeledContent("Warnings", value: "\(plan.warnings.count)"); LabeledContent("Skipped/withheld", value: "\(plan.skipped)"); Text("Plan hash: \(plan.planHash)").font(.caption).textSelection(.enabled); Button(importing ? "Importing…" : (approvedPlanHash == plan.planHash ? "Continue import" : "Import accepted items")) { if approvedPlanHash == plan.planHash { execute(plan) } else { confirmExecute = true } }.disabled(importing) } }
+                Section("Read-only dry run") { Picker("Named source", selection: $source) { Text("Personal OS").tag("personal-os"); Text("LLM Wiki").tag("llm-wiki") }; Text("Only a deliberately configured named root on this Gateway can be read.").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary); Button("Inspect import") { offset = 0; dryRun(offset: 0) } }
+                if let plan, planOffset == offset, planSource == source { Section("Inspected import plan") { LabeledContent("Corpus progress", value: progress.map { "\($0.completed) of \($0.total)" } ?? "0 of \(plan.planned)"); LabeledContent("Warnings", value: "\(plan.warnings.count)"); LabeledContent("Skipped/withheld", value: "\(plan.skipped)"); Text("Plan hash: \(plan.planHash)").font(.caption).textSelection(.enabled); Button(importing ? "Importing…" : (approvedPlanHash == plan.planHash ? "Continue import" : "Import accepted items")) { if approvedPlanHash == plan.planHash { execute(plan) } else { confirmExecute = true } }.buttonStyle(TronActionButtonStyle(role: .primary, accent: .tronKnowledge)).disabled(importing) } }
                 if let message { Text(message).foregroundStyle(Color.tronTextSecondary) }
-            }.navigationTitle("Import Knowledge").toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            }.tronNavigationTitle("Import Knowledge", accent: .tronKnowledge).tronSettingsVisualTheme(accent: .tronKnowledge).toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.foregroundStyle(Color.tronKnowledge) } }
             .confirmationDialog("Execute this exact inspected import?", isPresented: $confirmExecute) { Button("Import", role: .destructive) { if let plan { execute(plan) } }; Button("Cancel", role: .cancel) {} }
         }
     }
@@ -592,11 +1026,12 @@ private struct KnowledgeCorrectionView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Correction") { TextEditor(text: $text).frame(minHeight: 180); Text("This creates a new immutable revision and preserves the original as corrected evidence.").font(.footnote).foregroundStyle(Color.tronTextSecondary) }
-                if let error { Text(error).foregroundStyle(.red) }
+                Section("Correction") { TextEditor(text: $text).frame(minHeight: 180).tronTextEditor(); Text("This creates a new immutable revision and preserves the original as corrected evidence.").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary) }
+                if let error { Text(error).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronError) }
             }
-            .navigationTitle("Correct Knowledge")
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) }; ToolbarItem(placement: .confirmationAction) { Button(saving ? "Saving…" : "Save") { save() }.disabled(saving || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) } }
+            .tronNavigationTitle("Correct Knowledge", accent: .tronKnowledge)
+            .tronSettingsVisualTheme(accent: .tronKnowledge)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) }; ToolbarItem(placement: .confirmationAction) { Button(saving ? "Saving…" : "Save") { save() }.disabled(saving || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).foregroundStyle(Color.tronKnowledge) } }
         }
     }
     private func save() {
@@ -626,9 +1061,9 @@ private struct KnowledgeCaptureView: View {
     @State private var error: String?
     var body: some View {
         NavigationStack { Form {
-            Section("Manual URL") { TextField("Title", text: $title); TextField("https://…", text: $uri).textInputAutocapitalization(.never).keyboardType(.URL); Picker("Scope", selection: $scope) { ForEach(KnowledgeScope.allCases, id: \.self) { Text($0.label).tag($0) } }; Text("The Gateway performs bounded safe fetching and records capture quality.").font(.footnote).foregroundStyle(Color.tronTextSecondary) }
-            if let error { Text(error).foregroundStyle(.red) }
-        }.navigationTitle("Capture URL").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) }; ToolbarItem(placement: .confirmationAction) { Button(saving ? "Capturing…" : "Capture") { capture() }.disabled(saving || !valid) } } }
+            Section("Manual URL") { TextField("Title", text: $title).tronField(); TextField("https://…", text: $uri).textInputAutocapitalization(.never).keyboardType(.URL).tronField(monospaced: true); Picker("Scope", selection: $scope) { ForEach(KnowledgeScope.allCases, id: \.self) { Text($0.label).tag($0) } }; Text("The Gateway performs bounded safe fetching and records capture quality.").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary) }
+            if let error { Text(error).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronError) }
+        }.tronNavigationTitle("Capture URL", accent: .tronKnowledge).tronSettingsVisualTheme(accent: .tronKnowledge).toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) }; ToolbarItem(placement: .confirmationAction) { Button(saving ? "Capturing…" : "Capture") { capture() }.disabled(saving || !valid).foregroundStyle(Color.tronKnowledge) } } }
     }
     private var valid: Bool { guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let url = URL(string: uri), ["http", "https"].contains(url.scheme?.lowercased()), url.user == nil, url.password == nil else { return false }; return true }
     private func capture() { guard valid else { error = "Use an http(s) URL without credentials."; return }; guard !saving else { return }; saving = true; let identity = model.knowledgePresentationIdentity; let sourceURL = uri; let sourceTitle = title
@@ -650,9 +1085,9 @@ private struct KnowledgeNoteCreateView: View {
     @State private var error: String?
     var body: some View {
         NavigationStack { Form {
-            Section("Note") { TextField("Title", text: $title); TextEditor(text: $noteText).frame(minHeight: 140); Picker("Role", selection: $role) { ForEach(KnowledgeNoteRole.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }; Picker("Scope", selection: $scope) { ForEach(KnowledgeScope.allCases, id: \.self) { Text($0.label).tag($0) } }; Toggle("Confirmed by me", isOn: $confirmed) }
-            if let error { Text(error).foregroundStyle(.red) }
-        }.navigationTitle("New Note").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button(saving ? "Saving…" : "Save") { save() }.disabled(saving || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) } } }
+            Section("Note") { TextField("Title", text: $title).tronField(); TextEditor(text: $noteText).frame(minHeight: 140).tronTextEditor(); Picker("Role", selection: $role) { ForEach(KnowledgeNoteRole.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }; Picker("Scope", selection: $scope) { ForEach(KnowledgeScope.allCases, id: \.self) { Text($0.label).tag($0) } }; Toggle("Confirmed by me", isOn: $confirmed) }
+            if let error { Text(error).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronError) }
+        }.tronNavigationTitle("New Note", accent: .tronKnowledge).tronSettingsVisualTheme(accent: .tronKnowledge).toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button(saving ? "Saving…" : "Save") { save() }.disabled(saving || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).foregroundStyle(Color.tronKnowledge) } } }
     }
     private func save() {
         guard !saving else { return }

@@ -447,6 +447,15 @@ policy. Shell, webhook, extension-command, attachment, deployment, and Gateway l
 no UI or wire path. Run-now, enable, cancellation, deletion, and uncertain-outcome
 resolution require explicit confirmation and retain optimistic definition revision fences.
 
+Knowledge is a bounded, Gateway-authoritative projection exposed by the Knowledge dashboard. It uses
+`Color.tronKnowledge` (deep violet in light appearance and lavender in dark appearance) for its identity,
+while semantic warning, success, and danger states retain their established colors. The dashboard's
+managed filter sheet owns type and scope selection, and its managed configuration, connector, import,
+capture, note, correction, and detail presentations inherit the same accent and Tron typography. Search,
+loading, empty, evidence, coverage, and retained-object states use the shared presentation controls;
+record and revision IDs remain exact metadata rather than oversized display headlines. Accepted Knowledge
+mutations remain owned by the confirmed executor and are fenced by the originating presentation identity.
+
 Gateway restart uses a supervised drain contract. The request freezes new mutations,
 waits for accepted agent runs to settle in canonical JSONL, then replaces the Gateway
 process; active PTYs must be closed first because their process state is not restartable.

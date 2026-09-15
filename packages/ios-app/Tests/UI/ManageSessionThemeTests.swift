@@ -20,6 +20,20 @@ struct ManageSessionThemeTests {
         #expect(TronSettingsVisualTheme(accent: .tronSessionTeal).accent == .tronSessionTeal)
     }
 
+    @Test("Knowledge violet accent is adaptive and readable in both appearances")
+    func knowledgeAccentPalette() {
+        let lightTraits = UITraitCollection(userInterfaceStyle: .light)
+        let darkTraits = UITraitCollection(userInterfaceStyle: .dark)
+        let lightAccent = UIColor(Color.tronKnowledge).resolvedColor(with: lightTraits)
+        let darkAccent = UIColor(Color.tronKnowledge).resolvedColor(with: darkTraits)
+        #expect(lightAccent == UIColor(hex: "#6D3BB8"))
+        #expect(darkAccent == UIColor(hex: "#C4B5FD"))
+        #expect(contrastRatio(lightAccent, UIColor(Color.tronBackground).resolvedColor(with: lightTraits)) >= 4.5)
+        #expect(contrastRatio(darkAccent, UIColor(Color.tronBackground).resolvedColor(with: darkTraits)) >= 4.5)
+        #expect(TronSettingsVisualTheme(accent: .tronKnowledge).accent == .tronKnowledge)
+        #expect(Color.tronKnowledgeText != Color.tronAutomationText)
+    }
+
     @Test("subagent seafoam theme stays readable and lifecycle colors are confined to activity rows")
     @MainActor
     func subagentTheme() {

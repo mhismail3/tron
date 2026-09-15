@@ -34,6 +34,9 @@ extension Color {
     static let tronCoral = Color(lightHex: "#C06545", darkHex: "#D97757")
     static let tronAutomation = Color(lightHex: "#31889A", darkHex: "#74CBDC")
     static let tronAutomationText = Color(lightHex: "#1F6675", darkHex: "#8BD8E4")
+    /// Knowledge identity: readable deep violet in light mode and lavender in dark mode.
+    static let tronKnowledge = Color(lightHex: "#6D3BB8", darkHex: "#C4B5FD")
+    static let tronKnowledgeText = Color(lightHex: "#54258F", darkHex: "#DDD6FE")
     static let tronRose = Color(lightHex: "#D4245F", darkHex: "#E62B6C")
     static let tronPink = Color(lightHex: "#DB2777", darkHex: "#EC4899")
     static let tronSlate = Color(lightHex: "#64748B", darkHex: "#94A3B8")

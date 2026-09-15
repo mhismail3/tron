@@ -20,7 +20,7 @@ enum DashboardMode: String, CaseIterable, Identifiable {
         switch self {
         case .sessions: .tronEmerald
         case .automations: .tronAutomation
-        case .knowledge: .tronCyan
+        case .knowledge: .tronKnowledge
         }
     }
 }

@@ -11,6 +11,20 @@ scripts/install-ci-tools.sh xcodegen
 scripts/tron ios generate
 ```
 
+## Knowledge dashboard
+
+Knowledge is styled as its own adaptive identity rather than inheriting the Sessions emerald or
+Automations cyan palette: use `Color.tronKnowledge` for deep violet in light appearance and lavender
+in dark appearance, with `tronKnowledgeText` only where readable text contrast requires it. Keep warning,
+success, and destructive states semantic. The dashboard uses the shared bottom `TronSearchBar`,
+`TronDashboardFilterSheet`, `TronPlaceholderState`, loading pulse, glass rows, and edge chrome. Its
+configuration, connector, import, capture, note, correction, and detail screens use the same managed
+progressive presentation and `TronTypography`/settings controls. Type and scope selections remain
+obvious in the filter sheet; exact record, revision, evidence, and provenance IDs remain selectable
+metadata and are not used as display headlines. A covered parent must not suppress a legitimate child
+correction callback: the callback checks the originating Knowledge presentation identity while the
+managed child owns presentation publication.
+
 ## Automations dashboard
 
 The top-left Tron logo on the session dashboard is a native `UIButton`/`UIMenu`
