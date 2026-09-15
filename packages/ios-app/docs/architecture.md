@@ -453,8 +453,12 @@ while semantic warning, success, and danger states retain their established colo
 managed filter sheet owns type and scope selection, and its managed configuration, connector, import,
 capture, note, correction, and detail presentations inherit the same accent and Tron typography. Search,
 loading, empty, evidence, coverage, and retained-object states use the shared presentation controls;
-record and revision IDs remain exact metadata rather than oversized display headlines. Accepted Knowledge
-mutations remain owned by the confirmed executor and are fenced by the originating presentation identity.
+record and revision IDs remain exact metadata rather than oversized display headlines. `KnowledgeFormSheet`
+composes the existing settings layout, controls, and large-sheet toolbar contract without owning form drafts
+or mutations. Coverage shares the dashboard scroll owner, and floating controls have explicit content clearance.
+Connector status reads refresh after their managed editor uncovers the parent; accepted connector runs do
+not retire with presentation reads. Accepted Knowledge mutations remain owned by the confirmed executor
+and are fenced by the originating presentation identity.
 
 Gateway restart uses a supervised drain contract. The request freezes new mutations,
 waits for accepted agent runs to settle in canonical JSONL, then replaces the Gateway

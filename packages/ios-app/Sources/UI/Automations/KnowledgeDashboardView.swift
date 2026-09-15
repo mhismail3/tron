@@ -62,36 +62,46 @@ struct KnowledgeDashboardView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            VStack(spacing: 0) {
-                if let status { coverageSummary(status) }
-                dashboardContent
-            }
-            TronTopBlurOverlay(style: .dashboard)
-            if !showingSearch {
-                HStack(spacing: TronSpacing.md) {
-                    Button { showingFilters = true } label: {
-                        TronInlineActionLabel(filterSummary, icon: "line.3.horizontal.decrease.circle", accent: .tronKnowledge)
+            GeometryReader { geometry in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: TronSpacing.section) {
+                        if let status { coverageSummary(status) }
+                        dashboardContent(minimumHeight: max(280, geometry.size.height - (status == nil ? 0 : 150) - 100))
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Knowledge filters")
-                    .accessibilityValue(filterSummary)
-                    Spacer()
-                    Button { showingSearch = true } label: {
-                        Image(systemName: "magnifyingglass")
-                    }
-                    .buttonStyle(TronIconButtonStyle(accent: .tronKnowledge, size: 48))
-                    .accessibilityLabel("Search Knowledge")
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 16)
+                    // The floating controls must never cover the last record or coverage action.
+                    .padding(.bottom, 80)
                 }
-                .padding(.horizontal, TronSpacing.xlarge)
-                .padding(.bottom, TronSpacing.md)
-            } else {
+                .tronScrollEdgeChrome()
+                .refreshable { await reload() }
+            }
+            .ignoresSafeArea(.keyboard, edges: .bottom)
+            TronTopBlurOverlay(style: .dashboard)
+            if showingSearch {
                 TronSearchBar(text: $search, prompt: "Search Knowledge", accent: .tronKnowledge,
-                              focusOnAppear: true, onClose: { showingSearch = false })
-                    .padding(.horizontal, TronSpacing.xlarge)
-                    .padding(.bottom, TronSpacing.md)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                              focusOnAppear: true, onClose: dismissSearch,
+                              onFocusChange: { if !$0 { dismissSearch() } })
+                    .padding(.horizontal, TronSpacing.section)
+                    .padding(.vertical, 8)
+            } else {
+                HStack {
+                    Button { showingSearch = true } label: { Image(systemName: "magnifyingglass") }
+                        .buttonStyle(TronIconButtonStyle(accent: .tronKnowledge, size: 56))
+                        .accessibilityLabel("Search Knowledge")
+                    Spacer(minLength: 12)
+                    Menu {
+                        Button("Capture URL", systemImage: "link.badge.plus") { captureSheet = true }
+                        Button("New note", systemImage: "note.text.badge.plus") { noteSheet = true }
+                    } label: { Image(systemName: "plus") }
+                        .buttonStyle(TronIconButtonStyle(accent: .tronKnowledge, size: 56))
+                        .accessibilityLabel("Add Knowledge")
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 8)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.tronBackground)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -100,21 +110,30 @@ struct KnowledgeDashboardView: View {
                 DashboardModeMenuButton(mode: .knowledge, onSelect: onSelectDashboard)
                     .frame(width: 34, height: 34)
             }
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .principal) {
+                Text("Knowledge")
+                    .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
+                    .foregroundStyle(Color.tronKnowledge)
+                    .accessibilityAddTraits(.isHeader)
+            }
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button { showingFilters = true } label: {
+                    Image(systemName: "line.3.horizontal.decrease").foregroundStyle(Color.tronKnowledge)
+                }
+                .accessibilityLabel("Knowledge filters")
+                .accessibilityValue(filterSummary)
                 Menu {
                     Button("Observation configuration", systemImage: "eye") { configSheet = true }
                     Button("Connectors", systemImage: "arrow.triangle.2.circlepath") { connectorSheet = true }
                     Button("Capture URL", systemImage: "link.badge.plus") { captureSheet = true }
                     Button("New note", systemImage: "note.text.badge.plus") { noteSheet = true }
                     Button("Import legacy records", systemImage: "square.and.arrow.down") { importSheet = true }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .foregroundStyle(Color.tronKnowledge)
-                }
-                .accessibilityLabel("Knowledge actions")
+                } label: { Image(systemName: "ellipsis").foregroundStyle(Color.tronKnowledge) }
+                    .accessibilityLabel("Knowledge actions")
             }
         }
-        .tronPresentation()
+        .font(TronTypography.body)
+        .foregroundStyle(Color.tronTextPrimary)
         .tronSettingsVisualTheme(accent: .tronKnowledge)
         .navigationDestination(item: $selected) { record in
             KnowledgeDetailView(record: record, origin: selectedIdentity ?? model.knowledgePresentationIdentity,
@@ -150,46 +169,51 @@ struct KnowledgeDashboardView: View {
             guard activity.allowsPresentationPublication else { return }
             await reload()
         }
-        .refreshable { await reload() }
+        .onChange(of: activity.allowsPresentationPublication) { _, active in
+            if !active { coverageStore.suspend() }
+        }
+        .onDisappear { coverageStore.suspend() }
+    }
+
+    private func dismissSearch() {
+        search = ""
+        showingSearch = false
     }
 
     @ViewBuilder
-    private var dashboardContent: some View {
-        if let error {
+    private func dashboardContent(minimumHeight: CGFloat) -> some View {
+        if loading && records.isEmpty {
+            TronLoadingState(label: "Loading Knowledge…", accent: .tronKnowledge)
+                .frame(maxWidth: .infinity, minHeight: minimumHeight)
+        } else if let error {
             TronPlaceholderState(title: "Knowledge unavailable", detail: error,
-                                 icon: "externaldrive.badge.xmark", accent: .tronKnowledge)
-        } else if records.isEmpty && !loading {
-            TronPlaceholderState(title: "No knowledge yet",
-                                 detail: "Observations, links, and notes retained by this Gateway will appear here.",
-                                 icon: "book.closed", accent: .tronKnowledge)
+                                 icon: "externaldrive.badge.xmark", accent: .tronKnowledge,
+                                 actionTitle: "Retry", action: { Task { await reload() } })
+                .frame(minHeight: minimumHeight)
+        } else if records.isEmpty {
+            let filtered = kind != nil || scope != nil || !search.isEmpty
+            TronPlaceholderState(title: filtered ? "No matching Knowledge" : "No Knowledge yet",
+                                 detail: filtered ? "Adjust your search or filters to see more records." : "Observations, links, and notes retained by this Gateway will appear here.",
+                                 icon: filtered ? "line.3.horizontal.decrease.circle" : "book.closed", accent: .tronKnowledge)
+                .frame(minHeight: minimumHeight)
         } else {
-            List {
-                ForEach(records) { record in
-                    Button {
-                        selected = record
-                        selectedIdentity = model.knowledgePresentationIdentity
-                    } label: {
-                        KnowledgeRecordRow(record: record)
-                    }
-                    .buttonStyle(.plain)
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                }
-                if nextCursor != nil {
-                    Button(loadingMore ? "Loading…" : "Load more") { loadMore() }
-                        .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
-                        .frame(maxWidth: .infinity)
-                        .listRowBackground(Color.clear)
-                }
+            HStack {
+                Text(filterSummary).font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronKnowledge)
+                Spacer()
+                Text("r\(revision)").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextMuted)
             }
-            .listStyle(.plain)
-            .tronCollectionSurface()
-            // Collection chrome has an emerald historical default; Knowledge
-            // must explicitly restore its identity after opting into it.
-            .tint(Color.tronKnowledge)
-            .tronScrollEdgeChrome()
-            .overlay {
-                if loading { TronLoadingState(label: "Loading Knowledge…", accent: .tronKnowledge) }
+            ForEach(records) { record in
+                Button {
+                    selected = record
+                    selectedIdentity = model.knowledgePresentationIdentity
+                } label: { KnowledgeRecordRow(record: record) }
+                    .buttonStyle(.plain)
+            }
+            if nextCursor != nil {
+                Button(loadingMore ? "Loading…" : "Load more") { loadMore() }
+                    .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
+                    .disabled(loadingMore)
+                    .frame(maxWidth: .infinity)
             }
         }
     }
@@ -201,7 +225,7 @@ struct KnowledgeDashboardView: View {
             TronDashboardFilterOption(title: "All types", selected: kind == nil, accent: .tronKnowledge,
                                       inactiveAccent: .tronSlate) { kind = nil }
             ForEach(KnowledgeRecordKind.allCases, id: \.self) { value in
-                TronDashboardFilterOption(title: value.label, detail: value.rawValue,
+                TronDashboardFilterOption(title: value.label,
                                           selected: kind == value, accent: .tronKnowledge,
                                           inactiveAccent: .tronSlate) { kind = value }
             }
@@ -209,7 +233,7 @@ struct KnowledgeDashboardView: View {
             TronDashboardFilterOption(title: "All scopes", selected: scope == nil, accent: .tronKnowledge,
                                       inactiveAccent: .tronSlate) { scope = nil }
             ForEach(KnowledgeScope.allCases, id: \.self) { value in
-                TronDashboardFilterOption(title: value.label, detail: value.rawValue,
+                TronDashboardFilterOption(title: value.label,
                                           selected: scope == value, accent: .tronKnowledge,
                                           inactiveAccent: .tronSlate) { scope = value }
             }
@@ -276,8 +300,6 @@ struct KnowledgeDashboardView: View {
         }
         .padding(TronSpacing.xl)
         .tronGlassSurface(accent: .tronKnowledge, tintOpacity: 0.10)
-        .padding(.horizontal, TronSpacing.xlarge)
-        .padding(.top, TronSpacing.md)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Observation coverage. Observed \(coverage.observedCount), empty \(coverage.emptyCount), excluded \(coverage.excludedCount), remaining \(coverage.remainingCount)")
     }
@@ -416,6 +438,7 @@ struct KnowledgeDetailView: View {
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                    .padding(14)
                 }
                 recordMetadata
                 sourceLink
@@ -433,6 +456,7 @@ struct KnowledgeDetailView: View {
                             Button("Start editable session from handoff") { onOpenDraft(reflectedHandoff) }
                                 .buttonStyle(TronActionButtonStyle(accent: .tronKnowledge))
                         }
+                        .padding(14)
                     }
                 }
                 if case .note(let note) = currentRecord.content, editing {
@@ -443,7 +467,9 @@ struct KnowledgeDetailView: View {
                                 .tronTextEditor()
                             Button("Save note") { saveNote(note) }
                                 .buttonStyle(TronActionButtonStyle(role: .primary, accent: .tronKnowledge))
+                                .disabled(mutationInFlight)
                         }
+                        .padding(14)
                     }
                 }
                 if let message {
@@ -477,7 +503,8 @@ struct KnowledgeDetailView: View {
                 .accessibilityLabel("Knowledge record actions")
             }
         }
-        .tronPresentation()
+        .foregroundStyle(Color.tronTextPrimary)
+        .tronSettingsLayout()
         .tronSettingsVisualTheme(accent: .tronKnowledge)
         .confirmationDialog("Forget this record?", isPresented: $forgetConfirmation) {
             Button("Forget", role: .destructive) { forget() }
@@ -538,6 +565,7 @@ struct KnowledgeDetailView: View {
                     }
                 }
             }
+            .padding(14)
         }
     }
     @ViewBuilder private var sourceLink: some View {
@@ -555,15 +583,18 @@ struct KnowledgeDetailView: View {
             }
             if let representations = source.representations, !representations.isEmpty {
                 TronSettingsGroup("Retained representations", accent: .tronKnowledge) {
-                    ForEach(Array(representations.enumerated()), id: \.offset) { _, representation in
-                        objectReader(representation.object, label: representation.kind == .providerAPI ? "provider API" : "linked article")
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(Array(representations.enumerated()), id: \.offset) { _, representation in
+                            objectReader(representation.object, label: representation.kind == .providerAPI ? "provider API" : "linked article")
+                        }
                     }
+                    .padding(14)
                 }
             }
             if let annotations = source.annotations, !annotations.isEmpty {
                 TronSettingsGroup("Annotations and corrections", accent: .tronKnowledge) {
                     ForEach(Array(annotations.enumerated()), id: \.offset) { _, annotation in
-                        Text(annotation.text).font(TronTypography.body).foregroundStyle(Color.tronTextPrimary).textSelection(.enabled)
+                        Text(annotation.text).font(TronTypography.body).foregroundStyle(Color.tronTextPrimary).textSelection(.enabled).padding(14)
                     }
                 }
             }
@@ -579,6 +610,7 @@ struct KnowledgeDetailView: View {
                         if let use = assessment.possibleUse { Text("Possible use: \(use)").font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary) }
                         Text("Evidence \(assessment.evidenceQuality.rawValue) · Freshness \(assessment.freshness.rawValue)").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
                     }
+                    .padding(14)
                 }
             }
         }
@@ -596,7 +628,7 @@ struct KnowledgeDetailView: View {
         if !state.bytes.isEmpty {
             Text(KnowledgeObjectPresentationPolicy.renderedText(state.bytes, mediaType: reference.mediaType, label: label))
                 .font(TronTypography.codeBlock).foregroundStyle(Color.tronTextPrimary).textSelection(.enabled)
-                .padding(TronSpacing.md).tronGlassSurface(accent: .tronKnowledge, tintOpacity: 0.06)
+                .padding(TronSpacing.md).tronScrollSurface(accent: .tronKnowledge, tintOpacity: 0.06)
             if let next = state.nextOffset {
                 Text("Loaded \(state.bytes.count) of \(state.totalBytes ?? reference.bytes) bytes.").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
                 Button("Load next \(label) chunk (offset \(next))") { readObject(reference, offset: next) }.buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
@@ -618,6 +650,7 @@ struct KnowledgeDetailView: View {
                 if linkedReader.loading { TronLoadingState(label: "Opening linked evidence…", accent: .tronKnowledge) }
                 if let linkedRecordError = linkedReader.error { Text(linkedRecordError).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronAmber) }
             }
+            .padding(14)
         }
     }
     @ViewBuilder private func citationLinks(_ refs: [KnowledgeEvidenceRef]) -> some View {
@@ -656,7 +689,9 @@ struct KnowledgeDetailView: View {
                     }
                     Button("Reflect bounded handoff") { reflect(observation) }
                         .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
+                        .disabled(mutationInFlight)
                 }
+                .padding(14)
             }
         }
     }
@@ -725,43 +760,47 @@ struct KnowledgeConfigurationView: View {
     private var hasScope: Bool { !selectedSessionIDs.isEmpty || !selectedProjectIDs.isEmpty }
     private var canSave: Bool { config != nil }
     var body: some View {
-        NavigationStack {
-            Form {
-                Section("Observer") {
-                    TronToggleRow(icon: "eye", title: "Observe selected conversations",
-                                   detail: "Run bounded observation for the selected scope.", accent: .tronKnowledge,
-                                   isOn: Binding(get: { config?.observation.enabled ?? false }, set: { config?.observation.enabled = $0 }))
-                        .disabled(config?.observation.enabled != true && (chosenModel == nil || !hasScope))
-                    Text(chosenModel.map { "Selected model: \($0.provider)/\($0.id)" } ?? "Choose an existing configured model before enabling observation.").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
-                    ModelPicker(selection: $chosenModel, models: model.providerCatalog(for: .global)?.models.filter { $0.available } ?? []).frame(minHeight: 160)
+        KnowledgeFormSheet(title: "Observation", isWorking: saving, actionDisabled: !canSave, onAction: save) {
+            if config == nil && error == nil { TronLoadingState(label: "Loading configuration…") }
+            TronSettingsGroup("Observer", accent: .tronKnowledge) {
+                TronSelectionSheetRow(icon: "cpu", title: "Model", value: chosenModel?.id ?? "Choose", accent: .tronKnowledge) {
+                    ModelPicker(selection: $chosenModel, models: model.providerCatalog(for: .global)?.models.filter(\.available) ?? [])
+                        .tronNavigationTitle("Observation model", accent: .tronKnowledge)
+                        .presentationDetents([.large])
                 }
-                Section("Current interests") { TextEditor(text: $interestsText).frame(minHeight: 100).tronTextEditor(); Text("One interest per line, up to 50. Interests guide source triage and do not enable observation.").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary) }
-                Section("Existing sessions") {
-                    if model.sessions.isEmpty { Text("No sessions are available on this Gateway.").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary) }
-                    ForEach(model.sessions.prefix(100)) { session in
-                        TronToggleRow(icon: "bubble.left.and.bubble.right", title: session.title,
-                                      accent: .tronKnowledge,
-                                      isOn: Binding(get: { selectedSessionIDs.contains(session.id) }, set: { if $0 { selectedSessionIDs.insert(session.id) } else { selectedSessionIDs.remove(session.id) } }))
+                TronSettingsDivider(accent: .tronKnowledge)
+                TronToggleRow(icon: "eye", title: "Observe selected conversations",
+                              detail: "Only the sessions and projects selected below are eligible.", accent: .tronKnowledge,
+                              isOn: Binding(get: { config?.observation.enabled ?? false }, set: { config?.observation.enabled = $0 }))
+                    .disabled(config?.observation.enabled != true && (chosenModel == nil || !hasScope))
+            }
+            .disabled(config == nil)
+            .tronSettingsCaption("Choose an existing configured model and at least one scope before enabling observation.")
+            TronSettingsGroup("Current interests", accent: .tronKnowledge, surfaceStyle: .uncontained) {
+                TextEditor(text: $interestsText).frame(minHeight: 120).tronTextEditor()
+                    .accessibilityLabel("Current interests")
+            }
+            .tronSettingsCaption("One interest per line, up to 50. Interests guide source triage and do not enable observation.")
+            TronSettingsGroup("Existing sessions", accent: .tronKnowledge, surfaceStyle: model.sessions.isEmpty ? .uncontained : .scrollOptimized) {
+                if model.sessions.isEmpty { TronSettingsCaption("No sessions are available on this Gateway.") }
+                ForEach(model.sessions.prefix(100)) { session in
+                    TronToggleRow(icon: "bubble.left.and.bubble.right", title: session.title, accent: .tronKnowledge,
+                                  isOn: Binding(get: { selectedSessionIDs.contains(session.id) }, set: { if $0 { selectedSessionIDs.insert(session.id) } else { selectedSessionIDs.remove(session.id) } }))
+                }
+            }
+            TronSettingsGroup("Existing projects", accent: .tronKnowledge, surfaceStyle: .scrollOptimized) {
+                if let workspace = model.workspace {
+                    ForEach(workspace.entries.filter { $0.kind == .directory }.prefix(100)) { entry in
+                        TronToggleRow(icon: "folder", title: entry.name, accent: .tronKnowledge,
+                                      isOn: Binding(get: { selectedProjectIDs.contains(entry.path) }, set: { if $0 { selectedProjectIDs.insert(entry.path) } else { selectedProjectIDs.remove(entry.path) } }))
                     }
                 }
-                Section("Existing projects") {
-                    if let workspace = model.workspace { ForEach(workspace.entries.filter { $0.kind == .directory }.prefix(100)) { entry in
-                        TronToggleRow(icon: "folder", title: entry.name,
-                                      accent: .tronKnowledge,
-                                      isOn: Binding(get: { selectedProjectIDs.contains(entry.path) }, set: { if $0 { selectedProjectIDs.insert(entry.path) } else { selectedProjectIDs.remove(entry.path) } }))
-                    } }
-                    Text("An empty allowlist means no eligible scope. Select at least one existing session or project; exclusions override these choices.").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
-                    if !hasScope { Label("No scope selected", systemImage: "exclamationmark.triangle").foregroundStyle(Color.tronAmber) }
-                }
-                if let error { Text(error).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronError) }
             }
-            .tronNavigationTitle("Observation configuration", accent: .tronKnowledge)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button(saving ? "Saving…" : "Save") { save() }.disabled(!canSave || saving).foregroundStyle(Color.tronKnowledge) } }
-            .tronPresentation()
-            .tronSettingsVisualTheme(accent: .tronKnowledge)
-            .tronTopBlur(.sheet)
-            .task { await load() }
+            .tronSettingsCaption("An empty allowlist means no eligible scope. Exclusions override these choices.")
+            if !hasScope { TronSettingsNotice(message: "No scope selected", accent: .tronAmber) }
+            if let error { TronSettingsNotice(message: error, accent: .tronError) }
         }
+        .task { await load() }
     }
     private func load() async {
         let requestIdentity = model.knowledgePresentationIdentity
@@ -805,45 +844,44 @@ struct KnowledgeConnectorsView: View {
     @State private var refreshInFlight = Set<String>()
     @State private var runInFlight = Set<String>()
     var body: some View {
-        NavigationStack {
-            List(["raindrop", "x"], id: \.self) { connector in
-                TronSettingsGroup(connector == "x" ? "X" : "Raindrop", detail: statuses[connector]?.detail ?? "Checking status…", accent: .tronKnowledge) {
-                    VStack(alignment: .leading, spacing: TronSpacing.md) {
-                        if statuses[connector]?.writesEnabled == false {
-                            Label("Remote writes disabled", systemImage: "exclamationmark.triangle")
-                                .font(TronTypography.secondaryDescription)
-                                .foregroundStyle(Color.tronAmber)
-                        }
-                        HStack(spacing: TronSpacing.md) {
-                            Button("Refresh") { refresh(connector) }
-                                .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
-                            Button("Configure") { configuring = connector }
-                                .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
-                            Button("Run") { run(connector) }
-                                .buttonStyle(TronActionButtonStyle(role: .primary, expands: false, accent: .tronKnowledge))
-                                .disabled(statuses[connector]?.configured != true)
-                        }
+        KnowledgeFormSheet(title: "Connectors") {
+            ForEach(["raindrop", "x"], id: \.self) { connector in
+                TronSettingsGroup(connector == "x" ? "X" : "Raindrop", accent: .tronKnowledge) {
+                    TronSettingsRow(icon: "person.crop.circle", title: "Account",
+                                    subtitle: statuses[connector].map { $0.configured ? ($0.enabled ? "Enabled" : "Disabled") : "Not configured" } ?? "Checking status…") {
+                        Button { configuring = connector } label: { TronInlineActionLabel("Configure") }.buttonStyle(.plain)
+                    }
+                    TronSettingsDivider(accent: .tronKnowledge)
+                    TronSettingsRow(icon: "arrow.clockwise", title: "Status") {
+                        Button { refresh(connector) } label: { TronInlineActionLabel("Refresh") }.buttonStyle(.plain)
+                            .disabled(refreshInFlight.contains(connector))
+                    }
+                    TronSettingsDivider(accent: .tronKnowledge)
+                    TronSettingsRow(icon: "arrow.triangle.2.circlepath", title: "Sync", subtitle: "Run using the saved permissions.") {
+                        Button { run(connector) } label: { TronInlineActionLabel(runInFlight.contains(connector) ? "Running…" : "Run") }.buttonStyle(.plain)
+                            .disabled(statuses[connector]?.configured != true || runInFlight.contains(connector))
                     }
                 }
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
+                .tronSettingsCaption(statuses[connector]?.writesEnabled == false ? "Remote writes are disabled." : nil)
+                if let detail = statuses[connector]?.detail { TronSettingsNotice(message: detail, accent: .tronAmber) }
             }
-            .listStyle(.plain)
-            .tronCollectionSurface()
-            .tint(Color.tronKnowledge)
-            .tronScrollEdgeChrome()
-            .tronNavigationTitle("Connectors", accent: .tronKnowledge)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.foregroundStyle(Color.tronKnowledge) } }
-            .tronPresentation()
-            .tronSettingsVisualTheme(accent: .tronKnowledge)
-            .tronTopBlur(.sheet)
-            .task { refresh("raindrop"); refresh("x") }
-            .tronManagedSheet(isPresented: Binding(get: { configuring != nil }, set: { if !$0 { configuring = nil } }), identity: "knowledge.connector.edit") {
-                if let connector = configuring {
-                    KnowledgeConnectorEditView(connector: connector, status: statuses[connector]) { configuring = nil; refresh(connector) }.environment(model)
-                }
+            if let message { TronSettingsCaption(message) }
+        }
+        .task(id: PresentationActivityTaskID(source: "\(model.knowledgePresentationIdentity)", presentationActive: activity.allowsPresentationPublication)) {
+            guard activity.allowsPresentationPublication else { return }
+            refresh("raindrop"); refresh("x")
+        }
+        .onChange(of: activity.allowsPresentationPublication) { _, active in
+            if !active {
+                // Reads retire with their surface; accepted connector runs do not.
+                for connector in ["raindrop", "x"] { refreshGeneration[connector, default: 0] &+= 1 }
+                refreshInFlight.removeAll()
             }
-            .alert("Connector", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) { Button("OK") {} } message: { Text(message ?? "") }
+        }
+        .tronManagedSheet(isPresented: Binding(get: { configuring != nil }, set: { if !$0 { configuring = nil } }), identity: "knowledge.connector.edit") {
+            if let connector = configuring {
+                KnowledgeConnectorEditView(connector: connector, status: statuses[connector]) { configuring = nil }.environment(model)
+            }
         }
     }
     private func refresh(_ connector: String) {
@@ -893,12 +931,37 @@ private struct KnowledgeConnectorEditView: View {
         _enabled = State(initialValue: status?.enabled ?? false); _accountID = State(initialValue: status?.accountId ?? ""); _scope = State(initialValue: status?.scope ?? ""); _allowWrites = State(initialValue: status?.allowWrites ?? false); _paidAccessApproved = State(initialValue: status?.paidAccessApproved ?? false); _recurringApproved = State(initialValue: status?.recurringApproved ?? false)
     }
     var body: some View {
-        NavigationStack { Form {
-            Section("Account") { Toggle("Enabled", isOn: $enabled); TextField("Account ID", text: $accountID).tronField(monospaced: true); TextField(connector == "raindrop" ? "Collection ID" : "User ID", text: $scope).tronField(monospaced: true); SecureField("Mac Keychain reference", text: $credentialRef).tronField(monospaced: true); Text("Credentials stay in the Mac Keychain; this is only an opaque reference.").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary) }
-            if connector == "raindrop" { Section("Remote policy") { TextField("Destination collection (optional)", text: $destination).tronField(monospaced: true); Toggle("Allow reversible moves", isOn: $allowWrites); Text("Moves require a complete local capture and verified remote state.").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary) } }
-            Section("Access") { Toggle("Paid access approved", isOn: $paidAccessApproved); Toggle("Recurring runs approved", isOn: $recurringApproved) }
-            if let error { Text(error).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronError) }
-        }.tronNavigationTitle(connector == "x" ? "X connector" : "Raindrop connector", accent: .tronKnowledge).tronSettingsVisualTheme(accent: .tronKnowledge).toolbar { ToolbarItem(placement: .confirmationAction) { Button(saving ? "Saving…" : "Save") { save() }.disabled(saving).foregroundStyle(Color.tronKnowledge) } } }
+        KnowledgeFormSheet(title: connector == "x" ? "X connector" : "Raindrop connector", isWorking: saving, onAction: save) {
+            TronSettingsGroup("Account", accent: .tronKnowledge) {
+                TronToggleRow(icon: "power", title: "Enabled", isOn: $enabled)
+                TronSettingsDivider(accent: .tronKnowledge)
+                TronTextSettingRow(icon: "person.crop.circle", title: "Account ID", value: $accountID)
+                TronSettingsDivider(accent: .tronKnowledge)
+                TronTextSettingRow(icon: "folder", title: connector == "raindrop" ? "Collection ID" : "User ID", value: $scope)
+                TronSettingsDivider(accent: .tronKnowledge)
+                TronSettingsRow(icon: "key", title: "Credential reference", subtitle: "Stored on your Mac") {
+                    SecureField("Mac Keychain reference", text: $credentialRef).tronInlineField(monospaced: true)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .multilineTextAlignment(.trailing).frame(minWidth: 80, maxWidth: 180)
+                        .accessibilityLabel("Mac Keychain reference")
+                }
+            }
+            .tronSettingsCaption("Credentials stay in the Mac Keychain; this is only an opaque reference.")
+            if connector == "raindrop" {
+                TronSettingsGroup("Remote policy", accent: .tronKnowledge) {
+                    TronTextSettingRow(icon: "folder.badge.plus", title: "Destination collection", detail: "Optional", value: $destination)
+                    TronSettingsDivider(accent: .tronKnowledge)
+                    TronToggleRow(icon: "arrow.right.arrow.left", title: "Allow reversible moves", isOn: $allowWrites)
+                }
+                .tronSettingsCaption("Moves require a complete local capture and verified remote state.")
+            }
+            TronSettingsGroup("Access", accent: .tronKnowledge) {
+                TronToggleRow(icon: "creditcard", title: "Paid access approved", isOn: $paidAccessApproved)
+                TronSettingsDivider(accent: .tronKnowledge)
+                TronToggleRow(icon: "repeat", title: "Recurring runs approved", isOn: $recurringApproved)
+            }
+            if let error { TronSettingsNotice(message: error, accent: .tronError) }
+        }
     }
     private func save() {
         guard !saving else { return }
@@ -940,13 +1003,41 @@ struct KnowledgeImportView: View {
     @State private var progress: KnowledgeImportProgress?
     @State private var requestGeneration = 0
     var body: some View {
-        NavigationStack {
-            Form {
-                Section("Read-only dry run") { Picker("Named source", selection: $source) { Text("Personal OS").tag("personal-os"); Text("LLM Wiki").tag("llm-wiki") }; Text("Only a deliberately configured named root on this Gateway can be read.").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary); Button("Inspect import") { offset = 0; dryRun(offset: 0) } }
-                if let plan, planOffset == offset, planSource == source { Section("Inspected import plan") { LabeledContent("Corpus progress", value: progress.map { "\($0.completed) of \($0.total)" } ?? "0 of \(plan.planned)"); LabeledContent("Warnings", value: "\(plan.warnings.count)"); LabeledContent("Skipped/withheld", value: "\(plan.skipped)"); Text("Plan hash: \(plan.planHash)").font(.caption).textSelection(.enabled); Button(importing ? "Importing…" : (approvedPlanHash == plan.planHash ? "Continue import" : "Import accepted items")) { if approvedPlanHash == plan.planHash { execute(plan) } else { confirmExecute = true } }.buttonStyle(TronActionButtonStyle(role: .primary, accent: .tronKnowledge)).disabled(importing) } }
-                if let message { Text(message).foregroundStyle(Color.tronTextSecondary) }
-            }.tronNavigationTitle("Import Knowledge", accent: .tronKnowledge).tronSettingsVisualTheme(accent: .tronKnowledge).toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.foregroundStyle(Color.tronKnowledge) } }
-            .confirmationDialog("Execute this exact inspected import?", isPresented: $confirmExecute) { Button("Import", role: .destructive) { if let plan { execute(plan) } }; Button("Cancel", role: .cancel) {} }
+        KnowledgeFormSheet(title: "Import Knowledge") {
+            TronSettingsGroup("Read-only inspection", accent: .tronKnowledge) {
+                TronSelectionRow(icon: "externaldrive", title: "Named source", value: source == "personal-os" ? "Personal OS" : "LLM Wiki") {
+                    Button("Personal OS") { source = "personal-os" }
+                    Button("LLM Wiki") { source = "llm-wiki" }
+                }
+                .disabled(importing)
+                TronSettingsDivider(accent: .tronKnowledge)
+                TronSettingsRow(icon: "doc.text.magnifyingglass", title: "Import plan") {
+                    Button { offset = 0; dryRun(offset: 0) } label: { TronInlineActionLabel("Inspect") }.buttonStyle(.plain).disabled(importing)
+                }
+            }
+            .tronSettingsCaption("Only a deliberately configured named root on this Gateway can be read. Inspection does not import records.")
+            if let plan, planOffset == offset, planSource == source {
+                TronSettingsGroup("Inspected import plan", accent: .tronKnowledge) {
+                    TronSettingsRow(icon: "chart.bar", title: "Progress") {
+                        Text(progress.map { "\($0.completed) of \($0.total)" } ?? "0 of \(plan.planned)").font(TronTypography.secondaryCodeDescription)
+                    }
+                    TronSettingsDivider(accent: .tronKnowledge)
+                    TronSettingsRow(icon: "exclamationmark.triangle", title: "Warnings") { Text("\(plan.warnings.count)").font(TronTypography.secondaryCodeDescription) }
+                    TronSettingsDivider(accent: .tronKnowledge)
+                    TronSettingsRow(icon: "eye.slash", title: "Skipped or withheld") { Text("\(plan.skipped)").font(TronTypography.secondaryCodeDescription) }
+                }
+                Text("Plan hash: \(plan.planHash)").font(TronTypography.secondaryCodeDescription)
+                    .foregroundStyle(Color.tronTextSecondary).textSelection(.enabled)
+                Button(importing ? "Importing…" : (approvedPlanHash == plan.planHash ? "Continue import" : "Import accepted items")) {
+                    if approvedPlanHash == plan.planHash { execute(plan) } else { confirmExecute = true }
+                }
+                .buttonStyle(TronActionButtonStyle(role: .primary, accent: .tronKnowledge)).disabled(importing)
+            }
+            if let message { TronSettingsCaption(message) }
+        }
+        .confirmationDialog("Execute this exact inspected import?", isPresented: $confirmExecute) {
+            Button("Import", role: .destructive) { if let plan { execute(plan) } }
+            Button("Cancel", role: .cancel) {}
         }
     }
     private func dryRun(offset requestedOffset: Int, preservingApproval: Bool = false) {
@@ -1024,14 +1115,13 @@ private struct KnowledgeCorrectionView: View {
         _text = State(initialValue: record.summary)
     }
     var body: some View {
-        NavigationStack {
-            Form {
-                Section("Correction") { TextEditor(text: $text).frame(minHeight: 180).tronTextEditor(); Text("This creates a new immutable revision and preserves the original as corrected evidence.").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary) }
-                if let error { Text(error).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronError) }
+        KnowledgeFormSheet(title: "Correct Knowledge", isWorking: saving,
+                           actionDisabled: text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, onAction: save) {
+            TronSettingsGroup("Correction", accent: .tronKnowledge, surfaceStyle: .uncontained) {
+                TextEditor(text: $text).frame(minHeight: 180).tronTextEditor().accessibilityLabel("Correction")
             }
-            .tronNavigationTitle("Correct Knowledge", accent: .tronKnowledge)
-            .tronSettingsVisualTheme(accent: .tronKnowledge)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) }; ToolbarItem(placement: .confirmationAction) { Button(saving ? "Saving…" : "Save") { save() }.disabled(saving || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).foregroundStyle(Color.tronKnowledge) } }
+            .tronSettingsCaption("This creates a new immutable revision and preserves the original as corrected evidence.")
+            if let error { TronSettingsNotice(message: error, accent: .tronError) }
         }
     }
     private func save() {
@@ -1060,10 +1150,19 @@ private struct KnowledgeCaptureView: View {
     @State private var saving = false
     @State private var error: String?
     var body: some View {
-        NavigationStack { Form {
-            Section("Manual URL") { TextField("Title", text: $title).tronField(); TextField("https://…", text: $uri).textInputAutocapitalization(.never).keyboardType(.URL).tronField(monospaced: true); Picker("Scope", selection: $scope) { ForEach(KnowledgeScope.allCases, id: \.self) { Text($0.label).tag($0) } }; Text("The Gateway performs bounded safe fetching and records capture quality.").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary) }
-            if let error { Text(error).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronError) }
-        }.tronNavigationTitle("Capture URL", accent: .tronKnowledge).tronSettingsVisualTheme(accent: .tronKnowledge).toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) }; ToolbarItem(placement: .confirmationAction) { Button(saving ? "Capturing…" : "Capture") { capture() }.disabled(saving || !valid).foregroundStyle(Color.tronKnowledge) } } }
+        KnowledgeFormSheet(title: "Capture URL", actionTitle: "Capture", isWorking: saving, actionDisabled: !valid, onAction: capture) {
+            TronSettingsGroup("Source", accent: .tronKnowledge) {
+                TronTextSettingRow(icon: "textformat", title: "Title", value: $title)
+                TronSettingsDivider(accent: .tronKnowledge)
+                TronTextSettingRow(icon: "link", title: "URL", value: $uri, keyboard: .URL)
+                TronSettingsDivider(accent: .tronKnowledge)
+                TronSelectionRow(icon: "folder", title: "Scope", value: scope.label) {
+                    ForEach(KnowledgeScope.allCases, id: \.self) { value in Button(value.label) { scope = value } }
+                }
+            }
+            .tronSettingsCaption("The Gateway performs bounded safe fetching and records capture quality.")
+            if let error { TronSettingsNotice(message: error, accent: .tronError) }
+        }
     }
     private var valid: Bool { guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let url = URL(string: uri), ["http", "https"].contains(url.scheme?.lowercased()), url.user == nil, url.password == nil else { return false }; return true }
     private func capture() { guard valid else { error = "Use an http(s) URL without credentials."; return }; guard !saving else { return }; saving = true; let identity = model.knowledgePresentationIdentity; let sourceURL = uri; let sourceTitle = title
@@ -1084,10 +1183,26 @@ private struct KnowledgeNoteCreateView: View {
     @State private var saving = false
     @State private var error: String?
     var body: some View {
-        NavigationStack { Form {
-            Section("Note") { TextField("Title", text: $title).tronField(); TextEditor(text: $noteText).frame(minHeight: 140).tronTextEditor(); Picker("Role", selection: $role) { ForEach(KnowledgeNoteRole.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }; Picker("Scope", selection: $scope) { ForEach(KnowledgeScope.allCases, id: \.self) { Text($0.label).tag($0) } }; Toggle("Confirmed by me", isOn: $confirmed) }
-            if let error { Text(error).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronError) }
-        }.tronNavigationTitle("New Note", accent: .tronKnowledge).tronSettingsVisualTheme(accent: .tronKnowledge).toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button(saving ? "Saving…" : "Save") { save() }.disabled(saving || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).foregroundStyle(Color.tronKnowledge) } } }
+        KnowledgeFormSheet(title: "New note", isWorking: saving,
+                           actionDisabled: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, onAction: save) {
+            TronSettingsGroup("Note", accent: .tronKnowledge) {
+                TronTextSettingRow(icon: "textformat", title: "Title", value: $title)
+                TronSettingsDivider(accent: .tronKnowledge)
+                TronSelectionRow(icon: "tag", title: "Role", value: role.rawValue.capitalized) {
+                    ForEach(KnowledgeNoteRole.allCases, id: \.self) { value in Button(value.rawValue.capitalized) { role = value } }
+                }
+                TronSettingsDivider(accent: .tronKnowledge)
+                TronSelectionRow(icon: "folder", title: "Scope", value: scope.label) {
+                    ForEach(KnowledgeScope.allCases, id: \.self) { value in Button(value.label) { scope = value } }
+                }
+                TronSettingsDivider(accent: .tronKnowledge)
+                TronToggleRow(icon: "checkmark.seal", title: "Confirmed by me", isOn: $confirmed)
+            }
+            TronSettingsGroup("Content", accent: .tronKnowledge, surfaceStyle: .uncontained) {
+                TextEditor(text: $noteText).frame(minHeight: 180).tronTextEditor().accessibilityLabel("Note content")
+            }
+            if let error { TronSettingsNotice(message: error, accent: .tronError) }
+        }
     }
     private func save() {
         guard !saving else { return }

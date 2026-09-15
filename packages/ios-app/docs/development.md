@@ -16,10 +16,14 @@ scripts/tron ios generate
 Knowledge is styled as its own adaptive identity rather than inheriting the Sessions emerald or
 Automations cyan palette: use `Color.tronKnowledge` for deep violet in light appearance and lavender
 in dark appearance, with `tronKnowledgeText` only where readable text contrast requires it. Keep warning,
-success, and destructive states semantic. The dashboard uses the shared bottom `TronSearchBar`,
-`TronDashboardFilterSheet`, `TronPlaceholderState`, loading pulse, glass rows, and edge chrome. Its
-configuration, connector, import, capture, note, correction, and detail screens use the same managed
-progressive presentation and `TronTypography`/settings controls. Type and scope selections remain
+success, and destructive states semantic. The dashboard uses the standard tinted title, toolbar filter,
+floating search/add controls, `TronSearchBar`, `TronDashboardFilterSheet`, `TronPlaceholderState`,
+loading pulse, and edge chrome. Coverage and records share one scroll owner with bottom-control
+clearance; closing search clears its query instead of hiding an active filter. Configuration, connector,
+import, capture, note, and correction forms compose `KnowledgeFormSheet` with the existing
+`TronSettingsGroup`, selection, toggle, inline-field, editor, caption, and notice controls—not native
+Form chrome. The shared wrapper only owns presentation; each form keeps its draft and command owner.
+Model selection opens the existing progressive picker rather than nesting a scrolling picker in a form. Type and scope selections remain
 obvious in the filter sheet; exact record, revision, evidence, and provenance IDs remain selectable
 metadata and are not used as display headlines. A covered parent must not suppress a legitimate child
 correction callback: the callback checks the originating Knowledge presentation identity while the
