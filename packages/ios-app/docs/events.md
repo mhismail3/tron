@@ -272,7 +272,9 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   top edge fade discloses earlier result content; no separate bounded-output warning line is
   rendered. Rows do not accumulate output frames. Raw protocol tool names drive built-in kind and icon
   selection while optional registered labels remain user-facing. Known built-ins derive only a
-  semantic primary summary from exact request/result keys; compact protocol
+  semantic primary summary from exact request/result keys. Generic tool details (including
+  subagents) show primary text without a leading icon; bounded primary-preview captions
+  sit inside the same glass container below the text. Compact protocol
   identifiers, timing, and progress remain first in Technical details, followed directly by
   complete Request JSON and Result JSON in that order. Result JSON prefers the response, then
   content-only output, then only a fallback distinct from Request. Exact current-runtime

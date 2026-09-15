@@ -112,11 +112,9 @@ private struct InAppNoticeStack: View {
                 if let notice = notices.first {
                     InAppNoticeCard(notice: notice, reduceMotion: reduceMotion)
                         .id(notice.id)
-                        // Retire old text immediately; only the next card enters.
-                        .transition(.asymmetric(
-                            insertion: reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity),
-                            removal: .identity
-                        ))
+                        // Let SwiftUI retire the outgoing card visually; the center
+                        // still removes its authority and hit target immediately.
+                        .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
                         .background {
                             // Pending notices are silhouettes, never competing text.
                             // The foreground card owns their geometry, including Dynamic Type.
@@ -138,7 +136,7 @@ private struct InAppNoticeStack: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, dynamicTypeSize.isAccessibilitySize ? 16 : InAppNoticeLayout.horizontalControlReservation)
-        .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: notices)
+        .animation(reduceMotion ? .easeOut(duration: 0.18) : .smooth(duration: 0.24), value: notices)
     }
 }
 

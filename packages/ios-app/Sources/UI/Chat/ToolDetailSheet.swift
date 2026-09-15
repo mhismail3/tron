@@ -73,8 +73,8 @@ struct ToolDetailSheet: View {
            !preview.text.isEmpty {
             VStack(alignment: .leading, spacing: 7) {
                 sectionLabel(label)
-                Group {
-                    if presentation.sheetTitleIcon != nil {
+                VStack(alignment: .leading, spacing: 7) {
+                    if presentation.sheetTitleIcon != nil || presentation.kind == .generic {
                         primaryValue(presentation, preview: preview)
                     } else {
                         HStack(alignment: .center, spacing: 10) {
@@ -88,12 +88,12 @@ struct ToolDetailSheet: View {
                             primaryValue(presentation, preview: preview)
                         }
                     }
+                    if preview.isBounded, presentation.kind != .bash {
+                        boundedPreviewNote("Complete \(label.lowercased()) is available in Technical details.")
+                    }
                 }
                 .padding(12)
                 .tronGlassSurface(accent: accent, tintOpacity: 0.10)
-                if preview.isBounded, presentation.kind != .bash {
-                    boundedPreviewNote("Complete \(label.lowercased()) is available in Technical details.")
-                }
             }
             .accessibilityElement(children: .contain)
         }
