@@ -1,9 +1,25 @@
 import SwiftUI
 
 private enum AutomationTargetMode: String, CaseIterable, Identifiable {
-    case existingSession, workspace
+    case workspace, existingSession
     var id: String { rawValue }
     var title: String { self == .existingSession ? "Existing Session" : "New Session in Workspace" }
+}
+
+private enum AutomationDateField: String, Identifiable {
+    case once, intervalAnchor, localTime
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .once: "Run at"
+        case .intervalAnchor: "Anchor"
+        case .localTime: "Local time"
+        }
+    }
+    var components: DatePickerComponents {
+        self == .localTime ? [.hourAndMinute] : [.date, .hourAndMinute]
+    }
 }
 
 private enum AutomationIntervalUnit: String, CaseIterable, Identifiable {
@@ -33,13 +49,15 @@ struct AutomationFormView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var selectedProfileID = ""
     @State private var name = ""
     @State private var description = ""
     @State private var actionKind: AutomationActionKind = .sessionPrompt
     @State private var actionContent = ""
-    @State private var targetMode: AutomationTargetMode = .existingSession
+    @State private var targetMode: AutomationTargetMode = .workspace
     @State private var targetSessionID = ""
+    @State private var editingDateField: AutomationDateField?
     // Workspace paths are transient form state only. They are sent to the
     // owning Gateway and are never written to iOS preferences or caches.
     @State private var workspacePath = ""
@@ -119,21 +137,20 @@ struct AutomationFormView: View {
                 .padding(.vertical, 18)
                 .padding(.bottom, 32)
             }
+            .scrollDismissesKeyboard(.interactively)
             .tronScrollEdgeChrome()
+            .tronNavigationTitle(
+                isEditing ? "Edit Automation" : "New Automation",
+                accent: .tronAutomation
+            )
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .cancellationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "xmark")
                             .font(TronTypography.buttonSM)
                             .foregroundStyle(Color.tronAutomation)
                     }
                     .accessibilityLabel("Cancel")
-                }
-                ToolbarItem(placement: .principal) {
-                    TronSheetTitle(
-                        title: isEditing ? "Edit Automation" : "New Automation",
-                        accent: .tronAutomation
-                    )
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { requestSave() } label: {
@@ -144,6 +161,8 @@ struct AutomationFormView: View {
                 }
             }
         }
+        .foregroundStyle(Color.tronTextPrimary)
+        .tronSettingsLayout()
         .tronSettingsVisualTheme(accent: .tronAutomation)
         .tronTopBlur(.sheet)
         .presentationDetents([.large])
@@ -170,6 +189,24 @@ struct AutomationFormView: View {
                 icon: "checkmark.shield",
                 onConfirm: { Task { await setWorkspaceTrust(true) } }
             )
+        }
+        .tronManagedSheet(item: $editingDateField, identity: { "automation.date.\($0.id)" }) { field in
+            NavigationStack {
+                DatePicker(field.title, selection: dateBinding(for: field), displayedComponents: field.components)
+                    .datePickerStyle(.graphical)
+                    .padding()
+                    .tronNavigationTitle(field.title, accent: .tronAutomation)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button { editingDateField = nil } label: {
+                                Image(systemName: "checkmark")
+                            }
+                            .accessibilityLabel("Done")
+                        }
+                    }
+            }
+            .presentationDetents([.medium])
+            .tronSettingsVisualTheme(accent: .tronAutomation)
         }
         .task(id: PresentationActivityTaskID(
             source: "\(selectedProfileID):\(trigger):\(initialized):\(model.profileRevision):\(scenePhase == .active)",
@@ -198,6 +235,8 @@ struct AutomationFormView: View {
                 targetMode = .existingSession
                 workspacePath = ""
                 workspaceTrustInspection = nil
+            } else if !isEditing {
+                targetMode = .workspace
             }
         }
         .onChange(of: targetMode) { _, _ in
@@ -231,25 +270,30 @@ struct AutomationFormView: View {
                 descriptionField
                 if let profile = selectedEndpoint?.profile {
                     TronSettingsDivider(accent: .tronAutomation)
-                    TronValueRow(
-                        icon: "desktopcomputer",
-                        title: "Gateway",
-                        value: profile.label,
-                        accent: .tronAutomation
-                    ) {
-                        if !isEditing, endpoints.count > 1 {
-                            TronInlineMenu("Change", accent: .tronAutomation) {
-                                ForEach(endpoints) { endpoint in
-                                    Button(endpoint.profile.label) {
-                                        selectedProfileID = endpoint.profile.id
-                                        targetSessionID = sessions.first?.id ?? ""
-                                        targetMode = .existingSession
-                                        workspacePath = ""
-                                        workspaceTrustInspection = nil
-                                    }
+                    if !isEditing, endpoints.count > 1 {
+                        TronSelectionRow(
+                            icon: "desktopcomputer",
+                            title: "Gateway",
+                            value: profile.label,
+                            accent: .tronAutomation
+                        ) {
+                            ForEach(endpoints) { endpoint in
+                                Button(endpoint.profile.label) {
+                                    selectedProfileID = endpoint.profile.id
+                                    targetSessionID = sessions.first?.id ?? ""
+                                    targetMode = actionKind == .notification ? .existingSession : .workspace
+                                    workspacePath = ""
+                                    workspaceTrustInspection = nil
                                 }
                             }
                         }
+                    } else {
+                        TronValueRow(
+                            icon: "desktopcomputer",
+                            title: "Gateway",
+                            value: profile.label,
+                            accent: .tronAutomation
+                        )
                     }
                 }
                 if !isEditing {
@@ -336,16 +380,14 @@ struct AutomationFormView: View {
                     accent: .tronAutomation
                 )
             } else {
-                TronValueRow(
+                TronSelectionRow(
                     icon: "bubble.left",
                     title: "Session",
                     value: selectedSessionTitle,
                     accent: .tronAutomation
                 ) {
-                    TronInlineMenu(targetSessionID.isEmpty ? "Choose" : "Change", accent: .tronAutomation) {
-                        ForEach(sessions) { session in
-                            Button(session.title) { targetSessionID = session.id }
-                        }
+                    ForEach(sessions) { session in
+                        Button(session.title) { targetSessionID = session.id }
                     }
                 }
             }
@@ -354,18 +396,21 @@ struct AutomationFormView: View {
 
     private var workspaceTarget: some View {
         VStack(alignment: .leading, spacing: 0) {
-            TronValueRow(
+            TronSettingsRow(
                 icon: "folder",
                 title: "Workspace",
-                value: workspaceName,
                 accent: .tronAutomation
             ) {
-                Button(workspacePath.isEmpty ? "Choose" : "Change") {
+                Button {
                     guard ownsMutationGateway else { return }
                     showingWorkspaceBrowser = true
+                } label: {
+                    TronInlineActionLabel(
+                        workspacePath.isEmpty ? "Choose" : workspaceName,
+                        accent: .tronAutomation
+                    )
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(Color.tronAutomation)
             }
             TronSettingsRow(
                 icon: "plus.bubble",
@@ -404,6 +449,7 @@ struct AutomationFormView: View {
                     dateRow(
                         icon: "calendar.badge.clock",
                         title: "Run at",
+                        field: .once,
                         selection: $onceDate,
                         components: [.date, .hourAndMinute]
                     )
@@ -451,28 +497,24 @@ struct AutomationFormView: View {
             detail: "Pausing stops future triggers but does not cancel work already accepted by the Gateway."
         ) {
             VStack(spacing: 0) {
-                TronValueRow(
+                TronSelectionRow(
                     icon: "clock.arrow.circlepath",
                     title: "After downtime",
                     value: misfirePolicy == "latest" ? "Run latest" : "Skip missed",
                     accent: .tronAutomation
                 ) {
-                    TronInlineMenu("Change", accent: .tronAutomation) {
-                        Button("Run latest") { misfirePolicy = "latest" }
-                        Button("Skip missed") { misfirePolicy = "skip" }
-                    }
+                    Button("Run latest") { misfirePolicy = "latest" }
+                    Button("Skip missed") { misfirePolicy = "skip" }
                 }
                 TronSettingsDivider(accent: .tronAutomation)
-                TronValueRow(
+                TronSelectionRow(
                     icon: "rectangle.stack.badge.play",
                     title: "While running",
                     value: overlapPolicy == "queueLatest" ? "Queue latest" : "Skip",
                     accent: .tronAutomation
                 ) {
-                    TronInlineMenu("Change", accent: .tronAutomation) {
-                        Button("Skip") { overlapPolicy = "skip" }
-                        Button("Queue latest") { overlapPolicy = "queueLatest" }
-                    }
+                    Button("Skip") { overlapPolicy = "skip" }
+                    Button("Queue latest") { overlapPolicy = "queueLatest" }
                 }
                 TronSettingsDivider(accent: .tronAutomation)
                 TronSettingsRow(
@@ -681,22 +723,21 @@ struct AutomationFormView: View {
                 .labelsHidden()
             }
             TronSettingsDivider(accent: .tronAutomation)
-            TronValueRow(
+            TronSelectionRow(
                 icon: "clock.arrow.2.circlepath",
                 title: "Unit",
                 value: intervalUnit.rawValue,
                 accent: .tronAutomation
             ) {
-                TronInlineMenu("Change", accent: .tronAutomation) {
-                    ForEach(AutomationIntervalUnit.allCases) { unit in
-                        Button(unit.rawValue) { selectIntervalUnit(unit) }
-                    }
+                ForEach(AutomationIntervalUnit.allCases) { unit in
+                    Button(unit.rawValue) { selectIntervalUnit(unit) }
                 }
             }
             TronSettingsDivider(accent: .tronAutomation)
             dateRow(
                 icon: "calendar.badge.clock",
                 title: "Anchor",
+                field: .intervalAnchor,
                 selection: $intervalAnchor,
                 components: [.date, .hourAndMinute]
             )
@@ -710,6 +751,7 @@ struct AutomationFormView: View {
             dateRow(
                 icon: "clock",
                 title: "Local time",
+                field: .localTime,
                 selection: $localTime,
                 components: [.hourAndMinute]
             )
@@ -744,27 +786,95 @@ struct AutomationFormView: View {
     private func dateRow(
         icon: String,
         title: String,
+        field: AutomationDateField,
         selection: Binding<Date>,
         components: DatePickerComponents
     ) -> some View {
         TronSettingsRow(icon: icon, title: title, accent: .tronAutomation) {
-            DatePicker("", selection: selection, displayedComponents: components)
-                .labelsHidden()
+            HStack(spacing: TronSpacing.sm) {
+                if components.contains(.date) {
+                    dateValueButton(
+                        selection.wrappedValue.formatted(date: .abbreviated, time: .omitted),
+                        field: field
+                    )
+                }
+                if components.contains(.hourAndMinute) {
+                    dateValueButton(
+                        selection.wrappedValue.formatted(date: .omitted, time: .shortened),
+                        field: field
+                    )
+                }
+            }
         }
     }
 
+    private func dateValueButton(_ label: String, field: AutomationDateField) -> some View {
+        Button { editingDateField = field } label: {
+            TronInlineActionLabel(label, accent: .tronAutomation)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func dateBinding(for field: AutomationDateField) -> Binding<Date> {
+        Binding(
+            get: {
+                switch field {
+                case .once: onceDate
+                case .intervalAnchor: intervalAnchor
+                case .localTime: localTime
+                }
+            },
+            set: { value in
+                switch field {
+                case .once: onceDate = value
+                case .intervalAnchor: intervalAnchor = value
+                case .localTime: localTime = value
+                }
+            }
+        )
+    }
+
+    @ViewBuilder
     private func fieldHeader(title: String, icon: String, count: Int, limit: Int) -> some View {
-        HStack(spacing: TronSpacing.sm) {
-            Image(systemName: icon)
-                .foregroundStyle(Color.tronAutomation)
-                .frame(width: 22)
-            Text(title)
-                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(Color.tronTextPrimary)
-            Spacer(minLength: TronSpacing.md)
-            Text("\(count) / \(limit)")
-                .font(TronTypography.secondaryCodeDescription)
-                .foregroundStyle(count > limit ? Color.tronError : Color.tronTextMuted)
+        let countLabel = Text("\(count) / \(limit)")
+            .font(TronTypography.secondaryCodeDescription)
+            .foregroundStyle(count > limit ? Color.tronError : Color.tronTextMuted)
+        let titleLabel = fieldTitleLabel(title: title, icon: icon)
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: TronSpacing.xs) {
+                titleLabel
+                countLabel
+            }
+        } else {
+            HStack(spacing: TronSpacing.sm) {
+                titleLabel
+                Spacer(minLength: TronSpacing.md)
+                countLabel
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func fieldTitleLabel(title: String, icon: String) -> some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: TronSpacing.xs) {
+                Image(systemName: icon)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                    .foregroundStyle(Color.tronAutomation)
+                Text(title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                    .foregroundStyle(Color.tronTextPrimary)
+            }
+        } else {
+            HStack(spacing: TronSpacing.sm) {
+                Image(systemName: icon)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                    .foregroundStyle(Color.tronAutomation)
+                    .frame(width: 22)
+                Text(title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                    .foregroundStyle(Color.tronTextPrimary)
+            }
         }
     }
 
@@ -897,6 +1007,7 @@ struct AutomationFormView: View {
         selectedProfileID = selection?.profileID ?? model.profiles.selected?.id ?? endpoints.first?.profile.id ?? ""
         let requestedPresentationGeneration = presentationReadGeneration
         guard let selection else {
+            targetMode = actionKind == .notification ? .existingSession : .workspace
             targetSessionID = sessions.first?.id ?? ""
             initialized = true
             return

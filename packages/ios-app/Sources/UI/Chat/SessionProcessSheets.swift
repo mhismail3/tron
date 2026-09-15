@@ -282,8 +282,11 @@ enum SessionProcessRowStyle {
     case history
 
     @MainActor func accent(for state: SessionProcessLifecycleState) -> Color {
-        guard self == .activity else { return .tronSubagent }
-        return switch SessionProcessRowPresentation.tone(for: state) {
+        let tone = SessionProcessRowPresentation.tone(for: state)
+        // History keeps its neutral terminal theme, but active work must be
+        // just as recognizable as it is in the activity sheet.
+        if self == .history, tone != .inProgress { return .tronSubagent }
+        return switch tone {
         case .inProgress: .tronAmber
         case .succeeded: .tronSuccess
         case .unsuccessful: .tronError

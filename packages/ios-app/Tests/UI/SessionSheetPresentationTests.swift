@@ -7,6 +7,34 @@ import WebKit
 
 @MainActor
 final class SessionSheetPresentationTests: XCTestCase {
+    func testAutomationFormUsesCompactInlineSettingsChrome() async throws {
+        try await withModel { model in
+            for variant in [
+                (name: "light", scheme: ColorScheme.light, size: DynamicTypeSize.large),
+                (name: "dark", scheme: ColorScheme.dark, size: DynamicTypeSize.large),
+                (name: "accessibility", scheme: ColorScheme.dark, size: DynamicTypeSize.accessibility3)
+            ] {
+                try await self.withSheet(
+                    AutomationFormView(selection: nil, onSaved: {})
+                        .environment(model)
+                        .environment(\.dynamicTypeSize, variant.size)
+                        .preferredColorScheme(variant.scheme)
+                ) { controller in
+                    let navigationBar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
+                    XCTAssertEqual(navigationBar.topItem?.largeTitleDisplayMode, .never,
+                                   "Automation form must not reserve a large-title region")
+                    self.capture(controller, name: "automation-form-inline-settings-\(variant.name)")
+                    if let scrollView = self.views(of: UIScrollView.self, in: controller.view).first {
+                        let targetOffset = min(900, max(0, scrollView.contentSize.height - scrollView.bounds.height))
+                        scrollView.setContentOffset(CGPoint(x: 0, y: targetOffset), animated: false)
+                        controller.view.layoutIfNeeded()
+                        self.capture(controller, name: "automation-form-target-schedule-\(variant.name)")
+                    }
+                }
+            }
+        }
+    }
+
     func testKnowledgeObservationAndTechnicalDetailsStartAtMediumAndExpand() async throws {
         let record = KnowledgeObservationFixture.record()
         let presentation = try XCTUnwrap(KnowledgeObservationPresentation(record: record))

@@ -7,6 +7,7 @@ struct AutomationDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var record: GatewayAutomationRecord?
     @State private var runs: [GatewayAutomationRunSummary] = []
     @State private var selectedRun: GatewayAutomationRun?
@@ -47,10 +48,8 @@ struct AutomationDetailView: View {
                 .padding(.bottom, 32)
             }
             .tronScrollEdgeChrome()
+            .tronNavigationTitle(selection.summary.name, accent: .tronAutomation)
             .toolbar {
-                ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: selection.summary.name, accent: .tronAutomation)
-                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
@@ -61,6 +60,8 @@ struct AutomationDetailView: View {
                 }
             }
         }
+        .foregroundStyle(Color.tronTextPrimary)
+        .tronSettingsLayout()
         .tronSettingsVisualTheme(accent: .tronAutomation)
         .tronTopBlur(.sheet).presentationDetents([.large]).presentationDragIndicator(.hidden)
         .task(id: PresentationActivityTaskID(
@@ -185,23 +186,24 @@ struct AutomationDetailView: View {
 
     private func statusHeader(_ record: GatewayAutomationRecord) -> some View {
         TronGlassCard(accent: .tronAutomation) {
-            HStack(alignment: .top, spacing: TronSpacing.xl) {
+            HStack(alignment: .center, spacing: TronSpacing.xl) {
                 Image(systemName: AutomationStatusPresentation.icon(record.activation, run: record.currentRun?.state))
-                    .font(TronTypography.sans(size: 24, weight: .semibold))
+                    .font(TronTypography.sans(size: 22, weight: .semibold))
                     .foregroundStyle(AutomationStatusPresentation.color(record.activation, run: record.currentRun?.state))
                     .frame(width: 28)
                 VStack(alignment: .leading, spacing: TronSpacing.xs) {
-                    Text(record.name)
-                        .font(TronTypography.headline)
-                        .foregroundStyle(Color.tronTextPrimary)
                     Text(record.trigger.summary)
+                        .font(TronTypography.bodySM)
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(record.activation.label)
                         .font(TronTypography.secondaryDescription)
                         .foregroundStyle(Color.tronTextSecondary)
                 }
                 Spacer(minLength: TronSpacing.md)
                 AutomationStatusBadge(activation: record.activation, run: record.currentRun?.state)
             }
-            .padding(16)
+            .padding(14)
         }
     }
     private func currentRun(_ run: GatewayAutomationRun, record: GatewayAutomationRecord) -> some View {
@@ -252,20 +254,39 @@ struct AutomationDetailView: View {
         .opacity(ownsMutationGateway ? 1 : 0.55)
     }
     private func section(_ title: String, icon: String, @ViewBuilder content: () -> some View) -> some View { TronSettingsGroup(title, accent: .tronAutomation) { content() } }
+    @ViewBuilder
     private func info(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: TronSpacing.md) {
-            Text(label)
-                .font(TronTypography.secondaryDescription)
-                .foregroundStyle(Color.tronTextMuted)
-            Spacer(minLength: TronSpacing.md)
-            Text(value)
-                .font(TronTypography.secondaryCodeDescription)
-                .foregroundStyle(Color.tronTextPrimary)
-                .multilineTextAlignment(.trailing)
-                .lineLimit(3)
+        let stacks = dynamicTypeSize.isAccessibilitySize || value.count > 48
+        Group {
+            if stacks {
+                VStack(alignment: .leading, spacing: TronSpacing.xs) {
+                    infoLabel(label)
+                    infoValue(value, alignment: .leading)
+                }
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: TronSpacing.md) {
+                    infoLabel(label)
+                    Spacer(minLength: TronSpacing.md)
+                    infoValue(value, alignment: .trailing)
+                }
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
+    }
+
+    private func infoLabel(_ value: String) -> some View {
+        Text(value)
+            .font(TronTypography.bodySM)
+            .foregroundStyle(Color.tronTextSecondary)
+    }
+
+    private func infoValue(_ value: String, alignment: TextAlignment) -> some View {
+        Text(value)
+            .font(TronTypography.bodySM)
+            .foregroundStyle(Color.tronTextPrimary)
+            .multilineTextAlignment(alignment)
+            .fixedSize(horizontal: false, vertical: true)
     }
     private func runSummary(_ run: GatewayAutomationRunSummary) -> some View {
         HStack(spacing: TronSpacing.xl) {

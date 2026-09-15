@@ -34,7 +34,7 @@ struct ManageSessionThemeTests {
         #expect(Color.tronKnowledgeText != Color.tronAutomationText)
     }
 
-    @Test("subagent seafoam theme stays readable and lifecycle colors are confined to activity rows")
+    @Test("subagent history shares active amber while retaining its terminal seafoam theme")
     @MainActor
     func subagentTheme() {
         let light = UITraitCollection(userInterfaceStyle: .light)
@@ -49,7 +49,7 @@ struct ManageSessionThemeTests {
         #expect(ChatNotificationTone.subagent.surfaceColor == .tronSubagent)
         for state: SessionProcessLifecycleState in [.queued, .running, .paused] {
             #expect(SessionProcessRowStyle.activity.accent(for: state) == .tronAmber)
-            #expect(SessionProcessRowStyle.history.accent(for: state) == .tronSubagent)
+            #expect(SessionProcessRowStyle.history.accent(for: state) == .tronAmber)
         }
         #expect(SessionProcessRowStyle.activity.accent(for: .completed) == .tronSuccess)
         #expect(SessionProcessRowStyle.history.accent(for: .completed) == .tronSubagent)
