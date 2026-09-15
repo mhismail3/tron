@@ -361,6 +361,7 @@ struct SessionContextSheet: View {
         .presentationDragIndicator(.hidden)
         .tint(Color.tronEmerald)
         .tronConfigurationSliderHost(sliderPresentation)
+        .environment(\.configurationSliderSignposts, model.performanceSignpostsForCapture)
         .onAppear {
             if capturedNoticeScope == nil {
                 capturedNoticeScope = model.presentationTarget(for: sessionID).map {

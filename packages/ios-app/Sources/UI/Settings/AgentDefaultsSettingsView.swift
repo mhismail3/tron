@@ -161,6 +161,7 @@ struct AgentDefaultsSettingsView: View {
         }
         .tronScrollEdgeChrome()
         .tronConfigurationSliderHost(sliderPresentation)
+        .environment(\.configurationSliderSignposts, model.performanceSignpostsForCapture)
         .tronNavigationTitle("Models and Defaults")
         .tronSettingsAutosave(draft: $draft, store: $drafts, initial: AgentDefaultsDraft())
         .task(id: PresentationActivityTaskID(

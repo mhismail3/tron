@@ -13,7 +13,7 @@ enum ChatAttachmentDestination: Hashable {
 }
 
 enum ChatAttachmentImportPolicy {
-    static let maximumPhotoSelection = 5
+    static let maximumPhotoSelection = ComposerAttachmentPolicy.maximumCount
     static let maximumFileSelection = ComposerAttachmentPolicy.maximumCount
     static let maximumFileBytes = ComposerAttachmentPolicy.maximumTotalBytes
 }

@@ -61,7 +61,7 @@ struct ToolDetailSheet: View {
                 ToolDiffCountChip(diff: diff)
             }
             if tool.outputTruncated {
-                ToolStaticChip(icon: "text.badge.minus", text: "Bounded output", accent: .tronAmber)
+                ToolStaticChip(icon: "text.badge.minus", text: "Bounded output", accent: .tronSlate)
             }
         }
         .accessibilityElement(children: .contain)
@@ -258,9 +258,9 @@ struct ToolDetailSheet: View {
     }
 
     private func boundedPreviewNote(_ text: String) -> some View {
-        Label(text, systemImage: "text.badge.minus")
+        Text(text)
             .font(TronTypography.caption)
-            .foregroundStyle(Color.tronAmber)
+            .foregroundStyle(Color.tronTextMuted)
             .fixedSize(horizontal: false, vertical: true)
     }
 }

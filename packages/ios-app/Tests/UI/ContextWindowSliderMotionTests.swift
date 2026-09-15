@@ -37,7 +37,7 @@ final class ContextWindowSliderMotionTests: XCTestCase {
             let startWall = CACurrentMediaTime()
             for target in [CGFloat(1), 0] {
                 let finished = expectation(description: "Morph settled")
-                withAnimation(.spring(duration: 0.42, bounce: 0.12), completionCriteria: .logicallyComplete) {
+                withAnimation(.easeInOut(duration: 0.28), completionCriteria: .logicallyComplete) {
                     driver.fraction = target
                 } completion: { finished.fulfill() }
                 await fulfillment(of: [finished], timeout: 2)

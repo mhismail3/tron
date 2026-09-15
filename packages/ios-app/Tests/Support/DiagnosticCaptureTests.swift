@@ -9,6 +9,33 @@ final class DiagnosticCaptureTests: XCTestCase {
         XCTAssertTrue(capture.report.events.isEmpty)
     }
 
+    @MainActor
+    func testSliderTransitionCaptureUsesBoundedContentFreeIntervals() throws {
+        let clock = ManualClock()
+        let capture = DiagnosticCaptureCoordinator(clock: clock.clock)
+        let recorder = DiagnosticCaptureSignposts(base: RecordingPerformanceSignposts(), capture: capture)
+        let presentation = ConfigurationSliderPresentation()
+        let first = presentation.open(owner: UUID())
+        presentation.beginMeasurement(.configurationSliderExpand, for: first, recorder: recorder)
+        presentation.completeExpansion(first)
+        XCTAssertTrue(capture.report.events.isEmpty)
+
+        XCTAssertTrue(capture.start(duration: .seconds(30)))
+        let next = presentation.open(owner: UUID())
+        presentation.beginMeasurement(.configurationSliderExpand, for: next, recorder: recorder)
+        clock.advance(by: .milliseconds(280))
+        presentation.completeExpansion(next)
+        XCTAssertTrue(presentation.beginClosing(next))
+        presentation.beginMeasurement(.configurationSliderCollapse, for: next, recorder: recorder)
+        clock.advance(by: .milliseconds(300))
+        presentation.finish(next) {}
+        let report = try XCTUnwrap(capture.stop())
+        XCTAssertEqual(report.events.map(\.name), ["configurationSliderExpand", "configurationSliderCollapse"])
+        XCTAssertEqual(report.events.map(\.durationMilliseconds), [280, 300])
+        XCTAssertEqual(report.events.map(\.outcome), ["0", "0"])
+        XCTAssertTrue(report.events.allSatisfy { $0.requestID == nil && $0.code == nil })
+    }
+
     func testRPCPurposeAndPageAreAllowlistedAndBounded() {
         let capture = DiagnosticCaptureCoordinator()
         XCTAssertTrue(capture.start(duration: .seconds(30)))

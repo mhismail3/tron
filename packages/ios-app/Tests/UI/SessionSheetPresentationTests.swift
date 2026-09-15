@@ -608,6 +608,35 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testToolTruncationNotesUseNeutralStyling() async throws {
+        let tool = ChatToolPresentation(id: "truncated-message", title: "Subagent", toolName: "subagent", subtitle: "Completed",
+            request: .object(["message": .string(String(repeating: "A long informational message. ", count: 50))]),
+            response: nil, content: "Message delivered.", fallbackContent: nil, error: false,
+            startedAt: nil, completedAt: nil, durationMs: nil, lastProgressAt: nil, progressSequence: nil)
+        XCTAssertTrue(ToolDetailPresentation(tool: tool).primaryPreview?.isBounded == true)
+        for scheme: ColorScheme in [.light, .dark] {
+            try await withSheet(TronDocumentSheet(title: "Subagent") {
+                ToolDetailSheet(tool: tool, density: .glance)
+            }.preferredColorScheme(scheme)) { controller in
+                let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
+                    controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
+                }
+                let cg = try XCTUnwrap(image.cgImage)
+                var pixels = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
+                let context = try XCTUnwrap(CGContext(data: &pixels, width: cg.width, height: cg.height,
+                    bitsPerComponent: 8, bytesPerRow: cg.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+                context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+                let amberPixels = stride(from: 0, to: pixels.count, by: 4).filter { i in
+                    Double(pixels[i]) > 100 && Double(pixels[i]) > Double(pixels[i + 1]) * 1.3
+                        && Double(pixels[i + 1]) > Double(pixels[i + 2]) * 1.1
+                }.count
+                XCTAssertEqual(amberPixels, 0, "Informational truncation must not render as an amber warning")
+                self.capture(controller, name: "neutral-truncation-\(scheme)")
+            }
+        }
+    }
+
     func testEditDetailsAndExpandedChangesShowDiffCountMetadata() async throws {
         let tool = ChatToolPresentation(
             id: "diff-count-fixture", title: "edit", subtitle: "Completed",

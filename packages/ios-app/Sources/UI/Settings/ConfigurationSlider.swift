@@ -12,9 +12,29 @@ final class ConfigurationSliderPresentation {
     }
     private(set) var session: Session?
     private(set) var closing = false
+    @ObservationIgnored private var measurement: (session: Session, interval: PerformanceInterval, recorder: any PerformanceSignposting)?
+
+    func beginMeasurement(_ operation: PerformanceOperation, for candidate: Session, recorder: any PerformanceSignposting) {
+        guard session == candidate else { return }
+        endMeasurement(result: .cancelled)
+        measurement = (candidate, recorder.begin(operation), recorder)
+    }
+
+    func completeExpansion(_ candidate: Session) {
+        guard admitsInput(candidate), measurement?.session == candidate,
+              measurement?.interval.operation == .configurationSliderExpand else { return }
+        endMeasurement(result: .success)
+    }
+
+    private func endMeasurement(result: PerformanceResult) {
+        guard let current = measurement else { return }
+        measurement = nil
+        current.recorder.end(current.interval, result: result, metrics: .none)
+    }
 
     @discardableResult
     func open(owner: UUID, surface: PresentationSurfaceToken? = nil) -> Session {
+        endMeasurement(result: .cancelled)
         let next = Session(owner: owner, surface: surface)
         session = next
         closing = false
@@ -25,12 +45,14 @@ final class ConfigurationSliderPresentation {
 
     func beginClosing(_ candidate: Session) -> Bool {
         guard admitsInput(candidate) else { return false }
+        endMeasurement(result: .cancelled)
         closing = true
         return true
     }
 
     func finish(_ candidate: Session, commit: () -> Void) {
         guard session == candidate, closing else { return }
+        endMeasurement(result: .success)
         session = nil
         closing = false
         commit()
@@ -38,6 +60,7 @@ final class ConfigurationSliderPresentation {
 
     func cancel(_ candidate: Session) {
         guard session == candidate else { return }
+        endMeasurement(result: .cancelled)
         session = nil
         closing = false
     }
@@ -49,6 +72,7 @@ final class ConfigurationSliderPresentation {
 
 extension EnvironmentValues {
     @Entry var configurationSliderPresentation: ConfigurationSliderPresentation? = nil
+    @Entry var configurationSliderSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared
 }
 
 struct ConfigurationSliderRequest {
@@ -134,6 +158,7 @@ struct ConfigurationSliderContainer<Content: View>: View {
     let finish: () -> Void
     @ViewBuilder let content: (ConfigurationSliderActions) -> Content
     @State private var expanded = false
+    @Environment(\.configurationSliderSignposts) private var signposts
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.tronPresentationActivity) private var activity
@@ -198,13 +223,18 @@ struct ConfigurationSliderContainer<Content: View>: View {
         }
         .onAppear {
             guard admitsPresentation, presentation.admitsInput(anchor.session) else { return }
+            presentation.beginMeasurement(.configurationSliderExpand, for: anchor.session, recorder: signposts)
             withAnimation(motion, completionCriteria: .logicallyComplete) { expanded = true } completion: {
-                if admitsPresentation, presentation.admitsInput(anchor.session) { sliderFocused = true }
+                if admitsPresentation, presentation.admitsInput(anchor.session) {
+                    presentation.completeExpansion(anchor.session)
+                    sliderFocused = true
+                }
             }
         }
         .onChange(of: presentation.closing, initial: true) { _, closing in
             guard closing, presentation.session == anchor.session else { return }
             sliderFocused = false
+            presentation.beginMeasurement(.configurationSliderCollapse, for: anchor.session, recorder: signposts)
             withAnimation(motion, completionCriteria: .logicallyComplete) { expanded = false } completion: {
                 // Read the owning surface registry again: retirement can precede
                 // SwiftUI's next onChange/onDisappear pass.

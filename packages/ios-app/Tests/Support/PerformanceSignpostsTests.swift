@@ -3,7 +3,7 @@ import Testing
 
 @Suite("Privacy-safe performance signposts")
 struct PerformanceSignpostsTests {
-    @Test("operation vocabulary is closed over the approved Phase 0 boundaries")
+    @Test("operation vocabulary is closed over the instrumented boundaries")
     func approvedOperations() {
         #expect(PerformanceOperation.allCases == [
             .gatewayConnect,
@@ -18,6 +18,8 @@ struct PerformanceSignpostsTests {
             .scrollCommandSettle,
             .prependSettle,
             .terminalAttachReplay,
+            .configurationSliderExpand,
+            .configurationSliderCollapse,
         ])
     }
 

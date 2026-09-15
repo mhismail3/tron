@@ -66,11 +66,12 @@ final class ThinkingSliderLayoutTests: XCTestCase {
     func testDismissalCompletesOnceWithoutChangingAnUneditedValue() async throws {
         let presentation = ConfigurationSliderPresentation()
         let finished = expectation(description: "Editor finished")
+        let recorder = RecordingPerformanceSignposts()
         var drafts: [ThinkingSliderDraft] = []
         try await withHost(ThinkingSliderFixture(presentation: presentation, finish: { draft in
             drafts.append(draft)
             finished.fulfill()
-        }).tronPresentation()) { _ in
+        }).tronPresentation().environment(\.configurationSliderSignposts, recorder)) { _ in
             let session = try XCTUnwrap(presentation.session)
             XCTAssertTrue(presentation.beginClosing(session))
             XCTAssertFalse(presentation.beginClosing(session))
@@ -78,6 +79,10 @@ final class ThinkingSliderLayoutTests: XCTestCase {
             XCTAssertEqual(drafts.count, 1)
             XCTAssertNil(drafts[0].selectionToCommit(currentValue: "xhigh", levels: ["off", "high", "xhigh"]))
             XCTAssertNil(presentation.session)
+            XCTAssertEqual(recorder.events(), [
+                .begin(.configurationSliderExpand), .end(.configurationSliderExpand, .success, .none),
+                .begin(.configurationSliderCollapse), .end(.configurationSliderCollapse, .success, .none)
+            ])
         }
     }
 

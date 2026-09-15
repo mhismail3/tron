@@ -263,7 +263,8 @@ struct MultilineComposerTextViewTests {
 
     @Test("attachment pickers preserve characterized selection ceilings")
     func attachmentSelectionCeilings() {
-        #expect(ChatAttachmentImportPolicy.maximumPhotoSelection == 5)
+        #expect(ChatAttachmentImportPolicy.maximumPhotoSelection == 10)
+        #expect(ChatAttachmentImportPolicy.maximumPhotoSelection == ComposerAttachmentPolicy.maximumCount)
         #expect(ChatAttachmentImportPolicy.maximumFileSelection == 10)
     }
 

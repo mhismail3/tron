@@ -1001,9 +1001,17 @@ to all their content rather than clip it permanently. The presentation owner rec
 registry at completion, not only the potentially stale environment projection.
 `ContextWindowSliderMotionTests` runs the actual morph surface over representative settings
 content, pins payload reconstruction to input changes rather than display cadence, and attaches
-six warmed CPU/run-loop-delivery samples after two warmups. Its fixed 420 ms spring is a
-comparison workload, deliberately independent of product timing; run with
+six warmed CPU/run-loop-delivery samples after two warmups. It uses the shipping 280 ms
+ease-in-out expansion/collapse curve; keep that workload aligned with the container when
+investigating perceived morph smoothness. Run with
 `scripts/tron-ios-test run --only-testing TronMobileTests/ContextWindowSliderMotionTests`.
+The shared slider presentation also emits `configurationSliderExpand` and `configurationSliderCollapse`
+intervals through the existing Diagnostic Capture and Instruments signpost owners. They record only elapsed
+time and success/cancellation: no settings values, content, per-frame logs, polling, or extra display link.
+Replacement, close interruption, and surface retirement finish only the exact current measurement once.
+To investigate an intermittent hitch, start Diagnostic Capture in Settings → Logs, exercise both sliders,
+then stop and export the capture; the intervals identify slow transitions for correlation with Instruments.
+Elapsed transition time alone cannot establish GPU frame smoothness.
 These simulator/test-process measurements do not establish device GPU frame time or release
 performance. Its temporary window and display link are owned and released by the test.
 Try narrow sheets, both appearances, large text, VoiceOver adjustment/escape, and Reduce Motion.
@@ -1107,7 +1115,8 @@ than the sheet, it remains within the sheet and wraps to at most two lines in th
 Open a running single-tool detail before a second tool joins its run and verify the original sheet and detent stay
 mounted while its fields settle from the newest matching call ID. Exercise one pathological command/output and confirm the
 primary preview wraps, explicitly marks omissions, and leaves the complete projected value in the final
-Technical details sheet. With VoiceOver enabled, verify pathological path/glob metadata speaks only the concise
+Technical details sheet. Informational omission footers use plain muted-gray caption text, not an amber
+warning/icon; the bounded-output metadata chip uses the neutral slate accent. With VoiceOver enabled, verify pathological path/glob metadata speaks only the concise
 preview plus the Technical details disclosure. Verify compact selectable execution metadata remains first and
 records bounded-command completeness, followed by Request JSON then Result JSON containers. Open each
 container and verify it immediately presents selectable, vertically scrollable raw JSON for the complete

@@ -75,6 +75,28 @@ struct ThinkingSliderTests {
         #expect(unknown.selectionToCommit(currentValue: "unlisted", levels: scale.levels) == "xhigh")
     }
 
+    @Test("transition diagnostics retire interrupted phases and ignore stale completions")
+    @MainActor func transitionDiagnosticsRespectOwner() {
+        let presentation = ConfigurationSliderPresentation()
+        let recorder = RecordingPerformanceSignposts()
+        let first = presentation.open(owner: UUID())
+        presentation.beginMeasurement(.configurationSliderExpand, for: first, recorder: recorder)
+        #expect(presentation.beginClosing(first))
+        presentation.beginMeasurement(.configurationSliderCollapse, for: first, recorder: recorder)
+        presentation.completeExpansion(first)
+        let second = presentation.open(owner: UUID())
+        presentation.beginMeasurement(.configurationSliderExpand, for: second, recorder: recorder)
+        presentation.finish(first) { Issue.record("Stale editor committed") }
+        presentation.cancel(first)
+        presentation.completeExpansion(second)
+        presentation.cancel(second)
+        #expect(recorder.events() == [
+            .begin(.configurationSliderExpand), .end(.configurationSliderExpand, .cancelled, .none),
+            .begin(.configurationSliderCollapse), .end(.configurationSliderCollapse, .cancelled, .none),
+            .begin(.configurationSliderExpand), .end(.configurationSliderExpand, .success, .none)
+        ])
+    }
+
     @Test("one host admits one editor and only its exact close may commit once")
     @MainActor func singleEditorAndCompletion() {
         let presentation = ConfigurationSliderPresentation()

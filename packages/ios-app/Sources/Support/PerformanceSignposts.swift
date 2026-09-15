@@ -14,6 +14,8 @@ enum PerformanceOperation: CaseIterable, Sendable {
     case scrollCommandSettle
     case prependSettle
     case terminalAttachReplay
+    case configurationSliderExpand
+    case configurationSliderCollapse
 }
 
 enum PerformanceResult: Int, Sendable {
@@ -82,6 +84,10 @@ struct SystemPerformanceSignposts: PerformanceSignposting {
         let id = signposter.makeSignpostID()
         let state: OSSignpostIntervalState
         switch operation {
+        case .configurationSliderExpand:
+            state = signposter.beginAnimationInterval("Configuration Slider Expand", id: id)
+        case .configurationSliderCollapse:
+            state = signposter.beginAnimationInterval("Configuration Slider Collapse", id: id)
         case .gatewayConnect:
             state = signposter.beginInterval("Gateway Connect", id: id)
         case .sessionOpen:
@@ -118,6 +124,10 @@ struct SystemPerformanceSignposts: PerformanceSignposting {
         guard let state = interval.state else { return }
         let signposter = signposter(for: interval.operation)
         switch interval.operation {
+        case .configurationSliderExpand:
+            signposter.endInterval("Configuration Slider Expand", state, "result=\(result.rawValue, privacy: .public)")
+        case .configurationSliderCollapse:
+            signposter.endInterval("Configuration Slider Collapse", state, "result=\(result.rawValue, privacy: .public)")
         case .gatewayConnect:
             signposter.endInterval("Gateway Connect", state, "result=\(result.rawValue, privacy: .public) items=\(metrics.itemCount, privacy: .public) bytes=\(metrics.byteCount, privacy: .public)")
         case .sessionOpen:
@@ -153,7 +163,8 @@ struct SystemPerformanceSignposts: PerformanceSignposting {
             sessions
         case .cacheLoad, .cacheSave:
             cache
-        case .chatProjection, .firstReadyFrame, .scrollCommandSettle, .prependSettle:
+        case .chatProjection, .firstReadyFrame, .scrollCommandSettle, .prependSettle,
+             .configurationSliderExpand, .configurationSliderCollapse:
             chat
         case .terminalAttachReplay:
             terminal
