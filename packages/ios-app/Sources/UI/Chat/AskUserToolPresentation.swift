@@ -42,17 +42,17 @@ enum PendingExtensionInteractionToolPresentation {
                 tool.isRunning
                     && toolOperationID(tool) == operationID
                     && ownersMatch(interaction: interaction, tool: tool)
-                    && (interaction.method != .form || isAuditedAskUser(tool))
+                    && (interaction.method != .form || isAskUser(tool))
             }
         }
         if operationMatches.count == 1 { return operationMatches[0] }
         guard operationMatches.isEmpty else { return nil }
 
         // A running ask_user blocks its serialized session lane, so one exact
-        // audited owner and one pending form are an unambiguous fallback when a
+        // admitted owner and one pending form are an unambiguous fallback when a
         // cold canonical tool segment no longer exposes the live operation ID.
         let askUserTools = tools.filter { tool in
-            tool.isRunning && isAuditedAskUser(tool)
+            tool.isRunning && isAskUser(tool)
         }
         guard askUserTools.count == 1, let tool = askUserTools.first else { return nil }
         let formMatches = pendingInteractions.filter { interaction in
@@ -61,9 +61,9 @@ enum PendingExtensionInteractionToolPresentation {
         return formMatches.count == 1 ? formMatches[0] : nil
     }
 
-    private static func isAuditedAskUser(_ tool: ChatToolDescriptor) -> Bool {
+    private static func isAskUser(_ tool: ChatToolDescriptor) -> Bool {
         tool.toolName == "ask_user"
-            && tool.extensionOrigin?.owner?.source == AskUserToolPresentation.auditedSource
+            && AskUserToolPresentation.isAskUserSource(tool.extensionOrigin?.owner?.source)
     }
 
     private static func toolOperationID(_ tool: ChatToolDescriptor) -> String? {
@@ -84,7 +84,13 @@ enum PendingExtensionInteractionToolPresentation {
 }
 
 struct AskUserToolPresentation: Equatable, Sendable {
+    /// Release-owned origin; the audited package remains a readable historical origin.
+    static let tronSource = "tron:ask-user.v1"
     static let auditedSource = "npm:@zhushanwen/pi-ask-user@7.0.15"
+
+    fileprivate static func isAskUserSource(_ source: String?) -> Bool {
+        source == tronSource || source == auditedSource
+    }
 
     let form: ExtensionFormDescriptor
     let answer: ExtensionFormAnswer?
@@ -92,11 +98,11 @@ struct AskUserToolPresentation: Equatable, Sendable {
 
     static func completed(tool: ChatToolPresentation) -> AskUserToolPresentation? {
         guard tool.toolName == "ask_user",
-              tool.extensionOrigin?.owner?.source == auditedSource,
+              isAskUserSource(tool.extensionOrigin?.owner?.source),
               !tool.isRunning,
               !tool.error,
               let result = tool.response?.objectValue,
-              Set(result.keys).isSubset(of: ["questions", "answers", "cancelled"]),
+              Set(result.keys).isSubset(of: ["title", "questions", "answers", "cancelled"]),
               let cancelled = result["cancelled"]?.boolValue,
               let rawQuestions = result["questions"]?.arrayValue,
               (1...4).contains(rawQuestions.count),
@@ -114,9 +120,13 @@ struct AskUserToolPresentation: Equatable, Sendable {
             if let header = question.header, !headers.insert(header).inserted { return nil }
             questions.append(question)
         }
+        guard result["title"] == nil || result["title"]?.stringValue != nil else { return nil }
+        let title = result["title"]?.stringValue ?? (questions.count == 1 ? (questions[0].header ?? "Question") : "Questions")
+        guard admits(title, maximumBytes: 4 * 1_024, newlines: true),
+              !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         let form = ExtensionFormDescriptor(
             version: 1,
-            title: questions.count == 1 ? (questions[0].header ?? "Question") : "Questions",
+            title: title,
             questions: questions,
             allowCancel: true
         )
@@ -170,7 +180,7 @@ struct AskUserToolPresentation: Equatable, Sendable {
         count: Int
     ) -> ExtensionFormQuestion? {
         guard let object = value.objectValue,
-              Set(object.keys).isSubset(of: ["header", "question", "context", "options", "multiSelect"]),
+              Set(object.keys).isSubset(of: ["header", "question", "context", "options", "multiSelect", "allowOther"]),
               let text = object["question"]?.stringValue,
               admits(text, maximumBytes: 4 * 1_024),
               !text.isEmpty,
@@ -187,6 +197,8 @@ struct AskUserToolPresentation: Equatable, Sendable {
               context.map({ admits($0, maximumBytes: 32 * 1_024, newlines: true) }) ?? true else { return nil }
         let multiSelect = object["multiSelect"]?.boolValue ?? false
         guard object["multiSelect"] == nil || object["multiSelect"]?.boolValue != nil else { return nil }
+        let allowOther = object["allowOther"]?.boolValue ?? true
+        guard object["allowOther"] == nil || object["allowOther"]?.boolValue != nil else { return nil }
         var labels = Set<String>()
         var options: [ExtensionFormOption] = []
         for (optionIndex, rawOption) in rawOptions.enumerated() {
@@ -212,7 +224,7 @@ struct AskUserToolPresentation: Equatable, Sendable {
             context: context,
             options: options,
             multiSelect: multiSelect,
-            allowOther: true
+            allowOther: allowOther
         )
     }
 

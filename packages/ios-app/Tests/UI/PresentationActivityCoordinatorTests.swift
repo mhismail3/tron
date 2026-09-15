@@ -196,6 +196,175 @@ struct PresentationActivityCoordinatorTests {
         #expect(coordinator.activity(for: replacement) == .active)
     }
 
+    @Test("same-ID interaction scopes retire old success and error effects")
+    func sameInteractionIDScopesReplaceManagedPresentation() throws {
+        let sessionID = "ask-user-scope-session"
+        let form = ExtensionFormDescriptor(
+            version: 1,
+            title: "Choose a database",
+            questions: [ExtensionFormQuestion(
+                id: "database", question: "Which database?",
+                options: [ExtensionFormOption(id: "postgres", label: "Postgres"), ExtensionFormOption(id: "sqlite", label: "SQLite")],
+                multiSelect: false, allowOther: false
+            )],
+            allowCancel: true
+        )
+        let old = ExtensionInteraction(
+            id: "same-id", hostEpoch: "epoch-a", presentationRevision: 1,
+            method: .form, title: form.title, form: form
+        )
+        let newEpoch = ExtensionInteraction(
+            id: old.id, hostEpoch: "epoch-b", presentationRevision: 1,
+            method: .form, title: form.title, form: form
+        )
+        let newRevision = ExtensionInteraction(
+            id: old.id, hostEpoch: newEpoch.hostEpoch, presentationRevision: 2,
+            method: .form, title: form.title, form: form
+        )
+        let identity: (ExtensionInteraction) -> String = {
+            ExtensionInteractionPresentationIdentity.value(sessionID: sessionID, interaction: $0)
+        }
+        // Negative control: the retired ID-only route would retain one token
+        // across both scope changes and therefore cannot fence a late result.
+        var legacyLease = PresentationDismissalLease()
+        let legacyIdentity = "chat.\(sessionID).interaction.\(old.id)"
+        _ = legacyLease.register(identity: legacyIdentity)
+        let legacyTransition = legacyLease.replace(identity: legacyIdentity)
+        #expect(legacyTransition.retired == nil)
+        #expect(legacyTransition.registered == nil)
+
+        var lease = PresentationDismissalLease()
+        let registeredOldToken = lease.register(identity: identity(old))
+        let oldToken = try #require(registeredOldToken)
+        let coordinator = PresentationActivityCoordinator()
+        coordinator.register(oldToken, parent: nil)
+        var publishedEffects = 0
+        func publish(_ token: PresentationSurfaceToken, outcome: Result<Void, Error>) {
+            guard coordinator.activity(for: token).allowsPresentationPublication else { return }
+            _ = outcome
+            publishedEffects += 1
+        }
+
+        let epochTransition = lease.replace(identity: identity(newEpoch))
+        let epochToken = try #require(epochTransition.registered)
+        #expect(epochTransition.retired == oldToken)
+        coordinator.retire(oldToken)
+        coordinator.register(epochToken, parent: nil)
+        publish(oldToken, outcome: .success(()))
+        publish(oldToken, outcome: .failure(NSError(domain: "PresentationActivityCoordinatorTests", code: 1)))
+        #expect(publishedEffects == 0)
+        #expect(coordinator.activity(for: epochToken) == .active)
+
+        let revisionTransition = lease.replace(identity: identity(newRevision))
+        let revisionToken = try #require(revisionTransition.registered)
+        #expect(revisionTransition.retired == epochToken)
+        coordinator.retire(epochToken)
+        coordinator.register(revisionToken, parent: nil)
+        publish(epochToken, outcome: .success(()))
+        publish(epochToken, outcome: .failure(NSError(domain: "PresentationActivityCoordinatorTests", code: 1)))
+        publish(revisionToken, outcome: .success(()))
+        #expect(publishedEffects == 1)
+        #expect(coordinator.activity(for: revisionToken) == .active)
+
+        let suiteName = "PresentationActivityCoordinatorTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let drafts = ExtensionInteractionDraftStore(defaults: defaults)
+        drafts.saveForm(
+            StoredExtensionFormDraft(
+                draft: ExtensionFormDraft(form: form), activeOtherQuestionIDs: [], currentQuestionIndex: 0
+            ),
+            sessionID: sessionID,
+            interaction: newRevision
+        )
+        #expect(drafts.formDraft(sessionID: sessionID, interaction: newRevision) != nil)
+        drafts.clear(sessionID: sessionID, interaction: old)
+        #expect(drafts.formDraft(sessionID: sessionID, interaction: newRevision) != nil)
+    }
+
+    @Test("managed item replacement retires same-ID scoped interaction content")
+    func managedItemReplacementUsesScopedIdentity() async throws {
+        let sessionID = "managed-interaction-probe"
+        let form = ExtensionFormDescriptor(
+            version: 1,
+            title: "Choose a database",
+            questions: [ExtensionFormQuestion(
+                id: "database", question: "Which database?",
+                options: [ExtensionFormOption(id: "postgres", label: "Postgres"), ExtensionFormOption(id: "sqlite", label: "SQLite")],
+                multiSelect: false, allowOther: false
+            )],
+            allowCancel: true
+        )
+        let old = ExtensionInteraction(
+            id: "same-id", hostEpoch: "epoch-a", presentationRevision: 1,
+            method: .form, title: form.title, form: form
+        )
+        let successor = ExtensionInteraction(
+            id: old.id, hostEpoch: "epoch-b", presentationRevision: 2,
+            method: .form, title: form.title, form: form
+        )
+        let coordinator = PresentationActivityCoordinator()
+        let state = ManagedInteractionProbeState()
+        let controller = UIHostingController(
+            rootView: ManagedInteractionProbeView(sessionID: sessionID, state: state)
+                .environment(\.tronPresentationActivityCoordinator, coordinator)
+        )
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        )
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        state.interaction = old
+        try await waitForSurfaceCount(1, coordinator: coordinator)
+        try await waitForProbeTokenCount(1, state: state)
+        let oldToken = try #require(state.tokens.first)
+        #expect(coordinator.activity(for: oldToken) == .active)
+
+        state.interaction = successor
+        try await waitForProbeTokenCount(2, state: state)
+        let successorToken = try #require(state.tokens.last)
+        #expect(successorToken != oldToken)
+        #expect(coordinator.activity(for: oldToken) == .covered)
+        #expect(coordinator.activity(for: successorToken) == .active)
+
+        state.publishIfAllowed(oldToken, coordinator: coordinator)
+        #expect(state.publishedCount == 0)
+        state.publishIfAllowed(successorToken, coordinator: coordinator)
+        #expect(state.publishedCount == 1)
+
+        state.interaction = nil
+        try await waitForSurfaceCount(0, coordinator: coordinator)
+        state.interaction = successor
+        try await waitForSurfaceCount(1, coordinator: coordinator)
+        try await waitForProbeTokenCount(3, state: state)
+        let reopenedToken = try #require(state.tokens.last)
+        #expect(reopenedToken != successorToken)
+        #expect(coordinator.activity(for: reopenedToken) == .active)
+        state.interaction = nil
+        await dismissPresentedSurface(from: controller)
+    }
+
+    @Test("coordinator authority rejects a missing token but standalone activity may publish")
+    func tokenlessPublicationFailsClosedUnderCoordinator() {
+        let coordinator = PresentationActivityCoordinator()
+        #expect(!PresentationPublicationPolicy.allows(
+            ambient: .active, coordinator: coordinator, token: nil
+        ))
+        #expect(PresentationPublicationPolicy.allows(
+            ambient: .active, coordinator: nil, token: nil
+        ))
+        #expect(!PresentationPublicationPolicy.allows(
+            ambient: .covered, coordinator: nil, token: nil
+        ))
+    }
+
     @Test("a stale dismissal completes its old lease without retiring a rapid replacement")
     func dismissalLeaseDefersRapidReplacement() throws {
         var lease = PresentationDismissalLease()
@@ -272,6 +441,17 @@ struct PresentationActivityCoordinatorTests {
         }
     }
 
+    private func waitForProbeTokenCount(
+        _ expected: Int,
+        state: ManagedInteractionProbeState
+    ) async throws {
+        for _ in 0..<200 {
+            if state.tokens.count >= expected { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        throw PresentationActivityHostedError.probeTimedOut(expected: expected, actual: state.tokens.count)
+    }
+
     private func waitForSurfaceCount(
         _ expected: Int,
         coordinator: PresentationActivityCoordinator
@@ -295,6 +475,52 @@ struct PresentationActivityCoordinatorTests {
         coordinator.retire(root)
         coordinator.retire(root)
         #expect(coordinator.mountedSurfaceCount == 0)
+    }
+}
+
+@MainActor
+@Observable
+private final class ManagedInteractionProbeState {
+    var interaction: ExtensionInteraction?
+    private(set) var tokens: [PresentationSurfaceToken] = []
+    private(set) var publishedCount = 0
+
+    func record(_ token: PresentationSurfaceToken?) {
+        guard let token, tokens.last != token else { return }
+        tokens.append(token)
+    }
+
+    func publishIfAllowed(_ token: PresentationSurfaceToken, coordinator: PresentationActivityCoordinator) {
+        guard coordinator.activity(for: token).allowsPresentationPublication else { return }
+        publishedCount += 1
+    }
+}
+
+private struct ManagedInteractionProbeView: View {
+    let sessionID: String
+    @Bindable var state: ManagedInteractionProbeState
+
+    var body: some View {
+        Color.clear
+            .tronManagedSheet(
+                item: $state.interaction,
+                identity: { ExtensionInteractionPresentationIdentity.value(sessionID: sessionID, interaction: $0) }
+            ) { interaction in
+                ManagedInteractionTokenProbe(interaction: interaction, state: state)
+            }
+    }
+}
+
+private struct ManagedInteractionTokenProbe: View {
+    let interaction: ExtensionInteraction
+    let state: ManagedInteractionProbeState
+    @Environment(\.tronPresentationSurfaceToken) private var token
+
+    var body: some View {
+        Color.clear
+            .accessibilityLabel(interaction.title)
+            .onAppear { state.record(token) }
+            .onChange(of: token) { _, updated in state.record(updated) }
     }
 }
 
@@ -328,4 +554,5 @@ private struct PresentationActivityHostedView: View {
 private enum PresentationActivityHostedError: Error {
     case presentationTimedOut
     case timedOut(expected: Int, actual: Int)
+    case probeTimedOut(expected: Int, actual: Int)
 }

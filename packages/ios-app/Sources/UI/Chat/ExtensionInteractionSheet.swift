@@ -6,6 +6,9 @@ import SwiftUI
 struct ExtensionInteractionSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.tronPresentationActivityCoordinator) private var presentationActivityCoordinator
+    @Environment(\.tronPresentationSurfaceToken) private var presentationSurfaceToken
     let sessionID: String
     let interaction: ExtensionInteraction
     let onResolved: () -> Void
@@ -91,11 +94,11 @@ struct ExtensionInteractionSheet: View {
         .presentationDragIndicator(.hidden)
         .interactiveDismissDisabled()
         .onAppear { resetState() }
-        .onChange(of: interactionScope) { _, _ in resetState() }
+        .onChange(of: ExtensionInteractionScope(interaction)) { _, _ in resetState() }
         .onChange(of: text) { _, _ in persistDraft() }
         .onChange(of: selectedOption) { _, _ in persistDraft() }
         .onChange(of: confirmValue) { _, _ in persistDraft() }
-        .task(id: interaction.id) {
+        .task(id: ExtensionInteractionScope(interaction)) {
             guard let expiresAt = interaction.expiresAt,
                   let expiration = GatewayTimestamp.parse(expiresAt) else { return }
             while !Task.isCancelled, currentDate < expiration {
@@ -205,10 +208,6 @@ struct ExtensionInteractionSheet: View {
         .accessibilityLabel(label)
     }
 
-    private var interactionScope: String {
-        "\(interaction.id)|\(interaction.hostEpoch)|\(interaction.presentationRevision)"
-    }
-
     private func resetState() {
         if let stored = model.extensionInteractionDrafts.primitiveDraft(
             sessionID: sessionID,
@@ -266,19 +265,26 @@ struct ExtensionInteractionSheet: View {
     private func respond(value: JSONValue?) {
         submitting = true
         submissionError = nil
-        Task {
+        let expectedToken = presentationSurfaceToken
+        Task { @MainActor in
             do {
+                // The accepted mutation remains owned by SessionMutationService;
+                // only callbacks for this exact managed presentation may publish.
                 try await model.answerInteraction(interaction, sessionID: sessionID, value: value, cancelled: false)
                 model.extensionInteractionDrafts.clear(sessionID: sessionID, interaction: interaction)
+                guard PresentationPublicationPolicy.allows(ambient: presentationActivity, coordinator: presentationActivityCoordinator, token: expectedToken) else { return }
                 onResolved()
                 dismiss()
             } catch is CancellationError {
+                guard PresentationPublicationPolicy.allows(ambient: presentationActivity, coordinator: presentationActivityCoordinator, token: expectedToken) else { return }
                 submitting = false
             } catch let failure as GatewayFailure where failure.code == "not_found" || failure.code == "conflict" {
                 model.extensionInteractionDrafts.clear(sessionID: sessionID, interaction: interaction)
+                guard PresentationPublicationPolicy.allows(ambient: presentationActivity, coordinator: presentationActivityCoordinator, token: expectedToken) else { return }
                 onLocallyClosed()
                 dismiss()
             } catch {
+                guard PresentationPublicationPolicy.allows(ambient: presentationActivity, coordinator: presentationActivityCoordinator, token: expectedToken) else { return }
                 submitting = false
                 submissionError = error.localizedDescription
                 model.presentError(error)

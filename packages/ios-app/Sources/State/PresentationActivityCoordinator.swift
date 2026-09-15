@@ -49,6 +49,21 @@ struct PresentationActivityTaskID<Source: Hashable>: Hashable {
     let presentationActive: Bool
 }
 
+@MainActor
+enum PresentationPublicationPolicy {
+    /// A coordinator is authoritative whenever present. A missing token is
+    /// therefore fail-closed; ambient activity is only a standalone fallback.
+    static func allows(
+        ambient: PresentationSurfaceActivity,
+        coordinator: PresentationActivityCoordinator?,
+        token: PresentationSurfaceToken?
+    ) -> Bool {
+        guard let coordinator else { return ambient.allowsPresentationPublication }
+        guard let token else { return false }
+        return coordinator.activity(for: token).allowsPresentationPublication
+    }
+}
+
 enum PresentationClockPolicy {
     static func runs(
         surfaceActive: Bool,
@@ -377,7 +392,7 @@ private struct TronManagedItemSheetModifier<Item: Identifiable, SheetContent: Vi
                     sheetContent(value)
                 }
             }
-            .onChange(of: item?.id, initial: true) { _, _ in itemChanged() }
+            .onChange(of: item.map(identity), initial: true) { _, _ in itemChanged() }
             .onDisappear { retireAllTokens() }
     }
 

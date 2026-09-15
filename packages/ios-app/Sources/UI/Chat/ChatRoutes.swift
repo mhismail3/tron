@@ -124,7 +124,7 @@ struct ChatRoutes: ViewModifier {
             }
             .tronManagedSheet(
                 item: $interaction,
-                identity: { "chat.\(sessionID).interaction.\($0.id)" }
+                identity: { ExtensionInteractionPresentationIdentity.value(sessionID: sessionID, interaction: $0) }
             ) { value in
                 if value.method == .form {
                     ExtensionFormSheet(

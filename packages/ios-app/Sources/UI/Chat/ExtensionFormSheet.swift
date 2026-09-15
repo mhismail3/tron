@@ -5,6 +5,9 @@ import SwiftUI
 struct ExtensionFormSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.tronPresentationActivityCoordinator) private var presentationActivityCoordinator
+    @Environment(\.tronPresentationSurfaceToken) private var presentationSurfaceToken
     let sessionID: String
     let interaction: ExtensionInteraction
     let onResolved: () -> Void
@@ -25,7 +28,6 @@ struct ExtensionFormSheet: View {
     }
     private var expiry: Date? { interaction.expiresAt.flatMap(GatewayTimestamp.parse) }
     private var expired: Bool { expiry.map { now >= $0 } ?? false }
-    private var interactionScope: String { "\(interaction.id)|\(interaction.hostEpoch)|\(interaction.presentationRevision)" }
     private var responseValidationMessage: String? {
         guard let form, draftIsComplete(form) else { return nil }
         return ExtensionInteractionResponsePolicy.formError(draft.answer(for: form), descriptor: form)
@@ -63,13 +65,22 @@ struct ExtensionFormSheet: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button(action: close) {
-                        Image(systemName: "xmark")
-                            .font(TronTypography.buttonSM)
+                    HStack(spacing: 12) {
+                        Button(action: close) {
+                            Image(systemName: "xmark")
+                                .font(TronTypography.buttonSM)
+                        }
+                        .tronToolbarAction(accent: .tronTextMuted)
+                        .disabled(submitting)
+                        .accessibilityLabel("Close form and keep answers")
+                        if form?.allowCancel == true {
+                            Button("Cancel", action: cancel)
+                                .font(TronTypography.bodySM)
+                                .foregroundStyle(Color.tronError)
+                                .disabled(submitting)
+                                .accessibilityLabel("Cancel form")
+                        }
                     }
-                    .tronToolbarAction(accent: .tronTextMuted)
-                    .disabled(submitting)
-                    .accessibilityLabel("Close form and keep answers")
                 }
                 ToolbarItem(placement: .principal) {
                     TronSheetTitle(title: form?.title ?? "Questions", accent: .tronAmber)
@@ -98,9 +109,9 @@ struct ExtensionFormSheet: View {
         .presentationDragIndicator(.hidden)
         .interactiveDismissDisabled()
         .onAppear { reset() }
-        .onChange(of: interactionScope) { _, _ in reset() }
+        .onChange(of: ExtensionInteractionScope(interaction)) { _, _ in reset() }
         .onChange(of: currentQuestionIndex) { _, _ in persistDraft() }
-        .task(id: interactionScope) {
+        .task(id: ExtensionInteractionScope(interaction)) {
             while !Task.isCancelled {
                 now = Date()
                 do { try await Task.sleep(for: .seconds(1)) }
@@ -337,6 +348,11 @@ struct ExtensionFormSheet: View {
         dismiss()
     }
 
+    private func cancel() {
+        guard !submitting, form?.allowCancel == true else { return }
+        respond(value: nil, cancelled: true)
+    }
+
     private func persistDraft() {
         guard let form, form.questions.indices.contains(currentQuestionIndex) else { return }
         model.extensionInteractionDrafts.saveForm(
@@ -356,25 +372,34 @@ struct ExtensionFormSheet: View {
         guard ExtensionInteractionResponsePolicy.formError(answer, descriptor: form) == nil,
               let data = try? JSONEncoder.gateway.encode(answer),
               let value = try? JSONDecoder.gateway.decode(JSONValue.self, from: data) else { return }
-        respond(value: value)
+        respond(value: value, cancelled: false)
     }
 
-    private func respond(value: JSONValue?) {
+    private func respond(value: JSONValue?, cancelled: Bool) {
         submitting = true
         errorMessage = nil
-        Task {
+        let expectedToken = presentationSurfaceToken
+        Task { @MainActor in
             do {
-                try await model.answerInteraction(interaction, sessionID: sessionID, value: value, cancelled: false)
+                // Accepted domain mutation remains owned by SessionMutationService
+                // even when this sheet disappears. Only presentation effects are
+                // fenced: the old result must not dismiss or suppress a successor
+                // sheet that reuses the interaction ID with a new scope.
+                try await model.answerInteraction(interaction, sessionID: sessionID, value: value, cancelled: cancelled)
                 model.extensionInteractionDrafts.clear(sessionID: sessionID, interaction: interaction)
+                guard PresentationPublicationPolicy.allows(ambient: presentationActivity, coordinator: presentationActivityCoordinator, token: expectedToken) else { return }
                 onResolved()
                 dismiss()
             } catch is CancellationError {
+                guard PresentationPublicationPolicy.allows(ambient: presentationActivity, coordinator: presentationActivityCoordinator, token: expectedToken) else { return }
                 submitting = false
             } catch let failure as GatewayFailure where failure.code == "not_found" || failure.code == "conflict" {
                 model.extensionInteractionDrafts.clear(sessionID: sessionID, interaction: interaction)
+                guard PresentationPublicationPolicy.allows(ambient: presentationActivity, coordinator: presentationActivityCoordinator, token: expectedToken) else { return }
                 onLocallyClosed()
                 dismiss()
             } catch {
+                guard PresentationPublicationPolicy.allows(ambient: presentationActivity, coordinator: presentationActivityCoordinator, token: expectedToken) else { return }
                 submitting = false
                 errorMessage = error.localizedDescription
                 model.presentError(error)

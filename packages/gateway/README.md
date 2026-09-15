@@ -727,7 +727,14 @@ an error rather than `{ aborted: true }`. Runtime replacement also drains the ou
 process owner before installing its successor. Extension-managed detached subagents never
 enter that owner and are not cancelled by foreground Stop.
 Extension commands are resolved before ordinary streaming rejection and still execute through
-Pi's prompt path. The explicit extension adapter registry identifies only the pinned
+Pi's prompt path. Tron registers its release-owned `ask_user` capability as one sequential
+semantic form tool (`tron:ask-user.v1`). Its title, descriptions, multi-select/Other policy,
+question and option order, and bounded answer details are retained in one canonical result
+shape; native Cancel is admitted only when `allowCancel` is true, while closing the native
+sheet preserves the draft and leaves the interaction pending. A same-name foreign registration
+fails closed with an actionable destination-only settings migration message. Historical
+`@zhushanwen/pi-ask-user` results remain readable through the audited adapter below.
+The explicit extension adapter registry identifies only the pinned
 `@zhushanwen/pi-ask-user@7.0.15` package through exact package source/path metadata,
 the installed manifest and npm-lock integrity
 `sha512-FqsIq4cOXVVX12Jotdj4o9BkZBa5DC/8Hg9w5yhxl+AmsA8UGX3a5kpThCzmFdf0lxaVaWN5/plAsJBSdWjZ3g==`,

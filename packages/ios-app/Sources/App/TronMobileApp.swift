@@ -61,9 +61,22 @@ private final class GatewayPathDiagnosticsObserver {
 @main
 struct TronMobileApp: App {
     #if HOSTED_TEST
+    @State private var hostedModel: AppModel
+
+    init() {
+        _hostedModel = State(initialValue: AppModel())
+    }
+
     var body: some Scene {
         WindowGroup {
-            Color.clear
+            if ProcessInfo.processInfo.arguments.contains("-tron-ask-user-fixture") {
+                HostedAskUserFixtureView()
+            } else {
+                SceneRootView(model: hostedModel, colorScheme: nil)
+                    .environment(hostedModel)
+                    .tronPresentation()
+                    .task { await hostedModel.start(sceneIsActive: true) }
+            }
         }
     }
     #else

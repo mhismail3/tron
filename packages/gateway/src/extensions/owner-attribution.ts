@@ -2,11 +2,12 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { basename, extname } from "node:path";
 import type { Extension, LoadExtensionsResult, RegisteredCommand, RegisteredTool, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { adaptedExtensionEventHandler, adaptedToolDefinition } from "./extension-adapters.js";
+import { adaptedExtensionEventHandler, adaptedToolDefinition, AUDITED_ASK_USER_PACKAGE } from "./extension-adapters.js";
 import type { ExtensionOwner } from "../protocol/types.js";
 import { GatewayError } from "../errors.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { observeTrustedAgentBrowserResult } from "../display/browser-live-view-adapter.js";
+import { TRON_ASK_USER_INLINE_PATH, TRON_ASK_USER_SOURCE } from "./tron-ask-user-contract.js";
 
 /** The owner is intentionally opaque to extension code and is only readable by
  * the gateway presentation projection. AsyncLocalStorage preserves it across
@@ -48,7 +49,11 @@ function humanizedDisplayName(extension: Extension): string {
 }
 
 export function extensionOwnerFor(extension: Extension): ExtensionOwner {
-  const source = extension.sourceInfo.source;
+  // Inline source labels are loader defaults; this exact generated path is the
+  // stable release-owned capability identity used by native projections.
+  const source = extension.path === TRON_ASK_USER_INLINE_PATH
+    ? TRON_ASK_USER_SOURCE
+    : extension.sourceInfo.source;
   const identity = `${source}\0${extension.resolvedPath}`;
   const id = `extension:${createHash("sha256").update(identity).digest("base64url")}`;
   if (source === trustedSubagentAdapterSource) trustedSubagentOwnerIDs.add(id);
@@ -72,7 +77,7 @@ export function attributeExtensions(base: LoadExtensionsResult, browserLiveView?
   views: BrowserLiveViewRegistry;
   sessionId: string;
   runtimeGeneration: string;
-}): LoadExtensionsResult {
+}, options?: { requireTronAskUser?: boolean }): LoadExtensionsResult {
   const loadToken = browserLiveView?.views.beginSessionLoad(browserLiveView.sessionId);
   const bashOwners = base.extensions.filter((extension) => extension.tools.has("bash"));
   if (bashOwners.length > 0) {
@@ -84,6 +89,21 @@ export function attributeExtensions(base: LoadExtensionsResult, browserLiveView?
       throw new GatewayError("conflict", `The ${tool} tool name is reserved by Tron`);
     }
     if (owners.length > 1) throw new GatewayError("conflict", `The first-party ${tool} tool was registered more than once`);
+  }
+  if (options?.requireTronAskUser) {
+    const firstParty = base.extensions.filter((extension) => extension.path === TRON_ASK_USER_INLINE_PATH);
+    if (firstParty.length !== 1 || !firstParty[0]!.tools.has("ask_user")) {
+      throw new GatewayError("conflict", "The first-party ask_user capability failed to load");
+    }
+    const owners = base.extensions.filter((extension) => extension.tools.has("ask_user"));
+    const superseded = owners.find((extension) => extension.sourceInfo.source === AUDITED_ASK_USER_PACKAGE.source);
+    if (superseded) {
+      throw new GatewayError("conflict", `The configured ${AUDITED_ASK_USER_PACKAGE.source} extension conflicts with Tron's ask_user capability; disable only that extension in the destination Pi settings and retry`);
+    }
+    if (owners.some((extension) => extension.path !== TRON_ASK_USER_INLINE_PATH)) {
+      throw new GatewayError("conflict", "The ask_user tool name is reserved by Tron");
+    }
+    if (owners.length > 1) throw new GatewayError("conflict", "The first-party ask_user tool was registered more than once");
   }
   for (const extension of base.extensions) {
     for (const [event, handlers] of extension.handlers) {

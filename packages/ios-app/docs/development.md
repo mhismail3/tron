@@ -921,8 +921,21 @@ out of source. The recorded Phase 0 environment, results, limitations, and comma
 are in [performance-baseline.md](performance-baseline.md).
 
 The checked-in `UIValidation.xctestplan` keeps routine UI diagnostics disabled.
-UI journeys run on the Development app identity but only on the exact owned test
-simulator; they never use the persistent Development simulator.
+UI journeys run the `HOSTED_TEST` app through the `Tron UI Validation` scheme's
+Test configuration, only on the exact owned test simulator; they never use the
+persistent Development simulator. `TronSmokeUITests` includes the focused
+rendered Ask User journey; run it with:
+
+```bash
+scripts/tron-ios-test build # builds the reusable hosted products
+scripts/tron-ios-test run --only-testing TronMobileUITests/TronSmokeUITests
+```
+
+The fixture's socket is test-only and records the real `extension.respond` RPC;
+no Gateway or provider is contacted. The test taps the rendered form controls,
+checks allow-cancel versus close behavior, restores the ID-keyed draft, and
+checks the completed read-only form. `HOSTED_TEST` is absent from Release
+configuration and the fixture source is guarded accordingly.
 
 The hosted real-Gateway boundary test owns one narrow integration contract: the
 iOS pairing and transport clients connect to the selected Pi runtime, accepted

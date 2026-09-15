@@ -217,6 +217,7 @@ struct SessionMutationServiceTests {
                 )
             }
             let answer = try await request(in: harness.socket, frameIndex: frameIndex)
+            frameIndex += 1
             #expect(answer.method == "extension.respond")
             #expect(answer.params?["sessionId"] == .string("session-e"))
             #expect(answer.params?["interactionId"] == .string("interaction"))
@@ -236,6 +237,35 @@ struct SessionMutationServiceTests {
                 result: .object(["answered": .bool(true)])
             ))
             try await valueOfOwnedTask(answering)
+
+            let cancelling = Task {
+                try await harness.service.answerInteraction(
+                    interactionID: "cancel-interaction",
+                    hostEpoch: "host-c",
+                    presentationRevision: 11,
+                    sessionID: "session-c",
+                    value: nil,
+                    cancelled: true
+                )
+            }
+            let cancellation = try await request(in: harness.socket, frameIndex: frameIndex)
+            frameIndex += 1
+            #expect(cancellation.method == "extension.respond")
+            #expect(cancellation.params?["sessionId"] == .string("session-c"))
+            #expect(cancellation.params?["interactionId"] == .string("cancel-interaction"))
+            #expect(cancellation.params?["hostEpoch"] == .string("host-c"))
+            #expect(cancellation.params?["presentationRevision"] == .number(11))
+            // Params.value is Optional and synthesized Codable omits nil; the
+            // Gateway's extension.respond contract treats omitted value as the
+            // valid cancellation payload.
+            #expect(cancellation.params?["value"] == nil)
+            #expect(cancellation.params?["cancelled"] == .bool(true))
+            try expectCommandID(cancellation)
+            await harness.socket.enqueue(successResponse(
+                id: cancellation.id,
+                result: .object(["answered": .bool(true)])
+            ))
+            try await valueOfOwnedTask(cancelling)
             await harness.client.close()
         }
     }

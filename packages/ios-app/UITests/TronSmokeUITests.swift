@@ -108,6 +108,94 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
+    func testAskUserAllowCancelCancelSendsExactlyOneScopedCancellation() {
+        let app = launchAskUser()
+        waitForAskUserForm(in: app)
+        XCTAssertTrue(app.buttons["Cancel form"].exists)
+        XCTAssertTrue(app.buttons["Close form and keep answers"].exists)
+        app.buttons["Cancel form"].tap()
+        XCTAssertTrue(app.staticTexts["Mutation count: 1"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["extension.respond cancelled=true scope=ask-user-interaction/hosted-ask-user-epoch/1"].exists)
+        XCTAssertFalse(app.staticTexts["Mutation count: 2"].exists)
+    }
+
+    @MainActor
+    func testAskUserClosePreservesSelectionsAndOtherDraftOnReopen() {
+        let app = launchAskUser()
+        waitForAskUserForm(in: app)
+        app.buttons["Staging"].tap()
+        app.buttons["Other"].tap()
+        let other = app.textFields["Other response for Environment"]
+        XCTAssertTrue(other.waitForExistence(timeout: 3))
+        other.tap()
+        other.typeText("local canary")
+        app.buttons["Close form and keep answers"].tap()
+        XCTAssertTrue(app.buttons["Reopen Ask User"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Mutation count: 0"].exists)
+        app.buttons["Reopen Ask User"].tap()
+        XCTAssertTrue(app.buttons["Staging"].waitForExistence(timeout: 3))
+        XCTAssertEqual(app.buttons["Staging"].value as? String, "Selected")
+        let restored = app.textFields["Other response for Environment"]
+        XCTAssertTrue(restored.waitForExistence(timeout: 3))
+        restored.tap()
+        app.buttons["Submit all answers"].tap()
+        XCTAssertTrue(app.staticTexts["Mutation count: 1"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["extension.respond cancelled=false selected=environment-a other=local canary"].exists)
+    }
+
+    @MainActor
+    func testAskUserWithoutAllowCancelHasCloseOnly() {
+        let app = launchAskUser(noCancel: true)
+        waitForAskUserForm(in: app)
+        XCTAssertFalse(app.buttons["Cancel form"].exists)
+        XCTAssertTrue(app.buttons["Close form and keep answers"].exists)
+        app.buttons["Close form and keep answers"].tap()
+        XCTAssertTrue(app.staticTexts["Mutation count: 0"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.buttons["Reopen Ask User"].exists)
+    }
+
+    @MainActor
+    func testAskUserSubmitRendersExactReadOnlyCompletedForm() {
+        let app = launchAskUser()
+        waitForAskUserForm(in: app)
+        app.buttons["Staging"].tap()
+        app.buttons["Production"].tap()
+        app.buttons["Other"].tap()
+        let other = app.textFields["Other response for Environment"]
+        XCTAssertTrue(other.waitForExistence(timeout: 3))
+        other.tap()
+        other.typeText("A canary region")
+        app.buttons["Submit all answers"].tap()
+        XCTAssertTrue(app.staticTexts["Choose deployment target"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Other"].exists)
+        XCTAssertTrue(app.staticTexts["A canary region"].exists)
+        XCTAssertTrue(app.staticTexts["Mutation count: 1"].exists)
+        XCTAssertTrue(app.staticTexts["extension.respond cancelled=false selected=environment-a,environment-b other=A canary region"].exists)
+        XCTAssertFalse(app.textFields["Other response for Environment"].exists)
+        keepScreenshot(named: "ask-user-completed-read-only-fixture")
+    }
+
+    @MainActor
+    private func launchAskUser(noCancel: Bool = false) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-ask-user-fixture"]
+        if noCancel { app.launchArguments.append("-tron-ask-user-no-cancel") }
+        app.launch()
+        return app
+    }
+
+    @MainActor
+    private func waitForAskUserForm(in app: XCUIApplication) {
+        XCTAssertTrue(app.staticTexts["Choose deployment target"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.buttons["Staging"].waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(app.buttons["Production"].exists)
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "ask-user-form-fixture"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor
     private func assertWelcomeVisualParity() {
         guard let referenceURL = Bundle(for: Self.self).url(
             forResource: "onboarding-welcome-medium-historical",

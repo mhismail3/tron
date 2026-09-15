@@ -235,9 +235,9 @@ schemes:
         TronShareExtension: all
         TronMobileUITests: [test]
     run:
-      config: Development
+      config: Test
     test:
-      config: Development
+      config: Test
       testPlans:
         - path: TestPlans/UIValidation.xctestplan
           defaultPlan: true

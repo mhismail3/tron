@@ -109,6 +109,7 @@ import { createTronDisplayExtension } from "../display/tron-display-extension.js
 import { createTronNativeCaptureExtension } from "../display/tron-native-capture-extension.js";
 import { createTronComputerExtension } from "../display/tron-computer-extension.js";
 import { createTronScheduleExtension, type ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
+import { createTronAskUserExtension } from "../extensions/tron-ask-user-extension.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { createTronCoreExtension } from "../workspace/tron-core-extension.js";
@@ -1288,6 +1289,7 @@ export class RuntimeSlot {
               () => { this.revision += 1; this.publishSnapshot(); },
             ) },
             { name: "tron-core", factory: createTronCoreExtension(this.dependencies.workspace, this.dependencies.knowledge) },
+            { name: "tron-ask-user", factory: createTronAskUserExtension() },
             {
               name: "tron-display",
               factory: createTronDisplayExtension({
@@ -1327,7 +1329,7 @@ export class RuntimeSlot {
             views: this.dependencies.browserLiveViews,
             sessionId: sessionManager.getSessionId(),
             runtimeGeneration: this.runtimeGeneration,
-          } : undefined),
+          } : undefined, { requireTronAskUser: true }),
         },
         resourceLoaderReloadOptions: this.resourceReloadOptions,
       });

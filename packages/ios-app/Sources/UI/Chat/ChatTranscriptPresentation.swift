@@ -66,6 +66,16 @@ struct ExtensionInteractionScope: Equatable, Hashable, Sendable {
     }
 }
 
+/// Identity used by the managed sheet lease. Every field that owns a pending
+/// interaction response participates so a same-ID host successor gets a fresh
+/// presentation token instead of sharing the old sheet's lifecycle.
+enum ExtensionInteractionPresentationIdentity {
+    static func value(sessionID: String, interaction: ExtensionInteraction) -> String {
+        let scope = ExtensionInteractionScope(interaction)
+        return "chat.\(sessionID).interaction.\(scope.id)|\(scope.hostEpoch)|\(scope.presentationRevision)"
+    }
+}
+
 enum ChatExtensionForegroundPresentation: Equatable {
     case none
     case interaction

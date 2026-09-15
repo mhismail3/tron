@@ -1267,6 +1267,53 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(ToolDetailNavigationPresentation(tool: tool).title == "Question")
     }
 
+    @Test("first-party ask user transcript result retains title and allowOther policy")
+    func firstPartyAskUserResultKeepsCanonicalFormRoute() throws {
+        var snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"call","type":"toolCall","toolCallId":"tron-ask-call","name":"ask_user","label":"Ask User","arguments":{"title":"Choose a database","allowCancel":false,"questions":[{"question":"Which database?","options":[{"label":"Postgres"},{"label":"SQLite"}],"allowOther":false}]} }]},
+          {"id":"result","parentId":"assistant","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"toolResult","content":[{"id":"text","type":"text","text":"SQLite"}],"toolCallId":"tron-ask-call","toolName":"ask_user","toolLabel":"Ask User","isError":false,"details":{"title":"Choose a database","questions":[{"question":"Which database?","options":[{"label":"Postgres"},{"label":"SQLite"}],"multiSelect":false,"allowOther":false}],"answers":{"Which database?":{"selected":["SQLite"],"other":null}},"cancelled":false},"extensionOrigin":{"source":"tron:ask-user.v1","owner":{"id":"tron-ask-user","title":"Ask User","source":"tron:ask-user.v1"}}}
+        ]
+        """)
+        snapshot.transcriptTotal = 2
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        guard case .toolRun(let run) = candidate.timeline.items.first,
+              let descriptor = run.tools.first,
+              let tool = candidate.toolPayloads.resolving(descriptor),
+              let form = AskUserToolPresentation.completed(tool: tool) else {
+            Issue.record("Expected a first-party completed Ask User form")
+            return
+        }
+        #expect(tool.extensionOrigin?.owner?.source == AskUserToolPresentation.tronSource)
+        #expect(form.form.title == "Choose a database")
+        #expect(form.form.questions[0].allowOther == false)
+        #expect(form.answer?.answers[0].optionIds == ["question-0-option-1"])
+    }
+
+    @Test("first-party cancelled ask user transcript keeps a readable cancelled route")
+    func firstPartyCancelledAskUserResultKeepsCanonicalFormRoute() throws {
+        var snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"call","type":"toolCall","toolCallId":"tron-cancel-call","name":"ask_user","label":"Ask User","arguments":{"title":"Choose a database","questions":[{"question":"Which database?","options":[{"label":"Postgres"},{"label":"SQLite"}],"allowOther":false}]} }]},
+          {"id":"result","parentId":"assistant","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"toolResult","content":[{"id":"text","type":"text","text":"User cancelled."}],"toolCallId":"tron-cancel-call","toolName":"ask_user","toolLabel":"Ask User","isError":false,"details":{"title":"Choose a database","questions":[{"question":"Which database?","options":[{"label":"Postgres"},{"label":"SQLite"}],"multiSelect":false,"allowOther":false}],"answers":{},"cancelled":true},"extensionOrigin":{"source":"tron:ask-user.v1","owner":{"id":"tron-ask-user","title":"Ask User","source":"tron:ask-user.v1"}}}
+        ]
+        """)
+        snapshot.transcriptTotal = 2
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        guard case .toolRun(let run) = candidate.timeline.items.first,
+              let descriptor = run.tools.first,
+              let tool = candidate.toolPayloads.resolving(descriptor),
+              let form = AskUserToolPresentation.completed(tool: tool) else {
+            Issue.record("Expected a first-party cancelled Ask User form")
+            return
+        }
+        #expect(tool.extensionOrigin?.owner?.source == AskUserToolPresentation.tronSource)
+        #expect(form.cancelled)
+        #expect(form.form.title == "Choose a database")
+        #expect(form.form.questions[0].allowOther == false)
+        #expect(form.answer == nil)
+    }
+
     @Test("triggered extension messages remain trailing conversation input instead of tool runs")
     func triggeredExtensionMessageIsConversationInput() throws {
         var snapshot = try fixture(transcript: """
