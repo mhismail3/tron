@@ -19,6 +19,25 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var debugPairingInfoWindowController: NSWindowController?
     private var logsWindowController: NSWindowController?
     private var permissionSettingsWindow: PermissionSettingsWindow?
+    private(set) var isQuitting = false
+    var isServiceActionRunning: Bool { actionHandler.isBusy }
+    var onUninstallCompleted: (() -> Void)?
+
+    func completeUninstall() { onUninstallCompleted?() }
+    func beginQuit() {
+        isQuitting = true
+        permissionSettingsWindow?.close(); pairingInfoWindowController?.close()
+        debugPairingInfoWindowController?.close(); logsWindowController?.close()
+        applySnapshot(.init(state: .busy(.quitting)))
+    }
+    func quitFailed(_ error: any Error) async {
+        isQuitting = false
+        applySnapshot(await ServerStatusPoller.singleSnapshot(setup: setup))
+        await actionHandler.presentNonBlockingError(title: "Quit did not finish", message: error.localizedDescription)
+    }
+    func showLifecycleError(_ error: any Error) async {
+        await actionHandler.presentNonBlockingError(title: "Tron setup needs attention", message: error.localizedDescription)
+    }
     private(set) var debugGatewayState = DebugGatewayMenuState.unavailable
     private(set) var debugGatewayAdmission: DebugGatewayObserver.Admission?
     private(set) var debugPairingWindowAdmission: DebugGatewayObserver.Admission?
@@ -81,6 +100,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     /// the icon + menu items refresh immediately rather than waiting for
     /// the next 30s poll).
     func applySnapshot(_ snapshot: ServerStatusSnapshot) {
+        guard !isQuitting || snapshot.state == .busy(.quitting) else { return }
         self.snapshot = snapshot
         statusItem?.button?.image = MenuBarIcon.image(for: snapshot.state)
         statusItem?.button?.toolTip = snapshot.state.tooltip
@@ -193,6 +213,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     func showPermissionsWindow() {
+        guard !isQuitting else { return }
         if permissionSettingsWindow == nil {
             permissionSettingsWindow = PermissionSettingsWindow(setup: setup) { [weak self] in
                 self?.permissionSettingsWindow = nil
@@ -271,13 +292,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             let item = NSMenuItem(title: title, action: #selector(handleOpenLink(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = url
-            normalizeMenuItem(item)
-            return item
-        case .quit(let title):
-            let wrapper = ActionWrapper { NSApp.terminate(nil) }
-            let item = NSMenuItem(title: title, action: #selector(ActionWrapper.invoke), keyEquivalent: "")
-            item.target = wrapper
-            item.representedObject = wrapper // keep alive
             normalizeMenuItem(item)
             return item
         }

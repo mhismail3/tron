@@ -28,7 +28,7 @@ cat > "$child" <<'CHILD'
 set -euo pipefail
 selection="$1"
 log="$2"
-trap 'exit 0' TERM INT
+trap 'if [[ "$(cat "$selection")" == "clean-exit" ]]; then exit 0; else exit 1; fi' TERM INT
 printf '%s\t%s\n' "$$" "$(cat "$selection")" >> "$log"
 while :; do sleep 1; done
 CHILD
@@ -44,7 +44,8 @@ cat > "$plist" <<PLIST
   <key>ProgramArguments</key>
   <array><string>$child</string><string>$selection</string><string>$log</string></array>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
+  <key>KeepAlive</key>
+  <dict><key>SuccessfulExit</key><false/></dict>
   <key>ThrottleInterval</key><integer>1</integer>
 </dict>
 </plist>
@@ -72,4 +73,16 @@ wait_for_lines 2
 second_pid="$(awk 'NR==2 { print $1 }' "$log")"
 [[ "$second_pid" != "$first_pid" ]]
 [[ "$(awk -F '\t' 'NR==2 { print $2 }' "$log")" == "second-selection" ]]
-printf 'launchd fixture passed: handled exit produced a new PID and reread current.json\n'
+
+# A clean administrative exit must not be relaunched by SuccessfulExit=false.
+printf '%s\n' 'clean-exit' > "$selection"
+kill -TERM "$second_pid"
+for _ in {1..30}; do
+    [[ "$(wc -l < "$log" | tr -d ' ')" -gt 2 ]] && {
+        echo "clean exit was relaunched" >&2
+        exit 1
+    }
+    sleep 0.1
+done
+[[ "$(wc -l < "$log" | tr -d ' ')" -eq 2 ]]
+printf 'launchd fixture passed: handled exit relaunched once, clean exit stayed retired\n'

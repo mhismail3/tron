@@ -239,12 +239,14 @@ builds read only the validated `gateway/update-config.json` projection. Source m
 the repository's local TypeScript compiler with a private temporary output directory,
 never `packages/gateway/dist`, and stages only verified output. A helper launch
 acknowledgement does not claim eventual build or promotion success; failures are exposed
-through bounded update progress. The Mac menu Restart seam uses the authenticated drain command rather than
-`launchctl kickstart`; kickstart is deployment recovery only.
+through bounded update progress. The Mac menu Restart seam uses the authenticated drain command for a
+running job; only an exact owned registered-but-stopped job receives non-destructive `launchctl kickstart`
+(without `-k`). Kickstart recovery remains separately bounded for deployment.
 
-The Stable plist now requires Boolean `KeepAlive=true`. Delivering that plist requires
-following **Reinstall a local Release build** below and refreshing registration with
-Pause/Resume; payload promotion alone does not replace the registered plist.
+The Stable plist now requires `KeepAlive` with `SuccessfulExit=false`, so launchd
+relaunches failed Gateway exits but honors a clean administrative Quit. Delivering
+that plist requires following **Reinstall a local Release build** below and refreshing
+registration; payload promotion alone does not replace the registered plist.
 
 An isolated opt-in launchd fixture verifies handled-exit relaunch and selection reread
 without using Tron's label, ports, or data directories:
@@ -273,7 +275,7 @@ window screenshot that can omit the blocking system prompt.
 
 After granting Screen Recording, macOS may restart only the wrapper while the
 native helper remains alive. If Settings shows the current Tron entry enabled but
-Tron's own row remains ungranted, use **Permissions… → Restart Helper**, which
+Tron's own row remains ungranted, use **Permissions → Restart Helper**, which
 joins native retirement before unregister/register, then re-check. A pending or
 failed drain is not permission to quit/kill the helper. Do not restart the Gateway or reset working grants as a workaround.
 A still-failing fresh helper requires diagnosis, not repeated permission toggles.
@@ -300,8 +302,8 @@ embedding under Resources.
 ## Reinstall a local Release build
 
 This is a manual developer installation, not a production deployment command.
-The user or maintainer performs Pause, replacement, launch, Resume, and every
-Gateway transition. Repository agents may prepare and validate the `.app` artifact and
+The user or maintainer performs replacement, launch, and every Gateway transition.
+Repository agents may prepare and validate the `.app` artifact and
 report its path, but must not initiate those operations. It is also the bootstrap path for an intentional lockstep Gateway protocol bump:
 the new signed launcher rejects a previously selected payload whose manifest
 protocol differs and falls back to the matching bundled Gateway. The final Mac
@@ -321,13 +323,11 @@ require changing the running services. Before replacing an already-installed app
 the user must complete this sequence using the **old installed wrapper**:
 
 1. Wait for active agent work to finish.
-2. Open **Permissions… → Disable Helper for Update** and wait for successful
-   native drain and unregister. A pending/failed result stops the update. Neither
-   Gateway Pause, wrapper quit, process absence nor an elapsed timer substitutes
-   for joined native retirement.
-3. Only after that succeeds, choose **Pause Tron** and quit the wrapper. Stop any
-   legacy Debug SMAppService separately; Release never takes over Debug lifecycle.
-4. Replace the application in Finder, then launch the new installed copy.
+2. Choose **Quit Tron**. Quit safely drains accepted Gateway work, joins native
+   work, and temporarily retires the enabled helper; it is restored when Tron
+   launches again. Stop any legacy Debug SMAppService separately; Release never
+   takes over Debug lifecycle.
+3. Replace the application in Finder, then launch the new installed copy.
 
 Old and new wrapper/helper builds pin each other's signed code hashes. If the app
 was replaced before this drain, the new wrapper may be unable to contact the old
@@ -354,15 +354,16 @@ xcodebuild -project TronMac.xcodeproj -scheme TronMac \
 In Finder, replace `/Applications/Tron.app` with that built `Tron.app`, then
 launch it after the old-wrapper sequence above. The existing onboarding marker
 keeps the wrapper in menu-bar mode. Explicitly enable the new native helper in
-**Permissions…** when native capture is wanted; enabling does not request new TCC
-grants. Choose **Resume Tron** so macOS registers the new bundled LaunchAgent plist
-and starts the new helper. Approve Tron Agent under System Settings → General →
-Login Items if macOS asks. Wait for the menu-bar status to report Running before
-reconnecting iOS. Pause/Resume is intentional here: it reloads the plist and
-its supervision environment, whereas **Restart Tron** only restarts the
-currently registered job. The new wrapper also detects a running same-bundle
-job without the supervision marker and repairs its registration before it
-settles into the healthy state.
+**Permissions** when native capture is wanted; enabling does not request new TCC
+grants. The new wrapper registers the bundled LaunchAgent and starts it at launch.
+Approve Tron Agent under System Settings → General → Login Items if macOS asks.
+Wait for the menu-bar status to report Running before reconnecting iOS. **Restart
+Tron** drains accepted Gateway work when the job is running; for a registered but
+stopped owned job it uses a non-destructive launchd kick, while an absent
+registration follows the normal load path. Startup refuses to replace a running
+job whose ownership, health, or registration is not current. Resolve the reported
+condition using the installed build's verified controls; startup never
+force-kills accepted work.
 
 Do not install the new iOS app before this Mac verification succeeds. Verify
 the result with the read-only check:
@@ -449,7 +450,8 @@ restores and revalidates the prior selection, accepts an already-running exact r
 payload, or uses one fixed recovery kickstart only after the candidate deadline and only
 for an absent/exact captured failed listener; unknown listeners fail closed.
 Recovery never issues RPC to the failed Gateway. The Mac menu Restart seam uses
-authenticated `gateway.restart` instead of `launchctl kickstart`. Never automate
+authenticated `gateway.restart` for a running process; a registered stopped process
+uses only the exact-owned non-destructive `launchctl kickstart` path. Never automate
 copying into `/Applications`, release deployment, or launchd registration.
 
 ## Efficient focused tests

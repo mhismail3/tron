@@ -92,12 +92,24 @@ struct MenuBarItemBuilderTests {
             snapshot: ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847)),
             canManageLaunchAgent: false
         )
-        let protectedActions: [MenuBarAction] = [.pauseServer, .restartServer, .uninstall]
+        let protectedActions: [MenuBarAction] = [.restartServer, .uninstall]
         for item in items {
             guard case .action(_, let enabled, let action) = item,
                   protectedActions.contains(action) else { continue }
             #expect(!enabled)
         }
+    }
+
+    @Test("lifecycle menu has Restart and Quit without Pause or Resume")
+    func simplifiedLifecycleMenu() {
+        for state in [ServerStatusState.paused, .running(version: nil, port: 9847)] {
+            let items = Self.build(snapshot: .init(state: state))
+            #expect(items.contains(.action(title: "Permissions", isEnabled: true, action: .showPermissions)))
+            #expect(items.contains(.action(title: "Quit Tron", isEnabled: true, action: .quit)))
+            #expect(!items.contains(where: { $0.title.contains("Pause") || $0.title.contains("Resume") }))
+        }
+        let quitting = Self.build(snapshot: .init(state: .busy(.quitting)))
+        #expect(quitting.contains(.action(title: "Quit Tron", isEnabled: false, action: .quit)))
     }
 
     @Test("busy state disables the corresponding server control")

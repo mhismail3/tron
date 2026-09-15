@@ -4,15 +4,14 @@ import os
 
 /// In-memory `LaunchAgentManaging` stand-in for tests. Each call is
 /// recorded so the test can assert the exact sequence of ops the install
-/// pipeline dispatched. All four entry points return a configurable
-/// `LaunchAgentOutcome`.
+/// pipeline dispatched. Lifecycle outcomes are configurable per operation.
 ///
 /// State is guarded by `OSAllocatedUnfairLock`, the async-safe lock
 /// primitive Apple recommends for Swift 6 — `NSLock` is explicitly
 /// unavailable in async contexts because it blocks the calling thread.
 final class MockLaunchAgentManager: LaunchAgentManaging, @unchecked Sendable {
     struct Call: Equatable {
-        enum Kind: Equatable { case load, unload, restart, isLoaded, runtimeInfo }
+        enum Kind: Equatable { case load, start, unload, isLoaded, runtimeInfo }
         let kind: Kind
         let label: String
         let plistPath: URL?
@@ -21,8 +20,8 @@ final class MockLaunchAgentManager: LaunchAgentManaging, @unchecked Sendable {
     private struct State {
         var calls: [Call] = []
         var loadOutcome: LaunchAgentOutcome = .ok
+        var startOutcome: LaunchAgentOutcome = .alreadyLoaded
         var unloadOutcome: LaunchAgentOutcome = .ok
-        var restartOutcome: LaunchAgentOutcome = .ok
         var loaded: Bool? = false
         var runtimeInfo: LaunchAgentRuntimeInfo?
     }
@@ -33,13 +32,13 @@ final class MockLaunchAgentManager: LaunchAgentManaging, @unchecked Sendable {
         get { state.withLock { $0.loadOutcome } }
         set { state.withLock { $0.loadOutcome = newValue } }
     }
+    var startOutcome: LaunchAgentOutcome {
+        get { state.withLock { $0.startOutcome } }
+        set { state.withLock { $0.startOutcome = newValue } }
+    }
     var unloadOutcome: LaunchAgentOutcome {
         get { state.withLock { $0.unloadOutcome } }
         set { state.withLock { $0.unloadOutcome = newValue } }
-    }
-    var restartOutcome: LaunchAgentOutcome {
-        get { state.withLock { $0.restartOutcome } }
-        set { state.withLock { $0.restartOutcome = newValue } }
     }
     var loaded: Bool? {
         get { state.withLock { $0.loaded } }
@@ -61,6 +60,13 @@ final class MockLaunchAgentManager: LaunchAgentManaging, @unchecked Sendable {
         }
     }
 
+    func start(label: String) async -> LaunchAgentOutcome {
+        state.withLock {
+            $0.calls.append(Call(kind: .start, label: label, plistPath: nil))
+            return $0.startOutcome
+        }
+    }
+
     func unload(label: String) async -> LaunchAgentOutcome {
         state.withLock {
             $0.calls.append(Call(kind: .unload, label: label, plistPath: nil))
@@ -68,15 +74,10 @@ final class MockLaunchAgentManager: LaunchAgentManaging, @unchecked Sendable {
         }
     }
 
-    func restart(label: String) async -> LaunchAgentOutcome {
-        state.withLock {
-            $0.calls.append(Call(kind: .restart, label: label, plistPath: nil))
-            return $0.restartOutcome
-        }
-    }
-
     func isRegistered(label: String) async -> Bool {
-        await isLoaded(label: label) == true
+        // A fake registration is represented by the same runtime metadata the
+        // live manager admits; tests cannot bypass ownership with a flag.
+        state.withLock { $0.runtimeInfo != nil }
     }
 
     func isLoaded(label: String) async -> Bool? {

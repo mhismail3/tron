@@ -44,11 +44,11 @@ struct WizardInstallationTests {
         #expect(!state.installIsRunning)
         #expect(!state.needsInstallDetection)
         #expect(InstallPipelineStage.allCases.allSatisfy { state.installStages[$0] == .succeeded })
-        #expect(manager.calls.map(\.kind) == [.load, .restart])
+        #expect(manager.calls.map(\.kind) == [.load, .start])
         #expect(manager.calls.first?.plistPath == setup.launchAgentPlistPath)
         #expect(manager.calls.allSatisfy { $0.label == setup.launchAgentLabel })
         state.goBack(); state.advance()
-        #expect(manager.calls.map(\.kind) == [.load, .restart])
+        #expect(manager.calls.map(\.kind) == [.load, .start])
     }
 
     @Test("busy presentation observes both admission and retirement")

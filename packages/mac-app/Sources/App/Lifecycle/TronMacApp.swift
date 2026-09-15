@@ -229,6 +229,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBarController: MenuBarController?
     private var wizardCompletionObserver: NSObjectProtocol?
     private var instanceLock: SingleInstanceLock?
+    private var startupTask: Task<Void, Never>?
+    private var quitTask: Task<Void, Never>?
+    private var terminationApproved = false
+    private lazy var quitCoordinator = MacQuitCoordinator(setup: .live)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let setup = EnvironmentSetup.live
@@ -341,6 +345,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if terminationApproved { return .terminateNow }
+        let setup = EnvironmentSetup.live
+        guard MacQuitCoordinator.shouldCoordinate(mode: startupMode, ownsLock: instanceLock != nil, canManage: setup.canManageLaunchAgent) else { return .terminateNow }
+        guard menuBarController?.isServiceActionRunning != true else {
+            Task { @MainActor [weak self] in
+                await self?.menuBarController?.showLifecycleError(NSError(domain: "Tron.Quit", code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Wait for the current service action to finish, then Quit Tron."]))
+            }
+            return .terminateCancel
+        }
+        if quitTask == nil {
+            menuBarController?.beginQuit()
+            quitTask = Task { @MainActor [self] in
+                await startupTask?.value
+                do {
+                    try await quitCoordinator.quit()
+                    terminationApproved = true
+                    sender.reply(toApplicationShouldTerminate: true)
+                } catch {
+                    quitTask = nil
+                    sender.reply(toApplicationShouldTerminate: false)
+                    let message = (error as? GatewayRestartClient.Failure)?.userMessage ?? error.localizedDescription
+                    let displayError = NSError(domain: "Tron.Quit", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+                    if let menuBarController { await menuBarController.quitFailed(displayError) }
+                    else {
+                        let alert = NSAlert(); alert.messageText = "Quit did not finish"
+                        alert.informativeText = message; alert.alertStyle = .warning
+                        alert.runModal()
+                    }
+                }
+            }
+        }
+        return .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         if let wizardCompletionObserver {
             NotificationCenter.default.removeObserver(wizardCompletionObserver)
@@ -356,14 +396,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func installMenuBar(setup: EnvironmentSetup, context: MacAppStartupContext) {
         guard menuBarController == nil else { return }
         let controller = MenuBarController(setup: setup)
+        controller.onUninstallCompleted = { [weak self] in
+            self?.terminationApproved = true
+            NSApp.terminate(nil)
+        }
         controller.install()
         menuBarController = controller
-        Task { [weak controller] in
-            _ = await MacAppStartupMaintenance.run(
+        startupTask = Task { @MainActor [weak self, weak controller] in
+            let result = await MacAppStartupMaintenance.run(
                 setup: setup,
                 controller: controller,
                 context: context
             )
+            guard self?.quitTask == nil else { return }
+            if case .needsAttention(let message) = result {
+                await controller?.showLifecycleError(NSError(domain: "Tron.Startup", code: 1, userInfo: [NSLocalizedDescriptionKey: message]))
+            }
+            guard self?.quitTask == nil else { return }
+            do { _ = try await setup.restoreNativeHost() }
+            catch { if self?.quitTask == nil { await controller?.showLifecycleError(error) } }
         }
     }
 }

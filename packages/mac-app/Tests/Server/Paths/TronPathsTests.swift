@@ -32,11 +32,12 @@ struct TronPathsTests {
         #expect(!EnvironmentSetup.debug.canManageLaunchAgent)
     }
 
-    @Test("production LaunchAgent always advertises Gateway supervision")
+    @Test("production LaunchAgent advertises supervision and clean-exit policy")
     func productionLaunchAgentSupervisionEnvironment() {
         #expect(TronPaths.launchAgentEnvironmentVariables(environment: [:]) == [
             TronPaths.gatewaySupervisionEnv: TronPaths.gatewaySupervisionValue,
             TronPaths.gatewayChannelEnv: TronPaths.productionGatewayChannel,
+            "TRON_GATEWAY_EXIT_POLICY": "stop-on-success",
         ])
     }
 

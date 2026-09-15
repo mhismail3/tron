@@ -221,7 +221,7 @@ enum ExistingInstallDetector {
               let bundleProgram = plist["BundleProgram"] as? String,
               let args = plist["ProgramArguments"] as? [String],
               let runAtLoad = plist["RunAtLoad"] as? Bool,
-              let keepAlive = plist["KeepAlive"] as? Bool,
+              let keepAlive = plist["KeepAlive"] as? [String: Bool],
               let environmentVariables = plist["EnvironmentVariables"] as? [String: String],
               let associatedBundleIDs = plist["AssociatedBundleIdentifiers"] as? [String] else {
             return false
@@ -230,7 +230,7 @@ enum ExistingInstallDetector {
             && bundleProgram == expectedBundleProgram
             && args == ["tron", "--host", "tailscale", "--port", "\(port)"]
             && runAtLoad
-            && keepAlive
+            && keepAlive == ["SuccessfulExit": false]
             && environmentVariables == expectedEnvironmentVariables
             && associatedBundleIDs == expectedAssociatedBundleIDs
     }

@@ -70,7 +70,7 @@ export class TerminalService {
 
   /** Atomically refuse replacement when a PTY is live, otherwise close future
    * PTY admission before any previously dispatched terminal.open can spawn. */
-  beginRestartDrain(): boolean {
+  beginAdministrativeDrain(): boolean {
     if (this.activeTerminalIds().length > 0) return false;
     this.restartAdmissionClosed = true;
     return true;

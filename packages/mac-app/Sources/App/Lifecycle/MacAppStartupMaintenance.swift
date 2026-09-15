@@ -71,6 +71,7 @@ enum MacAppStartupMaintenanceResult: Equatable, Sendable {
     case restarted(LaunchAgentOutcome)
     case restartUnhealthy(LaunchAgentOutcome, ServerPingResult)
     case recordedCurrentVersion
+    case needsAttention(String)
     case skipped(MacAppStartupSkipReason)
 }
 
@@ -100,39 +101,32 @@ enum MacAppStartupMaintenance {
         case .wizard: onboarded = false
         default: onboarded = false
         }
-        if let reason = restartSkipReason(
-            currentVersion: currentVersion,
-            recordedVersion: recordedVersion,
-            canManageLaunchAgent: canManage,
-            onboarded: onboarded
-        ) {
-            guard reason == .versionAlreadyRecorded else { return .skipped(reason) }
-            let runtime = await setup.launchAgentManager.runtimeInfo(label: setup.launchAgentLabel)
-            let currentVariant = setup.runtimeVariant
-            // Ownership admission is authoritative for the currently selected
-            // payload. Syntactic command-line checks accept any valid payload and
-            // therefore cannot justify a same-version skip.
-            let ownershipHealthy = await setup.runtimeOwnershipHealthy()
-            let registrationNeedsRepair =
-                LiveLaunchAgentManager.shouldRefreshRegistrationForCurrentBundle(
-                    status: .enabled,
-                    currentVariant: currentVariant,
-                    runtimeInfo: runtime,
-                    currentParentBundleVersion: currentVersion.buildNumber,
-                    canManageLaunchAgent: canManage
-                )
-                || runtime?.needsLaunchConstraintRefresh == true
-            let health = await ServerHealthAwaiter.waitForHealthy(
-                token: setup.readBearerToken(),
-                expectedChannel: setup.profile.channel,
-                attempts: 1,
-                delayNanoseconds: 0,
-                pingServer: setup.pingServer
-            )
-            if case .success = health, ownershipHealthy, !registrationNeedsRepair { return .skipped(reason) }
-            // A same-version wrapper launch still repairs a stale, unsupervised,
-            // or unhealthy LaunchAgent; the version marker is not a health assertion.
+        let skip = restartSkipReason(currentVersion: currentVersion, recordedVersion: recordedVersion,
+                                     canManageLaunchAgent: canManage, onboarded: onboarded)
+        if let skip, skip != .versionAlreadyRecorded { return .skipped(skip) }
+        guard let loaded = await setup.launchAgentManager.isLoaded(label: setup.launchAgentLabel) else {
+            return .needsAttention("Could not inspect Gateway registration. No service change was made.")
         }
+        let runtime = await setup.launchAgentManager.runtimeInfo(label: setup.launchAgentLabel)
+        if loaded, runtime?.pid != nil {
+            let ownershipHealthy = await setup.runtimeOwnershipHealthy()
+            let registrationNeedsRepair = LiveLaunchAgentManager.shouldRefreshRegistrationForCurrentBundle(
+                status: .enabled, currentVariant: setup.runtimeVariant, runtimeInfo: runtime,
+                currentParentBundleVersion: currentVersion.buildNumber, canManageLaunchAgent: canManage)
+                || runtime?.needsLaunchConstraintRefresh == true || runtime?.gatewayExitPolicy != "stop-on-success"
+            let health = await ServerHealthAwaiter.waitForHealthy(token: setup.readBearerToken(),
+                expectedChannel: setup.profile.channel, attempts: 1, delayNanoseconds: 0, pingServer: setup.pingServer)
+            if case .success = health, ownershipHealthy, !registrationNeedsRepair {
+                // Opening a wrapper must not restart healthy accepted work just
+                // because its build marker changed. Quit owns graceful retirement.
+                recordCurrentVersion(currentVersion, setup: setup)
+                return skip == .versionAlreadyRecorded ? .skipped(.versionAlreadyRecorded) : .recordedCurrentVersion
+            }
+            let message = "A Gateway is already running but its ownership, health or registration needs attention. Use a verified graceful Restart or finish the Mac update; startup did not replace it."
+            await MainActor.run { controller?.applySnapshot(.init(state: .failed(reason: message))) }
+            return .needsAttention(message)
+        }
+        if loaded && runtime == nil { return .needsAttention("Gateway process observation failed. No service change was made.") }
 
         await MainActor.run {
             controller?.applySnapshot(ServerStatusSnapshot(

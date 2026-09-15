@@ -23,7 +23,7 @@ import { installKimiK3Policy } from "./providers/kimi-k3-policy.js";
 import { NotificationGrantStore } from "./notifications/grant-store.js";
 import { PushRelayClient } from "./notifications/relay-client.js";
 import { NotificationService } from "./notifications/notification-service.js";
-import { handledSignalExitCode, SUPERVISOR_RELAUNCH_EXIT_CODE } from "./lifecycle/supervisor-exit-policy.js";
+import { administrativeExitCode, handledSignalExitCode } from "./lifecycle/supervisor-exit-policy.js";
 import { configureAgentBinEnvironment, configureSupervisedNodeCommandEnvironment } from "./runtime/node-command-environment.js";
 import { AutomationStore } from "./automations/automation-store.js";
 import { AutomationScheduler } from "./automations/automation-scheduler.js";
@@ -248,11 +248,11 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
   }
 }
 
-let requestedRestart: Promise<void> | undefined;
-function requestRestart(): void {
-  if (requestedRestart) return;
-  logger.log("info", "Gateway restart scheduled after accepted agent runs settle", { event: "gateway.restart-drain", source: "lifecycle" });
-  requestedRestart = (async () => {
+let requestedLifecycle: Promise<void> | undefined;
+function requestLifecycle(kind: "restart" | "shutdown"): void {
+  if (requestedLifecycle) return;
+  logger.log("info", `Gateway ${kind} scheduled after accepted work settles`, { event: `gateway.${kind}-drain`, source: "lifecycle" });
+  requestedLifecycle = (async () => {
     const waitingLog = setInterval(() => {
       const snapshot = sessions.administrativeDrainSnapshot();
       const categories = Object.entries(snapshot.blockerCounts)
@@ -261,8 +261,8 @@ function requestRestart(): void {
         .join(", ");
       logger.log(
         "info",
-        `Gateway restart is waiting for ${snapshot.blockerCount} admitted operation${snapshot.blockerCount === 1 ? "" : "s"} to settle${categories ? ` (${categories})` : ""}`,
-        { event: "gateway.restart-drain.waiting", source: "lifecycle" },
+        `Gateway ${kind} is waiting for ${snapshot.blockerCount} admitted operation${snapshot.blockerCount === 1 ? "" : "s"} to settle${categories ? ` (${categories})` : ""}`,
+        { event: `gateway.${kind}-drain.waiting`, source: "lifecycle" },
       );
     }, 15_000);
     waitingLog.unref();
@@ -271,11 +271,11 @@ function requestRestart(): void {
     } finally {
       clearInterval(waitingLog);
     }
-    logger.log("info", "Gateway restart drain completed", { event: "gateway.restart-drain.completed", source: "lifecycle" });
-    await shutdown("requested restart", SUPERVISOR_RELAUNCH_EXIT_CODE);
+    logger.log("info", `Gateway ${kind} drain completed`, { event: `gateway.${kind}-drain.completed`, source: "lifecycle" });
+    await shutdown(`requested ${kind}`, administrativeExitCode(kind));
   })().catch((error) => {
-    logger.log("error", error instanceof Error ? error.message : String(error), { event: "gateway.restart-drain-failed", source: "lifecycle" });
-    void shutdown("restart drain failed", 1);
+    logger.log("error", error instanceof Error ? error.message : String(error), { event: "gateway.lifecycle-drain-failed", source: "lifecycle" });
+    void shutdown("lifecycle drain failed", 1);
   });
 }
 
@@ -296,7 +296,8 @@ const service = new GatewayService({
   receipts,
   // LaunchAgent/supervisor restarts unsuccessful exits. Administrative
   // restart drains accepted agent work before using the deliberate restart code.
-  requestRestart,
+  requestRestart: () => requestLifecycle("restart"),
+  requestShutdown: () => requestLifecycle("shutdown"),
   sessionDeleted: (sessionId) => transport?.revokeSessionTerminals(sessionId),
   broadcast: (topic, payload) => transport?.broadcast(topic, payload),
   notifications,
@@ -323,8 +324,11 @@ transport = new GatewayServer({
 });
 
 const supervised = process.env.TRON_GATEWAY_SUPERVISED === "1";
-process.once("SIGTERM", () => void shutdown("SIGTERM", handledSignalExitCode(supervised, requestedRestart !== undefined)));
-process.once("SIGINT", () => void shutdown("SIGINT", handledSignalExitCode(supervised, requestedRestart !== undefined)));
+for (const signal of ["SIGTERM", "SIGINT"] as const) process.once(signal, () => {
+  // An accepted administrative drain cannot be replaced by the short
+  // cancellation grace path when a concurrent system signal arrives.
+  if (!requestedLifecycle) void shutdown(signal, handledSignalExitCode(supervised));
+});
 process.on("uncaughtException", (error) => {
   logger.log("error", `Uncaught exception: ${error.message}`, { event: "process.uncaught-exception", source: "process" });
   void shutdown("uncaught exception", 1);

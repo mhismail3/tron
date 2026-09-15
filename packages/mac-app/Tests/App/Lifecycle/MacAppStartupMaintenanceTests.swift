@@ -73,8 +73,8 @@ struct MacAppStartupMaintenanceTests {
         #expect(MacAppVersionMarkerStore.read(at: marker) == version)
     }
 
-    @Test("existing onboarded launch restarts once when version marker is missing")
-    func missingMarkerRestartsAndRecords() async throws {
+    @Test("existing onboarded launch records a missing version marker without restarting")
+    func missingMarkerRecordsWithoutRestarting() async throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let current = MacAppVersionIdentity(canonicalVersion: "0.1.0-beta.3", buildNumber: "3")
@@ -88,8 +88,8 @@ struct MacAppStartupMaintenanceTests {
             context: .existingOnboardedLaunch
         )
 
-        #expect(result == .restarted(.ok))
-        #expect(mock.calls.map(\.kind) == [.load, .restart])
+        #expect(result == .restarted(.alreadyLoaded))
+        #expect(mock.calls.map(\.kind) == [.isLoaded, .runtimeInfo, .load, .start])
         #expect(setup.readRecordedAppVersion() == current)
     }
 
@@ -113,8 +113,8 @@ struct MacAppStartupMaintenanceTests {
             context: .existingOnboardedLaunch
         )
 
-        #expect(result == .restartUnhealthy(.ok, .unreachable))
-        #expect(mock.calls.map(\.kind) == [.load, .restart, .isLoaded])
+        #expect(result == .restartUnhealthy(.alreadyLoaded, .unreachable))
+        #expect(mock.calls.map(\.kind) == [.isLoaded, .runtimeInfo, .load, .start, .isLoaded])
         #expect(setup.readRecordedAppVersion() == nil)
     }
 
@@ -123,7 +123,7 @@ struct MacAppStartupMaintenanceTests {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let current = MacAppVersionIdentity(canonicalVersion: "0.1.0-beta.3", buildNumber: "3")
-        let mock = MockLaunchAgentManager()
+        let mock = MockLaunchAgentManager(); mock.loaded = true
         let helper = tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron").path
         let payload = tmp.appendingPathComponent("Tron.app/Contents/Resources/Gateway").path
         mock.runtimeInfo = LaunchAgentRuntimeInfo(
@@ -133,7 +133,8 @@ struct MacAppStartupMaintenanceTests {
             executablePath: helper,
             processCommand: "\(payload)/runtime/node-arm64 \(payload)/app/dist/index.js --host tailscale --port 9847",
             gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue,
-            gatewayChannelMarker: TronGatewayProfile.stable.channel
+            gatewayChannelMarker: TronGatewayProfile.stable.channel,
+            gatewayExitPolicy: "stop-on-success"
         )
         let setup = Self.makeSetup(
             tmp: tmp,
@@ -149,15 +150,15 @@ struct MacAppStartupMaintenanceTests {
         )
 
         #expect(result == .skipped(.versionAlreadyRecorded))
-        #expect(mock.calls.map(\.kind) == [.runtimeInfo])
+        #expect(mock.calls.map(\.kind) == [.isLoaded, .runtimeInfo])
     }
 
-    @Test("same-version marker repairs a registration with the wrong channel marker")
+    @Test("same-version marker refuses replacement of a live wrong-channel registration")
     func recordedVersionRepairsWrongChannelRegistration() async throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let current = MacAppVersionIdentity(canonicalVersion: "0.1.0-beta.3", buildNumber: "3")
-        let mock = MockLaunchAgentManager()
+        let mock = MockLaunchAgentManager(); mock.loaded = true
         let helper = tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron").path
         let payload = tmp.appendingPathComponent("Tron.app/Contents/Resources/Gateway").path
         mock.runtimeInfo = LaunchAgentRuntimeInfo(
@@ -183,16 +184,16 @@ struct MacAppStartupMaintenanceTests {
             context: .existingOnboardedLaunch
         )
 
-        #expect(result == .restarted(.ok))
-        #expect(mock.calls.map(\.kind) == [.runtimeInfo, .load])
+        if case .needsAttention = result {} else { Issue.record("A live wrong-channel process must not be replaced by startup") }
+        #expect(mock.calls.map(\.kind) == [.isLoaded, .runtimeInfo])
     }
 
-    @Test("same-version marker repairs when selected payload ownership changes")
+    @Test("same-version marker refuses a live process whose payload ownership changed")
     func recordedVersionRepairsChangedSelectedPayload() async throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let current = MacAppVersionIdentity(canonicalVersion: "0.1.0-beta.3", buildNumber: "3")
-        let mock = MockLaunchAgentManager()
+        let mock = MockLaunchAgentManager(); mock.loaded = true
         let helper = tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron").path
         let selectedPayload = tmp.appendingPathComponent("gateway/payloads/stable/versions/payload-v2").path
         mock.runtimeInfo = LaunchAgentRuntimeInfo(
@@ -217,11 +218,11 @@ struct MacAppStartupMaintenanceTests {
             context: .existingOnboardedLaunch
         )
 
-        #expect(result == .restarted(.ok))
-        #expect(mock.calls.map(\.kind) == [.runtimeInfo, .load])
+        if case .needsAttention = result {} else { Issue.record("A live unowned process must not be replaced by startup") }
+        #expect(mock.calls.map(\.kind) == [.isLoaded, .runtimeInfo])
     }
 
-    @Test("same-version marker does not suppress repair after an unhealthy probe")
+    @Test("same-version marker does not suppress starting a missing service")
     func recordedVersionRepairsUnhealthyGateway() async throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
@@ -242,8 +243,8 @@ struct MacAppStartupMaintenanceTests {
             context: .existingOnboardedLaunch
         )
 
-        #expect(result == .restartUnhealthy(.ok, .unreachable))
-        #expect(mock.calls.map(\.kind) == [.runtimeInfo, .load, .restart, .isLoaded])
+        #expect(result == .restartUnhealthy(.alreadyLoaded, .unreachable))
+        #expect(mock.calls.map(\.kind) == [.isLoaded, .runtimeInfo, .load, .start, .isLoaded])
     }
 
     @Test("wizard completion records current version without restarting")

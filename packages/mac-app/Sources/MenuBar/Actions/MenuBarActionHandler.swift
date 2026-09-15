@@ -10,8 +10,7 @@ enum MenuBarAction: Equatable, Sendable {
     case showDebugPairingInfo
     case viewLogs
     case sendFeedback
-    case pauseServer
-    case resumeServer
+    case quit
     case restartServer
     case uninstall
 }
@@ -22,16 +21,31 @@ enum MenuBarAction: Equatable, Sendable {
 @MainActor
 final class MenuBarActionHandler {
     private let setup: EnvironmentSetup
+    private let postNotification: (String, String) async -> Void
+    private let presentError: (String, String) async -> Void
+    private(set) var isBusy = false
 
-    /// Handle on the menu-bar controller so re-pairing can request a
-    /// status refresh and pause/resume can re-render the menu.
+    /// Handle on the menu-bar controller so re-pairing and lifecycle actions
+    /// can request status refreshes and re-render the menu.
     weak var menuBarController: MenuBarController?
 
-    init(setup: EnvironmentSetup) {
+    init(
+        setup: EnvironmentSetup,
+        postNotification: @escaping (String, String) async -> Void = { title, body in
+            await MenuBarNotifier.post(title: title, body: body)
+        },
+        presentError: @escaping (String, String) async -> Void = MenuBarActionHandler.defaultPresentNonBlockingError
+    ) {
         self.setup = setup
+        self.postNotification = postNotification
+        self.presentError = presentError
     }
 
     func perform(_ action: MenuBarAction) async {
+        guard !isBusy, menuBarController?.isQuitting != true else { return }
+        let lifecycle = action == .restartServer || action == .uninstall
+        if lifecycle { isBusy = true }
+        defer { if lifecycle { isBusy = false } }
         switch action {
         case .showPairingInfo:
             menuBarController?.showPairingInfoWindow()
@@ -43,10 +57,8 @@ final class MenuBarActionHandler {
             menuBarController?.showLogsWindow()
         case .sendFeedback:
             await sendFeedback()
-        case .pauseServer:
-            await pauseServer()
-        case .resumeServer:
-            await resumeServer()
+        case .quit:
+            NSApp.terminate(nil)
         case .restartServer:
             await restartServer()
         case .uninstall:
@@ -56,9 +68,9 @@ final class MenuBarActionHandler {
 
     // MARK: - Actions
 
-    /// Requests a drain-aware Gateway restart. Launchd owns the process and is
-    /// only asked to register an unloaded service; an already-loaded service
-    /// is never force-kickstarted by this user-facing action.
+    /// Requests a drain-aware Gateway restart. A registered-but-stopped job is
+    /// started non-destructively; a running job uses the authenticated Gateway
+    /// drain and is never force-kickstarted by this user-facing action.
     private func restartServer() async {
         guard await ensureLaunchAgentManagementAllowed(actionTitle: "Restart blocked") else { return }
         applyBusy(.restarting)
@@ -67,37 +79,37 @@ final class MenuBarActionHandler {
             await finishRestartFailure(title: "Restart blocked", message: "Could not inspect the LaunchAgent. No restart was requested.")
             return
         }
-        let needsRepair: Bool = {
-            if case .needsRepair = menuBarController?.snapshot.state { return true }
-            return false
-        }()
-        if needsRepair || !serviceWasLoaded {
-            let outcome = await setup.launchAgentManager.load(
-                plistPath: setup.launchAgentPlistPath,
-                label: setup.launchAgentLabel
-            )
-            switch outcome {
-            case .ok, .alreadyLoaded:
-                break
-            case .requiresApproval(let message):
-                await finishRestartFailure(title: "Restart blocked", message: message, openLoginItems: true)
-                return
-            case .launchdRefused(let message), .unknown(let message):
-                await finishRestartFailure(title: "Restart failed", message: message)
-                return
-            case .binaryMissing(let path):
-                await finishRestartFailure(title: "Restart failed", message: "Binary missing: \(path)")
+        if serviceWasLoaded {
+            // A loaded launchd row can represent a registered, stopped job.
+            // Missing metadata is an observation failure, not evidence that the
+            // registration is absent, so refuse rather than mutating it.
+            guard let runtime = await setup.launchAgentManager.runtimeInfo(label: setup.launchAgentLabel) else {
+                await finishRestartFailure(title: "Restart blocked", message: "Could not inspect the loaded LaunchAgent. No restart was requested.")
                 return
             }
-
-            // A repaired registration may need a moment to launch before it
-            // can receive the authenticated restart request. Do not kick it;
-            // wait for the launchd-owned health endpoint instead.
-            let health = await ServerHealthAwaiter.waitForHealthy(setup: setup)
-            guard case .success = health else {
-                await finishRestartFailure(title: "Restart failed", message: unhealthyStartMessage(result: health))
+            guard runtime.pid != nil else {
+                let outcome = await setup.launchAgentManager.start(label: setup.launchAgentLabel)
+                guard await finishLaunchAgentStart(outcome) else { return }
+                await finishStartedRestart()
                 return
             }
+        } else {
+            let outcome: LaunchAgentOutcome
+            if await setup.launchAgentManager.isRegistered(label: setup.launchAgentLabel) {
+                // A registered-but-stopped job is started with a non-destructive
+                // kick. Never route it through load's bootout/re-register plan.
+                outcome = await setup.launchAgentManager.start(label: setup.launchAgentLabel)
+            } else {
+                // An absent registration retains the existing ServiceManagement
+                // load path, which performs its normal registration admission.
+                outcome = await setup.launchAgentManager.load(
+                    plistPath: setup.launchAgentPlistPath,
+                    label: setup.launchAgentLabel
+                )
+            }
+            guard await finishLaunchAgentStart(outcome) else { return }
+            await finishStartedRestart()
+            return
         }
 
         guard await setup.runtimeOwnershipHealthy() else {
@@ -122,66 +134,48 @@ final class MenuBarActionHandler {
         }
     }
 
+    private func finishLaunchAgentStart(_ outcome: LaunchAgentOutcome) async -> Bool {
+        switch outcome {
+        case .ok, .alreadyLoaded:
+            return true
+        case .requiresApproval(let message):
+            await finishRestartFailure(title: "Restart blocked", message: message, openLoginItems: true)
+        case .launchdRefused(let message), .unknown(let message):
+            await finishRestartFailure(title: "Restart failed", message: message)
+        case .binaryMissing(let path):
+            await finishRestartFailure(title: "Restart failed", message: "Binary missing: \(path)")
+        }
+        return false
+    }
+
+    private func finishStartedRestart() async {
+        // Starting or loading is the restart intent for a stopped/absent job;
+        // do not issue a second Gateway restart after launchd has been started.
+        let health = await ServerHealthAwaiter.waitForHealthy(setup: setup)
+        guard case .success = health else {
+            await finishRestartFailure(title: "Restart failed", message: unhealthyStartMessage(result: health))
+            return
+        }
+        guard await setup.runtimeOwnershipHealthy() else {
+            await finishRestartFailure(
+                title: "Restart blocked",
+                message: "The running LaunchAgent is not owned by this Gateway profile; repair it before restarting."
+            )
+            return
+        }
+        await finishServerStartAction(
+            successTitle: "Tron restarted",
+            successBody: "The Gateway drained accepted work and reconnected through launchd.",
+            failureTitle: "Restart failed",
+            health: health
+        )
+    }
+
     private func finishRestartFailure(title: String, message: String, openLoginItems: Bool = false) async {
         await refreshStatus()
         if openLoginItems { LoginItemsSettingsOpener.open() }
-        await MenuBarNotifier.post(title: title, body: message)
-        await presentNonBlockingError(title: title, message: message)
-    }
-
-    private func pauseServer() async {
-        guard await ensureLaunchAgentManagementAllowed(actionTitle: "Pause blocked") else { return }
-        applyBusy(.pausing)
-        let outcome = await setup.launchAgentManager.unload(label: setup.launchAgentLabel)
-        await refreshStatus()
-        switch outcome {
-        case .ok, .alreadyLoaded:
-            await MenuBarNotifier.post(title: "Tron paused", body: "Resume it from the Tron menu bar when needed.")
-        case .requiresApproval(let message):
-            LoginItemsSettingsOpener.open()
-            await MenuBarNotifier.post(title: "Pause blocked", body: message)
-            await presentNonBlockingError(title: "Pause blocked", message: message)
-        case .launchdRefused(let message), .unknown(let message):
-            await MenuBarNotifier.post(title: "Pause failed", body: message)
-            await presentNonBlockingError(title: "Pause failed", message: message)
-        case .binaryMissing(let path):
-            let message = "Binary missing: \(path)"
-            await MenuBarNotifier.post(title: "Pause failed", body: message)
-            await presentNonBlockingError(title: "Pause failed", message: message)
-        }
-    }
-
-    private func resumeServer() async {
-        guard await ensureLaunchAgentManagementAllowed(actionTitle: "Resume blocked") else { return }
-        applyBusy(.resuming)
-        let outcome = await LaunchAgentLoader.ensureLoaded(
-            manager: setup.launchAgentManager,
-            plistPath: setup.launchAgentPlistPath,
-            label: setup.launchAgentLabel
-        )
-        switch outcome {
-        case .ok, .alreadyLoaded:
-            await finishServerStartAction(
-                successTitle: "Tron resumed",
-                successBody: "The menu bar status has been refreshed.",
-                failureTitle: "Resume failed"
-            )
-            return
-        case .requiresApproval(let message):
-            await refreshStatus()
-            LoginItemsSettingsOpener.open()
-            await MenuBarNotifier.post(title: "Resume blocked", body: message)
-            await presentNonBlockingError(title: "Resume blocked", message: message)
-        case .launchdRefused(let message), .unknown(let message):
-            await refreshStatus()
-            await MenuBarNotifier.post(title: "Resume failed", body: message)
-            await presentNonBlockingError(title: "Resume failed", message: message)
-        case .binaryMissing(let path):
-            await refreshStatus()
-            let message = "Binary missing: \(path)"
-            await MenuBarNotifier.post(title: "Resume failed", body: message)
-            await presentNonBlockingError(title: "Resume failed", message: message)
-        }
+        await postNotification(title, message)
+        await presentError(title, message)
     }
 
     private func sendFeedback() async {
@@ -263,19 +257,19 @@ final class MenuBarActionHandler {
         )
         switch outcome {
         case .ok, .alreadyLoaded:
-            NSApp.terminate(nil)
+            menuBarController?.completeUninstall()
         case .requiresApproval(let message), .launchdRefused(let message), .unknown(let message):
             if case .requiresApproval = outcome {
                 LoginItemsSettingsOpener.open()
             }
-            await presentNonBlockingError(
-                title: "Uninstall failed",
-                message: message
+            await presentError(
+                "Uninstall failed",
+                message
             )
         case .binaryMissing(let path):
-            await presentNonBlockingError(
-                title: "Uninstall failed",
-                message: "Missing helper: \(path)"
+            await presentError(
+                "Uninstall failed",
+                "Missing helper: \(path)"
             )
         }
     }
@@ -294,19 +288,25 @@ final class MenuBarActionHandler {
     private func finishServerStartAction(
         successTitle: String,
         successBody: String,
-        failureTitle: String
+        failureTitle: String,
+        health: ServerPingResult? = nil
     ) async {
-        let health = await ServerHealthAwaiter.waitForHealthy(setup: setup)
+        let healthResult: ServerPingResult
+        if let health {
+            healthResult = health
+        } else {
+            healthResult = await ServerHealthAwaiter.waitForHealthy(setup: setup)
+        }
         await refreshStatus()
 
-        if case .success = health {
-            await MenuBarNotifier.post(title: successTitle, body: successBody)
+        if case .success = healthResult {
+            await postNotification(successTitle, successBody)
             return
         }
 
-        let message = unhealthyStartMessage(result: health)
-        await MenuBarNotifier.post(title: failureTitle, body: message)
-        await presentNonBlockingError(title: failureTitle, message: message)
+        let message = unhealthyStartMessage(result: healthResult)
+        await postNotification(failureTitle, message)
+        await presentError(failureTitle, message)
     }
 
     private func unhealthyStartMessage(result: ServerPingResult) -> String {
@@ -330,7 +330,11 @@ final class MenuBarActionHandler {
         ))
     }
 
-    private func presentNonBlockingError(title: String, message: String) async {
+    func presentNonBlockingError(title: String, message: String) async {
+        await presentError(title, message)
+    }
+
+    private static func defaultPresentNonBlockingError(title: String, message: String) async {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
@@ -345,8 +349,8 @@ final class MenuBarActionHandler {
     private func ensureLaunchAgentManagementAllowed(actionTitle: String) async -> Bool {
         guard setup.canManageLaunchAgent else {
             let message = "This Xcode wrapper is a read-only companion. Use the installed Tron.app to install, pause, restart, or uninstall Stable."
-            await MenuBarNotifier.post(title: actionTitle, body: message)
-            await presentNonBlockingError(title: actionTitle, message: message)
+            await postNotification(actionTitle, message)
+            await presentError(actionTitle, message)
             return false
         }
         return true

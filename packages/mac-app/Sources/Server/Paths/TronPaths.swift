@@ -185,6 +185,7 @@ enum TronPaths {
 
     static func launchAgentEnvironmentVariables(profile: TronGatewayProfile) -> [String: String] {
         var values = [gatewaySupervisionEnv: gatewaySupervisionValue, gatewayChannelEnv: profile.channel]
+        if profile == .stable { values["TRON_GATEWAY_EXIT_POLICY"] = "stop-on-success" }
         if profile == .debug {
             values[tronHomeNameEnv] = profile.homeName
             values[agentDirNameEnv] = profile.agentDirectoryName

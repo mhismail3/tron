@@ -9,13 +9,12 @@ enum MenuItemDescriptor: Equatable {
     case action(title: String, isEnabled: Bool, action: MenuBarAction)
     case openLink(title: String, url: URL)
     case separator
-    case quit(title: String)
 
     var title: String {
         switch self {
         case .header:
             return "Tron"
-        case .action(let title, _, _), .openLink(let title, _), .quit(let title):
+        case .action(let title, _, _), .openLink(let title, _):
             return title
         case .separator:
             return "—"
@@ -66,7 +65,7 @@ enum MenuBarItemBuilder {
         items.append(.separator)
 
         items.append(.action(title: "Show pairing info", isEnabled: true, action: .showPairingInfo))
-        items.append(.action(title: "Permissions…", isEnabled: true, action: .showPermissions))
+        items.append(.action(title: "Permissions", isEnabled: true, action: .showPermissions))
         switch debugGateway {
         case .admitted(let isPairable):
             if isPairable {
@@ -86,14 +85,9 @@ enum MenuBarItemBuilder {
         items.append(.action(title: "Send feedback", isEnabled: true, action: .sendFeedback))
 
         items.append(.separator)
-        if snapshot.state.isRunning {
-            items.append(.action(title: "Pause Tron", isEnabled: serviceControlsEnabled, action: .pauseServer))
-        } else {
-            items.append(.action(title: snapshot.state.resumeTitle, isEnabled: serviceControlsEnabled, action: .resumeServer))
-        }
         items.append(.action(title: snapshot.state.restartTitle, isEnabled: serviceControlsEnabled, action: .restartServer))
         items.append(.action(title: "Uninstall Tron", isEnabled: serviceControlsEnabled, action: .uninstall))
-        items.append(.quit(title: "Quit Tron"))
+        items.append(.action(title: "Quit Tron", isEnabled: controlsEnabled, action: .quit))
 
         return items
     }
@@ -107,7 +101,7 @@ enum MenuBarItemBuilder {
         case .busy(let action):
             return action.rawValue
         case .paused:
-            return "Paused"
+            return "Stopped"
         case .failed:
             return "Stopped"
         case .unauthorized:
@@ -155,8 +149,7 @@ struct MenuHeaderContent: Equatable, Sendable {
 enum ServerBusyAction: String, Equatable, Sendable {
     case starting = "Starting"
     case restarting = "Restarting"
-    case pausing = "Pausing"
-    case resuming = "Resuming"
+    case quitting = "Finishing work and quitting"
 }
 
 enum ServerStatusState: Equatable, Sendable {
@@ -209,7 +202,7 @@ enum ServerStatusState: Equatable, Sendable {
         case .busy(let action):
             return "Tron: \(action.rawValue)"
         case .paused:
-            return "Tron: Paused"
+            return "Tron: Stopped"
         case .failed:
             return "Tron: Failed"
         case .unauthorized:
@@ -225,13 +218,6 @@ enum ServerStatusState: Equatable, Sendable {
         return "Restart Tron"
     }
 
-    var resumeTitle: String {
-        if case .busy(let action) = self {
-            return "\(action.rawValue)…"
-        }
-        if case .needsRepair = self { return "Repair Tron" }
-        return "Resume Tron"
-    }
 }
 
 /// Snapshot consumed by `MenuBarItemBuilder` and produced by

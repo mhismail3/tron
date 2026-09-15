@@ -50,15 +50,27 @@ struct NativeHostOperations: Sendable {
     }()
 }
 
+/// Mac-owned user intent, not a mirror of ServiceManagement status or TCC grants.
+struct NativeHostPreferences: Sendable {
+    let desiredEnabled: @Sendable () -> Bool?
+    let setDesiredEnabled: @Sendable (Bool) -> Void
+    static let live = Self(desiredEnabled: {
+        UserDefaults.standard.object(forKey: "nativeHelperDesiredEnabled") as? Bool
+    }, setDesiredEnabled: { UserDefaults.standard.set($0, forKey: "nativeHelperDesiredEnabled") })
+}
+
 /// Service activation and TCC consent are explicit separate setup phases. Each
 /// accepted command is retained independently of whichever view is waiting.
 actor NativeHostCoordinator {
-    static let shared = NativeHostCoordinator(operations: .live)
+    static let shared = NativeHostCoordinator(operations: .live, preferences: .live)
     private let operations: NativeHostOperations
+    private let preferences: NativeHostPreferences
     private var pending: (id: UUID, permission: Permission, task: Task<PermissionStatus, Never>)?
-    private enum Command { case enable, refresh, unregister }
+    private enum Command { case enable, refresh, unregister, restore, suspendForQuit }
     private var lifecycle: (id: UUID, kind: Command, task: Task<NativeHostServiceState, Error>)?
-    init(operations: NativeHostOperations) { self.operations = operations }
+    init(operations: NativeHostOperations, preferences: NativeHostPreferences) {
+        self.operations = operations; self.preferences = preferences
+    }
 
     func serviceState() async -> NativeHostServiceState { await operations.state() }
     func probe() async -> [Permission: PermissionStatus] {
@@ -68,23 +80,53 @@ actor NativeHostCoordinator {
     func enable() async throws -> NativeHostServiceState { try await perform(.enable) }
     func refresh() async throws -> NativeHostServiceState { try await perform(.refresh) }
     func unregister() async throws { _ = try await perform(.unregister) }
+    func restoreIfDesired() async throws -> NativeHostServiceState { try await perform(.restore) }
+    func suspendForQuit() async throws { _ = try await perform(.suspendForQuit) }
 
     private func perform(_ kind: Command) async throws -> NativeHostServiceState {
         if let lifecycle {
-            guard lifecycle.kind == kind else { throw NativeHostError.busy }
-            return try await lifecycle.task.value
+            if lifecycle.kind == kind { return try await lifecycle.task.value }
+            guard kind == .suspendForQuit else { throw NativeHostError.busy }
+            _ = try await lifecycle.task.value
+            if self.lifecycle?.id == lifecycle.id { self.lifecycle = nil }
+            return try await perform(kind)
         }
         let id = UUID()
         let consent = pending?.task
-        let task = Task { [operations] in
+        let task = Task { [operations, preferences] in
             if let consent { _ = await consent.value }
             switch kind {
-            case .enable: try await operations.enable()
+            case .enable:
+                try await operations.enable()
+                preferences.setDesiredEnabled(true)
             case .refresh:
                 try await operations.drain()
                 try await operations.unregister()
                 try await operations.enable()
+                preferences.setDesiredEnabled(true)
             case .unregister:
+                try await operations.drain()
+                try await operations.unregister()
+                preferences.setDesiredEnabled(false)
+            case .restore:
+                let state = await operations.state()
+                if preferences.desiredEnabled() == nil, state == .enabled { preferences.setDesiredEnabled(true) }
+                guard preferences.desiredEnabled() == true, state != .enabled, state != .needsApproval else { return state }
+                try await operations.enable()
+            case .suspendForQuit:
+                let state = await operations.state()
+                if preferences.desiredEnabled() == nil {
+                    if state == .enabled || state == .needsApproval {
+                        // Approval is an outstanding enable request, not an
+                        // explicit disable. Preserve it across Quit even when
+                        // this installation predates the intent preference.
+                        preferences.setDesiredEnabled(true)
+                    } else if state == .needsRegistration {
+                        preferences.setDesiredEnabled(false)
+                    }
+                }
+                // Temporary retirement preserves user intent even if Quit fails
+                // later or the app exits between unregister and completion.
                 try await operations.drain()
                 try await operations.unregister()
             }

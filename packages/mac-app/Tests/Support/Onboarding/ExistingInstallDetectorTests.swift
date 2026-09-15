@@ -231,12 +231,13 @@ struct ExistingInstallDetectorTests {
             environmentVariables: [
                 TronPaths.gatewaySupervisionEnv: TronPaths.gatewaySupervisionValue,
                 TronPaths.gatewayChannelEnv: TronPaths.productionGatewayChannel,
+                "TRON_GATEWAY_EXIT_POLICY": "stop-on-success",
             ],
             associatedBundleIDs: ["com.tron.mac"]
         ))
     }
 
-    @Test("LaunchAgent plist requires Boolean RunAtLoad and KeepAlive")
+    @Test("LaunchAgent plist requires RunAtLoad and non-relaunching successful exits")
     func launchAgentPlistRequiresBooleanSupervision() throws {
         let trackedPlist = trackedLaunchAgentPlist(named: "com.tron.server.plist")
         let data = try Data(contentsOf: trackedPlist)
@@ -246,7 +247,8 @@ struct ExistingInstallDetectorTests {
         for (key, value) in [
             ("RunAtLoad", false as Any),
             ("KeepAlive", false as Any),
-            ("KeepAlive", ["SuccessfulExit": false] as Any),
+            ("KeepAlive", true as Any),
+            ("KeepAlive", ["SuccessfulExit": true] as Any),
             ("KeepAlive", "true" as Any),
         ] {
             let tmp = TestTempDir.make()

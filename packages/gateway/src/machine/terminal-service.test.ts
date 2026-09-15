@@ -32,7 +32,7 @@ describe("TerminalService", () => {
     const cwd = await mkdtemp(join(tmpdir(), "tron-terminal-drain-"));
     const active = new TerminalService(64_000, () => {});
     const first = active.open("session", cwd);
-    expect(active.beginRestartDrain()).toBe(false);
+    expect(active.beginAdministrativeDrain()).toBe(false);
     await active.terminate(first.id);
     // A rejected restart did not leave the admission gate closed.
     const second = active.open("session", cwd);
@@ -40,7 +40,7 @@ describe("TerminalService", () => {
     active.dispose();
 
     const draining = new TerminalService(64_000, () => {});
-    expect(draining.beginRestartDrain()).toBe(true);
+    expect(draining.beginAdministrativeDrain()).toBe(true);
     expect(() => draining.open("session", cwd)).toThrow(/not accepting terminal/u);
     draining.dispose();
   });

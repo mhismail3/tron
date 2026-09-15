@@ -13,6 +13,10 @@ struct LaunchAgentRuntimeInfo: Equatable, Sendable {
     var gatewaySupervisionMarker: String?
     var gatewayChannelMarker: String?
     var needsLaunchConstraintRefresh: Bool
+    var launchCount: Int?
+    var lastExitCode: Int?
+    var processStartIdentity: String?
+    var gatewayExitPolicy: String?
 
     init(
         pid: Int? = nil,
@@ -24,7 +28,9 @@ struct LaunchAgentRuntimeInfo: Equatable, Sendable {
         processCommand: String? = nil,
         gatewaySupervisionMarker: String? = nil,
         gatewayChannelMarker: String? = nil,
-        needsLaunchConstraintRefresh: Bool = false
+        needsLaunchConstraintRefresh: Bool = false,
+        launchCount: Int? = nil, lastExitCode: Int? = nil,
+        processStartIdentity: String? = nil, gatewayExitPolicy: String? = nil
     ) {
         self.pid = pid
         self.uptime = uptime
@@ -36,20 +42,25 @@ struct LaunchAgentRuntimeInfo: Equatable, Sendable {
         self.gatewaySupervisionMarker = gatewaySupervisionMarker
         self.gatewayChannelMarker = gatewayChannelMarker
         self.needsLaunchConstraintRefresh = needsLaunchConstraintRefresh
+        self.launchCount = launchCount; self.lastExitCode = lastExitCode
+        self.processStartIdentity = processStartIdentity; self.gatewayExitPolicy = gatewayExitPolicy
     }
 }
 
 /// Read-only launchd/ps observation shared with the native peer boundary.
 enum LaunchAgentRuntimeReader {
     enum ObservationFailure: Error { case unavailable }
-    static func read(label: String) async throws -> LaunchAgentRuntimeInfo? {
+    static func read(label: String, includingStartIdentity: Bool = false) async throws -> LaunchAgentRuntimeInfo? {
         let result = await Subprocess.run(
             executable: URL(fileURLWithPath: "/bin/launchctl"),
             arguments: ["print", "gui/\(getuid())/\(label)"],
             policy: .observation
         )
         guard result.exitCode >= 0 else { throw ObservationFailure.unavailable }
-        guard result.exitCode == 0 else { return nil }
+        guard result.exitCode == 0 else {
+            guard result.stderr.contains("Could not find service") else { throw ObservationFailure.unavailable }
+            return nil
+        }
         let pid = parsePID(from: result.stdout)
         let uptime: String?
         let processCommand: String?
@@ -60,6 +71,7 @@ enum LaunchAgentRuntimeReader {
             uptime = nil
             processCommand = nil
         }
+        let processStartIdentity = if let pid, includingStartIdentity { await ServerProcessProbe.processStartIdentity(pid: pid) } else { nil as String? }
         return LaunchAgentRuntimeInfo(
             pid: pid,
             uptime: uptime,
@@ -79,7 +91,11 @@ enum LaunchAgentRuntimeReader {
                 named: "TRON_GATEWAY_CHANNEL",
                 from: result.stdout
             ),
-            needsLaunchConstraintRefresh: result.stdout.contains("needs LWCR update")
+            needsLaunchConstraintRefresh: result.stdout.contains("needs LWCR update"),
+            launchCount: parseLaunchctlValue(named: "runs", from: result.stdout).flatMap(Int.init),
+            lastExitCode: parseLaunchctlValue(named: "last exit code", from: result.stdout).flatMap(Int.init),
+            processStartIdentity: processStartIdentity,
+            gatewayExitPolicy: parseLaunchctlEnvironmentValue(named: "TRON_GATEWAY_EXIT_POLICY", from: result.stdout)
         )
     }
 

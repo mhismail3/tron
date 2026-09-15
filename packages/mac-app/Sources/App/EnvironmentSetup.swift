@@ -69,6 +69,8 @@ struct EnvironmentSetup: Sendable {
     var refreshNativeHost: @Sendable () async throws -> NativeHostServiceState = { .unavailable }
     var requestPermission: @Sendable (Permission) async -> PermissionStatus = { _ in .probeUnavailable }
     var unregisterNativeHost: @Sendable () async throws -> Void = {}
+    var restoreNativeHost: @Sendable () async throws -> NativeHostServiceState = { .needsRegistration }
+    var suspendNativeHostForQuit: @Sendable () async throws -> Void = { throw NativeHostError.serviceUnavailable }
 
     /// Detects whether the bundled Login Item is registered and usable.
     var detectExistingInstall: @Sendable () async -> ExistingInstallStatus
@@ -100,6 +102,9 @@ struct EnvironmentSetup: Sendable {
     var restartGateway: @Sendable () async throws -> GatewayRestartClient.Response = {
         throw GatewayRestartClient.Failure.transport
     }
+
+    var shutdownGateway: @Sendable (String) async throws -> GatewayShutdownClient.Response = { _ in throw GatewayRestartClient.Failure.transport }
+    var readGatewayForQuit: @Sendable () async throws -> LaunchAgentRuntimeInfo? = { throw LaunchAgentRuntimeReader.ObservationFailure.unavailable }
 
     /// Health wait policy after menu-bar start/restart/resume actions.
     /// Tests can lower these to keep stale-helper paths deterministic.
@@ -238,6 +243,14 @@ struct EnvironmentSetup: Sendable {
                 guard TronPaths.canManageLaunchAgent(profile: profile) else { throw NativeHostError.serviceUnavailable }
                 try await NativeHostCoordinator.shared.unregister()
             },
+            restoreNativeHost: {
+                guard TronPaths.canManageLaunchAgent(profile: profile) else { throw NativeHostError.bundleUnavailable }
+                return try await NativeHostCoordinator.shared.restoreIfDesired()
+            },
+            suspendNativeHostForQuit: {
+                guard TronPaths.canManageLaunchAgent(profile: profile) else { throw NativeHostError.bundleUnavailable }
+                try await NativeHostCoordinator.shared.suspendForQuit()
+            },
             detectExistingInstall: {
                 await ExistingInstallDetector.detect(
                     helperBundle: TronPaths.serverHelperBundle(profile: profile),
@@ -279,6 +292,12 @@ struct EnvironmentSetup: Sendable {
                     host: host, port: profile.port, token: BearerTokenReader.read(at: bearer)
                 )
             },
+            shutdownGateway: { commandID in
+                guard let host = await resolveHost() else { throw GatewayRestartClient.Failure.transport }
+                return try await GatewayShutdownClient.shutdown(host: host, port: profile.port,
+                    token: BearerTokenReader.read(at: bearer), commandID: commandID)
+            },
+            readGatewayForQuit: { try await LaunchAgentRuntimeReader.read(label: profile.launchAgentLabel, includingStartIdentity: true) },
             launchAgentManager: LiveLaunchAgentManager(profile: profile),
             touchOnboardedSentinel: { try OnboardedSentinelWriter.touch(at: marker) },
             currentAppVersion: { MacAppVersionIdentity.current() },
@@ -375,8 +394,8 @@ private struct ReadOnlyDebugLaunchAgentManager: LaunchAgentManaging {
     }
 
     func load(plistPath: URL, label: String) async -> LaunchAgentOutcome { refused }
+    func start(label: String) async -> LaunchAgentOutcome { refused }
     func unload(label: String) async -> LaunchAgentOutcome { refused }
-    func restart(label: String) async -> LaunchAgentOutcome { refused }
     func isLoaded(label: String) async -> Bool? { false }
     func isRegistered(label: String) async -> Bool { false }
     func runtimeInfo(label: String) async -> LaunchAgentRuntimeInfo? { nil }

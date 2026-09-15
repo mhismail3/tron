@@ -22,6 +22,13 @@ struct LiveLaunchAgentManagerTests {
         case companion, companionMissing, companionStale, missingCommand, stoppedStale
     }
 
+    @Test("non-destructive start targets the user LaunchAgent without force-kickstart")
+    func startCommandArguments() {
+        #expect(LiveLaunchAgentManager.startCommandArguments(label: "com.tron.server", uid: 123) == [
+            "kickstart", "gui/123/com.tron.server"
+        ])
+    }
+
     @Test("registration decisions use runtime/application inputs, not injected policy flags", arguments: Scenario.allCases)
     private func decisionMatrix(_ scenario: Scenario) {
         var status: ExistingInstallDetector.ServiceRegistrationStatus = .enabled
@@ -102,6 +109,37 @@ struct LiveLaunchAgentManagerTests {
             expectedParentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
             expectedHelperPath: Self.helper, expectedSupervisionMarker: "0", fileExists: { _ in true }
         ))
+    }
+
+    @Test("registered ownership rejects foreign or incomplete stopped metadata")
+    func stoppedRegistrationOwnershipIsExact() {
+        var stopped = Self.healthy
+        stopped.pid = nil
+        stopped.processCommand = nil
+        stopped.lastExitCode = 0
+        stopped.gatewayExitPolicy = "stop-on-success"
+        let owns: (LaunchAgentRuntimeInfo) -> Bool = { runtime in
+            LiveLaunchAgentManager.registeredProfileOwnsProfile(
+                runtimeInfo: runtime,
+                profile: .stable,
+                expectedParentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
+                expectedHelperPath: Self.helper,
+                fileExists: { $0 == Self.helper }
+            )
+        }
+        #expect(owns(stopped))
+        for mutation in [
+            { (value: inout LaunchAgentRuntimeInfo) in value.parentBundleIdentifier = "com.foreign.wrapper" },
+            { (value: inout LaunchAgentRuntimeInfo) in value.executablePath = "/foreign/helper" },
+            { (value: inout LaunchAgentRuntimeInfo) in value.executablePath = nil; value.bundleProgram = "Contents/Library/LoginItems/Foreign.app/Contents/MacOS/tron" },
+            { (value: inout LaunchAgentRuntimeInfo) in value.gatewayChannelMarker = "dev" },
+            { (value: inout LaunchAgentRuntimeInfo) in value.gatewaySupervisionMarker = nil },
+            { (value: inout LaunchAgentRuntimeInfo) in value.gatewayExitPolicy = nil }
+        ] {
+            var foreign = stopped
+            mutation(&foreign)
+            #expect(!owns(foreign))
+        }
     }
 
     @Test("relative BundleProgram alone cannot replace exact running command identity")
@@ -226,16 +264,16 @@ struct LaunchAgentLoaderTests {
         #expect(mock.calls.map(\.kind) == [.load])
     }
 
-    @Test("already-loaded registration restarts on explicit service start")
-    func alreadyLoadedRestarts() async {
+    @Test("already-loaded registration is started without a force restart")
+    func alreadyLoadedRemainsRunning() async {
         let mock = MockLaunchAgentManager()
         mock.loadOutcome = .alreadyLoaded
         let outcome = await LaunchAgentLoader.ensureLoaded(manager: mock, plistPath: URL(fileURLWithPath: "/fixture/agent.plist"), label: "fixture")
-        #expect(outcome == .ok)
-        #expect(mock.calls.map(\.kind) == [.load, .restart])
+        #expect(outcome == .alreadyLoaded)
+        #expect(mock.calls.map(\.kind) == [.load, .start])
     }
 
-    @Test("registration failure prevents restart; restart failure is preserved")
+    @Test("registration failure is returned without another lifecycle operation")
     func failuresAreNotReplayed() async {
         let mock = MockLaunchAgentManager()
         let failure = LaunchAgentOutcome.launchdRefused(message: "synthetic failure")
@@ -244,8 +282,8 @@ struct LaunchAgentLoaderTests {
         #expect(mock.calls.map(\.kind) == [.load])
         let loaded = MockLaunchAgentManager()
         loaded.loadOutcome = .alreadyLoaded
-        loaded.restartOutcome = failure
+        loaded.startOutcome = failure
         #expect(await LaunchAgentLoader.ensureLoaded(manager: loaded, plistPath: URL(fileURLWithPath: "/fixture/agent.plist"), label: "fixture") == failure)
-        #expect(loaded.calls.map(\.kind) == [.load, .restart])
+        #expect(loaded.calls.map(\.kind) == [.load, .start])
     }
 }

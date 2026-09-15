@@ -224,8 +224,9 @@ python3 -m unittest discover -s packages/mac-app/native-computer-control/qualifi
 ```
 
 Native app replacement and Gateway transitions are manual maintainer actions.
-Use the old authenticated wrapper's **Disable Helper for Update** before replacing
-an enabled helper. Uninstall drains/unregisters the helper before Gateway/files.
+Quitting Tron safely stops and restores an enabled helper during temporary
+app replacement. Use **Disable Helper** only when you want it to remain disabled.
+Uninstall drains/unregisters the helper before Gateway/files.
 `.notRegistered` is a no-op; `.notFound`/unknown cannot establish retirement and
 must not be silently treated as success. A permission-only installed build without
 that control needs an explicit maintainer bootstrap, not a compatibility bypass.

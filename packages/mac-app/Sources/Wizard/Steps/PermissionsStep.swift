@@ -10,7 +10,9 @@ struct PermissionsStep: View {
 
 struct PermissionSetupView: View {
     @Binding var statuses: [Permission: PermissionStatus]
+    var onContentHeight: ((CGFloat) -> Void)? = nil
     @Environment(\.environmentSetup) private var setup
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var activationObserver: NSObjectProtocol?
     @State private var settingsWatch: Task<Void, Never>?
     @State private var active = false
@@ -18,8 +20,14 @@ struct PermissionSetupView: View {
     @State private var busy = false
     @State private var actionID = UUID()
     @State private var probeID = UUID()
-    @State private var serviceState = NativeHostServiceState.unavailable
+    // A missing value is intentional: service status is unknown until the
+    // first read completes, so the UI cannot briefly imply Enable is needed.
+    @State private var serviceState: NativeHostServiceState?
     @State private var actionError: String?
+
+    private var stateAnimation: Animation? {
+        reduceMotion ? nil : PermissionsStepContent.stateAnimation
+    }
 
     var body: some View {
         ScrollView {
@@ -28,21 +36,36 @@ struct PermissionSetupView: View {
                     .font(TronTypography.wizardBody).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 permissionRow(.fullDiskAccess, title: "Full Disk Access", detail: "Lets Tron read and edit files.")
-                HStack {
-                    Text(serviceState == .enabled ? "Native helper enabled" : "Optional: prepare computer control")
-                        .font(TronTypography.wizardHeadline)
-                    Spacer()
-                    Button(serviceActionTitle) { changeService() }
-                        .buttonStyle(.wizardSecondary)
-                        .fixedSize()
-                        .disabled(busy || !setup.canManageLaunchAgent)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text(serviceState == .enabled
+                             ? "Native helper enabled"
+                             : serviceState == nil
+                                ? "Checking helper status…"
+                                : "Optional: prepare computer control")
+                            .font(TronTypography.wizardHeadline)
+                        Spacer(minLength: 8)
+                    }
+                    HStack(spacing: 8) {
+                        Button(serviceActionTitle) { changeService() }
+                            .buttonStyle(.wizardSecondary)
+                            .fixedSize()
+                            .disabled(busy || serviceState == nil || !setup.canManageLaunchAgent)
+                        if serviceState == .enabled {
+                            Button("Disable Helper") { changeService(disable: true) }
+                                .buttonStyle(.wizardSecondary)
+                                .fixedSize()
+                                .disabled(busy || !setup.canManageLaunchAgent)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .animation(stateAnimation, value: serviceState)
                 if serviceState == .enabled {
-                    Button("Disable Helper for Update") { changeService(disable: true) }
-                        .buttonStyle(.wizardLink)
-                        .disabled(busy || !setup.canManageLaunchAgent)
-                    Text("Before replacing Tron.app, disable this helper using the current app. This joins capture before unregistering; it does not revoke permissions or stop the Gateway.")
+                    Text("Quitting Tron safely stops the enabled helper and restores it when Tron launches again. Use Disable Helper when you want it to remain disabled.")
                         .font(TronTypography.wizardCaption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 if let actionError {
                     Text(actionError)
@@ -55,7 +78,7 @@ struct PermissionSetupView: View {
                     .font(TronTypography.wizardCaption).foregroundStyle(.secondary)
                 permissionRow(.accessibility, title: "Accessibility", detail: "Prepares inspection and control of approved apps.")
                 permissionRow(.screenRecording, title: "Screen Recording", detail: "Prepares viewing of selected app windows.")
-                if serviceState == .enabled, statuses[.screenRecording] != .granted {
+                if serviceState == .enabled, let screenStatus = statuses[.screenRecording], screenStatus != .granted {
                     Text("Screen Recording may be listed under Tron.app in macOS Settings. If it is enabled there but not here, restart the helper, then re-check. This does not restart the Gateway.")
                         .font(TronTypography.wizardCaption)
                         .foregroundStyle(.secondary)
@@ -69,25 +92,23 @@ struct PermissionSetupView: View {
                 .padding(.leading, PermissionsStepLayout.recheckLeadingPadding)
                 .disabled(checking || busy)
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                onContentHeight?(height)
+            }
         }
         .onAppear { active = true; installActivationObserver() }
         .task(id: active) {
             guard active else { return }
-            if statuses.isEmpty { try? await Task.sleep(nanoseconds: PermissionsStepContent.initialProbeDelayNanoseconds) }
             await refresh(showActivity: false)
         }
         .onDisappear { retirePresentation() }
     }
 
     private var serviceActionTitle: String {
-        switch serviceState {
-        case .enabled: "Restart Helper"
-        case .needsApproval: "Open Login Items"
-        case .needsRegistration, .unavailable: "Enable Helper"
-        }
+        PermissionsStepContent.serviceActionTitle(for: serviceState)
     }
     private func permissionRow(_ permission: Permission, title: String, detail: String) -> some View {
-        let status = statuses[permission] ?? .notDetermined
+        let status = statuses[permission]
         return WizardInfoCard(verticalPadding: PermissionsStepLayout.cardVerticalPadding,
                               horizontalPadding: PermissionsStepLayout.cardHorizontalPadding) {
             WizardIconTextRow(iconColumnWidth: PermissionsStepLayout.statusIconColumnWidth,
@@ -97,7 +118,7 @@ struct PermissionSetupView: View {
                 VStack(alignment: .leading, spacing: PermissionsStepLayout.textLineSpacing) {
                     Text(title).font(TronTypography.wizardHeadline)
                     Text(detail).font(TronTypography.wizardBodySmall).foregroundStyle(.secondary)
-                    Text(permission == .fullDiskAccess
+                    Text(status == .granted ? "Access granted." : status == nil ? "Checking access…" : permission == .fullDiskAccess
                          ? "Enable \"\(PermissionsStepContent.appDisplayName(for: setup.applicationBundle))\" in Full Disk Access."
                          : "Press Allow, then follow the macOS prompt for Tron.")
                         .font(TronTypography.wizardCaption).foregroundStyle(.secondary)
@@ -105,7 +126,7 @@ struct PermissionSetupView: View {
                 .fixedSize(horizontal: false, vertical: true)
             } trailing: {
                 HStack(spacing: 8) {
-                    if permission != .fullDiskAccess, status != .granted {
+                    if permission != .fullDiskAccess, let status, status != .granted {
                         Button("Allow") { request(permission) }
                             .buttonStyle(.wizardSecondary)
                             .fixedSize()
@@ -119,12 +140,13 @@ struct PermissionSetupView: View {
         }
     }
 
-    @ViewBuilder private func statusBadge(_ status: PermissionStatus) -> some View {
+    @ViewBuilder private func statusBadge(_ status: PermissionStatus?) -> some View {
         switch status {
-        case .granted: Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
-        case .denied: Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)
-        case .notDetermined: Image(systemName: "questionmark.circle.fill").foregroundStyle(.orange)
-        case .probeUnavailable: Image(systemName: "minus.circle.fill").foregroundStyle(.secondary)
+        case nil: ProgressView().controlSize(.small)
+        case .some(.granted): Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+        case .some(.denied): Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)
+        case .some(.notDetermined): Image(systemName: "questionmark.circle.fill").foregroundStyle(.orange)
+        case .some(.probeUnavailable): Image(systemName: "minus.circle.fill").foregroundStyle(.secondary)
         }
     }
 
@@ -141,15 +163,20 @@ struct PermissionSetupView: View {
                     result = await setup.nativeHostServiceState()
                 } else if restart { result = try await setup.refreshNativeHost() }
                 else { result = try await setup.enableNativeHost() }
-                guard active, actionID == id else { return }
-                serviceState = result
-                busy = false
+                guard PermissionsStepContent.presentationIsCurrent(active: active, requestID: id, currentID: actionID) else { return }
+                withAnimation(stateAnimation) {
+                    serviceState = result
+                    busy = false
+                }
                 await refresh(showActivity: true)
+                guard PermissionsStepContent.presentationIsCurrent(active: active, requestID: id, currentID: actionID) else { return }
                 if serviceState == .needsApproval { watchSettings(permission: nil) }
             } catch {
-                guard active, actionID == id else { return }
-                busy = false
-                actionError = String(error.localizedDescription.prefix(512))
+                guard PermissionsStepContent.presentationIsCurrent(active: active, requestID: id, currentID: actionID) else { return }
+                withAnimation(stateAnimation) {
+                    busy = false
+                    actionError = String(error.localizedDescription.prefix(512))
+                }
                 await refresh(showActivity: false)
             }
         }
@@ -160,9 +187,10 @@ struct PermissionSetupView: View {
         let id = UUID(); actionID = id; probeID = UUID(); busy = true; checking = false
         Task { @MainActor in
             _ = await setup.requestPermission(permission)
-            guard active, actionID == id else { return }
-            busy = false
+            guard PermissionsStepContent.presentationIsCurrent(active: active, requestID: id, currentID: actionID) else { return }
+            withAnimation(stateAnimation) { busy = false }
             await refresh(showActivity: true)
+            guard PermissionsStepContent.presentationIsCurrent(active: active, requestID: id, currentID: actionID) else { return }
             if statuses[permission] != .granted { watchSettings(permission: permission) }
         }
     }
@@ -172,11 +200,16 @@ struct PermissionSetupView: View {
         let id = UUID(); probeID = id; checking = showActivity
         defer { if probeID == id { checking = false } }
         let native = await setup.nativeHostServiceState()
-        guard active, !Task.isCancelled, probeID == id else { return }
+        guard !Task.isCancelled,
+              PermissionsStepContent.presentationIsCurrent(active: active, requestID: id, currentID: probeID) else { return }
+        withAnimation(stateAnimation) { serviceState = native }
         let result = await setup.probePermissions()
-        guard active, !Task.isCancelled, probeID == id else { return }
-        serviceState = native
-        statuses = Dictionary(uniqueKeysWithValues: Permission.allCases.map { ($0, result[$0] ?? .probeUnavailable) })
+        guard !Task.isCancelled,
+              PermissionsStepContent.presentationIsCurrent(active: active, requestID: id, currentID: probeID) else { return }
+        withAnimation(stateAnimation) {
+            serviceState = native
+            statuses = Dictionary(uniqueKeysWithValues: Permission.allCases.map { ($0, result[$0] ?? .probeUnavailable) })
+        }
     }
 
     @MainActor private func openSettings(_ permission: Permission) {
@@ -212,9 +245,20 @@ struct PermissionSetupView: View {
 }
 
 enum PermissionsStepContent {
-    static let intro = "Full Disk Access is required for core setup. You can also prepare computer-control permissions here: enable the helper first, approve its background item if asked, then grant access. Computer control is not enabled by completing this page alone."
-    static let initialProbeDelayNanoseconds: UInt64 = 520_000_000
+    static let intro = "Full Disk Access is required for core setup. Optional computer-control permissions can be prepared here after enabling the helper."
+    static let stateAnimation = Animation.easeInOut(duration: 0.2)
     static let settingsGrantWatchAttempts = 24
+    static func serviceActionTitle(for state: NativeHostServiceState?) -> String {
+        switch state {
+        case nil: "Checking Helper…"
+        case .some(.enabled): "Restart Helper"
+        case .some(.needsApproval): "Open Login Items"
+        case .some(.needsRegistration), .some(.unavailable): "Enable Helper"
+        }
+    }
+    static func presentationIsCurrent(active: Bool, requestID: UUID, currentID: UUID) -> Bool {
+        active && requestID == currentID
+    }
     static let settingsGrantWatchIntervalNanoseconds: UInt64 = 750_000_000
     static func appDisplayName(for applicationBundle: URL) -> String {
         let name = applicationBundle.lastPathComponent

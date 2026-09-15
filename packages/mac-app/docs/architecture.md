@@ -202,14 +202,17 @@ an exchange the gateway removes the used invitation and issues a new one.
 ## Supervision and status
 
 `SMAppService` owns registration and launchd owns the gateway process. Stable's
-LaunchAgent uses Boolean `KeepAlive=true`, `RunAtLoad=true`, and a throttle interval;
-pause and uninstall therefore unregister the job before intentional stoppage. Managed
-LaunchAgents advertise `TRON_GATEWAY_SUPERVISED=1`; planned restart and handled
-supervised signals exit 75 so direct foreground restart controls still fail closed.
-Quitting `Tron.app` does not stop accepted work. `ServerStatusPoller` probes the Tron
-Gateway protocol and combines health with registration state. Menu controls can
-pause, resume, restart, inspect bounded persisted Gateway logs, show a fresh
-pairing invitation, and uninstall. Log and feedback capture resolve a validated
+LaunchAgent uses `KeepAlive` with `SuccessfulExit=false`, `RunAtLoad=true`, and a
+throttle interval, so failed exits relaunch while an administrative success retires
+the process. Managed LaunchAgents advertise `TRON_GATEWAY_SUPERVISED=1` and
+`TRON_GATEWAY_EXIT_POLICY=stop-on-success`; planned restart exits 75, while graceful
+Quit exits 0 after the shared Gateway admission drain. Quitting `Tron.app` sends
+that authenticated local shutdown, waits for clean exit, retires the native helper,
+and unregisters the LaunchAgent; a failed stage leaves the wrapper open for retry.
+`ServerStatusPoller` probes the Tron Gateway protocol and combines health with
+registration state. Menu controls can restart, inspect bounded persisted Gateway
+logs, show a fresh pairing invitation, manage permissions, and uninstall. Log and
+feedback capture resolve a validated
 Tailscale host from live state or the bounded owner-only Tailscale cache and pass
 it explicitly to the Gateway socket; absent host data fails unavailable rather
 than falling back to loopback. The cache is an exact-schema version-1 regular
@@ -241,10 +244,20 @@ invalidate an otherwise unchanged admission.
 It derives stale-runtime, takeover and refresh policy once from registration and
 runtime metadata, application identity, helper presence and wrapper authority;
 callers do not override derived decisions or supply a second parent identity.
+The admission read and subsequent ServiceManagement/launchd operation are not an
+OS compare-and-swap: an external administrator can replace the same-label
+registration between them, and macOS exposes no compare-generation mutation for
+this boundary. The wrapper therefore documents pre-operation metadata admission
+without claiming atomic protection from that external race.
 Refresh/takeover are reasons for real bootout/unregister/register steps, not
 separate execution modes or no-op steps. Live load and its focused tests share
 one sequential executor: await each accepted step, stop at the first reported
-failure, and never retry or re-derive ownership between steps.
+failure, and never retry or re-derive ownership between steps. A registered but
+stopped Stable job is instead admitted again from its exact parent/helper,
+channel, supervision, and `stop-on-success` metadata, then started with
+non-destructive `launchctl kickstart` (without `-k`); missing, foreign, or
+unknown registration is refused. Running Restart remains the authenticated
+Gateway drain, and never uses kickstart as a kill/restart shortcut.
 `LiveLaunchAgentManagerTests` exercises the real planner with synthetic inputs
 and the live executor with controlled callbacks, without changing Login Items. Bearer, enrollment, and network-cache credentials
 use one bounded owner-only regular-file/no-symlink descriptor reader, followed
@@ -445,13 +458,17 @@ machine-local package managers cannot alter project generation.
 The Mac app and iOS app emit the same canonical protocol range into their final
 Info plists. Build scripts validate source constants, final app metadata, and
 the bundled payload together; the physical-device helper additionally compares
-the target Mac app before installation. The Mac menu Restart action
-authenticates to the Gateway WebSocket, validates protocol identity, and calls
-`gateway.restart` with a bounded command ID. The
-Gateway drains accepted work; the wrapper then waits for the launchd-owned
-Gateway to become healthy again. It does not use `launchctl kickstart -k` as a
-restart shortcut; the fixed kickstart is reserved for payload deployment recovery after
-the captured old process has exited.
+the target Mac app before installation. The Mac menu Restart action inspects
+the launchd runtime row before mutating service state. A loaded row with no PID is
+a registered stopped service: the wrapper uses the exact-owned non-destructive
+start and treats owned health as fulfillment of the restart, without a second
+Gateway request. A running row authenticates to the Gateway WebSocket,
+validates protocol identity, and calls
+`gateway.restart` with a bounded command ID; missing runtime metadata refuses
+safely. The Gateway drains accepted work; the wrapper then waits for the
+launchd-owned Gateway to become healthy again. It does not use `launchctl
+kickstart -k` as a restart shortcut; the fixed kickstart is reserved for payload
+deployment recovery after the captured old process has exited.
 
 Changing the bundled LaunchAgent plist requires the manual Release reinstall and
 registration refresh in `docs/development.md`; payload promotion cannot update the

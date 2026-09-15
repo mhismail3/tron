@@ -78,6 +78,31 @@ any event, persistence, projection, packaging, UI, or UX difference as a
 behavior-delta stop: do not normalize it silently; compare current and candidate
 behavior and obtain an explicit product decision before continuing.
 
+## Gateway lifecycle
+
+The installed Stable Gateway is supervised by its LaunchAgent with
+`TRON_GATEWAY_SUPERVISED=1` and `TRON_GATEWAY_EXIT_POLICY=stop-on-success`.
+The LaunchAgent uses `KeepAlive` with `SuccessfulExit=false`, so failed exits are
+relaunchable while a deliberate successful exit retires the process. The local
+Mac wrapper is the only caller authorized to invoke `gateway.shutdown`; it must
+first prove the current supervised runtime and registration, then the Gateway
+closes admission under the shared lifecycle mutex, drains accepted session,
+terminal, update, and automation work, and exits 0. A shutdown request is
+accepted once and is not undone by receipt-write failure or a later signal.
+
+`gateway.restart` follows the same admission drain but exits 75 so launchd
+relaunches the Gateway. During an accepted update or rollback, only the
+authenticated local updater handoff may restart with that operation's exact
+command ID; this remains valid while detached-helper startup or status
+projection is catching up. Unrelated restart, quit, install, and update
+requests remain excluded by lifecycle admission. Neither operation kills
+accepted work or relies on a second registry. The wrapper waits for the exact old runtime to exit cleanly
+before retiring the native helper and unregistering the LaunchAgent. It rechecks
+that stopped identity after the helper's awaited retirement; a successor or
+unknown observation leaves the wrapper open and performs no unregister. A failed
+stage is retryable, while reconnecting clients receive the authoritative next
+snapshot rather than replaying prompts.
+
 ## Ownership
 
 Gateway owns only mobile infrastructure:

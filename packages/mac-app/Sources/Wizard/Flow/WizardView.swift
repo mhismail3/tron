@@ -357,22 +357,14 @@ struct WizardShell<Content: View>: View {
             .keyboardShortcut(.defaultAction)
         case .permissions:
             Button {
-                Task { @MainActor in
-                    guard permissionsCanContinue else { return }
-                    if !state.permissionsServerRestarted {
-                        state.permissionsRestartInProgress = true
-                        _ = await setup.launchAgentManager.restart(label: setup.launchAgentLabel)
-                        state.permissionsServerRestarted = true
-                        state.permissionsRestartInProgress = false
-                    }
-                    state.advance()
-                }
+                guard permissionsCanContinue else { return }
+                state.advance()
             } label: {
-                Text(state.permissionsRestartInProgress ? "Finalizing…" : "Continue")
+                Text("Continue")
             }
             .buttonStyle(.wizardPrimary)
             .keyboardShortcut(.defaultAction)
-            .disabled(!permissionsCanContinue || state.permissionsRestartInProgress)
+            .disabled(!permissionsCanContinue)
         case .install:
             Button {
                 if installCanContinue {

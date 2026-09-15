@@ -267,6 +267,33 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String
     }
 
+    /// Validates only registration metadata. A stopped launchd job has no
+    /// process identity, so pid/command are intentionally neither fabricated
+    /// nor accepted as evidence at this boundary.
+    static func registeredProfileOwnsProfile(
+        runtimeInfo: LaunchAgentRuntimeInfo?,
+        profile: TronGatewayProfile,
+        expectedParentBundleIdentifier: String?,
+        expectedHelperPath: String,
+        expectedSupervisionMarker: String = TronPaths.gatewaySupervisionValue,
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> Bool {
+        guard let runtimeInfo,
+              runtimeInfo.parentBundleIdentifier == expectedParentBundleIdentifier,
+              runtimeInfo.gatewaySupervisionMarker == expectedSupervisionMarker,
+              runtimeInfo.gatewayChannelMarker == profile.channel,
+              runtimeInfo.gatewayExitPolicy == "stop-on-success" else { return false }
+        let expected = URL(fileURLWithPath: expectedHelperPath).standardizedFileURL.path
+        guard fileExists(expected) else { return false }
+        if let executable = runtimeInfo.executablePath, !executable.isEmpty {
+            return URL(fileURLWithPath: executable).standardizedFileURL.path == expected
+        }
+        guard let bundleProgram = runtimeInfo.bundleProgram,
+              !bundleProgram.isEmpty,
+              let contentsRange = expected.range(of: "/Contents/") else { return false }
+        return bundleProgram == String(expected[contentsRange.lowerBound...].dropFirst())
+    }
+
     static func runtimeOwnsProfile(
         runtimeInfo: LaunchAgentRuntimeInfo?,
         profile: TronGatewayProfile,
@@ -298,6 +325,15 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
     ) -> Bool {
         guard let runtimeInfo else { return false }
+        if runtimeInfo.pid == nil {
+            return !registeredProfileOwnsProfile(
+                runtimeInfo: runtimeInfo,
+                profile: profile,
+                expectedParentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
+                expectedHelperPath: expectedHelperPath,
+                fileExists: fileExists
+            )
+        }
         guard runtimeInfo.gatewaySupervisionMarker == TronPaths.gatewaySupervisionValue,
               runtimeInfo.gatewayChannelMarker == profile.channel else { return true }
 
@@ -360,6 +396,66 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         )
     }
 
+    /// Non-destructively starts an owned registration. The status and runtime
+    /// metadata are deliberately read again here: callers may have observed a
+    /// stopped job, but must not kick a foreign or indeterminate replacement.
+    func start(label: String) async -> LaunchAgentOutcome {
+        guard profile == .stable else {
+            return .launchdRefused(message: "Debug Gateway lifecycle belongs to scripts/tron dev.")
+        }
+        guard label == profile.launchAgentLabel else {
+            return .launchdRefused(message: "LaunchAgent label does not match the requested Gateway profile.")
+        }
+        let status = ExistingInstallDetector.serviceStatus(label: label)
+        switch status {
+        case .enabled:
+            break
+        case .requiresApproval:
+            return .requiresApproval(message: "Approve Tron Agent in Login Items to finish installation.")
+        case .notRegistered, .notFound:
+            return .launchdRefused(message: "Tron Agent is not registered. Register it before starting the Gateway.")
+        case .unknown:
+            return .unknown(message: "Could not inspect Tron Agent registration. No start was requested.")
+        }
+        let runtime: LaunchAgentRuntimeInfo?
+        do {
+            runtime = try await LaunchAgentRuntimeReader.read(label: label)
+        } catch {
+            return .unknown(message: "Could not inspect Tron Agent registration. No start was requested.")
+        }
+        guard let runtime,
+              Self.registeredProfileOwnsProfile(
+                  runtimeInfo: runtime,
+                  profile: profile,
+                  expectedParentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
+                  expectedHelperPath: TronPaths.serverHelperBinary(profile: profile).path
+              ) else {
+            return .launchdRefused(message: "Tron Agent registration ownership could not be verified. No start was requested.")
+        }
+        if runtime.pid != nil {
+            guard Self.runtimeOwnsProfile(
+                runtimeInfo: runtime,
+                profile: profile,
+                expectedParentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
+                expectedHelperPath: TronPaths.serverHelperBinary(profile: profile).path
+            ) else {
+                return .launchdRefused(message: "The running Gateway is not owned by this profile. No start was requested.")
+            }
+            return .alreadyLoaded
+        }
+        let result = await Subprocess.run(
+            executable: URL(fileURLWithPath: "/bin/launchctl"),
+            arguments: Self.startCommandArguments(label: label, uid: currentUID()),
+            policy: .acceptedOperation
+        )
+        guard result.exitCode >= 0 else {
+            return .unknown(message: "Could not confirm the start command outcome. Inspect Gateway state before retrying.")
+        }
+        return result.exitCode == 0
+            ? .ok
+            : .launchdRefused(message: result.stderr.isEmpty ? result.stdout : result.stderr)
+    }
+
     func unload(label: String) async -> LaunchAgentOutcome {
         guard profile == .stable else {
             return .launchdRefused(message: "Debug Gateway lifecycle belongs to scripts/tron dev.")
@@ -393,26 +489,6 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         case .enabled, .requiresApproval, .unknown:
             return nil
         }
-    }
-
-    func restart(label: String) async -> LaunchAgentOutcome {
-        guard profile == .stable else {
-            return .launchdRefused(message: "Debug Gateway lifecycle belongs to scripts/tron dev.")
-        }
-        guard label == profile.launchAgentLabel else {
-            return .launchdRefused(message: "LaunchAgent label does not match the requested Gateway profile.")
-        }
-        let result = await Subprocess.run(
-            executable: URL(fileURLWithPath: "/bin/launchctl"),
-            arguments: ["kickstart", "-k", "gui/\(currentUID())/\(label)"],
-            policy: .acceptedOperation
-        )
-        guard result.exitCode >= 0 else {
-            return .unknown(message: "Could not confirm the restart command outcome. Inspect Gateway state before retrying.")
-        }
-        return result.exitCode == 0
-            ? .ok
-            : .launchdRefused(message: result.stderr.isEmpty ? result.stdout : result.stderr)
     }
 
     func isRegistered(label: String) async -> Bool {
@@ -458,6 +534,10 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         if result.exitCode == 0 { return !result.stdout.isEmpty }
         if result.exitCode == 1 && result.stdout.isEmpty { return false }
         throw ObservationFailure.unavailable
+    }
+
+    static func startCommandArguments(label: String, uid: Int) -> [String] {
+        ["kickstart", "gui/\(uid)/\(label)"]
     }
 
     private func currentUID() -> Int {

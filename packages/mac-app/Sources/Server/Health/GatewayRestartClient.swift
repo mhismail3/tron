@@ -40,9 +40,9 @@ enum GatewayRestartClient {
             case .missingCredential, .unauthorized:
                 return "The Mac wrapper could not authenticate to Tron."
             case .invalidCommandID:
-                return "The restart request could not be safely created."
+                return "The Gateway lifecycle request could not be safely created."
             case .timeout:
-                return "The Gateway did not respond before the restart request timed out."
+                return "The Gateway lifecycle request was not acknowledged before its deadline. Its outcome is unknown; check status before retrying."
             case .transport:
                 return "The Gateway could not be reached."
             case .gateway(_, let message, _):

@@ -42,9 +42,10 @@ protocol LaunchAgentManaging: Sendable {
     /// bundled Login Item registration. Safe to call when not registered.
     func unload(label: String) async -> LaunchAgentOutcome
 
-    /// Explicit process restart used only by lifecycle flows that cannot use
-    /// the Gateway's authenticated drain command (for example permissions).
-    func restart(label: String) async -> LaunchAgentOutcome
+    /// Starts an already-registered, stopped agent without terminating a
+    /// concurrently starting process. The live implementation admits the
+    /// registration again immediately before issuing a non-destructive kick.
+    func start(label: String) async -> LaunchAgentOutcome
 
     /// True if `launchctl print gui/$UID/<label>` returns a state row.
     /// Nil means the observation failed; it is not proof that the job is absent.
@@ -60,8 +61,8 @@ protocol LaunchAgentManaging: Sendable {
 }
 
 /// Applies the shared service-start policy for registration/start flows.
-/// The menu-bar Restart action deliberately does not use this helper: it asks
-/// the supervised Gateway to drain and lets launchd perform relaunch.
+/// An already-loaded registration is admitted and started non-destructively;
+/// lifecycle callers use the authenticated Gateway drain for running work.
 enum LaunchAgentLoader {
     static func ensureLoaded(
         manager: LaunchAgentManaging,
@@ -69,9 +70,7 @@ enum LaunchAgentLoader {
         label: String
     ) async -> LaunchAgentOutcome {
         let loadOutcome = await manager.load(plistPath: plistPath, label: label)
-        guard case .alreadyLoaded = loadOutcome else {
-            return loadOutcome
-        }
-        return await manager.restart(label: label)
+        guard case .alreadyLoaded = loadOutcome else { return loadOutcome }
+        return await manager.start(label: label)
     }
 }

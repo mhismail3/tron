@@ -303,6 +303,10 @@ check_owner() {
     && pass "$label exact helper path" || fail "$label helper path mismatch"
   [[ "$(plist_value EnvironmentVariables.TRON_GATEWAY_SUPERVISED "$plist")" == 1 ]] && pass "$label supervision marker" || fail "$label supervision marker"
   [[ "$(plist_value EnvironmentVariables.TRON_GATEWAY_CHANNEL "$plist")" == "$channel" ]] && pass "$label channel marker" || fail "$label channel marker"
+  if [[ "$channel" == stable ]]; then
+    [[ "$(plist_json KeepAlive "$plist")" == '{"SuccessfulExit":false}' ]] && pass "$label clean-exit policy" || fail "$label clean-exit policy"
+    [[ "$(plist_value EnvironmentVariables.TRON_GATEWAY_EXIT_POLICY "$plist")" == stop-on-success ]] && pass "$label exit-policy marker" || fail "$label exit-policy marker"
+  fi
   if [[ "$channel" == dev ]]; then
     [[ "$(plist_value EnvironmentVariables.TRON_HOME_NAME "$plist")" == "$expected_home" ]] && pass "$label home marker" || fail "$label home marker"
     [[ "$(plist_value EnvironmentVariables.TRON_AGENT_DIR_NAME "$plist")" == "$expected_agent" ]] && pass "$label agent-dir marker" || fail "$label agent-dir marker"
@@ -326,6 +330,9 @@ check_owner() {
     && pass "$label PID uses exact selected payload" || fail "$label PID selected payload path mismatch"
   [[ "$output" == *"TRON_GATEWAY_SUPERVISED => 1"* || "$output" == *"TRON_GATEWAY_SUPERVISED = 1"* ]] || fail "$label runtime supervision marker missing"
   [[ "$output" == *"TRON_GATEWAY_CHANNEL => $channel"* || "$output" == *"TRON_GATEWAY_CHANNEL = $channel"* ]] || fail "$label runtime channel marker missing"
+  if [[ "$channel" == stable ]]; then
+    [[ "$output" == *"TRON_GATEWAY_EXIT_POLICY => stop-on-success"* || "$output" == *"TRON_GATEWAY_EXIT_POLICY = stop-on-success"* ]] || fail "$label runtime exit-policy marker missing"
+  fi
   if [[ "$channel" == dev ]]; then
     [[ "$output" == *"TRON_HOME_NAME => $expected_home"* || "$output" == *"TRON_HOME_NAME = $expected_home"* ]] || fail "$label runtime home marker missing"
     [[ "$output" == *"TRON_AGENT_DIR_NAME => $expected_agent"* || "$output" == *"TRON_AGENT_DIR_NAME = $expected_agent"* ]] || fail "$label runtime agent-dir marker missing"

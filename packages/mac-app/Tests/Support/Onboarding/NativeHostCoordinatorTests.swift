@@ -152,6 +152,78 @@ struct NativeHostCoordinatorTests {
         }
     }
 
+    @Test("Quit temporarily unregisters and reopening restores prior enabled intent without consent")
+    func quitAndRestore() async throws {
+        let fake = FakeNativeHost(), preferences = FakeNativePreferences()
+        await fake.approve()
+        let owner = NativeHostCoordinator(operations: fake.operations, preferences: preferences.operations)
+        try await owner.suspendForQuit()
+        #expect(preferences.value == true)
+        #expect(await fake.events == ["drain", "unregister"])
+        let reopened = NativeHostCoordinator(operations: fake.operations, preferences: preferences.operations)
+        #expect(try await reopened.restoreIfDesired() == .needsApproval)
+        #expect(try await reopened.restoreIfDesired() == .needsApproval)
+        #expect(await fake.events == ["drain", "unregister", "register"])
+        #expect(await fake.requestIDs.isEmpty)
+    }
+
+    @Test("Quit preserves a pending helper approval when intent is not yet recorded")
+    func quitAndRestorePreservesPendingApproval() async throws {
+        let fake = FakeNativeHost(), preferences = FakeNativePreferences()
+        await fake.needsApproval()
+        let owner = NativeHostCoordinator(operations: fake.operations, preferences: preferences.operations)
+        try await owner.suspendForQuit()
+        #expect(preferences.value == true)
+        let reopened = NativeHostCoordinator(operations: fake.operations, preferences: preferences.operations)
+        #expect(try await reopened.restoreIfDesired() == .needsApproval)
+        #expect(await fake.events == ["drain", "unregister", "register"])
+    }
+
+    @Test("An explicitly disabled helper is not restored on launch")
+    func disabledIntentStaysDisabled() async throws {
+        let fake = FakeNativeHost(), preferences = FakeNativePreferences(true)
+        await fake.approve()
+        let owner = NativeHostCoordinator(operations: fake.operations, preferences: preferences.operations)
+        try await owner.unregister()
+        #expect(preferences.value == false)
+        #expect(try await owner.restoreIfDesired() == .needsRegistration)
+        #expect(await fake.events == ["drain", "unregister"])
+    }
+
+    @Test("Failed temporary unregister cannot lose restore intent")
+    func failedQuitPreservesIntent() async {
+        let fake = FakeNativeHost(), preferences = FakeNativePreferences()
+        await fake.approve(); await fake.failUnregister()
+        let owner = NativeHostCoordinator(operations: fake.operations, preferences: preferences.operations)
+        await #expect(throws: NativeHostError.self) { try await owner.suspendForQuit() }
+        #expect(preferences.value == true)
+        #expect(await owner.serviceState() == .enabled)
+    }
+
+    @Test("Launch never enables an optional helper without prior intent")
+    func noFirstLaunchActivation() async throws {
+        let fake = FakeNativeHost(), preferences = FakeNativePreferences()
+        let owner = NativeHostCoordinator(operations: fake.operations, preferences: preferences.operations)
+        #expect(try await owner.restoreIfDesired() == .needsRegistration)
+        #expect(await fake.events.isEmpty)
+        #expect(preferences.value == nil)
+    }
+}
+
+private extension NativeHostCoordinator {
+    init(operations: NativeHostOperations) {
+        self.init(operations: operations, preferences: FakeNativePreferences().operations)
+    }
+}
+
+private final class FakeNativePreferences: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Bool?
+    init(_ value: Bool? = nil) { stored = value }
+    var value: Bool? { lock.withLock { stored } }
+    var operations: NativeHostPreferences {
+        .init(desiredEnabled: { self.value }, setDesiredEnabled: { value in self.lock.withLock { self.stored = value } })
+    }
 }
 
 private actor FakeNativeHost {
@@ -171,6 +243,7 @@ private actor FakeNativeHost {
               request: { await self.request($0, id: $1) })
     }
     func state() -> NativeHostServiceState { status }
+    func needsApproval() { status = .needsApproval }
     func approve() { status = .enabled }
     func failUnregister() { unregisterFails = true }
     func failEnable() { enableFails = true }

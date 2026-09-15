@@ -107,8 +107,8 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
   return { mode, branch };
 }
 
-const restartDrainMethods = new Set([
-  "system.info", "system.logs", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.drain.status",
+const lifecycleDrainMethods = new Set([
+  "system.info", "system.logs", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.shutdown", "gateway.drain.status",
   "device.install.config.status", "device.install.status",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
   "session.workspace.inspect", "session.workspace.list", "session.workspace.file", "session.workspace.git.diff", "session.workspace.git.history.list", "session.workspace.git.history.get", "session.workspace.git.history.diff",
@@ -167,6 +167,7 @@ export interface GatewayServiceDependencies {
   logger: GatewayLogger;
   receipts: CommandReceiptStore;
   requestRestart: () => void;
+  requestShutdown?: () => void;
   sessionDeleted: (sessionId: string) => void;
   broadcast: (topic: string, payload: JsonValue) => void;
   notifications?: NotificationService;
@@ -175,8 +176,8 @@ export interface GatewayServiceDependencies {
 }
 
 export class GatewayService {
-  private restartRequested = false;
-  private restartScheduled = false;
+  private lifecycle: { kind: "restart" | "shutdown" | "update"; commandId: string } | undefined;
+  private readonly lifecycleLane = new AsyncMutex();
   private readonly gitWorktrees: GitWorktreeService;
   private readonly sessionListPages = new SessionListPaginationStore();
   private readonly modelCatalogPages = new ModelCatalogPager();
@@ -272,6 +273,7 @@ export class GatewayService {
         "queue-management.v1",
         "skill-prompt.v1",
         "restart-drain.v1",
+        ...(process.env.TRON_GATEWAY_EXIT_POLICY === "stop-on-success" && this.dependencies.requestShutdown ? ["shutdown-drain.v1"] : []),
         "context-window.v1",
         "compaction-policy.v1",
         "drain-status.v1",
@@ -285,8 +287,8 @@ export class GatewayService {
 
   async invoke(client: ClientContext, method: string, rawParams: unknown): Promise<JsonValue> {
     const params = object(rawParams ?? {}, "params");
-    if (this.restartRequested && !restartDrainMethods.has(method)) {
-      throw new GatewayError("busy", "The Gateway is draining accepted work before restart", true);
+    if (this.lifecycle && this.lifecycle.kind !== "update" && !lifecycleDrainMethods.has(method)) {
+      throw new GatewayError("busy", "The Gateway is draining accepted work before process exit", true);
     }
     switch (method) {
       case "system.info":
@@ -327,24 +329,29 @@ export class GatewayService {
         return safeJson(await this.updateService.status(channel));
       }
       case "gateway.update":
-        return this.mutation(client, method, params, async () => {
+        return this.mutation(client, method, params, () => this.lifecycleLane.run(async () => {
+          this.requireLifecycleAdmission();
           await this.requireNoActiveIosDeviceInstall();
+          await this.requireNoActiveGatewayUpdate();
           const commandId = string(params.commandId, "commandId", { min: 8, max: 160 });
-          return safeJson(await this.updateService.update({
-            ...validateGatewayUpdateRequest(params),
-            commandId,
-          }));
-        });
+          const result = await this.updateService.update({ ...validateGatewayUpdateRequest(params), commandId });
+          this.lifecycle = { kind: "update", commandId }; // Covers the detached helper's startup/status gap.
+          return safeJson(result);
+        }));
       case "gateway.rollback":
-        return this.mutation(client, method, params, async () => {
+        return this.mutation(client, method, params, () => this.lifecycleLane.run(async () => {
+          this.requireLifecycleAdmission();
           await this.requireNoActiveIosDeviceInstall();
+          await this.requireNoActiveGatewayUpdate();
           if (Object.keys(params).some((key) => !["commandId", "channel"].includes(key))) {
             throw new GatewayError("invalid_request", "Gateway rollback accepts only channel and commandId");
           }
           const commandId = string(params.commandId, "commandId", { min: 8, max: 160 });
           const channel = oneOf(params.channel === undefined ? "stable" : params.channel, "channel", ["stable", "dev"] as const);
-          return safeJson(await this.updateService.rollback({ channel, commandId }));
-        });
+          const result = await this.updateService.rollback({ channel, commandId });
+          this.lifecycle = { kind: "update", commandId };
+          return safeJson(result);
+        }));
       case "device.list":
         return safeJson({ devices: await this.dependencies.devices.listDevices() });
       case "device.install.config.status": {
@@ -376,7 +383,8 @@ export class GatewayService {
         return safeJson(await this.iosDeviceInstallService.status(deviceId));
       }
       case "device.install":
-        return this.mutation(client, method, params, async () => {
+        return this.mutation(client, method, params, () => this.lifecycleLane.run(async () => {
+          this.requireLifecycleAdmission();
           if (Object.keys(params).some((key) => !["commandId", "deviceId"].includes(key))) {
             throw new GatewayError("invalid_request", "iOS device installation accepts only deviceId");
           }
@@ -385,7 +393,7 @@ export class GatewayService {
           await this.requirePairedDevice(deviceId);
           await this.requireNoActiveGatewayUpdate();
           return safeJson(await this.iosDeviceInstallService.install(deviceId, commandId));
-        });
+        }));
       case "device.revoke": {
         const deviceId = string(params.deviceId, "deviceId", { max: 100 });
         return this.mutation(client, method, params, () => this.withMobileIdentityLane(deviceId, async () => {
@@ -457,49 +465,60 @@ export class GatewayService {
           if (Object.keys(params).some((key) => key !== "commandId")) throw new GatewayError("invalid_request", "Push registration removal accepts no parameters beyond commandId");
           return { removed: await this.requireNotifications().removeDevice(client.identity) };
         }));
-      case "gateway.restart": {
+      case "gateway.restart":
+      case "gateway.shutdown": {
+        const shuttingDown = method === "gateway.shutdown";
+        if (shuttingDown && !client.isLocal) throw new GatewayError("auth_required", "Only the local Mac app can stop the Gateway");
+        if (shuttingDown && (process.env.TRON_GATEWAY_EXIT_POLICY !== "stop-on-success" || !this.dependencies.requestShutdown)) {
+          throw new GatewayError("unsupported", "Graceful Quit requires the current installed Mac app and Gateway registration");
+        }
         if (process.env.TRON_GATEWAY_SUPERVISED !== "1") {
           throw new GatewayError("unsupported", "Gateway restart requires an external supervisor");
         }
-        if (this.restartRequested) {
-          throw new GatewayError("busy", "Gateway restart is already draining; inspect gateway.drain.status or command.status", true);
-        }
         let ownsSchedule = false;
         try {
-          return await this.mutation(client, method, params, async () => {
+          return await this.mutation(client, method, params, () => this.lifecycleLane.run(async () => {
+            if (this.lifecycle && this.lifecycle.kind !== "update") throw new GatewayError("busy", "Gateway lifecycle is already draining; inspect gateway.drain.status or command.status", true);
+            if (Object.keys(params).some(key => key !== "commandId")) throw new GatewayError("invalid_request", "Gateway lifecycle accepts only commandId");
+            const commandId = string(params.commandId, "commandId", { min: 8, max: 160 });
             await this.requireNoActiveIosDeviceInstall();
-            if (!this.dependencies.terminals.beginRestartDrain()) {
-              throw new GatewayError("busy", "Close active terminal sessions before restarting the Gateway", true);
+            // Updates run through a detached helper but retain this lifecycle
+            // marker until terminal status is observed. The helper's
+            // authenticated local restart is the one handoff that must replace
+            // that marker: promotion and rollback request it with the exact
+            // Gateway-owned command ID, before the status projection can reach
+            // its draining state. Other restart and shutdown requests remain
+            // subject to the active-update admission check.
+            if (shuttingDown || !this.isAcceptedGatewayUpdateRestart(client, commandId)) {
+              await this.requireNoActiveGatewayUpdate();
+            }
+            if (!this.dependencies.terminals.beginAdministrativeDrain()) {
+              throw new GatewayError("busy", "Close active terminal sessions before stopping or restarting the Gateway", true);
             }
             const activeSessionIds = this.dependencies.sessions.activeSessionIds();
             this.dependencies.automations?.beginDrain();
             const drain = this.dependencies.sessions.beginAdministrativeDrain();
             this.dependencies.logger?.log(
               "info",
-              `Gateway restart requested; draining ${activeSessionIds.length} active session${activeSessionIds.length === 1 ? "" : "s"}`,
-              { event: "gateway.restart.requested", source: "transport" }
+              `Gateway ${shuttingDown ? "shutdown" : "restart"} requested; draining ${activeSessionIds.length} active session${activeSessionIds.length === 1 ? "" : "s"}`,
+              { event: shuttingDown ? "gateway.shutdown.requested" : "gateway.restart.requested", source: "transport" }
             );
-            if (!this.restartRequested) {
-              this.restartRequested = true;
-              ownsSchedule = true;
-            }
+            this.lifecycle = { kind: shuttingDown ? "shutdown" : "restart", commandId };
+            ownsSchedule = true;
             return safeJson({
-              restarting: drain.blockerCount === 0,
+              ...(shuttingDown ? { stopping: true } : { restarting: drain.blockerCount === 0 }),
               scheduled: drain.blockerCount > 0,
               activeSessionIds,
               drainId: drain.drainId,
               drainRevision: drain.revision,
               drain,
             });
-          });
+          }));
         } finally {
           // CommandReceiptStore has completed (or failed) its terminal write
           // attempt before this boundary. A failed receipt cannot reopen the
           // already accepted drain, so replacement still progresses exactly once.
-          if (ownsSchedule && !this.restartScheduled) {
-            this.restartScheduled = true;
-            setTimeout(this.dependencies.requestRestart, 100).unref();
-          }
+          if (ownsSchedule) setTimeout(shuttingDown ? this.dependencies.requestShutdown! : this.dependencies.requestRestart, 100).unref();
         }
       }
       case "automation.status": {
@@ -1499,11 +1518,23 @@ export class GatewayService {
     }
   }
 
+  private requireLifecycleAdmission(): void {
+    if (this.lifecycle && this.lifecycle.kind !== "update") throw new GatewayError("busy", "Gateway lifecycle is already draining", true);
+  }
+
+  private isAcceptedGatewayUpdateRestart(client: ClientContext, commandId: string): boolean {
+    return client.isLocal && this.lifecycle?.kind === "update" && this.lifecycle.commandId === commandId;
+  }
+
   private async requireNoActiveGatewayUpdate(): Promise<void> {
     if (!this.updateService.isUsable) return;
     const status = await this.updateService.status(this.updateService.channel);
-    if (["starting", "building", "staging", "draining", "promoting", "restart", "rollback", "rollback-requested", "restart-requested"].includes(status.state)) {
-      throw new GatewayError("busy", "Wait for the active Gateway update or rollback to finish before installing iOS", true);
+    if (this.lifecycle?.kind === "update") {
+      if (status.commandId === this.lifecycle.commandId && ["ready", "failed", "failure", "rolled-back"].includes(status.state)) this.lifecycle = undefined;
+      else throw new GatewayError("busy", "Wait for the accepted Gateway update or rollback to finish", true);
+    }
+    if (["update-requested", "starting", "building", "staging", "draining", "promoting", "restart", "rollback", "rollback-requested", "restart-requested"].includes(status.state)) {
+      throw new GatewayError("busy", "Wait for the active Gateway update or rollback to finish", true);
     }
   }
 

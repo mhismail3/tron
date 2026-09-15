@@ -28,6 +28,8 @@ function service(options: {
   activeSessions?: string[];
   activeTerminals?: string[];
   requestRestart?: () => void;
+  requestShutdown?: () => void;
+  updateService?: GatewayServiceDependencies["updateService"];
   executeReceipt?: GatewayServiceDependencies["receipts"]["execute"];
   workRegistry?: GatewayWorkRegistry;
   rename?: (name: string) => Promise<void>;
@@ -46,7 +48,7 @@ function service(options: {
     },
     terminals: {
       activeTerminalIds: () => options.activeTerminals ?? [],
-      beginRestartDrain: () => (options.activeTerminals ?? []).length === 0,
+      beginAdministrativeDrain: () => (options.activeTerminals ?? []).length === 0,
     },
     receipts: { execute: options.executeReceipt ?? (async (_identity: string, _method: string, _commandId: string, operation: () => Promise<unknown>) => operation()) },
     devices: { hasDevice: async () => true },
@@ -55,6 +57,8 @@ function service(options: {
       removeDevice: async () => true,
     },
     requestRestart: options.requestRestart ?? (() => {}),
+    ...(options.requestShutdown ? { requestShutdown: options.requestShutdown } : {}),
+    ...(options.updateService ? { updateService: options.updateService } : {}),
     ...(options.workRegistry ? { workRegistry: options.workRegistry } : {}),
   } as unknown as GatewayServiceDependencies;
   return new GatewayService(dependencies);
@@ -65,7 +69,120 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe("Gateway administrative restart", () => {
+describe("Gateway administrative lifecycle", () => {
+  it("shutdown is local-only and requires non-relaunching supervision", async () => {
+    vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1");
+    const stop = vi.fn(), gateway = service({ requestShutdown: stop });
+    await expect(gateway.invoke(client, "gateway.shutdown", { commandId: "shutdown-command" })).rejects.toMatchObject({ code: "auth_required" });
+    await expect(gateway.invoke({ ...client, isLocal: true }, "gateway.shutdown", { commandId: "shutdown-command" })).rejects.toMatchObject({ code: "unsupported" });
+    expect(stop).not.toHaveBeenCalled();
+  });
+  it("shutdown acknowledges its drain, seals new work, and never schedules a restart", async () => {
+    vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1"); vi.stubEnv("TRON_GATEWAY_EXIT_POLICY", "stop-on-success"); vi.useFakeTimers();
+    const stop = vi.fn(), restart = vi.fn();
+    const gateway = service({ activeSessions: ["session-1"], requestShutdown: stop, requestRestart: restart });
+    const local = { ...client, isLocal: true };
+    await expect(gateway.invoke(local, "gateway.shutdown", { commandId: "shutdown-command" })).resolves.toMatchObject({ stopping: true, scheduled: true, activeSessionIds: ["session-1"] });
+    await expect(gateway.invoke(local, "gateway.restart", { commandId: "restart-command" })).rejects.toMatchObject({ code: "busy" });
+    await expect(gateway.invoke(local, "settings.update", {})).rejects.toMatchObject({ code: "busy" });
+    expect(stop).not.toHaveBeenCalled(); await vi.advanceTimersByTimeAsync(100);
+    expect(stop).toHaveBeenCalledOnce(); expect(restart).not.toHaveBeenCalled();
+  });
+  it("receipt-write failure cannot undo an already accepted shutdown", async () => {
+    vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1"); vi.stubEnv("TRON_GATEWAY_EXIT_POLICY", "stop-on-success"); vi.useFakeTimers();
+    const stop = vi.fn();
+    const gateway = service({ requestShutdown: stop, executeReceipt: async (_owner, _method, _id, operation) => { await operation(); throw new Error("receipt write failed"); } });
+    await expect(gateway.invoke({ ...client, isLocal: true }, "gateway.shutdown", { commandId: "shutdown-command" })).rejects.toThrow("receipt write failed");
+    await vi.advanceTimersByTimeAsync(100); expect(stop).toHaveBeenCalledOnce();
+  });
+  it("accepted update startup cannot race a restart through stale progress", async () => {
+    vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1"); vi.stubEnv("TRON_GATEWAY_EXIT_POLICY", "stop-on-success"); vi.useFakeTimers();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let status = { state: "ready", commandId: null as string | null };
+    const update = vi.fn(async () => { await gate; return { accepted: true }; });
+    const restart = vi.fn(), gateway = service({ requestRestart: restart, updateService: { isUsable: true, channel: "stable", status: async () => status, update } as never });
+    const changing = gateway.invoke(client, "gateway.update", { commandId: "update-command", mode: "source" });
+    await vi.waitFor(() => expect(update).toHaveBeenCalled());
+    const restarting = gateway.invoke(client, "gateway.restart", { commandId: "restart-command" });
+    release(); await changing;
+    await expect(restarting).rejects.toMatchObject({ code: "busy" });
+    expect(restart).not.toHaveBeenCalled();
+  });
+
+  it("admits only the authenticated updater's exact restart during a status projection gap", async () => {
+    vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1"); vi.stubEnv("TRON_GATEWAY_EXIT_POLICY", "stop-on-success"); vi.useFakeTimers();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const update = vi.fn(async () => { await gate; return { accepted: true }; });
+    const requestRestart = vi.fn();
+    const requestShutdown = vi.fn();
+    const gateway = service({
+      requestRestart,
+      requestShutdown,
+      updateService: {
+        isUsable: true,
+        channel: "stable",
+        // The detached helper has accepted the update, but its first progress
+        // write has not reached the Gateway status projection yet.
+        status: async () => ({ state: "unknown", commandId: null }),
+        update,
+      } as never,
+    });
+    const changing = gateway.invoke(client, "gateway.update", { commandId: "update-command", mode: "source" });
+    await vi.waitFor(() => expect(update).toHaveBeenCalled());
+    release(); await changing;
+
+    await expect(gateway.invoke({ ...client, isLocal: true }, "gateway.restart", { commandId: "different-command" }))
+      .rejects.toMatchObject({ code: "busy" });
+    await expect(gateway.invoke(client, "gateway.restart", { commandId: "update-command" }))
+      .rejects.toMatchObject({ code: "busy" });
+    await expect(gateway.invoke({ ...client, isLocal: true }, "gateway.shutdown", { commandId: "update-command" }))
+      .rejects.toMatchObject({ code: "busy" });
+    await expect(gateway.invoke({ ...client, isLocal: true }, "gateway.restart", { commandId: "update-command" }))
+      .resolves.toMatchObject({ scheduled: false });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(requestRestart).toHaveBeenCalledOnce();
+  });
+
+  it("admits the exact authenticated restart handoff after rollback acceptance", async () => {
+    vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1"); vi.useFakeTimers();
+    const rollback = vi.fn(async () => ({ accepted: true }));
+    const requestRestart = vi.fn();
+    const gateway = service({
+      requestRestart,
+      updateService: {
+        isUsable: true,
+        channel: "stable",
+        status: async () => ({ state: "unknown", commandId: null }),
+        rollback,
+      } as never,
+    });
+    await gateway.invoke(client, "gateway.rollback", { commandId: "rollback-command" });
+    await expect(gateway.invoke({ ...client, isLocal: true }, "gateway.restart", { commandId: "rollback-command" }))
+      .resolves.toMatchObject({ scheduled: false });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(rollback).toHaveBeenCalledOnce();
+    expect(requestRestart).toHaveBeenCalledOnce();
+  });
+
+  it("accepted update startup cannot race a shutdown through stale progress", async () => {
+    vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1"); vi.stubEnv("TRON_GATEWAY_EXIT_POLICY", "stop-on-success"); vi.useFakeTimers();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let status = { state: "ready", commandId: null as string | null };
+    const update = vi.fn(async () => { await gate; return { accepted: true }; });
+    const stop = vi.fn(), gateway = service({ requestShutdown: stop, updateService: { isUsable: true, channel: "stable", status: async () => status, update } as never });
+    const local = { ...client, isLocal: true };
+    const changing = gateway.invoke(local, "gateway.update", { commandId: "update-command", mode: "source" });
+    await vi.waitFor(() => expect(update).toHaveBeenCalled());
+    const quitting = gateway.invoke(local, "gateway.shutdown", { commandId: "shutdown-command" });
+    const refused = expect(quitting).rejects.toMatchObject({ code: "busy" });
+    release(); await changing; await refused; expect(stop).not.toHaveBeenCalled();
+    status = { state: "failure", commandId: "update-command" };
+    await gateway.invoke(local, "gateway.shutdown", { commandId: "shutdown-retry" });
+    await vi.advanceTimersByTimeAsync(100); expect(stop).toHaveBeenCalledOnce();
+  });
   it("fails closed when the Gateway is not externally supervised", async () => {
     vi.stubEnv("TRON_GATEWAY_SUPERVISED", "0");
     const gateway = service();
@@ -163,7 +280,7 @@ describe("Gateway administrative restart", () => {
         administrativeDrainSnapshot: () => snapshot,
       },
       terminals: {
-        beginRestartDrain: () => { gateClosed = true; return true; },
+        beginAdministrativeDrain: () => { gateClosed = true; return true; },
         open: spawn,
         attach: () => ({ terminal: {}, chunks: [], reset: false }),
       },
