@@ -195,6 +195,14 @@ struct ExistingInstallDetectorTests {
         try FileManager.default.createDirectory(at: helper.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("// test".utf8).write(to: helper)
         try Data("// update test".utf8).write(to: updateHelper)
+        for relativePath in [
+            "app/dist/delegation/pi-subagents/index.js",
+            "app/dist/delegation/pi-subagents/src/runs/background/subagent-runner.js",
+        ] {
+            let delegationFile = payload.appendingPathComponent(relativePath, isDirectory: false)
+            try FileManager.default.createDirectory(at: delegationFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("export {};\n".utf8).write(to: delegationFile)
+        }
         try FileManager.default.createDirectory(at: runtime, withIntermediateDirectories: true)
         for architecture in ["arm64", "x64"] {
             try Data(repeating: 0, count: 1_048_576).write(to: runtime.appendingPathComponent("node-\(architecture)"))

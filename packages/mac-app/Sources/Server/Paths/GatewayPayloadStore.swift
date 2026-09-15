@@ -175,6 +175,8 @@ enum GatewayPayloadValidator {
     static let minimumRuntimeBytes: Int64 = 1_048_576
     static let xcodegenRelativePath = "runtime/xcodegen/bin/xcodegen"
     static let xcodegenBasePresetRelativePath = "runtime/xcodegen/share/xcodegen/SettingPresets/base.yml"
+    static let delegationEntrypointRelativePath = "app/dist/delegation/pi-subagents/index.js"
+    static let delegationRunnerRelativePath = "app/dist/delegation/pi-subagents/src/runs/background/subagent-runner.js"
 
     static func validate(
         payloadRoot: URL,
@@ -244,6 +246,8 @@ enum GatewayPayloadValidator {
 
         let requiredFiles: [(String, Int64)] = [
             ("app/dist/index.js", minimumEntrypointBytes),
+            (delegationEntrypointRelativePath, 1),
+            (delegationRunnerRelativePath, 1),
             ("app/package.json", 1),
             ("app/package-lock.json", 1),
             ("app/scripts/ensure-node-pty-helper.mjs", 1),

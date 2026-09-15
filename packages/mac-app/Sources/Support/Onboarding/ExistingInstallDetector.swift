@@ -153,6 +153,14 @@ enum ExistingInstallDetector {
         guard usableFile(entrypoint, minimumBytes: 1_024) else {
             return "The bundled Gateway entrypoint is missing or incomplete. Rebuild or reinstall Tron."
         }
+        for relativePath in [
+            "app/dist/delegation/pi-subagents/index.js",
+            "app/dist/delegation/pi-subagents/src/runs/background/subagent-runner.js",
+        ] {
+            guard usableFile(payloadRoot.appendingPathComponent(relativePath, isDirectory: false)) else {
+                return "The bundled Gateway delegation runtime is missing or incomplete. Rebuild or reinstall Tron."
+            }
+        }
 
         let packageManifest = payloadRoot.appendingPathComponent("app/package.json", isDirectory: false)
         let packageLock = payloadRoot.appendingPathComponent("app/package-lock.json", isDirectory: false)

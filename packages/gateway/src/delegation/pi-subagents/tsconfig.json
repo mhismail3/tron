@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": false,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "declaration": true,
+    "sourceMap": true,
+    "outDir": "../../../dist/delegation/pi-subagents",
+    "rootDir": ".",
+    "types": ["node"]
+  },
+  "include": ["index.ts", "src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}

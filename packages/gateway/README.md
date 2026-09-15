@@ -727,7 +727,21 @@ an error rather than `{ aborted: true }`. Runtime replacement also drains the ou
 process owner before installing its successor. Extension-managed detached subagents never
 enter that owner and are not cancelled by foreground Stop.
 Extension commands are resolved before ordinary streaming rejection and still execute through
-Pi's prompt path. The explicit extension adapter registry identifies only the pinned
+Pi's prompt path. Tron installs one release-owned inline `ask_user` capability at
+`<inline:tron-ask-user>` with source identity `tron:ask-user.v1`. It calls the shared
+SemanticUIBroker form seam directly, uses deterministic question/option IDs, runs
+sequentially, and returns the bounded historical `{questions, answers, cancelled}`
+details shape. The native form route therefore works without installing a user
+package. The default capability is reserved: if a configured extension also
+registers `ask_user`, resource admission fails closed rather than depending on Pi
+load order; the same gate rejects duplicate first-party registrations. The
+foreign adapter below remains only for explicitly admitted compatibility
+handling and historical result interpretation; it is not a selectable replacement
+for the reserved built-in in the default RuntimeSlot. A destination still carrying
+that package must disable only the superseded package in its Pi settings before
+retrying runtime admission; no source settings or canonical history are rewritten.
+
+The explicit extension adapter registry identifies only the pinned
 `@zhushanwen/pi-ask-user@7.0.15` package through exact package source/path metadata,
 the installed manifest and npm-lock integrity
 `sha512-FqsIq4cOXVVX12Jotdj4o9BkZBa5DC/8Hg9w5yhxl+AmsA8UGX3a5kpThCzmFdf0lxaVaWN5/plAsJBSdWjZ3g==`,
@@ -742,7 +756,8 @@ validation, result formatting, renderer callbacks, events, abort signal, and
 channel behavior remain authoritative. A scoped UI adapter translates the package's
 exact `\0XYZ_ASK_USER` select marker into one first-class semantic form interaction;
 the same adapter is installed on the extension event context captured by its subagent
-channel handler. Form v1 admits one to four questions, two to four options per question,
+channel handler. That marker is foreign-compatibility-only and is not accepted by the
+Tron-owned tool. Form v1 admits one to four questions, two to four options per question,
 stable question/option IDs, single or multiple selection, optional Other text, explicit
 cancel policy, and one atomic structured response. The Gateway permits one pending form
 per session, preserves canonical option order, caps each Other response at 32 KiB and the

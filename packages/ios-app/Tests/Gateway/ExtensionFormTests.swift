@@ -206,7 +206,24 @@ struct ExtensionFormTests {
         #expect(navigation.icon == nil)
     }
 
-    @Test func pendingToolMatchingUsesOperationAndAuditedOwnerInsteadOfToolCallID() throws {
+    @Test func completedTronAskUserResultBuildsReadOnlyForm() throws {
+        let response = try JSONDecoder.gateway.decode(JSONValue.self, from: Data(#"""
+        {"questions":[{"question":"Pick one","options":[{"label":"A"},{"label":"B"}],"multiSelect":false}],"answers":{"Pick one":{"selected":["B"],"other":null}},"cancelled":false}
+        """#.utf8))
+        let owner = ExtensionOwner(id: "tron-ask-user", title: "Ask User", source: AskUserToolPresentation.tronSource)
+        let tool = ChatToolPresentation(
+            id: "call", title: "Ask User", toolName: "ask_user", subtitle: "Completed",
+            request: nil, response: response, content: "", fallbackContent: nil,
+            error: false, startedAt: nil, completedAt: nil, durationMs: nil,
+            lastProgressAt: nil, progressSequence: nil,
+            extensionOrigin: ExtensionToolOrigin(source: AskUserToolPresentation.tronSource, owner: owner)
+        )
+        let presentation = try #require(AskUserToolPresentation.completed(tool: tool))
+        #expect(presentation.answer?.answers.first?.optionIds == ["question-0-option-1"])
+        #expect(presentation.form.title == "Question")
+    }
+
+    @Test func pendingToolMatchingUsesOperationAndAdmittedAskUserOwnerInsteadOfToolCallID() throws {
         let owner = ExtensionOwner(
             id: "ask-user",
             title: "Pi Ask User",

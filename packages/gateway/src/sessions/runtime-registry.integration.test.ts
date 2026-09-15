@@ -44,6 +44,7 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<v
 describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
+  const fixtureRoots = new Set<string>();
 
   async function coldFixture(label: string, options: {
     nested?: boolean;
@@ -67,6 +68,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       : join(agentDir, "sessions", "workspace");
     await Promise.all([mkdir(sessionDirectory, { recursive: true }), mkdir(cwd, { recursive: true })]);
     process.env.PI_CODING_AGENT_DIR = agentDir;
+    fixtureRoots.add(root);
     const manager = SessionManager.create(cwd, sessionDirectory);
     manager.appendMessage(fauxAssistantMessage(`cold acquisition ${label}`));
     if (options.name) manager.appendSessionInfo(options.name);
@@ -107,8 +109,27 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
 
   afterEach(async () => {
     await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
+    await Promise.all([...fixtureRoots].map((root) => rm(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 50,
+    })));
+    fixtureRoots.clear();
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+  });
+
+  it("loads the Tron ask_user capability through the production RuntimeSlot bootstrap", async () => {
+    const fixture = await coldFixture("tron-ask-user-bootstrap");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const tools = (slot.resources() as { tools: Array<{ name: string; source: string }> }).tools;
+    expect(tools).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "ask_user", source: "inline" }),
+      expect.objectContaining({ name: "subagent", source: "inline" }),
+    ]));
+    expect((slot as any).extensionToolOrigin("ask_user")).toMatchObject({ source: "tron:ask-user.v1" });
+    expect((slot as any).extensionToolOrigin("subagent")).toMatchObject({ source: "tron:subagents.v1" });
   });
 
   it("fences canonical history reads to the exact live runtime", async () => {
@@ -4592,7 +4613,9 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }));
     const internal = slot as unknown as { refreshSubagentActivityFromArtifact: (path: string) => Promise<void> };
     await internal.refreshSubagentActivityFromArtifact(asyncDir);
-    expect(slot.snapshot().extensionActivities ?? []).toEqual([]);
+    // The terminal canonical tool result may be projected as a recent activity;
+    // the stale running artifact must never regress it to running.
+    expect(slot.snapshot().extensionActivities ?? []).not.toContainEqual(expect.objectContaining({ lifecycle: expect.objectContaining({ state: "running" }) }));
 
     const projectRoot = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs");
     const unboundHistoricalDir = join(projectRoot, "unbound-historical-run");
@@ -4605,7 +4628,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       endedAt: Date.now(),
     }));
     await internal.refreshSubagentActivityFromArtifact(unboundHistoricalDir);
-    expect(slot.snapshot().extensionActivities ?? []).toEqual([]);
+    expect(slot.snapshot().extensionActivities ?? []).not.toContainEqual(expect.objectContaining({ runId: "unbound-historical-run" }));
 
     const pathPolicy = slot as unknown as { extensionArtifactPathAllowed: (path: string) => boolean };
     expect(pathPolicy.extensionArtifactPathAllowed(projectRoot)).toBe(false);
@@ -4635,7 +4658,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       lastUpdate: Date.now(),
     }));
     await internal.refreshSubagentActivityFromArtifact(ordinaryDir);
-    expect(slot.snapshot().extensionActivities ?? []).toEqual([]);
+    expect(slot.snapshot().extensionActivities ?? []).not.toContainEqual(expect.objectContaining({ runId: "ordinary-run" }));
   });
 
   it("binds artifact refresh to the canonical run directory and keeps admission time authoritative", async () => {

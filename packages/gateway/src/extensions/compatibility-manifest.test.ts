@@ -22,6 +22,10 @@ describe("pinned public Pi extension-host contract", () => {
       ui_prompt_start: { classification: "pi-runtime", capability: "event.ui-prompt-start" },
       ui_prompt_end: { classification: "pi-runtime", capability: "event.ui-prompt-end" },
     });
+    expect(extensionToolAdapterCompatibility.tronAskUserForm).toMatchObject({
+      classification: "native-semantic",
+      capability: "form.v1",
+    });
     expect(extensionToolAdapterCompatibility.tronDisplay).toMatchObject({
       classification: "native-semantic",
       capability: "display-artifacts.v1",

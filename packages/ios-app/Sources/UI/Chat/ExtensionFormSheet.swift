@@ -63,13 +63,22 @@ struct ExtensionFormSheet: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button(action: close) {
-                        Image(systemName: "xmark")
-                            .font(TronTypography.buttonSM)
+                    HStack(spacing: 12) {
+                        Button(action: close) {
+                            Image(systemName: "xmark")
+                                .font(TronTypography.buttonSM)
+                        }
+                        .tronToolbarAction(accent: .tronTextMuted)
+                        .disabled(submitting)
+                        .accessibilityLabel("Close form and keep answers")
+                        if form?.allowCancel == true {
+                            Button("Cancel", action: cancel)
+                                .font(TronTypography.bodySM)
+                                .foregroundStyle(Color.tronError)
+                                .disabled(submitting)
+                                .accessibilityLabel("Cancel form")
+                        }
                     }
-                    .tronToolbarAction(accent: .tronTextMuted)
-                    .disabled(submitting)
-                    .accessibilityLabel("Close form and keep answers")
                 }
                 ToolbarItem(placement: .principal) {
                     TronSheetTitle(title: form?.title ?? "Questions", accent: .tronAmber)
@@ -337,6 +346,11 @@ struct ExtensionFormSheet: View {
         dismiss()
     }
 
+    private func cancel() {
+        guard !submitting, form?.allowCancel == true else { return }
+        respond(value: nil, cancelled: true)
+    }
+
     private func persistDraft() {
         guard let form, form.questions.indices.contains(currentQuestionIndex) else { return }
         model.extensionInteractionDrafts.saveForm(
@@ -356,15 +370,15 @@ struct ExtensionFormSheet: View {
         guard ExtensionInteractionResponsePolicy.formError(answer, descriptor: form) == nil,
               let data = try? JSONEncoder.gateway.encode(answer),
               let value = try? JSONDecoder.gateway.decode(JSONValue.self, from: data) else { return }
-        respond(value: value)
+        respond(value: value, cancelled: false)
     }
 
-    private func respond(value: JSONValue?) {
+    private func respond(value: JSONValue?, cancelled: Bool) {
         submitting = true
         errorMessage = nil
         Task {
             do {
-                try await model.answerInteraction(interaction, sessionID: sessionID, value: value, cancelled: false)
+                try await model.answerInteraction(interaction, sessionID: sessionID, value: value, cancelled: cancelled)
                 model.extensionInteractionDrafts.clear(sessionID: sessionID, interaction: interaction)
                 onResolved()
                 dismiss()

@@ -72,7 +72,10 @@ fi
 
 for required_file in \
     "$PAYLOAD_DIR/manifest.json" "$PAYLOAD_DIR/app/dist/index.js" \
+    "$PAYLOAD_DIR/app/dist/delegation/pi-subagents/index.js" \
+    "$PAYLOAD_DIR/app/dist/delegation/pi-subagents/src/runs/background/subagent-runner.js" \
     "$PAYLOAD_DIR/app/package.json" "$PAYLOAD_DIR/app/package-lock.json" \
+    "$PAYLOAD_DIR/app/node_modules/pi-subagents/package.json" \
     "$PAYLOAD_DIR/app/PushService.xcconfig" \
     "$PAYLOAD_DIR/app/scripts/ensure-node-pty-helper.mjs" \
     "$PAYLOAD_DIR/app/scripts/gateway-payload-deploy.mjs" \

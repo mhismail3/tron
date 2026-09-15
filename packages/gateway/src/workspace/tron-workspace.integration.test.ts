@@ -104,20 +104,24 @@ describe("Tron workspace through the pinned runtime", () => {
     expect(resumed.cwd).toBe(f.cwd);
   }, 30_000);
 
-  it("passes actual direct delegated task arguments without broadening child tools", async () => {
+  it("passes actual direct delegated task arguments without broadening unrelated child tools", async () => {
+    // `subagent` is reserved by Tron; a fixture-owned tool uses a distinct
+    // name so this test exercises argument/cwd handling without bypassing the
+    // production collision gate.
     const f = await fixture(`export default function(pi) {
-      pi.registerTool({name:"subagent", label:"Child", description:"fixture", parameters:{type:"object",properties:{agent:{type:"string"},task:{type:"string"}},required:["agent","task"]},
+      pi.registerTool({name:"child_task", label:"Child", description:"fixture", parameters:{type:"object",properties:{agent:{type:"string"},task:{type:"string"}},required:["agent","task"]},
       execute: async (_id, args) => ({content:[{type:"text",text:args.task}],details:{received:args}})});
     }`);
     f.faux.setResponses([
-      fauxAssistantMessage([fauxToolCall("subagent", { agent: "worker", task: "Read only" })], { stopReason: "toolUse" }),
+      fauxAssistantMessage([fauxToolCall("child_task", { agent: "worker", task: "Read only" })], { stopReason: "toolUse" }),
       f.response(),
     ]);
     await f.slot.prompt("delegate"); await settle(f.slot);
     const tool = f.contexts[0]?.messages.find(message => message.role === "toolResult");
-    expect(JSON.stringify(tool)).toContain("Tron workspace handoff");
-    expect(JSON.stringify(tool)).toContain(join(f.tronHome, "workspace"));
+    expect(JSON.stringify(tool)).toContain('"received"');
+    expect(JSON.stringify(tool)).toContain('"agent":"worker"');
     expect(JSON.stringify(tool)).toContain("Read only");
+    expect(JSON.stringify(tool)).not.toContain("Tron workspace handoff");
     expect(f.slot.cwd).toBe(f.cwd);
   }, 15_000);
 

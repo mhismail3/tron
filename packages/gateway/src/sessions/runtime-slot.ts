@@ -15,6 +15,7 @@ import {
   type AgentSession,
   type AgentSessionEvent,
   type CreateAgentSessionRuntimeFactory,
+  type ExtensionAPI,
   type ExtensionCommandContextActions,
   type ModelRuntime,
   type ToolDefinition,
@@ -109,6 +110,7 @@ import { createTronDisplayExtension } from "../display/tron-display-extension.js
 import { createTronNativeCaptureExtension } from "../display/tron-native-capture-extension.js";
 import { createTronComputerExtension } from "../display/tron-computer-extension.js";
 import { createTronScheduleExtension, type ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
+import { createTronAskUserExtension } from "../extensions/tron-ask-user-extension.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import type { TronWorkspace } from "../workspace/tron-workspace.js";
 import { createTronCoreExtension } from "../workspace/tron-core-extension.js";
@@ -1272,6 +1274,32 @@ export class RuntimeSlot {
         resolveProjectTrust: async () => (await this.dependencies.trust.inspect(trust.cwd)).effectiveDecision === true,
       };
       const notifications = this.dependencies.notifications;
+      const workspaceDescriptor = await this.dependencies.workspace.describe();
+      const childBootstrapPrompt = [
+        "## Tron delegated-child context",
+        `You are a native child runtime launched by Tron. Keep the supplied working directory (${JSON.stringify(trust.cwd)}); do not assume Gateway services or parent UI tools are available.`,
+        `Tron internal workspace: ${JSON.stringify(workspaceDescriptor.root)} (${workspaceDescriptor.available ? "available" : "unavailable"}). Use only explicitly supplied tools and do not treat this context as extra authorization.`,
+        "Preserve canonical Pi sessions and report to the parent; never create a second session runtime for an existing session.",
+      ].join("\n");
+      // The delegation implementation is a separately compiled owned package;
+      // load its release artifact rather than making the strict Gateway project
+      // compile the upstream-sized source tree as internal code.
+      const { default: registerOwnedSubagentExtension } = await import(
+        new URL("../delegation/pi-subagents/index.js", import.meta.url).href,
+      );
+      // Test and embedding hosts may carry PI_SUBAGENT_CHILD from their own
+      // process. RuntimeSlot is always the parent authority, while child Pi
+      // processes invoke the same entrypoint with the marker intact.
+      const registerTronSubagentExtension = (pi: ExtensionAPI): void => {
+        const childMarker = process.env.PI_SUBAGENT_CHILD;
+        delete process.env.PI_SUBAGENT_CHILD;
+        try {
+          registerOwnedSubagentExtension(pi, { childBootstrapPrompt });
+        } finally {
+          if (childMarker === undefined) delete process.env.PI_SUBAGENT_CHILD;
+          else process.env.PI_SUBAGENT_CHILD = childMarker;
+        }
+      };
       const services = await createAgentSessionServices({
         cwd: trust.cwd,
         agentDir: this.dependencies.agentDir,
@@ -1288,6 +1316,8 @@ export class RuntimeSlot {
               () => { this.revision += 1; this.publishSnapshot(); },
             ) },
             { name: "tron-core", factory: createTronCoreExtension(this.dependencies.workspace, this.dependencies.knowledge) },
+            { name: "tron-ask-user", factory: createTronAskUserExtension() },
+            { name: "tron-subagents", factory: registerTronSubagentExtension },
             {
               name: "tron-display",
               factory: createTronDisplayExtension({
@@ -1327,7 +1357,7 @@ export class RuntimeSlot {
             views: this.dependencies.browserLiveViews,
             sessionId: sessionManager.getSessionId(),
             runtimeGeneration: this.runtimeGeneration,
-          } : undefined),
+          } : undefined, { requireTronAskUser: true, requireTronSubagent: true }),
         },
         resourceLoaderReloadOptions: this.resourceReloadOptions,
       });

@@ -42,17 +42,17 @@ enum PendingExtensionInteractionToolPresentation {
                 tool.isRunning
                     && toolOperationID(tool) == operationID
                     && ownersMatch(interaction: interaction, tool: tool)
-                    && (interaction.method != .form || isAuditedAskUser(tool))
+                    && (interaction.method != .form || isAskUser(tool))
             }
         }
         if operationMatches.count == 1 { return operationMatches[0] }
         guard operationMatches.isEmpty else { return nil }
 
         // A running ask_user blocks its serialized session lane, so one exact
-        // audited owner and one pending form are an unambiguous fallback when a
+        // admitted owner and one pending form are an unambiguous fallback when a
         // cold canonical tool segment no longer exposes the live operation ID.
         let askUserTools = tools.filter { tool in
-            tool.isRunning && isAuditedAskUser(tool)
+            tool.isRunning && isAskUser(tool)
         }
         guard askUserTools.count == 1, let tool = askUserTools.first else { return nil }
         let formMatches = pendingInteractions.filter { interaction in
@@ -61,9 +61,9 @@ enum PendingExtensionInteractionToolPresentation {
         return formMatches.count == 1 ? formMatches[0] : nil
     }
 
-    private static func isAuditedAskUser(_ tool: ChatToolDescriptor) -> Bool {
+    private static func isAskUser(_ tool: ChatToolDescriptor) -> Bool {
         tool.toolName == "ask_user"
-            && tool.extensionOrigin?.owner?.source == AskUserToolPresentation.auditedSource
+            && AskUserToolPresentation.isAskUserSource(tool.extensionOrigin?.owner?.source)
     }
 
     private static func toolOperationID(_ tool: ChatToolDescriptor) -> String? {
@@ -84,7 +84,13 @@ enum PendingExtensionInteractionToolPresentation {
 }
 
 struct AskUserToolPresentation: Equatable, Sendable {
+    /// Release-owned origin; the audited package remains an explicit compatibility origin.
+    static let tronSource = "tron:ask-user.v1"
     static let auditedSource = "npm:@zhushanwen/pi-ask-user@7.0.15"
+
+    fileprivate static func isAskUserSource(_ source: String?) -> Bool {
+        source == tronSource || source == auditedSource
+    }
 
     let form: ExtensionFormDescriptor
     let answer: ExtensionFormAnswer?
@@ -92,7 +98,7 @@ struct AskUserToolPresentation: Equatable, Sendable {
 
     static func completed(tool: ChatToolPresentation) -> AskUserToolPresentation? {
         guard tool.toolName == "ask_user",
-              tool.extensionOrigin?.owner?.source == auditedSource,
+              isAskUserSource(tool.extensionOrigin?.owner?.source),
               !tool.isRunning,
               !tool.error,
               let result = tool.response?.objectValue,

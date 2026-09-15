@@ -15,10 +15,11 @@
     "update:pi-sdk": "node scripts/update-pi-sdk.mjs",
     "test:pi-sdk-scripts": "node --test scripts/check-pi-sdk.test.mjs scripts/update-pi-sdk.test.mjs scripts/compare-pi-sdk-graph.test.mjs scripts/check-pi-sdk-rollback.test.mjs",
     "test:pi-sdk-rollback": "node scripts/check-pi-sdk-rollback.mjs",
-    "build": "tsc -p tsconfig.json",
-    "check": "tsc -p tsconfig.json --noEmit",
+    "build": "node src/delegation/pi-subagents/clean.mjs && tsc -p tsconfig.json && tsc -p src/delegation/pi-subagents/tsconfig.json && node src/delegation/pi-subagents/build.mjs",
+    "check": "tsc -p tsconfig.json --noEmit && tsc -p src/delegation/pi-subagents/tsconfig.json --noEmit",
     "test:resilience-fixtures": "node --test ../../scripts/ios-gateway-fault-proxy.test.mjs",
-    "test": "npm run test:pi-sdk-scripts && npm run test:resilience-fixtures && vitest run",
+    "test:delegation-behavior": "node --test scripts/delegation-public.integration.test.mjs",
+    "test": "npm run test:pi-sdk-scripts && npm run test:resilience-fixtures && npm run test:delegation-behavior && vitest run",
     "test:watch": "vitest",
     "start": "node dist/index.js",
     "chat": "node dist/client/terminal-chat.js"
@@ -28,9 +29,12 @@
     "@earendil-works/pi-ai": "0.84.4",
     "@earendil-works/pi-coding-agent": "0.84.4",
     "@earendil-works/pi-tui": "0.84.4",
+    "acorn": "8.18.0",
+    "jiti": "2.7.0",
     "node-pty": "1.1.0",
     "proper-lockfile": "4.1.2",
     "typebox": "1.3.7",
+    "yaml": "2.8.3",
     "ws": "8.21.3"
   },
   "devDependencies": {

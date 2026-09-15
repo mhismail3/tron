@@ -79,6 +79,10 @@ async function addRuntimeNodeAliases(root) {
   await mkdir(dirname(piCli), { recursive: true });
   await mkdir(join(root, "app", "node_modules", ".bin"), { recursive: true });
   await writeFile(join(piPackage, "package.json"), JSON.stringify({ name: "@earendil-works/pi-coding-agent", bin: { pi: "dist/cli.js" } }));
+  const ownedPackage = join(root, "app", "node_modules", "pi-subagents");
+  await mkdir(ownedPackage, { recursive: true });
+  await writeFile(join(ownedPackage, "package.json"), JSON.stringify({ name: "pi-subagents", version: "0.59.0-tron.1", type: "module", exports: { ".": "./index.js" } }));
+  await writeFile(join(ownedPackage, "index.js"), "export default () => {};\n");
   await writeFile(piCli, "#!/usr/bin/env node\n");
   await chmod(piCli, 0o755);
   try {
@@ -251,6 +255,9 @@ test("payload fingerprints include safe internal node_modules symlinks", async (
     await mkdir(join(versionRoot, "app", "node_modules", ".bin"), { recursive: true });
     await mkdir(join(versionRoot, "runtime"), { recursive: true });
     await writeFile(join(versionRoot, "app", "dist", "index.js"), `${"x".repeat(1_024)}\n`);
+    await mkdir(join(versionRoot, "app", "dist", "delegation", "pi-subagents", "src", "runs", "background"), { recursive: true });
+    await writeFile(join(versionRoot, "app", "dist", "delegation", "pi-subagents", "index.js"), "export default () => {};\n");
+    await writeFile(join(versionRoot, "app", "dist", "delegation", "pi-subagents", "src", "runs", "background", "subagent-runner.js"), "export {};\n");
     await writeFile(join(versionRoot, "app", "package.json"), "{}\n");
     await writeFile(join(versionRoot, "app", "package-lock.json"), "{}\n");
     await writeFile(join(versionRoot, "app", "PushService.xcconfig"), "TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test\n");
@@ -316,7 +323,11 @@ test("payload fingerprints include safe internal node_modules symlinks", async (
       join(staged.root, "app", "node_modules", "@earendil-works", "pi-coding-agent", "dist"),
       join(staged.root, "app", "node_modules", "@earendil-works", "pi-coding-agent"),
       join(staged.root, "app", "node_modules", "@earendil-works"), join(staged.root, "app", "node_modules"),
-      join(staged.root, "app", "dist"), join(staged.root, "app", "scripts"),
+      join(staged.root, "app", "dist", "delegation", "pi-subagents", "src", "runs", "background"),
+      join(staged.root, "app", "dist", "delegation", "pi-subagents", "src", "runs"),
+      join(staged.root, "app", "dist", "delegation", "pi-subagents", "src"),
+      join(staged.root, "app", "dist", "delegation", "pi-subagents"),
+      join(staged.root, "app", "dist", "delegation"), join(staged.root, "app", "dist"), join(staged.root, "app", "scripts"),
       join(staged.root, "app"), join(staged.root, "runtime", "bin-arm64"),
       join(staged.root, "runtime", "bin-x64"),
       join(staged.root, "runtime", "xcodegen", "bin"),
@@ -326,7 +337,7 @@ test("payload fingerprints include safe internal node_modules symlinks", async (
       join(staged.root, "runtime", "xcodegen"),
       join(staged.root, "runtime"), staged.root,
     ]) await chmod(directory, 0o755);
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
 });
 
 test("source build failure leaves active selection and deployment state unchanged", async () => {
@@ -340,6 +351,9 @@ test("source build failure leaves active selection and deployment state unchange
     await mkdir(join(versionRoot, "runtime"), { recursive: true });
     const emptyLock = `${JSON.stringify({ lockfileVersion: 3, packages: { "": {} } })}\n`;
     await writeFile(join(versionRoot, "app", "dist", "index.js"), `${"x".repeat(1_024)}\n`);
+    await mkdir(join(versionRoot, "app", "dist", "delegation", "pi-subagents", "src", "runs", "background"), { recursive: true });
+    await writeFile(join(versionRoot, "app", "dist", "delegation", "pi-subagents", "index.js"), "export default () => {};\n");
+    await writeFile(join(versionRoot, "app", "dist", "delegation", "pi-subagents", "src", "runs", "background", "subagent-runner.js"), "export {};\n");
     await writeFile(join(versionRoot, "app", "package.json"), "{}\n");
     await writeFile(join(versionRoot, "app", "package-lock.json"), emptyLock);
     await writeFile(join(versionRoot, "app", "PushService.xcconfig"), "TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test\n");
@@ -456,6 +470,9 @@ test("source builds compile privately and leave the trusted source tree unchange
     await mkdir(join(versionRoot, "app", "node_modules"), { recursive: true });
     await mkdir(join(versionRoot, "runtime"), { recursive: true });
     await writeFile(join(versionRoot, "app", "dist", "index.js"), `${"x".repeat(1_024)}\n`);
+    await mkdir(join(versionRoot, "app", "dist", "delegation", "pi-subagents", "src", "runs", "background"), { recursive: true });
+    await writeFile(join(versionRoot, "app", "dist", "delegation", "pi-subagents", "index.js"), "export default () => {};\n");
+    await writeFile(join(versionRoot, "app", "dist", "delegation", "pi-subagents", "src", "runs", "background", "subagent-runner.js"), "export {};\n");
     await writeFile(join(versionRoot, "app", "package.json"), sourceFiles["package.json"]);
     await writeFile(join(versionRoot, "app", "package-lock.json"), sourceFiles["package-lock.json"]);
     await writeFile(join(versionRoot, "app", "PushService.xcconfig"), "TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test\n");
@@ -484,15 +501,25 @@ test("source builds compile privately and leave the trusted source tree unchange
       paths: store, config: { sourceRoot }, candidateVersion: "candidate",
       runCommand: async (tool, args, options) => {
         commands.push({ tool, args, options });
-        if (tool === process.execPath && args[0].endsWith("/tsc")) {
-          await mkdir(args.at(-1), { recursive: true });
-          await writeFile(join(args.at(-1), "index.js"), `${"c".repeat(1_024)}\n`);
-        } else throw new Error("source build invoked an unexpected external command");
+        if (tool !== process.execPath || !args[0].endsWith("/tsc")) throw new Error("source build invoked an unexpected external command");
+        const output = args.at(-1);
+        if (args.includes(join(gatewayRoot, "tsconfig.json"))) {
+          await mkdir(output, { recursive: true });
+          await writeFile(join(output, "index.js"), `${"c".repeat(1_024)}\n`);
+        } else {
+          await mkdir(join(output, "src", "runs", "background"), { recursive: true });
+          await writeFile(join(output, "index.js"), "export default () => {};\n");
+          await writeFile(join(output, "package.json"), JSON.stringify({ name: "pi-subagents", version: "0.59.0-tron.1", type: "module", exports: { ".": "./index.js" } }));
+          await writeFile(join(output, "src", "runs", "background", "subagent-runner.js"), "export {};\n");
+        }
       },
     });
     assert.equal(result.manifest.version, "candidate");
-    assert.equal(commands.length, 1);
+    assert.equal(commands.length, 2);
     assert.equal(commands[0].tool, process.execPath);
+    assert.equal(commands[1].tool, process.execPath);
+    assert.deepEqual(commands.map(({ args }) => args.includes(join(gatewayRoot, "tsconfig.json"))), [true, false]);
+    assert.equal(commands[1].args.includes(join(gatewayRoot, "src", "delegation", "pi-subagents", "tsconfig.json")), true);
     assert.equal(commands[0].args.includes("run"), false);
     assert.equal(await readFile(join(gatewayRoot, "dist", "index.js")).catch(() => undefined), undefined);
     for (const [path, content] of before) assert.deepEqual(await readFile(join(gatewayRoot, path)), content);
@@ -530,6 +557,9 @@ async function makePreflightFixture(root) {
   await mkdir(join(payload, "app", "node_modules", "node-pty", "prebuilds", `darwin-${process.arch}`), { recursive: true });
   await mkdir(join(payload, "runtime"), { recursive: true });
   await writeFile(join(payload, "app", "dist", "index.js"), "x".repeat(1_024));
+  await mkdir(join(payload, "app", "dist", "delegation", "pi-subagents", "src", "runs", "background"), { recursive: true });
+  await writeFile(join(payload, "app", "dist", "delegation", "pi-subagents", "index.js"), "export default () => {};\n");
+  await writeFile(join(payload, "app", "dist", "delegation", "pi-subagents", "src", "runs", "background", "subagent-runner.js"), "export {};\n");
   await writeFile(join(payload, "app", "dist", "version.js"), "export const PROTOCOL_VERSION = 5; export const MIN_PROTOCOL_VERSION = 5;\n");
   await writeFile(join(payload, "app", "package.json"), "{}\n");
   await writeFile(join(payload, "app", "package-lock.json"), "{}\n");

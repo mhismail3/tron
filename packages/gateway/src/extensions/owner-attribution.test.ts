@@ -32,6 +32,22 @@ describe("extension owner attribution", () => {
     expect(() => attributeExtensions({ extensions: [extension as any], errors: [], runtime: {} as any })).toThrow(`${tool} tool name is reserved`);
   });
 
+  it("rejects the superseded pi-subagents scheduler/tool package", () => {
+    const extension = {
+      path: "/packages/pi-subagents/index.ts", resolvedPath: "/packages/pi-subagents/index.ts",
+      sourceInfo: { path: "/packages/pi-subagents/index.ts", source: "npm:pi-subagents", scope: "user", origin: "top-level" },
+      handlers: new Map(), tools: new Map([["subagent", { definition: { execute: async () => ({ content: [] }) } }]]),
+      commands: new Map(), shortcuts: new Map(), messageRenderers: new Map(), entryRenderers: new Map(),
+    };
+    const tron = {
+      path: "<inline:tron-subagents>", resolvedPath: "<inline:tron-subagents>",
+      sourceInfo: { path: "<inline:tron-subagents>", source: "inline", scope: "builtin", origin: "top-level" },
+      handlers: new Map(), tools: new Map([["subagent", { definition: { execute: async () => ({ content: [] }) } }]]),
+      commands: new Map(), shortcuts: new Map(), messageRenderers: new Map(), entryRenderers: new Map(),
+    };
+    expect(() => attributeExtensions({ extensions: [tron as any, extension as any], errors: [], runtime: {} as any }, undefined, { requireTronSubagent: true })).toThrow(/disable only that extension/);
+  });
+
   it("resolves finalized package provenance for callbacks and tool/command lookups", async () => {
     const seen: Array<ReturnType<typeof currentExtensionOwner>> = [];
     const capture = async () => {

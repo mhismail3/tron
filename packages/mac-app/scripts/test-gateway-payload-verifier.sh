@@ -118,4 +118,15 @@ printf '{"schema":1,"kind":"forged"}\n' > "$PAYLOAD/manifest.json"
 chmod -R a-w "$PAYLOAD" "$APP"
 expect_rejected malformed-manifest
 
-printf 'payload verifier fixtures: valid, app fingerprint tamper, forged helper identity, runtime version/architecture, manifest identity, and malformed manifest rejected\n'
+for relative_path in \
+    app/dist/delegation/pi-subagents/index.js \
+    app/dist/delegation/pi-subagents/src/runs/background/subagent-runner.js; do
+    reset_fixture
+    target="$PAYLOAD/$relative_path"
+    make_writable "$(dirname "$target")"
+    rm "$target"
+    chmod -R a-w "$PAYLOAD" "$APP"
+    expect_rejected "missing-$(basename "$relative_path" .js)"
+done
+
+printf 'payload verifier fixtures: valid, app fingerprint tamper, forged helper identity, runtime version/architecture, manifest identity, malformed manifest, and missing delegation runtime rejected\n'

@@ -445,6 +445,11 @@ cp "$REPO_ROOT/scripts/gateway-payload-deploy.mjs" "$APP_DIR/scripts/"
 # npm prune in the source tree would damage developer dependencies. Install an
 # independent production tree directly into the generated app payload.
 (cd "$APP_DIR" && "$NPM_BIN" ci --omit=dev --ignore-scripts=false)
+# Bind the owned delegation package under the shipped dependency tree so
+# package consumers resolve the exact emitted runtime, not an ambient npm copy.
+rm -rf "$APP_DIR/node_modules/pi-subagents"
+mkdir -p "$APP_DIR/node_modules/pi-subagents"
+cp -R "$APP_DIR/dist/delegation/pi-subagents/." "$APP_DIR/node_modules/pi-subagents/"
 "$NODE_BIN" "$GATEWAY_DIR/scripts/check-pi-sdk.mjs" --runtime-tree "$APP_DIR"
 
 stage_node arm64 "$NODE_ARM64_SHA256"
@@ -476,9 +481,12 @@ done
 rm -rf "$(dirname "$launcher_temp")"
 
 for required_payload in \
-    "$APP_DIR/dist/index.js" "$APP_DIR/dist/version.js" "$APP_DIR/package.json" "$APP_DIR/package-lock.json" "$APP_DIR/PushService.xcconfig" \
+    "$APP_DIR/dist/index.js" "$APP_DIR/dist/version.js" \
+    "$APP_DIR/dist/delegation/pi-subagents/index.js" \
+    "$APP_DIR/dist/delegation/pi-subagents/src/runs/background/subagent-runner.js" \
+    "$APP_DIR/package.json" "$APP_DIR/package-lock.json" "$APP_DIR/PushService.xcconfig" \
     "$APP_DIR/scripts/ensure-node-pty-helper.mjs" "$APP_DIR/scripts/gateway-payload-deploy.mjs" \
-    "$APP_DIR/node_modules" "$RUNTIME_DIR/node-arm64" "$RUNTIME_DIR/node-x64" \
+    "$APP_DIR/node_modules" "$APP_DIR/node_modules/pi-subagents/package.json" "$RUNTIME_DIR/node-arm64" "$RUNTIME_DIR/node-x64" \
     "$RUNTIME_DIR/xcodegen/bin/xcodegen" "$RUNTIME_DIR/xcodegen/share/xcodegen/SettingPresets/base.yml"; do
     [[ -e "$required_payload" ]] || { echo "missing required staged payload: $required_payload" >&2; exit 3; }
 done

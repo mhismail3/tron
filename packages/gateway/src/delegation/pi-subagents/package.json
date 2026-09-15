@@ -1,0 +1,50 @@
+{
+  "name": "pi-subagents",
+  "version": "0.59.0-tron.1",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Tron-owned delegation runtime derived from pi-subagents 0.59.0",
+  "exports": {
+    ".": "./index.js",
+    "./background-work": "./src/api/background-work.js",
+    "./external-job-provider": "./src/api/external-job-provider.js",
+    "./external-runs": "./src/api/external-runs.js",
+    "./agents": "./src/api/agents.js",
+    "./delegation": "./src/api/delegation.js",
+    "./capability-ceiling": "./src/api/capability-ceiling.js",
+    "./preflight": "./src/api/preflight.js",
+    "./control-channel": "./src/api/control-channel.js",
+    "./intercom-bridge": "./src/api/intercom-bridge.js",
+    "./pi-args": "./src/api/pi-args.js",
+    "./shared-types": "./src/api/shared-types.js",
+    "./project-panes": "./src/api/project-panes.js"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": "0.84.4",
+    "@earendil-works/pi-ai": "0.84.4",
+    "@earendil-works/pi-coding-agent": "0.84.4",
+    "@earendil-works/pi-tui": "0.84.4"
+  },
+  "files": [
+    "index.js",
+    "src/**/*.js",
+    "src/**/*.d.ts",
+    "src/**/*.js.map",
+    "agents/",
+    "docs/",
+    "prompts/",
+    "skills/",
+    "LICENSE",
+    "CHANGELOG.md",
+    "README.md",
+    "PROVENANCE.md",
+    "*.mjs"
+  ],
+  "dependencies": {
+    "acorn": "8.18.0",
+    "jiti": "2.7.0",
+    "typebox": "1.3.7",
+    "yaml": "2.8.3"
+  }
+}

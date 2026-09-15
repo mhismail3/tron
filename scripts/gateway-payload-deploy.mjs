@@ -62,8 +62,11 @@ const LOCAL_CREDENTIAL_MAX_BYTES = 64 * 1024;
 const MAX_RETAINED_VERSIONS = 8;
 const REQUIREMENTS = [
   ["app/dist/index.js", 1_024, false],
+  ["app/dist/delegation/pi-subagents/index.js", 1, false],
+  ["app/dist/delegation/pi-subagents/src/runs/background/subagent-runner.js", 1, false],
   ["app/package.json", 1, false],
   ["app/package-lock.json", 1, false],
+  ["app/node_modules/pi-subagents/package.json", 1, false],
   ["app/PushService.xcconfig", 1, false],
   ["app/scripts/ensure-node-pty-helper.mjs", 1, false],
   ["app/scripts/gateway-payload-deploy.mjs", 1, false],
@@ -871,6 +874,16 @@ async function gitRevision(cwd) {
     const { promisify } = await import("node:util");
     return (await promisify(execFile)("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" })).stdout.trim() || "unknown";
   } catch { return "unknown"; }
+}
+
+async function copyOwnedDelegationPackage(candidateRoot) {
+  const source = join(candidateRoot, "app", "dist", "delegation", "pi-subagents");
+  const destination = join(candidateRoot, "app", "node_modules", "pi-subagents");
+  await rm(destination, { recursive: true, force: true });
+  await mkdir(destination, { recursive: true, mode: 0o755 });
+  await cp(source, destination, { recursive: true, errorOnExist: true, force: false });
+  const packageInfo = await lstat(join(destination, "package.json"));
+  if (!packageInfo.isFile() || packageInfo.isSymbolicLink()) throw new Error("owned delegation package binding is incomplete");
 }
 
 async function copyTrustedSourceScripts(sourceRoot, candidateRoot) {
@@ -1894,6 +1907,7 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
   // the package build script here: its configured outDir is the trusted source
   // tree's packages/gateway/dist, which must remain byte-for-byte unchanged.
   const compilerOutput = await mkdtemp(join(tmpdir(), "tron-gateway-source-build-"));
+  const delegationCompilerOutput = await mkdtemp(join(tmpdir(), "tron-gateway-delegation-build-"));
   let privateStaging;
   try {
     let source;
@@ -1901,10 +1915,21 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
       // Capture dependency authority while bundle-gateway.sh cannot replace
       // source node_modules, then hold that same lock through compilation.
       source = await captureReusableSourcePackage(active.root, gatewayRoot);
+      const compiler = join(gatewayRoot, "node_modules", "typescript", "bin", "tsc");
       await runCommand(process.execPath, [
-        join(gatewayRoot, "node_modules", "typescript", "bin", "tsc"),
-        "-p", join(gatewayRoot, "tsconfig.json"), "--outDir", compilerOutput,
+        compiler, "-p", join(gatewayRoot, "tsconfig.json"), "--outDir", compilerOutput,
       ], { cwd: gatewayRoot, timeoutMs });
+      // The main project excludes the owned delegation fork, so compile that
+      // package as a second private project and place its emitted package at
+      // the same path produced by the checked-in package build. Payload
+      // validation below is the final oracle for both compiler outputs.
+      await runCommand(process.execPath, [
+        compiler, "-p", join(gatewayRoot, "src", "delegation", "pi-subagents", "tsconfig.json"),
+        "--outDir", delegationCompilerOutput,
+      ], { cwd: gatewayRoot, timeoutMs });
+      await cp(delegationCompilerOutput, join(compilerOutput, "delegation", "pi-subagents"), {
+        recursive: true, errorOnExist: true, force: false,
+      });
     });
     // Source updates inherit the exact validated product configuration from
     // the selected immutable payload. The source checkout and environment are
@@ -1924,6 +1949,7 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
       await rm(join(temporary, "app", "dist"), { recursive: true, force: true });
       await verifiedSourceCompilerOutput(compilerOutput);
       await cp(compilerOutput, join(temporary, "app", "dist"), { recursive: true, errorOnExist: true, force: false });
+      await copyOwnedDelegationPackage(temporary);
       await writeFile(join(temporary, "app", "package.json"), source.packageBytes);
       await writeFile(join(temporary, "app", "package-lock.json"), source.lockBytes);
       if (await validatePayloadPushConfiguration(temporary, paths.channel) !== activePushConfiguration) {
@@ -1983,6 +2009,7 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
     }
   } finally {
     await rm(compilerOutput, { recursive: true, force: true });
+    await rm(delegationCompilerOutput, { recursive: true, force: true });
   }
 }
 

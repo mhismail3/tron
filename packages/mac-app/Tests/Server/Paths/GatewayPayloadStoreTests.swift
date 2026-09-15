@@ -364,6 +364,8 @@ struct GatewayPayloadStoreTests {
         for relativePath in [
             GatewayPayloadValidator.xcodegenRelativePath,
             GatewayPayloadValidator.xcodegenBasePresetRelativePath,
+            GatewayPayloadValidator.delegationEntrypointRelativePath,
+            GatewayPayloadValidator.delegationRunnerRelativePath,
         ] {
             let root = temporary.root.appendingPathComponent(UUID().uuidString, isDirectory: true)
             try makePayload(
@@ -478,6 +480,8 @@ struct GatewayPayloadStoreTests {
         let fm = FileManager.default
         let files: [(String, Data)] = [
             ("app/dist/index.js", Data(repeating: 0x2f, count: 1_024)),
+            ("app/dist/delegation/pi-subagents/index.js", Data("export default () => {};\n".utf8)),
+            ("app/dist/delegation/pi-subagents/src/runs/background/subagent-runner.js", Data("export {};\n".utf8)),
             ("app/package.json", Data("{}".utf8)),
             ("app/package-lock.json", Data("{}".utf8)),
             ("app/PushService.xcconfig", Data((pushConfiguration ?? (channel == "dev"
