@@ -1453,6 +1453,11 @@ struct ChatViewScrollHarnessTests {
                 compacting.phase = .compacting
                 compacting.revision += 1
                 compacting.eventSequence += 1
+                var nativeAtCompaction: [PresentedFrameRecorder.NativeRow] = []
+                harness.probe.onNextProjectionInstall { _ in
+                    nativeAtCompaction = harness.nativeRowSnapshot()
+                    print("NativeBoundary compaction probe=\(harness.probeObservation.visibleRowIDs.count) native=\(nativeAtCompaction.filter(\.isVisible).map(\.physicalID))")
+                }
                 harness.replaceAuthoritativeSnapshot(compacting)
                 let progress = try await harness.recorder.waitUntil {
                     $0.observation.projectionInstallCount > settled.observation.projectionInstallCount
@@ -1478,10 +1483,17 @@ struct ChatViewScrollHarnessTests {
                         && ($0.observation.scrollSettledDistance ?? .infinity)
                             <= ChatTranscriptGeometry.catchUpDistance
                 }
+                try await harness.waitForNativeTailSettlement()
                 #expect(compactionSettled.observation.animatedEntranceCount
                     >= progress.observation.animatedEntranceCount)
                 #expect(try harness.nativeTranscriptDistanceFromTail() <= 2)
                 #expect(!compactionSettled.observation.visibleRowIDs.isEmpty)
+                #expect(nativeAtCompaction.contains { $0.isVisible })
+                harness.recorder.expectNativeContinuity(
+                    from: ready.frameIndex,
+                    through: try #require(harness.recorder.samples.last?.frameIndex)
+                )
+                harness.attachSimulatorImage(named: "response-compaction-settled.png")
             }
         }
     }
@@ -1529,6 +1541,7 @@ struct ChatViewScrollHarnessTests {
                     $0.observation.projectionInstallCount > revealed.observation.projectionInstallCount
                         && $0.observation.rowFrames["discrete-tail"] != nil
                 }
+                harness.recorder.expectNativeContinuity(from: ready.frameIndex, through: updated.frameIndex)
                 #expect(updated.observation.animatedEntranceCount == entranceBaseline + 1)
                 #expect(updated.observation.tailMaterializationCommandCount == materializationBaseline + 2)
                 #expect(updated.observation.physicalRowAppearanceCounts["discrete-tail"] == 1)
@@ -1584,6 +1597,7 @@ struct ChatViewScrollHarnessTests {
                             $0.semanticID == "tool-run-settled-group" && $0.isVisible
                         }
                 }
+                harness.recorder.expectNativeContinuity(from: ready.frameIndex, through: settled.frameIndex)
                 #expect(settled.observation.animatedEntranceCount == entranceBaseline + 1)
                 #expect(settled.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
                 #expect(
@@ -1666,6 +1680,11 @@ struct ChatViewScrollHarnessTests {
                     groupCount: 1
                 ))
                 nextGroup.eventSequence += 1
+                var nativeAtTopology: [PresentedFrameRecorder.NativeRow] = []
+                harness.probe.onNextProjectionInstall { _ in
+                    nativeAtTopology = harness.nativeRowSnapshot()
+                    print("NativeBoundary topology probe=\(harness.probeObservation.visibleRowIDs.count) native=\(nativeAtTopology.filter(\.isVisible).map(\.physicalID))")
+                }
                 harness.replaceAuthoritativeSnapshot(nextGroup)
                 let distinct = try await harness.recorder.waitUntil {
                     $0.observation.projectionInstallCount >= installBaseline + 3
@@ -1677,6 +1696,9 @@ struct ChatViewScrollHarnessTests {
                     $0.runID == "tool-run-group-one" && $0.transitionToken == 1
                 })
                 #expect(!distinct.observation.visibleRowIDs.isEmpty)
+                #expect(nativeAtTopology.contains { $0.isVisible })
+                harness.recorder.expectNativeContinuity(from: ready.frameIndex, through: distinct.frameIndex)
+                harness.attachSimulatorImage(named: "tool-topology-settled.png")
                 let latest = distinct.observation.toolChipSamples.last {
                     $0.runID == "tool-run-group-next"
                 }
@@ -2460,6 +2482,10 @@ final class ChatViewScrollHarness {
         recorder.start()
     }
 
+    func nativeRowSnapshot() -> [PresentedFrameRecorder.NativeRow] {
+        Self.nativeRows(in: hostingController.view)
+    }
+
     func setCovered(_ value: Bool) { cover.presented = value }
     func setScenePhase(_ phase: ScenePhase) { cover.scenePhase = phase }
     func releaseOpeningRevealCompletion() {
@@ -2607,6 +2633,33 @@ final class ChatViewScrollHarness {
             animated: false
         )
         scrollView.layoutIfNeeded()
+    }
+
+    func waitForNativeTailSettlement() async throws {
+        var previous: [CGFloat] = []
+        var stableFrames = 0
+        for _ in 0..<180 {
+            try await DisplayFrameScheduler.displayLink.nextFrame()
+            let scroll = try nativeTranscriptScrollView()
+            let current = [scroll.contentOffset.y, scroll.contentSize.height,
+                           scroll.bounds.height, scroll.adjustedContentInset.bottom]
+            let distance = try nativeTranscriptDistanceFromTail()
+            stableFrames = current == previous && distance <= 2
+                ? stableFrames + 1 : 0
+            previous = current
+            if stableFrames == 2 { return }
+        }
+        Issue.record("Native tail did not settle with unchanged current geometry")
+        throw HarnessError.nativeTailDidNotSettle
+    }
+
+    func attachSimulatorImage(named name: String) {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: window.bounds.size, format: format).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        if let data = image.pngData() { Attachment.record(data, named: name) }
     }
 
     func nativeTranscriptSignedTailError() throws -> CGFloat {
@@ -2915,6 +2968,18 @@ final class PresentedFrameRecorder: NSObject {
         for waiter in ready { waiter.continuation.resume(returning: sample) }
     }
 
+    func expectNativeContinuity(from first: Int, through last: Int) {
+        let span = samples.filter { $0.frameIndex >= first && $0.frameIndex <= last }
+        #expect(span.first?.frameIndex == first && span.last?.frameIndex == last)
+        #expect(span.count > 1)
+        for sample in span {
+            #expect(sample.nativeRows.contains { $0.isVisible }, "Native rows absent at frame \(sample.frameIndex), install \(sample.observation.projectionInstallCount)")
+            if sample.observation.visibleRowIDs.isEmpty {
+                print("NativeContinuity frame=\(sample.frameIndex) install=\(sample.observation.projectionInstallCount) probe=0 native=\(sample.nativeRows.filter(\.isVisible).map(\.physicalID))")
+            }
+        }
+    }
+
     private func cancelWaiter(id: Int) {
         guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
         waiters.remove(at: index).continuation.resume(throwing: CancellationError())
@@ -2922,6 +2987,7 @@ final class PresentedFrameRecorder: NSObject {
 }
 
 enum HarnessError: Error {
+    case nativeTailDidNotSettle
     case invalidAuthorityBoundary
     case missingTranscript
     case missingWindowScene
