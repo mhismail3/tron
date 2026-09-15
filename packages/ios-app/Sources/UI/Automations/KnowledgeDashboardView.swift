@@ -47,9 +47,9 @@ struct KnowledgeDashboardView: View {
     @State private var nextCursor: String?
     @State private var loadingMore = false
     @State private var status: KnowledgeStatus?
-    @State private var coverage: [KnowledgeObservationCoverage] = []
+    @State private var coverageStore = KnowledgeCoveragePresentationStore()
     @State private var loadGeneration = 0
-    @State private var linkedRecordGeneration = 0
+    @State private var connectorRefreshGeneration: [String: Int] = [:]
     @State private var configSheet = false
     @State private var connectorSheet = false
     @State private var importSheet = false
@@ -67,13 +67,14 @@ struct KnowledgeDashboardView: View {
         }.background(Color.tronBackground).navigationTitle("Knowledge").navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .topBarLeading) { DashboardModeMenuButton(mode: .knowledge, onSelect: onSelectDashboard).frame(width: 34, height: 34) }; ToolbarItem(placement: .topBarTrailing) { Menu { Button("Observation configuration", systemImage: "eye") { configSheet = true }; Button("Connectors", systemImage: "arrow.triangle.2.circlepath") { connectorSheet = true }; Button("Capture URL", systemImage: "link.badge.plus") { captureSheet = true }; Button("New note", systemImage: "note.text.badge.plus") { noteSheet = true }; Button("Import legacy records", systemImage: "square.and.arrow.down") { importSheet = true } } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("Knowledge actions") } }
         .searchable(text: $search, prompt: "Search Knowledge")
-        .navigationDestination(item: $selected) { record in KnowledgeDetailView(record: record, origin: selectedIdentity ?? model.knowledgePresentationIdentity, onChanged: reload, onOpenDraft: openDraft, onOpenSession: onOpenSession, onOpenRecord: openLinkedRecord) }
+        .navigationDestination(item: $selected) { record in KnowledgeDetailView(record: record, origin: selectedIdentity ?? model.knowledgePresentationIdentity, onChanged: reload, onOpenDraft: openDraft, onOpenSession: onOpenSession) }
         .onChange(of: model.knowledgePresentationIdentity) { _, _ in
             // Retire both the visible page and any manually spawned page task;
             // the next task must carry the new Gateway identity from its start.
             loadGeneration += 1
             loadingMore = false
-            records.removeAll(); selected = nil; selectedIdentity = nil; revision = 0; nextCursor = nil; status = nil; coverage.removeAll(); error = nil
+            coverageStore.reset()
+            records.removeAll(); selected = nil; selectedIdentity = nil; revision = 0; nextCursor = nil; status = nil; error = nil
         }
         .sheet(isPresented: $configSheet) { KnowledgeConfigurationView().environment(model) }
         .sheet(isPresented: $connectorSheet) { KnowledgeConnectorsView().environment(model) }
@@ -86,37 +87,56 @@ struct KnowledgeDashboardView: View {
     @ViewBuilder
     private func coverageSummary(_ status: KnowledgeStatus) -> some View {
         let coverage = status.coverage
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Label("Observation coverage", systemImage: "eye")
-                    .font(.headline)
-                Spacer()
-                Text("\(coverage.observedCount + coverage.emptyCount + coverage.excludedCount) settled")
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Label("Observation coverage", systemImage: "eye").font(.headline)
+                    Spacer()
+                    Text("\(coverage.observedCount + coverage.emptyCount + coverage.excludedCount) settled")
+                        .font(.caption).foregroundStyle(Color.tronTextSecondary)
+                }
+                Text("Observed \(coverage.observedCount) · Empty \(coverage.emptyCount) · Excluded \(coverage.excludedCount)")
                     .font(.caption).foregroundStyle(Color.tronTextSecondary)
-            }
-            Text("Observed \(coverage.observedCount) · Empty \(coverage.emptyCount) · Excluded \(coverage.excludedCount)")
-                .font(.caption).foregroundStyle(Color.tronTextSecondary)
-            if coverage.remainingCount > 0 {
-                Label("\(coverage.remainingCount) cuts need attention (pending \(coverage.pendingCount), failed \(coverage.failedCount), unavailable \(coverage.unavailableCount))", systemImage: "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(Color.tronAmber)
-                ForEach(self.coverage.filter { $0.disposition == .pending || $0.disposition == .failed || $0.disposition == .unavailable }) { cut in
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("\(cut.disposition.rawValue.capitalized) · \(cut.id)").font(.caption.bold())
-                            Text("\(cut.range.fromEntryId)…\(cut.range.toEntryId) · \(cut.reason ?? "No reason recorded")").font(.caption2).foregroundStyle(Color.tronTextSecondary)
+                if coverage.remainingCount > 0 {
+                    Label("\(coverage.remainingCount) cuts need attention (pending \(coverage.pendingCount), failed \(coverage.failedCount), unavailable \(coverage.unavailableCount))", systemImage: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(Color.tronAmber)
+                    ForEach(coverageStore.cuts.filter { $0.disposition == .pending || $0.disposition == .failed || $0.disposition == .unavailable }) { cut in
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("\(cut.disposition.rawValue.capitalized) · \(cut.id)").font(.caption.bold())
+                                Text("\(cut.range.fromEntryId)…\(cut.range.toEntryId) · \(cut.reason ?? "No reason recorded")")
+                                    .font(.caption2).foregroundStyle(Color.tronTextSecondary)
+                            }
+                            Spacer()
+                            Button("Open") { onOpenSession(cut.range.sessionId, cut.range.fromEntryId) }.font(.caption)
                         }
-                        Spacer()
-                        Button("Open") { onOpenSession(cut.range.sessionId, cut.range.fromEntryId) }.font(.caption)
+                    }
+                } else {
+                    Text("No pending, failed, or unavailable observation cuts.")
+                        .font(.caption).foregroundStyle(Color.tronTextSecondary)
+                }
+                if let coverageError = coverageStore.error {
+                    Label("Coverage unavailable: \(coverageError)", systemImage: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(Color.tronAmber)
+                }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 10)
+            .background(Color.tronBackground.opacity(0.96), in: RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal, 16).padding(.top, 8)
+            if coverageStore.loading { ProgressView("Loading coverage…").font(.caption) }
+            if coverageStore.nextCursor != nil {
+                Button(coverageStore.loading ? "Loading…" : "Inspect more coverage") {
+                    let identity = model.knowledgePresentationIdentity
+                    Task { @MainActor in
+                        await coverageStore.loadMore(identity: identity,
+                            request: { cursor in try await model.knowledge.coverage(cursor: cursor, limit: 50) },
+                            isCurrent: { activity.allowsPresentationPublication && model.knowledgePresentationIdentity == identity })
                     }
                 }
-            } else {
-                Text("No pending, failed, or unavailable observation cuts.")
-                    .font(.caption).foregroundStyle(Color.tronTextSecondary)
+                .font(.caption)
+                .disabled(coverageStore.loading || !activity.allowsPresentationPublication)
             }
         }
-        .padding(.horizontal, 16).padding(.vertical, 10)
-        .background(Color.tronBackground.opacity(0.96), in: RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal, 16).padding(.top, 8)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Observation coverage. Observed \(coverage.observedCount), empty \(coverage.emptyCount), excluded \(coverage.excludedCount), remaining \(coverage.remainingCount)")
     }
@@ -128,14 +148,16 @@ struct KnowledgeDashboardView: View {
         defer { if generation == loadGeneration { loading = false } }
         do {
             async let loadedStatus = model.knowledge.status()
-            async let loadedCoverage = model.knowledge.coverage(limit: 50)
             let response: KnowledgeListResponse
             if search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { response = try await model.knowledge.list(kind: kind, scope: scope, limit: 50) }
             else { let found = try await model.knowledge.search(query: search, kind: kind, scope: scope, limit: 50); response = KnowledgeListResponse(records: found.hits.map { $0.record }, nextCursor: nil, stateRevision: found.stateRevision) }
             let currentStatus = try await loadedStatus
-            let currentCoverage = try await loadedCoverage
             guard generation == loadGeneration, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
-            records = response.records; nextCursor = response.nextCursor; revision = response.stateRevision; status = currentStatus; coverage = currentCoverage.coverage
+            records = response.records; nextCursor = response.nextCursor; revision = response.stateRevision; status = currentStatus
+            await coverageStore.load(identity: identity,
+                request: { cursor in try await model.knowledge.coverage(cursor: cursor, limit: 50) },
+                isCurrent: { generation == loadGeneration && activity.allowsPresentationPublication && model.knowledgePresentationIdentity == identity })
+            guard generation == loadGeneration, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
         } catch is CancellationError { return } catch { guard generation == loadGeneration, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }; self.error = error.localizedDescription }
     }
     private func loadMore() {
@@ -161,25 +183,6 @@ struct KnowledgeDashboardView: View {
         }
     }
     private func openDraft(_ record: KnowledgeRecord) { guard model.knowledgePresentationIdentity == selectedIdentity ?? model.knowledgePresentationIdentity else { return }; selected = nil; onOpenDraft(record) }
-    private func openLinkedRecord(id: String, revisionID: String?) {
-        guard let selectedIdentity, model.knowledgePresentationIdentity == selectedIdentity, activity.allowsPresentationPublication else { return }
-        linkedRecordGeneration &+= 1
-        let generation = linkedRecordGeneration
-        let identity = selectedIdentity
-        Task { @MainActor in
-            guard generation == linkedRecordGeneration, activity.allowsPresentationPublication,
-                  model.knowledgePresentationIdentity == identity else { return }
-            do {
-                let linked = try await model.knowledge.read(id: id, revisionID: revisionID)
-                guard generation == linkedRecordGeneration, activity.allowsPresentationPublication,
-                      model.knowledgePresentationIdentity == identity else { return }
-                guard let linked else { self.error = "Linked record is unavailable, excluded, or forgotten. Refresh Knowledge and retry the citation."; return }
-                selected = linked
-                self.selectedIdentity = identity
-            } catch is CancellationError { return }
-            catch { guard generation == linkedRecordGeneration, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }; self.error = error.localizedDescription }
-        }
-    }
 }
 
 private struct KnowledgeRecordRow: View {
@@ -196,59 +199,80 @@ struct KnowledgeDetailView: View {
     let onChanged: () async -> Void
     let onOpenDraft: (KnowledgeRecord) -> Void
     let onOpenSession: (String, String) -> Void
-    let onOpenRecord: (String, String?) -> Void
     @State private var noteBody = ""
     @State private var editing = false
     @State private var message: String?
     @State private var forgetConfirmation = false
     @State private var correctionSheet = false
     @State private var evidenceMessage: String?
-    @State private var objectBytes = Data()
-    @State private var objectNextOffset: Int?
-    @State private var objectTotalBytes: Int?
-    @State private var objectLoading = false
     @State private var reflectedHandoff: KnowledgeRecord?
-    @State private var objectRequestGeneration = 0
     @State private var reflectionRequestGeneration = 0
+    @State private var objectReaders = KnowledgeObjectReaderStore()
+    @State private var linkedReader = KnowledgeLinkedRecordReaderStore()
     private var admitsOrigin: Bool { model.knowledgePresentationIdentity == origin && activity.allowsPresentationPublication }
-    var body: some View { ScrollView { VStack(alignment: .leading, spacing: 16) { Text(record.title).font(.title2.bold()); Label("\(record.kind.label) · \(record.scope.label)", systemImage: record.kind.icon).foregroundStyle(Color.tronEmerald); Text(record.summary).textSelection(.enabled); recordMetadata; sourceLink; noteMetadata; evidence; observationItems; if let reflectedHandoff { VStack(alignment: .leading, spacing: 8) { Text("Generated reflected handoff").font(.headline); Text(reflectedHandoff.summary).font(.callout).textSelection(.enabled); Button("Start editable session from handoff") { onOpenDraft(reflectedHandoff) }.buttonStyle(.bordered) } }; if case .note(let note) = record.content, editing { TextEditor(text: $noteBody).frame(minHeight: 180).overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.3))); Button("Save note") { saveNote(note) }.buttonStyle(.borderedProminent) }; if let message { Text(message).font(.footnote).foregroundStyle(Color.tronTextSecondary) } }.padding(20) }.background(Color.tronBackground).navigationTitle("Detail").navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .topBarTrailing) { Menu { Button("Start editable session", systemImage: "plus.bubble") { onOpenDraft(record) }; if record.kind == .note { Button(editing ? "Cancel editing" : "Edit note", systemImage: "pencil") { editing.toggle(); if editing, case .note(let note) = record.content { noteBody = note.body ?? "" } } }; if record.kind == .source { Button("Assess with current interests", systemImage: "sparkles") { triage() } }; Button("Correct record", systemImage: "arrow.triangle.2.circlepath") { correctionSheet = true }; Button("Exclude from Knowledge", systemImage: "eye.slash") { exclude() }; Button("Forget permanently", systemImage: "trash", role: .destructive) { forgetConfirmation = true } } label: { Image(systemName: "ellipsis.circle") } } }.confirmationDialog("Forget this record?", isPresented: $forgetConfirmation) { Button("Forget", role: .destructive) { forget() } }.sheet(isPresented: $correctionSheet) { KnowledgeCorrectionView(record: record, origin: origin) { correctionSheet = false; await onChanged(); dismiss() } } }
+    var body: some View { ScrollView { VStack(alignment: .leading, spacing: 16) { Text(record.title).font(.title2.bold()); Label("\(record.kind.label) · \(record.scope.label)", systemImage: record.kind.icon).foregroundStyle(Color.tronEmerald); Text(record.summary).textSelection(.enabled); recordMetadata; sourceLink; noteMetadata; evidence; observationItems; if let reflectedHandoff { VStack(alignment: .leading, spacing: 8) { Text("Generated reflected handoff").font(.headline); Text(reflectedHandoff.summary).font(.callout).textSelection(.enabled); Button("Start editable session from handoff") { onOpenDraft(reflectedHandoff) }.buttonStyle(.bordered) } }; if case .note(let note) = record.content, editing { TextEditor(text: $noteBody).frame(minHeight: 180).overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.3))); Button("Save note") { saveNote(note) }.buttonStyle(.borderedProminent) }; if let message { Text(message).font(.footnote).foregroundStyle(Color.tronTextSecondary) } }.padding(20) }.background(Color.tronBackground).navigationTitle("Detail").navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .topBarTrailing) { Menu { Button("Start editable session", systemImage: "plus.bubble") { onOpenDraft(record) }; if record.kind == .note { Button(editing ? "Cancel editing" : "Edit note", systemImage: "pencil") { editing.toggle(); if editing, case .note(let note) = record.content { noteBody = note.body ?? "" } } }; if record.kind == .source { Button("Assess with current interests", systemImage: "sparkles") { triage() } }; Button("Correct record", systemImage: "arrow.triangle.2.circlepath") { correctionSheet = true }; Button("Exclude from Knowledge", systemImage: "eye.slash") { exclude() }; Button("Forget permanently", systemImage: "trash", role: .destructive) { forgetConfirmation = true } } label: { Image(systemName: "ellipsis.circle") } } }.confirmationDialog("Forget this record?", isPresented: $forgetConfirmation) { Button("Forget", role: .destructive) { forget() } }.sheet(isPresented: $correctionSheet) { KnowledgeCorrectionView(record: record, origin: origin) { correctionSheet = false; await onChanged(); dismiss() } }.navigationDestination(item: Binding(get: { linkedReader.record }, set: { _ in linkedReader.clear() })) { linked in KnowledgeDetailView(record: linked, origin: origin, onChanged: onChanged, onOpenDraft: onOpenDraft, onOpenSession: onOpenSession) }.onDisappear { objectReaders.suspend(); linkedReader.suspend() } }
     @ViewBuilder private var recordMetadata: some View { VStack(alignment: .leading, spacing: 6) { Text("Revision: \(record.revisionId)").font(.caption); if let temporal = record.temporal { Text([temporal.eventAt.map { "event \($0)" }, temporal.validFrom.map { "valid from \($0)" }, temporal.validTo.map { "valid to \($0)" }, temporal.reviewDue.map { "review \($0)" }].compactMap { $0 }.joined(separator: " · ")).font(.caption) } }; if case .source(let source) = record.content { Text("Capture: \(source.captureDisposition.rawValue)").font(.caption); if source.captureDisposition != .complete { Label("Evidence is \(source.captureDisposition.rawValue); generated text is not proof.", systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(Color.tronAmber) } }; if case .note(let note) = record.content, let fields = note.fields { VStack(alignment: .leading, spacing: 8) { Text("Structured qualifications").font(.headline); ForEach(Array(fields.enumerated()), id: \.offset) { _, field in VStack(alignment: .leading, spacing: 3) { Text(field.field).font(.subheadline.bold()); Text("Value: \(jsonText(field.value))").font(.callout); if let subject = field.subject { Text("Subject: \(subject)").font(.caption) }; Text("\(field.certainty.rawValue)\(field.validFrom.map { " · from \($0)" } ?? "")\(field.validTo.map { " · to \($0)" } ?? "")").font(.caption).foregroundStyle(Color.tronTextSecondary); citationLinks(field.evidence) } } } } }
-    @ViewBuilder private var sourceLink: some View { if case .source(let source) = record.content { if let uri = source.uri, let url = URL(string: uri) { Link(uri, destination: url).font(.callout) }; if let object = source.object {
-            Button(objectBytes.isEmpty ? "Open retained source object (\(object.bytes) bytes)" : "Load retained source object") { readObject(object, offset: objectNextOffset ?? 0) }.buttonStyle(.bordered).disabled(objectLoading || objectNextOffset == nil && !objectBytes.isEmpty)
-            if objectLoading { ProgressView().controlSize(.small) }
-            if !objectBytes.isEmpty {
-                Text(String(data: objectBytes, encoding: .utf8) ?? "Binary source object (\(objectBytes.count) bytes loaded)").font(.footnote.monospaced()).textSelection(.enabled)
-                if let next = objectNextOffset { Text("Loaded \(objectBytes.count) of \(objectTotalBytes ?? object.bytes) bytes.").font(.caption).foregroundStyle(Color.tronTextSecondary); Button("Load next chunk (offset \(next))") { readObject(object, offset: next) }.buttonStyle(.bordered) }
-                else { Text("Complete retained object loaded (\(objectBytes.count) bytes).").font(.caption).foregroundStyle(Color.tronTextSecondary) }
-            }
+    @ViewBuilder private var sourceLink: some View {
+        if case .source(let source) = record.content {
+            if let uri = source.uri, let url = URL(string: uri) { Link(uri, destination: url).font(.callout) }
+            if let object = source.object { objectReader(object, label: "retained source") }
             if let retention = source.retention { Text("Retention: \(retention.sensitivity) · evidence \(retention.evidenceAvailable ? "available" : "unavailable")").font(.caption).foregroundStyle(Color.tronTextSecondary) }
-        }; if let representations = source.representations, !representations.isEmpty { VStack(alignment: .leading, spacing: 6) { Text("Retained representations").font(.headline); ForEach(Array(representations.enumerated()), id: \.offset) { _, representation in Button("Open \(representation.kind == .providerAPI ? "provider API" : "linked article") representation (\(representation.object.bytes) bytes)") { readObject(representation.object, offset: 0) }.font(.callout).disabled(objectLoading) } } }; if let annotations = source.annotations, !annotations.isEmpty { VStack(alignment: .leading, spacing: 5) { Text("Annotations and corrections").font(.headline); ForEach(Array(annotations.enumerated()), id: \.offset) { _, annotation in Text(annotation.text).font(.callout).textSelection(.enabled) } } }; if let identity = source.identity { Text("\(identity.provider) · account \(identity.accountId) · item \(identity.itemId)").font(.caption).foregroundStyle(Color.tronTextSecondary) }; if let assessment = source.assessment { VStack(alignment: .leading, spacing: 6) { Text("Assessment").font(.headline); Text(assessment.summary); if let contribution = assessment.contribution { Text("Contribution: \(contribution)") }; if let use = assessment.possibleUse { Text("Possible use: \(use)") }; Text("Evidence \(assessment.evidenceQuality.rawValue) · Freshness \(assessment.freshness.rawValue)").font(.caption).foregroundStyle(Color.tronTextSecondary) } } } }
-    private var evidence: some View { VStack(alignment: .leading, spacing: 8) { Text("Evidence").font(.headline); citationLinks(record.provenance.evidence); if case .observation(let observation) = record.content { ForEach(Array(observation.items.enumerated()), id: \.offset) { _, item in citationLinks(item.evidence ?? []) } }; if case .note(let note) = record.content, let contrary = note.contraryEvidence { Text("Contrary evidence").font(.subheadline.bold()).foregroundStyle(Color.tronAmber); citationLinks(contrary) }; if let evidenceMessage { Text(evidenceMessage).font(.footnote).foregroundStyle(Color.tronTextSecondary) } } }
-    @ViewBuilder private func citationLinks(_ refs: [KnowledgeEvidenceRef]) -> some View { ForEach(Array(refs.enumerated()), id: \.offset) { _, ref in if let citation = ref.sessionEntry { Button("Open originating session · \(citation.entryId)") { openSessionEvidence(citation) }.font(.footnote) } else if let recordID = ref.recordId { Button("Open record \(recordID) · revision \(ref.revisionId ?? "latest")") { onOpenRecord(recordID, ref.revisionId) }.font(.footnote) } else if let hash = ref.objectHash { Text("Retained object \(hash.prefix(12))…").font(.footnote).foregroundStyle(Color.tronTextSecondary) } else { Text("Evidence unavailable").font(.footnote).foregroundStyle(Color.tronAmber) } } }
+            if let representations = source.representations, !representations.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Retained representations").font(.headline)
+                    ForEach(Array(representations.enumerated()), id: \.offset) { _, representation in
+                        objectReader(representation.object, label: representation.kind == .providerAPI ? "provider API" : "linked article")
+                    }
+                }
+            }
+            if let annotations = source.annotations, !annotations.isEmpty { VStack(alignment: .leading, spacing: 5) { Text("Annotations and corrections").font(.headline); ForEach(Array(annotations.enumerated()), id: \.offset) { _, annotation in Text(annotation.text).font(.callout).textSelection(.enabled) } } }
+            if let identity = source.identity { Text("\(identity.provider) · account \(identity.accountId) · item \(identity.itemId)").font(.caption).foregroundStyle(Color.tronTextSecondary) }
+            if let assessment = source.assessment { VStack(alignment: .leading, spacing: 6) { Text("Assessment").font(.headline); Text(assessment.summary); if let contribution = assessment.contribution { Text("Contribution: \(contribution)") }; if let use = assessment.possibleUse { Text("Possible use: \(use)") }; Text("Evidence \(assessment.evidenceQuality.rawValue) · Freshness \(assessment.freshness.rawValue)").font(.caption).foregroundStyle(Color.tronTextSecondary) } }
+        }
+    }
+    @ViewBuilder private func objectReader(_ reference: KnowledgeObjectRef, label: String) -> some View {
+        let key = KnowledgeObjectSelectionKey(recordID: record.id, revisionID: record.revisionId, reference: reference)
+        let state = objectReaders.state(for: key)
+        Button(state.bytes.isEmpty ? "Open \(label) (\(reference.bytes) bytes)" : "Load \(label)") {
+            readObject(reference, offset: state.nextOffset ?? 0)
+        }
+        .buttonStyle(.bordered)
+        .disabled(state.loading || (state.nextOffset == nil && !state.bytes.isEmpty))
+        if state.loading { ProgressView().controlSize(.small) }
+        if let error = state.error { Text(error).font(.footnote).foregroundStyle(Color.tronAmber) }
+        if !state.bytes.isEmpty {
+            Text(String(data: state.bytes, encoding: .utf8) ?? "Binary \(label) (\(state.bytes.count) bytes loaded)")
+                .font(.footnote.monospaced()).textSelection(.enabled)
+            if let next = state.nextOffset {
+                Text("Loaded \(state.bytes.count) of \(state.totalBytes ?? reference.bytes) bytes.").font(.caption).foregroundStyle(Color.tronTextSecondary)
+                Button("Load next \(label) chunk (offset \(next))") { readObject(reference, offset: next) }.buttonStyle(.bordered)
+            } else { Text("Complete \(label) loaded (\(state.bytes.count) bytes).").font(.caption).foregroundStyle(Color.tronTextSecondary) }
+        }
+    }
+    private var evidence: some View { VStack(alignment: .leading, spacing: 8) { Text("Evidence").font(.headline); citationLinks(record.provenance.evidence); if case .observation(let observation) = record.content { ForEach(Array(observation.items.enumerated()), id: \.offset) { _, item in citationLinks(item.evidence ?? []) } }; if case .note(let note) = record.content, let contrary = note.contraryEvidence { Text("Contrary evidence").font(.subheadline.bold()).foregroundStyle(Color.tronAmber); citationLinks(contrary) }; if let evidenceMessage { Text(evidenceMessage).font(.footnote).foregroundStyle(Color.tronTextSecondary) }; if linkedReader.loading { ProgressView("Opening linked evidence…").font(.footnote) }; if let linkedRecordError = linkedReader.error { Text(linkedRecordError).font(.footnote).foregroundStyle(Color.tronAmber) } } }
+    @ViewBuilder private func citationLinks(_ refs: [KnowledgeEvidenceRef]) -> some View { ForEach(Array(refs.enumerated()), id: \.offset) { _, ref in if let citation = ref.sessionEntry { Button("Open originating session · \(citation.entryId)") { openSessionEvidence(citation) }.font(.footnote) } else if let recordID = ref.recordId { Button("Open record \(recordID) · revision \(ref.revisionId ?? "latest")") { openLinkedRecord(id: recordID, revisionID: ref.revisionId) }.font(.footnote) } else if let hash = ref.objectHash { Text("Retained object \(hash.prefix(12))…").font(.footnote).foregroundStyle(Color.tronTextSecondary) } else { Text("Evidence unavailable").font(.footnote).foregroundStyle(Color.tronAmber) } } }
     private func jsonText(_ value: JSONValue) -> String { switch value { case .string(let value): return value; case .number(let value): return String(value); case .bool(let value): return value ? "true" : "false"; case .null: return "null"; case .array(let values): return "[\(values.prefix(20).map(jsonText).joined(separator: ", "))]"; case .object(let values): return "{\(values.keys.sorted().prefix(20).compactMap { key in values[key].map { "\(key): \(jsonText($0))" } }.joined(separator: ", "))}" } }
     @ViewBuilder private var noteMetadata: some View { if case .note(let note) = record.content { if let freshness = note.freshness { Text("Freshness: \(freshness.rawValue)").font(.caption).foregroundStyle(Color.tronTextSecondary) }; if let contrary = note.contraryEvidence, !contrary.isEmpty { Text("Contrary evidence retained: \(contrary.count)").font(.caption).foregroundStyle(Color.tronAmber) } } }
     @ViewBuilder private var observationItems: some View { if case .observation(let observation) = record.content { VStack(alignment: .leading, spacing: 8) { Text("Observed items").font(.headline); Text("Entries \(observation.range.fromEntryId)…\(observation.range.toEntryId) · digest \(observation.range.entryDigest.prefix(12))…").font(.caption).foregroundStyle(Color.tronTextSecondary); ForEach(Array(observation.items.enumerated()), id: \.offset) { _, item in Text("\(item.attribution.rawValue.capitalized) · \(item.certainty.rawValue): \(item.text)").font(.callout) }; Button("Reflect bounded handoff") { reflect(observation) }.buttonStyle(.bordered) } } }
     private func readObject(_ reference: KnowledgeObjectRef, offset: Int) {
         guard admitsOrigin else { evidenceMessage = "Gateway changed; reopen this entry."; return }
-        objectRequestGeneration &+= 1
-        let requestGeneration = objectRequestGeneration
+        let key = KnowledgeObjectSelectionKey(recordID: record.id, revisionID: record.revisionId, reference: reference)
         let requestIdentity = origin
-        objectLoading = true
-        let requestedOffset = max(0, offset)
         Task { @MainActor in
-            guard requestGeneration == objectRequestGeneration, model.knowledgePresentationIdentity == requestIdentity,
-                  activity.allowsPresentationPublication else { return }
-            do {
-                let object = try await model.knowledge.readObject(reference, recordID: record.id, revisionID: record.revisionId, offset: requestedOffset)
-                guard requestGeneration == objectRequestGeneration, model.knowledgePresentationIdentity == requestIdentity,
-                      activity.allowsPresentationPublication else { return }
-                objectLoading = false
-                guard let object, let bytes = Data(base64Encoded: object.base64) else { evidenceMessage = "Retained object is unavailable or excluded."; return }
-                if requestedOffset == 0 { objectBytes = bytes } else if requestedOffset == objectBytes.count { objectBytes.append(bytes) } else { evidenceMessage = "The retained object changed while it was being read; reopen this entry."; return }
-                objectTotalBytes = object.totalBytes; objectNextOffset = object.nextOffset
-                evidenceMessage = "Retained object chunk verified (\(object.bytes) of \(object.totalBytes ?? object.bytes) bytes, \(object.mediaType))."
-            } catch is CancellationError { return }
-            catch { guard requestGeneration == objectRequestGeneration, model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; objectLoading = false; evidenceMessage = error.localizedDescription }
+            await objectReaders.load(key, offset: offset,
+                request: { reference, offset in
+                    try await model.knowledge.readObject(reference, recordID: record.id, revisionID: record.revisionId, offset: offset)
+                },
+                isCurrent: { model.knowledgePresentationIdentity == requestIdentity && activity.allowsPresentationPublication })
+        }
+    }
+    private func openLinkedRecord(id: String, revisionID: String?) {
+        guard admitsOrigin else { evidenceMessage = "Gateway changed; reopen this entry."; return }
+        let requestIdentity = origin
+        Task { @MainActor in
+            await linkedReader.load(id: id, revisionID: revisionID,
+                request: { id, revision in try await model.knowledge.read(id: id, revisionID: revision) },
+                isCurrent: { model.knowledgePresentationIdentity == requestIdentity && activity.allowsPresentationPublication })
         }
     }
     private func openSessionEvidence(_ citation: KnowledgeSessionEntryCitation) {
@@ -356,6 +380,7 @@ struct KnowledgeConnectorsView: View {
     @State private var statuses: [String: KnowledgeConnectorStatus] = [:]
     @State private var configuring: String?
     @State private var message: String?
+    @State private var refreshGeneration: [String: Int] = [:]
     var body: some View {
         NavigationStack {
             List(["raindrop", "x"], id: \.self) { connector in
@@ -375,7 +400,27 @@ struct KnowledgeConnectorsView: View {
             .alert("Connector", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) { Button("OK") {} } message: { Text(message ?? "") }
         }
     }
-    private func refresh(_ connector: String) { guard activity.allowsPresentationPublication else { return }; let requestIdentity = model.knowledgePresentationIdentity; Task { @MainActor in guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; do { let status = try await model.knowledge.connectorStatus(connector); guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; identity = requestIdentity; statuses[connector] = status } catch is CancellationError { return } catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; statuses[connector] = nil; message = error.localizedDescription } } }
+    private func refresh(_ connector: String) {
+        guard activity.allowsPresentationPublication else { return }
+        let requestIdentity = model.knowledgePresentationIdentity
+        let ticket = (refreshGeneration[connector] ?? 0) &+ 1
+        refreshGeneration[connector] = ticket
+        Task { @MainActor in
+            guard ticket == refreshGeneration[connector], activity.allowsPresentationPublication,
+                  model.knowledgePresentationIdentity == requestIdentity else { return }
+            do {
+                let status = try await model.knowledge.connectorStatus(connector)
+                guard ticket == refreshGeneration[connector], activity.allowsPresentationPublication,
+                      model.knowledgePresentationIdentity == requestIdentity else { return }
+                identity = requestIdentity; statuses[connector] = status
+            } catch is CancellationError { return }
+            catch {
+                guard ticket == refreshGeneration[connector], activity.allowsPresentationPublication,
+                      model.knowledgePresentationIdentity == requestIdentity else { return }
+                statuses[connector] = nil; message = error.localizedDescription
+            }
+        }
+    }
     private func run(_ connector: String) { guard let status = statuses[connector], status.configured, activity.allowsPresentationPublication else { return }; let requestIdentity = identity ?? model.knowledgePresentationIdentity; Task { @MainActor in guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; do { let result = try await model.knowledge.runConnector(connector, dryRun: false); guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; message = result.error ?? "Run accepted (\(result.pending) pending)." } catch is CancellationError { return } catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; message = error.localizedDescription } } }
 }
 

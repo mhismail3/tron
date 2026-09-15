@@ -1,6 +1,14 @@
 import XCTest
 @testable import TronMobile
 
+private actor CoverageTestRecorder {
+    var calls: [String?] = []
+    var shouldFail = true
+    func append(_ cursor: String?) { calls.append(cursor) }
+    func takeCalls() -> [String?] { calls }
+    func consumeFailure() -> Bool { defer { shouldFail = false }; return shouldFail }
+}
+
 final class KnowledgeModelsTests: XCTestCase {
     func testGatewayObjectResponseAndImportedQualificationWireShapeDecode() throws {
         let object = KnowledgeObjectRead(hash: String(repeating: "a", count: 64), mediaType: "text/plain", bytes: 5, totalBytes: 5, offset: 0, nextOffset: nil, base64: "aGVsbG8=")
@@ -91,6 +99,109 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertEqual(page.coverage.map(\.disposition), [.pending, .failed])
         XCTAssertEqual(page.stateRevision, 8)
         XCTAssertNil(page.nextCursor)
+    }
+
+    @MainActor
+    func testCoveragePresentationOwnerRetainsCursorAndRestartsChangedRevision() async {
+        let identity = KnowledgePresentationIdentity(profileID: "fixture", lifecycleGeneration: 1, connectionID: 1)
+        let range = KnowledgeObservationRange(sessionId: "session", branchId: nil, fromEntryId: "from", toEntryId: "to", entryIds: ["from"], entryDigest: String(repeating: "a", count: 64), projectId: nil, invocationIds: nil)
+        let store = KnowledgeCoveragePresentationStore()
+        let recorder = CoverageTestRecorder()
+        await store.load(identity: identity, request: { cursor in
+            await recorder.append(cursor)
+            if cursor == nil { return KnowledgeCoveragePage(coverage: (0..<50).map { Self.syntheticCut("cut-\($0)", .observed, range: range) }, stateRevision: 1, nextCursor: "page-2") }
+            return KnowledgeCoveragePage(coverage: [Self.syntheticCut("cut-50", .pending, range: range), Self.syntheticCut("cut-51", .failed, range: range), Self.syntheticCut("cut-52", .unavailable, range: range)], stateRevision: 1, nextCursor: nil)
+        }, isCurrent: { true })
+        await store.loadMore(identity: identity, request: { cursor in
+            await recorder.append(cursor)
+            return KnowledgeCoveragePage(coverage: [Self.syntheticCut("cut-50", .pending, range: range)], stateRevision: 2, nextCursor: nil)
+        }, isCurrent: { true })
+        let recordedCalls = await recorder.takeCalls()
+        XCTAssertEqual(recordedCalls, [nil, "page-2", nil])
+        XCTAssertEqual(store.cuts.count, 1)
+        XCTAssertEqual(store.cuts.first?.disposition, .pending)
+        XCTAssertNil(store.nextCursor)
+        XCTAssertEqual(store.stateRevision, 2)
+
+        let retryStore = KnowledgeCoveragePresentationStore()
+        let retryRecorder = CoverageTestRecorder()
+        await retryStore.load(identity: identity, request: { _ in
+            if await retryRecorder.consumeFailure() { throw GatewayFailure(code: "temporary", message: "fixture retry", retryable: true, details: nil) }
+            return KnowledgeCoveragePage(coverage: [Self.syntheticCut("retry", .failed, range: range)], stateRevision: 3, nextCursor: nil)
+        }, isCurrent: { true })
+        XCTAssertNotNil(retryStore.error)
+        await retryStore.load(identity: identity, request: { _ in
+            KnowledgeCoveragePage(coverage: [Self.syntheticCut("retry", .failed, range: range)], stateRevision: 3, nextCursor: nil)
+        }, isCurrent: { true })
+        XCTAssertNil(retryStore.error)
+        XCTAssertEqual(retryStore.cuts.map(\.id), ["retry"])
+    }
+
+    @MainActor
+    func testObjectReaderOwnerKeepsMultichunkRepresentationsAndRetiresLateResponse() async {
+        let primary = KnowledgeObjectRef(hash: String(repeating: "p", count: 64), mediaType: "text/plain", bytes: 10)
+        let article = KnowledgeObjectRef(hash: String(repeating: "a", count: 64), mediaType: "text/html", bytes: 7)
+        let primaryKey = KnowledgeObjectSelectionKey(recordID: "source", revisionID: "revision", reference: primary)
+        let articleKey = KnowledgeObjectSelectionKey(recordID: "source", revisionID: "revision", reference: article)
+        let store = KnowledgeObjectReaderStore()
+        let delayed = Task { @MainActor in
+            await store.load(primaryKey, offset: 0, request: { reference, offset in
+                try await Task.sleep(for: .milliseconds(80))
+                let text = offset == 0 ? "first-" : "second"
+                return KnowledgeObjectRead(hash: reference.hash, mediaType: reference.mediaType, bytes: Data(text.utf8).count, totalBytes: 10, offset: offset, nextOffset: offset == 0 ? 6 : nil, base64: Data(text.utf8).base64EncodedString())
+            }, isCurrent: { true })
+        }
+        await store.load(articleKey, offset: 0, request: { reference, offset in
+            KnowledgeObjectRead(hash: reference.hash, mediaType: reference.mediaType, bytes: 7, totalBytes: 7, offset: offset, nextOffset: nil, base64: Data("ARTICLE".utf8).base64EncodedString())
+        }, isCurrent: { true })
+        await delayed.value
+        await store.load(primaryKey, offset: 6, request: { reference, offset in
+            KnowledgeObjectRead(hash: reference.hash, mediaType: reference.mediaType, bytes: 4, totalBytes: 10, offset: offset, nextOffset: nil, base64: Data("second".utf8).base64EncodedString())
+        }, isCurrent: { true })
+        let stale = Task { @MainActor in
+            await store.load(articleKey, offset: 0, request: { reference, offset in
+                try await Task.sleep(for: .milliseconds(80))
+                return KnowledgeObjectRead(hash: reference.hash, mediaType: reference.mediaType, bytes: 5, totalBytes: 7, offset: offset, nextOffset: nil, base64: Data("STALE".utf8).base64EncodedString())
+            }, isCurrent: { true })
+        }
+        try? await Task.sleep(for: .milliseconds(5))
+        await store.load(articleKey, offset: 0, request: { reference, offset in
+            KnowledgeObjectRead(hash: reference.hash, mediaType: reference.mediaType, bytes: 5, totalBytes: 7, offset: offset, nextOffset: nil, base64: Data("FRESH".utf8).base64EncodedString())
+        }, isCurrent: { true })
+        await stale.value
+        XCTAssertEqual(String(data: store.state(for: articleKey).bytes, encoding: .utf8), "FRESH")
+        XCTAssertEqual(String(data: store.state(for: primaryKey).bytes, encoding: .utf8), "first-second")
+        XCTAssertNil(store.state(for: primaryKey).nextOffset)
+    }
+
+    @MainActor
+    func testLinkedRecordReaderPublishesVisibleUnavailableAndRetiresOlderCitation() async {
+        let store = KnowledgeLinkedRecordReaderStore()
+        await store.load(id: "missing", revisionID: "revision-a", request: { _, _ in nil }, isCurrent: { true })
+        XCTAssertEqual(store.error, "Linked record is unavailable, excluded, or forgotten. Retry from this detail.")
+        await store.load(id: "new", revisionID: "new-revision", request: { _, _ in
+            KnowledgeModelsTests.syntheticRecord(id: "new", revision: "new-revision")
+        }, isCurrent: { true })
+        XCTAssertEqual(store.record?.id, "new")
+        let staleStore = KnowledgeLinkedRecordReaderStore()
+        let stale = Task { @MainActor in
+            await staleStore.load(id: "old", revisionID: "old-revision", request: { _, _ in
+                try await Task.sleep(for: .milliseconds(80)); return KnowledgeModelsTests.syntheticRecord(id: "old", revision: "old-revision")
+            }, isCurrent: { false })
+        }
+        await stale.value
+        XCTAssertNil(staleStore.record)
+    }
+
+    nonisolated static func syntheticRecord(id: String, revision: String) -> KnowledgeRecord {
+        KnowledgeRecord(schemaVersion: 1, id: id, revisionId: revision, kind: .note, scope: .research,
+            createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+            provenance: KnowledgeProvenance(actor: .user, source: nil, sessionId: nil, branchId: nil, invocationId: nil, evidence: []),
+            temporal: nil, relations: [], content: .note(KnowledgeNoteContent(title: id, body: "fixture", fields: nil, role: .fact, confirmed: false, contraryEvidence: nil, freshness: .unknown, privacyScope: nil, usageConstraint: nil)))
+    }
+
+    nonisolated static func syntheticCut(_ id: String, _ disposition: KnowledgeCoverageDisposition, range: KnowledgeObservationRange) -> KnowledgeObservationCoverage {
+        KnowledgeObservationCoverage(schemaVersion: 1, id: id, revisionId: "revision-\(id)", range: range, disposition: disposition, groupRevisionIds: [], recordedAt: "2026-01-01T00:00:00Z", reason: "fixture")
     }
 
     func testCataloguePaginationAllowsListContinuationButNotSearchPages() {

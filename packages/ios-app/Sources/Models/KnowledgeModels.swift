@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 // These projections intentionally mirror packages/gateway/src/knowledge/
 // knowledge-contract.ts. The Gateway owns all bytes and revisions; iOS only
@@ -39,6 +40,140 @@ struct KnowledgeObservationCoverage: Codable, Hashable, Sendable, Identifiable {
 }
 struct KnowledgeCoveragePage: Codable, Hashable, Sendable {
     let coverage: [KnowledgeObservationCoverage]; let stateRevision: Int; let nextCursor: String?
+}
+
+/// Owns the bounded coverage projection and its cursor. A continuation from a
+/// previous state revision is discarded and restarted rather than mixed with
+/// newer cuts, so later pending/failed/unavailable cuts remain inspectable.
+@MainActor @Observable
+final class KnowledgeCoveragePresentationStore {
+    private(set) var cuts: [KnowledgeObservationCoverage] = []
+    private(set) var nextCursor: String?
+    private(set) var stateRevision: Int?
+    private(set) var loading = false
+    private(set) var error: String?
+    private var generation = 0
+    private var identity: KnowledgePresentationIdentity?
+    private var requestedCursor: String?
+
+    func suspend() { generation &+= 1; loading = false }
+    func reset() { generation &+= 1; cuts = []; nextCursor = nil; stateRevision = nil; error = nil; loading = false; identity = nil; requestedCursor = nil }
+
+    func load(
+        identity: KnowledgePresentationIdentity,
+        cursor: String? = nil,
+        request: @Sendable (String?) async throws -> KnowledgeCoveragePage,
+        isCurrent: @MainActor () -> Bool
+    ) async {
+        guard !Task.isCancelled, isCurrent() else { return }
+        guard !loading || self.identity != identity || requestedCursor != cursor else { return }
+        self.identity = identity; requestedCursor = cursor; generation &+= 1
+        let ticket = generation
+        if cursor == nil { cuts = []; nextCursor = nil; stateRevision = nil }
+        loading = true; error = nil
+        do {
+            let page = try await request(cursor)
+            guard !Task.isCancelled, ticket == generation, isCurrent() else { return }
+            // Never append a page from a changed canonical revision. Restart
+            // at the head so the retained projection has one coherent cursor.
+            if let oldRevision = stateRevision, cursor != nil, oldRevision != page.stateRevision {
+                loading = false
+                await load(identity: identity, cursor: nil, request: request, isCurrent: isCurrent)
+                return
+            }
+            if cursor == nil { cuts = page.coverage } else { cuts.append(contentsOf: page.coverage.filter { !cuts.contains($0) }) }
+            nextCursor = page.nextCursor; stateRevision = page.stateRevision; loading = false
+        } catch is CancellationError { return }
+        catch {
+            guard ticket == generation, isCurrent() else { return }
+            self.error = error.localizedDescription; loading = false
+        }
+    }
+
+    func loadMore(
+        identity: KnowledgePresentationIdentity,
+        request: @Sendable (String?) async throws -> KnowledgeCoveragePage,
+        isCurrent: @MainActor () -> Bool
+    ) async {
+        guard let cursor = nextCursor else { return }
+        await load(identity: identity, cursor: cursor, request: request, isCurrent: isCurrent)
+    }
+}
+
+struct KnowledgeObjectSelectionKey: Hashable, Sendable {
+    let recordID: String; let revisionID: String; let reference: KnowledgeObjectRef
+}
+struct KnowledgeObjectReaderState: Sendable {
+    var bytes = Data(); var totalBytes: Int?; var nextOffset: Int?; var loading = false; var error: String?; var generation = 0
+}
+
+/// Owns linked-record reads for the active detail. A late response cannot
+/// navigate after a newer citation, dismissal, or Gateway profile change.
+@MainActor @Observable
+final class KnowledgeLinkedRecordReaderStore {
+    private(set) var record: KnowledgeRecord?
+    private(set) var loading = false
+    private(set) var error: String?
+    private var generation = 0
+
+    func suspend() { generation &+= 1; loading = false }
+    func clear() { record = nil }
+    func load(id: String, revisionID: String?, request: @Sendable (String, String?) async throws -> KnowledgeRecord?, isCurrent: @MainActor () -> Bool) async {
+        guard !Task.isCancelled, isCurrent() else { return }
+        generation &+= 1; let ticket = generation; let ownerGeneration = generation
+        record = nil; error = nil; loading = true
+        do {
+            let value = try await request(id, revisionID)
+            guard !Task.isCancelled, ticket == generation, generation == ownerGeneration, isCurrent() else { return }
+            loading = false
+            if let value { record = value } else { error = "Linked record is unavailable, excluded, or forgotten. Retry from this detail." }
+        } catch is CancellationError { return }
+        catch {
+            guard ticket == generation, generation == ownerGeneration, isCurrent() else { return }
+            loading = false; self.error = error.localizedDescription
+        }
+    }
+}
+
+/// One reader state per exact record revision and representation. Continuation
+/// offsets are never shared across primary/API/article objects.
+@MainActor @Observable
+final class KnowledgeObjectReaderStore {
+    private(set) var states: [KnowledgeObjectSelectionKey: KnowledgeObjectReaderState] = [:]
+    private var generation = 0
+
+    func state(for key: KnowledgeObjectSelectionKey) -> KnowledgeObjectReaderState { states[key] ?? KnowledgeObjectReaderState() }
+    func suspend() { generation &+= 1 }
+
+    func load(
+        _ key: KnowledgeObjectSelectionKey,
+        offset: Int,
+        request: @Sendable (KnowledgeObjectRef, Int) async throws -> KnowledgeObjectRead?,
+        isCurrent: @MainActor () -> Bool
+    ) async {
+        guard !Task.isCancelled, isCurrent() else { return }
+        var current = states[key] ?? KnowledgeObjectReaderState()
+        current.generation &+= 1; let ticket = current.generation; let ownerGeneration = generation
+        current.loading = true; current.error = nil; states[key] = current
+        let requestedOffset = max(0, offset)
+        do {
+            let value = try await request(key.reference, requestedOffset)
+            guard !Task.isCancelled, generation == ownerGeneration, isCurrent(), states[key]?.generation == ticket else { return }
+            guard let value, let bytes = Data(base64Encoded: value.base64) else {
+                states[key]?.loading = false; states[key]?.error = "Retained object is unavailable or excluded."; return
+            }
+            var updated = states[key] ?? KnowledgeObjectReaderState()
+            guard requestedOffset == 0 || requestedOffset == updated.bytes.count else {
+                updated.loading = false; updated.error = "The retained object changed while it was being read; reopen this representation."; states[key] = updated; return
+            }
+            if requestedOffset == 0 { updated.bytes = bytes } else { updated.bytes.append(bytes) }
+            updated.totalBytes = value.totalBytes; updated.nextOffset = value.nextOffset; updated.loading = false; states[key] = updated
+        } catch is CancellationError { return }
+        catch {
+            guard generation == ownerGeneration, isCurrent(), states[key]?.generation == ticket else { return }
+            states[key]?.loading = false; states[key]?.error = error.localizedDescription
+        }
+    }
 }
 struct KnowledgeSessionEntryCitation: Codable, Hashable, Sendable {
     let sessionId: String; let branchId: String?; let entryId: String; let digest: String?; let startOffset: Int?; let endOffset: Int?

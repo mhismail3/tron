@@ -40,7 +40,7 @@ final class KnowledgeRPCClient {
     func coverage(cursor: String? = nil, limit: Int = 50) async throws -> KnowledgeCoveragePage {
         struct Params: Encodable { let cursor: String?; let limit: Int }
         let value: KnowledgeCoveragePage = try await request("knowledge.observation.coverage", Params(cursor: cursor, limit: min(100, max(1, limit))))
-        guard value.coverage.count <= 100, value.nextCursor != cursor else { throw invalidResponse() }
+        guard value.coverage.count <= 100, value.nextCursor == nil || value.nextCursor != cursor else { throw invalidResponse() }
         return value
     }
     func list(kind: KnowledgeRecordKind? = nil, scope: KnowledgeScope? = nil, cursor: String? = nil, limit: Int = 50) async throws -> KnowledgeListResponse {

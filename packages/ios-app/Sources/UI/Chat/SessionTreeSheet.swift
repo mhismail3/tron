@@ -82,6 +82,7 @@ private struct HistorySelection: Identifiable {
     let node: SessionTreeNode
     let action: Action
     let identity: SessionHistoryReadIdentity
+    let initialPage: SessionHistoryEntryPage?
 }
 private struct HistoryPageRequest {
     var revision = 0
@@ -124,6 +125,7 @@ struct SessionTreeSheet: View {
     #endif
     @State private var installedRevision = -1
     @State private var initialEntryResolved = false
+    @State private var initialEntryStore = SessionHistoryEntryStore()
     @State private var forkNavigation = ChatForkNavigationOwner()
 
     init(sessionID: String, initialEntryID: String? = nil, onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void, onNavigated: @escaping () -> Void) {
@@ -150,7 +152,9 @@ struct SessionTreeSheet: View {
                             if store.loading && store.page == nil { TronLoadingState(label: "Loading history…") }
                             if let page = store.page {
                                 if let initialEntryID, !initialEntryResolved, !page.nodes.contains(where: { $0.id == initialEntryID }) {
-                                    TronSettingsNotice(message: "The cited entry is not in this bounded history page. Use Older entries to locate it; no evidence was substituted.", accent: .tronSessionTeal)
+                                    if initialEntryStore.loading { TronLoadingState(label: "Opening cited entry…") }
+                                    else if initialEntryStore.error != nil { TronSettingsNotice(message: "The cited history entry is unavailable; no evidence was substituted.", accent: .tronAmber) }
+                                    else { TronSettingsNotice(message: "Opening the exact cited entry…", accent: .tronSessionTeal) }
                                 }
                                 pagingControls(page, location: "top")
                                 ForEach(page.nodes) { node in
@@ -205,7 +209,7 @@ struct SessionTreeSheet: View {
                       pageRequest.revision == request.revision else { return }
                 installedRevision = request.revision
                 if changedIdentity { pageRequest.cursor = nil }
-                resolveInitialEntryIfPresent()
+                await resolveInitialEntryIfPresent(identity: identity)
             }
             #if HOSTED_TEST
             .onAppear { installPagingProbe() }
@@ -234,7 +238,7 @@ struct SessionTreeSheet: View {
                 if let route = forkNavigation.consume() { onForkCreated(route) }
             }) { selection in
                 switch selection.action {
-                case .details: HistoryEntryDetailsSheet(node: selection.node, identity: selection.identity)
+                case .details: HistoryEntryDetailsSheet(node: selection.node, identity: selection.identity, initialPage: selection.initialPage)
                 case .navigate: HistoryNavigationSheet(node: selection.node, identity: selection.identity, onNavigated: onNavigated)
                 case .fork: HistoryForkSheet(node: selection.node, identity: selection.identity) { route in
                     forkNavigation.stage(route); self.selection = nil
@@ -253,12 +257,21 @@ struct SessionTreeSheet: View {
         .tronSettingsVisualTheme(accent: .tronSessionTeal).tint(.tronSessionTeal)
     }
 
-    private func resolveInitialEntryIfPresent() {
+    private func resolveInitialEntryIfPresent(identity: SessionHistoryReadIdentity) async {
         guard let initialEntryID, !initialEntryResolved, let page = store.page,
-              let node = page.nodes.first(where: { $0.id == initialEntryID }),
-              let identity, store.identity == identity, active else { return }
+              store.identity == identity, active else { return }
+        if let node = page.nodes.first(where: { $0.id == initialEntryID }) {
+            initialEntryResolved = true
+            select(node, .details)
+            return
+        }
+        await initialEntryStore.load(identity: identity, entryID: initialEntryID, offset: 0,
+            request: { try await model.client.requestValue($0, $1) },
+            isCurrent: { active && self.identity == identity })
+        guard let exact = initialEntryStore.page, active,
+              self.identity == identity, !initialEntryResolved else { return }
         initialEntryResolved = true
-        select(node, .details)
+        select(SessionHistoryEntryStore.node(for: exact), .details, initialPage: exact)
     }
 
     private func pagingControls(_ page: SessionHistoryPage, location: String) -> some View {
@@ -321,9 +334,9 @@ struct SessionTreeSheet: View {
         guard active, !store.loading else { return }
         pageRequest.advance(cursor: pageRequest.cursor, resetsViewport: pageRequest.resetsViewport)
     }
-    private func select(_ node: SessionTreeNode, _ action: HistorySelection.Action) {
+    private func select(_ node: SessionTreeNode, _ action: HistorySelection.Action, initialPage: SessionHistoryEntryPage? = nil) {
         guard active, !store.loading, let identity, store.identity == identity else { return }
-        selection = HistorySelection(node: node, action: action, identity: identity)
+        selection = HistorySelection(node: node, action: action, identity: identity, initialPage: initialPage)
     }
     private func saveLabel(_ value: String?) {
         guard let node = labelNode, SessionHistoryPolicy.canBookmark(node), let expected = labelIdentity, expected == identity else { labelNode = nil; return }
@@ -468,6 +481,10 @@ struct HistoryEntryDetailsSheet: View {
     @State private var store = SessionHistoryEntryStore()
     @State private var offset = 0
     @State private var revision = 0
+    init(node: SessionTreeNode, identity: SessionHistoryReadIdentity, initialPage: SessionHistoryEntryPage? = nil) {
+        self.node = node; self.identity = identity
+        _store = State(initialValue: SessionHistoryEntryStore(initialPage: initialPage))
+    }
     private var active: Bool { activity.allowsPresentationPublication && (coordinator?.activity(for: surfaceToken).allowsPresentationPublication ?? true) }
     private var current: Bool { SessionHistoryReadIdentity.current(model: model, sessionID: identity.target.sessionID) == identity }
     var body: some View {

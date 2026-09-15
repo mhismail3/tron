@@ -5,6 +5,46 @@ import XCTest
 
 @MainActor
 final class SessionSheetPresentationTests: XCTestCase {
+    func testKnowledgeOriginCitationOpensExactOffPageHistoryEntry() async throws {
+        let gateway = ProcessSheetGatewayFixture()
+        try await withModel(client: gateway.client) { model in
+            try await gateway.connect(model: model, capabilities: ["session-history-pages.v1"])
+            let snapshot = try SessionScenarioBuilder(seed: 9_401).openingTail(targetEncodedBytes: 4_096)
+            model.installHostedSubscribedSnapshot(snapshot)
+            let targetEntry = "synthetic-history-entry"
+            let list = try SessionHistoryStoreTests.window(1...100, total: 101)
+            let listResponse = Task {
+                try await gateway.respond(at: 1, method: "session.history.list", result: JSONValue.encode(SessionHistoryPage(
+                    runtimeGeneration: snapshot.runtimeGeneration, nodes: list.nodes, older: list.older,
+                    newer: list.newer, totalEntries: 101)))
+            }
+            defer { listResponse.cancel() }
+            try await self.withSheet(SessionTreeSheet(sessionID: snapshot.sessionId, initialEntryID: targetEntry,
+                onForkCreated: { _ in }, onNavigated: {}).environment(model)) { controller in
+                try await listResponse.value
+                try await gateway.waitForRequest(at: 2)
+                let first = String(repeating: "a", count: 24_000)
+                let exact = SessionHistoryEntryPage(runtimeGeneration: snapshot.runtimeGeneration, entryId: targetEntry,
+                    text: first, offset: 0, nextOffset: 24_000, previousOffset: nil, totalCharacters: 24_028,
+                    metadata: .object(["type": .string("message"), "role": .string("user"), "timestamp": .string("2026-01-01T00:00:00Z")]))
+                try await gateway.respond(at: 2, method: "session.history.entry", result: JSONValue.encode(exact))
+                try await self.waitForRouting {
+                    guard let detail = controller.presentedViewController else { return false }
+                    return self.views(of: UITextView.self, in: detail.view).contains { $0.text == first }
+                }
+                let detail = try XCTUnwrap(controller.presentedViewController)
+                XCTAssertTrue(self.views(of: UITextView.self, in: detail.view).contains { $0.text == first })
+                let requests = await gateway.socket.sentFrames()
+                let decoded = try requests.compactMap { try? JSONDecoder.gateway.decode(JSONValue.self, from: $0) }
+                XCTAssertTrue(decoded.contains { value in
+                    value.objectValue?["method"]?.stringValue == "session.history.entry"
+                        && value.objectValue?["params"]?.objectValue?["entryId"]?.stringValue == targetEntry
+                })
+            }
+            await gateway.client.close()
+        }
+    }
+
     func testSessionHistoryPagingStartsNewNativeBatchAtTopAndRetainsFailures() async throws {
         for scheme: ColorScheme in [.light, .dark] {
             let gateway = ProcessSheetGatewayFixture()

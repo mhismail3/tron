@@ -167,6 +167,26 @@ final class SessionHistoryEntryStore {
     private var entryID: String?
     private var requestedOffset = 0
 
+    init(initialPage: SessionHistoryEntryPage? = nil) {
+        page = initialPage
+        requestedOffset = initialPage?.offset ?? 0
+    }
+
+    /// Builds the existing history row shape from canonical entry metadata;
+    /// the displayed body remains the admitted SessionHistoryEntryPage, never
+    /// a reduced citation DTO or a first-page cache lookup.
+    static func node(for page: SessionHistoryEntryPage) -> SessionTreeNode {
+        let metadata = page.metadata.objectValue ?? [:]
+        let role = metadata["role"]?.stringValue.flatMap(TranscriptItem.Role.init(rawValue:))
+        return SessionTreeNode(
+            id: page.entryId, parentId: metadata["parentId"]?.stringValue,
+            timestamp: metadata["timestamp"]?.stringValue ?? "1970-01-01T00:00:00Z",
+            kind: metadata["type"]?.stringValue ?? "message", label: nil,
+            preview: String(page.text.prefix(SessionHistoryPreview.maximumCharacters)), role: role,
+            depth: 0, childCount: 0, isCurrentPath: true
+        )
+    }
+
     func suspend() { generation &+= 1; loading = false }
 
     func load(identity: SessionHistoryReadIdentity, entryID: String, offset: Int,
