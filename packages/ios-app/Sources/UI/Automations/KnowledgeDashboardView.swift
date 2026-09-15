@@ -46,6 +46,9 @@ struct KnowledgeDashboardView: View {
     @State private var loadingMore = false
     @State private var status: KnowledgeStatus?
     @State private var coverageStore = KnowledgeCoveragePresentationStore()
+    @State private var coverageToClear: KnowledgeObservationCoverage?
+    @State private var clearingCoverageID: String?
+    @State private var coverageMutationError: String?
     @State private var loadGeneration = 0
     @State private var connectorRefreshGeneration: [String: Int] = [:]
     @State private var configSheet = false
@@ -149,6 +152,7 @@ struct KnowledgeDashboardView: View {
             loadGeneration += 1
             loadingMore = false
             coverageStore.reset()
+            coverageToClear = nil; clearingCoverageID = nil; coverageMutationError = nil
             records.removeAll(); selected = nil; selectedIdentity = nil; pendingDetailAction = nil
             nextCursor = nil; status = nil; error = nil
         }
@@ -178,6 +182,13 @@ struct KnowledgeDashboardView: View {
             if !active { coverageStore.suspend() }
         }
         .onDisappear { coverageStore.suspend() }
+        .confirmationDialog("Clear this observation failure?", isPresented: Binding(
+            get: { coverageToClear != nil }, set: { if !$0 { coverageToClear = nil } }
+        ), presenting: coverageToClear) { cut in
+            Button("Clear failure") { clearCoverage(cut) }
+        } message: { _ in
+            Text("Skip only this cut without retrying it. Conversation history and other observations stay unchanged.")
+        }
     }
 
     private func dismissSearch() {
@@ -273,8 +284,21 @@ struct KnowledgeDashboardView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer(minLength: TronSpacing.md)
-                        Button("Open") { onOpenSession(cut.range.sessionId, cut.range.fromEntryId) }
-                            .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
+                        VStack(spacing: TronSpacing.xs) {
+                            Button { onOpenSession(cut.range.sessionId, cut.range.fromEntryId) } label: {
+                                TronInlineActionLabel("Open", accent: .tronKnowledge)
+                            }
+                            .buttonStyle(.plain)
+                            if cut.disposition == .failed || cut.disposition == .unavailable {
+                                Button { coverageToClear = cut } label: {
+                                    TronInlineActionLabel("Clear", isWorking: clearingCoverageID == cut.id, accent: .tronKnowledge)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(clearingCoverageID != nil)
+                                .accessibilityLabel("Clear observation failure")
+                            }
+                        }
+                        .controlSize(.small)
                     }
                 }
             } else {
@@ -282,10 +306,13 @@ struct KnowledgeDashboardView: View {
                     .font(TronTypography.secondaryDescription)
                     .foregroundStyle(Color.tronTextSecondary)
             }
+            if let coverageMutationError {
+                TronSettingsNotice(message: coverageMutationError, accent: .tronAmber)
+            }
             if let coverageError = coverageStore.error {
                 TronSettingsNotice(message: "Coverage unavailable: \(coverageError)", accent: .tronAmber)
             }
-            if coverageStore.loading { TronLoadingState(label: "Loading coverage…", accent: .tronKnowledge) }
+            if coverageStore.showsInitialLoading { TronLoadingState(label: "Loading coverage…", accent: .tronKnowledge) }
             if coverageStore.nextCursor != nil {
                 Button(coverageStore.loading ? "Loading…" : "Inspect more coverage") {
                     let identity = model.knowledgePresentationIdentity
@@ -305,6 +332,24 @@ struct KnowledgeDashboardView: View {
         .accessibilityLabel("Observation coverage. Observed \(coverage.observedCount), empty \(coverage.emptyCount), excluded \(coverage.excludedCount), remaining \(coverage.remainingCount)")
     }
 
+    private func clearCoverage(_ cut: KnowledgeObservationCoverage) {
+        guard activity.allowsPresentationPublication, clearingCoverageID == nil else { return }
+        let identity = model.knowledgePresentationIdentity
+        clearingCoverageID = cut.id; coverageMutationError = nil
+        Task { @MainActor in
+            defer { if model.knowledgePresentationIdentity == identity { clearingCoverageID = nil } }
+            guard model.knowledgePresentationIdentity == identity else { return }
+            do {
+                _ = try await model.knowledge.dismissCoverage(cut, capabilities: model.gatewayInfo?.capabilities ?? [])
+                guard model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication else { return }
+                await reload()
+            } catch {
+                guard model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication else { return }
+                coverageMutationError = error.localizedDescription
+            }
+        }
+    }
+
     private func reload() async {
         loadGeneration += 1; let generation = loadGeneration; let identity = model.knowledgePresentationIdentity
         guard activity.allowsPresentationPublication, identity.profileID != nil, identity.lifecycleGeneration != nil else { return }
@@ -318,7 +363,7 @@ struct KnowledgeDashboardView: View {
             let currentStatus = try await loadedStatus
             guard generation == loadGeneration, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
             records = response.records; nextCursor = response.nextCursor; status = currentStatus
-            await coverageStore.load(identity: identity,
+            await coverageStore.load(identity: identity, expectedStateRevision: currentStatus.stateRevision ?? 0,
                 request: { cursor in try await model.knowledge.coverage(cursor: cursor, limit: 50) },
                 isCurrent: { generation == loadGeneration && activity.allowsPresentationPublication && model.knowledgePresentationIdentity == identity })
             guard generation == loadGeneration, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
@@ -518,7 +563,6 @@ struct KnowledgeDetailView: View {
             .padding(.horizontal, TronSpacing.xlarge)
             .padding(.vertical, TronSpacing.large)
         }
-        .background(Color.tronBackground)
         .tronScrollEdgeChrome()
         .tronNavigationTitle(observationPresentation == nil ? "Knowledge detail" : "Observation", accent: .tronKnowledge)
         .toolbar {
@@ -733,11 +777,13 @@ struct KnowledgeDetailView: View {
     private func observationEvidence(_ observation: KnowledgeObservationPresentation) -> some View {
         TronSettingsGroup("Evidence", accent: .tronKnowledge) {
             TronSettingsRow(icon: "bubble.left.and.bubble.right", title: originatingSessionTitle(observation.sessionID)) {
-                Button("Open session") {
+                Button {
                     guard admitsOrigin else { evidenceMessage = "Gateway changed; reopen this entry."; return }
                     onOpenSession(observation.sessionID, observation.entryID)
+                } label: {
+                    TronInlineActionLabel("Open session", accent: .tronKnowledge)
                 }
-                .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
+                .buttonStyle(.plain)
             }
             if let evidenceMessage {
                 TronSettingsCaption(evidenceMessage).padding(14)

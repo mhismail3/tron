@@ -294,7 +294,7 @@ export class GatewayService {
         ...(this.iosDeviceInstallService.isUsable ? [IOS_DEVICE_INSTALL_CAPABILITY] : []),
         ...(this.dependencies.notifications ? ["push-notifications.v1", "notification-inbox.v1"] : []),
         ...(this.dependencies.automations?.status().ready ? [AUTOMATIONS_CAPABILITY, AUTOMATIONS_TIMELINE_CAPABILITY] : []),
-        ...(this.dependencies.knowledge ? ["knowledge.v1", "knowledge-global-observation.v1"] : []),
+        ...(this.dependencies.knowledge ? ["knowledge.v1", "knowledge-global-observation.v1", "knowledge-coverage-dismiss.v1"] : []),
       ],
     };
   }
@@ -319,6 +319,7 @@ export class GatewayService {
         return safeJson(await knowledge.invoke({ operation: method, request: params } as KnowledgeAction));
       }
       case "knowledge.config":
+      case "knowledge.observation.dismiss":
       case "knowledge.source.capture":
       case "knowledge.source.triage":
       case "knowledge.note.create":

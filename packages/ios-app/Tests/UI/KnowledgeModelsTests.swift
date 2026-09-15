@@ -21,7 +21,7 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertEqual(presentation.entryID, "fixture-first", "The single session action retains the exact originating entry")
         XCTAssertEqual(presentation.recordMetadata.first { $0.title == "Revision" }?.value, "fixture-revision")
         XCTAssertEqual(presentation.sourceMetadata.first { $0.title == "Digest" }?.value, String(repeating: "a", count: 64))
-        XCTAssertEqual(presentation.sourceMetadata.first { $0.title == "Entries" }?.value, "fixture-first\nfixture-last")
+        XCTAssertEqual(presentation.sourceMetadata.first { $0.title == "Entries" }?.value, "fixture-first, fixture-last")
         XCTAssertEqual(presentation.observerMetadata.first { $0.title == "Model" }?.value, "fixture/model")
         let item = try XCTUnwrap(presentation.observation.items.first)
         XCTAssertEqual(presentation.itemMetadata(item).map(\.value), ["User", "Qualified", "2026-01-01T09:30:00Z"])
@@ -211,6 +211,50 @@ final class KnowledgeModelsTests: XCTestCase {
         }, isCurrent: { true })
         XCTAssertNil(retryStore.error)
         XCTAssertEqual(retryStore.cuts.map(\.id), ["retry"])
+    }
+
+    @MainActor
+    func testCoverageUncoverReusesThePageAndRefreshKeepsRowsUntilReplacement() async {
+        let identity = KnowledgePresentationIdentity(profileID: "fixture", lifecycleGeneration: 1, connectionID: 1)
+        let range = KnowledgeObservationPresentation(record: KnowledgeObservationFixture.record())!.observation.range
+        let cut = Self.syntheticCut("failed-cut", .failed, range: range)
+        let store = KnowledgeCoveragePresentationStore()
+        await store.load(identity: identity, request: { _ in
+            KnowledgeCoveragePage(coverage: [cut], stateRevision: 1, nextCursor: "next-page")
+        }, isCurrent: { true })
+        store.suspend()
+        await store.load(identity: identity, expectedStateRevision: 1, request: { _ in
+            XCTFail("Closing an unchanged sheet must not reload coverage")
+            return KnowledgeCoveragePage(coverage: [], stateRevision: 1, nextCursor: nil)
+        }, isCurrent: { true })
+        XCTAssertEqual(store.cuts, [cut]); XCTAssertEqual(store.nextCursor, "next-page")
+        await store.load(identity: identity, expectedStateRevision: 2, request: { _ in
+            await MainActor.run {
+                XCTAssertEqual(store.cuts, [cut], "Keep rows while the replacement is in flight")
+                XCTAssertTrue(store.loading)
+                XCTAssertFalse(store.showsInitialLoading, "Do not replace retained coverage with a spinner")
+            }
+            return KnowledgeCoveragePage(coverage: [], stateRevision: 2, nextCursor: nil)
+        }, isCurrent: { true })
+        XCTAssertTrue(store.cuts.isEmpty); XCTAssertEqual(store.stateRevision, 2)
+        let other = KnowledgePresentationIdentity(profileID: "other", lifecycleGeneration: 2, connectionID: 2)
+        await store.load(identity: other, expectedStateRevision: 2, request: { _ in
+            await MainActor.run { XCTAssertTrue(store.showsInitialLoading); XCTAssertNil(store.stateRevision) }
+            return KnowledgeCoveragePage(coverage: [], stateRevision: 2, nextCursor: nil)
+        }, isCurrent: { true })
+    }
+
+    @MainActor
+    func testCoverageClearRequiresAGatewayThatOwnsTheMutation() async {
+        var calls = 0
+        let client = KnowledgeRPCClient(request: { _, _, _ in calls += 1; return .null })
+        let cut = Self.syntheticCut("failed-cut", .failed, range: KnowledgeObservationPresentation(record: KnowledgeObservationFixture.record())!.observation.range)
+        do {
+            _ = try await client.dismissCoverage(cut, capabilities: ["knowledge.v1"])
+            XCTFail("Old Gateways must not silently ignore a coverage clear")
+        } catch let error as GatewayFailure { XCTAssertEqual(error.code, "unsupported") }
+        catch { XCTFail("Unexpected error: \(error)") }
+        XCTAssertEqual(calls, 0)
     }
 
     @MainActor

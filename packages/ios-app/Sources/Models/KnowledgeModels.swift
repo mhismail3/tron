@@ -38,6 +38,10 @@ struct KnowledgeObservationCoverage: Codable, Hashable, Sendable, Identifiable {
     let schemaVersion: Int; let id: String; let revisionId: String; let range: KnowledgeObservationRange
     let disposition: KnowledgeCoverageDisposition; let groupRevisionIds: [String]; let recordedAt: String; let reason: String?
 }
+struct KnowledgeCoverageDismissResult: Codable, Sendable {
+    let coverage: KnowledgeObservationCoverage
+    let stateRevision: Int
+}
 struct KnowledgeCoveragePage: Codable, Hashable, Sendable {
     let coverage: [KnowledgeObservationCoverage]; let stateRevision: Int; let nextCursor: String?
 }
@@ -55,6 +59,7 @@ final class KnowledgeCoveragePresentationStore {
     private var generation = 0
     private var identity: KnowledgePresentationIdentity?
     private var requestedCursor: String?
+    var showsInitialLoading: Bool { loading && stateRevision == nil }
 
     func suspend() { generation &+= 1; loading = false }
     func reset() { generation &+= 1; cuts = []; nextCursor = nil; stateRevision = nil; error = nil; loading = false; identity = nil; requestedCursor = nil }
@@ -62,14 +67,18 @@ final class KnowledgeCoveragePresentationStore {
     func load(
         identity: KnowledgePresentationIdentity,
         cursor: String? = nil,
+        expectedStateRevision: Int? = nil,
         request: @Sendable (String?) async throws -> KnowledgeCoveragePage,
         isCurrent: @MainActor () -> Bool
     ) async {
         guard !Task.isCancelled, isCurrent() else { return }
         guard !loading || self.identity != identity || requestedCursor != cursor else { return }
+        if self.identity != identity { reset() }
+        if cursor == nil, let expectedStateRevision, stateRevision == expectedStateRevision, error == nil { return }
         self.identity = identity; requestedCursor = cursor; generation &+= 1
         let ticket = generation
-        if cursor == nil { cuts = []; nextCursor = nil; stateRevision = nil }
+        // A same-Gateway refresh replaces the page only after it arrives. A
+        // covered/uncovered sheet must not flash an empty coverage container.
         loading = true; error = nil
         do {
             let page = try await request(cursor)

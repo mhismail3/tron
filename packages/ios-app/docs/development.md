@@ -28,16 +28,22 @@ obvious in the filter sheet. Observation cards show only the statement (bounded 
 Personal/Research tag, and localized source date—not a repeated Observation title/type, eye icon, raw
 timestamp, or revision counter. Corrections do not redate the source observation. Opening a record uses
 `KnowledgeDetailSheet`, initially medium and expandable to large, with the standard violet title,
-Done control, edge chrome, and hidden grabber. Observation detail shows the full statement once and a
-single originating-session row with Open session. Catalog names are presentation-only; the action
+Done control, edge chrome, and hidden grabber. It inherits the same native sheet background as technical
+details, without a dashboard-black override. Observation detail shows the full statement once and a
+single originating-session row with the shared capsule-shaped Open session control. Catalog names are presentation-only; the action
 retains the exact Gateway/session/entry citation even if the session is off-page. The top-left info
 button opens `KnowledgeObservationTechnicalDetailsSheet` using the shared technical metadata/JSON
-components for revisions, ranges, digests, attribution, certainty, model, and complete evidence.
+components for revisions, ranges, digests, attribution, certainty, model, and complete evidence. Entry IDs
+are comma-separated and wrap naturally rather than allocating one line per ID.
 Reflection remains available in the actions menu rather than a redundant Observed items section.
 Session navigation and editable drafts are handed off only after the record sheet dismisses, with the
 originating Gateway identity rechecked. `KnowledgeModelsTests` and the focused observation case in
 `SessionSheetPresentationTests` cover retained evidence/source dates and real medium/large sheets.
-A covered parent must not suppress a legitimate child
+Coverage retains its rows through sheet dismissal and same-Gateway refresh. An unchanged canonical
+revision reuses the loaded page/cursor; a changed revision replaces it after arrival, without a loading
+placeholder. Initial/new-Gateway reads still show loading. Clear on a failed/unavailable cut uses the
+confirmed mutation owner and requires `knowledge-coverage-dismiss.v1`; it preserves an exact terminal
+skip, not a deleted gap or a session exclusion. A covered parent must not suppress a legitimate child
 correction callback: the callback checks the originating Knowledge presentation identity while the
 managed child owns presentation publication.
 

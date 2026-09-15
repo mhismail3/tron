@@ -13,7 +13,7 @@ import {
   type KnowledgeListResponse, type KnowledgeObjectRef, type KnowledgeRecallRequest,
   type KnowledgeRecallResponse, type KnowledgeRecord, type KnowledgeRecordDraft,
   type KnowledgeSearchRequest, type KnowledgeSearchResponse, type KnowledgeSearchHit,
-  type KnowledgeNoteMutationRequest,
+  type KnowledgeNoteMutationRequest, type KnowledgeCoverageDismissRequest,
   type KnowledgeConnectorState, type ObservationCoverage, type ObservationRange, type KnowledgeCoveragePage, type KnowledgeCoverageSummary, validateKnowledgeConfig,
   validateKnowledgeRecord, validateObjectRef, assertKnowledgeId, assertKnowledgeProjectId,
 } from "./knowledge-contract.js";
@@ -842,6 +842,20 @@ export class KnowledgeStore {
       // Record bodies are durable first; one catalog transaction admits all
       // heads and coverage together. No growing group-manifest journal is needed.
       state.coverage.set(coverage.id, coverage); return { records, coverage, stateRevision: state.stateRevision + 1 };
+    });
+  }
+  async dismissCoverage(request: KnowledgeCoverageDismissRequest): Promise<{ coverage: ObservationCoverage; stateRevision: number }> {
+    safeId(request.coverageId, "coverage id"); safeId(request.expectedRevision, "coverage revision");
+    return this.mutate("knowledge.observation.dismiss", request.commandId, request, async state => {
+      const current = state.coverage.get(request.coverageId);
+      if (!current || current.revisionId !== request.expectedRevision) throw conflict("Observation coverage changed; reload before clearing it");
+      if (!["failed", "unavailable"].includes(current.disposition) || current.groupRevisionIds.length) throw conflict("Only failed or unavailable observation cuts can be cleared");
+      // Keep the exact cut as a terminal skip, not a deletion that would allow
+      // recovery to re-admit it. This never excludes its session or project.
+      const coverage: ObservationCoverage = { ...current, disposition: "excluded", revisionId: revisionId(),
+        reason: `dismissed-by-user: ${current.reason ?? current.disposition}` };
+      state.coverage.set(coverage.id, coverage);
+      return { coverage, stateRevision: state.stateRevision + 1 };
     });
   }
   async setCoverage(input: CoverageUpdateInput): Promise<{ coverage: ObservationCoverage; stateRevision: number }> {

@@ -218,6 +218,7 @@ export class KnowledgeService {
     switch (action.operation) {
       case "knowledge.status": return this.store.status();
       case "knowledge.observation.coverage": return this.store.observationCoveragePage(action.request.limit ?? 100, action.request.cursor);
+      case "knowledge.observation.dismiss": return this.store.dismissCoverage(action.request);
       case "knowledge.object.read": {
         const bytes = await this.store.readObject({ hash: action.request.hash, mediaType: action.request.mediaType, bytes: action.request.bytes }, { recordId: action.request.recordId, revisionId: action.request.revisionId });
         if (!bytes) return null;

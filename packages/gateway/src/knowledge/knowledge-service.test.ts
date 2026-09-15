@@ -21,6 +21,38 @@ function model(): KnowledgeGenerationModel {
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
 
 describe("KnowledgeService integration", () => {
+  it("clears only an exact failed cut through a durable, replayable terminal skip", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-knowledge-clear-")); roots.push(root);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const initial = await store.config();
+    const config = await store.configure("clear-cut-config", { ...initial, eligibility: { ...initial.eligibility, sessionIds: ["session-clear"] } });
+    const range = { sessionId: "session-clear", fromEntryId: "e1", toEntryId: "e1", entryIds: ["e1"], entryDigest: "a".repeat(64) };
+    const failed = await store.setCoverage({ commandId: "clear-cut-failed", expectedConfigRevision: config.revision,
+      coverage: { id: "cut-failed", range, disposition: "failed", groupRevisionIds: [], reason: "Observer output must be an object" } });
+    const goodRange = { ...range, fromEntryId: "e2", toEntryId: "e2", entryIds: ["e2"], entryDigest: "b".repeat(64) };
+    const observed = await store.publishObservationGroup({ commandId: "clear-cut-observed", expectedConfigRevision: config.revision,
+      coverage: { id: "cut-observed", range: goodRange, disposition: "observed" },
+      records: [{ kind: "observation", scope: "personal", provenance: { actor: "agent", evidence: [] }, relations: [],
+        content: { range: goodRange, items: [{ text: "Retained statement", attribution: "user", certainty: "qualified", observedAt: "2026-01-01T00:00:00Z" }] } }] });
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined));
+    const request = { commandId: "clear-cut-command", coverageId: failed.coverage.id, expectedRevision: failed.coverage.revisionId };
+    const cleared = await service.invoke({ operation: "knowledge.observation.dismiss", request });
+    expect(cleared).toMatchObject({ coverage: { id: failed.coverage.id, range, disposition: "excluded", groupRevisionIds: [], reason: "dismissed-by-user: Observer output must be an object" } });
+    expect((await store.status()).coverage).toMatchObject({ failedCount: 0, excludedCount: 1, observedCount: 1, remainingCount: 0 });
+    expect(await store.read(observed.records[0]!.id)).toEqual(observed.records[0]);
+    expect(await store.config()).toEqual(config);
+    expect(await store.scopeExcluded(range)).toBe(false);
+    expect(await service.invoke({ operation: "knowledge.observation.dismiss", request })).toEqual(cleared);
+    await expect(service.invoke({ operation: "knowledge.observation.dismiss", request: { ...request, commandId: "clear-cut-stale" } })).rejects.toThrow("changed");
+    await expect(store.setCoverage({ commandId: "clear-cut-late-failure", expectedConfigRevision: config.revision,
+      expectedRevision: failed.coverage.revisionId, coverage: { id: failed.coverage.id, range, disposition: "failed", groupRevisionIds: [] } })).rejects.toThrow("stale");
+    const pending = await store.setCoverage({ commandId: "clear-cut-pending", expectedConfigRevision: config.revision,
+      coverage: { id: "cut-pending", range: { ...range, fromEntryId: "e3", toEntryId: "e3", entryIds: ["e3"] }, disposition: "pending", groupRevisionIds: [] } });
+    for (const coverage of [pending.coverage, observed.coverage]) {
+      await expect(service.invoke({ operation: "knowledge.observation.dismiss", request: { commandId: `cannot-clear-${coverage.id}`, coverageId: coverage.id, expectedRevision: coverage.revisionId } })).rejects.toThrow("Only failed");
+    }
+  });
+
   it("routes source triage through the persisted source and model seam", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));

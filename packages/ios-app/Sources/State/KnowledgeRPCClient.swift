@@ -5,6 +5,7 @@ import Foundation
 @MainActor
 final class KnowledgeRPCClient {
     static let globalObservationCapability = "knowledge-global-observation.v1"
+    static let coverageDismissCapability = "knowledge-coverage-dismiss.v1"
     typealias Request = @MainActor @Sendable (String, JSONValue, Duration) async throws -> JSONValue
     private let requestValue: Request
     private let mutationExecutor: ConfirmedMutationExecutor?
@@ -42,6 +43,15 @@ final class KnowledgeRPCClient {
         struct Params: Encodable { let cursor: String?; let limit: Int }
         let value: KnowledgeCoveragePage = try await request("knowledge.observation.coverage", Params(cursor: cursor, limit: min(100, max(1, limit))))
         guard value.coverage.count <= 100, value.nextCursor == nil || value.nextCursor != cursor else { throw invalidResponse() }
+        return value
+    }
+    func dismissCoverage(_ cut: KnowledgeObservationCoverage, capabilities: [String]) async throws -> KnowledgeCoverageDismissResult {
+        guard capabilities.contains(Self.coverageDismissCapability) else {
+            throw GatewayFailure(code: "unsupported", message: "Update this Gateway before clearing failed observation cuts.", retryable: false, details: nil)
+        }
+        struct Params: Encodable { let coverageId: String; let expectedRevision: String }
+        let value: KnowledgeCoverageDismissResult = try await mutate("knowledge.observation.dismiss", parameters: Params(coverageId: cut.id, expectedRevision: cut.revisionId))
+        guard value.coverage.id == cut.id, value.coverage.range == cut.range, value.coverage.disposition == .excluded else { throw invalidResponse() }
         return value
     }
     func list(kind: KnowledgeRecordKind? = nil, scope: KnowledgeScope? = nil, cursor: String? = nil, limit: Int = 50) async throws -> KnowledgeListResponse {

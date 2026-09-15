@@ -519,9 +519,12 @@ export interface KnowledgeObjectReadRequest {
   mediaType: string;
   offset?: number;
 }
+export interface KnowledgeCoverageDismissRequest { commandId: string; coverageId: string; expectedRevision: string; }
+
 export type KnowledgeAction =
   | { operation: "knowledge.status"; request: Record<string, never> }
   | { operation: "knowledge.observation.coverage"; request: KnowledgeCoverageRequest }
+  | { operation: "knowledge.observation.dismiss"; request: KnowledgeCoverageDismissRequest }
   | { operation: "knowledge.object.read"; request: KnowledgeObjectReadRequest }
   | { operation: "knowledge.config"; request: { commandId: string; config: KnowledgeConfig } }
   | { operation: "knowledge.list"; request: KnowledgeListRequest }

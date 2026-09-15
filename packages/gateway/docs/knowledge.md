@@ -99,6 +99,16 @@ immutable; pending/failed work can recover, while `observed` cannot be
 fabricated without committed observation revisions. Session-entry evidence is represented by a typed
 `sessionEntry` citation; record evidence names the exact record revision.
 
+`knowledge.observation.dismiss` (capability `knowledge-coverage-dismiss.v1`) is
+the explicit Clear action for an exact failed/unavailable cut. The command ID
+and expected coverage revision pass the existing serialized mutation/receipt
+owner. It retains the range, digest, and original failure reason, marking only
+that cut `excluded` with a `dismissed-by-user` reason so recovery cannot recreate
+the warning. Active pending work and observed/empty groups cannot be cleared.
+Session/project eligibility, conversation history, and observations are not
+changed. A stale or late worker loses the coverage revision race. This requires
+the updated Gateway; clients never hide failures in local acknowledgment state.
+
 Mutations serialize per workspace and require stable command IDs with exact
 request hashes. Record/config/coverage expected revisions reject stale
 writers. Receipt payloads contain references rather than full record bodies.

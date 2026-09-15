@@ -35,7 +35,7 @@ struct KnowledgeObservationPresentation {
             .init(title: "Session ID", value: range.sessionId, icon: "bubble.left.and.bubble.right"),
             .init(title: "First entry", value: range.fromEntryId, icon: "arrow.up.to.line"),
             .init(title: "Last entry", value: range.toEntryId, icon: "arrow.down.to.line"),
-            .init(title: "Entries", value: range.entryIds.joined(separator: "\n"), icon: "list.bullet"),
+            .init(title: "Entries", value: range.entryIds.joined(separator: ", "), icon: "list.bullet"),
             .init(title: "Digest", value: range.entryDigest, icon: "number"),
         ]
         if let branch = range.branchId { items.append(.init(title: "Branch", value: branch, icon: "arrow.triangle.branch")) }
