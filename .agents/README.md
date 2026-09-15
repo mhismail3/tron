@@ -13,11 +13,14 @@ facts in the owning source and package docs, not copied into skills.
 | [tron-test-confidence](skills/tron-test-confidence/SKILL.md) | Behavioral oracles, test cleanup, timing/isolation failures, and controlled mutation or ablation |
 | [tron-performance](skills/tron-performance/SKILL.md) | Profiling a demonstrated bottleneck or comparing alternatives under a frozen experiment |
 | [tron-ios](skills/tron-ios/SKILL.md) | Required routing for iOS build, test, simulator, device, signing, archive, and artifact work |
+| [tron-workspace-housekeeping](skills/tron-workspace-housekeeping/SKILL.md) | Evidence-based post-merge cleanup of branches, inactive worktrees, and stale Git metadata; protect active agents and unmerged work |
 
 For a broad investigation, start with code health and its coverage ledger. Use
 test confidence to evaluate the evidence, then performance only where a cost or
 comparison warrants measurement. For a bounded task, load only the relevant
-procedure; this is not a mandatory multi-skill pipeline. Dependency and
+procedure; this is not a mandatory multi-skill pipeline. Use workspace housekeeping
+for post-merge Git resource cleanup, not code-health or filesystem sweeps. It audits
+first and requires approved targets before deletion. Dependency and
 configuration changes follow their owning contributor/package runbooks.
 
 ## Maintaining guidance
