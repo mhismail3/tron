@@ -32,7 +32,8 @@ export type AdministrativeDrainBlockerCategory =
   | "extension-command-prompt-ui"
   | "administrative-provider-package-operation"
   | "automation-dispatch"
-  | "automation-terminal-persistence";
+  | "automation-terminal-persistence"
+  | "knowledge-observation";
 
 export interface AdministrativeDrainBlockerSummary {
   /** Per-drain opaque identity. It is not a session, run, path, or token ID. */

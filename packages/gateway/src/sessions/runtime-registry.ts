@@ -9,6 +9,7 @@ import {
   ModelRuntime,
   parseSessionEntries,
   SessionManager,
+  type FileEntry,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
@@ -42,6 +43,7 @@ import {
 import { RunMarkerStore, type RunMarkerEvidence } from "./run-markers.js";
 import {
   RuntimeSlot,
+  observationBranchIdFor,
   completionOwnedByMarker,
   type CanonicalAssistantCompletion,
   type SessionAttentionRebindDisposition,
@@ -74,6 +76,8 @@ import {
 } from "./catalog-metadata-index.js";
 import { branchFromParsedSession } from "./session-branch.js";
 import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-boundary.js";
+import type { KnowledgeService } from "../knowledge/knowledge-service.js";
+import { observationEntriesDigest } from "../knowledge/knowledge-observation.js";
 
 const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
 /** A read-only child observer may page only canonical sessions that fit this
@@ -423,6 +427,7 @@ export class RuntimeRegistry {
   private readonly exports: BlobStore;
   private readonly displayArtifacts: DisplayArtifactStore;
   private readonly workspace: TronWorkspace;
+  private knowledgeService: KnowledgeService | undefined;
   private readonly markers: RunMarkerStore;
   private readonly extensionActivityRecency = new ExtensionActivityRecency();
   private readonly processActivityRecency = new ProcessActivityRecency();
@@ -541,6 +546,15 @@ export class RuntimeRegistry {
     return this.revision;
   }
 
+  /** Shared workspace owner for capability stores; callers must not construct a
+   * second workspace authority for the same Tron installation. */
+  knowledgeWorkspace(): TronWorkspace { return this.workspace; }
+
+  setKnowledgeService(service: KnowledgeService): void {
+    if (this.knowledgeService && this.knowledgeService !== service) throw new Error("Knowledge service is already installed");
+    this.knowledgeService = service;
+  }
+
   get administrativeWorkRegistry(): GatewayWorkRegistry { return this.workRegistry; }
 
   async initialize(onPhase?: (phase: "catalog-warming" | "attention-recovery") => void): Promise<void> {
@@ -563,6 +577,82 @@ export class RuntimeRegistry {
     this.artifactDiscoveryTimer = setInterval(() => void this.discoverExtensionArtifacts(), 750);
     this.artifactDiscoveryTimer.unref();
     void this.discoverExtensionArtifacts();
+  }
+
+  /** Re-admit only durable pending/failed Knowledge cuts after restart. The
+   * canonical slot supplies the exact currently selected branch; recovery does
+   * not acquire or pin a foreground runtime, replay a prompt/tool, or invent
+   * provenance. Missing/non-active/changed coverage is made explicitly
+   * unavailable so it remains visible as a bounded gap. */
+  async recoverKnowledgeObservation(): Promise<void> {
+    const knowledge = this.knowledgeService;
+    if (!knowledge) return;
+    const pending = await knowledge.pendingObservationCoverage(100).catch(() => []);
+    const config = await knowledge.store.config().catch(() => undefined);
+    if (!config) return;
+    for (const coverage of pending) {
+      const markUnavailable = async (reason: string): Promise<void> => {
+        await knowledge.store.setCoverage({
+          commandId: `knowledge-recovery-unavailable-${coverage.id}`,
+          expectedConfigRevision: config.revision,
+          expectedRevision: coverage.revisionId,
+          coverage: { ...coverage, disposition: "unavailable", groupRevisionIds: [], reason },
+        }).catch(() => {});
+      };
+      let branch: FileEntry[];
+      let canonicalEntries: FileEntry[];
+      let branchId: string;
+      const slot = this.slots.get(coverage.range.sessionId);
+      if (slot && !slot.isDisposed) {
+        canonicalEntries = slot.canonicalSessionEntries();
+        branch = canonicalEntries.slice(1);
+        branchId = slot.canonicalObservationBranchId();
+      } else {
+        // Read the admitted canonical file without constructing a live slot.
+        // This keeps recovery useful after restart while avoiding foreground
+        // ownership, model/session initialization, or a second runtime.
+        const candidates = this.catalogStructuralIndex?.allInfos.filter(info => info.id === coverage.range.sessionId) ?? [];
+        if (candidates.length !== 1) { await markUnavailable(candidates.length === 0 ? "canonical-session-unavailable" : "canonical-session-identity-ambiguous"); continue; }
+        let manager: SessionManager;
+        try { manager = SessionManager.open(candidates[0]!.path, this.sessionDirectoryFor(candidates[0]!.cwd)); } catch { await markUnavailable("canonical-session-read-failed"); continue; }
+        canonicalEntries = manager.getHeader() ? [manager.getHeader()!, ...manager.getBranch()] : [];
+        branch = canonicalEntries.slice(1);
+        const anchor = await this.resolveForkBoundary(manager).catch(() => undefined);
+        branchId = observationBranchIdFor(canonicalEntries, manager.getEntries(), anchor?.inheritedEntryId);
+      }
+      if (branchId !== (coverage.range.branchId ?? "root")) { await markUnavailable("coverage-branch-not-active"); continue; }
+      const start = branch.findIndex(entry => entry.id === coverage.range.fromEntryId);
+      if (start < 0) { await markUnavailable("coverage-start-is-unavailable"); continue; }
+      const entries = branch.slice(start, start + coverage.range.entryIds.length);
+      if (entries.length !== coverage.range.entryIds.length || entries.some((entry, index) => entry.id !== coverage.range.entryIds[index])) { await markUnavailable("coverage-entry-sequence-changed"); continue; }
+      if (observationEntriesDigest(entries) !== coverage.range.entryDigest) { await markUnavailable("coverage-digest-changed"); continue; }
+      // Recovery must retain the outcome admitted with this exact cut. A
+      // restart is not evidence that a completed canonical invocation became
+      // unknown; only a missing or contradictory Gateway terminal receipt is.
+      const invocationIds = coverage.range.invocationIds;
+      if (!invocationIds || invocationIds.length === 0) { await markUnavailable("invocation-provenance-missing"); continue; }
+      let recoveredOutcome: "completed" | "failed" | "interrupted" | "outcomeUnknown";
+      try {
+        const projections = invocationProjection(invocationReceipts(canonicalEntries as unknown as Parameters<typeof invocationReceipts>[0], coverage.range.sessionId));
+        const byInvocation = new Map(projections.map(projection => [projection.invocationId, projection]));
+        const outcomes = invocationIds.map(invocationId => byInvocation.get(invocationId)?.lifecycle);
+        if (outcomes.some(outcome => outcome === undefined)) { await markUnavailable("invocation-terminal-missing"); continue; }
+        if (outcomes.some(outcome => !["completed", "failed", "interrupted", "outcomeUnknown"].includes(outcome as string))) { await markUnavailable("invocation-terminal-missing"); continue; }
+        const distinct = new Set(outcomes);
+        if (distinct.size !== 1) { await markUnavailable("invocation-terminal-conflict"); continue; }
+        recoveredOutcome = outcomes[0] as "completed" | "failed" | "interrupted" | "outcomeUnknown";
+      } catch {
+        await markUnavailable("invocation-terminal-conflict");
+        continue;
+      }
+      knowledge.observe({
+        sessionId: coverage.range.sessionId, entries, outcome: recoveredOutcome,
+        ...(coverage.range.branchId ? { branchId: coverage.range.branchId } : {}),
+        ...(coverage.range.projectId ? { projectId: coverage.range.projectId } : {}),
+        ...(coverage.range.invocationIds?.[0] ? { invocationId: coverage.range.invocationIds[0] } : {}),
+        ...(coverage.range.invocationIds ? { invocationIds: coverage.range.invocationIds } : {}),
+      });
+    }
   }
 
   async initializeBlobStorage(): Promise<void> {
@@ -638,6 +728,11 @@ export class RuntimeRegistry {
         this.options.sessionListChanged();
       },
       settled: (sessionId: string) => { this.interrupted.delete(sessionId); },
+      turnSettled: (sessionId: string, entries: readonly import("@earendil-works/pi-coding-agent").FileEntry[], outcome: "completed" | "failed" | "interrupted" | "outcomeUnknown", completionId?: string, branchId?: string, projectId?: string, invocationId?: string) => {
+        // Admission is detached from inference, but RuntimeSlot invokes this
+        // only after the terminal receipt and canonical attention barrier settle.
+        this.knowledgeService?.observe({ sessionId, entries, outcome, ...(completionId ? { completionId } : {}), ...(branchId ? { branchId } : {}), ...(projectId ? { projectId } : {}), ...(invocationId ? { invocationId } : {}) });
+      },
       assistantResponseCompleted: async (
         sessionId: string,
         completion: CanonicalAssistantCompletion,
@@ -938,6 +1033,7 @@ export class RuntimeRegistry {
       ...(this.options.notifications ? { notifications: this.options.notifications } : {}),
       ...(this.options.extensionArtifactWarning ? { extensionArtifactWarning: this.options.extensionArtifactWarning } : {}),
       ...(this.options.scheduleToolOperations ? { scheduleToolOperations: this.options.scheduleToolOperations } : {}),
+      ...(this.knowledgeService ? { knowledge: this.knowledgeService } : {}),
       resolveForkBoundary: (manager: SessionManager) => this.resolveForkBoundary(manager),
       ...(this.options.stageTiming ? {
         runtimeDisposalTimedOut: (graceMs: number) => this.options.stageTiming!("runtime.dispose-timeout", graceMs, "failure"),

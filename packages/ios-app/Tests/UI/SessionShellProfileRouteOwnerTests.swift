@@ -48,6 +48,19 @@ struct SessionShellProfileRouteOwnerTests {
         ])
     }
 
+    @Test("evidence route preserves exact entry while retaining editable chat inputs")
+    func evidenceRouteIdentity() {
+        let route = AppModel.SessionNavigationRoute(
+            sessionID: "session-a", editorText: "edited draft", initialModel: ModelRef(provider: "fixture", id: "model"),
+            initialHistoryEntryID: "entry-24000"
+        )
+        #expect(route.initialHistoryEntryID == "entry-24000")
+        #expect(route.editorText == "edited draft")
+        #expect(route.withEditorText("new edits").initialHistoryEntryID == "entry-24000")
+        #expect(route.withInitialModel(nil).initialHistoryEntryID == "entry-24000")
+        #expect(route.id.contains("history:entry-24000"))
+    }
+
     @Test("production reconciliation revokes presentation, composer, and share authority")
     func appModelIntegration() throws {
         let model = AppModel()

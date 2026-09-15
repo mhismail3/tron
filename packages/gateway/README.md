@@ -39,6 +39,53 @@ app. It embeds the pinned Pi SDK through supported SDK exports. User-facing copy
 calls the product and agent **Tron**; source may use Pi-specific names only where
 it identifies the backing SDK contract.
 
+## Knowledge boundaries
+
+Knowledge state is owned by the Gateway under `state/knowledge`; iOS retains only
+bounded pages. Observation project scope uses the canonical absolute workspace
+path (a project reference, not a record filename ID), and each admitted model
+cut is branch-lineage-scoped (not the changing leaf), exact, redacted, and
+input-bounded. Distinct terminal envelopes retain their own invocation/outcome
+when queued. Cancellation or a
+configuration/privacy change leaves the cut retryable and cannot publish late.
+Branch scope uses append-order first-child continuation, so adding a sibling
+never changes the original branch identity; recovery compares exact canonical
+entry IDs and digest and marks missing/non-active coverage unavailable rather
+than replaying it. Registered synthesis accepts exact SOURCE, NOTE, and
+OBSERVATION revisions, preserves capture disposition, qualifications, contrary
+evidence, and privacy scope, and publishes only an unconfirmed agent-derived
+note after cancellation/configuration/source fences. Knowledge read pages
+continue through complete canonical record sections (including source text,
+fields, retention, origins, representations, and assessments); `details` is
+not the only route to evidence. Registered recall text includes bounded dated,
+attributed, qualified evidence and points to a pinned record/revision read
+continuation when needed. Retained source objects are available only through
+`knowledge.object.read` with the exact owning record ID and committed revision;
+the store rechecks current privacy/exclusion fences after byte I/O and never
+uses a hash-only corpus scan. Excluded/forgotten records cannot authorize
+object reads.
+Legacy imports support explicit `offset` continuation with one checkpoint
+covering the complete admitted plan; page completion is distinct from whole-plan
+completion. They compute excluded-source/dependent assertion closure before
+page slicing. Connector X runs require a host-qualified account price, explicit paid
+access, and a one-attempt allowance reservation/debit; unknown pricing or a
+positive budget alone never permits an API call. Remote Raindrop moves
+re-read the exact current source revision and connector account/write policy
+after preflight before persisting or applying the effect. Legacy exclusions are withheld rather than copied; if a re-import changes an
+already-readable canonical record to excluded, the run fails closed and asks
+for the existing exclusion/forget control rather than mutating that record.
+Native import exposes bounded offset continuation, and an admitted run owns its
+per-record checkpoint through the operation deadline instead of transport
+cancellation. Native note/correction mutations carry an explicit confirmation
+bit; agent-tool notes remain agent-authored and unconfirmed. `knowledge.status`
+returns typed coverage counts (`observedCount`, `emptyCount`, `excludedCount`,
+`pendingCount`, `failedCount`, `unavailableCount`, and `remainingCount`), while
+`knowledge.observation.coverage` returns bounded canonical coverage pages with a
+`nextCursor`; remaining means pending, failed, or unavailable cuts—not empty or
+intentionally excluded scope. Recovery preserves the admitted terminal outcome
+only when its canonical Gateway invocation receipt is present and unambiguous;
+otherwise it marks the cut unavailable with an explicit reason.
+
 ## Pi SDK maintenance
 
 `packages/gateway/package.json` is the sole Pi SDK version authority. The four

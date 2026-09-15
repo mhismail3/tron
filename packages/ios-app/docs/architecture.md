@@ -917,6 +917,8 @@ Subagent history paging and detail requests belong to `SessionProcessHistoryStor
 constructed by the mounted history sheet. Covering it cancels disposable requests but retains complete pages and their cursor. Revealing it only resumes an unfinished initial load; it neither advances pagination nor replays the first page after cursor exhaustion. Load More owns subsequent pages, and real revision/duplicate-page conflicts still fail closed rather than mixing history. `SessionProcessHistoryStoreTests` exercises these boundaries through the real Gateway client with a scripted transport. Live extension activity remains a separate bounded snapshot projection; it has no independent mobile history cache.
 
 Offline cache strips all extension surfaces, interactions, lease/focus, capabilities/diagnostics, and ephemeral semantic values; it also never persists process overview, current/recent rows, history pages, or child transcript leases.
+
+Knowledge reads are presentation-owned bounded projections. `KnowledgeCoveragePresentationStore` retains its cursor and restarts from the head when a continuation observes a changed state revision, exposing retry errors rather than declaring an incomplete page empty. `KnowledgeObjectReaderStore` owns one bounded bytes/offset/loading/error state for the exact selected record/revision/object reference; switching primary, provider API, or linked-article representations releases the previous buffer, and late responses are retired by the selection request generation. Its Gateway boundary rejects mismatched hashes/media, count/offset/continuation envelopes, and decoded byte lengths before publication. Linked-record citations remain in the initiating detail through `KnowledgeLinkedRecordReaderStore`, including visible unavailable/error state. Catalogue and connector refreshes fence every response by Gateway presentation identity and the connector's latest request. Knowledge-origin session citations pass the existing `SessionHistoryEntryStore` and admitted `SessionHistoryEntryPage` exact-entry request; an off-page entry opens directly without searching a first-page cache, while missing evidence settles as unavailable. `KnowledgeModelsTests` covers 53-cut continuation/revision restart, retry, multichunk representation switching, malformed envelopes, partial UTF-8, and stale response retirement; `SessionSheetPresentationTests.testKnowledgeOriginCitationOpensExactOffPageHistoryEntry` covers rendered exact-entry history presentation. Knowledge mutations publish their returned record into the selected detail before refreshing the catalogue, so triage, note edits, and corrections immediately expose the new revision while retaining canonical qualifications and evidence. Import presents one exact inspected plan hash and uses Gateway checkpoint progress for the complete bounded operation; a failed item remains the retry point rather than advancing an offset or asking for routine page approvals.
 Native safe-area layout pushes the transcript exactly once and reverses naturally when
 the keyboard or composer contracts. `ChatViewportMode` has only two states: `.pinned`
 selects the native bottom size-change anchor as the sole physical size/inset owner, while
@@ -1312,8 +1314,19 @@ removal, send completion, and errors cannot cross a reopen. Closing or
 replacing a route synchronously revokes its intake lease and disposes presentation-transient state
 while retaining only the bounded profile/session text draft. Share intake captures the sole admitted presentation target, never consumes that target's
 staged uploads, and clears the shared payload only after confirmed prompt admission. Dashboard
-imports use the explicit default workspace rather than a hidden transcript selection. In-app
-notification projection is disposable and bounded to eight entries, 4 KiB per message, and 16 KiB total.
+imports use the explicit default workspace rather than a hidden transcript selection.
+
+Knowledge evidence citations navigate to the originating mounted session and open the cited entry through
+the managed history sheet rather than issuing a parallel history read: `SessionHistoryEntryStore` reuses
+`SessionHistoryReadIdentity`, `SessionHistoryEntryPage.admitted`, the runtime generation, and the installed
+subscription. Knowledge status projects settled and remaining coverage dispositions without mirroring coverage
+records. Reflected observations publish the generated unconfirmed note as an explicit editable handoff, while
+source corrections retain the captured text/object and append a user-authored correction with new provenance.
+Knowledge detail, linked-record, and import-plan presentations fence activity, Gateway identity, and latest
+request generation before and after every await; import execution carries the exact inspected offset, limit,
+and plan hash.
+
+In-app notification projection is disposable and bounded to eight entries, 4 KiB per message, and 16 KiB total.
 `InAppNoticeCenter` is the single AppModel-owned, monotonic-clock-driven center. It presents one readable
 card at a time in FIFO order; up to two decorative backing shapes indicate pending feedback without exposing
 another card's text. Higher-priority arrivals never interrupt the current card. Overflow sheds the lowest-priority
@@ -2027,3 +2040,39 @@ publication and preserved staged skill, then verifies current reconciliation on
 uncover plus retained native draft text/selection and tail geometry.
 These hosted scene inputs do not certify physical lock/unlock behavior.
 The stack is never persisted and is not a second state authority.
+
+## Knowledge projection
+
+`KnowledgeRPCClient` is the typed iOS consumer of the Gateway Knowledge contract. It
+uses the existing confirmed-mutation receipt owner for every change and bounds
+search, pages, connector runs, and imports before exposing them to SwiftUI.
+`KnowledgeDashboardView` presents All Knowledge (including All Links), filters by
+record kind and Personal/Research scope, and loads detail evidence on demand.
+Source object reads use the Gateway's authorization-checked `knowledge.object.read`
+projection with the exact owning record ID and committed revision, and report
+verified bounded bytes rather than caching a second corpus;
+loaded chunks remain visible and can continue by the returned offset. Primary
+source objects and retained provider-api/linked-article representations remain
+in the typed DTO and are labeled in the same bounded object reader; corrections
+copy those references rather than dropping canonical evidence. Session
+citations decode the exact Gateway history-entry DTO, render its bounded text
+before navigation, and expose continuation plus the originating-session action
+separately. Import requests carry an explicit offset and exact dry-run plan hash;
+a completed batch reports corpus progress and never claims whole-corpus completion
+until the final selected batch. Detail renders structured field values,
+subjects, validity, qualifications, contrary evidence, and nested record/session
+citations; exact session-entry reads are bounded and displayed before navigation.
+Handoffs carry record/revision and Gateway identity metadata with explicit
+untrusted-evidence wording, bounded structured qualifications/evidence, and a
+bounded preview. The existing New Session owner still owns workspace/model/trust
+inspection and preserves the user's edits; Knowledge records do not infer those
+choices. Note confirmation is sent as
+an explicit user action rather than defaulting an inferred or imported note to
+confirmed; its original provenance remains unchanged.
+Observation configuration requires an explicitly selected existing model and at
+least one prospective session or project scope; an empty allowlist remains
+ineligible and exclusions are evaluated by the Gateway. Editable current interests are persisted in the Gateway configuration and do not enable observation; source triage is an explicit `knowledge.source.triage` mutation that resolves those interests server-side. Connector status reports
+unconfigured or writes-disabled integrations honestly, while legacy import is a
+Gateway-owned dry-run followed by explicit plan-hash confirmation. Starting a
+session from an entry pins the originating Gateway and opens the existing New Session sheet for workspace/model/trust choices, then seeds only an unsent draft;
+no prompt is replayed or automatically sent.

@@ -70,7 +70,8 @@ export class TronWorkspace {
       if (read.present) {
         const value = read.value as Record<string, unknown> | null;
         if (!value || typeof value !== "object" || Array.isArray(value)
-          || Object.keys(value).length !== 1 || value.version !== 1) {
+          || Object.keys(value).some(key => key !== "version" && key !== "knowledgeInitialized")
+          || value.version !== 1 || (value.knowledgeInitialized !== undefined && typeof value.knowledgeInitialized !== "boolean")) {
           throw new Error("Invalid workspace initialization record");
         }
       }
@@ -106,6 +107,25 @@ export class TronWorkspace {
       this.identity = undefined;
     }
     return { root: this.root, available: false, reason: this.failure };
+  }
+
+  /** Feature initialization evidence lives beside the workspace root so loss of
+   * a feature namespace cannot be mistaken for a fresh installation. */
+  async featureInitialized(feature: "knowledge"): Promise<boolean> {
+    await this.initialize();
+    const marker = join(this.home, "gateway", "workspace-state", "initialized.json");
+    const read = await readSecureJson<unknown>(marker, 256);
+    if (!read.present) return false;
+    if (!read.value || typeof read.value !== "object" || Array.isArray(read.value)) return false;
+    return (read.value as Record<string, unknown>)["knowledgeInitialized"] === true;
+  }
+
+  async markFeatureInitialized(feature: "knowledge"): Promise<void> {
+    await this.initialize();
+    const marker = join(this.home, "gateway", "workspace-state", "initialized.json");
+    const read = await readSecureJson<unknown>(marker, 256);
+    const value = read.present && read.value && typeof read.value === "object" && !Array.isArray(read.value) ? read.value as Record<string, unknown> : { version: 1 };
+    await durableAtomicWriteJson(marker, { ...value, version: 1, [`${feature}Initialized`]: true });
   }
 
   /** Read-only resolution for display. The document producer creates files/;

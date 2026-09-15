@@ -5,6 +5,9 @@ import { describe, expect, it, vi } from "vitest";
 import { CommandReceiptStore } from "./command-receipts.js";
 import { DeviceStore } from "../security/device-store.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "./gateway-service.js";
+import { TronWorkspace } from "../workspace/tron-workspace.js";
+import { KnowledgeStore } from "../knowledge/knowledge-store.js";
+import { KnowledgeService } from "../knowledge/knowledge-service.js";
 
 const client: ClientContext = {
   id: "phone",
@@ -22,6 +25,23 @@ const client: ClientContext = {
 };
 
 describe("session transcript paging", () => {
+  it("resolves knowledge receipt references after supporting evidence is forgotten", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-service-knowledge-erasure-"));
+    const workspace = new TronWorkspace(root);
+    try {
+      const store = new KnowledgeStore(workspace);
+      const source = await store.captureSource({ commandId: "service-erasure-source", record: { kind: "source", scope: "personal", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "Evidence", text: "private fixture", captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z", origin: "manual" } } });
+      const request = { commandId: "service-erasure-note", record: { kind: "note" as const, scope: "personal" as const, provenance: { actor: "agent" as const, evidence: [{ recordId: source.record.id, revisionId: source.record.revisionId }] }, relations: [], content: { title: "Derived", body: "private fixture", role: "fact" as const, confirmed: false } } };
+      const service = new GatewayService({ config: { tronHome: root }, sessions: {}, receipts: new CommandReceiptStore(root), knowledge: new KnowledgeService(store, { admit() {}, dispose() {} }), updateService: {}, iosDeviceInstallService: {}, gitWorktrees: {}, workspaceInspector: {}, providerUsage: {} } as unknown as GatewayServiceDependencies);
+      const first = await service.invoke(client, "knowledge.note.create", request);
+      expect(JSON.stringify(first)).toContain("private fixture");
+      await service.invoke(client, "knowledge.forget", { commandId: "service-erasure-forget", recordId: source.record.id, reason: "fixture erasure", expectedRevision: source.record.revisionId });
+      const status = await service.invoke(client, "command.status", { method: "knowledge.note.create", commandId: request.commandId });
+      const replay = await service.invoke(client, "knowledge.note.create", request);
+      expect(JSON.stringify(status)).not.toContain("private fixture");
+      expect(JSON.stringify(replay)).not.toContain("private fixture");
+    } finally { await workspace.dispose(); await rm(root, { recursive: true, force: true }); }
+  });
   it("publishes durable self-revocation before install cleanup and preserves idempotence", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-service-revoke-"));
     let releaseCleanup: (() => void) | undefined;

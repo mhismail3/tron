@@ -66,6 +66,8 @@ struct SessionShellView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dashboardMode: DashboardMode = .sessions
     @State private var showNewSession = false
+    @State private var knowledgeDraftText: String?
+    @State private var knowledgeDraftIdentity: KnowledgePresentationIdentity?
     @State private var newSessionDetent: PresentationDetent = .medium
     @State private var showSettings = false
     @State private var search = ""
@@ -111,7 +113,11 @@ struct SessionShellView: View {
                 isPresented: $showNewSession,
                 identity: "dashboard.new-session"
             ) {
-                NewSessionSheet(onCreated: present)
+                NewSessionSheet(initialDraftText: knowledgeDraftText, pinnedProfileID: knowledgeDraftIdentity?.profileID) { route in
+                    knowledgeDraftText = nil
+                    knowledgeDraftIdentity = nil
+                    present(route)
+                }
                     .tronTopBlur(.sheet)
                     .presentationDetents([.medium, .large], selection: $newSessionDetent)
                     .presentationDragIndicator(.hidden)
@@ -159,7 +165,7 @@ struct SessionShellView: View {
                 identity: "dashboard.rename-confirmation"
             )
             .onChange(of: model.profiles.selected?.id, initial: true) { previousProfileID, profileID in
-                if previousProfileID != profileID { routeReplacementOwner.invalidate() }
+                if previousProfileID != profileID { routeReplacementOwner.invalidate(); knowledgeDraftText = nil; knowledgeDraftIdentity = nil }
                 var route = presentedSession
                 profileRouteOwner.reconcile(
                     profileID: profileID,
@@ -232,6 +238,12 @@ struct SessionShellView: View {
                 onOpenSettings: { showSettings = true },
                 onOpenSession: openAutomationSession
             )
+        case .knowledge:
+            KnowledgeDashboardView(
+                onSelectDashboard: selectDashboard,
+                onOpenDraft: openKnowledgeDraft,
+                onOpenSession: openKnowledgeEvidence
+            )
         }
     }
 
@@ -242,11 +254,36 @@ struct SessionShellView: View {
         )
     }
 
+    private func openKnowledgeDraft(_ record: KnowledgeRecord) {
+        let identity = model.knowledgePresentationIdentity
+        guard let text = KnowledgeDraftHandoffPolicy.text(for: record, identity: identity) else { return }
+        knowledgeDraftIdentity = identity
+        knowledgeDraftText = text
+        showNewSession = true
+    }
+
     private func selectDashboard(_ mode: DashboardMode) {
         var transaction = Transaction(animation: nil)
         transaction.disablesAnimations = true
         withTransaction(transaction) {
             dashboardMode = mode
+        }
+    }
+
+    private func openKnowledgeEvidence(sessionID: String, entryID: String) {
+        guard let profileID = model.knowledgePresentationIdentity.profileID, openingSessionID == nil else { return }
+        openingSessionID = "knowledge:\(profileID):\(sessionID):\(entryID)"
+        let navigationIntent = navigationOwner.begin()
+        Task { @MainActor in
+            defer { openingSessionID = nil }
+            guard openingSessionID == "knowledge:\(profileID):\(sessionID):\(entryID)",
+                  model.knowledgePresentationIdentity.profileID == profileID else { return }
+            do {
+                let route = try await model.navigationRoute(profileID: profileID, sessionID: sessionID, historyEntryID: entryID)
+                guard navigationOwner.admit(navigationIntent), model.ownsNavigationRoute(route) else { return }
+                dashboardMode = .sessions
+                present(route)
+            } catch is CancellationError { return } catch { model.presentError(error) }
         }
     }
 
@@ -297,6 +334,7 @@ struct SessionShellView: View {
                 sessionID: route.sessionID,
                 initialEditorText: route.editorText,
                 initialModel: route.initialModel,
+                initialHistoryEntryID: route.initialHistoryEntryID,
                 onForkCreated: present,
                 performanceSignposts: model.performanceSignpostsForCapture
             )

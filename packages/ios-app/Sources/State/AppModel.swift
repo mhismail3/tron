@@ -92,22 +92,34 @@ final class AppModel {
         let sessionID: String
         let editorText: String?
         let initialModel: ModelRef?
+        /// Optional exact history entry requested by an evidence citation. It
+        /// is route identity so a second citation cannot reuse a mounted chat.
+        let initialHistoryEntryID: String?
         fileprivate let gatewayProfileID: String?
         fileprivate let gatewayLifecycleGeneration: Int?
-        var id: String { gatewayProfileID.map { "\($0):\(sessionID)" } ?? sessionID }
+        var id: String {
+            let base = gatewayProfileID.map { "\($0):\(sessionID)" } ?? sessionID
+            return initialHistoryEntryID.map { "\(base):history:\($0)" } ?? base
+        }
 
         init(
             sessionID: String,
             editorText: String?,
             initialModel: ModelRef? = nil,
+            initialHistoryEntryID: String? = nil,
             gatewayProfileID: String? = nil,
             gatewayLifecycleGeneration: Int? = nil
         ) {
             self.sessionID = sessionID
             self.editorText = editorText
             self.initialModel = initialModel
+            self.initialHistoryEntryID = initialHistoryEntryID
             self.gatewayProfileID = gatewayProfileID
             self.gatewayLifecycleGeneration = gatewayLifecycleGeneration
+        }
+
+        func withEditorText(_ text: String?) -> SessionNavigationRoute {
+            SessionNavigationRoute(sessionID: sessionID, editorText: text, initialModel: initialModel, initialHistoryEntryID: initialHistoryEntryID, gatewayProfileID: gatewayProfileID, gatewayLifecycleGeneration: gatewayLifecycleGeneration)
         }
 
         func withInitialModel(_ model: ModelRef?) -> SessionNavigationRoute {
@@ -115,6 +127,7 @@ final class AppModel {
                 sessionID: sessionID,
                 editorText: editorText,
                 initialModel: model,
+                initialHistoryEntryID: initialHistoryEntryID,
                 gatewayProfileID: gatewayProfileID,
                 gatewayLifecycleGeneration: gatewayLifecycleGeneration
             )
@@ -155,6 +168,9 @@ final class AppModel {
     let diagnosticCapture: DiagnosticCaptureCoordinator
     var performanceSignpostsForCapture: any PerformanceSignposting { performanceSignposts }
     var diagnosticConnectionID: Int? { gatewayConnectionID }
+    var knowledgePresentationIdentity: KnowledgePresentationIdentity {
+        KnowledgePresentationIdentity(profileID: lifecycle.selectedProfileID, lifecycleGeneration: lifecycle.generationAdmission?.generation, connectionID: gatewayConnectionID)
+    }
     private let exportArtifacts: SessionExportArtifactStore
     private let mutationExecutor: ConfirmedMutationExecutor
     private let sessionMutations: SessionMutationService
@@ -188,6 +204,8 @@ final class AppModel {
     private var sessionCatalog = SessionCatalogCoordinator()
     private let dashboardConnections: DashboardGatewayConnectionPool
     let automationCatalog: AutomationCatalogCoordinator
+    /// Typed access to Gateway-owned Knowledge; no records are persisted here.
+    let knowledge: KnowledgeRPCClient
     private var dashboardSessionsByProfile: [String: [SessionSummary]] = [:]
     private var dashboardStatesByProfile: [String: DashboardServerConnectionState] = [:]
     private var dashboardCacheLoadGeneration = 0
@@ -540,6 +558,13 @@ final class AppModel {
             }
         })
         let workspaceInspection = WorkspaceInspectionService(client: client)
+        let knowledge = KnowledgeRPCClient(
+            request: { method, params, timeout in
+                try await client.requestValue(method, params, timeout: timeout)
+            },
+            mutationExecutor: mutationExecutor,
+            uuidSource: uuidSource
+        )
         let chatMedia = ChatMediaLoader(
             fetch: { identity in
                 let value = try await client.blob(
@@ -571,6 +596,7 @@ final class AppModel {
         self.noticeCenter = noticeCenter
         self.dashboardConnections = dashboardConnections
         self.automationCatalog = automationCatalog
+        self.knowledge = knowledge
         self.mutationExecutor = mutationExecutor
         self.sessionMutations = sessionMutations
         self.sessionImports = SessionImportCoordinator(
@@ -2679,12 +2705,13 @@ final class AppModel {
     /// Opens an authoritative session returned by an Automation run. The
     /// profile is part of the route identity because the same session ID may
     /// exist on multiple Gateways; no dashboard cache lookup is used here.
-    func navigationRoute(profileID: String, sessionID: String) async throws -> SessionNavigationRoute {
+    func navigationRoute(profileID: String, sessionID: String, historyEntryID: String? = nil) async throws -> SessionNavigationRoute {
         let owner = try await activateDashboardProfile(profileID)
         guard !sessionID.isEmpty else { throw CancellationError() }
         return SessionNavigationRoute(
             sessionID: sessionID,
             editorText: nil,
+            initialHistoryEntryID: historyEntryID,
             gatewayProfileID: owner.profileID,
             gatewayLifecycleGeneration: owner.lifecycleGeneration
         )

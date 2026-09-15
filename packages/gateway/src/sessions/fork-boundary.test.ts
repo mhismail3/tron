@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { SessionManager, parseSessionEntries, type FileEntry, type SessionEntry } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import { resolveForkBoundaryAnchor } from "./fork-boundary.js";
+import { observationBranchIdFor } from "./runtime-slot.js";
 import { branchFromParsedSession } from "./session-branch.js";
 import { projectTranscriptPage } from "./projection.js";
 import { BlobStore } from "./blob-store.js";
@@ -27,6 +28,25 @@ function page(child: FileEntry[], parent: FileEntry[], before?: number, budget?:
 }
 
 describe("canonical fork boundaries", () => {
+  it("keeps intra-file observation scope stable across turns and distinct across sibling branches", () => {
+    const root = message("root", null);
+    const first = message("first", "root");
+    const second = message("second", "root");
+    const firstNext = message("first-next", "first");
+    const beforeSibling = [root, first, firstNext] as FileEntry[];
+    const all = [root, first, firstNext, second] as FileEntry[];
+    const firstScope = observationBranchIdFor([root, first], beforeSibling);
+    const afterSiblingScope = observationBranchIdFor([root, first], all);
+    const continuedScope = observationBranchIdFor([root, first, firstNext], all);
+    const siblingScope = observationBranchIdFor([root, second], all);
+    // The first append-order child remains the original scope even after its
+    // sibling is discovered; only the later sibling receives a fork scope.
+    expect(firstScope).toBe("root");
+    expect(afterSiblingScope).toBe(firstScope);
+    expect(continuedScope).toBe(firstScope);
+    expect(siblingScope).not.toBe(firstScope);
+  });
+
   it("uses full parent ancestry despite parent branch changes; skips regenerated labels and hidden child entries", () => {
     const parent = file("parent", [message("root", null), label("source-label", "root"), message("shared", "source-label"), message("other-branch", "root")]);
     const child = file("child", [message("root", null), message("shared", "root"), label("new-label", "shared"),

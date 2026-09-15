@@ -31,8 +31,25 @@ import { AutomationService } from "./automations/automation-service.js";
 import { GatewayAutomationExecutor } from "./automations/automation-executor.js";
 import { GatewayScheduleToolOperations } from "./automations/automation-tool-operations.js";
 import { BrowserLiveViewRegistry } from "./display/browser-live-view.js";
+import { KnowledgeStore } from "./knowledge/knowledge-store.js";
+import { KnowledgeService, ModelRuntimeKnowledgeModel } from "./knowledge/knowledge-service.js";
+import { KnowledgeObservationService, ModelRuntimeObservationModel, modelForConfig } from "./knowledge/knowledge-observation.js";
+import { MacKeychainConnectorCredentialStore } from "./knowledge/connector-credentials.js";
+import { createKnowledgeConnectorExtension } from "./knowledge/connectors.js";
+import { createKnowledgeImporter } from "./knowledge/legacy-import.js";
 
 const config = await loadConfig();
+// Paid X access is only qualified when the host explicitly supplies the
+// provider/account price and retry ceiling. Missing or malformed values keep
+// the connector unavailable; no default price is inferred in production.
+const xPricing = (() => {
+  const accountId = process.env.TRON_X_ACCOUNT_ID?.trim();
+  const costCentsPerAttempt = Number(process.env.TRON_X_COST_CENTS_PER_ATTEMPT);
+  const maxAttempts = Number(process.env.TRON_X_MAX_ATTEMPTS);
+  if (!accountId || !Number.isSafeInteger(costCentsPerAttempt) || costCentsPerAttempt < 1
+    || !Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 3) return undefined;
+  return { accountId, costCentsPerAttempt, maxAttempts };
+})();
 const configuredSessionDir = SettingsManager.create(process.cwd(), config.agentDir, { projectTrusted: false }).getSessionDir();
 // Pi installs its private agent-bin projection while loading settings. Apply
 // the supervised immutable command contract afterward, before extension or
@@ -144,6 +161,35 @@ const sessions = new RuntimeRegistry({
     );
   },
 });
+const knowledgeStore = new KnowledgeStore(sessions.knowledgeWorkspace());
+const knowledgeConnector = createKnowledgeConnectorExtension(knowledgeStore, {
+  credentials: new MacKeychainConnectorCredentialStore(),
+  ...(xPricing ? { xPricing } : {}),
+});
+const knowledge = new KnowledgeService(
+  knowledgeStore,
+  new KnowledgeObservationService(
+    knowledgeStore,
+    (knowledgeConfig) => {
+      const model = modelForConfig(modelRuntime, knowledgeConfig.observation.model);
+      return model ? new ModelRuntimeObservationModel(modelRuntime, model) : undefined;
+    },
+    workRegistry,
+  ),
+  {
+    connector: (action) => knowledgeConnector.invoke(action),
+    importer: createKnowledgeImporter(knowledgeStore, { roots: {
+      ...(process.env.TRON_PERSONAL_OS_ROOT ? { "personal-os": process.env.TRON_PERSONAL_OS_ROOT } : {}),
+      ...(process.env.TRON_LLM_WIKI_ROOT ? { "llm-wiki": process.env.TRON_LLM_WIKI_ROOT } : {}),
+    } }),
+  },
+  (knowledgeConfig) => {
+    const model = modelForConfig(modelRuntime, knowledgeConfig.observation.model);
+    return model ? new ModelRuntimeKnowledgeModel(modelRuntime, model) : undefined;
+  },
+  workRegistry,
+);
+sessions.setKnowledgeService(knowledge);
 const terminal = new TerminalService(
   config.terminalReplayBytes,
   (terminalId, topic, payload) => transport?.broadcastTerminal(terminalId, topic, payload),
@@ -236,6 +282,7 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
     }
     terminal.dispose();
     notifications.dispose();
+    knowledge.dispose();
     await automations.dispose();
     await sessions.dispose();
     // The retained pi-coding-agent session exposes no disposal API on the
@@ -306,6 +353,7 @@ const service = new GatewayService({
   notifications,
   workRegistry,
   automations,
+  knowledge,
 });
 transport = new GatewayServer({
   host: config.host,
@@ -345,6 +393,7 @@ await transport.listen(async () => {
   await automations.initialize();
   transport.setStartupPhase("storage-warming");
   await sessions.initializeBlobStorage();
+  await sessions.recoverKnowledgeObservation();
 });
 const maintainStorage = async (): Promise<void> => {
   try {

@@ -22,6 +22,14 @@ struct NewSessionSheet: View {
     @State private var configurationOwner = NewSessionConfigurationOwner()
     @State private var creationOwner = NewSessionCreationOwner()
     let onCreated: (AppModel.SessionNavigationRoute) -> Void
+    let initialDraftText: String?
+    let pinnedProfileID: String?
+
+    init(initialDraftText: String? = nil, pinnedProfileID: String? = nil, onCreated: @escaping (AppModel.SessionNavigationRoute) -> Void) {
+        self.initialDraftText = initialDraftText
+        self.pinnedProfileID = pinnedProfileID
+        self.onCreated = onCreated
+    }
 
     var body: some View {
         NavigationStack {
@@ -69,7 +77,7 @@ struct NewSessionSheet: View {
                         value: selectedServer?.label ?? "Select",
                         caption: selectedServer.map { "\($0.host):\($0.port)" } ?? "Choose the server for this new session.",
                         accent: .tronEmerald
-                    ) { showServers = true }
+                    ) { if pinnedProfileID == nil { showServers = true } }
 
                     setupCard(
                         icon: "folder.fill",
@@ -238,9 +246,9 @@ struct NewSessionSheet: View {
                 presentationActive: presentationActivity.allowsPresentationPublication
             )) {
                 guard presentationActivity.allowsPresentationPublication else { return }
-                if selectedServerID == nil {
-                    selectedServerID = model.profiles.selected?.id
-                }
+                if let pinnedProfileID { selectedServerID = pinnedProfileID }
+                else if selectedServerID == nil { selectedServerID = model.profiles.selected?.id }
+                if let pinnedProfileID, model.profiles.selected?.id != pinnedProfileID { return }
                 guard let profileID = selectedServerID,
                       model.profiles.selected?.id == profileID else {
                     // A quick project selection can target another server. Do
@@ -484,6 +492,7 @@ struct NewSessionSheet: View {
     }
 
     private func beginCreation() {
+        guard pinnedProfileID == nil || model.profiles.selected?.id == pinnedProfileID else { return }
         guard creationOwner.begin(configurationReady: configurationReady) else { return }
         let cwd = workspace
         let modelOverride = creationOwner.modelOverride(
@@ -523,7 +532,7 @@ struct NewSessionSheet: View {
                 dismiss()
                 return
             }
-            onCreated(route.withInitialModel(modelOverride))
+            onCreated(route.withInitialModel(modelOverride).withEditorText(initialDraftText))
             dismiss()
         } catch is CancellationError {
             return

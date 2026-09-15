@@ -115,6 +115,7 @@ import { createTronCoreExtension } from "../workspace/tron-core-extension.js";
 import { admitToolDisplayProjection, displayArtifactIDs } from "../display/display-contract.js";
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
+import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 
 // A lifecycle header is trusted only after RuntimeSlot has parsed and schema-
 // admitted the first property from the exact-owned status file. A payload key
@@ -282,6 +283,9 @@ export interface RuntimeSlotHooks {
   summaryChanged: (summary: SessionSummaryUpdate) => void;
   changed: (sessionId: string) => void;
   settled: (sessionId: string) => void;
+  /** Fire-and-forget canonical observation admission after Pi has appended the
+   * terminal turn. Implementations must never delay foreground settlement. */
+  turnSettled?: (sessionId: string, entries: readonly FileEntry[], outcome: "completed" | "failed" | "interrupted" | "outcomeUnknown", completionId?: string, branchId?: string, projectId?: string, invocationId?: string) => void;
   assistantResponseCompleted: (
     sessionId: string,
     completion: CanonicalAssistantCompletion,
@@ -314,6 +318,8 @@ export interface RuntimeSlotDependencies {
   displayArtifacts: DisplayArtifactStore;
   /** Disposable observer registrations; browser state remains provider-owned. */
   browserLiveViews?: BrowserLiveViewRegistry;
+  /** Optional bounded observational memory owner. */
+  knowledge?: KnowledgeService;
   workspace: TronWorkspace;
   markers: RunMarkerStore;
   extensionActivityRecency: ExtensionActivityRecency;
@@ -351,6 +357,38 @@ export interface RuntimeDrainBlockerFact {
  * canonical JSONL session. Every mutation runs through `lane`; distinct slots
  * remain concurrent.
  */
+/** Derive a stable scope from the canonical active branch. A leaf hash is
+ * intentionally avoided: continuing a branch must not create a new privacy
+ * scope, while sibling choices in one JSONL file must remain isolated. The
+ * first child is the append-order continuation of its parent; only later
+ * sibling choices add lineage. This is important because appending a sibling
+ * must not retroactively move the original conversation into a new scope. */
+export function observationBranchIdFor(
+  activeEntries: readonly FileEntry[],
+  allEntries: readonly FileEntry[],
+  inheritedAnchor?: string,
+): string {
+  const entries = activeEntries.filter(entry => entry.type !== "session" && entry.type !== "label");
+  const siblings = new Map<string, string[]>();
+  for (const entry of allEntries) {
+    if (entry.type === "session" || entry.type === "label") continue;
+    const parent = entry.parentId ?? "<root>";
+    const children = siblings.get(parent) ?? [];
+    if (!children.includes(entry.id)) children.push(entry.id);
+    siblings.set(parent, children);
+  }
+  // A branch's identity is its inherited anchor plus the choices that were
+  // appended after the canonical first child at each fork. Future appends do
+  // not alter an already-selected first-child continuation.
+  const choices = entries
+    .filter(entry => (siblings.get(entry.parentId ?? "<root>") ?? []).indexOf(entry.id) > 0)
+    .map(entry => `${entry.parentId ?? "<root>"}\0${entry.id}`);
+  if (choices.length === 0 && !inheritedAnchor) return "root";
+  const lineage = [inheritedAnchor ? `parent\0${inheritedAnchor}` : undefined, ...choices]
+    .filter((value): value is string => value !== undefined);
+  return `branch-${createHash("sha256").update(lineage.join("\n")).digest("hex").slice(0, 48)}`;
+}
+
 export class RuntimeSlot {
   private readonly contextPolicies = new WeakMap<AgentSession, SessionContextWindowPolicy>();
   private readonly compactionPolicies = new WeakMap<AgentSession, CompactionOperationPolicy>();
@@ -769,10 +807,36 @@ export class RuntimeSlot {
     return this.sessionManager.getSessionId();
   }
 
-  /** Read-only owner seam for bounded derived projections; callers never mutate. */
+  /** Read-only owner seam for bounded derived projections; callers never
+   * mutate. Branch-sensitive consumers must use the SDK-selected branch, not
+   * the file-wide entry set (which also contains sibling fork history). */
   canonicalSessionEntries(): FileEntry[] {
     const header = this.sessionManager.getHeader();
-    return header ? [header, ...this.sessionManager.getEntries()] : [];
+    return header ? [header, ...this.sessionManager.getBranch()] : [];
+  }
+
+  private observationBranchId(entries: readonly FileEntry[]): string {
+    return observationBranchIdFor(entries, this.sessionManager.getEntries(), this.forkBoundary?.inheritedEntryId);
+  }
+
+  /** Recovery reads the currently selected SDK branch without acquiring a
+   * foreground lease or opening a second session runtime. */
+  canonicalObservationBranchId(): string {
+    return this.observationBranchId(this.canonicalSessionEntries());
+  }
+
+  private observationEntries(operationId: string, endEntryId?: string): { entries: readonly FileEntry[]; branchId: string } {
+    const entries = this.canonicalSessionEntries();
+    const branchId = this.observationBranchId(entries);
+    const start = this.observationStarts.get(operationId);
+    // Observation admission must use the operation's immutable cut. A missing
+    // start marker is an unavailable range, never permission to expose the
+    // entire session history to a background model.
+    if (!start) return { entries: [], branchId };
+    const endIndex = endEntryId ? entries.findIndex(entry => entry.id === endEntryId) : -1;
+    if (endEntryId && endIndex < start.entryIndex) return { entries: [], branchId: start.branchId };
+    const cutEnd = endEntryId ? endIndex + 1 : entries.length;
+    return { entries: [...entries.slice(start.entryIndex, cutEnd)], branchId: start.branchId };
   }
 
   get cwd(): string {
@@ -1223,7 +1287,7 @@ export class RuntimeSlot {
                 || (event.reason !== "manual" && this.activeOperationId !== undefined && this.abortedOperations.has(this.activeOperationId)),
               () => { this.revision += 1; this.publishSnapshot(); },
             ) },
-            { name: "tron-core", factory: createTronCoreExtension(this.dependencies.workspace) },
+            { name: "tron-core", factory: createTronCoreExtension(this.dependencies.workspace, this.dependencies.knowledge) },
             {
               name: "tron-display",
               factory: createTronDisplayExtension({
@@ -2158,6 +2222,8 @@ export class RuntimeSlot {
     });
   }
 
+  private readonly observationStarts = new Map<string, { entryIndex: number; branchId: string }>();
+
   private completionObserved(completionId: string): boolean {
     const existing = this.completionDispositions.get(completionId);
     if (existing !== undefined) return existing;
@@ -2740,6 +2806,8 @@ export class RuntimeSlot {
         this.toolStartedAtMonotonicMs.clear();
         this.nextToolOrder = 0;
         this.activeOperationId ??= requiresDistinctAgentOwner ? randomUUID() : (preflightOwner ?? randomUUID());
+        const observationCut = this.canonicalSessionEntries();
+      this.observationStarts.set(this.activeOperationId, { entryIndex: observationCut.length, branchId: this.observationBranchId(observationCut) });
         if (!continuesToolSegment) {
           if (beginsWithUserInput) this.ownToolSegment(this.activeOperationId);
           else this.prepareAssistantOwnedToolSegment();
@@ -2802,6 +2870,9 @@ export class RuntimeSlot {
         const terminalErrorCode = terminalLifecycle === "interrupted"
           ? (settledOperationId && this.abortedOperations.has(settledOperationId) ? "user-abort" : "agent-aborted")
           : terminalLifecycle === "failed" ? "agent-error" : undefined;
+        // Observation admission is issued only after the exact terminal receipt
+        // path below settles; before that point canonical durability is still
+        // provisional and must not be projected as memory coverage.
         this.activeOperationId = undefined;
         this.ownToolSegment(undefined);
         this.operation = this.compactionOperation;
@@ -2818,10 +2889,6 @@ export class RuntimeSlot {
         if (this.pendingExtensionCommand === undefined
           || this.pendingExtensionCommand.id !== settledOperationId) {
           if (this.pendingAssistantCompletion) {
-            if (!this.pendingAssistantCompletion.operationId && settledOperationId) {
-              this.pendingAssistantCompletion = { ...this.pendingAssistantCompletion, operationId: settledOperationId };
-            }
-            if (settledOperationId) this.completionWorkOwners.set(this.pendingAssistantCompletion.id, settledOperationId);
             this.operationWork.get(settledOperationId ?? "")?.transition("terminal-receipt-persistence");
             // Pi has settled, but the Gateway remains operationally running until
             // the exact canonical completion is durable. This is the open/drain
@@ -2837,6 +2904,17 @@ export class RuntimeSlot {
                 await this.terminalizeInvocation(settledOperationId, terminalLifecycle, terminalErrorCode);
               }
               await this.beginAttentionSettlement(completion);
+              const completionOperationId = completion.operationId ?? this.completionWorkOwners.get(completion.id);
+              const observed = this.observationEntries(completionOperationId ?? "", completion.id);
+              // The completion waiting for attention is a separate owner from
+              // the follow-up that just settled. Admit each exact cut with its
+              // own outcome and invocation provenance.
+              this.hooks.turnSettled?.(this.id, observed.entries, "completed", completion.id, observed.branchId, this.cwd, completionOperationId ? this.invocationForOperation(completionOperationId)?.invocationId : undefined);
+              if (settledOperationId && settledOperationId !== completionOperationId) {
+                const followUpObserved = this.observationEntries(settledOperationId);
+                this.hooks.turnSettled?.(this.id, followUpObserved.entries, terminalLifecycle, undefined, followUpObserved.branchId, this.cwd, this.invocationForOperation(settledOperationId)?.invocationId);
+              }
+              if (settledOperationId) this.observationStarts.delete(settledOperationId);
               if (settledOperationId && settledOperationId !== completion.operationId) {
                 await this.clearMarkerOwnership(settledOperationId);
                 this.abortedOperations.delete(settledOperationId);
@@ -2853,6 +2931,9 @@ export class RuntimeSlot {
               terminalLifecycle,
               terminalErrorCode,
             ).then(async () => {
+              const observed = this.observationEntries(settledOperationId);
+              this.hooks.turnSettled?.(this.id, observed.entries, terminalLifecycle, undefined, observed.branchId, this.cwd, this.invocationForOperation(settledOperationId)?.invocationId);
+              this.observationStarts.delete(settledOperationId);
               if (terminalNotification) await this.notifyAgentTerminal(terminalNotification.sourceId, terminalNotification.outcome);
               await this.clearMarkerOwnership(settledOperationId);
             });
@@ -3407,6 +3488,14 @@ export class RuntimeSlot {
               entry.type === "message" && entry.message.role === "user" && entry.message === message);
             if (!candidate || candidate.type !== "message") return;
             this.rememberPresentationID(candidate.id, operationID);
+            // Pi can admit a same-agent queued follow-up without emitting a
+            // second agent_start. The canonical user binding is the exact
+            // prospective cut boundary; never fall back to session history.
+            if (!this.observationStarts.has(operationID)) {
+              const canonical = this.canonicalSessionEntries();
+              const entryIndex = canonical.findIndex(entry => entry.id === candidate.id);
+              if (entryIndex >= 0) this.observationStarts.set(operationID, { entryIndex, branchId: this.observationBranchId(canonical) });
+            }
             // The live map is only an optimization. A fast run may already
             // have terminalized and evicted it; recover immutable ownership
             // from the canonical start receipt before binding.
