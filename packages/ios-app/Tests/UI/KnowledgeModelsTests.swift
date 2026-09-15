@@ -21,6 +21,39 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertEqual(decodedOrigin.review?.basis, "user-confirmed")
     }
 
+    func testGlobalObservationGrantIsExplicitAndPreservesSelectedScopesAndExclusions() throws {
+        let selected = Data(#"{"sessionIds":["selected-session"],"projectIds":["selected-project"],"excludedSessionIds":["private-session"],"excludedProjectIds":["private-project"]}"#.utf8)
+        var eligibility = try JSONDecoder().decode(KnowledgeEligibility.self, from: selected)
+        XCTAssertNil(eligibility.allSessions)
+        eligibility.allSessions = true
+        let global = try JSONValue.encode(eligibility)
+        XCTAssertEqual(global.objectValue?["allSessions"], .bool(true))
+        let decoded = try global.decode(KnowledgeEligibility.self)
+        XCTAssertEqual(decoded.sessionIds, ["selected-session"])
+        XCTAssertEqual(decoded.projectIds, ["selected-project"])
+        XCTAssertEqual(decoded.excludedSessionIds, ["private-session"])
+        XCTAssertEqual(decoded.excludedProjectIds, ["private-project"])
+        eligibility.allSessions = nil
+        XCTAssertNil(try JSONValue.encode(eligibility).objectValue?["allSessions"])
+    }
+
+    @MainActor
+    func testGlobalConfigurationCannotBeSentToAGatewayWithoutGlobalAdmission() async {
+        var requests = 0
+        let client = KnowledgeRPCClient(request: { _, _, _ in requests += 1; return .null })
+        let config = KnowledgeConfig(schemaVersion: 1, revision: 0,
+                                     eligibility: KnowledgeEligibility(allSessions: true, sessionIds: [], projectIds: [], excludedSessionIds: [], excludedProjectIds: []),
+                                     observation: KnowledgeObservationLimits(enabled: true, model: "fixture/model", maxInputChars: 48_000, maxOutputChars: 8_000, timeoutMs: 30_000, maxAttempts: 1),
+                                     maximumSearchResults: 50, currentInterests: [])
+        do {
+            _ = try await client.configure(config, capabilities: ["knowledge.v1"])
+            XCTFail("Global selection must not be silently ignored by an unsupported Gateway")
+        } catch let error as GatewayFailure {
+            XCTAssertEqual(error.code, "unsupported")
+        } catch { XCTFail("Unexpected error: \(error)") }
+        XCTAssertEqual(requests, 0)
+    }
+
     func testObservationRoundTripPreservesCanonicalInputIdentity() throws {
         let range = KnowledgeObservationRange(
             sessionId: "session-1", branchId: "branch-1", fromEntryId: "entry-1", toEntryId: "entry-2",

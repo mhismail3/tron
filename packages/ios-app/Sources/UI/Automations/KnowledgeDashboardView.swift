@@ -757,7 +757,9 @@ struct KnowledgeConfigurationView: View {
     @State private var saving = false
     @State private var error: String?
     @State private var identity: KnowledgePresentationIdentity?
-    private var hasScope: Bool { !selectedSessionIDs.isEmpty || !selectedProjectIDs.isEmpty }
+    private var observesAllConversations: Bool { config?.eligibility.allSessions == true }
+    private var supportsGlobalObservation: Bool { model.gatewayInfo?.capabilities.contains(KnowledgeRPCClient.globalObservationCapability) == true }
+    private var hasScope: Bool { observesAllConversations || !selectedSessionIDs.isEmpty || !selectedProjectIDs.isEmpty }
     private var canSave: Bool { config != nil }
     var body: some View {
         KnowledgeFormSheet(title: "Observation", isWorking: saving, actionDisabled: !canSave, onAction: save) {
@@ -769,34 +771,46 @@ struct KnowledgeConfigurationView: View {
                         .presentationDetents([.large])
                 }
                 TronSettingsDivider(accent: .tronKnowledge)
-                TronToggleRow(icon: "eye", title: "Observe selected conversations",
-                              detail: "Only the sessions and projects selected below are eligible.", accent: .tronKnowledge,
+                TronToggleRow(icon: "eye", title: "Enable observation",
+                              detail: "Save cited observations from future eligible conversation turns.", accent: .tronKnowledge,
                               isOn: Binding(get: { config?.observation.enabled ?? false }, set: { config?.observation.enabled = $0 }))
                     .disabled(config?.observation.enabled != true && (chosenModel == nil || !hasScope))
             }
             .disabled(config == nil)
-            .tronSettingsCaption("Choose an existing configured model and at least one scope before enabling observation.")
+            .tronSettingsCaption("Choose an existing configured model and an observation scope. Earlier turns are not backfilled.")
+            TronSettingsGroup("Scope", accent: .tronKnowledge) {
+                TronToggleRow(icon: "globe", title: "All Tron conversations",
+                              detail: "Include future turns in every workspace on this Gateway. Excluded conversations and projects stay excluded.", accent: .tronKnowledge,
+                              isOn: Binding(get: { observesAllConversations }, set: { config?.eligibility.allSessions = $0 ? true : nil }))
+                    .disabled(config == nil || (!supportsGlobalObservation && !observesAllConversations))
+            }
+            .tronSettingsCaption("This covers Tron conversations, not other apps or files on your Mac. It does not select delegated-agent transcripts.")
+            if !supportsGlobalObservation {
+                TronSettingsNotice(message: "Update this Gateway to use all-conversation observation.", accent: .tronAmber)
+            }
             TronSettingsGroup("Current interests", accent: .tronKnowledge, surfaceStyle: .uncontained) {
                 TextEditor(text: $interestsText).frame(minHeight: 120).tronTextEditor()
                     .accessibilityLabel("Current interests")
             }
             .tronSettingsCaption("One interest per line, up to 50. Interests guide source triage and do not enable observation.")
-            TronSettingsGroup("Existing sessions", accent: .tronKnowledge, surfaceStyle: model.sessions.isEmpty ? .uncontained : .scrollOptimized) {
-                if model.sessions.isEmpty { TronSettingsCaption("No sessions are available on this Gateway.") }
-                ForEach(model.sessions.prefix(100)) { session in
-                    TronToggleRow(icon: "bubble.left.and.bubble.right", title: session.title, accent: .tronKnowledge,
-                                  isOn: Binding(get: { selectedSessionIDs.contains(session.id) }, set: { if $0 { selectedSessionIDs.insert(session.id) } else { selectedSessionIDs.remove(session.id) } }))
-                }
-            }
-            TronSettingsGroup("Existing projects", accent: .tronKnowledge, surfaceStyle: .scrollOptimized) {
-                if let workspace = model.workspace {
-                    ForEach(workspace.entries.filter { $0.kind == .directory }.prefix(100)) { entry in
-                        TronToggleRow(icon: "folder", title: entry.name, accent: .tronKnowledge,
-                                      isOn: Binding(get: { selectedProjectIDs.contains(entry.path) }, set: { if $0 { selectedProjectIDs.insert(entry.path) } else { selectedProjectIDs.remove(entry.path) } }))
+            if !observesAllConversations {
+                TronSettingsGroup("Selected conversations", accent: .tronKnowledge, surfaceStyle: model.sessions.isEmpty ? .uncontained : .scrollOptimized) {
+                    if model.sessions.isEmpty { TronSettingsCaption("No sessions are available on this Gateway.") }
+                    ForEach(model.sessions.prefix(100)) { session in
+                        TronToggleRow(icon: "bubble.left.and.bubble.right", title: session.title, accent: .tronKnowledge,
+                                      isOn: Binding(get: { selectedSessionIDs.contains(session.id) }, set: { if $0 { selectedSessionIDs.insert(session.id) } else { selectedSessionIDs.remove(session.id) } }))
                     }
                 }
+                TronSettingsGroup("Selected projects", accent: .tronKnowledge, surfaceStyle: .scrollOptimized) {
+                    if let workspace = model.workspace {
+                        ForEach(workspace.entries.filter { $0.kind == .directory }.prefix(100)) { entry in
+                            TronToggleRow(icon: "folder", title: entry.name, accent: .tronKnowledge,
+                                          isOn: Binding(get: { selectedProjectIDs.contains(entry.path) }, set: { if $0 { selectedProjectIDs.insert(entry.path) } else { selectedProjectIDs.remove(entry.path) } }))
+                        }
+                    }
+                }
+                .tronSettingsCaption("With all-conversation observation off, an empty selection means no eligible scope. Exclusions always win.")
             }
-            .tronSettingsCaption("An empty allowlist means no eligible scope. Exclusions override these choices.")
             if !hasScope { TronSettingsNotice(message: "No scope selected", accent: .tronAmber) }
             if let error { TronSettingsNotice(message: error, accent: .tronError) }
         }
@@ -818,14 +832,14 @@ struct KnowledgeConfigurationView: View {
     private func save() {
         guard !saving, var config else { return }
         guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == (identity ?? model.knowledgePresentationIdentity) else { error = "Gateway changed; reopen configuration."; return }
-        if config.observation.enabled && (chosenModel == nil || !hasScope) { error = "Select a model and at least one scope before enabling observation."; return }
+        if config.observation.enabled && (chosenModel == nil || !hasScope) { error = "Select a model and all conversations or at least one selected scope before enabling observation."; return }
         saving = true
         if let chosenModel { config.observation.model = chosenModel.contextWindowKey }
         config.eligibility.sessionIds = selectedSessionIDs.sorted(); config.eligibility.projectIds = selectedProjectIDs.sorted(); config.currentInterests = interestsText.split(whereSeparator: \.isNewline).map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }.prefix(50).map { String($0.prefix(500)) }
         let requestIdentity = identity ?? model.knowledgePresentationIdentity
         Task { @MainActor in
             guard model.knowledgePresentationIdentity == requestIdentity else { return }
-            do { _ = try await model.knowledge.configure(config); guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; saving = false; dismiss() }
+            do { _ = try await model.knowledge.configure(config, capabilities: model.gatewayInfo?.capabilities ?? []); guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; saving = false; dismiss() }
             catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { saving = false }; return }
             catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; saving = false; self.error = error.localizedDescription }
         }

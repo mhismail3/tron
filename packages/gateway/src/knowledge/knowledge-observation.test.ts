@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { fauxAssistantMessage, fauxProvider, type Context } from "@earendil-works/pi-ai";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { DEFAULT_KNOWLEDGE_CONFIG } from "./knowledge-contract.js";
 import { KnowledgeStore } from "./knowledge-store.js";
-import { KnowledgeObservationService, projectObservationEntry, type ObservationModel } from "./knowledge-observation.js";
+import { KnowledgeObservationService, ModelRuntimeObservationModel, projectObservationEntry, type ObservationModel } from "./knowledge-observation.js";
 import { KnowledgeService } from "./knowledge-service.js";
 import { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 
@@ -41,14 +43,33 @@ async function waitFor(predicate: () => boolean | Promise<boolean>): Promise<voi
 }
 
 describe("KnowledgeObservationService", () => {
-  it("keeps model input within the configured bound and does not publish after disposal", async () => {
+  it("supplies the configured model with the exact observation JSON contract", async () => {
+    const completeSimple = vi.fn(async (_model: unknown, _context: Context, _options: unknown) => fauxAssistantMessage(output));
+    const model = fauxProvider({ provider: "observer-output-contract" }).getModel();
+    const adapter = new ModelRuntimeObservationModel({ completeSimple } as unknown as ModelRuntime, model);
+    const signal = new AbortController().signal;
+    const sourceText = "[2026-01-01T00:00:01Z] user: The release is Friday.";
+    expect(await adapter.infer({ sessionId: "session-1", range: { sessionId: "session-1", fromEntryId: "entry-1", toEntryId: "entry-1", entryIds: ["entry-1"], entryDigest: "a".repeat(64) }, sourceText, outcome: "completed", signal, maxOutputChars: 8_000 })).toBe(output);
+    expect(completeSimple).toHaveBeenCalledTimes(1);
+    const [selected, context, options] = completeSimple.mock.calls[0]!;
+    expect(selected).toBe(model);
+    const schemaExample = JSON.parse(context.systemPrompt!.split("\n").find(line => line.startsWith('{"observations":['))!);
+    expect(Object.keys(schemaExample.observations[0]).sort()).toEqual(["attribution", "certainty", "observedAt", "text"]);
+    expect(context.systemPrompt).toContain("user, assistant, tool, system, or unknown");
+    expect(context.systemPrompt).toContain("certain, qualified, or uncertain");
+    expect(context.systemPrompt).toContain('{"observations":[]}');
+    expect(context.messages[0]?.content).toBe(sourceText);
+    expect(options).toMatchObject({ signal, maxTokens: 2_000 });
+  });
+
+  it("does not publish after disposal during an admitted inference", async () => {
     let observer!: KnowledgeObservationService;
-    const infer = vi.fn(async (input) => { expect(input.sourceText.length).toBeLessThanOrEqual(48_000); observer.dispose(); return output; });
-    const { store, observer: created } = await fixture(infer); observer = created;
-    const large = { type: "message", id: "oversized-entry", timestamp: "2026-01-01T00:00:03Z", message: { role: "user", content: "x".repeat(100_000) } };
-    observer.admit({ sessionId: "session-1", entries: [large], outcome: "completed" });
-    await vi.waitFor(() => infer.mock.calls.length === 1);
-    await new Promise(resolve => setTimeout(resolve, 25));
+    const work = new GatewayWorkRegistry();
+    const infer = vi.fn(async () => { observer.dispose(); return output; });
+    const { store, observer: created } = await fixture({ infer }, work); observer = created;
+    observer.admit({ sessionId: "session-1", entries, outcome: "completed" });
+    await waitFor(() => infer.mock.calls.length === 1);
+    await waitFor(() => work.size === 0);
     expect((await store.list({ kind: "observation" })).records).toHaveLength(0);
   });
 
@@ -204,6 +225,98 @@ describe("KnowledgeObservationService", () => {
     expect((await store.list({ kind: "observation" })).records).toHaveLength(0);
     observer.dispose();
     await new Promise(resolve => setTimeout(resolve, 25));
+  });
+
+  it("observes new sessions across projects only with an explicit global grant", async () => {
+    const infer = vi.fn(async () => output);
+    const { store, observer } = await fixture({ infer });
+    try {
+      const config = await store.config();
+      await store.configure("observer-global-config", { ...config, eligibility: { ...config.eligibility, allSessions: true, sessionIds: [], projectIds: [] } });
+      observer.admit({ sessionId: "new-project-session", projectId: "another-project", entries, outcome: "completed" });
+      observer.admit({ sessionId: "new-unscoped-session", entries, outcome: "completed" });
+      await waitFor(async () => (await store.status()).coverage.observedCount === 2);
+      expect(infer).toHaveBeenCalledTimes(2);
+      expect((await store.list({ kind: "observation" })).records.map(record => record.provenance.sessionId).sort()).toEqual(["new-project-session", "new-unscoped-session"]);
+    } finally { observer.dispose(); }
+  });
+
+  it("keeps explicit session and project exclusions authoritative under global scope", async () => {
+    const infer = vi.fn(async () => output);
+    const { store, observer } = await fixture({ infer });
+    try {
+      const config = await store.config();
+      await store.configure("observer-global-exclusions", { ...config, eligibility: {
+        allSessions: true, sessionIds: ["private-session"], projectIds: ["private-project"],
+        excludedSessionIds: ["private-session"], excludedProjectIds: ["private-project"],
+      } });
+      observer.admit({ sessionId: "private-session", entries, outcome: "completed" });
+      observer.admit({ sessionId: "another-session", projectId: "private-project", entries, outcome: "completed" });
+      await waitFor(async () => (await store.status()).coverage.excludedCount === 2);
+      expect(infer).not.toHaveBeenCalled();
+      expect((await store.list()).records).toHaveLength(0);
+    } finally { observer.dispose(); }
+  });
+
+  it.each(["session", "branch", "project"] as const)("does not send a stored %s exclusion to the model", async kind => {
+    const infer = vi.fn(async () => output);
+    const { store, observer } = await fixture({ infer });
+    try {
+      const config = await store.config();
+      await store.configure("observer-global-scope-fence", { ...config, eligibility: { ...config.eligibility, allSessions: true } });
+      const scope = kind === "session" ? { sessionId: "session-1" }
+        : kind === "branch" ? { sessionId: "session-1", branchId: "private-branch" } : { projectId: "private-project" };
+      await store.setScopeExclusion("observer-private-scope", scope, true);
+      observer.admit({ sessionId: "session-1", branchId: "private-branch", projectId: "private-project", entries, outcome: "completed" });
+      await waitFor(async () => (await store.status()).coverage.excludedCount === 1);
+      expect(infer).not.toHaveBeenCalled();
+      expect((await store.list()).records).toHaveLength(0);
+    } finally { observer.dispose(); }
+  });
+
+  it("does not infer if a privacy change wins serialized pending admission", async () => {
+    const infer = vi.fn(async () => output);
+    const { store, observer } = await fixture({ infer });
+    const setCoverage = store.setCoverage.bind(store);
+    let rejected = false;
+    const admission = vi.spyOn(store, "setCoverage").mockImplementation(async input => {
+      if (input.coverage.disposition === "pending") {
+        await store.setScopeExclusion("observer-admission-exclusion", { sessionId: "session-1" }, true);
+        try { return await setCoverage(input); } catch (error) { rejected = true; throw error; }
+      }
+      return setCoverage(input);
+    });
+    try {
+      observer.admit({ sessionId: "session-1", entries, outcome: "completed" });
+      await waitFor(() => rejected);
+      // Join the attempted admission rather than interpreting zero records as
+      // proof that private text did not cross the inference boundary.
+      await Promise.allSettled(admission.mock.results.map(result => result.value));
+      expect(infer).not.toHaveBeenCalled();
+      expect((await store.list()).records).toHaveLength(0);
+    } finally { observer.dispose(); admission.mockRestore(); }
+  });
+
+  it("retires an in-flight global result when selection becomes narrower", async () => {
+    let release!: (value: string) => void;
+    const blocked = new Promise<string>(resolve => { release = resolve; });
+    const infer = vi.fn(async () => blocked);
+    const { store, observer } = await fixture({ infer });
+    try {
+      const config = await store.config();
+      const global = await store.configure("observer-global-before-narrowing", { ...config, eligibility: { ...config.eligibility, allSessions: true, sessionIds: [] } });
+      observer.admit({ sessionId: "new-session", entries, outcome: "completed" });
+      await waitFor(() => infer.mock.calls.length === 1);
+      await store.configure("observer-selected-after-global", { ...global, eligibility: { sessionIds: ["different-session"], projectIds: [], excludedSessionIds: [], excludedProjectIds: [] } });
+      release(output);
+      await waitFor(async () => (await store.status()).coverage.excludedCount === 1);
+      const coverage = await store.observationCoverageForScope("new-session");
+      expect(coverage).toHaveLength(1);
+      expect(coverage[0]?.range.entryIds).toEqual(["entry-1", "entry-2"]);
+      expect((await store.status()).coverage.remainingCount).toBe(0);
+      expect((await store.list()).records).toHaveLength(0);
+      expect(infer).toHaveBeenCalledTimes(1);
+    } finally { release(output); observer.dispose(); }
   });
 
   it("records failed model inference as a non-success coverage disposition", async () => {

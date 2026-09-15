@@ -283,7 +283,12 @@ struct KnowledgeRecordDraft: Codable, Hashable, Sendable {
     let id: String?; let createdAt: String?; let updatedAt: String?; let kind: KnowledgeRecordKind; let scope: KnowledgeScope; let provenance: KnowledgeProvenance; let temporal: KnowledgeTemporalQualification?; let relations: [KnowledgeRelation]; var importOrigin: KnowledgeImportOrigin? = nil; let content: KnowledgeRecordContent
 }
 
-struct KnowledgeEligibility: Codable, Hashable, Sendable { var sessionIds: [String]; var projectIds: [String]; var excludedSessionIds: [String]; var excludedProjectIds: [String] }
+struct KnowledgeEligibility: Codable, Hashable, Sendable {
+    // Only an explicit true grants global scope. Omission retains the selected
+    // sessions/projects, including the intentionally empty initial selection.
+    var allSessions: Bool?
+    var sessionIds: [String]; var projectIds: [String]; var excludedSessionIds: [String]; var excludedProjectIds: [String]
+}
 struct KnowledgeObservationLimits: Codable, Hashable, Sendable { var enabled: Bool; var model: String?; var maxInputChars: Int; var maxOutputChars: Int; var timeoutMs: Int; var maxAttempts: Int }
 struct KnowledgeConfig: Codable, Hashable, Sendable {
     let schemaVersion: Int; var revision: Int; var eligibility: KnowledgeEligibility; var observation: KnowledgeObservationLimits; var maximumSearchResults: Int; var currentInterests: [String]

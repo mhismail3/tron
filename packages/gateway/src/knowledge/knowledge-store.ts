@@ -8,7 +8,7 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import { durableAtomicWriteJson, durableRemove } from "../util/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import {
-  DEFAULT_KNOWLEDGE_CONFIG, KNOWLEDGE_SCHEMA_VERSION,
+  DEFAULT_KNOWLEDGE_CONFIG, KNOWLEDGE_SCHEMA_VERSION, knowledgeScopeEligible,
   type KnowledgeConfig, type KnowledgeEvidenceRef, type KnowledgeListRequest,
   type KnowledgeListResponse, type KnowledgeObjectRef, type KnowledgeRecallRequest,
   type KnowledgeRecallResponse, type KnowledgeRecord, type KnowledgeRecordDraft,
@@ -581,14 +581,8 @@ export class KnowledgeStore {
     return { record, stateRevision: state.stateRevision + 1 };
   }
   private excludedRange(state: KnowledgeState, range: ObservationRange): boolean {
-    const eligibility = state.config.eligibility;
-    // An empty allowlist is intentionally unconfigured, never an all-session
-    // grant. Session or project selection admits the range; exclusions win.
-    if (eligibility.sessionIds.length === 0 && eligibility.projectIds.length === 0) return true;
-    if (eligibility.excludedSessionIds.includes(range.sessionId) || !eligibility.sessionIds.includes(range.sessionId)
-      && (!range.projectId || !eligibility.projectIds.includes(range.projectId))) return true;
-    if (range.projectId && eligibility.excludedProjectIds.includes(range.projectId)) return true;
-    return scopeKey(range).some(key => state.scopeExclusions[key]?.excluded);
+    return !knowledgeScopeEligible(state.config.eligibility, range)
+      || scopeKey(range).some(key => state.scopeExclusions[key]?.excluded);
   }
 
   /** Shared privacy predicate for recall/display owners. A historical record

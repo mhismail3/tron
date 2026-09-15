@@ -4,6 +4,7 @@ import Foundation
 /// before reaching views; no corpus or object bytes are cached on iOS.
 @MainActor
 final class KnowledgeRPCClient {
+    static let globalObservationCapability = "knowledge-global-observation.v1"
     typealias Request = @MainActor @Sendable (String, JSONValue, Duration) async throws -> JSONValue
     private let requestValue: Request
     private let mutationExecutor: ConfirmedMutationExecutor?
@@ -85,7 +86,12 @@ final class KnowledgeRPCClient {
                 : object.nextOffset == object.offset! + object.bytes && object.nextOffset! > object.offset! && object.nextOffset! <= object.totalBytes!) else { throw invalidResponse() }
         return object
     }
-    func configure(_ config: KnowledgeConfig) async throws -> KnowledgeConfig {
+    func configure(_ config: KnowledgeConfig, capabilities: [String]) async throws -> KnowledgeConfig {
+        // Do not let a Gateway that lacks global admission silently accept and
+        // ignore the new grant while the UI reports all conversations enabled.
+        if config.eligibility.allSessions == true && !capabilities.contains(Self.globalObservationCapability) {
+            throw GatewayFailure(code: "unsupported", message: "Update this Gateway before enabling global observation.", retryable: false, details: nil)
+        }
         struct Params: Encodable { let config: KnowledgeConfig }
         return try await mutate("knowledge.config", parameters: Params(config: config))
     }

@@ -68,12 +68,27 @@ resurrect or disclose it), and scrubs current derivative evidence/relations.
 Shared objects remain only while referenced by retained revisions.
 
 Observation eligibility and exclusion are prospective and revision-checked:
-configuration carries a monotonic revision and explicit session/project
-allowlists and exclusions. Empty allowlists select no scope. `setScopeExclusion()`
-fences session, branch, or project publication even if a late worker generated
-a new record ID; `scopeExcluded()` is the shared privacy predicate for
-presentation/recall owners. Background publication supplies the captured config
-revision, so disabled/re-enabled or changed-scope workers cannot publish late.
+configuration carries a monotonic revision and either explicit session/project
+selection or the positive `eligibility.allSessions: true` grant. The global grant
+admits future turns in normal Gateway-owned conversations across workspaces,
+including newly created conversations; it does not scan other apps/files,
+select runtime-owned delegated transcripts, or backfill historical turns.
+Omitting the grant retains selected-scope behavior, and empty allowlists still
+select no scope. Global observation is advertised as
+`knowledge-global-observation.v1`; clients must require it before sending that
+grant so an older Gateway cannot silently ignore the choice. Existing model,
+limits, selections, and exclusions remain intact when scope changes.
+
+The same eligibility predicate gates inference admission and serialized
+publication. Explicit session/project exclusions always override global scope.
+`setScopeExclusion()` also fences session, branch, or project input before model
+inference, not merely publication. A rejected pending admission cannot start a
+model request. These fences apply even if a late worker generated a new record
+ID; `scopeExcluded()` is the shared privacy predicate for presentation/recall
+owners. Background publication supplies the captured config revision, so
+disabled/re-enabled or changed-scope workers cannot publish late. Scope changes
+re-evaluate the complete admitted cut without dropping its suffix; owner
+cancellation retains pending coverage for recovery rather than requeueing work.
 
 `reflect()` accepts a non-empty bounded set of observation revision IDs from
 one session and one branch, including successive input digests. It replaces a
@@ -102,10 +117,17 @@ authorization. A prospective
 failed, and interrupted turns), omits thinking/attachment bodies, uses one
 pinned `ModelRuntime` adapter (the configured model is an explicit
 `provider/model` value), and keeps model/storage latency outside foreground
-settlement. Admission occurs only after the runtime's terminal receipt and
-canonical attention barrier; bounded model chunks name only their exact entry
+settlement. The Observer prompt supplies the exact JSON envelope, item fields,
+allowed attribution/certainty values, and empty-result shape required by the
+parser; the configured model is never expected to guess that contract. Admission
+occurs only after the runtime's terminal receipt and canonical attention barrier;
+bounded model chunks name only their exact entry
 IDs and digest, and any remaining suffix is admitted as a separate chunk. Connector calls fail as unsupported until their named extension seam is installed;
 legacy import is installed only when explicitly named checkout roots are configured.
+`knowledge-observation.test.ts` covers global admission, exclusion-before-inference,
+and narrowing scope during inference. `runtime-knowledge-observation.integration.test.ts`
+drives real canonical runtime turns through the observation owner and checks
+persisted, cited recall under both selected and global scope without backfill.
 
 ## Sources and maintained notes
 

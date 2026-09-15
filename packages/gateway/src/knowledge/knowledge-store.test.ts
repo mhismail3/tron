@@ -50,6 +50,32 @@ describe("KnowledgeStore", () => {
     expect((await reopened.list()).records).toHaveLength(1);
   });
 
+  it("persists an explicit global grant without changing existing selected-scope configuration", async () => {
+    const { store, home, workspace } = await fixture();
+    const initial = await store.config();
+    expect(initial.eligibility.allSessions).toBeUndefined();
+    const selected = await store.configure(command("selected-before-global"), { ...initial, eligibility: { ...initial.eligibility, projectIds: ["selected-project"] } });
+    const global = await store.configure(command("global"), { ...selected, eligibility: { ...selected.eligibility, allSessions: true } });
+    const draft = observation("new-session", "new-entry");
+    await store.publishObservationGroup({ commandId: command("global-publication"), expectedConfigRevision: global.revision, coverage: { id: "global-cut", range: draft.content.range, disposition: "observed" }, records: [draft] });
+    await workspace.dispose();
+    const reopenedWorkspace = new TronWorkspace(home); workspaces.push(reopenedWorkspace);
+    const reopened = new KnowledgeStore(reopenedWorkspace);
+    expect((await reopened.config()).eligibility).toEqual({ ...selected.eligibility, allSessions: true });
+    expect((await reopened.recall({ query: "corrected" })).records).toHaveLength(1);
+    const { allSessions, ...selectedScope } = global.eligibility;
+    const narrowed = await reopened.configure(command("selected-again"), { ...global, eligibility: selectedScope });
+    expect(narrowed.eligibility.allSessions).toBeUndefined();
+    const next = observation("new-session", "next-entry");
+    await expect(reopened.publishObservationGroup({ commandId: command("no-global-publication"), expectedConfigRevision: narrowed.revision, coverage: { id: "next-cut", range: next.content.range, disposition: "observed" }, records: [next] })).rejects.toThrow("excluded");
+  });
+
+  it.each([false, null, "true", 1, {}])("rejects a malformed global observation grant %j", async grant => {
+    const { store } = await fixture();
+    await expect(store.configure(command("invalid-global"), { ...DEFAULT_KNOWLEDGE_CONFIG, eligibility: { ...DEFAULT_KNOWLEDGE_CONFIG.eligibility, allSessions: grant as true } })).rejects.toThrow("Invalid global observation grant");
+    expect((await store.status()).config.eligibility.allSessions).toBeUndefined();
+  });
+
   it("survives a rejected first mutation and permits the next valid mutation", async () => {
     const { store } = await fixture();
     await expect(store.captureSource({ commandId: command("invalid-first"), record: { ...source("invalid"), content: { ...source("invalid").content, object: { hash: "a".repeat(64), mediaType: "text/plain", bytes: 1 } } } })).rejects.toThrow(/durably captured/);

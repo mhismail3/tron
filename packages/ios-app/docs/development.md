@@ -29,6 +29,13 @@ metadata and are not used as display headlines. A covered parent must not suppre
 correction callback: the callback checks the originating Knowledge presentation identity while the
 managed child owns presentation publication.
 
+Observation has one Gateway-wide model and enable control plus an explicit **All Tron conversations**
+scope switch. Global scope hides, but does not discard, individual session/project selections;
+turning it off restores them. Exclusions remain authoritative under both scopes, and no past turns
+are backfilled. The switch requires `knowledge-global-observation.v1`; without it, show update
+guidance and reject global configuration before sending a mutation. `KnowledgeModelsTests` covers
+positive-grant encoding, retained exclusions/selections, and unsupported-Gateway admission.
+
 ## Automations dashboard
 
 The top-left Tron logo on the session dashboard is a native `UIButton`/`UIMenu`
