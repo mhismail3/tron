@@ -292,7 +292,7 @@ export class KnowledgeObservationService {
     if (!config.observation.enabled) return;
     const projected = settlement.entries.map(projectObservationEntry).filter((entry): entry is ObservationSourceEntry => entry !== undefined);
     if (projected.length === 0) return;
-    const committed = await this.store.observationCoverageForScope(settlement.sessionId, settlement.branchId, settlement.projectId).catch(() => []);
+    const committed = await this.store.observationCoverageForScope(settlement.sessionId, settlement.branchId, settlement.projectId, projected.map(entry => entry.id)).catch(() => []);
     // Recover the longest exact committed prefix. This keeps a later full
     // canonical snapshot from replaying old entries when chunking changes or
     // the process restarts with an empty in-memory cursor.

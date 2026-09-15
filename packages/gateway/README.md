@@ -41,8 +41,14 @@ it identifies the backing SDK contract.
 
 ## Knowledge boundaries
 
-Knowledge state is owned by the Gateway under `state/knowledge`; iOS retains only
-bounded pages. Observation project scope uses the canonical absolute workspace
+Knowledge state is owned by the Gateway under `state/knowledge`; iOS consumes
+bounded pages. A transactional SQLite catalog indexes dates, record heads,
+coverage, and lexical search fields while immutable revisions/objects remain
+in their owned files. User-initiated startup of the updated Gateway performs the
+one-time, data-preserving catalog upgrade before observation admission; reads
+never migrate or reset missing state. See [Knowledge storage](docs/knowledge.md)
+for publication, paging bounds, upgrade failure, and recovery contracts.
+Observation project scope uses the canonical absolute workspace
 path (a project reference, not a record filename ID), and each admitted model
 cut is branch-lineage-scoped (not the changing leaf), exact, redacted, and
 input-bounded. Distinct terminal envelopes retain their own invocation/outcome

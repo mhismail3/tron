@@ -1,41 +1,81 @@
 # Knowledge owner
 
-`KnowledgeStore` is the single canonical knowledge owner for a resolved
-`TronWorkspace`. Construction and presentation reads are side-effect free. A
-first deliberate mutation creates the owner-only namespace:
+`KnowledgeStore` is the single canonical Knowledge owner for a resolved
+`TronWorkspace` on the Gateway. Construction and presentation reads do not
+initialize or migrate storage. A first deliberate mutation creates this
+owner-only namespace:
 
 ```text
 state/knowledge/
-  initialized.json          # namespace-local integrity marker
-  state.json                 # small atomic control state only
-
-The workspace-owned `gateway/workspace-state/initialized.json` also records
-that Knowledge was initialized. This evidence is outside the deletable
-namespace, so deleting an established namespace reports invalid/lost state
-instead of silently creating a pristine corpus.
-  records/<record-id>/<revision-id>.json
-  groups/<coverage-id>-<revision-id>.json
-  objects/<sha256>           # immutable raw content-addressed bytes
+  initialized.json                     # namespace-local integrity marker
+  state.json                           # small storage-version/catalog-ID manifest
+  catalog-<id>.sqlite                   # canonical transactional catalog
+  records/<record-id>/<revision-id>.json # immutable record revisions
+  objects/<sha256>                      # immutable raw content-addressed bytes
 ```
 
-Record bodies and content bytes are immutable files. `state.json` contains
-only record heads/revision lists, observation coverage, suppression and scope
-exclusion fences, cleanup intents, bounded receipts, configuration, and a
-monotonic state revision. Search and recall scan the bounded canonical record
-set before applying presentation limits; they do not silently lose matches
-past a list page.
+The workspace-owned `gateway/workspace-state/initialized.json` also records
+initialization. Deleting an established namespace, manifest, or active catalog
+reports unavailable/lost state rather than creating an empty corpus.
 
-## Publication and recovery
+`KnowledgeCatalog` uses Node's built-in SQLite, not a new dependency or a session
+mirror. Catalog rows own record heads, exact revision ownership, normalized
+lexical search fields, coverage, exclusions, receipts, import checkpoints, and
+cleanup intentions. Immutable record/object bytes remain in their existing
+files. There is no four-MiB whole-corpus document or ten-thousand-record scan
+cutoff. Dates are indexed in the catalog rather than inferred from filesystem
+paths/mtime: observations sort by their source observation timestamp, with a
+stable ID tie-breaker; notes and sources sort by update time.
 
-Objects are written and synchronized before a record revision can reference
-them. A record revision is then written and synchronized. For an observation
-group, all record revisions are written first, followed by one group manifest
-containing the exact coverage and revision references; only then is the
-atomic `state.json` replacement published. A crash before that replacement
-leaves orphan immutable files that are ignored. A committed head always points
-to already-published revisions. Cleanup is recorded before forgotten object
-files are removed, and `reconcile()` retries unreferenced objects without
-recreating records.
+List queries seek by date/ID and filter kind/scope before loading a bounded page
+of bodies. The opaque cursor carries its query scope and position, so deleting
+its anchor cannot restart or skip a page. Newer insertions are seen on refresh;
+continuations keep moving toward older records. Search/recall retain lexical
+substring semantics over all canonical search fields and only load selected
+record bodies. These text queries are not semantic/vector search or an O(1)
+operation; their work still grows with indexed text volume. Pages reserve both
+750,000 encoded bytes and 24,000 JSON nodes for the existing RPC/native bounds.
+Coverage uses indexed date/scoped queries; per-turn recovery selects only cuts
+whose starts occur in that turn's admitted entries, not all earlier turns.
+
+## Publication, upgrade, and recovery
+
+Objects and immutable revisions are synchronized before a single SQLite
+transaction publishes heads, exact revision ownership, coverage, privacy
+fences, and the command receipt. SQLite uses `synchronous=EXTRA` with its rollback
+journal (including directory synchronization after journal deletion) and secure
+row deletion. The workspace mutex owns connections through close, including
+async body I/O; no presentation reader can see a partial transaction. Failed
+publication leaves only uncommitted immutable files, which are not readable
+through Knowledge. New publications do not create a group-manifest journal.
+Cleanup intentions and tombstones commit before physical deletion; `reconcile()`
+retries exact pending cleanup without recreating records. Shared/historical
+object references remain authoritative until their last retained revision is
+forgotten. Historical revisions are not automatically expired.
+
+The storage-v1 upgrade is explicit in Gateway startup, before session/Automation
+initialization and observation recovery. It runs only when the user starts the
+updated Gateway; source builds and reads do not touch a live store. This one-time
+reader admits up to 64 MiB, including legacy state that already outgrew the old
+four-MiB ceiling; larger or invalid state is left intact and unavailable, never
+silently reset. It validates
+every committed legacy revision and captured object, preserves IDs, timestamps,
+coverage, configuration, exclusions, receipts, and checkpoints, and prepares a
+new durable catalog. Only then does an atomic replacement of the small manifest
+publish storage v2. Before that boundary the original v1 manifest remains
+canonical. Definite preparation failure removes its own staging catalog; an
+uncertain publication leaves a candidate ignored unless the manifest names it.
+Existing immutable bytes and legacy group files are not rewritten or pruned.
+There is no dual-write/fallback store and no automatic downgrade. A preparation
+failure leaves Knowledge visibly unavailable without disabling unrelated chat;
+after an uncertain publication, the manifest still decides which catalog is active.
+
+`knowledge-catalog.test.ts` covers preserving a legacy corpus and receipt replay,
+missing-revision retry, rescue of a 16,000-cut legacy state above four MiB,
+atomic group rollback, missing/symlinked catalogs,
+evidence-heavy byte/node paging, and a 10,005-record fixture larger than four MiB.
+It checks exact body-read counts, full-history continuation, deleted anchors,
+late-corpus search/recall, scoped recovery, and actual SQLite date-index plans.
 
 Missing state in an established namespace is invalid and is never treated as
 an empty corpus. Missing or malformed/newer state, unsafe ancestors, and

@@ -388,6 +388,11 @@ process.on("unhandledRejection", (error) => {
 const enrollmentTimer = setInterval(() => void devices.ensureEnrollment(), 60_000);
 enrollmentTimer.unref();
 await transport.listen(async () => {
+  // This startup follows a user-initiated Gateway update. Keep Knowledge
+  // unavailable on upgrade failure without disabling unrelated chat features.
+  await knowledgeStore.upgradeStorage().catch(() => {
+    logger.log("warning", "Knowledge catalog upgrade reported an error; inspect Knowledge status. No reset was attempted.", { event: "knowledge.upgrade-failed", source: "knowledge" });
+  });
   await sessions.initialize((phase) => transport.setStartupPhase(phase));
   transport.setStartupPhase("automation-recovery");
   await automations.initialize();

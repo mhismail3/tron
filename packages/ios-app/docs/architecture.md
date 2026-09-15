@@ -453,7 +453,10 @@ while semantic warning, success, and danger states retain their established colo
 managed filter sheet owns type and scope selection, and its managed configuration, connector, import,
 capture, note, correction, and detail presentations inherit the same accent and Tron typography. Search,
 loading, empty, evidence, coverage, and retained-object states use the shared presentation controls;
-record and revision IDs remain exact metadata rather than oversized display headlines. `KnowledgeFormSheet`
+observation cards contain only statement, scope tag, and localized source date. `KnowledgeDetailSheet`
+opens at medium and expands to large; observation detail shows one originating-session action and puts
+revision/range/digest/attribution/certainty behind its top-left technical-details button. Navigation and
+editable-draft handoffs wait for sheet dismissal and recheck the originating identity. `KnowledgeFormSheet`
 composes the existing settings layout, controls, and large-sheet toolbar contract without owning form drafts
 or mutations. Coverage shares the dashboard scroll owner, and floating controls have explicit content clearance.
 Connector status reads refresh after their managed editor uncovers the parent; accepted connector runs do
@@ -2060,21 +2063,25 @@ The stack is never persisted and is not a second state authority.
 uses the existing confirmed-mutation receipt owner for every change and bounds
 search, pages, connector runs, and imports before exposing them to SwiftUI.
 `KnowledgeDashboardView` presents All Knowledge (including All Links), filters by
-record kind and Personal/Research scope, and loads detail evidence on demand.
+record kind and Personal/Research scope, and loads detail evidence on demand. Observation rows use a
+statement, scope tag, and source date; detail is a standard medium/large managed sheet with a single
+originating-session row, not a repeated list of entry IDs. Its info button opens shared technical
+metadata and the exact retained-record JSON, preserving all evidence/qualifications without duplicating
+the statement in an Observed items section. Reflection is an explicit actions-menu operation.
 Source object reads use the Gateway's authorization-checked `knowledge.object.read`
 projection with the exact owning record ID and committed revision, and report
 verified bounded bytes rather than caching a second corpus;
 loaded chunks remain visible and can continue by the returned offset. Primary
 source objects and retained provider-api/linked-article representations remain
 in the typed DTO and are labeled in the same bounded object reader; corrections
-copy those references rather than dropping canonical evidence. Session
-citations decode the exact Gateway history-entry DTO, render its bounded text
-before navigation, and expose continuation plus the originating-session action
-separately. Import requests carry an explicit offset and exact dry-run plan hash;
+copy those references rather than dropping canonical evidence. The originating-session action keeps
+its exact history-entry citation through sheet dismissal; the existing session/history owner then
+reads and presents that entry with bounded continuation, including when it is absent from the first
+history page. Import requests carry an explicit offset and exact dry-run plan hash;
 a completed batch reports corpus progress and never claims whole-corpus completion
 until the final selected batch. Detail renders structured field values,
 subjects, validity, qualifications, contrary evidence, and nested record/session
-citations; exact session-entry reads are bounded and displayed before navigation.
+citations for source/note records; observation technical details retain the full protocol evidence.
 Handoffs carry record/revision and Gateway identity metadata with explicit
 untrusted-evidence wording, bounded structured qualifications/evidence, and a
 bounded preview. The existing New Session owner still owns workspace/model/trust

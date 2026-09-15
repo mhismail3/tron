@@ -10,6 +10,24 @@ private actor CoverageTestRecorder {
 }
 
 final class KnowledgeModelsTests: XCTestCase {
+    func testObservationPresentationSeparatesStatementDateAndTechnicalEvidence() throws {
+        let record = KnowledgeObservationFixture.record()
+        let presentation = try XCTUnwrap(KnowledgeObservationPresentation(record: record))
+        XCTAssertEqual(presentation.statement, "The user prefers concise explanations.")
+        XCTAssertEqual(presentation.scope, "Personal")
+        XCTAssertEqual(presentation.date, GatewayTimestamp.parse("2026-01-01T09:30:00Z"))
+        XCTAssertNotEqual(presentation.observedAt, record.updatedAt, "Correcting a record must not redate its observation")
+        XCTAssertEqual(presentation.sessionID, "fixture-session")
+        XCTAssertEqual(presentation.entryID, "fixture-first", "The single session action retains the exact originating entry")
+        XCTAssertEqual(presentation.recordMetadata.first { $0.title == "Revision" }?.value, "fixture-revision")
+        XCTAssertEqual(presentation.sourceMetadata.first { $0.title == "Digest" }?.value, String(repeating: "a", count: 64))
+        XCTAssertEqual(presentation.sourceMetadata.first { $0.title == "Entries" }?.value, "fixture-first\nfixture-last")
+        XCTAssertEqual(presentation.observerMetadata.first { $0.title == "Model" }?.value, "fixture/model")
+        let item = try XCTUnwrap(presentation.observation.items.first)
+        XCTAssertEqual(presentation.itemMetadata(item).map(\.value), ["User", "Qualified", "2026-01-01T09:30:00Z"])
+        XCTAssertEqual(presentation.record.provenance.evidence.count, 2, "Simplifying evidence rows must not discard canonical citations")
+    }
+
     func testGatewayObjectResponseAndImportedQualificationWireShapeDecode() throws {
         let object = KnowledgeObjectRead(hash: String(repeating: "a", count: 64), mediaType: "text/plain", bytes: 5, totalBytes: 5, offset: 0, nextOffset: nil, base64: "aGVsbG8=")
         let imported = KnowledgeImportOrigin(store: "llm-wiki", recordId: "assertion-1", revision: "git-revision", importedAt: "2026-01-01T00:00:00Z", review: KnowledgeImportReview(batch: "batch-1", auditId: "audit-1", receiptId: nil, resultRevision: nil, basis: "user-confirmed"))

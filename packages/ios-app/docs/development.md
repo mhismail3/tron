@@ -24,8 +24,20 @@ import, capture, note, and correction forms compose `KnowledgeFormSheet` with th
 `TronSettingsGroup`, selection, toggle, inline-field, editor, caption, and notice controls—not native
 Form chrome. The shared wrapper only owns presentation; each form keeps its draft and command owner.
 Model selection opens the existing progressive picker rather than nesting a scrolling picker in a form. Type and scope selections remain
-obvious in the filter sheet; exact record, revision, evidence, and provenance IDs remain selectable
-metadata and are not used as display headlines. A covered parent must not suppress a legitimate child
+obvious in the filter sheet. Observation cards show only the statement (bounded to four preview lines),
+Personal/Research tag, and localized source date—not a repeated Observation title/type, eye icon, raw
+timestamp, or revision counter. Corrections do not redate the source observation. Opening a record uses
+`KnowledgeDetailSheet`, initially medium and expandable to large, with the standard violet title,
+Done control, edge chrome, and hidden grabber. Observation detail shows the full statement once and a
+single originating-session row with Open session. Catalog names are presentation-only; the action
+retains the exact Gateway/session/entry citation even if the session is off-page. The top-left info
+button opens `KnowledgeObservationTechnicalDetailsSheet` using the shared technical metadata/JSON
+components for revisions, ranges, digests, attribution, certainty, model, and complete evidence.
+Reflection remains available in the actions menu rather than a redundant Observed items section.
+Session navigation and editable drafts are handed off only after the record sheet dismisses, with the
+originating Gateway identity rechecked. `KnowledgeModelsTests` and the focused observation case in
+`SessionSheetPresentationTests` cover retained evidence/source dates and real medium/large sheets.
+A covered parent must not suppress a legitimate child
 correction callback: the callback checks the originating Knowledge presentation identity while the
 managed child owns presentation publication.
 

@@ -7,6 +7,30 @@ import WebKit
 
 @MainActor
 final class SessionSheetPresentationTests: XCTestCase {
+    func testKnowledgeObservationAndTechnicalDetailsStartAtMediumAndExpand() async throws {
+        let record = KnowledgeObservationFixture.record()
+        let presentation = try XCTUnwrap(KnowledgeObservationPresentation(record: record))
+        try await withModel { model in
+            for _ in 0..<2 {
+                try await self.withSheet(KnowledgeDetailSheet(record: record, origin: model.knowledgePresentationIdentity,
+                    onChanged: {}, onOpenDraft: { _ in }, onOpenSession: { _, _ in }).environment(model)) { controller in
+                    let sheet = try XCTUnwrap(controller.sheetPresentationController)
+                    XCTAssertEqual(Set(sheet.detents.map(\.identifier)), [.medium, .large])
+                    XCTAssertEqual(sheet.selectedDetentIdentifier, .medium, "Each record opens compactly, including after a previous expansion")
+                    XCTAssertFalse(sheet.prefersGrabberVisible)
+                    sheet.animateChanges { sheet.selectedDetentIdentifier = .large }
+                    try await self.waitForRouting { sheet.selectedDetentIdentifier == .large }
+                }
+            }
+        }
+        try await withSheet(KnowledgeObservationTechnicalDetailsSheet(presentation: presentation)) { controller in
+            let sheet = try XCTUnwrap(controller.sheetPresentationController)
+            XCTAssertEqual(Set(sheet.detents.map(\.identifier)), [.medium, .large])
+            XCTAssertEqual(sheet.selectedDetentIdentifier, .medium)
+            XCTAssertFalse(sheet.prefersGrabberVisible)
+        }
+    }
+
     func testKnowledgeOriginCitationOpensExactOffPageHistoryEntry() async throws {
         let gateway = ProcessSheetGatewayFixture()
         try await withModel(client: gateway.client) { model in

@@ -35,12 +35,13 @@ struct KnowledgeDashboardView: View {
     @State private var records: [KnowledgeRecord] = []
     @State private var selected: KnowledgeRecord?
     @State private var selectedIdentity: KnowledgePresentationIdentity?
+    @State private var pendingDetailAction: DetailAction?
+    private enum DetailAction { case draft(KnowledgeRecord), session(String, String) }
     @State private var search = ""
     @State private var kind: KnowledgeRecordKind?
     @State private var scope: KnowledgeScope?
     @State private var loading = false
     @State private var error: String?
-    @State private var revision = 0
     @State private var nextCursor: String?
     @State private var loadingMore = false
     @State private var status: KnowledgeStatus?
@@ -135,9 +136,12 @@ struct KnowledgeDashboardView: View {
         .font(TronTypography.body)
         .foregroundStyle(Color.tronTextPrimary)
         .tronSettingsVisualTheme(accent: .tronKnowledge)
-        .navigationDestination(item: $selected) { record in
-            KnowledgeDetailView(record: record, origin: selectedIdentity ?? model.knowledgePresentationIdentity,
-                                onChanged: reload, onOpenDraft: openDraft, onOpenSession: onOpenSession)
+        .tronManagedSheet(item: $selected, identity: { "knowledge.detail.\($0.id)" }, onDismiss: finishDetailDismissal) { record in
+            KnowledgeDetailSheet(record: record, origin: selectedIdentity ?? model.knowledgePresentationIdentity,
+                                 onChanged: reload,
+                                 onOpenDraft: { stageDetailAction(.draft($0)) },
+                                 onOpenSession: { stageDetailAction(.session($0, $1)) })
+                .environment(model)
         }
         .onChange(of: model.knowledgePresentationIdentity) { _, _ in
             // Retire both the visible page and any manually spawned page task;
@@ -145,7 +149,8 @@ struct KnowledgeDashboardView: View {
             loadGeneration += 1
             loadingMore = false
             coverageStore.reset()
-            records.removeAll(); selected = nil; selectedIdentity = nil; revision = 0; nextCursor = nil; status = nil; error = nil
+            records.removeAll(); selected = nil; selectedIdentity = nil; pendingDetailAction = nil
+            nextCursor = nil; status = nil; error = nil
         }
         .tronManagedSheet(isPresented: $showingFilters, identity: "knowledge.filters") {
             knowledgeFilterSheet
@@ -197,11 +202,7 @@ struct KnowledgeDashboardView: View {
                                  icon: filtered ? "line.3.horizontal.decrease.circle" : "book.closed", accent: .tronKnowledge)
                 .frame(minHeight: minimumHeight)
         } else {
-            HStack {
-                Text(filterSummary).font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronKnowledge)
-                Spacer()
-                Text("r\(revision)").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextMuted)
-            }
+            Text(filterSummary).font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronKnowledge)
             ForEach(records) { record in
                 Button {
                     selected = record
@@ -316,7 +317,7 @@ struct KnowledgeDashboardView: View {
             else { let found = try await model.knowledge.search(query: search, kind: kind, scope: scope, limit: 50); response = KnowledgeListResponse(records: found.hits.map { $0.record }, nextCursor: nil, stateRevision: found.stateRevision) }
             let currentStatus = try await loadedStatus
             guard generation == loadGeneration, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
-            records = response.records; nextCursor = response.nextCursor; revision = response.stateRevision; status = currentStatus
+            records = response.records; nextCursor = response.nextCursor; status = currentStatus
             await coverageStore.load(identity: identity,
                 request: { cursor in try await model.knowledge.coverage(cursor: cursor, limit: 50) },
                 isCurrent: { generation == loadGeneration && activity.allowsPresentationPublication && model.knowledgePresentationIdentity == identity })
@@ -340,18 +341,51 @@ struct KnowledgeDashboardView: View {
                 guard generation == loadGeneration, query == search, requestedKind == kind, requestedScope == scope,
                       activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity,
                       page.records.allSatisfy({ !records.contains($0) }) else { return }
-                records.append(contentsOf: page.records); nextCursor = page.nextCursor; revision = page.stateRevision
+                records.append(contentsOf: page.records); nextCursor = page.nextCursor
             } catch is CancellationError { return }
             catch { guard generation == loadGeneration, query == search, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }; self.error = error.localizedDescription }
         }
     }
-    private func openDraft(_ record: KnowledgeRecord) { guard model.knowledgePresentationIdentity == selectedIdentity ?? model.knowledgePresentationIdentity else { return }; selected = nil; onOpenDraft(record) }
+    private func stageDetailAction(_ action: DetailAction) {
+        guard model.knowledgePresentationIdentity == selectedIdentity, pendingDetailAction == nil else { return }
+        // The existing session/new-session owner must not present through an
+        // observation sheet that is still dismissing.
+        pendingDetailAction = action
+        selected = nil
+    }
+    private func finishDetailDismissal() {
+        let action = pendingDetailAction
+        pendingDetailAction = nil
+        defer { selectedIdentity = nil }
+        guard model.knowledgePresentationIdentity == selectedIdentity else { return }
+        switch action {
+        case .draft(let record): onOpenDraft(record)
+        case .session(let sessionID, let entryID): onOpenSession(sessionID, entryID)
+        case nil: break
+        }
+    }
 }
 
 private struct KnowledgeRecordRow: View {
     let record: KnowledgeRecord
 
     var body: some View {
+        Group {
+            if let observation = KnowledgeObservationPresentation(record: record) {
+                KnowledgeObservationStatement(presentation: observation, preview: true)
+                    .accessibilityElement(children: .combine)
+            } else {
+                otherRecord
+            }
+        }
+        .padding(.horizontal, TronSpacing.xl)
+        .padding(.vertical, TronSpacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .tronScrollSurface(accent: .tronKnowledge, tintOpacity: 0.08)
+        .contentShape(Rectangle())
+    }
+
+    private var otherRecord: some View {
         HStack(alignment: .top, spacing: TronSpacing.xl) {
             Image(systemName: record.kind.icon)
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
@@ -382,11 +416,6 @@ private struct KnowledgeRecordRow: View {
                 .foregroundStyle(Color.tronKnowledge)
                 .accessibilityHidden(true)
         }
-        .padding(.horizontal, TronSpacing.xl)
-        .padding(.vertical, TronSpacing.lg)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .tronScrollSurface(accent: .tronKnowledge, tintOpacity: 0.08)
-        .contentShape(Rectangle())
     }
 }
 
@@ -413,38 +442,45 @@ struct KnowledgeDetailView: View {
     @State private var message: String?
     @State private var forgetConfirmation = false
     @State private var correctionSheet = false
+    @State private var technicalDetailsSheet = false
     @State private var evidenceMessage: String?
     @State private var reflectedHandoff: KnowledgeRecord?
     @State private var reflectionRequestGeneration = 0
     @State private var objectReaders = KnowledgeObjectReaderStore()
     @State private var linkedReader = KnowledgeLinkedRecordReaderStore()
     private var admitsOrigin: Bool { model.knowledgePresentationIdentity == origin && activity.allowsPresentationPublication }
+    private var observationPresentation: KnowledgeObservationPresentation? { KnowledgeObservationPresentation(record: currentRecord) }
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: TronSpacing.section) {
-                TronSettingsGroup("Record", accent: .tronKnowledge) {
-                    VStack(alignment: .leading, spacing: TronSpacing.md) {
-                        Text(currentRecord.title)
-                            .font(TronTypography.largeTitle)
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Label("\(currentRecord.kind.label) · \(currentRecord.scope.label)", systemImage: currentRecord.kind.icon)
-                            .font(TronTypography.secondaryDescription)
-                            .foregroundStyle(Color.tronKnowledge)
-                        Text(currentRecord.summary)
-                            .font(TronTypography.body)
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
+                if let observation = observationPresentation {
+                    KnowledgeObservationStatement(presentation: observation)
+                        .textSelection(.enabled)
+                    observationEvidence(observation)
+                } else {
+                    TronSettingsGroup("Record", accent: .tronKnowledge) {
+                        VStack(alignment: .leading, spacing: TronSpacing.md) {
+                            Text(currentRecord.title)
+                                .font(TronTypography.largeTitle)
+                                .foregroundStyle(Color.tronTextPrimary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Label("\(currentRecord.kind.label) · \(currentRecord.scope.label)", systemImage: currentRecord.kind.icon)
+                                .font(TronTypography.secondaryDescription)
+                                .foregroundStyle(Color.tronKnowledge)
+                            Text(currentRecord.summary)
+                                .font(TronTypography.body)
+                                .foregroundStyle(Color.tronTextPrimary)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(14)
                     }
-                    .padding(14)
+                    recordMetadata
+                    sourceLink
+                    noteMetadata
+                    evidence
                 }
-                recordMetadata
-                sourceLink
-                noteMetadata
-                evidence
-                observationItems
                 if let reflectedHandoff {
                     TronSettingsGroup("Generated reflected handoff", accent: .tronKnowledge) {
                         VStack(alignment: .leading, spacing: TronSpacing.md) {
@@ -484,8 +520,16 @@ struct KnowledgeDetailView: View {
         }
         .background(Color.tronBackground)
         .tronScrollEdgeChrome()
-        .tronNavigationTitle("Knowledge detail", accent: .tronKnowledge)
+        .tronNavigationTitle(observationPresentation == nil ? "Knowledge detail" : "Observation", accent: .tronKnowledge)
         .toolbar {
+            if observationPresentation != nil {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { technicalDetailsSheet = true } label: {
+                        Image(systemName: "info.circle").foregroundStyle(Color.tronKnowledge)
+                    }
+                    .accessibilityLabel("Technical details")
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button("Start editable session", systemImage: "plus.bubble") { onOpenDraft(currentRecord) }
@@ -496,6 +540,10 @@ struct KnowledgeDetailView: View {
                         }
                     }
                     if currentRecord.kind == .source { Button("Assess with current interests", systemImage: "sparkles") { triage() } }
+                    if let observation = observationPresentation {
+                        Button("Reflect bounded handoff", systemImage: "sparkles") { reflect(observation.observation) }
+                            .disabled(mutationInFlight)
+                    }
                     Button("Correct record", systemImage: "arrow.triangle.2.circlepath") { correctionSheet = true }
                     Button("Exclude from Knowledge", systemImage: "eye.slash") { exclude() }
                     Button("Forget permanently", systemImage: "trash", role: .destructive) { forgetConfirmation = true }
@@ -508,6 +556,11 @@ struct KnowledgeDetailView: View {
         .tronSettingsVisualTheme(accent: .tronKnowledge)
         .confirmationDialog("Forget this record?", isPresented: $forgetConfirmation) {
             Button("Forget", role: .destructive) { forget() }
+        }
+        .tronManagedSheet(isPresented: $technicalDetailsSheet, identity: "knowledge.technical.\(currentRecord.id)") {
+            if let observation = observationPresentation {
+                KnowledgeObservationTechnicalDetailsSheet(presentation: observation)
+            }
         }
         .tronManagedSheet(isPresented: $correctionSheet, identity: "knowledge.correction.\(currentRecord.id)") {
             KnowledgeCorrectionView(record: currentRecord, origin: origin) { updated in
@@ -677,23 +730,25 @@ struct KnowledgeDetailView: View {
             }
         }
     }
-    @ViewBuilder private var observationItems: some View {
-        if case .observation(let observation) = currentRecord.content {
-            TronSettingsGroup("Observed items", accent: .tronKnowledge) {
-                VStack(alignment: .leading, spacing: TronSpacing.md) {
-                    Text("Entries \(observation.range.fromEntryId)…\(observation.range.toEntryId) · digest \(observation.range.entryDigest.prefix(12))…")
-                        .font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextSecondary).textSelection(.enabled)
-                    ForEach(Array(observation.items.enumerated()), id: \.offset) { _, item in
-                        Text("\(item.attribution.rawValue.capitalized) · \(item.certainty.rawValue): \(item.text)")
-                            .font(TronTypography.body).foregroundStyle(Color.tronTextPrimary).fixedSize(horizontal: false, vertical: true)
-                    }
-                    Button("Reflect bounded handoff") { reflect(observation) }
-                        .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
-                        .disabled(mutationInFlight)
+    private func observationEvidence(_ observation: KnowledgeObservationPresentation) -> some View {
+        TronSettingsGroup("Evidence", accent: .tronKnowledge) {
+            TronSettingsRow(icon: "bubble.left.and.bubble.right", title: originatingSessionTitle(observation.sessionID)) {
+                Button("Open session") {
+                    guard admitsOrigin else { evidenceMessage = "Gateway changed; reopen this entry."; return }
+                    onOpenSession(observation.sessionID, observation.entryID)
                 }
-                .padding(14)
+                .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
+            }
+            if let evidenceMessage {
+                TronSettingsCaption(evidenceMessage).padding(14)
             }
         }
+    }
+    private func originatingSessionTitle(_ sessionID: String) -> String {
+        guard model.knowledgePresentationIdentity == origin else { return "Originating session" }
+        // Session names are disposable catalog copy. Navigation still uses the
+        // exact Gateway/session/entry citation even when the row is off-page.
+        return model.sessions.first(where: { $0.id == sessionID })?.title ?? "Originating session"
     }
     private func readObject(_ reference: KnowledgeObjectRef, offset: Int) {
         guard admitsOrigin else { evidenceMessage = "Gateway changed; reopen this entry."; return }
