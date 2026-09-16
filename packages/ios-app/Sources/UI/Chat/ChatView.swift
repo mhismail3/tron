@@ -837,12 +837,33 @@ struct ChatView: View {
                 }
             }
         }
-        let admittedPhysicalRowIDs = installed.map {
-            ChatPhysicalTranscriptRowPolicy.admittedPhysicalIDs(
+        let semanticIDsByPhysicalID = installed.map {
+            ChatPhysicalTranscriptRowPolicy.semanticIDsByPhysicalID(
                 installed: $0,
                 canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases
             )
-        } ?? []
+        } ?? [:]
+        let physicalRowPositions: [String: Int] = installed.map {
+            let rows = ChatPhysicalTranscriptRowPolicy.rows(
+                installed: $0,
+                canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases
+            )
+            let hasEarlierMessages = ($0.sourceWindow.originalStart ?? 0) > 0
+            var positions = Dictionary(uniqueKeysWithValues: rows.enumerated().map {
+                ($0.element.id, $0.offset + (hasEarlierMessages ? 1 : 0))
+            })
+            if hasEarlierMessages { positions["earlier-messages"] = 0 }
+            return positions
+        } ?? [:]
+        let physicalTerminalPosition: Int? = installed.flatMap {
+            let rows = ChatPhysicalTranscriptRowPolicy.rows(
+                installed: $0,
+                canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases
+            )
+            let leadingEarlierRow = ($0.sourceWindow.originalStart ?? 0) > 0 ? 1 : 0
+            return rows.indices.last.map { $0 + leadingEarlierRow }
+                ?? (leadingEarlierRow > 0 ? 0 : nil)
+        }
         let terminalPhysicalID = installed.flatMap {
             let rows = ChatPhysicalTranscriptRowPolicy.rows(
                 installed: $0,
@@ -851,12 +872,10 @@ struct ChatView: View {
             if let terminal = rows.last { return terminal.id }
             return ($0.sourceWindow.originalStart ?? 0) > 0 ? "earlier-messages" : nil
         }
-        // Validate against the exact physical spine rendered by
-        // ChatTranscriptScrollView. The store's canonical namespace does not
-        // include display-only prompt/tool aliases, so validating it directly
-        // can retire a still-mounted materialization target during handoff.
-        scrollCoordinator.reconcileMaterializationRows { renderedID in
-            admittedPhysicalRowIDs.contains(renderedID)
+        // Keep the native physical target while transferring its geometry
+        // owner atomically with prompt/tool payload replacement.
+        scrollCoordinator.reconcileMaterializationRows { physicalID in
+            semanticIDsByPhysicalID[physicalID]
         }
         let projectionLayoutChanged = previousTag.map { previousTag in
             installed.map { !previousTag.matchesProjectionPayload(of: $0.tag) } ?? true
@@ -872,7 +891,9 @@ struct ChatView: View {
             scrollCoordinator.projectionInstalled(
                 structure: installed?.physicalRowSpineIdentity,
                 terminalPhysicalID: terminalPhysicalID,
-                projectionTag: installed?.tag
+                projectionTag: installed?.tag,
+                physicalRowPositions: physicalRowPositions,
+                physicalTerminalPosition: physicalTerminalPosition
             )
         }
         if projectionLayoutChanged {
@@ -1949,10 +1970,19 @@ struct ChatView: View {
             )
             let terminalID = rows.last?.id
                 ?? ((retained.sourceWindow.originalStart ?? 0) > 0 ? "earlier-messages" : nil)
+            let hasEarlierMessages = (retained.sourceWindow.originalStart ?? 0) > 0
+            var physicalPositions = Dictionary(uniqueKeysWithValues: rows.enumerated().map {
+                ($0.element.id, $0.offset + (hasEarlierMessages ? 1 : 0))
+            })
+            if hasEarlierMessages { physicalPositions["earlier-messages"] = 0 }
+            let leadingEarlierRow = hasEarlierMessages ? 1 : 0
             scrollCoordinator.projectionInstalled(
                 structure: retained.physicalRowSpineIdentity,
                 terminalPhysicalID: terminalID,
-                projectionTag: retained.tag
+                projectionTag: retained.tag,
+                physicalRowPositions: physicalPositions,
+                physicalTerminalPosition: rows.indices.last.map { $0 + leadingEarlierRow }
+                    ?? (leadingEarlierRow > 0 ? 0 : nil)
             )
         }
         let interval = performanceSignposts.begin(.firstReadyFrame)

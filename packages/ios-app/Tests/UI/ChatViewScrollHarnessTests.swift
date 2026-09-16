@@ -1525,16 +1525,22 @@ struct ChatViewScrollHarnessTests {
             let scheduler = DisplayFrameScheduler { throw CancellationError() }
             try await withHarness(seed: 105, displayFrameScheduler: scheduler) { harness in
                 _ = try await harness.recorder.waitUntil {
-                    $0.observation.readyFrameCompletionCount == 1
+                    $0.observation.readyFrameCompletionCount >= 1
                 }
-                // A still-active surface may immediately schedule a fresh
-                // opening attempt after cancellation. This assertion owns only
-                // the completed attempt: its begin must close exactly once and
-                // in order, without depending on later retry scheduling.
-                #expect(Array(harness.firstReadyEvents.prefix(2)) == [
-                    .begin(.firstReadyFrame),
-                    .end(.firstReadyFrame, .cancelled, .none),
-                ])
+                // Multiple cancelled attempts can finish before one presented
+                // sample. Check every recorded attempt, not a transient count
+                // that the frame observer is allowed to skip.
+                let events = harness.firstReadyEvents
+                #expect(events.count >= 2)
+                for index in stride(from: 0, to: events.count - 1, by: 2) {
+                    #expect(Array(events[index...index + 1]) == [
+                        .begin(.firstReadyFrame),
+                        .end(.firstReadyFrame, .cancelled, .none),
+                    ])
+                }
+                if !events.count.isMultiple(of: 2) {
+                    #expect(events.last == .begin(.firstReadyFrame))
+                }
             }
         }
     }
@@ -1961,6 +1967,19 @@ struct ChatViewScrollHarnessTests {
                 }
                 #expect(lifecycleSamples.contains { $0.transitionToken == 1 })
                 #expect(lifecycleSamples.last?.runID == "tool-run-settled-group")
+                let handoffs = harness.traceRecords.filter {
+                    $0.record.event == "chat.lease.semantic-handoff"
+                }
+                #expect(handoffs.contains {
+                    $0.record.message.contains("physicalRow=")
+                        && $0.record.message.contains("semanticRow=")
+                        && $0.record.message.contains("rowEvidence=")
+                })
+                #expect(!harness.traceRecords.contains {
+                    $0.record.event == "chat.lease.bounded-fallback"
+                        || ($0.record.event == "chat.lease.release-requested"
+                            && $0.record.message.contains("reason=bounded-fallback"))
+                })
             }
         }
     }

@@ -78,6 +78,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
         case released
         case retargeted
         case canonicalHandoff = "canonical-handoff"
+        case semanticHandoff = "semantic-handoff"
         case boundedFallback = "bounded-fallback"
         case repairExhausted = "repair-exhausted"
     }
@@ -91,6 +92,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
         case frameBoundary = "frame-boundary"
         case consumed
         case canonicalAcknowledgement = "canonical-acknowledgement"
+        case semanticIdentityChanged = "semantic-identity-changed"
         case attemptLimit = "attempt-limit"
     }
 
@@ -107,6 +109,11 @@ final class ChatInteractionTrace: @unchecked Sendable {
         case submissionBaseline = "submission-baseline"
         case submissionCheckpoint = "submission-checkpoint"
         case openingCheckpoint = "opening-checkpoint"
+    }
+
+    enum TailEdgeStage: String, Sendable {
+        case firstDisplacement = "first-displacement"
+        case recovered
     }
 
     enum Anomaly: String, Sendable {
@@ -172,7 +179,16 @@ final class ChatInteractionTrace: @unchecked Sendable {
         var physicalRowToken: Int?
         var semanticRowToken: Int?
         var pendingPhysicalRowToken: Int?
+        var pendingSemanticRowToken: Int?
         var pendingLayoutSettled: Bool?
+        /// Signed physical row index relative to the installed terminal row;
+        /// this is not a transcript ordinal or an identity token.
+        var requestedRowOffsetFromTerminal: Int?
+        var materializationRequiredRevision: Int?
+        var nativeTailEvidence: Bool?
+        var nativeRowEvidence: Bool?
+        var nativeRowEvidenceFresh: Bool?
+        var pendingRowEvidenceFresh: Bool?
         var rowMinY: CGFloat?
         var rowHeight: CGFloat?
 
@@ -368,7 +384,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
         state: State
     ) {
         var values = [
-            "token=\(command.token)",
+            "commandOrdinal=\(command.token)",
             "origin=\(Self.origin(command.origin))",
             "destination=\(Self.destination(command.destination))",
             "animated=\(Self.bit(command.animation != .disabled))"
@@ -390,7 +406,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
         state: State
     ) {
         var values = ["reason=\(reason.rawValue)"]
-        if let token { values.append("token=\(token)") }
+        if let token { values.append("commandOrdinal=\(token)") }
         appendState(state, to: &values)
         append(
             context: context,
@@ -428,6 +444,31 @@ final class ChatInteractionTrace: @unchecked Sendable {
             context: context,
             level: "error",
             event: "anomaly.\(anomaly.rawValue)",
+            details: values.joined(separator: " ")
+        )
+    }
+
+    /// Records classification edges from SwiftUI marker observations, not proof
+    /// of a painted frame. The caller excludes user-owned scrolling; ordinary
+    /// geometry stays thresholded while unexpected loss survives ring pressure.
+    func tailEdge(
+        _ stage: TailEdgeStage,
+        context: Int,
+        state: State,
+        previousClassification: ChatPhysicalTailClassification?,
+        previousTailDisplacement: CGFloat?,
+        previousOffsetY: CGFloat?,
+        previousContentHeight: CGFloat?
+    ) {
+        var values = ["beforeTail=\(previousClassification.map(Self.tail) ?? "unknown")"]
+        if let value = previousTailDisplacement { values.append("beforeTailDelta=\(Self.scalar(value))") }
+        if let value = previousOffsetY { values.append("beforeOffset=\(Self.scalar(value))") }
+        if let value = previousContentHeight { values.append("beforeContent=\(Self.scalar(value))") }
+        appendState(state, to: &values)
+        append(
+            context: context,
+            level: stage == .firstDisplacement ? "warning" : "info",
+            event: "tail.\(stage.rawValue)",
             details: values.joined(separator: " ")
         )
     }
@@ -528,7 +569,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
         if let value = state.offsetY { values.append("offset=\(Self.scalar(value))") }
         if let value = state.contentHeight {
             values.append("content=\(Self.scalar(value))")
-            values.append("geometrySource=swiftui")
+            values.append("geometrySource=swiftui-estimate")
         }
         if let value = state.containerHeight { values.append("container=\(Self.scalar(value))") }
         if let value = state.bottomInset { values.append("inset=\(Self.scalar(value))") }
@@ -547,7 +588,14 @@ final class ChatInteractionTrace: @unchecked Sendable {
         if let value = state.physicalRowToken { values.append("physicalRow=\(value)") }
         if let value = state.semanticRowToken { values.append("semanticRow=\(value)") }
         if let value = state.pendingPhysicalRowToken { values.append("pendingPhysicalRow=\(value)") }
+        if let value = state.pendingSemanticRowToken { values.append("pendingSemanticRow=\(value)") }
         if let value = state.pendingLayoutSettled { values.append("pendingLayoutSettled=\(Self.bit(value))") }
+        if let value = state.requestedRowOffsetFromTerminal { values.append("requestedFromTerminal=\(value)") }
+        if let value = state.materializationRequiredRevision { values.append("materializationRequiredRev=\(value)") }
+        if let value = state.nativeTailEvidence { values.append("tailEvidence=\(value ? "swiftui-marker" : "missing")") }
+        if let value = state.nativeRowEvidence { values.append("rowEvidence=\(value ? "swiftui-frame" : "missing")") }
+        if let value = state.nativeRowEvidenceFresh { values.append("rowEvidenceFresh=\(Self.bit(value))") }
+        if let value = state.pendingRowEvidenceFresh { values.append("pendingRowEvidenceFresh=\(Self.bit(value))") }
         if let value = state.rowMinY { values.append("rowY=\(Self.scalar(value))") }
         if let value = state.rowHeight { values.append("rowHeight=\(Self.scalar(value))") }
     }

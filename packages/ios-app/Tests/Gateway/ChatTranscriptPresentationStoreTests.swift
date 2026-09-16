@@ -1756,14 +1756,14 @@ struct ChatTranscriptPresentationStoreTests {
             // The canonical row owns the outgoing physical host; the local
             // handoff must not remain as a second materialized row.
             #expect(aliased.filter { $0.id == submission.presentationID }.count == 1)
-            let admittedPhysicalIDs = ChatPhysicalTranscriptRowPolicy.admittedPhysicalIDs(
+            let semanticIDs = ChatPhysicalTranscriptRowPolicy.semanticIDsByPhysicalID(
                 installed: settled,
                 canonicalAliases: [canonicalID: submission.presentationID]
             )
-            #expect(admittedPhysicalIDs.contains(submission.presentationID))
-            #expect(!admittedPhysicalIDs.contains(canonicalID))
-            #expect(admittedPhysicalIDs.contains("transcript-bottom"))
-            coordinator.reconcileMaterializationRows { admittedPhysicalIDs.contains($0) }
+            #expect(semanticIDs[submission.presentationID] == canonicalID)
+            #expect(semanticIDs[canonicalID] == nil)
+            #expect(semanticIDs["transcript-bottom"] == "transcript-bottom")
+            coordinator.reconcileMaterializationRows { semanticIDs[$0] }
             #expect(coordinator.ownsTailMaterializationTarget(
                 renderedID: submission.presentationID
             ))
@@ -2078,10 +2078,10 @@ struct ChatTranscriptPresentationStoreTests {
             ).first { $0.semanticID == "tool-run-producer-group" })
             #expect(completedRow.id == runningRow.id)
             #expect(completedRow.semanticID == "tool-run-producer-group")
-            #expect(ChatPhysicalTranscriptRowPolicy.admittedPhysicalIDs(
+            #expect(ChatPhysicalTranscriptRowPolicy.semanticIDsByPhysicalID(
                 installed: completed,
                 canonicalAliases: [:]
-            ).contains(runningRow.id))
+            )[runningRow.id] == completedRow.semanticID)
             #expect(completed.hasUniqueDisplayedIDs)
             #expect(store.entranceState(for: runningRow.semanticID) == .none)
             #expect(store.entranceState(for: completedRow.semanticID) == .admitted)

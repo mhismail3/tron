@@ -202,20 +202,19 @@ enum ChatPhysicalTranscriptRowPolicy {
         )
     }
 
-    /// The exact physical namespace installed in the lazy collection. Scroll
-    /// target leases must validate against this rendered spine rather than the
-    /// canonical semantic namespace, which intentionally excludes aliases.
-    static func admittedPhysicalIDs(
+    /// A lease retains physical identity, but geometry follows the current
+    /// semantic payload. Reconcile both together for prompt and tool handoffs.
+    static func semanticIDsByPhysicalID(
         installed: InstalledChatTranscript,
         canonicalAliases: [String: String]
-    ) -> Set<String> {
-        var ids = Set(rows(
-            installed: installed,
-            canonicalAliases: canonicalAliases
-        ).map(\.id))
-        ids.insert("transcript-bottom")
+    ) -> [String: String] {
+        var ids: [String: String] = [:]
+        for row in rows(installed: installed, canonicalAliases: canonicalAliases) {
+            ids[row.id] = row.semanticID
+        }
+        ids["transcript-bottom"] = "transcript-bottom"
         if (installed.sourceWindow.originalStart ?? 0) > 0 {
-            ids.insert("earlier-messages")
+            ids["earlier-messages"] = "earlier-messages"
         }
         return ids
     }

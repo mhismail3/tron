@@ -60,6 +60,27 @@ struct ChatInteractionTraceTests {
         #expect(records.contains { $0.record.message.contains("layout=39") })
     }
 
+    @Test("command diagnostics use an ordinal that survives generic token redaction")
+    func commandOrdinalIsExportSafe() throws {
+        let trace = ChatInteractionTrace()
+        let context = trace.beginContext(retainedPresentation: false)
+        trace.command(
+            .issued,
+            context: context,
+            command: ChatScrollCommand(
+                token: 7, presentation: 1, origin: .presentation,
+                destination: .openingTail("private-row"), animation: .disabled
+            ),
+            state: .empty
+        )
+        let record = try #require(trace.diagnosticRecords(limit: 1).first?.record)
+        #expect(record.message.contains("commandOrdinal=7"))
+        #expect(!record.message.contains("token="))
+        #expect(!record.message.contains("private-row"))
+        #expect(IOSClientDiagnosticBuffer.redactedMessage(record.message)
+            .contains("commandOrdinal=7"))
+    }
+
     @Test("opening target identity and content cannot enter command diagnostics")
     func commandIdentityIsRedacted() {
         let trace = ChatInteractionTrace()
@@ -172,6 +193,53 @@ struct ChatInteractionTraceTests {
         #expect(!records.contains { $0.record.message.contains("private-") })
     }
 
+    @Test("coordinator diagnostics use physical position and name semantic handoff distinctly")
+    @MainActor
+    func coordinatorDiagnosticsExposePhysicalPositionAndSemanticHandoff() throws {
+        let trace = ChatInteractionTrace()
+        let context = trace.beginContext(retainedPresentation: false)
+        let coordinator = ChatScrollCoordinator()
+        coordinator.configureInteractionTrace(trace, context: context)
+        let spine = ChatPhysicalRowSpineIdentity(
+            timelineIDs: ChatTranscriptIDs(canonical: ["older", "terminal"], live: []),
+            runtimeIDs: [], lifecycleID: nil, queueIDs: [], aliases: [], fusion: nil,
+            hasEarlierMessages: false
+        )
+        coordinator.projectionInstalled(
+            structure: spine,
+            terminalPhysicalID: "terminal",
+            physicalRowPositions: ["older": 0, "terminal": 1],
+            physicalTerminalPosition: 1
+        )
+        #expect(coordinator.discreteTailInserted(
+            renderedID: "running", physicalTargetID: "older"
+        ))
+        let command = try #require(coordinator.command)
+        #expect(trace.diagnosticRecords(limit: 256).contains {
+            $0.record.event == "chat.command.issued"
+                && $0.record.message.contains("requestedFromTerminal=-1")
+        })
+        #expect(coordinator.commandApplied(command))
+        coordinator.reconcileMaterializationRows { $0 == "older" ? "completed" : nil }
+        let handoff = try #require(trace.diagnosticRecords(limit: 256).first {
+            $0.record.event == "chat.lease.semantic-handoff"
+        })
+        #expect(handoff.record.message.contains("physicalRow="))
+        #expect(handoff.record.message.contains("semanticRow="))
+        #expect(handoff.record.message.contains("rowEvidence="))
+        #expect(!(handoff.record.event?.contains("canonical") ?? true))
+        coordinator.discreteTailInserted(renderedID: "pending-running", physicalTargetID: "terminal")
+        coordinator.reconcileMaterializationRows {
+            $0 == "terminal" ? "pending-completed" : "completed"
+        }
+        let pendingHandoff = try #require(trace.diagnosticRecords(limit: 256).first {
+            $0.record.event == "chat.lease.semantic-handoff"
+        })
+        let currentOwner = try #require(trace.identityToken("pending-completed"))
+        #expect(pendingHandoff.record.message.contains("pendingSemanticRow=\(currentOwner)"))
+        coordinator.cancel()
+    }
+
     @Test("retirement revokes checkpoints without masking an active lost projection")
     @MainActor
     func retiredContextCannotAdmitCheckpoint() {
@@ -254,6 +322,55 @@ struct ChatInteractionTraceTests {
             geometry: installedUnderflow,
             tailClassification: .belowViewport
         ))
+    }
+
+    @Test("observed tail edges retain evidence but exclude user-owned displacement")
+    @MainActor
+    func nativeTailEdgeDiagnostics() throws {
+        let trace = ChatInteractionTrace()
+        let context = trace.beginContext(retainedPresentation: true)
+        let coordinator = ChatScrollCoordinator()
+        coordinator.configureInteractionTrace(trace, context: context)
+        let aligned = CGRect(x: 0, y: 663, width: 100, height: 12)
+        let displaced = CGRect(x: 0, y: 700, width: 100, height: 12)
+        let atTail = ChatTranscriptGeometry(offsetY: 300, contentHeight: 675, containerHeight: 675)
+        coordinator.geometryChanged(previous: .zero, current: atTail)
+        coordinator.semanticFrameChanged(renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch, frame: aligned)
+        coordinator.geometryChanged(previous: atTail, current: atTail)
+        let latestBeforeDisplacement = ChatTranscriptGeometry(
+            offsetY: 360, contentHeight: 700, containerHeight: 675
+        )
+        // The marker has not changed, but the SwiftUI viewport sample has. The next
+        // marker edge must carry this immediately preceding geometry.
+        coordinator.geometryChanged(previous: atTail, current: latestBeforeDisplacement)
+        coordinator.semanticFrameChanged(renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch, frame: displaced)
+        for index in 0..<300 {
+            trace.geometry(.meaningfulChange, context: context,
+                           state: .init(layoutEpoch: index))
+        }
+        let first = try #require(trace.diagnosticRecords(limit: 256).first {
+            $0.record.event == "chat.tail.first-displacement"
+        })
+        #expect(first.record.level == "warning")
+        #expect(first.record.message.contains("beforeTail=aligned"))
+        #expect(first.record.message.contains("beforeOffset=360.0"))
+        #expect(first.record.message.contains("beforeContent=700.0"))
+        #expect(first.record.message.contains("tail=above-viewport"))
+        #expect(first.record.message.contains("tailEvidence=swiftui-marker"))
+        #expect(first.record.message.contains("geometrySource=swiftui-estimate"))
+        coordinator.semanticFrameChanged(renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch, frame: aligned)
+        #expect(trace.diagnosticRecords(limit: 256).contains {
+            $0.record.event == "chat.tail.recovered"
+        })
+        let lossCount = trace.diagnosticRecords(limit: 256).filter {
+            $0.record.event == "chat.tail.first-displacement"
+        }.count
+        coordinator.scrollPositionChanged(isPositionedByUser: true)
+        coordinator.semanticFrameChanged(renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch, frame: displaced)
+        #expect(trace.diagnosticRecords(limit: 256).filter {
+            $0.record.event == "chat.tail.first-displacement"
+        }.count == lossCount)
+        coordinator.cancel()
     }
 
     @Test("anomalies are actionable local error records")

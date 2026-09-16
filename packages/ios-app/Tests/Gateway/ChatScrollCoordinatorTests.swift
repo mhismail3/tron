@@ -960,6 +960,69 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
+    @Test("tool semantic handoff settles the existing physical lease without its fallback", arguments: [false, true])
+    func toolHandoffTransfersMaterializationEvidence(frameArrivesFirst: Bool) async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualViewportFrameScheduler()
+            let clock = ManualClock()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler, clock: clock.clock)
+            coordinator.discreteTailInserted(renderedID: "running", physicalTargetID: "physical")
+            let command = try #require(coordinator.command)
+            #expect(coordinator.commandApplied(command))
+            coordinator.projectionInstalled()
+            let frame = CGRect(x: 0, y: 20, width: 100, height: 20)
+            if frameArrivesFirst {
+                coordinator.semanticFrameChanged(renderedID: "completed", layoutEpoch: coordinator.layoutEpoch, frame: frame)
+            }
+            coordinator.reconcileMaterializationRows { $0 == "physical" ? "completed" : nil }
+            #expect(coordinator.command == nil)
+            if !frameArrivesFirst {
+                coordinator.semanticFrameChanged(renderedID: "completed", layoutEpoch: coordinator.layoutEpoch, frame: frame)
+            }
+            admitAlignedTail(coordinator)
+            // The clock never advances: only the new semantic row's current
+            // native evidence may release the unchanged physical target.
+            for count in 1...3 {
+                await frames.waitForRequest(count: count)
+                frames.releaseNext()
+            }
+            await Task.yield()
+            #expect(coordinator.targetReleaseGeneration == 1)
+            #expect(coordinator.consumeTargetRelease())
+            #expect(coordinator.canInstallPersistentBottomPosition)
+            coordinator.cancel()
+        }
+    }
+
+    @Test("pending tool handoff promotes its current semantic owner after predecessor removal")
+    func pendingToolHandoffTransfersMaterializationEvidence() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualViewportFrameScheduler()
+            let clock = ManualClock()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler, clock: clock.clock)
+            coordinator.discreteTailInserted(renderedID: "predecessor")
+            #expect(coordinator.commandApplied(try #require(coordinator.command)))
+            coordinator.discreteTailInserted(renderedID: "running", physicalTargetID: "physical")
+            coordinator.reconcileMaterializationRows { $0 == "physical" ? "completed" : nil }
+            let promoted = try #require(coordinator.command)
+            #expect(promoted.destination == .materialize("physical"))
+            #expect(coordinator.commandApplied(promoted))
+            coordinator.semanticFrameChanged(
+                renderedID: "completed", layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 20, width: 100, height: 20)
+            )
+            admitAlignedTail(coordinator)
+            for count in 1...3 {
+                await frames.waitForRequest(count: count)
+                frames.releaseNext()
+            }
+            await Task.yield()
+            #expect(coordinator.consumeTargetRelease())
+            #expect(coordinator.canInstallPersistentBottomPosition)
+            coordinator.cancel()
+        }
+    }
+
     @Test("full-height prompt targets its stable lazy host and transfers acknowledgement without readmission")
     func fullHeightPromptTransfersCanonicalLease() async throws {
         try await withTestWatchdog { @MainActor in
@@ -997,7 +1060,7 @@ struct ChatScrollCoordinatorTests {
             #expect(coordinator.consumeTargetRelease())
             #expect(!coordinator.ownsTailMaterializationTarget(renderedID: "outgoing-row"))
             coordinator.reconcileMaterializationRows { id in
-                id == "outgoing-row" || id == "assistant-row" || id == "transcript-bottom"
+                ["outgoing-row", "assistant-row", "transcript-bottom"].contains(id) ? id : nil
             }
             #expect(coordinator.command == nil)
         }
@@ -1318,7 +1381,7 @@ struct ChatScrollCoordinatorTests {
 
             coordinator.projectionInstalled()
             coordinator.reconcileMaterializationRows { id in
-                id == "canonical-user-row" || id == "transcript-bottom"
+                ["canonical-user-row", "transcript-bottom"].contains(id) ? id : nil
             }
             // Canonical replacement retires the removed row's exact target;
             // it never waits for a successor semantic sample.
@@ -2800,12 +2863,14 @@ private final class ResultRecorder {
 @MainActor
 private final class ManualViewportFrameScheduler {
     private struct Waiter {
+        let id: Int
         let target: Int
         let continuation: CheckedContinuation<Void, Never>
     }
     private var continuations: [Int: CheckedContinuation<Void, Error>] = [:]
     private var waiters: [Waiter] = []
     private var nextID = 0
+    private var nextWaiterID = 0
     private(set) var requestCount = 0
 
     lazy var scheduler = DisplayFrameScheduler { [weak self] in
@@ -2833,9 +2898,21 @@ private final class ManualViewportFrameScheduler {
     }
 
     func waitForRequest(count: Int) async {
-        guard requestCount < count else { return }
-        await withCheckedContinuation { continuation in
-            waiters.append(.init(target: count, continuation: continuation))
+        guard !Task.isCancelled, requestCount < count else { return }
+        let id = nextWaiterID
+        nextWaiterID &+= 1
+        // A missing production frame must fail the owning watchdog, not leave
+        // its cancelled test body suspended until the whole runner times out.
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if Task.isCancelled { continuation.resume() }
+                else { waiters.append(.init(id: id, target: count, continuation: continuation)) }
+            }
+        } onCancel: {
+            Task { @MainActor in
+                guard let index = self.waiters.firstIndex(where: { $0.id == id }) else { return }
+                self.waiters.remove(at: index).continuation.resume()
+            }
         }
     }
 

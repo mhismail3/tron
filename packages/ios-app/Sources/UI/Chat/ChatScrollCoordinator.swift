@@ -210,6 +210,11 @@ final class ChatScrollCoordinator {
     private var geometry = ChatTranscriptGeometry.zero
     private var geometryRevision = 0
     private var installedPhysicalRowSpine: ChatPhysicalRowSpineIdentity?
+    /// Physical collection positions are diagnostic context only. They are
+    /// supplied by the same row adapter that renders the installed spine so a
+    /// target's relation to the terminal never relies on opaque identity tokens.
+    private var installedPhysicalRowPositions: [String: Int] = [:]
+    private var installedPhysicalTerminalPosition: Int?
     private var installedPhysicalTerminalID: String?
     private var installedPhysicalProjectionTag: ChatTranscriptProjectionTag?
     /// A current terminal row geometry callback proves that the installed
@@ -259,6 +264,8 @@ final class ChatScrollCoordinator {
     private var layoutRestore: LayoutRestore?
     private var prepend: PrependContext?
     private(set) var physicalTailEvidence: ChatPhysicalTailEvidence?
+    private var physicalTailEvidenceOffsetY: CGFloat?
+    private var physicalTailEvidenceContentHeight: CGFloat?
     private var physicalTailRepairAttempts = 0
     private var physicalTailRepairEvidenceRevision: Int?
     private var physicalTailRepairCommandToken: Int?
@@ -383,12 +390,16 @@ final class ChatScrollCoordinator {
     ) {
         cancelAllOwnedWork(result: .discarded)
         physicalTailEvidence = nil
+        physicalTailEvidenceOffsetY = nil
+        physicalTailEvidenceContentHeight = nil
         physicalTailRepairEvidenceRevision = nil
         physicalTailRepairCommandToken = nil
         physicalTailRepairIssuedEvidenceRevision = nil
         physicalTailRepairBlockedUntilEvidenceRevision = nil
         physicalTailRepairAttempts = 0
         installedPhysicalRowSpine = nil
+        installedPhysicalRowPositions = [:]
+        installedPhysicalTerminalPosition = nil
         installedPhysicalTerminalID = nil
         installedPhysicalProjectionTag = nil
         terminalPhysicalRowObservedLayoutEpoch = nil
@@ -528,10 +539,14 @@ final class ChatScrollCoordinator {
     func projectionInstalled(
         structure: ChatPhysicalRowSpineIdentity?,
         terminalPhysicalID: String? = nil,
-        projectionTag: ChatTranscriptProjectionTag? = nil
+        projectionTag: ChatTranscriptProjectionTag? = nil,
+        physicalRowPositions: [String: Int] = [:],
+        physicalTerminalPosition: Int? = nil
     ) {
         installedPhysicalTerminalID = terminalPhysicalID
         installedPhysicalProjectionTag = projectionTag
+        installedPhysicalRowPositions = physicalRowPositions
+        installedPhysicalTerminalPosition = physicalTerminalPosition
         guard let structure else {
             installedPhysicalRowSpine = nil
             projectionInstalled()
@@ -992,16 +1007,39 @@ final class ChatScrollCoordinator {
     }
 
     func reconcileMaterializationRows(
-        containsPhysicalRowID: (String) -> Bool
+        semanticIDForPhysicalRow: (String) -> String?
     ) {
-        if let pending = pendingTailMaterialization,
-           !containsPhysicalRowID(pending.physicalTargetID) {
-            pendingTailMaterialization = nil
+        if var pending = pendingTailMaterialization {
+            if let semanticID = semanticIDForPhysicalRow(pending.physicalTargetID) {
+                if pending.renderedID != semanticID {
+                    pending.renderedID = semanticID
+                    pendingTailMaterialization = pending
+                    traceLease(.semanticHandoff, token: appliedTargetCommandToken,
+                               reason: .semanticIdentityChanged)
+                }
+                pendingTailMaterialization = pending
+            } else {
+                pendingTailMaterialization = nil
+            }
         }
-        guard let physicalTargetID = tailMaterialization?.physicalTargetID,
-              !containsPhysicalRowID(physicalTargetID) else { return }
+        guard let physicalTargetID = tailMaterialization?.physicalTargetID else { return }
+        if let semanticID = semanticIDForPhysicalRow(physicalTargetID) {
+            if tailMaterialization?.renderedID != semanticID {
+                tailMaterialization?.renderedID = semanticID
+                tailMaterialization?.requiredRevision = semanticFrames[semanticID].map {
+                    max(0, $0.revision - 1)
+                } ?? semanticFrameRevision
+                traceLease(.semanticHandoff, token: appliedTargetCommandToken,
+                           reason: .semanticIdentityChanged)
+                // Same physical host, new geometry producer. Invalidate any
+                // published settlement evidence without replaying its target
+                // or extending the bounded fallback deadline.
+                tailMaterializationEvidenceChanged()
+            }
+            return
+        }
         if let pending = pendingTailMaterialization,
-           containsPhysicalRowID(pending.physicalTargetID) {
+           semanticIDForPhysicalRow(pending.physicalTargetID) != nil {
             pendingTailMaterialization = nil
             prepareTailMaterialization(
                 renderedID: pending.renderedID,
@@ -2389,6 +2427,25 @@ final class ChatScrollCoordinator {
         interactionTrace.geometry(reason, context: interactionTraceContext, state: traceState())
     }
 
+    private func traceTailEdge(
+        _ stage: ChatInteractionTrace.TailEdgeStage,
+        previous: ChatPhysicalTailEvidence,
+        previousOffsetY: CGFloat?,
+        previousContentHeight: CGFloat?
+    ) {
+        guard canAutomaticallyFollow, !directPositionOwnership,
+              let interactionTrace, let interactionTraceContext else { return }
+        interactionTrace.tailEdge(
+            stage,
+            context: interactionTraceContext,
+            state: traceState(),
+            previousClassification: previous.classification,
+            previousTailDisplacement: previous.signedDisplacement,
+            previousOffsetY: previousOffsetY,
+            previousContentHeight: previousContentHeight
+        )
+    }
+
     private func traceLease(
         _ stage: ChatInteractionTrace.LeaseStage,
         token: Int?,
@@ -2415,6 +2472,22 @@ final class ChatScrollCoordinator {
             command: command,
             state: traceState()
         )
+    }
+
+    private var requestedRowOffsetFromTerminal: Int? {
+        let requestedPhysicalID = tailMaterialization?.physicalTargetID
+            ?? pendingTailMaterialization?.physicalTargetID
+            ?? openingTailPhase.context?.physicalTargetID
+            ?? command.flatMap { command in
+                switch command.destination {
+                case .materialize(let id), .openingTail(let id): id
+                case .tail, .offsetY: nil
+                }
+            }
+        guard let requestedPhysicalID,
+              let requestedPosition = installedPhysicalRowPositions[requestedPhysicalID],
+              let terminalPosition = installedPhysicalTerminalPosition else { return nil }
+        return requestedPosition - terminalPosition
     }
 
     private func traceState(
@@ -2450,7 +2523,29 @@ final class ChatScrollCoordinator {
             physicalRowToken: interactionTrace?.identityToken(tailMaterialization?.physicalTargetID),
             semanticRowToken: interactionTrace?.identityToken(tailMaterialization?.renderedID),
             pendingPhysicalRowToken: interactionTrace?.identityToken(pendingTailMaterialization?.physicalTargetID),
+            pendingSemanticRowToken: interactionTrace?.identityToken(pendingTailMaterialization?.renderedID),
             pendingLayoutSettled: pendingTailMaterialization?.layoutSettled,
+            requestedRowOffsetFromTerminal: requestedRowOffsetFromTerminal,
+            materializationRequiredRevision: tailMaterialization?.requiredRevision,
+            nativeTailEvidence: physicalTailEvidence.map {
+                $0.presentationEpoch == presentation && $0.layoutEpoch == layoutEpoch
+            },
+            nativeRowEvidence: tailMaterialization?.renderedID.map {
+                semanticFrames[$0]?.layoutEpoch == layoutEpoch
+            },
+            nativeRowEvidenceFresh: tailMaterialization.flatMap { materialization in
+                materialization.renderedID.flatMap { renderedID in
+                    semanticFrames[renderedID].map {
+                        $0.layoutEpoch == layoutEpoch
+                            && $0.revision > (materialization.requiredRevision ?? -1)
+                    }
+                }
+            },
+            pendingRowEvidenceFresh: pendingTailMaterialization.flatMap { pending in
+                semanticFrames[pending.renderedID].map {
+                    $0.layoutEpoch == layoutEpoch
+                }
+            },
             rowMinY: tailMaterialization?.renderedID.flatMap { semanticFrames[$0]?.frame.minY },
             rowHeight: tailMaterialization?.renderedID.flatMap { semanticFrames[$0]?.frame.height }
 
@@ -2539,11 +2634,14 @@ final class ChatScrollCoordinator {
         // projection reconciliation callback still removes it when its exact
         // row disappears; dropping it here would strand the active sentinel.
         physicalTailEvidence = nil
+        physicalTailEvidenceOffsetY = nil
+        physicalTailEvidenceContentHeight = nil
         terminalPhysicalRowObservedLayoutEpoch = nil
         semanticFrames.removeAll(keepingCapacity: true)
     }
 
     private func refreshPhysicalTailEvidence(marker: SemanticFrameSample) {
+        let previousEvidence = physicalTailEvidence
         // Native underflow alignment retains a content-local edge. The marker
         // and this edge share scroll-view coordinates; subtracting the composer
         // inset again would misclassify correctly visible short content.
@@ -2558,11 +2656,40 @@ final class ChatScrollCoordinator {
             markerFrame: marker.frame,
             visibleBounds: visibleBounds
         )
-        guard evidence != physicalTailEvidence else { return }
+        let previousOffsetY = physicalTailEvidenceOffsetY
+        let previousContentHeight = physicalTailEvidenceContentHeight
+        // Keep the latest SwiftUI viewport sample even when the marker's
+        // classification and frame are unchanged. A later classification edge
+        // must describe the immediately preceding geometry, not an older
+        // marker callback.
+        if evidence == physicalTailEvidence {
+            physicalTailEvidenceOffsetY = geometry.isValid ? geometry.offsetY : nil
+            physicalTailEvidenceContentHeight = geometry.isValid ? geometry.contentHeight : nil
+            return
+        }
         physicalTailRepairTask?.cancel()
         physicalTailRepairTask = nil
         physicalTailRepairEvidenceRevision = nil
         physicalTailEvidence = evidence
+        physicalTailEvidenceOffsetY = geometry.isValid ? geometry.offsetY : nil
+        physicalTailEvidenceContentHeight = geometry.isValid ? geometry.contentHeight : nil
+        if let previousEvidence,
+           previousEvidence.presentationEpoch == presentation,
+           previousEvidence.layoutEpoch == layoutEpoch {
+            let wasDisplaced = previousEvidence.classification == .aboveViewport
+                || previousEvidence.classification == .belowViewport
+            let isDisplaced = evidence.classification == .aboveViewport
+                || evidence.classification == .belowViewport
+            if previousEvidence.classification == .aligned && isDisplaced {
+                traceTailEdge(.firstDisplacement, previous: previousEvidence,
+                              previousOffsetY: previousOffsetY,
+                              previousContentHeight: previousContentHeight)
+            } else if wasDisplaced && evidence.classification == .aligned {
+                traceTailEdge(.recovered, previous: previousEvidence,
+                              previousOffsetY: previousOffsetY,
+                              previousContentHeight: previousContentHeight)
+            }
+        }
         // Geometry jitter, including transient alignment, cannot replenish a
         // repair episode. Only a new installed spine or explicit viewport
         // intent admits a fresh two-command budget.
