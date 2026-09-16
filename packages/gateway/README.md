@@ -191,8 +191,12 @@ always marked relocation-sensitive, even when they physically point inside the
 old home, because their bytes would retain the old root after a move. Unsupported
 package bases, malformed arrays, and uncertain paths are reported without
 exposing values or repairing settings.
-External references require an owner decision and diagnostics contain neither
-settings values, credential values, nor session bodies. Quiescence is always
+Registry/VCS package specs (`npm:`, `git:`, `github:`, HTTPS, and SSH) are
+portable package provenance: their installed trees move with the agent home and
+do not create an external filesystem decision. Absolute, local, session, and
+resource paths remain owner decisions. External references require an owner
+decision and diagnostics contain neither settings values, credential values, nor
+session bodies. Quiescence is always
 reported as unproven: the absence of a lock is not evidence that migration is
 safe. This command is an assessment, not an activation authority, and never
 returns a migration-ready or approval verdict. Mandatory operator prerequisites
@@ -255,8 +259,11 @@ scripts/tron agent-home-migrate stage \
 scripts/tron agent-home-migrate verify --staging "$HOME/.tron/.agent.migrate-<id>"
 ```
 
-The preparation tooling does not implement publication. The user/maintainer
-must inspect the verify output, ensure the destination is still absent, then
+The preparation tooling does not implement publication. The complete operator
+sequence, including the legacy Ask User staged-settings transform, browser
+artifact prerequisite, app/helper drain, backup, activation, diagnostics, and
+rollback is in [`packages/mac-app/docs/agent-home-cutover.md`](../mac-app/docs/agent-home-cutover.md).
+The user/maintainer must inspect the verify output, ensure the destination is still absent, then
 perform one manual same-filesystem rename (or a separately verified
 cross-filesystem copy with no atomicity claim), update the selected Mac/Gateway
 profile together, and manually activate one Gateway authority. Never run old and

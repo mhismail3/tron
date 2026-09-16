@@ -238,7 +238,7 @@ async function inspectTreeWithoutFollowing(result: MutableResult, source: string
   }
 }
 
-type ReferenceClassification = "internal" | "relocation-sensitive" | "external-absolute" | "external-relative" | "external-package" | "unresolvable";
+type ReferenceClassification = "internal" | "relocation-sensitive" | "external-absolute" | "external-relative" | "external-package" | "portable-package" | "unresolvable";
 
 function normalizedResourcePattern(value: string): string {
   return value.startsWith("!") || value.startsWith("+") || value.startsWith("-") ? value.slice(1) : value;
@@ -264,7 +264,9 @@ function classifyPathPattern(base: string, value: string): ReferenceClassificati
 
 function classifyPackageSource(agentRoot: string, value: string): { classification: ReferenceClassification; packageRoot?: string } {
   const trimmed = value.trim();
-  if (/^(?:npm:|git:|github:|https?:|ssh:)/u.test(trimmed)) return { classification: "external-package" };
+  // Registry and VCS specs identify package provenance, not an external
+  // filesystem authority. The installed tree is copied with the agent home.
+  if (/^(?:npm:|git:|github:|https?:|ssh:)/u.test(trimmed)) return { classification: "portable-package" };
   if (trimmed.startsWith("file:")) return { classification: "unresolvable" };
   const classification = classifyPathPattern(agentRoot, trimmed);
   if (classification !== "internal" && classification !== "relocation-sensitive") return { classification };
@@ -272,14 +274,18 @@ function classifyPackageSource(agentRoot: string, value: string): { classificati
   return packageRoot === undefined ? { classification: "unresolvable" } : { classification, packageRoot };
 }
 
-function inspectResourceArray(result: MutableResult, value: unknown, base: string, pathPrefix: string): void {
+function inspectResourceArray(result: MutableResult, value: unknown, base: string, pathPrefix: string, portableRelative = false): void {
   if (!Array.isArray(value) || value.length > MAX_RESOURCE_ENTRIES || value.some(entry => typeof entry !== "string" || Buffer.byteLength(entry) > MAX_RESOURCE_VALUE_BYTES)) {
     issue(result, "unrecognized-settings-value", true, pathPrefix);
     return;
   }
   for (let index = 0; index < value.length; index += 1) {
-    const classification = classifyPathPattern(base, value[index] as string);
-    if (classification !== "internal") {
+    const resource = value[index] as string;
+    const normalized = normalizedResourcePattern(resource).trim();
+    const classification = portableRelative && normalized && !isAbsolute(normalized) && !normalized.startsWith("~")
+      ? "portable-package"
+      : classifyPathPattern(base, resource);
+    if (classification !== "internal" && classification !== "portable-package") {
       result.externalConfigurationReferences += 1;
       issue(result, classification === "relocation-sensitive" ? "relocation-sensitive-reference" : "configured-external-reference", true, `${pathPrefix}[${index}]`, classification === "relocation-sensitive" ? "absolute or home-expanded path remains tied to the old home" : classification === "unresolvable" ? "resource path could not be resolved" : "resource owner decision required");
     }
@@ -348,7 +354,7 @@ async function inspectSettings(result: MutableResult, source: string): Promise<v
       continue;
     }
     const packageInfo = classifyPackageSource(source, raw);
-    if (packageInfo.classification !== "internal") {
+    if (packageInfo.classification !== "internal" && packageInfo.classification !== "portable-package") {
       result.externalConfigurationReferences += 1;
       issue(result, packageInfo.classification === "relocation-sensitive" ? "relocation-sensitive-reference" : "configured-external-reference", true, packagePath, packageInfo.classification === "relocation-sensitive" ? "absolute or home-expanded path remains tied to the old home" : "package owner decision required");
     }
@@ -358,6 +364,11 @@ async function inspectSettings(result: MutableResult, source: string): Promise<v
         if (packageObject[field] === undefined || packageObject[field] === null) continue;
         if (packageInfo.packageRoot) {
           inspectResourceArray(result, packageObject[field], packageInfo.packageRoot, `${packagePath}.${field}`);
+        } else if (packageInfo.classification === "portable-package") {
+          // A registry/VCS package's relative resource patterns resolve inside
+          // the installed tree, which moves with the agent home. Absolute or
+          // home-expanded patterns still go through the normal relocation gate.
+          inspectResourceArray(result, packageObject[field], source, `${packagePath}.${field}`, true);
         } else {
           issue(result, "unresolved-package-resource", true, `${packagePath}.${field}`, "package resource base is not an inspectable path");
         }

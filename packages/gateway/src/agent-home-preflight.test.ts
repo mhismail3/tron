@@ -63,6 +63,24 @@ describe("agent home migration preflight", () => {
     expect(await readFile(join(source, "settings.json"), "utf8")).toContain("packages");
   });
 
+  it("keeps registry and VCS package specs portable when their installed trees move with the home", async () => {
+    const root = await fixture("tron-agent-preflight-portable-packages-");
+    const source = join(root, "source");
+    const destination = join(root, "new-agent");
+    await mkdir(join(source, "packages", "registry"), { recursive: true });
+    await mkdir(join(source, "packages", "git"), { recursive: true });
+    await writeFile(join(source, "settings.json"), JSON.stringify({
+      packages: ["npm:pi-subagents@0.59.0", "git:github.com/example/portable.git#v1", "./packages/registry", "./packages/git", { source: "npm:pi-agent-browser-native@0.4.1", extensions: ["extensions/*.js"], skills: ["skills/*"] }],
+    }));
+
+    const result = await preflightAgentHome({ source, destination });
+
+    expect(result.status).toBe("assessment-only");
+    expect(result.externalConfigurationReferences).toBe(0);
+    expect(codes(result)).not.toContain("configured-external-reference");
+    expect(codes(result)).not.toContain("relocation-sensitive-reference");
+  });
+
   it("blocks collisions and source/destination overlap without inspecting a destination", async () => {
     const root = await fixture("tron-agent-preflight-collision-");
     const source = join(root, "source");

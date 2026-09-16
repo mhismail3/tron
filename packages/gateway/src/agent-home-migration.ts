@@ -12,6 +12,8 @@ const MARKER_VERSION = 1;
 const MARKER_SUFFIX = ".tron-agent-migration.json";
 const BROWSER_CONFIG_RELATIVE_PATH = join("config", "pi-agent-browser-native", "config.json");
 const BROWSER_CONFIG_MAX_BYTES = 1 * 1024 * 1024;
+const SETTINGS_MAX_BYTES = 1 * 1024 * 1024;
+const LEGACY_ASK_USER_SOURCE = "npm:@zhushanwen/pi-ask-user@7.0.15";
 
 type EntryType = "directory" | "file" | "symlink";
 
@@ -39,6 +41,8 @@ export interface AgentHomeStageOptions {
   readonly acknowledgeBackup: boolean;
   /** Explicit old global browser config; it is staged as a separate bounded component. */
   readonly browserConfigSource?: string;
+  /** Explicitly removes only the audited legacy Ask User package from staged settings. */
+  readonly removeLegacyAskUser?: boolean;
 }
 
 export interface AgentHomeStageResult {
@@ -50,6 +54,7 @@ export interface AgentHomeStageResult {
   readonly stagedManifest: AgentHomeManifest;
   readonly publicationMode: "same-filesystem-rename" | "cross-filesystem-copy-required";
   readonly browserConfig?: AgentHomeBrowserConfigManifest;
+  readonly legacyAskUserTransform?: AgentHomeLegacyAskUserTransform;
   readonly changesMade: true;
 }
 
@@ -62,6 +67,7 @@ export interface AgentHomeVerifyResult {
   readonly stagedManifest: AgentHomeManifest;
   readonly publicationMode: "same-filesystem-rename" | "cross-filesystem-copy-required";
   readonly browserConfig?: AgentHomeBrowserConfigManifest;
+  readonly legacyAskUserTransform?: AgentHomeLegacyAskUserTransform;
   readonly changesMade: false;
 }
 
@@ -79,6 +85,14 @@ export interface AgentHomeBrowserConfigManifest {
   readonly digest: string;
 }
 
+export interface AgentHomeLegacyAskUserTransform {
+  readonly source: typeof LEGACY_ASK_USER_SOURCE;
+  readonly removedCount: number;
+  readonly originalSettingsDigest: string;
+  readonly transformedSettingsBytes: number;
+  readonly transformedSettingsDigest: string;
+}
+
 interface StageMarker {
   readonly version: 1;
   readonly operationID: string;
@@ -89,6 +103,7 @@ interface StageMarker {
   readonly entryCount: number;
   readonly phase: "copying" | "complete";
   readonly browserConfig?: AgentHomeBrowserConfigManifest;
+  readonly legacyAskUserTransform?: AgentHomeLegacyAskUserTransform;
 }
 
 export class AgentHomeMigrationError extends Error {
@@ -151,6 +166,53 @@ async function inspectBrowserConfig(sourceInput: string): Promise<AgentHomeBrows
     mode: modeOf(entry.mode),
     digest: await hashFile(source, entry.size),
   };
+}
+
+async function prepareLegacyAskUserTransform(sourceRoot: string, enabled: boolean): Promise<{ transform?: AgentHomeLegacyAskUserTransform; content?: string }> {
+  if (!enabled) return {};
+  const settingsPath = join(sourceRoot, "settings.json");
+  let entry;
+  try { entry = await lstat(settingsPath); } catch { fail("legacy Ask User removal requires a readable settings.json"); }
+  if (entry.isSymbolicLink() || !entry.isFile() || entry.size > SETTINGS_MAX_BYTES) fail("legacy Ask User removal requires a bounded regular settings.json");
+  let document: unknown;
+  let original: string;
+  try {
+    original = await readFile(settingsPath, "utf8");
+    document = JSON.parse(original);
+  } catch { fail("legacy Ask User removal requires valid settings.json"); }
+  if (!document || typeof document !== "object" || Array.isArray(document)) fail("legacy Ask User removal requires an object settings.json");
+  const values = document as Record<string, unknown>;
+  if (!Array.isArray(values.packages)) fail("legacy Ask User removal requires a package list in settings.json");
+  const packages = values.packages;
+  const matches = packages.filter((value) => value === LEGACY_ASK_USER_SOURCE || (value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).source === LEGACY_ASK_USER_SOURCE));
+  if (matches.length === 0) fail("the audited legacy Ask User package is not configured; refusing an unaccounted settings transform");
+  const transformedDocument = { ...values, packages: packages.filter((value) => !matches.includes(value)) };
+  const content = `${JSON.stringify(transformedDocument, null, 2)}\n`;
+  return {
+    content,
+    transform: {
+      source: LEGACY_ASK_USER_SOURCE,
+      removedCount: matches.length,
+      originalSettingsDigest: createHash("sha256").update(original).digest("hex"),
+      transformedSettingsBytes: Buffer.byteLength(content),
+      transformedSettingsDigest: createHash("sha256").update(content).digest("hex"),
+    },
+  };
+}
+
+async function applyLegacyAskUserTransform(stagingRoot: string, transform: AgentHomeLegacyAskUserTransform, content: string): Promise<void> {
+  const settingsPath = join(stagingRoot, "settings.json");
+  const entry = await lstat(settingsPath);
+  if (entry.isSymbolicLink() || !entry.isFile()) fail("staged settings.json changed during the explicit transform");
+  await writeFile(settingsPath, content, { flag: "w" });
+  await chmod(settingsPath, modeOf(entry.mode));
+}
+
+function applySettingsManifestTransform(manifest: AgentHomeManifest, transform: AgentHomeLegacyAskUserTransform): AgentHomeManifest {
+  const entries = manifest.entries.map((entry) => entry.path === "settings.json"
+    ? { ...entry, bytes: transform.transformedSettingsBytes, digest: transform.transformedSettingsDigest }
+    : entry);
+  return { version: 1, entries, digest: createHash("sha256").update(JSON.stringify(entries)).digest("hex") };
 }
 
 async function copyBrowserConfig(source: AgentHomeBrowserConfigManifest, stagingRoot: string): Promise<void> {
@@ -279,7 +341,8 @@ async function readMarker(stagingInput: string): Promise<StageMarker> {
   const value = parsed as Record<string, unknown>;
   const expectedKeys = ["version", "operationID", "source", "destination", "staging", "sourceDigest", "entryCount", "phase"];
   const allowedKeys = value.browserConfig === undefined ? expectedKeys : [...expectedKeys, "browserConfig"];
-  if (Object.keys(value).length !== allowedKeys.length || !Object.keys(value).every(key => allowedKeys.includes(key))
+  const transformAllowed = value.legacyAskUserTransform === undefined ? allowedKeys : [...allowedKeys, "legacyAskUserTransform"];
+  if (Object.keys(value).length !== transformAllowed.length || !Object.keys(value).every(key => transformAllowed.includes(key))
     || value.version !== MARKER_VERSION || value.phase !== "complete" && value.phase !== "copying"
     || typeof value.operationID !== "string" || value.operationID.length < 1 || value.operationID.length > 128
     || typeof value.source !== "string" || typeof value.destination !== "string" || typeof value.staging !== "string"
@@ -288,6 +351,12 @@ async function readMarker(stagingInput: string): Promise<StageMarker> {
     fail("migration marker is malformed");
   }
   if (resolve(value.staging) !== staging) fail("migration marker does not belong to this staging root");
+  if (value.legacyAskUserTransform !== undefined) {
+    const transform = value.legacyAskUserTransform;
+    if (!transform || typeof transform !== "object" || Array.isArray(transform)) fail("migration marker settings transform is malformed");
+    const component = transform as Record<string, unknown>;
+    if (Object.keys(component).length !== 5 || component.source !== LEGACY_ASK_USER_SOURCE || !Number.isSafeInteger(component.removedCount) || (component.removedCount as number) < 1 || typeof component.originalSettingsDigest !== "string" || !/^[0-9a-f]{64}$/u.test(component.originalSettingsDigest) || !Number.isSafeInteger(component.transformedSettingsBytes) || (component.transformedSettingsBytes as number) < 1 || (component.transformedSettingsBytes as number) > SETTINGS_MAX_BYTES || typeof component.transformedSettingsDigest !== "string" || !/^[0-9a-f]{64}$/u.test(component.transformedSettingsDigest)) fail("migration marker settings transform is malformed");
+  }
   if (value.browserConfig !== undefined) {
     const browser = value.browserConfig;
     if (!browser || typeof browser !== "object" || Array.isArray(browser)) fail("migration marker browser component is malformed");
@@ -329,10 +398,11 @@ async function publicationMode(staging: string, destination: string): Promise<"s
   return stagingParent.dev === destinationParent.dev ? "same-filesystem-rename" : "cross-filesystem-copy-required";
 }
 
-function stageMarker(operationID: string, options: AgentHomeStageOptions, sourceDigest: string, entryCount: number, phase: StageMarker["phase"], browserConfig?: AgentHomeBrowserConfigManifest): StageMarker {
+function stageMarker(operationID: string, options: AgentHomeStageOptions, sourceDigest: string, entryCount: number, phase: StageMarker["phase"], browserConfig?: AgentHomeBrowserConfigManifest, legacyAskUserTransform?: AgentHomeLegacyAskUserTransform): StageMarker {
   return {
     version: 1, operationID, source: resolve(options.source), destination: resolve(options.destination), staging: resolve(options.staging), sourceDigest, entryCount, phase,
     ...(browserConfig ? { browserConfig } : {}),
+    ...(legacyAskUserTransform ? { legacyAskUserTransform } : {}),
   };
 }
 
@@ -350,6 +420,7 @@ export async function stageAgentHome(options: AgentHomeStageOptions): Promise<Ag
   const stagingPhysical = join(stagingParent.physical, basename(staging));
   if (within(sourceDirectory.physical, stagingPhysical) || within(stagingPhysical, sourceDirectory.physical)) fail("source and staging roots overlap physically");
   const browserConfig = options.browserConfigSource === undefined ? undefined : await inspectBrowserConfig(options.browserConfigSource);
+  const legacyAskUser = await prepareLegacyAskUserTransform(source, options.removeLegacyAskUser ?? false);
   try {
     await lstat(join(source, BROWSER_CONFIG_RELATIVE_PATH));
     fail("agent home already contains the target browser config path; refuse an ambiguous component");
@@ -364,16 +435,18 @@ export async function stageAgentHome(options: AgentHomeStageOptions): Promise<Ag
   const sourceManifest = await createAgentHomeManifest(source, options.maxEntries);
   const operationID = randomUUID();
   const marker = markerPath(staging);
-  await writeMarker(marker, stageMarker(operationID, options, sourceManifest.digest, sourceManifest.entries.length, "copying", browserConfig));
+  await writeMarker(marker, stageMarker(operationID, options, sourceManifest.digest, sourceManifest.entries.length, "copying", browserConfig, legacyAskUser.transform));
   try {
     await mkdir(staging, { mode: 0o700 });
     for (const entry of sourceManifest.entries) await copyEntry(source, staging, entry);
     if (browserConfig) await copyBrowserConfig(browserConfig, staging);
+    if (legacyAskUser.transform && legacyAskUser.content) await applyLegacyAskUserTransform(staging, legacyAskUser.transform, legacyAskUser.content);
     const stagedManifest = await createAgentHomeManifest(staging, options.maxEntries);
     const sourceAfter = await createAgentHomeManifest(source, options.maxEntries);
-    if (!manifestMatches(sourceManifest, sourceAfter) || !manifestMatches(sourceManifest, withoutBrowserConfig(stagedManifest, sourceManifest))) fail("source changed or staged manifest does not match; do not publish");
-    await replaceMarker(marker, stageMarker(operationID, options, sourceManifest.digest, sourceManifest.entries.length, "complete", browserConfig));
-    return { operation: "stage", source, destination, staging, sourceManifest, stagedManifest, ...(browserConfig ? { browserConfig } : {}), publicationMode: await publicationMode(staging, destination), changesMade: true };
+    const expectedStaged = legacyAskUser.transform ? applySettingsManifestTransform(sourceAfter, legacyAskUser.transform) : sourceAfter;
+    if (!manifestMatches(sourceManifest, sourceAfter) || !manifestMatches(expectedStaged, withoutBrowserConfig(stagedManifest, sourceManifest))) fail("source changed or staged manifest does not match; do not publish");
+    await replaceMarker(marker, stageMarker(operationID, options, sourceManifest.digest, sourceManifest.entries.length, "complete", browserConfig, legacyAskUser.transform));
+    return { operation: "stage", source, destination, staging, sourceManifest, stagedManifest, ...(browserConfig ? { browserConfig } : {}), ...(legacyAskUser.transform ? { legacyAskUserTransform: legacyAskUser.transform } : {}), publicationMode: await publicationMode(staging, destination), changesMade: true };
   } catch (error) {
     // Leave the marked staging tree for explicit verify/cleanup; never delete a
     // partially copied agent home implicitly after a disk or process failure.
@@ -392,7 +465,14 @@ export async function verifyStagedAgentHome(stagingInput: string, maxEntries = M
   await requireMissing(destination, "destination");
   const sourceManifest = await createAgentHomeManifest(source, maxEntries);
   const stagedManifest = await createAgentHomeManifest(staging, maxEntries);
-  if (sourceManifest.digest !== marker.sourceDigest || sourceManifest.entries.length !== marker.entryCount || !manifestMatches(sourceManifest, withoutBrowserConfig(stagedManifest, sourceManifest))) fail("source or staging no longer matches the verified manifest");
+  if (sourceManifest.digest !== marker.sourceDigest || sourceManifest.entries.length !== marker.entryCount) fail("source no longer matches the verified manifest");
+  let expectedStaged = sourceManifest;
+  if (marker.legacyAskUserTransform) {
+    const currentTransform = await prepareLegacyAskUserTransform(source, true);
+    if (!currentTransform.transform || currentTransform.transform.removedCount !== marker.legacyAskUserTransform.removedCount || currentTransform.transform.originalSettingsDigest !== marker.legacyAskUserTransform.originalSettingsDigest || currentTransform.transform.transformedSettingsBytes !== marker.legacyAskUserTransform.transformedSettingsBytes || currentTransform.transform.transformedSettingsDigest !== marker.legacyAskUserTransform.transformedSettingsDigest) fail("source settings no longer match the verified legacy Ask User transform");
+    expectedStaged = applySettingsManifestTransform(sourceManifest, marker.legacyAskUserTransform);
+  }
+  if (!manifestMatches(expectedStaged, withoutBrowserConfig(stagedManifest, sourceManifest))) fail("staging no longer matches the verified manifest");
   if (marker.browserConfig) {
     const expected = marker.browserConfig;
     const stagedPath = join(staging, expected.relativePath);
@@ -405,7 +485,7 @@ export async function verifyStagedAgentHome(stagingInput: string, maxEntries = M
     const currentSource = await inspectBrowserConfig(expected.source);
     if (currentSource.digest !== expected.digest || currentSource.bytes !== expected.bytes || currentSource.mode !== expected.mode) fail("browser global config source changed; do not publish");
   }
-  return { operation: "verify", source, destination, staging, sourceManifest, stagedManifest, ...(marker.browserConfig ? { browserConfig: marker.browserConfig } : {}), publicationMode: await publicationMode(staging, destination), changesMade: false };
+  return { operation: "verify", source, destination, staging, sourceManifest, stagedManifest, ...(marker.browserConfig ? { browserConfig: marker.browserConfig } : {}), ...(marker.legacyAskUserTransform ? { legacyAskUserTransform: marker.legacyAskUserTransform } : {}), publicationMode: await publicationMode(staging, destination), changesMade: false };
 }
 
 export async function cleanupStagedAgentHome(stagingInput: string): Promise<AgentHomeCleanupResult> {
@@ -427,7 +507,7 @@ export async function cleanupStagedAgentHome(stagingInput: string): Promise<Agen
 
 function usage(): never {
   console.error("Usage: scripts/tron agent-home-migrate <stage|verify|cleanup> ...");
-  console.error("stage accepts --browser-config-source <absolute-path> for the legacy browser global config");
+  console.error("stage accepts --browser-config-source <absolute-path> and --remove-legacy-ask-user");
   process.exit(64);
 }
 
@@ -456,6 +536,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         acknowledgeQuiescence: args.includes("--acknowledge-quiescence"),
         acknowledgeBackup: args.includes("--acknowledge-backup"),
         ...(browserConfigSource === undefined ? {} : { browserConfigSource }),
+        ...(args.includes("--remove-legacy-ask-user") ? { removeLegacyAskUser: true } : {}),
       });
     } else if (operation === "verify") {
       const staging = argument(args, "--staging");

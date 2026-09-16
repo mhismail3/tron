@@ -416,6 +416,8 @@ by `com.tron.server`/`com.tron.mac` on 9847. `scripts/tron dev` uses
 
 ### Agent-home cutover (manual)
 
+Follow the canonical [agent-home cutover runbook](agent-home-cutover.md) for the
+full dependency gate, exact commands, stop conditions, diagnostics, and rollback.
 The repository can prepare a verified staged copy of the old Pi agent home, but
 only the user/maintainer may cut over the writable authority. First stop Stable,
 Debug, standalone Pi clients, child/delegation writers, and package operations;

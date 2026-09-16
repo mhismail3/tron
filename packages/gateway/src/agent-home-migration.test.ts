@@ -72,6 +72,34 @@ describe("agent home migration staging", () => {
     expect(verified.browserConfig?.digest).toBe(staged.browserConfig?.digest);
   });
 
+  it("removes only the exact legacy Ask User package in staged settings with an accounted manifest transform", async () => {
+    const root = await fixture("tron-agent-migration-legacy-ask-user-");
+    const source = join(root, "source");
+    const destination = join(root, "destination");
+    const staging = join(root, "staging");
+    const original = JSON.stringify({ packages: ["npm:@zhushanwen/pi-ask-user@7.0.15", "npm:pi-subagents@0.59.0"] });
+    await mkdir(source);
+    await writeFile(join(source, "settings.json"), original);
+
+    const staged = await stageAgentHome({ source, destination, staging, removeLegacyAskUser: true, acknowledgeQuiescence: true, acknowledgeBackup: true });
+
+    expect(staged.legacyAskUserTransform?.removedCount).toBe(1);
+    expect(await readFile(join(source, "settings.json"), "utf8")).toBe(original);
+    const stagedSettings = JSON.parse(await readFile(join(staging, "settings.json"), "utf8")) as { packages: string[] };
+    expect(stagedSettings.packages).toEqual(["npm:pi-subagents@0.59.0"]);
+    await expect(verifyStagedAgentHome(staging)).resolves.toMatchObject({ legacyAskUserTransform: { removedCount: 1 } });
+    await writeFile(join(staging, "settings.json"), `${JSON.stringify({ packages: ["npm:pi-subagents@0.59.0", "npm:tampered@1.0.0"] })}\n`);
+    await expect(verifyStagedAgentHome(staging)).rejects.toThrow(/staging no longer matches/);
+  });
+
+  it("refuses a requested legacy Ask User transform when the exact package is absent", async () => {
+    const root = await fixture("tron-agent-migration-legacy-ask-user-absent-");
+    const source = join(root, "source");
+    await mkdir(source);
+    await writeFile(join(source, "settings.json"), JSON.stringify({ packages: ["npm:pi-subagents@0.59.0"] }));
+    await expect(stageAgentHome({ source, destination: join(root, "destination"), staging: join(root, "staging"), removeLegacyAskUser: true, acknowledgeQuiescence: true, acknowledgeBackup: true })).rejects.toThrow(/not configured/);
+  });
+
   it("rejects malformed or publicly accessible browser config before staging", async () => {
     const root = await fixture("tron-agent-migration-browser-safety-");
     const source = join(root, "source");
