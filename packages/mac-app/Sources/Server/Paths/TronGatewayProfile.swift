@@ -19,7 +19,7 @@ struct TronGatewayProfile: Equatable, Sendable {
     /// and report this profile, but no Mac wrapper manages its lifecycle.
     static let debug = TronGatewayProfile(
         name: "debug", launchAgentLabel: "com.tron.server.dev", channel: "dev",
-        homeName: ".tron-dev", agentDirectoryName: "agent-dev", port: 9848, agentBundleName: "Tron Agent Dev"
+        homeName: ".tron-dev", agentDirectoryName: "agent", port: 9848, agentBundleName: "Tron Agent Dev"
     )
 }
 

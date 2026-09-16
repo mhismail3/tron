@@ -159,6 +159,115 @@ the Gateway is stopped and restarted; the runtime also snapshots the admitted
 session directory at startup so an out-of-band settings edit cannot redirect
 new work around the ownership lock.
 
+### Agent-home migration preflight
+
+`scripts/tron agent-home-preflight --source <absolute-path> --destination
+<absolute-path>` is a read-only preparation check for the future Stable agent-home
+move. The intended contract is one Stable agent authority at `~/.tron/agent`, a
+separately isolated Debug agent authority at `~/.tron-dev/agent`, and an explicit
+absolute `PI_CODING_AGENT_DIR` override for an intentionally custom Gateway
+invocation. The managed Debug supervisor strips that override to preserve its
+profile. The source default resolves beneath the
+selected Tron home; the retired `TRON_AGENT_DIR_NAME` is rejected rather than
+silently reinterpreted. This worktree carries that default so it can be validated
+before a user-approved cutover; the command does not enact the cutover. It
+never creates a directory, acquires a lock, initializes a store, writes a
+manifest, or opens a Pi `SessionManager`. Source, destination, and traversal
+limits are validated completely before any root inspection; invalid requests are
+blocked with zero source traversal or settings reads. The source must be a real directory and
+the destination must be absent. The bounded traversal reports collisions,
+overlap, special files, root symlinks, and escaping symlinks without following
+any link. Relative links that remain inside the source are counted as safe
+internal package links; absolute or escaping links remain unresolved.
+
+The preflight parses only the bounded global `settings.json` shape needed to
+identify configured `sessionDir`, package, extension, skill, prompt, and theme
+references. It follows Pi 0.84.4 resource conventions: top-level resource
+patterns are relative to the agent home, package-object resource patterns are
+relative to that package source, and `!`, `+`, `-`, `*`, and `?` prefixes are
+classified without expanding or executing them. Relative paths may remain
+portable when contained by the old home; absolute and home-expanded paths are
+always marked relocation-sensitive, even when they physically point inside the
+old home, because their bytes would retain the old root after a move. Unsupported
+package bases, malformed arrays, and uncertain paths are reported without
+exposing values or repairing settings.
+External references require an owner decision and diagnostics contain neither
+settings values, credential values, nor session bodies. Quiescence is always
+reported as unproven: the absence of a lock is not evidence that migration is
+safe. This command is an assessment, not an activation authority, and never
+returns a migration-ready or approval verdict. Mandatory operator prerequisites
+remain unverified here: owner/private-mode and access checks, free space and
+filesystem-boundary checks, active-writer/lock quiescence, trust/auth/model
+metadata continuity, complete package/resource inventory, and extension/provider
+store ownership. Offline backup, staging, publication, rollback, and manual
+Gateway/Mac activation remain future operator-run steps. Project `.pi`/`.agents`,
+Keychain stores, and Gateway state are not relocated by this preflight.
+The inspected pinned extension seams are concrete: `pi-goal` stores state as
+Pi session custom entries and its install marker under the resolved agentDir;
+`pi-web-access` uses `PI_CODING_AGENT_DIR/web-search.json`, so Gateway and
+inherited children keep that config/cache under the resolved agentDir (it falls
+back to `$XDG_CONFIG_HOME/pi/web-search.json` or `~/.pi/web-search.json` only
+when run outside Gateway); `pi-subagents` keeps its config under the resolved agentDir extension
+namespace and its ephemeral run roots under OS temp/project-owned roots; and
+`pi-agent-browser-native` supports an explicit absolute
+`PI_AGENT_BROWSER_GLOBAL_CONFIG` path for its global layer, while retaining
+`PI_AGENT_BROWSER_CONFIG` as the higher-priority additional override layer.
+Tron sets the former to
+`<agentDir>/config/pi-agent-browser-native/config.json`, so its global browser
+config is part of the selected agent authority and is inherited by child
+processes. Project config remains `.pi/config/...`; browser profiles, cookie
+stores, and Keychain credentials remain OS/browser-owned and are not copied.
+The old conventional global file must be supplied to `agent-home-migrate stage`
+with `--browser-config-source`; staging validates it as a private regular JSON
+file, copies exact bytes/mode into the staged agent namespace, and verifies its
+separate digest. Missing, malformed, ambiguous, or changed files block staging;
+no secret values or command sources are executed. Cutover also requires a
+published `pi-agent-browser-native` release containing this path contract;
+the currently installed package must not be treated as compatible merely
+because Gateway exports the environment variable.
+
+### Agent-home staging and manual cutover
+
+`agent-home-migrate stage` is an explicit operator command, not part of Gateway
+startup. Pass `--browser-config-source ~/.pi/config/pi-agent-browser-native/config.json`
+when that legacy file exists; its destination is fixed under the staged
+`config/pi-agent-browser-native/config.json`. It requires both
+`--acknowledge-quiescence` and `--acknowledge-backup`, reruns the read-only
+preflight, refuses every decision or
+collision, and copies only a synthetic or explicitly chosen source into a new
+staging root. It preserves regular-file bytes, modes, and relative internal
+symlinks. Special files, absolute/dangling/escaping links, source changes during
+the copy, extra staged entries, malformed markers, and bounded traversal failures
+abort without deleting the partial staging tree. The sibling marker is `0600`
+and contains only bounded paths, an operation ID, phase, count, and manifest
+hashes; manifests contain metadata and SHA-256 digests, never file contents,
+credentials, or session text.
+
+Use the companion operations only after the source owner has independently
+protected a backup and quiesced every writer:
+
+```bash
+(cd packages/gateway && npm run build)
+scripts/tron agent-home-migrate stage \
+  --source "$HOME/.pi/agent" --destination "$HOME/.tron/agent" \
+  --staging "$HOME/.tron/.agent.migrate-<id>" \
+  --acknowledge-quiescence --acknowledge-backup
+scripts/tron agent-home-migrate verify --staging "$HOME/.tron/.agent.migrate-<id>"
+```
+
+The preparation tooling does not implement publication. The user/maintainer
+must inspect the verify output, ensure the destination is still absent, then
+perform one manual same-filesystem rename (or a separately verified
+cross-filesystem copy with no atomicity claim), update the selected Mac/Gateway
+profile together, and manually activate one Gateway authority. Never run old and
+new agent directories concurrently, use a symlink/fallback, merge a non-empty
+destination, or recursively delete anything except a marked staging root with:
+`scripts/tron agent-home-migrate cleanup --staging <exact-marked-root>`. If
+verification or activation fails, stop the new owner, quarantine it without
+merging post-cutover writes, restore the unchanged protected backup and old
+profile, and activate it manually. Post-cutover writes require an explicit
+recovery decision; they are not silently merged into rollback.
+
 ### Provider account usage
 
 `provider.usage` is the additive `provider-usage.v1` read capability. It resolves
@@ -350,9 +459,9 @@ its supplied environment. Extension-owned void presentation callbacks are
 transactional best-effort projections: malformed or over-budget updates are
 rejected with bounded diagnostics and can never become an uncaught process exit.
 
-- Agent state: `PI_CODING_AGENT_DIR`, default `~/.pi/agent`; the isolated Xcode
-  Dev LaunchAgent sets `TRON_AGENT_DIR_NAME=agent-dev`, so Dev sessions live in
-  `~/.pi/agent-dev` and never share production JSONL with `~/.pi/agent`
+- Agent state: `PI_CODING_AGENT_DIR`, default `<Tron home>/agent`; Stable uses
+  `~/.tron/agent` and the isolated Debug supervisor uses `~/.tron-dev/agent`.
+  Stable and Debug never share production JSONL, settings, or credentials
 - Physical-machine group identity: a bounded random ID in
   `~/.tron-machine-group-id`, shared by separate Tron homes only for connection
   grouping; it is not a session, credential, or runtime-data store

@@ -50,7 +50,7 @@ class NativeCaptureBuildInputsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary).resolve()
             with patch.object(build.Path, "home", return_value=home):
-                for relative in [".pi/agent", ".tron/gateway", ".tron/workspace/state", ".tron/settings"]:
+                for relative in [".pi/agent", ".tron/agent", ".tron-dev/agent", ".tron/gateway", ".tron/workspace/state", ".tron/settings"]:
                     with self.assertRaisesRegex(ValueError, "canonical runtime"):
                         build.validate_output(home / relative / "tron-native-capture.node")
                 build.validate_output(home / ".tron/workspace/files/builds/tron-native-capture.node")

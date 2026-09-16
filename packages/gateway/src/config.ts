@@ -295,11 +295,13 @@ export async function loadConfig(
   const pushServiceOrigin = await loadProductPushOrigin();
 
   const explicitAgentDir = environment.PI_CODING_AGENT_DIR;
-  const agentDirName = environment.TRON_AGENT_DIR_NAME?.trim();
-  if (agentDirName && (agentDirName === "." || agentDirName === ".." || agentDirName.includes("/") || agentDirName.includes("\\"))) {
-    throw new GatewayError("invalid_request", "TRON_AGENT_DIR_NAME must be one .pi-relative directory name");
+  if (environment.TRON_AGENT_DIR_NAME?.trim()) {
+    throw new GatewayError("invalid_request", "TRON_AGENT_DIR_NAME is retired; use an absolute PI_CODING_AGENT_DIR override or the profile default");
   }
-  const agentDir = resolve(explicitAgentDir ?? join(homedir(), ".pi", agentDirName || "agent"));
+  if (explicitAgentDir && !isAbsolute(explicitAgentDir)) {
+    throw new GatewayError("invalid_request", "PI_CODING_AGENT_DIR must be absolute");
+  }
+  const agentDir = resolve(explicitAgentDir ?? join(tronHome, "agent"));
   return {
     host: resolveBindHost(valueAfter(args, "--host") ?? environment.TRON_GATEWAY_HOST),
     port: parsePort(valueAfter(args, "--port") ?? environment.TRON_GATEWAY_PORT),

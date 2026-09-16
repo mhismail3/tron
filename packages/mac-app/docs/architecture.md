@@ -26,7 +26,7 @@ LaunchAgent.
 | Variant | Login Item | Label | Home | Port |
 |---|---|---|---|---|
 | Installed Stable | `Tron Agent.app` | `com.tron.server` | `~/.tron` | 9847 |
-| Developer Debug | `scripts/tron dev` supervisor | none (no SMAppService) | `~/.tron-dev` + `~/.pi/agent-dev` | 9848 |
+| Developer Debug | `scripts/tron dev` supervisor | none (no SMAppService) | `~/.tron-dev` + `~/.tron-dev/agent` | 9848 |
 | Xcode companion | read-only wrapper UI | none | `~/.tron` | 9847 |
 
 The LaunchAgent passes `--host tailscale`; gateway startup resolves and binds the
@@ -224,7 +224,7 @@ Installed Release owns only Stable registration and lifecycle. It authenticates
 to the developer-owned Debug Gateway on 9848 to report status and, when Debug
 is Tailscale-bound, show pairing information. It never registers, repairs,
 restarts, stops, uninstalls, caches into, or takes over Debug. Stable uninstall
-therefore cannot affect `~/.tron-dev` or `~/.pi/agent-dev`. Stable associates
+therefore cannot affect `~/.tron-dev` or `~/.tron-dev/agent`. Stable associates
 exactly with `com.tron.mac`; Debug has no SMAppService identity or helper in the
 Release bundle. Stable ownership requires the exact parent, markers, helper
 metadata, exact 9847 listener PID, selected immutable payload (or the validated

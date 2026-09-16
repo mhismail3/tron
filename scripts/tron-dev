@@ -157,7 +157,9 @@ supervise() {
       exit 1
     fi
     "$NODE_BIN" "$STATE_HELPER" transition "$STATE_FILE" starting childPid= childStartIdentity=
-    TRON_HOME_NAME=.tron-dev TRON_AGENT_DIR_NAME=agent-dev TRON_GATEWAY_CHANNEL=dev TRON_GATEWAY_SUPERVISED=1 "$LAUNCHER" --host "$HOST" --port 9848 &
+    env -u TRON_DATA_DIR -u PI_CODING_AGENT_DIR -u TRON_AGENT_DIR_NAME \
+      TRON_HOME_NAME=.tron-dev TRON_GATEWAY_CHANNEL=dev TRON_GATEWAY_SUPERVISED=1 \
+      "$LAUNCHER" --host "$HOST" --port 9848 &
     child=$!
     child_identity="$("$NODE_BIN" "$STATE_HELPER" pid-start "$child")"
     "$NODE_BIN" "$STATE_HELPER" write "$STATE_FILE" childPid="$child" childStartIdentity="$child_identity"

@@ -11,7 +11,8 @@ struct TronPathsTests {
         #expect(TronPaths.defaultServerPort(profile: .stable) == 9847)
         #expect(TronPaths.defaultServerPort(profile: .debug) == 9848)
         #expect(TronPaths.tronHome(profile: .debug).path.hasSuffix("/.tron-dev"))
-        #expect(TronPaths.agentHome(profile: .debug).path.hasSuffix("/.pi/agent-dev"))
+        #expect(TronPaths.agentHome(profile: .stable).path.hasSuffix("/.tron/agent"))
+        #expect(TronPaths.agentHome(profile: .debug).path.hasSuffix("/.tron-dev/agent"))
         #expect(TronPaths.bearerTokenPath(profile: .debug).path.hasSuffix("/.tron-dev/gateway/local-auth.json"))
     }
 
@@ -44,12 +45,25 @@ struct TronPathsTests {
     func debugEnvironmentDoesNotChangeOwnership() {
         let environment = [
             TronPaths.tronHomeNameEnv: ".tron-dev",
-            TronPaths.agentDirNameEnv: "agent-dev",
         ]
         #expect(TronPaths.launchAgentLabel(environment: environment) == "com.tron.server")
         #expect(TronPaths.defaultServerPort(environment: environment) == 9847)
         #expect(!TronPaths.canManageLaunchAgent(environment: environment))
+        #expect(!TronPaths.canManageLaunchAgent(environment: [TronPaths.retiredAgentDirNameEnv: "agent-old"]))
         #expect(TronPaths.tronHome(environment: environment).path.hasSuffix("/.tron-dev"))
+    }
+
+    @Test("Stable custom agent override is propagated without redirecting Debug")
+    func stableCustomAgentOverrideIsCoherent() {
+        let custom = "/private/tmp/tron-custom-agent"
+        let environment = [TronPaths.piCodingAgentDirEnv: custom]
+        #expect(TronPaths.agentHome(profile: .stable, environment: environment).path == custom)
+        #expect(TronPaths.tronHome(profile: .stable, environment: [TronPaths.tronDataDirEnv: "/private/tmp/tron-custom-home"]).path == "/private/tmp/tron-custom-home")
+        #expect(TronPaths.agentHome(profile: .debug, environment: environment).path.hasSuffix("/.tron-dev/agent"))
+        #expect(TronPaths.launchAgentEnvironmentVariables(profile: .stable, environment: environment)[TronPaths.piCodingAgentDirEnv] == custom)
+        #expect(TronPaths.launchAgentEnvironmentVariables(profile: .debug, environment: environment)[TronPaths.piCodingAgentDirEnv] == nil)
+        #expect(!TronPaths.canManageLaunchAgent(environment: environment))
+        #expect(!TronPaths.canManageLaunchAgent(environment: [TronPaths.piCodingAgentDirEnv: "relative-agent"]))
     }
 
 }

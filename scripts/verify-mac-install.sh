@@ -301,7 +301,7 @@ NODE
 }
 
 check_owner() {
-  local label="$1" port="$2" home="$3" helper="$4" channel="$5" expected_home="$6" expected_agent="$7"
+  local label="$1" port="$2" home="$3" helper="$4" channel="$5" expected_home="$6"
   local plist="$APP/Contents/Library/LaunchAgents/$label.plist" output pid command_line listener_pids listener host info payload_root
   regular_file "$plist" || { fail "$label LaunchAgent plist missing"; return; }
   [[ "$(plist_value Label "$plist")" == "$label" ]] && pass "$label plist label" || fail "$label plist label mismatch"
@@ -313,10 +313,10 @@ check_owner() {
   [[ "$(plist_value EnvironmentVariables.TRON_GATEWAY_CHANNEL "$plist")" == "$channel" ]] && pass "$label channel marker" || fail "$label channel marker"
   if [[ "$channel" == dev ]]; then
     [[ "$(plist_value EnvironmentVariables.TRON_HOME_NAME "$plist")" == "$expected_home" ]] && pass "$label home marker" || fail "$label home marker"
-    [[ "$(plist_value EnvironmentVariables.TRON_AGENT_DIR_NAME "$plist")" == "$expected_agent" ]] && pass "$label agent-dir marker" || fail "$label agent-dir marker"
+    [[ -z "$(plist_value EnvironmentVariables.TRON_AGENT_DIR_NAME "$plist")" ]] && pass "$label agent-dir marker absent" || fail "$label has retired agent-dir marker"
   else
     [[ -z "$(plist_value EnvironmentVariables.TRON_HOME_NAME "$plist")" ]] && pass "$label stable home marker absent" || fail "$label has Debug home marker"
-    [[ -z "$(plist_value EnvironmentVariables.TRON_AGENT_DIR_NAME "$plist")" ]] && pass "$label stable agent-dir marker absent" || fail "$label has Debug agent-dir marker"
+    [[ -z "$(plist_value EnvironmentVariables.TRON_AGENT_DIR_NAME "$plist")" ]] && pass "$label stable agent-dir marker absent" || fail "$label has retired agent-dir marker"
   fi
   output="$(launchctl print "gui/$UID_VALUE/$label" 2>/dev/null || true)"
   if [[ -z "$output" ]]; then
@@ -336,7 +336,7 @@ check_owner() {
   [[ "$output" == *"TRON_GATEWAY_CHANNEL => $channel"* || "$output" == *"TRON_GATEWAY_CHANNEL = $channel"* ]] || fail "$label runtime channel marker missing"
   if [[ "$channel" == dev ]]; then
     [[ "$output" == *"TRON_HOME_NAME => $expected_home"* || "$output" == *"TRON_HOME_NAME = $expected_home"* ]] || fail "$label runtime home marker missing"
-    [[ "$output" == *"TRON_AGENT_DIR_NAME => $expected_agent"* || "$output" == *"TRON_AGENT_DIR_NAME = $expected_agent"* ]] || fail "$label runtime agent-dir marker missing"
+    [[ "$output" != *TRON_AGENT_DIR_NAME* ]] || fail "$label runtime has retired agent-dir marker"
   else
     [[ "$output" != *TRON_HOME_NAME* ]] || fail "$label runtime has Debug home marker"
     [[ "$output" != *TRON_AGENT_DIR_NAME* ]] || fail "$label runtime has Debug agent-dir marker"
@@ -376,7 +376,7 @@ PY
     || fail "$label authenticated system.info identity/channel mismatch on listening host $host"
 }
 
-check_owner com.tron.server 9847 "$HOME/.tron" "Tron Agent" stable "" ""
+check_owner com.tron.server 9847 "$HOME/.tron" "Tron Agent" stable ""
 
 # Release must never own a second service identity.
 if launchctl print "gui/$UID_VALUE/com.tron.server.preview" >/dev/null 2>&1; then

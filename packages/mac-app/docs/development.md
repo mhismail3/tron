@@ -325,8 +325,8 @@ app before testing package operations.
 Do not remove `~/.tron`; it contains Gateway-owned state/credentials and Tron's
 internal workspace (`workspace/files` and capability-owned `workspace/state`).
 Preserve `gateway/workspace-state` lifecycle evidence with that workspace. Canonical
-session JSONL, provider credentials and runtime settings stay separately under
-`~/.pi/agent` (Debug: `~/.pi/agent-dev`); do not remove those either. Application
+session JSONL, provider credentials and runtime settings stay under
+`~/.tron/agent` (Debug: `~/.tron-dev/agent`); do not remove those either. Application
 replacement and local settings/credential reset do not delete the internal
 workspace. See the [workspace ownership and restore contract](../../gateway/docs/internal-workspace.md).
 Build and validate the replacement artifact first; source preparation does not
@@ -412,7 +412,29 @@ pairing information. The observation is generation-gated and pairing pins its
 exact admitted host/runtime, so overlapping refreshes and restarts cannot mix
 projections. It never controls Debug lifecycle or writes its cache. Stable remains independently owned
 by `com.tron.server`/`com.tron.mac` on 9847. `scripts/tron dev` uses
-`~/.tron-dev` and `~/.pi/agent-dev` without SMAppService registration.
+`~/.tron-dev` and `~/.tron-dev/agent` without SMAppService registration.
+
+### Agent-home cutover (manual)
+
+The repository can prepare a verified staged copy of the old Pi agent home, but
+only the user/maintainer may cut over the writable authority. First stop Stable,
+Debug, standalone Pi clients, child/delegation writers, and package operations;
+protect an operator-managed backup of the old agent home and Gateway state. Then
+run the read-only preflight and the explicit stage/verify commands from the
+Gateway README using a new sibling staging root. Do not run them against a live
+writer, and do not approve an `assessment-only` result when it reports external
+or relocation-sensitive references.
+
+After verification, the user manually renames the unchanged old directory to a
+protected, clearly marked backup and renames the verified staging directory to
+`~/.tron/agent` only when the output says same-filesystem rename is valid. A
+cross-filesystem copy has no atomicity claim and must be separately verified.
+Update the selected profile and LaunchAgent together, then manually activate one
+Gateway and run `scripts/tron mac verify`. Never run old and new agent homes
+concurrently, use a symlink/fallback, merge a pre-existing destination, or
+silently merge writes made after cutover. If activation fails, stop the new
+owner, quarantine it, restore the unchanged backup and prior profile, and
+activate/verify the old authority manually.
 
 ### Gateway payload operations
 
