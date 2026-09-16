@@ -1,10 +1,10 @@
 import SwiftUI
 
 enum ProjectResourceKind: String, CaseIterable, Identifiable, Sendable {
-    case extensions = "Extensions"
     case prompts = "Prompts"
     case skills = "Skills"
     case tools = "Tools"
+    case extensions = "Extensions"
 
     var id: String { rawValue }
     var key: String {
@@ -30,11 +30,13 @@ enum ProjectResourceKind: String, CaseIterable, Identifiable, Sendable {
         case .tools: "wrench.and.screwdriver"
         }
     }
-    var accent: Color {
+    /// Prompt and skill accents are shared with the chat composer; other
+    /// Project Resources categories retain their existing destination colors.
+    @MainActor var accent: Color {
         switch self {
         case .extensions: .tronPurple
-        case .prompts: .tronCyan
-        case .skills: .tronEmerald
+        case .prompts: ChatSemanticPillRole.prompt.accent
+        case .skills: .tronCyan
         case .tools: .tronAmber
         }
     }
@@ -55,20 +57,23 @@ struct ProjectResourceSelection: Identifiable {
     let title: String
     let value: JSONValue
 
-    var promptCommand: CommandInfo? {
-        guard kind == .prompts,
+    var commandInfo: CommandInfo? {
+        guard kind == .prompts || kind == .skills,
               let object = value.objectValue,
               let name = object["name"]?.stringValue, !name.isEmpty else { return nil }
+        let source: CommandInfo.Source = kind == .skills ? .skill : .prompt
         return CommandInfo(
-            name: name,
+            name: kind == .skills ? "skill:\(name)" : name,
             description: object["description"]?.stringValue,
             argumentHint: object["argumentHint"]?.stringValue,
-            source: .prompt,
-            sourcePath: object["path"]?.stringValue,
+            source: source,
+            sourcePath: object["path"]?.stringValue ?? object["resolvedPath"]?.stringValue,
             resourceSource: object["source"]?.stringValue,
-            resourceScope: object["scope"]?.stringValue.flatMap(CommandInfo.ResourceScope.init(rawValue:))
+            resourceScope: object["scope"]?.stringValue.flatMap(CommandInfo.ResourceScope.init(rawValue:)),
+            resourceOrigin: object["origin"]?.stringValue.flatMap(CommandInfo.ResourceOrigin.init(rawValue:))
         )
     }
+
 }
 
 private struct ProjectResourceOverviewRow: Identifiable, Equatable, Sendable {
@@ -111,7 +116,6 @@ struct ProjectResourceDetailPresentation: Equatable {
     let purpose: String
     let invocation: String?
     let availability: String?
-    let scopeAndSource: String?
     let path: String?
     let tools: [String]
     let commands: [String]
@@ -126,10 +130,6 @@ struct ProjectResourceDetailPresentation: Equatable {
             value.isEmpty ? nil : ProjectResourceTextPresentation.readableDescription(value)
         }
         path = object["path"]?.stringValue ?? object["resolvedPath"]?.stringValue
-        let scope = object["scope"]?.stringValue?.capitalized
-        let source = object["source"]?.stringValue
-        if let scope, let source { scopeAndSource = "\(scope) · \(source)" }
-        else { scopeAndSource = scope ?? source }
 
         switch kind {
         case .extensions:
@@ -412,92 +412,31 @@ struct ProjectResourceDetailSheet: View {
     let onDone: () -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var promptDetail: CommandResourceDetail?
-    @State private var promptLoadError: String?
+    @State private var detail: CommandResourceDetail?
+    @State private var loadError: String?
     @State private var loadRevision = 0
+    @State private var showsResourceInfo = false
 
     private var presentation: ProjectResourceDetailPresentation {
         ProjectResourceDetailPresentation(kind: selection.kind, value: selection.value)
     }
 
+    private var accent: Color { selection.kind.accent }
+
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                LazyVStack(alignment: .leading, spacing: 16) {
-                    TronInfoCard(icon: "info.circle", text: presentation.purpose,
-                                 accent: selection.kind.accent, usesSemanticAccent: true)
-
-                    if selection.kind == .prompts {
-                        promptContent
-                    }
-
-                    if presentation.invocation != nil
-                        || presentation.availability != nil
-                        || presentation.scopeAndSource != nil
-                        || presentation.schemaSummary != nil {
-                        TronSettingsGroup("At a Glance", accent: selection.kind.accent) {
-                            VStack(spacing: 0) {
-                                detailRows
-                            }
-                        }
-                    }
-
-                    if !presentation.tools.isEmpty || !presentation.commands.isEmpty {
-                        TronSettingsGroup("Capabilities", accent: selection.kind.accent) {
-                            VStack(alignment: .leading, spacing: 14) {
-                                if !presentation.tools.isEmpty {
-                                    capabilityCollection(
-                                        title: "Tools",
-                                        icon: "wrench.and.screwdriver",
-                                        values: presentation.tools
-                                    )
-                                }
-                                if !presentation.tools.isEmpty && !presentation.commands.isEmpty {
-                                    TronSettingsDivider(accent: selection.kind.accent)
-                                }
-                                if !presentation.commands.isEmpty {
-                                    capabilityCollection(
-                                        title: "Commands",
-                                        icon: "command",
-                                        values: presentation.commands.map { "/" + $0 }
-                                    )
-                                }
-                            }
+                LazyVStack(alignment: .leading, spacing: TronSpacing.section) {
+                    if !resolvedPurpose.isEmpty {
+                        Text(resolvedPurpose)
+                            .font(TronTypography.body)
+                            .foregroundStyle(Color.tronTextPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
                             .padding(14)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        }
+                            .tronGlassSurface(accent: accent, tintOpacity: 0.10)
                     }
-
-                    if let guidance = presentation.guidance, !guidance.isEmpty {
-                        VStack(alignment: .leading, spacing: TronSpacing.md) {
-                            Text("Usage Guidance")
-                                .font(TronTypography.sheetSectionHeader)
-                                .foregroundStyle(Color.tronTextPrimary)
-                                .accessibilityAddTraits(.isHeader)
-                            TronSettingsCaption(guidance)
-                        }
-                    }
-
-                    if let path = presentation.path {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("SOURCE FILE")
-                                .font(TronTypography.sheetSectionHeader)
-                                .foregroundStyle(Color.tronTextMuted)
-                            Label(path, systemImage: "folder")
-                                .font(TronTypography.codeContent)
-                                .foregroundStyle(Color.tronTextSecondary)
-                                .textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .tronGlassSurface(accent: selection.kind.accent, tintOpacity: 0.06)
-                    }
-
-                    TronTechnicalJSONRow(
-                        value: selection.value,
-                        sheetTitle: "\(selection.title) JSON"
-                    )
+                    contentSection
                 }
                 .padding(18)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -506,133 +445,164 @@ struct ProjectResourceDetailSheet: View {
             .tronScrollEdgeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { showsResourceInfo = true } label: {
+                        Image(systemName: "info.circle")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(accent)
+                    }
+                    .accessibilityLabel("Resource Info")
+                }
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: selection.title, accent: selection.kind.accent)
+                    TronSheetTitle(title: selection.title, accent: accent)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(action: onDone) {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(selection.kind.accent)
+                            .foregroundStyle(accent)
                     }
                     .accessibilityLabel("Done")
                 }
             }
-            .tint(selection.kind.accent)
+            .tint(accent)
         }
-        .tronSettingsVisualTheme(accent: selection.kind.accent)
+        .tronManagedSheet(isPresented: $showsResourceInfo, identity: "project-resource-info.\(selection.id)") {
+            ComposerResourceInfoSheet(
+                items: metadata,
+                accent: accent,
+                technicalValue: selection.value,
+                technicalTitle: "\(selection.title) JSON"
+            )
+        }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
+        .tronSettingsVisualTheme(accent: accent)
         .task(id: PresentationActivityTaskID(
             source: "\(selection.id):\(model.sessionResourceRevision(for: sessionID)):\(loadRevision)",
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
             guard presentationActivity.allowsPresentationPublication else { return }
-            await loadPromptContent()
+            await loadDetail()
         }
     }
 
-    private var promptContent: some View {
-        VStack(alignment: .leading, spacing: TronSpacing.sm) {
+    private var resolvedPurpose: String {
+        guard let description = detail?.description?.trimmingCharacters(in: .whitespacesAndNewlines), !description.isEmpty else {
+            return presentation.purpose
+        }
+        return ProjectResourceTextPresentation.readableDescription(description)
+    }
+
+    @ViewBuilder
+    private var contentSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
             TronTechnicalSectionLabel("Content")
             Group {
-                if let promptLoadError {
+                if let detail, let content = detail.content, !content.isEmpty {
+                    let preview = ComposerResourceContentPresentation.preview(
+                        content,
+                        source: selection.commandInfo?.source ?? .extension,
+                        sourceTruncated: detail.contentTruncated == true
+                    )
+                    ComposerResourceContentBody(
+                        preview: preview,
+                        source: selection.commandInfo?.source ?? .extension
+                    )
+                } else if detail != nil {
+                    Text("This resource has no body content.")
+                        .font(TronTypography.bodySM)
+                        .foregroundStyle(Color.tronTextSecondary)
+                } else if let loadError {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text(promptLoadError)
+                        Text(loadError)
                             .font(TronTypography.bodySM)
                             .foregroundStyle(Color.tronTextSecondary)
                         Button("Try Again", systemImage: "arrow.clockwise") { loadRevision &+= 1 }
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(selection.kind.accent)
+                            .foregroundStyle(accent)
                     }
-                } else if let promptDetail {
-                    ProjectResourcePromptContent(detail: promptDetail)
+                } else if selection.commandInfo == nil {
+                    Text("This resource does not expose body content.")
+                        .font(TronTypography.bodySM)
+                        .foregroundStyle(Color.tronTextSecondary)
                 } else {
-                    TronLoadingState(label: "Loading prompt content…", accent: selection.kind.accent)
+                    TronLoadingState(label: "Loading resource content…", accent: accent)
                 }
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .tronScrollSurface(accent: selection.kind.accent, cornerRadius: 16, tintOpacity: 0.06)
+            .tronScrollSurface(accent: accent, cornerRadius: 16, tintOpacity: 0.06)
         }
     }
 
-    private func loadPromptContent() async {
-        guard selection.kind == .prompts else { return }
-        promptLoadError = nil
-        guard let command = selection.promptCommand else {
-            promptLoadError = "This prompt has no available content identity. Reload Project Resources and try again."
-            return
+    private var metadata: [TronTechnicalMetadataItem] {
+        let object = selection.value.objectValue ?? [:]
+        let command = selection.commandInfo
+        let source = detail?.resourceSource ?? command?.resourceSource ?? object["source"]?.stringValue ?? selection.kind.rawValue
+        var items = [
+            TronTechnicalMetadataItem(title: "Type", value: String(selection.kind.rawValue.dropLast()), icon: selection.kind.icon),
+            TronTechnicalMetadataItem(title: "Source", value: source, icon: "shippingbox")
+        ]
+        if let command {
+            let name = detail?.name ?? command.name
+            let invocation = command.source == .skill ? "@\(name.replacingOccurrences(of: "skill:", with: ""))" : "/\(name)"
+            items.insert(.init(title: "Invocation", value: invocation, icon: "terminal"), at: 1)
+        } else if let invocation = presentation.invocation {
+            items.insert(.init(title: "Invocation", value: invocation, icon: "terminal"), at: 1)
         }
+        if let availability = presentation.availability {
+            items.append(.init(title: "Availability", value: availability, icon: "checkmark.seal"))
+        }
+        let scope = detail?.resourceScope?.rawValue.capitalized ?? object["scope"]?.stringValue?.capitalized
+        if let scope {
+            items.append(.init(title: "Scope", value: scope, icon: scope == "Project" ? "folder" : "person"))
+        }
+        let origin = detail?.resourceOrigin?.rawValue ?? command?.resourceOrigin?.rawValue ?? object["origin"]?.stringValue
+        if let origin {
+            items.append(.init(title: "Origin", value: origin == "top-level" ? "Top level" : origin.capitalized, icon: "point.3.connected.trianglepath.dotted"))
+        }
+        if let path = detail?.sourcePath ?? presentation.path, !path.isEmpty {
+            items.append(.init(title: "Source file", value: path, icon: "doc.text"))
+        }
+        if !presentation.tools.isEmpty {
+            items.append(.init(title: "Tools", value: presentation.tools.joined(separator: ", "), icon: "wrench.and.screwdriver"))
+        }
+        if !presentation.commands.isEmpty {
+            items.append(.init(title: "Commands", value: presentation.commands.map { "/\($0)" }.joined(separator: ", "), icon: "command"))
+        }
+        if let schema = presentation.schemaSummary {
+            items.append(.init(title: "Inputs", value: schema, icon: "list.bullet.rectangle"))
+        }
+        if let guidance = presentation.guidance, !guidance.isEmpty {
+            items.append(.init(title: "Usage guidance", value: guidance, icon: "text.quote"))
+        }
+        if let argumentHint = detail?.argumentHint ?? command?.argumentHint, !argumentHint.isEmpty {
+            items.append(.init(title: "Arguments", value: argumentHint, icon: "text.badge.plus"))
+        }
+        if let bytes = detail?.contentBytes {
+            items.append(.init(title: "Content size", value: ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file), icon: "internaldrive"))
+        }
+        return items
+    }
+
+    private func loadDetail() async {
+        detail = nil
+        loadError = nil
+        guard let command = selection.commandInfo else { return }
         do {
-            // The resource catalog intentionally contains metadata only. Read
-            // the loaded template on demand, never an arbitrary Mac file path.
-            let detail = try await model.commandDetail(sessionID: sessionID, command: command)
+            let loaded = try await model.commandDetail(sessionID: sessionID, command: command)
             guard !Task.isCancelled, presentationActivity.allowsPresentationPublication else { return }
-            promptDetail = detail
+            detail = loaded
         } catch is CancellationError {
+            // A rejected live-session read is not a cancelled presentation.
+            // Settle it so disconnected/busy sessions offer retry, not a spinner.
             guard !Task.isCancelled, presentationActivity.allowsPresentationPublication else { return }
-            promptLoadError = "Prompt content is unavailable while the session is disconnected or busy. Try again when it is ready."
+            loadError = "Resource content is unavailable while the session is disconnected or busy. Try again when it is ready."
         } catch {
             guard !Task.isCancelled, presentationActivity.allowsPresentationPublication else { return }
-            promptLoadError = error.localizedDescription
-        }
-    }
-
-    private func capabilityCollection(
-        title: String,
-        icon: String,
-        values: [String]
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Label("\(title) · \(values.count)", systemImage: icon)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(Color.tronTextPrimary)
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 150), spacing: 8)],
-                alignment: .leading,
-                spacing: 8
-            ) {
-                ForEach(values, id: \.self) { value in
-                    Text(value)
-                        .font(TronTypography.codeContent)
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .textSelection(.enabled)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            selection.kind.accent.opacity(0.09),
-                            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        )
-                }
-            }
-        }
-    }
-
-    private var detailRows: some View {
-        let rows: [(icon: String, title: String, value: String)] = [
-            presentation.invocation.map { ("command", "Invocation", $0) },
-            presentation.availability.map { ("checkmark.seal", "Availability", $0) },
-            presentation.scopeAndSource.map { ("scope", "Scope & Source", $0) },
-            presentation.schemaSummary.map { ("list.bullet.rectangle", "Inputs", $0) },
-        ].compactMap { $0 }
-        return ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
-            if index > 0 { TronSettingsDivider(accent: selection.kind.accent) }
-            detailRow(icon: row.icon, title: row.title, value: row.value)
-        }
-    }
-
-    private func detailRow(icon: String, title: String, value: String) -> some View {
-        TronSettingsRow(icon: icon, title: title, accent: selection.kind.accent) {
-            Text(value)
-                .font(TronTypography.bodySM)
-                .foregroundStyle(Color.tronTextSecondary)
-                .multilineTextAlignment(.trailing)
-                .fixedSize(horizontal: false, vertical: true)
+            loadError = error.localizedDescription
         }
     }
 }

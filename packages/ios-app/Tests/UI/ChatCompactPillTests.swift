@@ -220,7 +220,7 @@ struct ChatCompactPillTests {
 
     @Test("Project Resources excludes instruction files owned by Agent Instructions")
     func projectResourceCategories() {
-        #expect(ProjectResourceKind.allCases.map(\.key) == ["extensions", "prompts", "skills", "tools"])
+        #expect(ProjectResourceKind.allCases.map(\.key) == ["prompts", "skills", "tools", "extensions"])
     }
 
     @Test("Project resource descriptions normalize producer line breaks")
@@ -242,14 +242,17 @@ struct ChatCompactPillTests {
             "source": .string("auto"),
         ])
         let selection = ProjectResourceSelection(kind: .prompts, title: "Test Suite Audit", value: value)
-        #expect(selection.promptCommand?.name == "test-suite-audit")
-        #expect(selection.promptCommand?.source == .prompt)
-        #expect(selection.promptCommand?.resourceScope == .project)
-        #expect(selection.promptCommand?.argumentHint == "[scope]")
-        #expect(ProjectResourceSelection(kind: .tools, title: "Test", value: value).promptCommand == nil)
+        #expect(selection.commandInfo?.name == "test-suite-audit")
+        #expect(selection.commandInfo?.source == .prompt)
+        #expect(selection.commandInfo?.resourceScope == .project)
+        #expect(selection.commandInfo?.argumentHint == "[scope]")
+        let skill = ProjectResourceSelection(kind: .skills, title: "Review", value: value)
+        #expect(skill.commandInfo?.name == "skill:test-suite-audit")
+        #expect(skill.commandInfo?.source == .skill)
+        #expect(ProjectResourceSelection(kind: .tools, title: "Test", value: value).commandInfo == nil)
         #expect(ProjectResourceSelection(kind: .prompts, title: "Test", value: .object([
             "path": .string("/project/prompts/test.md"),
-        ])).promptCommand == nil)
+        ])).commandInfo == nil)
     }
 
     @Test("Project resource details foreground kind-specific user guidance")
@@ -265,7 +268,6 @@ struct ChatCompactPillTests {
         #expect(extensionDetail.purpose.contains("loaded extension"))
         #expect(extensionDetail.tools == ["read", "edit"])
         #expect(extensionDetail.commands == ["review"])
-        #expect(extensionDetail.scopeAndSource == "User · npm:example@1.0.0")
         #expect(extensionDetail.path == "/extensions/index.ts")
 
         let prompt = ProjectResourceDetailPresentation(kind: .prompts, value: .object([

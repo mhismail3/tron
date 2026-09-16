@@ -5,15 +5,32 @@ import SwiftUI
 struct ComposerResourceInfoSheet: View {
     let items: [TronTechnicalMetadataItem]
     let accent: Color
+    let technicalValue: JSONValue?
+    let technicalTitle: String?
     @Environment(\.dismiss) private var dismiss
     @State private var detent: PresentationDetent = .medium
+
+    init(items: [TronTechnicalMetadataItem], accent: Color, technicalValue: JSONValue? = nil, technicalTitle: String? = nil) {
+        self.items = items
+        self.accent = accent
+        self.technicalValue = technicalValue
+        self.technicalTitle = technicalTitle
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                TronTechnicalMetadataSection(title: "Resource", items: items, accent: accent)
-                    .padding(18)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                VStack(alignment: .leading, spacing: 16) {
+                    TronTechnicalMetadataSection(title: "Resource", items: items, accent: accent)
+                    if let technicalValue {
+                        TronTechnicalJSONRow(
+                            value: technicalValue,
+                            sheetTitle: technicalTitle ?? "Resource JSON"
+                        )
+                    }
+                }
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
             .defaultScrollAnchor(.top)
             .tronScrollEdgeChrome()

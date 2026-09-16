@@ -1072,6 +1072,46 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testProjectResourceDetailsLoadPromptAndSkillBodies() async throws {
+        for kind in [ProjectResourceKind.prompts, .skills] {
+            let gateway = ProcessSheetGatewayFixture()
+            try await withModel(client: gateway.client) { model in
+                try await gateway.connect(model: model)
+                let snapshot = try SessionScenarioBuilder(seed: 9_402).openingTail(targetEncodedBytes: 4_096)
+                model.installHostedSubscribedSnapshot(snapshot)
+                let selection = ProjectResourceSelection(kind: kind, title: "Review Resource", value: .object([
+                    "name": .string("review"),
+                    "description": .string("Review changes with focused checks."),
+                    "scope": .string("project"),
+                    "path": .string("/project/resources/review.md"),
+                ]))
+                let command = try XCTUnwrap(selection.commandInfo)
+                let content = "# Review\n\nRead the owning documentation.\n\n- Check correctness\n- Run focused tests\n\n" + (0..<40).map { "## Check \($0)\n\nReport verified results.\n" }.joined(separator: "\n")
+                let detail = CommandResourceDetail(
+                    name: command.name, description: command.description, argumentHint: nil, source: command.source,
+                    sourcePath: command.sourcePath, resourceSource: "project", resourceScope: .project, resourceOrigin: nil,
+                    content: content, contentBytes: content.utf8.count, contentTruncated: false
+                )
+                let response = Task {
+                    try await gateway.respond(at: 1, method: "session.commandDetail", result: JSONValue.encode(detail))
+                }
+                defer { response.cancel() }
+                try await self.withSheet(ProjectResourceDetailSheet(sessionID: snapshot.sessionId, selection: selection, onDone: {})
+                    .environment(model).preferredColorScheme(.light)) { controller in
+                    try await response.value
+                    let scroll = try XCTUnwrap(self.views(of: UIScrollView.self, in: controller.view).first)
+                    try await self.waitForRouting {
+                        controller.view.layoutIfNeeded()
+                        return scroll.contentSize.height > 2_000
+                    }
+                    XCTAssertGreaterThan(scroll.contentSize.height, 2_000, "The fetched body must render beyond the description or loading placeholder")
+                    self.capture(controller, name: "project-resource-loaded-\(kind.key)")
+                }
+                await gateway.client.close()
+            }
+        }
+    }
+
     func testProjectResourceDetailsOverrideOverviewTheme() async throws {
         try await withModel { model in
             for kind in ProjectResourceKind.allCases {
@@ -1179,26 +1219,6 @@ final class SessionSheetPresentationTests: XCTestCase {
                 controller.view.layoutIfNeeded()
                 self.capture(controller, name: "command-prompt-final-instructions-\(scheme)")
             }
-        }
-    }
-
-    func testProjectPromptBodyIncludesContentBeyondShortPreviewLimit() async throws {
-        let content = (0..<40).map { "## Instruction \($0)\n\nComplete this step before continuing.\n" }.joined(separator: "\n") + "\nFINAL PROMPT INSTRUCTION"
-        let detail = CommandResourceDetail(
-            name: "review", description: nil, argumentHint: nil, source: .prompt,
-            sourcePath: nil, resourceSource: nil, resourceScope: nil, resourceOrigin: nil,
-            content: content, contentBytes: content.utf8.count, contentTruncated: false
-        )
-        try await withSheet(TronDocumentSheet(title: "Prompt") {
-            ScrollView {
-                ProjectResourcePromptContent(detail: detail).padding(18)
-            }.tronScrollEdgeChrome()
-        }) { controller in
-            let scroll = try XCTUnwrap(self.views(of: UIScrollView.self, in: controller.view).first)
-            XCTAssertGreaterThan(scroll.contentSize.height, 2_000, "No local excerpt limit should discard prompt instructions")
-            scroll.setContentOffset(CGPoint(x: 0, y: scroll.contentSize.height - scroll.bounds.height), animated: false)
-            controller.view.layoutIfNeeded()
-            self.capture(controller, name: "project-prompt-final-instructions")
         }
     }
 
