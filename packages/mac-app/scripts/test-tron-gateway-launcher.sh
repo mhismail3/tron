@@ -3,14 +3,25 @@
 # It builds no app and writes only under mktemp; run on macOS with clang.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd -P)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/tron-launcher-fixture.XXXXXX")"
 trap 'chmod -R u+w "$TMP" 2>/dev/null || true; rm -rf "$TMP"' EXIT
 APP_ROOT="$TMP/Contents"
 BUNDLE="$APP_ROOT/Resources/Gateway"
 HELPER="$APP_ROOT/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
 HASH="$SCRIPT_DIR/hash-gateway-payload.sh"
-NODE_ROOT="${TRON_NODE_ROOT:-/tmp/tron-consolidation-toolchain-01a0a43d.4qlkoC/node-v22.22.0-darwin-arm64}"
-[[ -f "$NODE_ROOT/lib/node_modules/npm/package.json" ]] || { echo "TRON_NODE_ROOT must be an extracted official Node v22.22.0 archive" >&2; exit 2; }
+NODE_ROOT="${TRON_NODE_ROOT:-}"
+if [[ -z "$NODE_ROOT" ]]; then
+  NODE_EXECUTABLE="$(command -v node 2>/dev/null || true)"
+  [[ -n "$NODE_EXECUTABLE" ]] || { echo "pinned Node is unavailable" >&2; exit 2; }
+  NODE_EXECUTABLE="$(realpath "$NODE_EXECUTABLE")"
+  NODE_ROOT="$(cd "$(dirname "$NODE_EXECUTABLE")/.." && pwd -P)"
+fi
+EXPECTED_NODE_VERSION="$(<"$REPO_ROOT/.node-version")"
+[[ -x "$NODE_ROOT/bin/node" \
+    && "$($NODE_ROOT/bin/node --version 2>/dev/null || true)" == "v$EXPECTED_NODE_VERSION" \
+    && -f "$NODE_ROOT/lib/node_modules/npm/package.json" ]] \
+  || { echo "TRON_NODE_ROOT or PATH must select the pinned official Node $EXPECTED_NODE_VERSION toolchain" >&2; exit 2; }
 mkdir -p "$(dirname "$HELPER")" "$BUNDLE"
 xcrun --sdk macosx clang -O2 -Wall -Wextra -Werror -Wno-deprecated-declarations \
   -arch arm64 -arch x86_64 -mmacosx-version-min=15.0 \

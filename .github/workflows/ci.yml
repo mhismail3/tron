@@ -57,6 +57,9 @@ jobs:
             scripts/check-documentation-policy.py \
             scripts/test-agent-policy.py \
             scripts/test-personal-info-guard.py \
+            scripts/tron_mac_reinstall.py \
+            scripts/tron_agent_home_cutover.py \
+            scripts/test-mac-reinstall.py \
             scripts/validate-ios-artifact.py \
             scripts/ios-test-lock.py \
             scripts/ios-test-process.py \
@@ -264,6 +267,7 @@ jobs:
       - run: scripts/verify-ci-toolchain.sh node xcode xcodegen
       - run: python3 scripts/test-personal-info-guard.py
       - run: python3 scripts/test-native-host.py
+      - run: python3 scripts/test-mac-reinstall.py
       - run: scripts/test-cua-assets.sh
       - name: Test actual native capture addon ownership (offline transport only)
         timeout-minutes: 3
@@ -290,6 +294,8 @@ jobs:
             -derivedDataPath build/ci-derived-data
       - name: Smoke test signed staged Pi payload
         run: packages/mac-app/scripts/test-signed-pi-payload-smoke.sh packages/mac-app/build/ci-derived-data/Build/Products/Debug/TronMac.app
+      - name: Exercise offline cutover with bundled migration tools
+        run: TRON_TEST_APP="$GITHUB_WORKSPACE/packages/mac-app/build/ci-derived-data/Build/Products/Debug/TronMac.app" python3 scripts/test-mac-reinstall.py
       - name: Run Mac tests without rebuilding
         working-directory: packages/mac-app
         run: |

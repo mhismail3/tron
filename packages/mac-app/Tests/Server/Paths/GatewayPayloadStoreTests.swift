@@ -558,9 +558,7 @@ struct GatewayPayloadStoreTests {
         let basePreset = root.appendingPathComponent(GatewayPayloadValidator.xcodegenBasePresetRelativePath, isDirectory: false)
         try fm.createDirectory(at: basePreset.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("settings: {}\n".utf8).write(to: basePreset)
-        let nodeRoot = ProcessInfo.processInfo.environment["TRON_NODE_ROOT"] ?? "/tmp/tron-consolidation-toolchain-01a0a43d.4qlkoC/node-v22.22.0-darwin-arm64"
-        let officialNpmRoot = URL(fileURLWithPath: nodeRoot, isDirectory: true)
-            .appendingPathComponent("lib/node_modules/npm", isDirectory: true)
+        let officialNpmRoot = try bundledNpmRoot()
         guard fm.fileExists(atPath: officialNpmRoot.path) else {
             throw CocoaError(.fileNoSuchFile, userInfo: [NSFilePathErrorKey: officialNpmRoot.path])
         }
@@ -676,6 +674,18 @@ struct GatewayPayloadStoreTests {
             }
         }
         return SHA256.hash(data: lines).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func bundledNpmRoot() throws -> URL {
+        let fm = FileManager.default
+        guard let resources = Bundle.main.resourceURL else {
+            throw CocoaError(.fileNoSuchFile, userInfo: [NSFilePathErrorKey: "test host resources"])
+        }
+        let root = resources.appendingPathComponent("Gateway/runtime/npm-arm64", isDirectory: true)
+        guard fm.fileExists(atPath: root.appendingPathComponent("package.json").path) else {
+            throw CocoaError(.fileNoSuchFile, userInfo: [NSFilePathErrorKey: root.path])
+        }
+        return root
     }
 
     private func rewriteManifest(_ manifest: GatewayPayloadManifest, at url: URL) throws {

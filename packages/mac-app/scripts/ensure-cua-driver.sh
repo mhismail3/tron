@@ -3,14 +3,19 @@ set -euo pipefail
 # Build staging only: never install, launch, or re-sign the upstream executor.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PIN="$ROOT/cua-driver-release.json"
-read -r VERSION REVISION SHA256 BINARY_SHA256 SIGNER < <(python3 - "$PIN" <<'PY'
+read -r VERSION REVISION SHA256 BINARY_SHA256 SIGNER ARCHITECTURES < <(python3 - "$PIN" <<'PY'
 import json, re, sys
 p = json.load(open(sys.argv[1]))
 for key, pattern in [('version', r'\d+\.\d+\.\d+'), ('revision', r'[a-f0-9]{40}'), ('archiveSHA256', r'[a-f0-9]{64}'), ('binarySHA256', r'[a-f0-9]{64}'), ('upstreamSigner', r'[A-Z0-9]{10}')]:
     assert re.fullmatch(pattern, p[key])
-print(p['version'], p['revision'], p['archiveSHA256'], p['binarySHA256'], p['upstreamSigner'])
+architectures = p.get('architectures')
+assert isinstance(architectures, list) and 1 <= len(architectures) <= 8
+assert len(set(architectures)) == len(architectures)
+assert all(isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9_]+', value) for value in architectures)
+print(p['version'], p['revision'], p['archiveSHA256'], p['binarySHA256'], p['upstreamSigner'], ','.join(architectures))
 PY
 )
+IFS=, read -r -a EXPECTED_ARCHITECTURES <<< "$ARCHITECTURES"
 URL="https://github.com/trycua/cua/releases/download/cua-driver-rs-v${VERSION}/cua-driver-rs-${VERSION}-darwin-universal-binary.tar.gz"
 OUT="${1:?Pass a generated staging directory}"
 CACHE="${TRON_CUA_CACHE:-$ROOT/.build/cua}/cua-driver-rs-${VERSION}-darwin-universal-binary.tar.gz"
@@ -28,7 +33,7 @@ tar -xzf "$CACHE" -C "$STAGE" cua-driver
 [[ -f "$STAGE/cua-driver" && ! -L "$STAGE/cua-driver" ]] || exit 1
 printf '%s  %s\n' "$BINARY_SHA256" "$STAGE/cua-driver" | shasum -a 256 -c -
 codesign --verify --strict -R "=anchor apple generic and certificate leaf[subject.OU] = \"$SIGNER\" and identifier \"cua-driver\"" "$STAGE/cua-driver"
-lipo "$STAGE/cua-driver" -verify_arch arm64 x86_64
+"$ROOT/scripts/verify-macho-architectures.sh" "$STAGE/cua-driver" "${EXPECTED_ARCHITECTURES[@]}"
 mkdir -p "$OUT"
 install -m 0755 "$STAGE/cua-driver" "$OUT/cua-driver"
 install -m 0644 "$ROOT/scripts/cua-driver-LICENSE.txt" "$OUT/LICENSE.txt"

@@ -3,9 +3,19 @@
 # This never changes the app, LaunchAgents, Gateway, or either Tron home.
 set -u
 
+ARTIFACT_ONLY=false
+case "${1:-}" in
+  --artifact-only) ARTIFACT_ONLY=true; shift ;;
+  '') ;;
+  *) echo 'usage: verify-mac-install.sh [--artifact-only]' >&2; exit 64 ;;
+esac
+[[ $# == 0 ]] || exit 64
+
 APP="${TRON_APP_PATH:-/Applications/Tron.app}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 # shellcheck disable=SC1091
-source "$(dirname "$0")/../config/ci-toolchain.env"
+source "$REPO_ROOT/config/ci-toolchain.env"
 UID_VALUE="$(id -u)"
 HOST_ARCH="$(uname -m)"
 failures=0
@@ -57,8 +67,28 @@ else
   fail "native helper or Aqua Mach service composition invalid"
 fi
 CUA_DRIVER="$APP/Contents/Library/Native/cua-driver"
-if codesign --verify --strict -R '=anchor apple generic and certificate leaf[subject.OU] = "YCK386LBJ7" and identifier "cua-driver"' "$CUA_DRIVER" >/dev/null 2>&1 \
-  && lipo "$CUA_DRIVER" -verify_arch arm64 x86_64 >/dev/null 2>&1; then
+CUA_PIN="$REPO_ROOT/packages/mac-app/cua-driver-release.json"
+CUA_METADATA="$(python3 - "$CUA_PIN" <<'PY' 2>/dev/null || true
+import json, re, sys
+p = json.load(open(sys.argv[1]))
+signer = p.get('upstreamSigner')
+architectures = p.get('architectures')
+assert isinstance(signer, str) and re.fullmatch(r'[A-Z0-9]{10}', signer)
+assert isinstance(architectures, list) and 1 <= len(architectures) <= 8
+assert len(set(architectures)) == len(architectures)
+assert all(isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9_]+', value) for value in architectures)
+print(signer, ','.join(architectures))
+PY
+)"
+read -r CUA_SIGNER CUA_ARCHITECTURES <<< "$CUA_METADATA"
+if [[ -n "${CUA_SIGNER:-}" && -n "${CUA_ARCHITECTURES:-}" ]]; then
+  IFS=, read -r -a CUA_EXPECTED_ARCHITECTURES <<< "$CUA_ARCHITECTURES"
+else
+  CUA_EXPECTED_ARCHITECTURES=()
+fi
+if [[ -n "${CUA_SIGNER:-}" && -n "${CUA_ARCHITECTURES:-}" ]] \
+  && codesign --verify --strict -R "=anchor apple generic and certificate leaf[subject.OU] = \"$CUA_SIGNER\" and identifier \"cua-driver\"" "$CUA_DRIVER" >/dev/null 2>&1 \
+  && "$REPO_ROOT/packages/mac-app/scripts/verify-macho-architectures.sh" "$CUA_DRIVER" "${CUA_EXPECTED_ARCHITECTURES[@]}" >/dev/null 2>&1; then
   pass "pinned Cua executor signature and architectures"
 else
   fail "Cua executor signature or architectures invalid"
@@ -73,6 +103,8 @@ NATIVE_IDENTIFIER="$(codesign -dv --verbose=4 "$NATIVE_HOST" 2>&1 | sed -n 's/^I
 [[ ! -e "$APP/Contents/Library/LaunchAgents/com.tron.server.dev.plist" ]] \
   && pass "Release app contains no Debug LaunchAgent plist" \
   || fail "Release app unexpectedly contains a Debug LaunchAgent plist"
+# Never execute an embedded validator or runtime after its signature failed.
+(( failures == 0 )) || exit 1
 HASHER="$APP/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
 hash_payload() {
   "$HASHER" --fingerprint "$1"
@@ -136,11 +168,13 @@ payload_for() {
 
 verify_payload() {
   local label="$1" home="$2" channel="$3" bundled="$4" payload manifest expected actual selected_version
-  payload="$(payload_for "$home" "$channel" "$bundled")"
+  if [[ "$ARTIFACT_ONLY" == true ]]; then payload="$bundled"; else
+    payload="$(payload_for "$home" "$channel" "$bundled")"
+  fi
   manifest="$payload/manifest.json"
   if ! regular_file "$manifest"; then fail "$label payload manifest missing"; return; fi
   selected_version=""
-  if regular_file "$home/gateway/payloads/$channel/current.json"; then
+  if [[ "$ARTIFACT_ONLY" == false ]] && regular_file "$home/gateway/payloads/$channel/current.json"; then
     selected_version="$(plist_value version "$home/gateway/payloads/$channel/current.json")"
     if [[ -n "$selected_version" ]]; then
       if [[ "$payload" == "$bundled" ]]; then
@@ -264,6 +298,11 @@ STABLE_FINGERPRINT="" STABLE_REVISION="" STABLE_EPOCH="" STABLE_PAYLOAD_ROOT=""
 DEV_FINGERPRINT="" DEV_REVISION="" DEV_EPOCH="" DEV_PAYLOAD_ROOT=""
 BUNDLED="$APP/Contents/Resources/Gateway"
 verify_payload stable "$HOME/.tron" stable "$BUNDLED"
+if [[ "$ARTIFACT_ONLY" == true ]]; then
+  (( failures == 0 )) || exit 1
+  printf 'Signed Release artifact verified; no live service checks performed.\n'
+  exit 0
+fi
 if [[ -n "$STABLE_PAYLOAD_ROOT" ]] \
   && cmp -s "$STABLE_PAYLOAD_ROOT/app/PushService.xcconfig" "$BUNDLED/app/PushService.xcconfig"; then
   pass "stable selected payload push origin matches installed product"

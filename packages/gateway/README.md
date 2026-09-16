@@ -241,13 +241,17 @@ scripts/tron agent-home-migrate stage \
 scripts/tron agent-home-migrate verify --staging "$HOME/.tron/.agent.migrate-<id>"
 ```
 
-The preparation tooling does not implement publication. The complete operator
+The low-level staging tool does not implement publication. The separate, one-time
+operator command `scripts/tron agent-home-cutover` owns verified backups and
+journaled no-clobber same-filesystem publication; regular `scripts/tron mac reinstall`
+never migrates agent homes. Neither command replaces or activates the Mac app.
+The complete operator
 sequence, including the legacy Ask User staged-settings transform, app/helper drain,
 backup, activation, diagnostics, and rollback is in [`packages/mac-app/docs/agent-home-cutover.md`](../mac-app/docs/agent-home-cutover.md).
-The user/maintainer must inspect the verify output, ensure the destination is still absent, then
-perform one manual same-filesystem rename (or a separately verified
-cross-filesystem copy with no atomicity claim), update the selected Mac/Gateway
-profile together, and manually activate one Gateway authority. Never run old and
+The user/maintainer must explicitly confirm successful helper retirement and
+writer quiescence before running the cutover command. Cross-filesystem or custom
+layouts require a separate reviewed procedure, not a fallback copy. The user then
+updates the Mac app/profile together and manually activates one Gateway authority. Never run old and
 new agent directories concurrently, use a symlink/fallback, merge a non-empty
 destination, or recursively delete anything except a marked staging root with:
 `scripts/tron agent-home-migrate cleanup --staging <exact-marked-root>`. If

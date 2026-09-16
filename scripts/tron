@@ -18,6 +18,9 @@ Commands:
                                     Read-only assessment of an agent-home move
   agent-home-migrate <stage|verify|cleanup> ...
                                     Explicit, bounded offline staging operations
+  agent-home-cutover --app <Release.app> [--confirm-offline|--verify|--status]
+                                    One-time offline cutover; manual app activation
+                                    See --help for reviewed pre-helper bootstrap
   chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]
                                     Attach terminal chat to the Gateway-owned runtime
   ci [check|test|all]               Validate the gateway and repository policy
@@ -25,6 +28,8 @@ Commands:
   ios generate                      Regenerate iOS with pinned XcodeGen
   mac generate                      Regenerate macOS with pinned XcodeGen
   mac verify                        Verify installed app, payload, LaunchAgent, and PID
+  mac reinstall --app <Release.app> [--confirm-offline|--verify|--status]
+                                    Resumable local preparation; manual replacement
   version                           Print the canonical Tron version
 
 There is no deploy command. Production deployment is manual-only.
@@ -60,6 +65,9 @@ case "$cmd" in
     fi
     exec node "$GATEWAY/dist/agent-home-migration.js" "$@"
     ;;
+  agent-home-cutover)
+    exec python3 "$ROOT/scripts/tron_agent_home_cutover.py" "$@"
+    ;;
   chat)
     (cd "$GATEWAY" && npm run build >/dev/null)
     exec node "$GATEWAY/dist/client/terminal-chat.js" "$@"
@@ -91,6 +99,9 @@ case "$cmd" in
         ;;
       verify)
         exec "$ROOT/scripts/verify-mac-install.sh"
+        ;;
+      reinstall)
+        exec python3 "$ROOT/scripts/tron_mac_reinstall.py" "${@:2}"
         ;;
       *) usage >&2; exit 64 ;;
     esac

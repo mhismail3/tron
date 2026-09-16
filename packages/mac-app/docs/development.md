@@ -27,7 +27,11 @@ exact `$NVM_DIR/versions/node/v<version>/bin/node` directory and Homebrew
 candidates are considered. `TRON_NODE_BIN` may explicitly name an absolute
 executable, but it must provide both the pinned Node and sibling npm; there is
 no ambient npm override. Failure happens before build or payload mutation. These variables
-affect staging only. Release preparation also downloads and verifies the
+affect staging only. Focused shell and Node payload tests derive their fixture
+root from the active pinned Node executable, or from an explicit
+`TRON_NODE_ROOT`, and reject a version mismatch. Hosted Mac tests use the npm
+runtime embedded in their built test app. No test depends on a machine-specific
+temporary archive path. Release preparation also downloads and verifies the
 repository-pinned XcodeGen archive, executable, and preset tree, then
 fingerprints them under `Gateway/runtime/xcodegen`. Bundle writers serialize
 before touching the shared dependency tree, assemble and verify generated
@@ -348,6 +352,10 @@ helper. Do not weaken the pins, force unregister/kill surviving work, or assume
 Restart Helper repairs that mismatch. If an older installed build lacks the
 pre-update control, stop for an explicitly reviewed maintainer bootstrap based on
 that build's actual capabilities; the capture-owning sequence cannot be skipped.
+The separate one-time cutover runbook documents a narrowly admitted
+[pre-helper bootstrap](agent-home-cutover.md#reviewed-pre-helper-bootstrap) for
+the reviewed build that predates native capture entirely. It is not a general
+missing-helper fallback and is not part of routine reinstall behavior.
 Likewise, a `.notFound`/unknown native-service status refuses drain without XPC,
 registration or Gateway/file changes. Some never-registered optional helpers can
 report `.notFound`; successful uninstall/refresh for that first-install case is
@@ -363,6 +371,13 @@ xcodebuild -project TronMac.xcodeproj -scheme TronMac \
   -configuration Release -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath /tmp/tron-mac-release build
 ```
+
+`TRON_CI_XCODE_VERSION` remains the deterministic CI reference, not an upper
+bound on local Mac development. A later selected Xcode is usable only when the
+pinned XcodeGen generation, Release build, complete signed-payload validation,
+and installed-app verification all pass; compiler success alone is insufficient.
+Mac asset validators therefore use stable tool projections rather than relying
+on command forms whose argument parsing changed between Xcode releases.
 
 In Finder, replace `/Applications/Tron.app` with that built `Tron.app`, then
 launch it after the old-wrapper sequence above. The existing onboarding marker
@@ -400,11 +415,9 @@ Preview services are collisions. The verifier checks both signed runtimes and
 aliases on every Mac, but executes only the host-native runtime. The bundled
 foreign-architecture runtime is validated statically; this avoids false
 failures when Rosetta is unavailable or when translated Node cannot obtain its
-JIT permissions. If the menu-bar controls are
-unavailable, use the installed app's **Uninstall Tron** action without selecting
-reset options, then launch the replacement and complete the Install step; that
-preserves canonical sessions and credentials but stops the Gateway during the
-transition.
+JIT permissions. If the required menu-bar controls are unavailable, stop for a
+reviewed maintainer procedure. Uninstall or re-registration is not a substitute
+for successfully draining and retiring the old native helper.
 
 The Release menu authenticates to a developer-owned Debug Gateway on 9848 and,
 when one coherent observation is healthy, exposes read-only Debug status and
@@ -414,29 +427,91 @@ projections. It never controls Debug lifecycle or writes its cache. Stable remai
 by `com.tron.server`/`com.tron.mac` on 9847. `scripts/tron dev` uses
 `~/.tron-dev` and `~/.tron-dev/agent` without SMAppService registration.
 
-### Agent-home cutover (manual)
+### Resumable local reinstall preparation
+
+After preparing the signed Release artifact above, the user/maintainer can use:
+
+```bash
+scripts/tron mac reinstall --app /tmp/tron-mac-release/Build/Products/Release/Tron.app
+# After successful old-helper retirement, Pause/quit, and stopping all writers:
+scripts/tron mac reinstall --confirm-offline
+# After the user replaces the app in Finder, launches it and chooses Resume:
+scripts/tron mac reinstall --verify
+scripts/tron mac reinstall --finish
+```
+
+The regular command requires an existing private `~/.tron/agent`. It does not
+inspect, migrate or delete an old agent home. For a machine still using
+`~/.pi/agent`, use the separate [one-time cutover](agent-home-cutover.md) instead.
+Neither command replaces an app, changes LaunchAgents, starts/stops a Gateway,
+or approves macOS permissions. Repository agents may test them on isolated
+fixtures, but must not execute a live cutover or confirm the operator's offline
+attestation. A missing helper retirement control still requires the reviewed
+maintainer procedure above; an empty process list never substitutes for it.
+
+Container permissions and data privacy are distinct: `~/.tron` may retain `0755`
+when it is a real, user-owned directory with owner read/write/search access,
+no group/other write access and no ACL requiring review. The cutover applies the
+same container checks to `~/.pi`. Agent homes, receipts and backup directories
+remain owner-only. Neither command silently chmods an existing directory.
+
+The first invocation validates both apps and their signing teams, then records
+the exact candidate identity (code seal plus resource seal). Candidate validation
+uses `TRON_APP_PATH=<artifact> scripts/verify-mac-install.sh --artifact-only` and
+the signed Pi smoke test; it never consults an installed payload selection or
+contacts the live Gateway. The offline checkpoint refuses loaded services,
+listeners, observed writers and path/config overrides; custom setups need a
+reviewed owner decision rather than an inferred default.
+
+Private `~/.tron-maintenance/<operation-id>/` receipts record the source revision,
+phase, signed app identities, exact source-to-backup mapping, and SHA-256
+manifests. Backups include the agent home, every other top-level `~/.tron` entry,
+the old app, machine-group file and separately owned default browser config
+(including explicit absence). The command never reads Keychain stores or copies
+browser profiles/cookies. POSIX modes, ACLs, extended attributes, file contents
+and symbolic-link text are checked; special files and unsafe root links stop
+preparation. Owner-only maintenance directories protect backup contents; do not
+upload them or raw manifests/settings. External state referenced by custom
+settings or browser overrides requires its own operator-managed backup.
+
+One stable cross-process lock serializes both commands. Repeated invocations
+resume the recorded operation; partial backups only accept already copied bytes
+that still match the frozen source inventory. Source changes, corrupt receipts,
+metadata loss, insufficient space and collisions stop without deleting evidence.
+Before offering either Finder replacement or Resume, every offline retry verifies
+the backups and unchanged data again. An already-replaced app exempts only that
+installed app from comparison with the old-app manifest; its exact candidate
+signature identity is checked separately. It never exempts agent data, rollback
+evidence or the cutover's single-authority check. Failed checks do not advance
+the saved phase. After actual activation, `--verify` checks live supervision
+rather than requiring legitimately changing live data to match an offline snapshot.
+No retries, resets, implicit cleanup or automatic rollback hide a failed check.
+Use the same command with `--status` for its saved checkpoint. `--finish` is
+accepted only after successful installed verification and removes only the active
+operation pointer; all receipts and backups remain. No retention cleanup runs.
+
+`--verify` runs `scripts/tron mac verify`, checks the exact replacement identity
+and rejects loaded agent-directory overrides. A failure leaves the checkpoint
+unfinished. Success verifies app/supervision/runtime identity, **not** complete
+data or capability continuity: also open a historical conversation, run a fresh
+delegated worker and its extensions, exercise browser operation and a live Ask
+User form, and check historical answers, pairing, settings, trust, models and
+packages. Do not repeatedly restart after failure. Preserve post-update writes
+and use the coherent manual rollback procedure in the cutover runbook.
+
+Focused regressions: `python3 scripts/test-mac-reinstall.py`; set `TRON_TEST_APP`
+to a built app to include real bundled preflight/staging/verification against
+temporary homes. CI runs both filesystem tests and the bundled-tool integration.
+
+### Agent-home cutover (operator-owned)
 
 Follow the canonical [agent-home cutover runbook](agent-home-cutover.md) for the
 full dependency gate, exact commands, stop conditions, diagnostics, and rollback.
-The repository can prepare a verified staged copy of the old Pi agent home, but
-only the user/maintainer may cut over the writable authority. First stop Stable,
-Debug, standalone Pi clients, child/delegation writers, and package operations;
-protect an operator-managed backup of the old agent home and Gateway state. Then
-run the read-only preflight and the explicit stage/verify commands from the
-Gateway README using a new sibling staging root. Do not run them against a live
-writer, and do not approve an `assessment-only` result when it reports external
-or relocation-sensitive references.
-
-After verification, the user manually renames the unchanged old directory to a
-protected, clearly marked backup and renames the verified staging directory to
-`~/.tron/agent` only when the output says same-filesystem rename is valid. A
-cross-filesystem copy has no atomicity claim and must be separately verified.
-Update the selected profile and LaunchAgent together, then manually activate one
-Gateway and run `scripts/tron mac verify`. Never run old and new agent homes
-concurrently, use a symlink/fallback, merge a pre-existing destination, or
-silently merge writes made after cutover. If activation fails, stop the new
-owner, quarantine it, restore the unchanged backup and prior profile, and
-activate/verify the old authority manually.
+`scripts/tron agent-home-cutover` is a separate, explicitly invoked one-time
+operator command. It reuses the reinstall backup/receipt owner and the bundled
+canonical migration tools, then journals two no-clobber same-filesystem renames.
+There is no startup migration or compatibility path in the regular reinstall
+command. App replacement and activation remain manual in both workflows.
 
 ### Gateway payload operations
 

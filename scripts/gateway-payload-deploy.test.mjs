@@ -93,7 +93,8 @@ async function addRuntimeNodeAliases(root) {
   const basePreset = join(root, "runtime", "xcodegen", "share", "xcodegen", "SettingPresets", "base.yml");
   await mkdir(dirname(basePreset), { recursive: true });
   await writeFile(basePreset, "PRODUCT_NAME: $TARGET_NAME\n");
-  const nodeRoot = process.env.TRON_NODE_ROOT ?? "/tmp/tron-consolidation-toolchain-01a0a43d.4qlkoC/node-v22.22.0-darwin-arm64";
+  const nodeExecutable = await realpath(process.execPath);
+  const nodeRoot = process.env.TRON_NODE_ROOT ?? dirname(dirname(nodeExecutable));
   const officialNpmRoot = join(nodeRoot, "lib/node_modules/npm");
   const officialNpmPackage = join(officialNpmRoot, "package.json");
   await lstat(officialNpmPackage);

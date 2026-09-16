@@ -3,6 +3,7 @@
   "revision": "1b50c02e2d34734f64d2d22f54eb76cc97b4a663",
   "githubPrerelease": true,
   "upstreamSigner": "YCK386LBJ7",
+  "architectures": ["arm64", "x86_64"],
   "archiveSHA256": "aaaa29538fe7b1f103afb4eddeefe2dc137690f91f8074e333cfe0e76b49918d",
   "binarySHA256": "e0d802a126a8fc90af74ef9cccd7dde5ba82feea26c3a2ad8c492ad1f444bb1e"
 }

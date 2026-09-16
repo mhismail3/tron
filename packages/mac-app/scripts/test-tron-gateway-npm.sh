@@ -3,9 +3,19 @@
 # the SDK package-manager removal operation without an ambient PATH.
 set -euo pipefail
 
-NODE_ROOT="${TRON_NODE_ROOT:-/tmp/tron-consolidation-toolchain-01a0a43d.4qlkoC/node-v22.22.0-darwin-arm64}"
-[[ -x "$NODE_ROOT/bin/node" && -f "$NODE_ROOT/lib/node_modules/npm/bin/npm-cli.js" ]] || {
-    echo "set TRON_NODE_ROOT to an official Node ${NODE_VERSION:-22.22.0} archive root" >&2
+REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd -P)"
+NODE_ROOT="${TRON_NODE_ROOT:-}"
+if [[ -z "$NODE_ROOT" ]]; then
+    NODE_EXECUTABLE="$(command -v node 2>/dev/null || true)"
+    [[ -n "$NODE_EXECUTABLE" ]] || { echo "pinned Node is unavailable" >&2; exit 2; }
+    NODE_EXECUTABLE="$(realpath "$NODE_EXECUTABLE")"
+    NODE_ROOT="$(cd "$(dirname "$NODE_EXECUTABLE")/.." && pwd -P)"
+fi
+EXPECTED_NODE_VERSION="$(<"$REPO_ROOT/.node-version")"
+[[ -x "$NODE_ROOT/bin/node" \
+    && "$($NODE_ROOT/bin/node --version 2>/dev/null || true)" == "v$EXPECTED_NODE_VERSION" \
+    && -f "$NODE_ROOT/lib/node_modules/npm/bin/npm-cli.js" ]] || {
+    echo "TRON_NODE_ROOT or PATH must select the pinned official Node $EXPECTED_NODE_VERSION toolchain" >&2
     exit 2
 }
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/tron-gateway-npm.XXXXXX")"

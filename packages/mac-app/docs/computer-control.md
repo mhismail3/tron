@@ -38,9 +38,13 @@ The shipped driver is pinned to Cua0.28.0, revision
 `1b50c02e2d34734f64d2d22f54eb76cc97b4a663`. GitHub marks this release prerelease.
 `cua-driver-release.json` is the single release pin used by staging, composition
 validation and project generation. `ensure-cua-driver.sh` checks the archive and
-executable digests, both supported architectures, and the upstream signing identity
+executable digests, the exact configured architecture set, and the upstream signing identity
 before staging. Generation seals the expected binary digest into the helper's
 Info.plist; runtime verifies the vendor signature and that digest before launching.
+Architecture validation compares the order-independent `lipo -archs` result instead
+of relying on the multi-architecture `-verify_arch` form, whose parsing differs
+across Xcode releases. `scripts/test-cua-assets.sh` owns its missing, extra, duplicate,
+tool-failure, and output-order controls.
 The adjacent manifest cannot choose a different release. This is installed-asset
 validation, not an atomic-launch sandbox against concurrent same-user file changes. The vendor
 signature is preserved; the outer app seals the executable and its MIT notice.
