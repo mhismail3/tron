@@ -7,6 +7,41 @@ import WebKit
 
 @MainActor
 final class SessionSheetPresentationTests: XCTestCase {
+    func testAutomationTimeEditorUsesTimeOnlyPickerAndPreservesDate() async throws {
+        for field in [AutomationDateField.once, .intervalAnchor, .localTime] {
+            let route = AutomationDateSelection(field: field, component: .time)
+            XCTAssertEqual(route.components, .hourAndMinute)
+            XCTAssertNotEqual(route.id, AutomationDateSelection(field: field, component: .date).id)
+            var value = Date(timeIntervalSince1970: 1_789_459_200)
+            let original = value
+            try await withSheet(AutomationDatePickerSheet(
+                selection: route,
+                date: Binding(get: { value }, set: { value = $0 })
+            )) { controller in
+                let picker = try XCTUnwrap(self.views(of: UIDatePicker.self, in: controller.view).first)
+                XCTAssertEqual(picker.datePickerMode, .time)
+                XCTAssertEqual(picker.preferredDatePickerStyle, .wheels)
+                let changed = original.addingTimeInterval(1_800)
+                picker.setDate(changed, animated: false)
+                picker.sendActions(for: .valueChanged)
+                XCTAssertEqual(value.timeIntervalSince1970, changed.timeIntervalSince1970, accuracy: 1)
+                XCTAssertTrue(Calendar.current.isDate(value, inSameDayAs: original))
+                self.capture(controller, name: "automation-time-editor-\(field.id)")
+            }
+        }
+    }
+
+    func testPackageRemovalConfirmationHasShortActionAndCenteredTitle() async throws {
+        try await withSheet(TronConfirmationSheet(
+            title: "Remove this package?", message: "npm:sample-package", confirmTitle: "Remove",
+            destructive: true, centersTitle: true, icon: "shippingbox.and.arrow.down", onConfirm: {}
+        )) { controller in
+            let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
+            XCTAssertEqual(bar.topItem?.largeTitleDisplayMode, .never)
+            self.capture(controller, name: "package-remove-short-action")
+        }
+    }
+
     func testAutomationFormUsesCompactInlineSettingsChrome() async throws {
         try await withModel { model in
             for variant in [

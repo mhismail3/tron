@@ -230,9 +230,12 @@ struct ProcessHistorySheet: View {
                 }
 
                 if store.nextCursor != nil, store.status != .conflict {
-                    Button("Load More") {
+                    Button {
                         store.loadNext(sessionID: sessionID, presentationGeneration: generation)
+                    } label: {
+                        TronInlineActionLabel("Load More", accent: .tronSubagent)
                     }
+                    .buttonStyle(.plain)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
                     .disabled(store.status == .loading)

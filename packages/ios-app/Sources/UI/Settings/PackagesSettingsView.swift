@@ -258,8 +258,9 @@ struct PackagesSettingsView: View {
             TronConfirmationSheet(
                 title: "Remove this package?",
                 message: package.source,
-                confirmTitle: "Remove Package",
+                confirmTitle: "Remove",
                 destructive: true,
+                centersTitle: true,
                 icon: "shippingbox.and.arrow.down",
                 onConfirm: { remove(package) }
             )

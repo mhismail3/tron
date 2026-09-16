@@ -6,7 +6,7 @@ private enum AutomationTargetMode: String, CaseIterable, Identifiable {
     var title: String { self == .existingSession ? "Existing Session" : "New Session in Workspace" }
 }
 
-private enum AutomationDateField: String, Identifiable {
+enum AutomationDateField: String, Identifiable {
     case once, intervalAnchor, localTime
 
     var id: String { rawValue }
@@ -17,8 +17,47 @@ private enum AutomationDateField: String, Identifiable {
         case .localTime: "Local time"
         }
     }
-    var components: DatePickerComponents {
-        self == .localTime ? [.hourAndMinute] : [.date, .hourAndMinute]
+}
+
+/// The tapped component, not just the backing field, owns picker presentation.
+struct AutomationDateSelection: Identifiable {
+    enum Component: String { case date, time }
+    let field: AutomationDateField
+    let component: Component
+    var id: String { "\(field.id).\(component.rawValue)" }
+    var components: DatePickerComponents { component == .date ? .date : .hourAndMinute }
+}
+
+struct AutomationDatePickerSheet: View {
+    let selection: AutomationDateSelection
+    @Binding var date: Date
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if selection.component == .date {
+                    DatePicker(selection.field.title, selection: $date, displayedComponents: selection.components)
+                        .datePickerStyle(.graphical)
+                } else {
+                    DatePicker(selection.field.title, selection: $date, displayedComponents: selection.components)
+                        .datePickerStyle(.wheel)
+                        .labelsHidden()
+                }
+            }
+            .padding()
+            .tronNavigationTitle(selection.field.title, accent: .tronAutomation)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { dismiss() } label: { Image(systemName: "checkmark") }
+                        .tronToolbarAction(accent: .tronAutomation)
+                        .accessibilityLabel("Done")
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
+        .tronSettingsVisualTheme(accent: .tronAutomation)
     }
 }
 
@@ -57,7 +96,7 @@ struct AutomationFormView: View {
     @State private var actionContent = ""
     @State private var targetMode: AutomationTargetMode = .workspace
     @State private var targetSessionID = ""
-    @State private var editingDateField: AutomationDateField?
+    @State private var editingDateField: AutomationDateSelection?
     // Workspace paths are transient form state only. They are sent to the
     // owning Gateway and are never written to iOS preferences or caches.
     @State private var workspacePath = ""
@@ -190,23 +229,8 @@ struct AutomationFormView: View {
                 onConfirm: { Task { await setWorkspaceTrust(true) } }
             )
         }
-        .tronManagedSheet(item: $editingDateField, identity: { "automation.date.\($0.id)" }) { field in
-            NavigationStack {
-                DatePicker(field.title, selection: dateBinding(for: field), displayedComponents: field.components)
-                    .datePickerStyle(.graphical)
-                    .padding()
-                    .tronNavigationTitle(field.title, accent: .tronAutomation)
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button { editingDateField = nil } label: {
-                                Image(systemName: "checkmark")
-                            }
-                            .accessibilityLabel("Done")
-                        }
-                    }
-            }
-            .presentationDetents([.medium])
-            .tronSettingsVisualTheme(accent: .tronAutomation)
+        .tronManagedSheet(item: $editingDateField, identity: { "automation.date.\($0.id)" }) { selection in
+            AutomationDatePickerSheet(selection: selection, date: dateBinding(for: selection.field))
         }
         .task(id: PresentationActivityTaskID(
             source: "\(selectedProfileID):\(trigger):\(initialized):\(model.profileRevision):\(scenePhase == .active)",
@@ -795,21 +819,21 @@ struct AutomationFormView: View {
                 if components.contains(.date) {
                     dateValueButton(
                         selection.wrappedValue.formatted(date: .abbreviated, time: .omitted),
-                        field: field
+                        field: field, component: .date
                     )
                 }
                 if components.contains(.hourAndMinute) {
                     dateValueButton(
                         selection.wrappedValue.formatted(date: .omitted, time: .shortened),
-                        field: field
+                        field: field, component: .time
                     )
                 }
             }
         }
     }
 
-    private func dateValueButton(_ label: String, field: AutomationDateField) -> some View {
-        Button { editingDateField = field } label: {
+    private func dateValueButton(_ label: String, field: AutomationDateField, component: AutomationDateSelection.Component) -> some View {
+        Button { editingDateField = AutomationDateSelection(field: field, component: component) } label: {
             TronInlineActionLabel(label, accent: .tronAutomation)
         }
         .buttonStyle(.plain)
