@@ -1,5 +1,13 @@
 import SwiftUI
 
+enum AutomationWorkspacePathPolicy {
+    static func initialPath(selectedPath: String) -> String? {
+        // Omit an unset path so filesystem.list resolves the Gateway's own
+        // default; an empty string is an invalid explicit path.
+        selectedPath.isEmpty ? nil : selectedPath
+    }
+}
+
 private enum AutomationTargetMode: String, CaseIterable, Identifiable {
     case workspace, existingSession
     var id: String { rawValue }
@@ -26,6 +34,74 @@ struct AutomationDateSelection: Identifiable {
     let component: Component
     var id: String { "\(field.id).\(component.rawValue)" }
     var components: DatePickerComponents { component == .date ? .date : .hourAndMinute }
+}
+
+struct AutomationSessionPickerSheet: View {
+    let sessions: [SessionSummary]
+    let selectedID: String
+    let onSelect: (SessionSummary) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var search = ""
+
+    private var filteredSessions: [SessionSummary] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return sessions }
+        return sessions.filter { $0.title.localizedCaseInsensitiveContains(query) || $0.cwd.localizedCaseInsensitiveContains(query) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: TronSpacing.md) {
+                    TextField("Search sessions", text: $search).tronInlineField()
+                    if filteredSessions.isEmpty {
+                        TronPlaceholderState(title: sessions.isEmpty ? "No sessions available" : "No matching sessions", detail: sessions.isEmpty ? "Create or connect a persisted session before saving." : "Try another session or workspace name.", icon: "bubble.left.and.bubble.right", accent: .tronAutomation)
+                            .frame(minHeight: 260)
+                    } else {
+                        ForEach(SessionListWorkspaceGroup.groups(from: filteredSessions)) { group in
+                            Text(group.name)
+                                .font(TronTypography.code(size: TronTypography.sizeBody, weight: .bold))
+                                .foregroundStyle(Color.tronTextPrimary)
+                            ForEach(group.sessions) { session in
+                            Button {
+                                onSelect(session)
+                                dismiss()
+                            } label: {
+                                HStack(spacing: TronSpacing.lg) {
+                                    Image(systemName: "bubble.left").foregroundStyle(Color.tronAutomation).frame(width: 24)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(session.title).font(TronTypography.body).foregroundStyle(Color.tronTextPrimary).lineLimit(2)
+                                        Text(URL(fileURLWithPath: session.cwd).lastPathComponent).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted).lineLimit(1)
+                                    }
+                                    Spacer(minLength: TronSpacing.md)
+                                    if session.id == selectedID { Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.tronAutomation) }
+                                }
+                                .padding(.horizontal, 14).padding(.vertical, 12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .buttonStyle(.plain)
+                            .tronGlassSurface(accent: session.id == selectedID ? .tronAutomation : .tronSlate, cornerRadius: 14, tintOpacity: session.id == selectedID ? 0.14 : 0.07, interactive: true)
+                            .accessibilityLabel("Select \(session.title)")
+                            .accessibilityValue(session.id == selectedID ? "Selected" : "Not selected")
+                            .accessibilityAddTraits(session.id == selectedID ? .isSelected : [])
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 20).padding(.vertical, 16)
+            }
+            .tronScrollEdgeChrome()
+            .tronNavigationTitle("Choose Session", accent: .tronAutomation)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button { dismiss() } label: { Image(systemName: "xmark") }.accessibilityLabel("Cancel")
+                }
+            }
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.hidden)
+        .tronSettingsVisualTheme(accent: .tronAutomation)
+    }
 }
 
 struct AutomationDatePickerSheet: View {
@@ -58,6 +134,37 @@ struct AutomationDatePickerSheet: View {
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tronSettingsVisualTheme(accent: .tronAutomation)
+    }
+}
+
+private struct AutomationStepperControl: View {
+    let title: String
+    @Binding var value: Int
+    let range: ClosedRange<Int>
+    let step: Int
+    let accent: Color
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Button { value = max(range.lowerBound, value - step) } label: {
+                Image(systemName: "minus")
+                    .frame(width: 42, height: 34)
+            }
+            .disabled(value <= range.lowerBound)
+            Divider().frame(height: 22)
+            Button { value = min(range.upperBound, value + step) } label: {
+                Image(systemName: "plus")
+                    .frame(width: 42, height: 34)
+            }
+            .disabled(value >= range.upperBound)
+        }
+        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+        .foregroundStyle(accent)
+        .buttonStyle(.plain)
+        .glassEffect(.regular.tint(accent.opacity(0.12)).interactive(), in: Capsule())
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(title)
+        .accessibilityValue("\(value)")
     }
 }
 
@@ -102,6 +209,7 @@ struct AutomationFormView: View {
     @State private var workspacePath = ""
     @State private var workspaceTrustInspection: JSONValue?
     @State private var showingWorkspaceBrowser = false
+    @State private var showingSessionPicker = false
     @State private var confirmingWorkspaceTrust = false
     @State private var includesResource = false
     @State private var resourceSource: ComposerResourceInvocation.Source = .skill
@@ -215,9 +323,17 @@ struct AutomationFormView: View {
             await loadExisting()
         }
         .tronManagedSheet(isPresented: $showingWorkspaceBrowser, identity: "automation.workspace-browser") {
-            WorkspaceBrowser(shortcuts: recentWorkspaces, initialPath: workspacePath) { value in
+            WorkspaceBrowser(shortcuts: recentWorkspaces, initialPath: workspaceBrowserInitialPath) { value in
                 workspacePath = value
                 workspaceTrustInspection = nil
+            }
+        }
+        .tronManagedSheet(isPresented: $showingSessionPicker, identity: "automation.session-picker.\(selectedProfileID)") {
+            let profileID = selectedProfileID
+            AutomationSessionPickerSheet(sessions: sessions, selectedID: targetSessionID) { session in
+                guard selectedProfileID == profileID, selectedEndpoint != nil,
+                      sessions.contains(where: { $0.id == session.id }) else { return }
+                targetSessionID = session.id
             }
         }
         .tronManagedSheet(isPresented: $confirmingWorkspaceTrust, identity: "automation.workspace-trust") {
@@ -369,27 +485,32 @@ struct AutomationFormView: View {
     }
 
     private var targetSection: some View {
-        section(
-            actionKind == .notification ? "Associated Session" : "Target",
-            detail: actionKind == .notification
-                ? "Notifications are associated with an existing persisted session."
-                : "Choose an existing session or create a new ordinary session for every run."
-        ) {
-            VStack(spacing: 0) {
-                if actionKind == .sessionPrompt {
-                    TronSegmentedControl(
-                        options: AutomationTargetMode.allCases.map { ($0.title, $0) },
-                        selection: $targetMode,
-                        accent: .tronAutomation
-                    )
-                    .padding(14)
-                    TronSettingsDivider(accent: .tronAutomation)
+        VStack(alignment: .leading, spacing: TronSpacing.sm) {
+            section(
+                actionKind == .notification ? "Associated Session" : "Target",
+                detail: actionKind == .notification
+                    ? "Notifications are associated with an existing persisted session."
+                    : "Choose an existing session or create a new ordinary session for every run."
+            ) {
+                VStack(spacing: 0) {
+                    if actionKind == .sessionPrompt {
+                        TronSegmentedControl(
+                            options: AutomationTargetMode.allCases.map { ($0.title, $0) },
+                            selection: $targetMode,
+                            accent: .tronAutomation
+                        )
+                        .padding(14)
+                        TronSettingsDivider(accent: .tronAutomation)
+                    }
+                    if targetMode == .existingSession || actionKind == .notification {
+                        existingSessionTarget
+                    } else {
+                        workspaceTarget
+                    }
                 }
-                if targetMode == .existingSession || actionKind == .notification {
-                    existingSessionTarget
-                } else {
-                    workspaceTarget
-                }
+            }
+            if targetMode == .workspace && actionKind == .sessionPrompt {
+                TronSettingsCaption("Every occurrence creates and retains a new ordinary session in the selected workspace.")
             }
         }
     }
@@ -404,15 +525,13 @@ struct AutomationFormView: View {
                     accent: .tronAutomation
                 )
             } else {
-                TronSelectionRow(
-                    icon: "bubble.left",
-                    title: "Session",
-                    value: selectedSessionTitle,
-                    accent: .tronAutomation
-                ) {
-                    ForEach(sessions) { session in
-                        Button(session.title) { targetSessionID = session.id }
+                TronSettingsRow(icon: "bubble.left", title: "Session", accent: .tronAutomation) {
+                    Button { showingSessionPicker = true } label: {
+                        TronInlineActionLabel(selectedSessionTitle, accent: .tronAutomation)
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Choose session")
+                    .accessibilityValue(selectedSessionTitle)
                 }
             }
         }
@@ -436,12 +555,6 @@ struct AutomationFormView: View {
                 }
                 .buttonStyle(.plain)
             }
-            TronSettingsRow(
-                icon: "plus.bubble",
-                title: "New session per run",
-                subtitle: "Every occurrence creates and retains a new ordinary session.",
-                accent: .tronAutomation
-            )
             if let inspection = workspaceTrustInspection,
                NewSessionTrustPolicy.requiresDecision(inspection) {
                 TronSettingsDivider(accent: .tronAutomation)
@@ -547,8 +660,13 @@ struct AutomationFormView: View {
                     subtitle: "\(deadlineMinutes) minutes",
                     accent: .tronAutomation
                 ) {
-                    Stepper("Deadline", value: $deadlineMinutes, in: 5...1_440, step: 5)
-                        .labelsHidden()
+                    AutomationStepperControl(
+                        title: "Deadline",
+                        value: $deadlineMinutes,
+                        range: 5...1_440,
+                        step: 5,
+                        accent: .tronAutomation
+                    )
                 }
             }
         }
@@ -655,6 +773,10 @@ struct AutomationFormView: View {
             }
         }
         .padding(14)
+    }
+
+    private var workspaceBrowserInitialPath: String? {
+        AutomationWorkspacePathPolicy.initialPath(selectedPath: workspacePath)
     }
 
     private var selectedSessionTitle: String {

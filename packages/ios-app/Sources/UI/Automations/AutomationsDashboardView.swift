@@ -258,6 +258,7 @@ struct AutomationsDashboardView: View {
                     }
             }
             .presentationDetents([.medium])
+            .presentationDragIndicator(.hidden)
             .tronSettingsVisualTheme(accent: .tronAutomation)
         }
     }
@@ -416,40 +417,46 @@ struct AutomationsDashboardView: View {
     }
 
     private func automationCard(_ profile: AutomationDashboardProfile, _ summary: GatewayAutomationSummary) -> some View {
-        Button { selected = AutomationSummarySelection(profileID: profile.id, summary: summary) } label: {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: summary.typedActionKind?.icon ?? "clock").foregroundStyle(Color.tronAutomation).frame(width: 24)
+        let status = summary.currentRun?.state.label ?? summary.activation.label
+        let timing = summary.lastRun.map { "Last \(AutomationDateFormatting.relative($0.terminalAt ?? $0.scheduledFor))" }
+            ?? summary.nextOccurrenceAt.map { "Next \(AutomationDateFormatting.relative($0))" }
+            ?? "No run yet"
+        return Button { selected = AutomationSummarySelection(profileID: profile.id, summary: summary) } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Image(systemName: summary.typedActionKind?.icon ?? "clock")
+                    .foregroundStyle(Color.tronAutomation)
+                    .frame(width: 24)
                 VStack(alignment: .leading, spacing: 5) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(summary.name).font(TronTypography.body).foregroundStyle(Color.tronTextPrimary).lineLimit(2)
-                        Spacer(minLength: TronSpacing.md)
-                        AutomationStatusBadge(activation: summary.activation, run: summary.currentRun?.state)
-                    }
-                    Text(summary.trigger.summary)
-                        .font(TronTypography.bodySM)
-                        .foregroundStyle(Color.tronTextSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("\(summary.typedActionKind?.label ?? summary.actionKind) · \(targetLabel(profileID: profile.id, target: summary.target))")
-                        .font(TronTypography.bodySM)
-                        .foregroundStyle(Color.tronTextSecondary)
+                    Text(summary.name)
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
+                        .foregroundStyle(Color.tronTextPrimary)
                         .lineLimit(2)
-                    if let next = summary.nextOccurrenceAt {
-                        Text("Next: \(AutomationDateFormatting.date(next))")
-                            .font(TronTypography.bodySM)
-                            .foregroundStyle(Color.tronAutomation)
-                    } else if let last = summary.lastRun {
-                        Text("Last: \(last.state.label) · \(AutomationDateFormatting.date(last.terminalAt ?? last.scheduledFor))")
-                            .font(TronTypography.bodySM)
-                            .foregroundStyle(last.state == .failed || last.state == .outcomeUnknown ? Color.tronError : Color.tronTextMuted)
-                    }
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text([status, summary.trigger.summary, timing].joined(separator: " · "))
+                        .font(TronTypography.bodySM)
+                        .foregroundStyle(summary.isAttentionRequired ? Color.tronError : Color.tronTextSecondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                     if let reason = summary.blockedReason {
-                        Text(reason).font(TronTypography.bodySM).foregroundStyle(Color.tronError).lineLimit(2)
+                        Text(reason)
+                            .font(TronTypography.caption)
+                            .foregroundStyle(Color.tronError)
+                            .lineLimit(2)
                     }
                 }
                 Spacer(minLength: 0)
-            }.padding(TronSpacing.lg)
-        }.buttonStyle(.plain).tronGlassSurface(accent: summary.isAttentionRequired ? .tronError : .tronAutomation, cornerRadius: 14, tintOpacity: summary.isAttentionRequired ? 0.13 : 0.08, interactive: true)
-            .accessibilityLabel(AutomationStatusPresentation.accessible(summary))
+            }
+            .padding(.horizontal, TronSpacing.lg)
+            .padding(.vertical, 13)
+        }
+        .buttonStyle(.plain)
+        .tronGlassSurface(
+            accent: summary.isAttentionRequired ? .tronError : .tronAutomation,
+            cornerRadius: 12,
+            tintOpacity: 0.14,
+            interactive: true
+        )
+        .accessibilityLabel(AutomationStatusPresentation.accessible(summary))
     }
 
     private var attentionBanner: some View {

@@ -42,6 +42,19 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testAutomationSessionPickerUsesLargeSelectionSheet() async throws {
+        let sessions = [
+            SessionSummary(id: "session-a", name: "Daily Review", cwd: "/workspace/tron", parentSessionId: nil, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-02T00:00:00Z", messageCount: 4, firstMessage: "Review", phase: .idle),
+            SessionSummary(id: "session-b", name: "Release Notes", cwd: "/workspace/docs", parentSessionId: nil, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-02T00:00:00Z", messageCount: 2, firstMessage: "Notes", phase: .idle)
+        ]
+        try await withSheet(AutomationSessionPickerSheet(sessions: sessions, selectedID: "session-a", onSelect: { _ in })) { controller in
+            XCTAssertEqual(controller.sheetPresentationController?.detents.count, 1)
+            XCTAssertEqual(controller.sheetPresentationController?.detents.first?.identifier, .large)
+            XCTAssertNotNil(self.views(of: UITextField.self, in: controller.view).first)
+            self.capture(controller, name: "automation-session-picker")
+        }
+    }
+
     func testAutomationFormUsesCompactInlineSettingsChrome() async throws {
         try await withModel { model in
             for variant in [
