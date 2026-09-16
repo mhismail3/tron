@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { chmod, copyFile, lstat, mkdir, opendir, readFile, readlink, realpath, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, lchmod, lstat, mkdir, opendir, readFile, readlink, realpath, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { preflightAgentHome } from "./agent-home-preflight.js";
@@ -315,6 +315,11 @@ async function copyEntry(sourceRoot: string, stagingRoot: string, entry: AgentHo
     return;
   }
   await symlink(entry.target!, destination);
+  // macOS assigns link permissions from the caller's umask. Restore the link
+  // itself, never its target; chmod would follow it and corrupt target modes.
+  if (modeOf((await lstat(destination)).mode) !== entry.mode) {
+    await lchmod(destination, entry.mode);
+  }
 }
 
 function manifestMatches(expected: AgentHomeManifest, actual: AgentHomeManifest): boolean {

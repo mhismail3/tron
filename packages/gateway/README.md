@@ -215,7 +215,9 @@ startup. It requires both
 preflight, refuses every decision or
 collision, and copies only a synthetic or explicitly chosen source into a new
 staging root. It preserves regular-file bytes, modes, and relative internal
-symlinks. Special files, absolute/dangling/escaping links, source changes during
+symlinks. On macOS it restores symlink permissions with `lchmod`, independently
+of the operator's umask and without changing link-target permissions; the focused
+migration tests cover differing source/creation modes. Special files, absolute/dangling/escaping links, source changes during
 the copy, extra staged entries, malformed markers, and bounded traversal failures
 abort without deleting the partial staging tree. The sibling marker is `0600`
 and contains only bounded paths, an operation ID, phase, count, and manifest

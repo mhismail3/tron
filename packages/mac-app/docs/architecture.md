@@ -211,10 +211,17 @@ LaunchAgent uses Boolean `KeepAlive=true`, `RunAtLoad=true`, and a throttle inte
 pause and uninstall therefore unregister the job before intentional stoppage. Managed
 LaunchAgents advertise `TRON_GATEWAY_SUPERVISED=1`; planned restart and handled
 supervised signals exit 75 so direct foreground restart controls still fail closed.
-Quitting `Tron.app` does not stop accepted work. `ServerStatusPoller` probes the Tron
-Gateway protocol and combines health with registration state. Menu controls can
-pause, resume, restart, inspect bounded persisted Gateway logs, show a fresh
-pairing invitation, and uninstall. Log and feedback capture resolve a validated
+Quitting `Tron.app` does not stop accepted work. Quit and async command/uninstall
+exits request AppKit termination through `ApplicationTermination` on the main
+run loop, outside the main dispatch queue. AppKit's `.terminateLater` nested loop
+can otherwise starve main-actor cleanup/reply tasks; `DispatchQueue.main.async`
+is not a fix because its callback still occupies that queue. The isolated real
+AppKit subprocess in `MenuBarTerminationTests` verifies successful termination,
+cancel/retry, and watchdog failures for direct-task and dispatch-queue negative
+controls without starting Tron services. `ServerStatusPoller` probes the Tron Gateway protocol and combines
+health with registration state. Menu controls can pause, resume, restart,
+inspect bounded persisted Gateway logs, show a fresh pairing invitation, and
+uninstall. Log and feedback capture resolve a validated
 Tailscale host from live state or the bounded owner-only Tailscale cache and pass
 it explicitly to the Gateway socket; absent host data fails unavailable rather
 than falling back to loopback. The cache is an exact-schema version-1 regular

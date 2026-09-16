@@ -263,7 +263,9 @@ final class MenuBarActionHandler {
         )
         switch outcome {
         case .ok, .alreadyLoaded:
-            NSApp.terminate(nil)
+            // Uninstall is reached through the async action handler just like
+            // Quit; defer termination until its AppKit event has returned.
+            ApplicationTermination.request()
         case .requiresApproval(let message), .launchdRefused(let message), .unknown(let message):
             if case .requiresApproval = outcome {
                 LoginItemsSettingsOpener.open()

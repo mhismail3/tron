@@ -299,7 +299,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             var exitCode: Int32 = 1
             defer {
                 if exitCode == 0 {
-                    NSApp.terminate(nil)
+                    ApplicationTermination.request()
                 } else {
                     Darwin.exit(exitCode)
                 }
@@ -328,7 +328,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func uninstallAndQuit() {
         NSApp.setActivationPolicy(.accessory)
         Task { @MainActor in
-            defer { NSApp.terminate(nil) }
+            defer { ApplicationTermination.request() }
             let outcome = await TronUninstaller.unregisterAndClean(setup: EnvironmentSetup.live)
             switch outcome {
             case .ok, .alreadyLoaded:

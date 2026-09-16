@@ -274,7 +274,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             normalizeMenuItem(item)
             return item
         case .quit(let title):
-            let wrapper = ActionWrapper { NSApp.terminate(nil) }
+            // Use the run-loop boundary shared by async application exits.
+            let wrapper = ActionWrapper { ApplicationTermination.request() }
             let item = NSMenuItem(title: title, action: #selector(ActionWrapper.invoke), keyEquivalent: "")
             item.target = wrapper
             item.representedObject = wrapper // keep alive

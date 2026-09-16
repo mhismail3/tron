@@ -1,4 +1,4 @@
-import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, lchmod, lstat, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -45,6 +45,25 @@ describe("agent home migration staging", () => {
     const verified = await verifyStagedAgentHome(staging);
     expect(verified.changesMade).toBe(false);
     expect(verified.stagedManifest.digest).toBe(staged.sourceManifest.digest);
+  });
+
+  it.skipIf(process.platform !== "darwin")("preserves symlink modes independently of the creation umask without chmodding targets", async () => {
+    const root = await fixture("tron-agent-migration-link-mode-");
+    const source = join(root, "source");
+    const staging = join(root, "staging");
+    await mkdir(source);
+    await writeFile(join(source, "target"), "unchanged", { mode: 0o600 });
+    const link = join(source, "link");
+    await symlink("target", link);
+    // Force a mismatch with the mode assigned by symlink() under this process's
+    // umask, without changing process-global umask in a Vitest worker.
+    const mode = ((await lstat(link)).mode & 0o777) ^ 0o040;
+    await lchmod(link, mode);
+    await stageAgentHome({ source, destination: join(root, "destination"), staging, acknowledgeQuiescence: true, acknowledgeBackup: true });
+    expect((await lstat(join(staging, "link"))).mode & 0o777).toBe(mode);
+    expect((await lstat(join(staging, "target"))).mode & 0o777).toBe(0o600);
+    expect((await lstat(join(source, "target"))).mode & 0o777).toBe(0o600);
+    await expect(verifyStagedAgentHome(staging)).resolves.toMatchObject({ changesMade: false });
   });
 
   it("leaves an external browser config untouched while staging the agent home", async () => {
