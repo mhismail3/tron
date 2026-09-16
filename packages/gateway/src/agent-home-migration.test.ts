@@ -6,6 +6,7 @@ import {
   createAgentHomeManifest,
   cleanupStagedAgentHome,
   stageAgentHome,
+  validateMigrationStageArguments,
   verifyStagedAgentHome,
 } from "./agent-home-migration.js";
 
@@ -46,6 +47,23 @@ describe("agent home migration staging", () => {
     expect(verified.stagedManifest.digest).toBe(staged.sourceManifest.digest);
   });
 
+  it("leaves an external browser config untouched while staging the agent home", async () => {
+    const root = await fixture("tron-agent-migration-browser-external-");
+    const source = join(root, "source");
+    const browserConfig = join(root, "browser", "config.json");
+    await mkdir(source);
+    await mkdir(join(root, "browser"));
+    const browserContents = JSON.stringify({ browser: { defaultProfile: { name: "default" } } }) + "\n";
+    await writeFile(browserConfig, browserContents, { mode: 0o600 });
+    const staged = await stageAgentHome({ source, destination: join(root, "destination"), staging: join(root, "staging"), acknowledgeQuiescence: true, acknowledgeBackup: true });
+    expect(await readFile(browserConfig, "utf8")).toBe(browserContents);
+    expect(staged.stagedManifest.entries.some(entry => entry.path.includes("browser"))).toBe(false);
+  });
+
+  it("rejects the removed browser-config-source migration option", () => {
+    expect(() => validateMigrationStageArguments(["--browser-config-source", "/tmp/browser.json"])).toThrow(/was removed/);
+  });
+
   it("refuses staging without both operator acknowledgements and never creates roots", async () => {
     const root = await fixture("tron-agent-migration-ack-");
     const source = join(root, "source");
@@ -56,21 +74,6 @@ describe("agent home migration staging", () => {
     await expect(lstat(staging)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("stages and verifies the legacy browser global config as a separate exact-byte component", async () => {
-    const root = await fixture("tron-agent-migration-browser-");
-    const source = join(root, "source");
-    const destination = join(root, "destination");
-    const staging = join(root, "staging");
-    const legacyBrowserConfig = join(root, "legacy", "config.json");
-    await mkdir(source);
-    await mkdir(join(root, "legacy"));
-    await writeFile(legacyBrowserConfig, JSON.stringify({ version: 1, webSearch: { braveApiKey: "!op read secret" } }) + "\n", { mode: 0o600 });
-    const staged = await stageAgentHome({ source, destination, staging, browserConfigSource: legacyBrowserConfig, acknowledgeQuiescence: true, acknowledgeBackup: true });
-    expect(staged.browserConfig?.relativePath).toBe("config/pi-agent-browser-native/config.json");
-    expect(await readFile(join(staging, "config/pi-agent-browser-native/config.json"), "utf8")).toBe(await readFile(legacyBrowserConfig, "utf8"));
-    const verified = await verifyStagedAgentHome(staging);
-    expect(verified.browserConfig?.digest).toBe(staged.browserConfig?.digest);
-  });
 
   it("removes only the exact legacy Ask User package in staged settings with an accounted manifest transform", async () => {
     const root = await fixture("tron-agent-migration-legacy-ask-user-");
@@ -100,20 +103,6 @@ describe("agent home migration staging", () => {
     await expect(stageAgentHome({ source, destination: join(root, "destination"), staging: join(root, "staging"), removeLegacyAskUser: true, acknowledgeQuiescence: true, acknowledgeBackup: true })).rejects.toThrow(/not configured/);
   });
 
-  it("rejects malformed or publicly accessible browser config before staging", async () => {
-    const root = await fixture("tron-agent-migration-browser-safety-");
-    const source = join(root, "source");
-    const destination = join(root, "destination");
-    const staging = join(root, "staging");
-    const browserConfig = join(root, "browser.json");
-    await mkdir(source);
-    await writeFile(browserConfig, "not-json\n", { mode: 0o600 });
-    await expect(stageAgentHome({ source, destination, staging, browserConfigSource: browserConfig, acknowledgeQuiescence: true, acknowledgeBackup: true })).rejects.toThrow(/browser global config is malformed/);
-    await writeFile(browserConfig, "{}\n");
-    await chmod(browserConfig, 0o644);
-    await expect(stageAgentHome({ source, destination, staging, browserConfigSource: browserConfig, acknowledgeQuiescence: true, acknowledgeBackup: true })).rejects.toThrow(/must not be group\/world accessible/);
-    await expect(lstat(staging)).rejects.toMatchObject({ code: "ENOENT" });
-  });
 
   it("refuses destination collisions and unsafe special links before staging", async () => {
     const root = await fixture("tron-agent-migration-safety-");

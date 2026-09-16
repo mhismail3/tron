@@ -206,36 +206,11 @@ metadata continuity, complete package/resource inventory, and extension/provider
 store ownership. Offline backup, staging, publication, rollback, and manual
 Gateway/Mac activation remain future operator-run steps. Project `.pi`/`.agents`,
 Keychain stores, and Gateway state are not relocated by this preflight.
-The inspected pinned extension seams are concrete: `pi-goal` stores state as
-Pi session custom entries and its install marker under the resolved agentDir;
-`pi-web-access` uses `PI_CODING_AGENT_DIR/web-search.json`, so Gateway and
-inherited children keep that config/cache under the resolved agentDir (it falls
-back to `$XDG_CONFIG_HOME/pi/web-search.json` or `~/.pi/web-search.json` only
-when run outside Gateway); `pi-subagents` keeps its config under the resolved agentDir extension
-namespace and its ephemeral run roots under OS temp/project-owned roots; and
-`pi-agent-browser-native` supports an explicit absolute
-`PI_AGENT_BROWSER_GLOBAL_CONFIG` path for its global layer, while retaining
-`PI_AGENT_BROWSER_CONFIG` as the higher-priority additional override layer.
-Tron sets the former to
-`<agentDir>/config/pi-agent-browser-native/config.json`, so its global browser
-config is part of the selected agent authority and is inherited by child
-processes. Project config remains `.pi/config/...`; browser profiles, cookie
-stores, and Keychain credentials remain OS/browser-owned and are not copied.
-The old conventional global file must be supplied to `agent-home-migrate stage`
-with `--browser-config-source`; staging validates it as a private regular JSON
-file, copies exact bytes/mode into the staged agent namespace, and verifies its
-separate digest. Missing, malformed, ambiguous, or changed files block staging;
-no secret values or command sources are executed. Cutover also requires a
-published `pi-agent-browser-native` release containing this path contract;
-the currently installed package must not be treated as compatible merely
-because Gateway exports the environment variable.
-
+The inspected pinned extension seams are concrete: `pi-goal` stores state as Pi session custom entries and its install marker under the resolved agentDir; `pi-web-access` uses `PI_CODING_AGENT_DIR/web-search.json`, so Gateway and inherited children keep that config/cache under the resolved agentDir (it falls back to `$XDG_CONFIG_HOME/pi/web-search.json` or `~/.pi/web-search.json` only when run outside Gateway); and `pi-subagents` keeps its config under the resolved agentDir extension namespace and its ephemeral run roots under OS temp/project-owned roots. `pi-agent-browser-native` remains on its upstream global configuration path (`~/.pi/config/pi-agent-browser-native/config.json` by default), with project configuration and explicit `PI_AGENT_BROWSER_CONFIG` semantics unchanged. Browser configuration relocation is deferred until upstream provides a supported global-path contract; this migration neither copies nor rewrites it. Browser profiles, cookies, and Keychain credentials remain OS/browser-owned.
 ### Agent-home staging and manual cutover
 
 `agent-home-migrate stage` is an explicit operator command, not part of Gateway
-startup. Pass `--browser-config-source ~/.pi/config/pi-agent-browser-native/config.json`
-when that legacy file exists; its destination is fixed under the staged
-`config/pi-agent-browser-native/config.json`. It requires both
+startup. It requires both
 `--acknowledge-quiescence` and `--acknowledge-backup`, reruns the read-only
 preflight, refuses every decision or
 collision, and copies only a synthetic or explicitly chosen source into a new
@@ -260,9 +235,8 @@ scripts/tron agent-home-migrate verify --staging "$HOME/.tron/.agent.migrate-<id
 ```
 
 The preparation tooling does not implement publication. The complete operator
-sequence, including the legacy Ask User staged-settings transform, browser
-artifact prerequisite, app/helper drain, backup, activation, diagnostics, and
-rollback is in [`packages/mac-app/docs/agent-home-cutover.md`](../mac-app/docs/agent-home-cutover.md).
+sequence, including the legacy Ask User staged-settings transform, app/helper drain,
+backup, activation, diagnostics, and rollback is in [`packages/mac-app/docs/agent-home-cutover.md`](../mac-app/docs/agent-home-cutover.md).
 The user/maintainer must inspect the verify output, ensure the destination is still absent, then
 perform one manual same-filesystem rename (or a separately verified
 cross-filesystem copy with no atomicity claim), update the selected Mac/Gateway
