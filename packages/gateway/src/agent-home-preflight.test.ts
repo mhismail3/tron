@@ -63,6 +63,72 @@ describe("agent home migration preflight", () => {
     expect(await readFile(join(source, "settings.json"), "utf8")).toContain("packages");
   });
 
+  it("checks discovered agent definition paths using Pi frontmatter semantics", async () => {
+    const root = await fixture("tron-agent-preflight-agents-");
+    const source = join(root, "source");
+    const destination = join(root, "new-agent");
+    const agents = join(source, "agents");
+    await mkdir(join(agents, "extensions"), { recursive: true });
+    await writeFile(join(agents, "extensions", "browser.js"), "export default {};\n");
+    await writeFile(join(agents, "worker.md"), `---\nname: worker\ndescription: child\ntools: read\nsubagentOnlyExtensions: ./extensions/browser.js\n---\nworker\n`);
+
+    const result = await preflightAgentHome({ source, destination });
+
+    expect(result.status).toBe("assessment-only");
+    expect(result.externalConfigurationReferences).toBe(0);
+    expect(codes(result)).not.toContain("missing-configured-reference");
+  });
+
+  it("blocks stale or missing executable agent references without exposing their values", async () => {
+    const root = await fixture("tron-agent-preflight-agent-paths-");
+    const source = join(root, "source");
+    const destination = join(root, "new-agent");
+    const stale = join(source, "old-browser.js");
+    await mkdir(join(source, "agents"), { recursive: true });
+    await writeFile(join(source, "agents", "worker.md"), `---\nname: worker\ndescription: child\nsubagentOnlyExtensions: ${stale}, ./missing.js\nrunner:\n  type: external-cli\n  command: ${join(source, "missing-cli")}\n---\nworker\n`);
+
+    const result = await preflightAgentHome({ source, destination });
+    const serialized = JSON.stringify(result);
+
+    expect(result.status).toBe("blocked");
+    expect(result.externalConfigurationReferences).toBe(3);
+    expect(codes(result)).toEqual(expect.arrayContaining(["relocation-sensitive-reference", "missing-configured-reference"]));
+    expect(serialized).not.toContain("old-browser.js");
+    expect(serialized).not.toContain("missing.js");
+  });
+
+  it("checks subagent settings overrides without treating ordinary project text as configuration", async () => {
+    const root = await fixture("tron-agent-preflight-subagent-settings-");
+    const source = join(root, "source");
+    const destination = join(root, "new-agent");
+    await mkdir(join(source, "extensions", "subagent"), { recursive: true });
+    await writeFile(join(source, "settings.json"), JSON.stringify({
+      subagents: { defaultExtensions: [join(source, "old-default.js")], agentOverrides: { worker: { subagentOnlyExtensions: ["/private/old-worker.js"] } } },
+      systemPrompt: "the string .pi is historical text",
+    }));
+    await writeFile(join(source, "extensions", "subagent", "config.json"), JSON.stringify({ defaultSessionDir: join(source, "old-sessions") }));
+
+    const result = await preflightAgentHome({ source, destination });
+
+    expect(result.status).toBe("decision-required");
+    expect(result.externalConfigurationReferences).toBe(3);
+    expect(codes(result).filter(code => code === "relocation-sensitive-reference")).toHaveLength(2);
+  });
+
+  it("checks package-declared agent directories with their package-relative base", async () => {
+    const root = await fixture("tron-agent-preflight-package-agents-");
+    const source = join(root, "source");
+    const destination = join(root, "new-agent");
+    await mkdir(join(source, "npm", "node_modules", "example", "definitions"), { recursive: true });
+    await writeFile(join(source, "npm", "node_modules", "example", "package.json"), JSON.stringify({ pi: { subagents: { agents: ["./definitions"] } } }));
+    await writeFile(join(source, "npm", "node_modules", "example", "definitions", "worker.md"), "---\nname: worker\ndescription: child\nsubagentOnlyExtensions: ./missing.js\n---\nworker\n");
+
+    const result = await preflightAgentHome({ source, destination });
+
+    expect(result.status).toBe("blocked");
+    expect(codes(result)).toContain("missing-configured-reference");
+  });
+
   it("keeps registry and VCS package specs portable when their installed trees move with the home", async () => {
     const root = await fixture("tron-agent-preflight-portable-packages-");
     const source = join(root, "source");
