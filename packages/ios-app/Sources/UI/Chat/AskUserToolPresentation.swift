@@ -262,11 +262,22 @@ struct AskUserCompletedFormView: View {
     }
 
     private var status: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                Text(presentation.cancelled ? "No answers submitted" : "Review answers")
+        HStack(spacing: 10) {
+                if presentation.cancelled {
+                    ViewThatFits(in: .horizontal) {
+                        Label("Cancelled — no answers submitted", systemImage: "xmark.circle")
+                            .fixedSize()
+                        Label("Cancelled", systemImage: "xmark.circle")
+                            .fixedSize()
+                    }
                     .font(TronTypography.bodySM)
-                    .foregroundStyle(presentation.cancelled ? Color.tronAmber : Color.tronTextSecondary)
+                    .foregroundStyle(Color.tronAmber)
+                    .accessibilityLabel("Cancelled — no answers submitted")
+                } else {
+                    Text("Review answers")
+                        .font(TronTypography.bodySM)
+                        .foregroundStyle(Color.tronTextSecondary)
+                }
                 Spacer(minLength: 8)
                 if presentation.form.questions.count > 1 {
                     HStack(spacing: 5) {
@@ -281,12 +292,6 @@ struct AskUserCompletedFormView: View {
                 Text("\(currentQuestionIndex + 1)/\(presentation.form.questions.count)")
                     .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .semibold))
                     .foregroundStyle(Color.tronEmerald)
-            }
-            if presentation.cancelled {
-                Label("This question was cancelled.", systemImage: "xmark.circle")
-                    .font(TronTypography.bodySM)
-                    .foregroundStyle(Color.tronAmber)
-            }
         }
         .padding(.horizontal, 20)
         .padding(.top, 16)

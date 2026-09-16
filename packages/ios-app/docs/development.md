@@ -934,7 +934,15 @@ scripts/tron-ios-test run --only-testing TronMobileUITests/TronSmokeUITests
 The fixture's socket is test-only and records the real `extension.respond` RPC;
 no Gateway or provider is contacted. The test taps the rendered form controls,
 checks allow-cancel versus close behavior, restores the ID-keyed draft, and
-checks the completed read-only form. `HOSTED_TEST` is absent from Release
+checks the completed read-only form. The styled active-form case also checks that
+Close and Cancel occupy separate toolbar controls, selection guidance remains in
+the fixed top status row, and selection still gates submission. Cancelled history
+uses one compact status row alongside page progress, with a shorter visible label
+when space is limited and the full cancellation message retained for accessibility. Context and
+option descriptions use the existing body-small font plus 0.3 points; the send
+control retains the title's amber accent, including its disabled state. Its retained
+active-form screenshots support visual inspection of these details.
+`HOSTED_TEST` is absent from Release
 configuration and the fixture source is guarded accordingly.
 
 The hosted real-Gateway boundary test owns one narrow integration contract: the

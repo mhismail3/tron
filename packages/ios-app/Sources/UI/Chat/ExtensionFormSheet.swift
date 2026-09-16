@@ -65,21 +65,24 @@ struct ExtensionFormSheet: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    HStack(spacing: 12) {
-                        Button(action: close) {
-                            Image(systemName: "xmark")
-                                .font(TronTypography.buttonSM)
-                        }
-                        .tronToolbarAction(accent: .tronTextMuted)
-                        .disabled(submitting)
-                        .accessibilityLabel("Close form and keep answers")
-                        if form?.allowCancel == true {
-                            Button("Cancel", action: cancel)
-                                .font(TronTypography.bodySM)
-                                .foregroundStyle(Color.tronError)
-                                .disabled(submitting)
-                                .accessibilityLabel("Cancel form")
-                        }
+                    Button(action: close) {
+                        Image(systemName: "xmark")
+                            .font(TronTypography.buttonSM)
+                    }
+                    .tronToolbarAction(accent: .tronTextMuted)
+                    .disabled(submitting)
+                    .accessibilityLabel("Close form and keep answers")
+                }
+                if form?.allowCancel == true {
+                    // Keep draft dismissal and domain cancellation in distinct
+                    // native toolbar surfaces rather than one shared capsule.
+                    ToolbarSpacer(.fixed, placement: .topBarLeading)
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Cancel", action: cancel)
+                            .font(TronTypography.buttonSM)
+                            .tronToolbarAction(accent: .tronError)
+                            .disabled(submitting)
+                            .accessibilityLabel("Cancel form")
                     }
                 }
                 ToolbarItem(placement: .principal) {
@@ -97,7 +100,8 @@ struct ExtensionFormSheet: View {
                                     .font(TronTypography.buttonSM)
                             }
                         }
-                        .tronToolbarAction(accent: canSubmit ? .tronAmber : .tronTextMuted)
+                        .tronToolbarAction(accent: .tronAmber)
+                        .tint(Color.tronAmber)
                         .disabled(!canSubmit)
                         .accessibilityLabel("Submit all answers")
                     }
@@ -165,7 +169,7 @@ struct ExtensionFormSheet: View {
         }
         .animation(.easeInOut(duration: 0.18), value: currentQuestionIndex)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Question \(currentQuestionIndex + 1) of \(form.questions.count)")
+        .accessibilityLabel("\(currentQuestion?.multiSelect == true ? "Select all that apply" : "Select one"). Question \(currentQuestionIndex + 1) of \(form.questions.count)")
     }
 
     private func questionPage(_ question: ExtensionFormQuestion, index: Int) -> some View {
@@ -173,7 +177,7 @@ struct ExtensionFormSheet: View {
             LazyVStack(alignment: .leading, spacing: 16) {
                 if let context = question.context, !context.isEmpty {
                     Text(context)
-                        .font(TronTypography.bodySM)
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM + 0.3))
                         .foregroundStyle(Color.tronTextSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -222,7 +226,7 @@ struct ExtensionFormSheet: View {
                         .foregroundStyle(Color.tronTextPrimary)
                     if let description = option.description, !description.isEmpty {
                         Text(description)
-                            .font(TronTypography.bodySM)
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM + 0.3))
                             .foregroundStyle(Color.tronTextSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }

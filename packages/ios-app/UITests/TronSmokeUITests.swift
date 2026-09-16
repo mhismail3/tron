@@ -109,7 +109,7 @@ final class TronSmokeUITests: XCTestCase {
 
     @MainActor
     func testAskUserAllowCancelCancelSendsExactlyOneScopedCancellation() {
-        let app = launchAskUser()
+        let app = launchAskUser(multiple: true)
         waitForAskUserForm(in: app)
         XCTAssertTrue(app.buttons["Cancel form"].exists)
         XCTAssertTrue(app.buttons["Close form and keep answers"].exists)
@@ -117,6 +117,14 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Mutation count: 1"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.staticTexts["extension.respond cancelled=true scope=ask-user-interaction/hosted-ask-user-epoch/1"].exists)
         XCTAssertFalse(app.staticTexts["Mutation count: 2"].exists)
+        let cancelled = app.staticTexts["Cancelled — no answers submitted"].firstMatch
+        XCTAssertTrue(cancelled.waitForExistence(timeout: 3))
+        XCTAssertFalse(app.staticTexts["This question was cancelled."].exists)
+        XCTAssertFalse(app.staticTexts["No answers submitted"].exists)
+        let progress = app.staticTexts["1/2"]
+        XCTAssertTrue(progress.exists)
+        XCTAssertLessThan(abs(cancelled.frame.midY - progress.frame.midY), 8)
+        keepScreenshot(named: "ask-user-cancelled-single-status-row")
     }
 
     @MainActor
@@ -176,10 +184,35 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
-    private func launchAskUser(noCancel: Bool = false) -> XCUIApplication {
+    func testAskUserInstructionAndSeparateToolbarLayout() {
+        let app = launchAskUser(styled: true)
+        let question = app.staticTexts["Which environments should receive the change?"]
+        XCTAssertTrue(question.waitForExistence(timeout: 5))
+        let instruction = app.staticTexts["Select one. Question 1 of 1"]
+        let option = app.buttons["Staging, A pre-release environment for validation."]
+        XCTAssertTrue(instruction.exists)
+        XCTAssertTrue(option.exists)
+        XCTAssertLessThanOrEqual(instruction.frame.maxY, question.frame.minY)
+        XCTAssertLessThanOrEqual(question.frame.maxY, option.frame.minY)
+        let close = app.buttons["Close form and keep answers"]
+        let cancel = app.buttons["Cancel form"]
+        XCTAssertTrue(close.isHittable)
+        XCTAssertTrue(cancel.isHittable)
+        XCTAssertLessThan(close.frame.maxX, cancel.frame.minX)
+        XCTAssertFalse(app.buttons["Submit all answers"].isEnabled)
+        keepScreenshot(named: "ask-user-styled-active-disabled")
+        option.tap()
+        XCTAssertTrue(app.buttons["Submit all answers"].isEnabled)
+        keepScreenshot(named: "ask-user-styled-active-selected")
+    }
+
+    @MainActor
+    private func launchAskUser(noCancel: Bool = false, styled: Bool = false, multiple: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-tron-ask-user-fixture"]
         if noCancel { app.launchArguments.append("-tron-ask-user-no-cancel") }
+        if styled { app.launchArguments.append("-tron-ask-user-styled") }
+        if multiple { app.launchArguments.append("-tron-ask-user-multiple") }
         app.launch()
         return app
     }

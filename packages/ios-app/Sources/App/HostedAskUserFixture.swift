@@ -163,8 +163,9 @@ private struct HostedAskUserFixture {
         let receipt = HostedAskUserFixtureReceipt()
         self.receipt = receipt
         let allowCancel = !ProcessInfo.processInfo.arguments.contains("-tron-ask-user-no-cancel")
-        let optionA = ExtensionFormOption(id: "environment-a", label: "Staging", description: nil)
-        let optionB = ExtensionFormOption(id: "environment-b", label: "Production", description: nil)
+        let styled = ProcessInfo.processInfo.arguments.contains("-tron-ask-user-styled")
+        let optionA = ExtensionFormOption(id: "environment-a", label: "Staging", description: styled ? "A pre-release environment for validation." : nil)
+        let optionB = ExtensionFormOption(id: "environment-b", label: "Production", description: styled ? "The live environment used by customers." : nil)
         let form = ExtensionFormDescriptor(
             version: 1,
             title: "Choose deployment target",
@@ -172,10 +173,18 @@ private struct HostedAskUserFixture {
                 id: "environment",
                 header: "Environment",
                 question: "Which environments should receive the change?",
+                context: styled ? "Choose the environment for this change. Your answers are kept if you close and reopen this form." : nil,
                 options: [optionA, optionB],
-                multiSelect: true,
+                multiSelect: !styled,
                 allowOther: true
-            )],
+            )] + (ProcessInfo.processInfo.arguments.contains("-tron-ask-user-multiple") ? [
+                ExtensionFormQuestion(
+                    id: "timing", question: "When should the change happen?",
+                    options: [ExtensionFormOption(id: "now", label: "Now", description: nil),
+                              ExtensionFormOption(id: "later", label: "Later", description: nil)],
+                    multiSelect: false, allowOther: false
+                )
+            ] : []),
             allowCancel: allowCancel
         )
         self.form = form
