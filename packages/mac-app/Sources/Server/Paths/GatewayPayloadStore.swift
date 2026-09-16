@@ -248,6 +248,8 @@ enum GatewayPayloadValidator {
             ("app/package-lock.json", 1),
             ("app/scripts/ensure-node-pty-helper.mjs", 1),
             ("app/scripts/gateway-payload-deploy.mjs", 1),
+            ("runtime/npm-arm64/bin/npm-cli.js", 1),
+            ("runtime/npm-x64/bin/npm-cli.js", 1),
         ]
         for (relativePath, minimumBytes) in requiredFiles {
             guard let url = containedRegularURL(relativePath, under: root, directory: false),
@@ -286,6 +288,9 @@ enum GatewayPayloadValidator {
             }
             guard validateRuntimeNodeAlias(architecture, under: root, runtime: runtime, fileManager: fileManager) else {
                 return .failure(.incomplete("runtime/bin-\(architecture)/node"))
+            }
+            guard validateRuntimeNpmAlias(architecture, under: root, fileManager: fileManager) else {
+                return .failure(.incomplete("runtime/bin-\(architecture)/npm"))
             }
             guard validateRuntimePiAlias(architecture, under: root, fileManager: fileManager) else {
                 return .failure(.incomplete("runtime/bin-\(architecture)/pi"))
@@ -408,6 +413,77 @@ enum GatewayPayloadValidator {
               aliasTargetInfo.st_dev == runtimeInfo.st_dev,
               aliasTargetInfo.st_ino == runtimeInfo.st_ino,
               fileManager.isExecutableFile(atPath: resolvedAlias.path) else { return false }
+        return true
+    }
+
+    private static func realPath(_ path: String) -> String? {
+        var buffer = [Int8](repeating: 0, count: Int(PATH_MAX))
+        guard Darwin.realpath(path, &buffer) != nil else { return nil }
+        return String(cString: buffer)
+    }
+
+    private static func npmRuntimeTreeDigest(_ root: URL, fileManager: FileManager) -> String? {
+        let resolvedRoot = root.resolvingSymlinksInPath().standardizedFileURL
+        guard let enumerator = fileManager.enumerator(at: resolvedRoot, includingPropertiesForKeys: nil),
+              let canonicalRoot = realPath(resolvedRoot.path) else { return nil }
+        var entries: [(String, Data?)] = []
+        for case let url as URL in enumerator {
+            var info = stat()
+            guard lstat(url.path, &info) == 0 else { return nil }
+            let type = info.st_mode & S_IFMT
+            if type == S_IFLNK { return nil }
+            guard let canonicalPath = realPath(url.path),
+                  canonicalPath.hasPrefix(canonicalRoot + "/") else { return nil }
+            let relative = String(canonicalPath.dropFirst(canonicalRoot.count + 1))
+            if type == S_IFDIR { entries.append(("directory:\(relative)", nil)) }
+            else if type == S_IFREG, let data = try? Data(contentsOf: url) { entries.append(("file:\(relative)", data)) }
+            else { return nil }
+        }
+        entries.sort { Data($0.0.utf8).lexicographicallyPrecedes(Data($1.0.utf8)) }
+        var hash = SHA256()
+        for (path, data) in entries {
+            hash.update(data: Data(path.utf8)); hash.update(data: Data([0]))
+            if let data { hash.update(data: data); hash.update(data: Data([0])) }
+        }
+        return hash.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func validateRuntimeNpmAlias(
+        _ architecture: String,
+        under root: URL,
+        fileManager: FileManager
+    ) -> Bool {
+        let runtime = root.appendingPathComponent("runtime/npm-\(architecture)", isDirectory: true)
+        let packageJSON = runtime.appendingPathComponent("package.json", isDirectory: false)
+        let cli = runtime.appendingPathComponent("bin/npm-cli.js", isDirectory: false)
+        let alias = root.appendingPathComponent("runtime/bin-\(architecture)/npm", isDirectory: false)
+        var runtimeInfo = stat()
+        var packageInfo = stat()
+        var cliInfo = stat()
+        var aliasInfo = stat()
+        guard lstat(runtime.path, &runtimeInfo) == 0,
+              (runtimeInfo.st_mode & S_IFMT) == S_IFDIR,
+              lstat(packageJSON.path, &packageInfo) == 0,
+              (packageInfo.st_mode & S_IFMT) == S_IFREG,
+              lstat(cli.path, &cliInfo) == 0,
+              (cliInfo.st_mode & S_IFMT) == S_IFREG,
+              fileManager.isExecutableFile(atPath: cli.path),
+              lstat(alias.path, &aliasInfo) == 0,
+              (aliasInfo.st_mode & S_IFMT) == S_IFLNK,
+              let target = try? fileManager.destinationOfSymbolicLink(atPath: alias.path),
+              target == "../npm-\(architecture)/bin/npm-cli.js" else { return false }
+        guard let packageData = try? Data(contentsOf: packageJSON),
+              packageData.count <= GatewayPayloadStore.maxPackageJSONBytes,
+              let packageObject = try? JSONSerialization.jsonObject(with: packageData) as? [String: Any],
+              packageObject["version"] as? String == "10.9.4",
+              npmRuntimeTreeDigest(runtime, fileManager: fileManager) == "adc24b0737566f66bc2ce18251f0bb8168c9cc9177c20fa3379cf129d6091cff" else { return false }
+        let resolvedAlias = alias.resolvingSymlinksInPath().standardizedFileURL
+        let resolvedCLI = cli.resolvingSymlinksInPath().standardizedFileURL
+        guard resolvedAlias == resolvedCLI,
+              isContained(resolvedAlias, under: root),
+              stat(resolvedCLI.path, &cliInfo) == 0,
+              (cliInfo.st_mode & S_IFMT) == S_IFREG,
+              fileManager.isExecutableFile(atPath: resolvedCLI.path) else { return false }
         return true
     }
 

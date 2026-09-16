@@ -47,6 +47,53 @@ struct GatewayPayloadStoreTests {
         }
     }
 
+    @Test("npm runtime aliases require the pinned npm package")
+    func validatesPinnedNpmRuntime() throws {
+        let temporary = try TemporaryPayloadDirectory()
+        defer { temporary.cleanup() }
+        let store = GatewayPayloadStore(home: temporary.root, channel: "stable")
+        let root = store.versionRoot("npm")
+        try makePayload(root: root, channel: "stable", version: "npm", fingerprint: String(repeating: "a", count: 64))
+        let manifestURL = root.appendingPathComponent("manifest.json")
+        let pristine = GatewayPayloadValidator.validate(payloadRoot: root, expectedChannel: "stable")
+        guard case .success = pristine else {
+            Issue.record("the npm tree extracted from the pinned official Node archive must validate")
+            return
+        }
+        // Published payloads are immutable. Open only the exact fixture entries
+        // needed for the negative control, then restore their original modes
+        // before recomputing and validating the manifest.
+        let npmRoot = root.appendingPathComponent("runtime/npm-arm64", isDirectory: true)
+        let npmCLI = npmRoot.appendingPathComponent("bin/npm-cli.js", isDirectory: false)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: npmRoot.path)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: npmCLI.path)
+        try Data("#!/usr/bin/env node\n// same npm version, altered bytes\n".utf8).write(to: npmCLI)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: npmRoot.path)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: npmCLI.path)
+        let original = try JSONDecoder().decode(GatewayPayloadManifest.self, from: Data(contentsOf: manifestURL))
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: manifestURL.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: manifestURL.path)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root.path)
+        }
+        let tampered = GatewayPayloadManifest(
+            channel: original.channel, version: original.version, gatewayVersion: original.gatewayVersion,
+            protocolVersion: original.protocolVersion, minProtocolVersion: original.minProtocolVersion,
+            nodeVersion: original.nodeVersion, sourceRevision: original.sourceRevision,
+            runtimeEpoch: original.runtimeEpoch, payloadFingerprint: try independentPayloadFingerprint(root),
+            dependencyTreeCoverage: original.dependencyTreeCoverage
+        )
+        try write(tampered, to: manifestURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: manifestURL.path)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root.path)
+        let tamperedResult = GatewayPayloadValidator.validate(payloadRoot: root, expectedChannel: "stable")
+        guard case .failure(.incomplete("runtime/bin-arm64/npm")) = tamperedResult else {
+            Issue.record("same-version npm byte tampering must be rejected before payload activation")
+            return
+        }
+    }
+
     @Test("incremental fingerprint matches an independent oracle for Unicode, links, empty and large files")
     func fingerprintOracle() throws {
         let temporary = try TemporaryPayloadDirectory()
@@ -511,6 +558,12 @@ struct GatewayPayloadStoreTests {
         let basePreset = root.appendingPathComponent(GatewayPayloadValidator.xcodegenBasePresetRelativePath, isDirectory: false)
         try fm.createDirectory(at: basePreset.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("settings: {}\n".utf8).write(to: basePreset)
+        let nodeRoot = ProcessInfo.processInfo.environment["TRON_NODE_ROOT"] ?? "/tmp/tron-consolidation-toolchain-01a0a43d.4qlkoC/node-v22.22.0-darwin-arm64"
+        let officialNpmRoot = URL(fileURLWithPath: nodeRoot, isDirectory: true)
+            .appendingPathComponent("lib/node_modules/npm", isDirectory: true)
+        guard fm.fileExists(atPath: officialNpmRoot.path) else {
+            throw CocoaError(.fileNoSuchFile, userInfo: [NSFilePathErrorKey: officialNpmRoot.path])
+        }
         for architecture in ["arm64", "x64"] {
             let runtime = runtimeDirectory.appendingPathComponent("node-\(architecture)", isDirectory: false)
             try Data(repeating: 0x7f, count: 1_048_576).write(to: runtime)
@@ -520,6 +573,12 @@ struct GatewayPayloadStoreTests {
             try fm.createSymbolicLink(
                 atPath: aliasDirectory.appendingPathComponent("node").path,
                 withDestinationPath: "../node-\(architecture)"
+            )
+            let npmRoot = runtimeDirectory.appendingPathComponent("npm-\(architecture)", isDirectory: true)
+            try fm.copyItem(at: officialNpmRoot, to: npmRoot)
+            try fm.createSymbolicLink(
+                atPath: aliasDirectory.appendingPathComponent("npm").path,
+                withDestinationPath: "../npm-\(architecture)/bin/npm-cli.js"
             )
             try fm.createSymbolicLink(
                 atPath: aliasDirectory.appendingPathComponent("pi").path,

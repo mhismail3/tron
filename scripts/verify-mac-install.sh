@@ -183,7 +183,7 @@ verify_payload() {
     && pass "$label bundled XcodeGen version is canonical" \
     || fail "$label bundled XcodeGen version mismatch"
   for architecture in arm64 x64; do
-    local runtime="${payload}/runtime/node-${architecture}" alias="${payload}/runtime/bin-${architecture}/node" pi_alias="${payload}/runtime/bin-${architecture}/pi" expected_arch archs version_output entitlements native_arch
+    local runtime="${payload}/runtime/node-${architecture}" alias="${payload}/runtime/bin-${architecture}/node" npm_runtime="${payload}/runtime/npm-${architecture}/bin/npm-cli.js" npm_alias="${payload}/runtime/bin-${architecture}/npm" pi_alias="${payload}/runtime/bin-${architecture}/pi" expected_arch archs version_output entitlements native_arch
     [[ -x "$runtime" ]] && pass "$label Node $architecture runtime executable" || fail "$label Node $architecture runtime missing/non-executable"
     if codesign --verify --deep --strict "$runtime" >/dev/null 2>&1; then
       entitlements="$(codesign -d --entitlements :- "$runtime" 2>/dev/null || true)"
@@ -217,6 +217,14 @@ verify_payload() {
         && "$(realpath "$alias")" == "$(realpath "$runtime")" && -x "$alias" ]] \
       && pass "$label Node $architecture command alias resolves to the signed runtime" \
       || fail "$label Node $architecture command alias is invalid"
+    [[ -f "$npm_runtime" && ! -L "$npm_runtime" && -x "$npm_runtime" \
+        && "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["version"])' "${payload}/runtime/npm-${architecture}/package.json" 2>/dev/null)" == "10.9.4" ]] \
+      && pass "$label npm $architecture runtime is the pinned CLI" \
+      || fail "$label npm $architecture runtime is missing, substituted, or stale"
+    [[ -L "$npm_alias" && "$(readlink "$npm_alias")" == "../npm-${architecture}/bin/npm-cli.js" \
+        && "$(realpath "$npm_alias")" == "$(realpath "$npm_runtime")" && -x "$npm_alias" ]] \
+      && pass "$label npm $architecture command alias resolves to the pinned CLI" \
+      || fail "$label npm $architecture command alias is invalid"
     if [[ "$architecture" == "$native_arch" ]]; then
       [[ "$(PATH="$(dirname "$alias"):/usr/bin:/bin:/usr/sbin:/sbin" node --version 2>/dev/null | head -n 1 || true)" == "$version_output" ]] \
         && pass "$label Node $architecture command executes through a launchd-style PATH" \

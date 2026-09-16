@@ -58,6 +58,8 @@ const PAYLOAD_PI_ALIAS_TARGET = "../../app/node_modules/.bin/pi";
 const PROTOCOL_VERSION = 5;
 const MIN_PROTOCOL_VERSION = 5;
 export const PINNED_XCODEGEN_VERSION = "2.45.3";
+export const PINNED_NPM_VERSION = "10.9.4";
+export const PINNED_NPM_TREE_SHA256 = "adc24b0737566f66bc2ce18251f0bb8168c9cc9177c20fa3379cf129d6091cff";
 const LOCAL_CREDENTIAL_MAX_BYTES = 64 * 1024;
 const MAX_RETAINED_VERSIONS = 8;
 const REQUIREMENTS = [
@@ -70,6 +72,8 @@ const REQUIREMENTS = [
   ["app/node_modules", 0, true],
   ["runtime/node-arm64", 1_048_576, false, true],
   ["runtime/node-x64", 1_048_576, false, true],
+  ["runtime/npm-arm64/bin/npm-cli.js", 1, false, true],
+  ["runtime/npm-x64/bin/npm-cli.js", 1, false, true],
   ["runtime/xcodegen/bin/xcodegen", 1_048_576, false, true],
   ["runtime/xcodegen/share/xcodegen/SettingPresets/base.yml", 1, false, false],
 ];
@@ -192,6 +196,57 @@ async function validateRuntimeNodeAlias(root, architecture) {
   if (!runtimeInfo.isFile() || (runtimeInfo.mode & 0o111) === 0) throw new Error(`runtime Node alias target is not executable: ${architecture}`);
 }
 
+async function npmRuntimeTreeDigest(root) {
+  const records = [];
+  async function visit(directory, relativeDirectory) {
+    const entries = await readdir(directory, { withFileTypes: true });
+    entries.sort((left, right) => Buffer.from(left.name).compare(Buffer.from(right.name)));
+    if (relativeDirectory) records.push({ path: `directory:${relativeDirectory}`, data: undefined });
+    for (const entry of entries) {
+      const relative = relativeDirectory ? join(relativeDirectory, entry.name) : entry.name;
+      const path = join(directory, entry.name);
+      if (entry.isSymbolicLink()) throw new Error(`npm runtime contains a symlink: ${relative}`);
+      if (entry.isDirectory()) await visit(path, relative);
+      else if (entry.isFile()) records.push({ path: `file:${relative}`, data: await readFile(path) });
+      else throw new Error(`npm runtime contains an unsupported entry: ${relative}`);
+    }
+  }
+  await visit(root, "");
+  records.sort((left, right) => Buffer.from(left.path).compare(Buffer.from(right.path)));
+  const hash = createHash("sha256");
+  for (const record of records) {
+    hash.update(record.path); hash.update(Buffer.from([0]));
+    if (record.data !== undefined) { hash.update(record.data); hash.update(Buffer.from([0])); }
+  }
+  return hash.digest("hex");
+}
+
+async function validateRuntimeNpmAlias(root, architecture) {
+  const runtime = join(root, "runtime", `npm-${architecture}`);
+  const packageJson = join(runtime, "package.json");
+  const cli = join(runtime, "bin/npm-cli.js");
+  const alias = join(root, "runtime", `bin-${architecture}`, "npm");
+  const [runtimeInfo, packageInfo, cliInfo, aliasInfo] = await Promise.all([lstat(runtime), lstat(packageJson), lstat(cli), lstat(alias)]);
+  if (!runtimeInfo.isDirectory() || runtimeInfo.isSymbolicLink()
+    || !packageInfo.isFile() || packageInfo.isSymbolicLink()
+    || !cliInfo.isFile() || cliInfo.isSymbolicLink() || (cliInfo.mode & 0o111) === 0) {
+    throw new Error(`payload npm runtime is missing or substituted: ${architecture}`);
+  }
+  let version;
+  try {
+    version = JSON.parse(await readFile(packageJson, "utf8")).version;
+  } catch {
+    throw new Error(`payload npm runtime metadata is invalid: ${architecture}`);
+  }
+  if (version !== PINNED_NPM_VERSION) throw new Error(`payload npm runtime version is not pinned: ${architecture}`);
+  if (await npmRuntimeTreeDigest(runtime) !== PINNED_NPM_TREE_SHA256) throw new Error(`payload npm runtime content is not from the pinned Node archive: ${architecture}`);
+  if (!aliasInfo.isSymbolicLink() || await readlink(alias) !== `../npm-${architecture}/bin/npm-cli.js`) {
+    throw new Error(`runtime npm alias target is invalid: ${architecture}`);
+  }
+  const [resolvedAlias, resolvedCli] = await Promise.all([realpath(alias), realpath(cli)]);
+  if (!under(root, resolvedAlias) || resolvedAlias !== resolvedCli) throw new Error(`runtime npm alias does not resolve to npm CLI: ${architecture}`);
+}
+
 async function validateRuntimePiAlias(root, architecture) {
   const directory = join(root, "runtime", `bin-${architecture}`);
   const alias = join(directory, "pi");
@@ -253,6 +308,8 @@ async function completePayload(root) {
   }
   await validateRuntimeNodeAlias(resolved, "arm64");
   await validateRuntimeNodeAlias(resolved, "x64");
+  await validateRuntimeNpmAlias(resolved, "arm64");
+  await validateRuntimeNpmAlias(resolved, "x64");
   await validateRuntimePiAlias(resolved, "arm64");
   await validateRuntimePiAlias(resolved, "x64");
 }
@@ -268,6 +325,7 @@ async function regularFiles(root, prefix) {
       if (entry.isDirectory()) await visit(path, entryRelative);
       else if (entry.isFile()) output.push({ path: entryRelative, target: undefined });
       else if (entry.isSymbolicLink()) {
+        if (entryRelative.startsWith("runtime/npm-")) throw new Error(`npm runtime contains a symlink: ${entryRelative}`);
         const target = await validatePayloadSymlink(payloadRoot, path, entryRelative);
         output.push({ path: entryRelative, target });
       } else throw new Error(`payload contains unsupported entry: ${entryRelative}`);

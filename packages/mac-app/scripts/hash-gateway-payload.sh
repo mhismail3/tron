@@ -9,14 +9,25 @@ set -euo pipefail
 ROOT="$1"
 [[ ! -L "$ROOT" && -d "$ROOT" ]] || { echo "payload root must be a regular directory" >&2; exit 2; }
 ROOT="$(cd "$ROOT" && pwd -P)"
+REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd -P)"
+# shellcheck disable=SC1091
+source "$REPO_ROOT/config/ci-toolchain.env"
 [[ -d "$ROOT/app" && ! -L "$ROOT/app" && -d "$ROOT/runtime" && ! -L "$ROOT/runtime" ]] || {
     echo "payload must contain regular app/ and runtime/ directories" >&2
     exit 2
 }
+for npm_architecture in arm64 x64; do
+    npm_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["version"])' "$ROOT/runtime/npm-$npm_architecture/package.json" 2>/dev/null || true)"
+    [[ "$npm_version" == "$TRON_NODE_NPM_VERSION" ]] || { echo "runtime npm version is not pinned: $npm_architecture $npm_version" >&2; exit 2; }
+    npm_digest="$(python3 "$REPO_ROOT/scripts/hash-npm-runtime.py" "$ROOT/runtime/npm-$npm_architecture")" || exit 2
+    [[ "$npm_digest" == "$TRON_NODE_NPM_TREE_SHA256" ]] || { echo "runtime npm content is not from the pinned Node archive: $npm_architecture" >&2; exit 2; }
+done
+
 for required in \
     app/dist/index.js app/package.json app/package-lock.json app/PushService.xcconfig \
     app/scripts/ensure-node-pty-helper.mjs app/scripts/gateway-payload-deploy.mjs \
     app/node_modules runtime/node-arm64 runtime/node-x64 \
+    runtime/npm-arm64/bin/npm-cli.js runtime/npm-x64/bin/npm-cli.js \
     runtime/xcodegen/bin/xcodegen \
     runtime/xcodegen/share/xcodegen/SettingPresets/base.yml; do
     [[ -e "$ROOT/$required" && ! -L "$ROOT/$required" ]] || {
@@ -36,11 +47,17 @@ PI_REAL="$(realpath "$PI_CLI")"; PI_PACKAGE_REAL="$(realpath "$PI_PACKAGE")"; PI
 for architecture in arm64 x64; do
     directory="$ROOT/runtime/bin-$architecture"
     alias="$directory/node"
+    npm_alias="$directory/npm"
     pi_alias="$directory/pi"
     [[ -d "$directory" && ! -L "$directory" && -L "$alias" \
         && "$(readlink "$alias")" == "../node-$architecture" \
         && "$(realpath "$alias")" == "$(realpath "$ROOT/runtime/node-$architecture")" ]] || {
         echo "required runtime Node alias is invalid: $architecture" >&2; exit 2;
+    }
+    [[ -L "$npm_alias" && "$(readlink "$npm_alias")" == "../npm-$architecture/bin/npm-cli.js" \
+        && "$(realpath "$npm_alias")" == "$(realpath "$ROOT/runtime/npm-$architecture/bin/npm-cli.js")" \
+        && -x "$npm_alias" ]] || {
+        echo "required runtime npm alias is invalid: $architecture" >&2; exit 2;
     }
     [[ -L "$pi_alias" && "$(readlink "$pi_alias")" == "../../app/node_modules/.bin/pi" \
         && "$(realpath "$pi_alias")" == "$PI_REAL" ]] || {

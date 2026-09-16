@@ -77,6 +77,7 @@ for required_file in \
     "$PAYLOAD_DIR/app/scripts/ensure-node-pty-helper.mjs" \
     "$PAYLOAD_DIR/app/scripts/gateway-payload-deploy.mjs" \
     "$PAYLOAD_DIR/runtime/node-arm64" "$PAYLOAD_DIR/runtime/node-x64" \
+    "$PAYLOAD_DIR/runtime/npm-arm64/bin/npm-cli.js" "$PAYLOAD_DIR/runtime/npm-x64/bin/npm-cli.js" \
     "$PAYLOAD_DIR/runtime/xcodegen/bin/xcodegen" \
     "$PAYLOAD_DIR/runtime/xcodegen/share/xcodegen/SettingPresets/base.yml"; do
     [[ -f "$required_file" && ! -L "$required_file" ]] || fail "required file missing or symlinked: $required_file"
@@ -129,6 +130,14 @@ validate_runtime_alias() {
     [[ "$(readlink "$alias")" == "$expected" ]] || fail "Node $architecture alias target is not exact"
     [[ "$(realpath "$alias")" == "$(realpath "$runtime")" ]] || fail "Node $architecture alias does not resolve to its runtime"
     [[ -x "$alias" ]] || fail "Node $architecture alias target is not executable"
+    local npm_alias="$directory/npm" npm_expected="../npm-$architecture/bin/npm-cli.js" npm_runtime="$PAYLOAD_DIR/runtime/npm-$architecture/bin/npm-cli.js"
+    [[ -L "$npm_alias" && "$(readlink "$npm_alias")" == "$npm_expected" ]] || fail "npm $architecture alias is missing or has an unexpected target"
+    [[ "$(realpath "$npm_alias")" == "$(realpath "$npm_runtime")" && -x "$npm_alias" ]] || fail "npm $architecture alias does not resolve to an executable"
+    [[ -f "$PAYLOAD_DIR/runtime/npm-$architecture/package.json" && ! -L "$PAYLOAD_DIR/runtime/npm-$architecture/package.json" \
+        && "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["version"])' "$PAYLOAD_DIR/runtime/npm-$architecture/package.json" 2>/dev/null)" == "10.9.4" ]] || fail "npm $architecture package metadata is missing or stale"
+    if find "$PAYLOAD_DIR/runtime/npm-$architecture" -type l -print -quit | grep -q .; then
+        fail "npm $architecture runtime contains a symlink"
+    fi
 }
 validate_runtime_alias arm64
 validate_runtime_alias x64

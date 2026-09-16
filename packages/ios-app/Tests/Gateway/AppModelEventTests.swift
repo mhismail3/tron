@@ -8,6 +8,31 @@ private final class EventFixtureBundleMarker {}
 @Suite("Authoritative gateway event projection")
 @MainActor
 struct AppModelEventTests {
+    @Test("package completion notices distinguish success from failure")
+    func packageCompletionNoticeOutcome() async {
+        let model = AppModel()
+        await model.handle(GatewayEvent(
+            type: "event",
+            topic: "packages.completed",
+            sessionId: nil,
+            payload: .object([
+                "success": .bool(false),
+                "error": .string("spawn npm ENOENT"),
+            ])
+        ))
+        #expect(model.noticeCenter.notices.first?.role == .error)
+        #expect(model.noticeCenter.notices.first?.title == "Package operation failed: spawn npm ENOENT")
+
+        await model.handle(GatewayEvent(
+            type: "event",
+            topic: "packages.completed",
+            sessionId: nil,
+            payload: .object(["success": .bool(true)])
+        ))
+        #expect(model.noticeCenter.notices.first?.role == .success)
+        #expect(model.noticeCenter.notices.first?.title == "Package operation completed")
+    }
+
     @Test("onboarding waits for launch credential resolution")
     func onboardingLaunchResolution() {
         #expect(!OnboardingPresentationPolicy.shouldPresent(

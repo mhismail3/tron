@@ -149,6 +149,9 @@ packages/mac-app/scripts/test-gateway-payload-verifier.sh
 # Launcher boundary fixture (also covers channel path-component rejection)
 packages/mac-app/scripts/test-tron-gateway-launcher.sh
 
+# Bundled npm removal with sanitized PATH and isolated HOME/cache
+packages/mac-app/scripts/test-tron-gateway-npm.sh
+
 # Manifest fingerprint rewrite (preserves launcher-sensitive JSON strings)
 packages/mac-app/scripts/test-update-payload-fingerprint.sh
 ```
@@ -165,11 +168,12 @@ xcodebuild build -project TronMac.xcodeproj -scheme TronMac \
 The build fails closed if staging cannot complete (for example, if the
 machine lacks the development Node/npm toolchain or network access). A
 completed app contains the Gateway entrypoint, production `node_modules`, both
-arm64/x64 Node runtimes, and fingerprinted architecture-specific `node` command
-aliases. Stable adds only its selected immutable alias to `PATH` before extension
+arm64/x64 Node runtimes, the npm 10.9.4 CLI trees extracted from those same
+official archives, and fingerprinted architecture-specific `node`, `npm`, and `pi`
+command aliases. Stable adds only its selected immutable alias to `PATH` before extension
 discovery, so it never consults a user's nvm/Homebrew installation or a global Pi
 command. The Pi command is npm's `app/node_modules/.bin/pi` projection, and the
-runtime alias must target it exactly; private package-internal CLI paths are not
+runtime aliases must target their exact payload entries; private package-internal CLI paths are not
 a payload contract. Debug preserves an already-resolving developer
 Node and uses the payload alias only as fallback. Release validation must also
 execute the signed embedded runtime, not only check that the binary is present;
@@ -307,7 +311,16 @@ the new signed launcher rejects a previously selected payload whose manifest
 protocol differs and falls back to the matching bundled Gateway. The final Mac
 app binds its own protocol metadata to that bundled payload before signing.
 After `scripts/tron mac verify` passes, the physical iOS helper independently
-requires the same signed protocol before installation.
+requires the same signed protocol before installation. The Gateway package manager
+uses the npm CLI shipped from the same pinned Node archive as the bundled runtime;
+the launcher exports that architecture-specific command directory so package
+install/remove/update operations do not depend on launchd's PATH. Git-backed package
+operations remain intentionally dependent on the host `git` executable because Pi owns
+that checkout lifecycle; verify `/usr/bin/git` (or another explicitly configured Git)
+before using Git packages. This is a
+Mac payload change: a source-only Gateway rebuild cannot add the missing npm
+runtime to an already-installed app. Build and manually replace the Mac Release
+app before testing package operations.
 
 Do not remove `~/.tron`; it contains Gateway-owned state/credentials and Tron's
 internal workspace (`workspace/files` and capability-owned `workspace/state`).
