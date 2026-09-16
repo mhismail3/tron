@@ -1,66 +1,23 @@
 import SwiftUI
 
-private struct AutomationTechnicalDetailsSheet: View {
-    let record: GatewayAutomationRecord
-    let gatewayLabel: String?
-    let targetLabel: String
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 18) {
-                    TronSettingsGroup("Schedule", accent: .tronAutomation) {
-                        detailRow("Pattern", record.trigger.summary)
-                        detailRow("Series", record.trigger.kind == "once" ? "One time" : "Repeating")
-                        detailRow("Timezone", record.trigger.timezone ?? TimeZone.current.identifier)
-                        detailRow("After downtime", record.misfirePolicy == "latest" ? "Run latest missed occurrence" : "Skip missed occurrences")
-                        detailRow("While running", record.overlapPolicy == "queueLatest" ? "Queue latest occurrence" : "Skip overlapping occurrences")
-                        detailRow("Deadline", "\(record.executionDeadlineSeconds / 60) minutes")
-                    }
-                    TronSettingsGroup("Target", accent: .tronAutomation) {
-                        detailRow("Target", targetLabel)
-                        if let gatewayLabel { detailRow("Gateway", gatewayLabel) }
-                    }
-                    TronSettingsGroup("About", accent: .tronAutomation) {
-                        detailRow("Created", AutomationDateFormatting.date(record.createdAt))
-                        detailRow("Updated", AutomationDateFormatting.date(record.updatedAt))
-                        detailRow("Created by", provenanceLabel(record.provenance))
-                        detailRow("Revision", "\(record.revision)")
-                    }
-                }
-                .padding(.horizontal, 20).padding(.vertical, 18)
-            }
-            .tronScrollEdgeChrome()
-            .tronNavigationTitle("Technical Details", accent: .tronAutomation)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: { Image(systemName: "checkmark") }
-                        .accessibilityLabel("Done")
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
-        .tronSettingsVisualTheme(accent: .tronAutomation)
-    }
-
-    private func provenanceLabel(_ provenance: GatewayAutomationProvenance) -> String {
-        switch provenance.kind {
-        case "mobile": return "iPhone"
-        case "local": return "Mac"
-        case "assistant": return "Tron assistant"
-        default: return provenance.kind
-        }
-    }
-
-    private func detailRow(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: TronSpacing.md) {
-            Text(label).font(TronTypography.bodySM).foregroundStyle(Color.tronTextSecondary)
-            Spacer(minLength: TronSpacing.md)
-            Text(value).font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary).multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.horizontal, 14).padding(.vertical, 11)
+enum AutomationMutationReadinessPolicy {
+    static func admits(
+        targetProfileID: String,
+        selectedProfileID: String?,
+        isConnected: Bool,
+        isReconcilingForeground: Bool,
+        endpointAvailable: Bool,
+        hasAutomationCapability: Bool,
+        recordLoaded: Bool,
+        isBusy: Bool
+    ) -> Bool {
+        targetProfileID == selectedProfileID
+            && isConnected
+            && !isReconcilingForeground
+            && endpointAvailable
+            && hasAutomationCapability
+            && recordLoaded
+            && !isBusy
     }
 }
 
@@ -78,7 +35,7 @@ struct AutomationDetailView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var formPresented = false
-    @State private var showingTechnicalDetails = false
+    @State private var isExecutingAction = false
     @State private var confirmation: AutomationDetailConfirmation?
     @State private var loadRevision = 0
     @State private var runLoadGeneration = 0
@@ -93,6 +50,21 @@ struct AutomationDetailView: View {
     private var client: AutomationRPCClient? { model.automationCatalog.endpoint(for: selection.profileID)?.client }
     private var ownsMutationGateway: Bool {
         model.profiles.selected?.id == selection.profileID && model.connectionState == .connected
+    }
+    private var canPerformAction: Bool {
+        guard let endpoint = model.automationCatalog.endpoint(for: selection.profileID) else { return false }
+        return AutomationMutationReadinessPolicy.admits(
+            targetProfileID: selection.profileID,
+            selectedProfileID: model.profiles.selected?.id,
+            isConnected: model.connectionState == .connected,
+            isReconcilingForeground: model.isReconcilingForeground,
+            endpointAvailable: client != nil,
+            hasAutomationCapability: endpoint.profile.capabilities.contains(AutomationAdmissionPolicy.capability),
+            recordLoaded: record != nil,
+            // The record read is authoritative. Catalog projections can lag or
+            // omit this row; the Gateway fences mutations by expectedRevision.
+            isBusy: isExecutingAction
+        )
     }
     private var currentRevisionTag: String {
         guard let summary = model.automationCatalog.summaries.first(where: {
@@ -115,15 +87,6 @@ struct AutomationDetailView: View {
             .tronScrollEdgeChrome()
             .tronNavigationTitle(selection.summary.name, accent: .tronAutomation)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button { showingTechnicalDetails = true } label: {
-                        Image(systemName: "info.circle")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronAutomation)
-                    }
-                    .accessibilityLabel("Technical details")
-                    .disabled(record == nil)
-                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
@@ -159,15 +122,6 @@ struct AutomationDetailView: View {
         }
         .tronManagedSheet(isPresented: $formPresented, identity: "automation.edit.\(selection.id)") {
             AutomationFormView(selection: selection) { formPresented = false; loadRevision &+= 1 }
-        }
-        .tronManagedSheet(isPresented: $showingTechnicalDetails, identity: "automation.technical.\(selection.id)") {
-            if let record {
-                AutomationTechnicalDetailsSheet(
-                    record: record,
-                    gatewayLabel: model.profiles.profiles.first(where: { $0.id == selection.profileID })?.label,
-                    targetLabel: targetLabel(record.target)
-                )
-            }
         }
         .tronManagedSheet(item: $selectedRun, identity: { "automation.run.\($0.runId)" }) { run in
             AutomationRunDetailView(
@@ -230,10 +184,18 @@ struct AutomationDetailView: View {
         }
         section("Schedule", icon: "calendar") {
             info("Runs", record.trigger.summary)
+            info("Series", record.trigger.kind == "once" ? "One time" : "Repeating")
+            info("Timezone", record.trigger.timezone ?? TimeZone.current.identifier)
+            info("After downtime", record.misfirePolicy == "latest" ? "Run latest missed occurrence" : "Skip missed occurrences")
+            info("While running", record.overlapPolicy == "queueLatest" ? "Queue latest occurrence" : "Skip overlapping occurrences")
+            info("Deadline", "\(record.executionDeadlineSeconds / 60) minutes")
             if let next = record.nextOccurrenceAt { info("Next", AutomationDateFormatting.date(next)) }
         }
         section("Target", icon: "bubble.left") {
             info("Session", targetLabel(record.target))
+            if let gateway = model.profiles.profiles.first(where: { $0.id == selection.profileID })?.label {
+                info("Gateway", gateway)
+            }
             if record.activation == .blocked, let reason = record.blockedReason {
                 Text(reason).font(TronTypography.bodySM).foregroundStyle(Color.tronError).padding(14)
             }
@@ -257,7 +219,22 @@ struct AutomationDetailView: View {
                 }
             }
         }
+        section("About", icon: "info.circle") {
+            info("Created", AutomationDateFormatting.date(record.createdAt))
+            info("Updated", AutomationDateFormatting.date(record.updatedAt))
+            info("Created by", provenanceLabel(record.provenance))
+            info("Revision", "\(record.revision)")
+        }
         actions(record)
+    }
+
+    private func provenanceLabel(_ provenance: GatewayAutomationProvenance) -> String {
+        switch provenance.kind {
+        case "mobile": return "iPhone"
+        case "local": return "Mac"
+        case "assistant": return "Tron assistant"
+        default: return provenance.kind
+        }
     }
 
     private func statusHeader(_ record: GatewayAutomationRecord) -> some View {
@@ -267,15 +244,10 @@ struct AutomationDetailView: View {
                     .font(TronTypography.sans(size: 22, weight: .semibold))
                     .foregroundStyle(AutomationStatusPresentation.color(record.activation, run: record.currentRun?.state))
                     .frame(width: 28)
-                VStack(alignment: .leading, spacing: TronSpacing.xs) {
-                    Text(record.trigger.summary)
-                        .font(TronTypography.bodySM)
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(record.activation.label)
-                        .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(Color.tronTextSecondary)
-                }
+                Text(record.name)
+                    .font(TronTypography.headline)
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: TronSpacing.md)
                 AutomationStatusBadge(activation: record.activation, run: record.currentRun?.state)
             }
@@ -289,7 +261,7 @@ struct AutomationDetailView: View {
             if let started = run.startedAt { info("Started", AutomationDateFormatting.date(started)) }
             Button("Cancel run") { confirmation = .cancel(record, run) }
                 .buttonStyle(TronActionButtonStyle(role: .standard))
-                .disabled(!ownsMutationGateway)
+                .disabled(!canPerformAction)
                 .padding(.horizontal, 14)
                 .padding(.bottom, 14)
         }
@@ -321,8 +293,7 @@ struct AutomationDetailView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .disabled(!ownsMutationGateway)
-        .opacity(ownsMutationGateway ? 1 : 0.55)
+        .disabled(!canPerformAction)
     }
     private func section(_ title: String, icon: String, @ViewBuilder content: () -> some View) -> some View { TronSettingsGroup(title, accent: .tronAutomation) { content() } }
     @ViewBuilder
@@ -464,7 +435,9 @@ struct AutomationDetailView: View {
         }
     }
     private func execute(_ action: AutomationDetailConfirmation) async {
-        guard let client, ownsMutationGateway else { return }
+        guard let client, canPerformAction else { return }
+        isExecutingAction = true
+        defer { isExecutingAction = false }
         do {
             switch action.kind {
             case .run:

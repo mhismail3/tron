@@ -148,20 +148,22 @@ private struct AutomationStepperControl: View {
         HStack(spacing: 0) {
             Button { value = max(range.lowerBound, value - step) } label: {
                 Image(systemName: "minus")
-                    .frame(width: 42, height: 34)
+                    .frame(minWidth: 42, minHeight: TronSettingsLayoutPolicy.compactPillHeight)
             }
             .disabled(value <= range.lowerBound)
             Divider().frame(height: 22)
             Button { value = min(range.upperBound, value + step) } label: {
                 Image(systemName: "plus")
-                    .frame(width: 42, height: 34)
+                    .frame(minWidth: 42, minHeight: TronSettingsLayoutPolicy.compactPillHeight)
             }
             .disabled(value >= range.upperBound)
         }
         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
         .foregroundStyle(accent)
         .buttonStyle(.plain)
+        .frame(minHeight: TronSettingsLayoutPolicy.compactPillHeight)
         .glassEffect(.regular.tint(accent.opacity(0.12)).interactive(), in: Capsule())
+        .padding(.vertical, (TronSettingsLayoutPolicy.compactPillTargetHeight - TronSettingsLayoutPolicy.compactPillHeight) / 2)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
         .accessibilityValue("\(value)")
@@ -251,6 +253,7 @@ struct AutomationFormView: View {
     private var ownsMutationGateway: Bool {
         selectedProfileID == model.profiles.selected?.id
             && model.connectionState == .connected
+            && !model.isReconcilingForeground
             && selectedEndpoint?.profile.capabilities.contains(AutomationAdmissionPolicy.capability) == true
     }
     private var sessions: [SessionSummary] {
@@ -301,10 +304,17 @@ struct AutomationFormView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { requestSave() } label: {
-                        TronToolbarTextLabel(saveTitle, systemImage: "checkmark", isWorking: isSaving)
+                        if isSaving {
+                            TronPulseLoadingIndicator(accent: .tronBlue, size: 18)
+                        } else {
+                            Image(systemName: "checkmark")
+                                .font(TronTypography.buttonSM)
+                        }
                     }
-                    .tronToolbarAction(accent: canSave && ownsMutationGateway ? .tronAutomation : .tronTextMuted)
+                    .foregroundStyle(Color.tronBlue)
+                    .tronToolbarAction(accent: .tronBlue)
                     .disabled(isSaving || !canSave || !ownsMutationGateway)
+                    .accessibilityLabel(saveTitle)
                 }
             }
         }

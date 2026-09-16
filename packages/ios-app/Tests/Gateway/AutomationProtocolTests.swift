@@ -11,6 +11,36 @@ struct AutomationProtocolTests {
         #expect(AutomationWorkspacePathPolicy.initialPath(selectedPath: "/workspace/trailing ") == "/workspace/trailing ")
     }
 
+    @Test("automation controls require the selected ready owner and settle safely")
+    func mutationReadiness() {
+        let ready: (Bool, Bool, Bool, Bool, Bool) -> Bool = { connected, reconciling, endpoint, capability, loaded in
+            AutomationMutationReadinessPolicy.admits(
+                targetProfileID: "gateway-a", selectedProfileID: "gateway-a",
+                isConnected: connected, isReconcilingForeground: reconciling,
+                endpointAvailable: endpoint, hasAutomationCapability: capability,
+                recordLoaded: loaded, isBusy: false
+            )
+        }
+        #expect(ready(true, false, true, true, true))
+        #expect(!ready(false, false, true, true, true))
+        #expect(!ready(true, true, true, true, true))
+        #expect(!ready(true, false, false, true, true))
+        #expect(!ready(true, false, true, false, true))
+        #expect(!ready(true, false, true, true, false))
+        #expect(!AutomationMutationReadinessPolicy.admits(
+            targetProfileID: "gateway-a", selectedProfileID: "gateway-a",
+            isConnected: true, isReconcilingForeground: false,
+            endpointAvailable: true, hasAutomationCapability: true,
+            recordLoaded: true, isBusy: true
+        ))
+        #expect(!AutomationMutationReadinessPolicy.admits(
+            targetProfileID: "gateway-a", selectedProfileID: "gateway-b",
+            isConnected: true, isReconcilingForeground: false,
+            endpointAvailable: true, hasAutomationCapability: true,
+            recordLoaded: true, isBusy: false
+        ))
+    }
+
     @Test("bounded automation page decodes without action content")
     func pageDecodes() throws {
         let data = Data(#"""

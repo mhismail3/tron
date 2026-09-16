@@ -95,8 +95,11 @@ retain their canonical target. Date values use localized standard action pills: 
 opens a time-only wheel, each bound to the same field without changing the other component. The dashboard cards and detail sheet use the same inline navigation, settings
 containers, semantic typography, and responsive key/value rows; inventory cards use one concise
 status/frequency/timing line, while detail leads with action, target, schedule, status, and recent runs.
-Technical schedule/target/about metadata lives behind the toolbar info sheet; the four controls remain a
-bare 2×2 action grid. Existing-session target selection uses a large, scoped picker with dashboard
+Technical schedule/target/about metadata stays in the main readable detail containers; the four controls remain a
+bare 2×2 action grid. Action availability separates selected-Gateway ownership from readiness and
+in-flight mutation state; a lagging or absent catalog row cannot veto an authoritative detail read.
+The Gateway still checks each command's expected revision. Save uses an accessible blue checkmark-only
+control, and deadline steppers share the compact pill height. Existing-session target selection uses a large, scoped picker with dashboard
 project grouping. An unset workspace omits the browse path so the Gateway resolves its own default;
 explicit selections retain their exact path. Validate changes with
 `AutomationProtocolTests` and `AutomationCoordinatorTests`. Workspace targets are selected through the existing focused-Gateway WorkspaceBrowser and trust
