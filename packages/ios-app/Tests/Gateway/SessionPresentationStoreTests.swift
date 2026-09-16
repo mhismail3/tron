@@ -70,6 +70,27 @@ struct SessionPresentationStoreTests {
         return index
     }
 
+    @Test("opaque synchronization tokens admit valid values and reject invalid boundaries")
+    func synchronizationTokenAdmission() {
+        for token in [
+            "unused",
+            "00000000-0000-4000-8000-000000000001",
+            " opaque token ",
+            String(repeating: "a", count: 200),
+            String(repeating: "é", count: 100),
+        ] {
+            #expect(GatewayTokenAdmissionPolicy.admit(token))
+        }
+        for token in [
+            "", " \u{00a0} ",
+            String(repeating: "a", count: 201),
+            String(repeating: "é", count: 101),
+            "token\u{0}", "token\n", "token\t", "token\u{7f}",
+        ] {
+            #expect(!GatewayTokenAdmissionPolicy.admit(token))
+        }
+    }
+
     @Test("pending presentation owns notices before first open mounts")
     func pendingPresentationOwnsNoticeScope() {
         let store = SessionPresentationStore(client: GatewayClient(), performanceSignposts: SystemPerformanceSignposts.shared)

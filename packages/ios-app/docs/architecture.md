@@ -515,6 +515,13 @@ unobservable until `session.sync` succeeds and the exact session/presentation in
 revalidated. iOS admits both tokens as nonempty, printable UTF-8 values of at most 200 bytes before installation; stale or failed opens close only the already bounded provisional subscription token. The same opaque token
 then becomes subscription ownership, and `session.close` only releases a subscription whose
 current token matches. Protocol-v5 peers always provide explicit ownership.
+Control-character membership uses an explicit scalar closure: the optimized Xcode 27
+app miscompiles the bound `CharacterSet.contains` predicate and rejects valid tokens,
+blocking both acknowledgement and provisional cleanup. `synchronizationTokenAdmission`
+covers opaque values and UTF-8/control boundaries; `transientMalformedOpenRetries`,
+`malformedOpenTokensPreserveProvisionalCleanup`, and `coveredFinalOpeningFrame` protect
+the resulting wire cleanup and ready-chat behavior. Validate those cases with optimization
+enabled when qualifying a device toolchain.
 One intent-keyed synchronization coordinator owns the shared outcome and event quarantine.
 Compatible reconnect callers await that outcome directly instead of polling tokens; a fresh
 presentation never inherits reconnect installation semantics and waits to retry after incompatible
