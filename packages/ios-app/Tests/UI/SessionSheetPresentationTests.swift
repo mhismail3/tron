@@ -1221,6 +1221,22 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testAppSettingsEmeraldGlassInBothAppearances() async throws {
+        let suite = "app-settings-glass.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppLocalBehaviorSettings(defaults: defaults)
+        for scheme in [ColorScheme.light, .dark] {
+            try await withSheet(NavigationStack {
+                AppLocalBehaviorSettingsView(settings: settings)
+            }.tronSettingsVisualTheme(accent: .tronEmerald).preferredColorScheme(scheme)) { controller in
+                let field = try XCTUnwrap(self.views(of: UITextField.self, in: controller.view).first)
+                XCTAssertEqual(field.text, "10")
+                self.capture(controller, name: "app-settings-emerald-glass-\(scheme)")
+            }
+        }
+    }
+
     func testAppSettingsCommitsChatsPerProject() async throws {
         let suite = "app-settings-sheet.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

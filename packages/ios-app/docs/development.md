@@ -104,6 +104,8 @@ automation journals in iOS.
 ## App Settings and model search
 
 Settings → App Settings owns iPhone-local behavior, separate from Mac/runtime configuration.
+Its two eager row groups use the shared emerald Liquid Glass surface, matching the title and
+controls; subagent retention inherits this settings theme rather than the activity palette.
 **Chats per project** accepts 1–100 (default 10) through the shared numeric settings field. It sets
 both the initial project row count and Show more batch size; Show less returns to that baseline.
 Changes apply when the dashboard becomes visible, without resetting project disclosure or changing
