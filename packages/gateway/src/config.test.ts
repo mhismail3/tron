@@ -45,8 +45,8 @@ describe("gateway configuration", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-config-group-"));
     const groupPath = join(root, "machine-group.json");
     const [first, second] = await Promise.all([
-      loadConfig([], { TRON_DATA_DIR: join(root, "prod"), TRON_MACHINE_GROUP_PATH: groupPath, TRON_AGENT_DIR_NAME: "agent-prod" }),
-      loadConfig([], { TRON_DATA_DIR: join(root, "dev"), TRON_MACHINE_GROUP_PATH: groupPath, TRON_AGENT_DIR_NAME: "agent-dev" }),
+      loadConfig([], { TRON_DATA_DIR: join(root, "prod"), TRON_MACHINE_GROUP_PATH: groupPath }),
+      loadConfig([], { TRON_DATA_DIR: join(root, "dev"), TRON_MACHINE_GROUP_PATH: groupPath }),
     ]);
     expect(first.machineGroupID).toBe(second.machineGroupID);
     expect(first.machineId).not.toBe(second.machineId);
@@ -56,8 +56,21 @@ describe("gateway configuration", () => {
       loadConfig([], { TRON_DATA_DIR: sameHome, TRON_MACHINE_GROUP_PATH: groupPath }),
     ]);
     expect(sameFirst.machineId).toBe(sameSecond.machineId);
-    expect(first.agentDir).toBe(join(homedir(), ".pi", "agent-prod"));
-    expect(second.agentDir).toBe(join(homedir(), ".pi", "agent-dev"));
+    expect(first.agentDir).toBe(join(root, "prod", "agent"));
+    expect(second.agentDir).toBe(join(root, "dev", "agent"));
+    const unchangedDefault = await loadConfig([], { TRON_DATA_DIR: join(root, "default"), TRON_MACHINE_GROUP_PATH: groupPath });
+    expect(unchangedDefault.agentDir).toBe(join(root, "default", "agent"));
+  });
+
+  it("retains only an explicit absolute agent directory and rejects the retired name override", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-config-agent-dir-"));
+    await expect(loadConfig([], { TRON_DATA_DIR: join(root, "home"), TRON_AGENT_DIR_NAME: "agent-old" })).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(loadConfig([], { TRON_DATA_DIR: join(root, "home"), PI_CODING_AGENT_DIR: "relative-agent" })).rejects.toMatchObject({ code: "invalid_request" });
+    const explicit = join(root, "custom-agent");
+    const loaded = await loadConfig([], { TRON_DATA_DIR: join(root, "home"), PI_CODING_AGENT_DIR: explicit });
+    expect(loaded.agentDir).toBe(explicit);
+    const homeNamed = await loadConfig([], { TRON_HOME_NAME: "tron-custom", PI_CODING_AGENT_DIR: explicit });
+    expect(homeNamed.agentDir).toBe(explicit);
   });
 
   it("does not admit a runtime or user push-origin override", async () => {

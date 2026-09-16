@@ -166,9 +166,20 @@ to refresh them.
 Tron keeps its durable internal workspace under `<Tron home>/workspace` (normally
 `~/.tron/workspace`). This is separate from the current session directory: new
 sessions can still start in any directory selected through the Mac filesystem
-browser. Canonical session JSONL remains owned by the embedded runtime under
-`~/.pi/agent`; use the Settings Import action for supported JSON/JSONL session
-exports. Retained documents in `workspace/files` can be presented in chat through
+browser. Canonical session JSONL, settings, credentials, models, packages, and resources
+are owned by the embedded runtime under `~/.tron/agent` for Stable and
+`~/.tron-dev/agent` for separately isolated Debug. An explicit absolute
+`PI_CODING_AGENT_DIR` is supported for an intentionally custom Gateway
+invocation; the managed Debug supervisor strips it to preserve profile isolation.
+The pinned `pi-agent-browser-native` package receives the same resolved agent
+home through `PI_AGENT_BROWSER_GLOBAL_CONFIG`, storing its global config under
+`<agentDir>/config/pi-agent-browser-native/config.json`; project config remains
+project-owned, while browser profiles, cookies, and Keychain credentials remain
+OS/browser-owned. The offline migration stages the legacy browser config as a
+separate exact-byte component and blocks malformed, private-mode, or ambiguous
+inputs. Cutover requires a published browser-extension release supporting
+`PI_AGENT_BROWSER_GLOBAL_CONFIG`; the current installed package is not assumed
+to understand that variable. Use the Settings Import action for supported JSON/JSONL session exports. Retained documents in `workspace/files` can be presented in chat through
 `display` without changing the session directory. See the
 [workspace ownership and recovery contract](packages/gateway/docs/internal-workspace.md).
 

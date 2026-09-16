@@ -42,7 +42,7 @@ def validate_output(output):
             raise ValueError("output ancestors must not be symlinks")
     home = Path.home().resolve()
     resolved = output.resolve()
-    if resolved.is_relative_to(home / ".pi") or (
+    if resolved.is_relative_to(home / ".pi") or resolved.is_relative_to(home / ".tron-dev") or (
         resolved.is_relative_to(home / ".tron") and not resolved.is_relative_to(home / ".tron/workspace/files")
     ):
         raise ValueError("canonical runtime/settings/state outputs are prohibited")

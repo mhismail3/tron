@@ -39,6 +39,10 @@ import { createKnowledgeConnectorExtension } from "./knowledge/connectors.js";
 import { createKnowledgeImporter } from "./knowledge/legacy-import.js";
 
 const config = await loadConfig();
+// pi-agent-browser-native keeps its explicit override layer separate from the
+// global layer. Point its supported global-path seam at the same resolved
+// agentDir used by every Gateway runtime and inherited child process.
+process.env.PI_AGENT_BROWSER_GLOBAL_CONFIG = join(config.agentDir, "config", "pi-agent-browser-native", "config.json");
 // Paid X access is only qualified when the host explicitly supplies the
 // provider/account price and retry ceiling. Missing or malformed values keep
 // the connector unavailable; no default price is inferred in production.

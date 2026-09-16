@@ -14,6 +14,10 @@ Commands:
                                     Own the immutable Debug Gateway on port 9848
                                     status/preflight are read-only; users initiate
                                     every mutating Gateway lifecycle transition
+  agent-home-preflight --source <absolute-path> --destination <absolute-path>
+                                    Read-only assessment of an agent-home move
+  agent-home-migrate <stage|verify|cleanup> ...
+                                    Explicit, bounded offline staging operations
   chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]
                                     Attach terminal chat to the Gateway-owned runtime
   ci [check|test|all]               Validate the gateway and repository policy
@@ -39,6 +43,22 @@ case "$cmd" in
     ;;
   __dev-supervise|dev)
     exec "$ROOT/scripts/tron-dev" "$@"
+    ;;
+  agent-home-preflight)
+    if [[ ! -f "$GATEWAY/dist/agent-home-preflight.js" ]]; then
+      echo "missing prepared preflight artifact: $GATEWAY/dist/agent-home-preflight.js" >&2
+      echo "prepare it explicitly with: (cd packages/gateway && npm run build)" >&2
+      exit 66
+    fi
+    exec node "$GATEWAY/dist/agent-home-preflight.js" "$@"
+    ;;
+  agent-home-migrate)
+    if [[ ! -f "$GATEWAY/dist/agent-home-migration.js" ]]; then
+      echo "missing prepared migration artifact: $GATEWAY/dist/agent-home-migration.js" >&2
+      echo "prepare it explicitly with: (cd packages/gateway && npm run build)" >&2
+      exit 66
+    fi
+    exec node "$GATEWAY/dist/agent-home-migration.js" "$@"
     ;;
   chat)
     (cd "$GATEWAY" && npm run build >/dev/null)
