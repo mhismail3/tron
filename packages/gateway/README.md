@@ -180,17 +180,22 @@ overlap, special files, root symlinks, and escaping symlinks without following
 any link. Relative links that remain inside the source are counted as safe
 internal package links; absolute or escaping links remain unresolved.
 
-The preflight parses only the bounded global `settings.json` shape needed to
-identify configured `sessionDir`, package, extension, skill, prompt, and theme
+The preflight parses only bounded supported metadata: global `settings.json`,
+package-manifest agent directories, discovered `agents/**/*.md` definitions,
+and the `extensions/subagent/config.json` path fields needed to identify
+executable session, package, extension, skill, prompt, theme, and child-launch
 references. It follows Pi 0.84.4 resource conventions: top-level resource
 patterns are relative to the agent home, package-object resource patterns are
-relative to that package source, and `!`, `+`, `-`, `*`, and `?` prefixes are
-classified without expanding or executing them. Relative paths may remain
-portable when contained by the old home; absolute and home-expanded paths are
-always marked relocation-sensitive, even when they physically point inside the
-old home, because their bytes would retain the old root after a move. Unsupported
-package bases, malformed arrays, and uncertain paths are reported without
-exposing values or repairing settings.
+relative to that package source, and agent-definition relative extension and
+skill paths are relative to the definition file. `!`, `+`, `-`, `*`, and `?`
+prefixes are classified without expanding or executing them. Relative paths may
+remain portable when contained by the old home; absolute and home-expanded paths
+are always marked relocation-sensitive, even when they physically point inside
+the old home, because their bytes would retain the old root after a move.
+Portable executable references must resolve in the source home. Unsupported
+bases, malformed arrays/metadata, and uncertain paths are reported without
+exposing values or repairing settings. The complete classification and explicit
+coverage exclusions are in [`docs/agent-home-reference-inventory.md`](docs/agent-home-reference-inventory.md).
 Registry/VCS package specs (`npm:`, `git:`, `github:`, HTTPS, and SSH) are
 portable package provenance: their installed trees move with the agent home and
 do not create an external filesystem decision. Absolute, local, session, and
@@ -206,7 +211,7 @@ metadata continuity, complete package/resource inventory, and extension/provider
 store ownership. Offline backup, staging, publication, rollback, and manual
 Gateway/Mac activation remain future operator-run steps. Project `.pi`/`.agents`,
 Keychain stores, and Gateway state are not relocated by this preflight.
-The inspected pinned extension seams are concrete: `pi-goal` stores state as Pi session custom entries and its install marker under the resolved agentDir; `pi-web-access` uses `PI_CODING_AGENT_DIR/web-search.json`, so Gateway and inherited children keep that config/cache under the resolved agentDir (it falls back to `$XDG_CONFIG_HOME/pi/web-search.json` or `~/.pi/web-search.json` only when run outside Gateway); and `pi-subagents` keeps its config under the resolved agentDir extension namespace and its ephemeral run roots under OS temp/project-owned roots. `pi-agent-browser-native` remains on its upstream global configuration path (`~/.pi/config/pi-agent-browser-native/config.json` by default), with project configuration and explicit `PI_AGENT_BROWSER_CONFIG` semantics unchanged. Browser configuration relocation is deferred until upstream provides a supported global-path contract; this migration neither copies nor rewrites it. Browser profiles, cookies, and Keychain credentials remain OS/browser-owned.
+The inspected pinned extension seams are concrete: `pi-goal` stores state as Pi session custom entries and its install marker under the resolved agentDir; `pi-web-access` uses `PI_CODING_AGENT_DIR/web-search.json`, so Gateway and inherited children keep that config/cache under the resolved agentDir (it falls back to `$XDG_CONFIG_HOME/pi/web-search.json` or `~/.pi/web-search.json` only when run outside Gateway); and `pi-subagents` keeps its config under the resolved agentDir extension namespace and its ephemeral run roots under OS temp/project-owned roots. `pi-agent-browser-native` remains on its upstream global configuration path (`~/.pi/config/pi-agent-browser-native/config.json` by default), with project configuration and explicit `PI_AGENT_BROWSER_CONFIG` semantics unchanged. Browser configuration relocation is deferred until upstream provides a supported global-path contract; this migration neither copies nor rewrites it. Browser profiles, cookies, and Keychain credentials remain OS/browser-owned. The durable repository classification and explicit sweep exclusions are recorded in [`docs/agent-home-reference-inventory.md`](docs/agent-home-reference-inventory.md).
 ### Agent-home staging and manual cutover
 
 `agent-home-migrate stage` is an explicit operator command, not part of Gateway

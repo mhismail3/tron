@@ -123,6 +123,16 @@ describe("agent home migration staging", () => {
   });
 
 
+  it("refuses staging when a portable child extension reference is missing", async () => {
+    const root = await fixture("tron-agent-migration-agent-reference-");
+    const source = join(root, "source");
+    const staging = join(root, "staging");
+    await mkdir(join(source, "agents"), { recursive: true });
+    await writeFile(join(source, "agents", "worker.md"), "---\nname: worker\ndescription: child\nsubagentOnlyExtensions: ./missing.js\n---\nworker\n");
+    await expect(stageAgentHome({ source, destination: join(root, "destination"), staging, acknowledgeQuiescence: true, acknowledgeBackup: true })).rejects.toThrow(/preflight/);
+    await expect(lstat(staging)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("refuses destination collisions and unsafe special links before staging", async () => {
     const root = await fixture("tron-agent-migration-safety-");
     const source = join(root, "source");
