@@ -83,6 +83,12 @@ async function awaitWhileClientConnected<T>(operation: Promise<T>, signal?: Abor
   });
 }
 
+function rejectUnknownFields(params: Record<string, unknown>, allowed: readonly string[], label: string): void {
+  if (Object.keys(params).some((key) => !allowed.includes(key))) {
+    throw new GatewayError("invalid_request", `${label} contains unknown fields`);
+  }
+}
+
 function parseSessionSourceControl(value: unknown): SessionSourceControlRequest | undefined {
   if (value === undefined || value === null) return undefined;
   const source = object(value, "sourceControl");
@@ -1352,12 +1358,15 @@ export class GatewayService {
           return safeJson(result);
         });
       case "packages.list":
+        rejectUnknownFields(params, ["cwd"], "Package listing");
         return safeJson(await this.dependencies.packages.list(optionalString(params.cwd, "cwd", 4_096) ?? process.cwd()));
       case "packages.checkUpdates":
+        rejectUnknownFields(params, ["cwd"], "Package update check");
         return safeJson(await this.dependencies.packages.checkUpdates(optionalString(params.cwd, "cwd", 4_096) ?? process.cwd()));
       case "packages.install":
       case "packages.remove":
       case "packages.update":
+        rejectUnknownFields(params, ["commandId", "cwd", "source", "local"], "Package mutation");
         return this.mutation(client, method, params, async () => {
           const cwd = optionalString(params.cwd, "cwd", 4_096) ?? process.cwd();
           const result = await this.dependencies.packages.mutate(

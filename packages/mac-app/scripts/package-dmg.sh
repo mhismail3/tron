@@ -60,7 +60,7 @@ verify_app_bundle() {
     local required_file
     local required_directory
     local manifest="$root/$gateway_root/manifest.json"
-    local expected_fingerprint actual_fingerprint runtime expected_arch actual_arch entitlements helper_archs node_version alias pi_alias pi_cli
+    local expected_fingerprint actual_fingerprint runtime expected_arch actual_arch entitlements helper_archs node_version alias npm_alias pi_alias pi_cli
     local required_files=(
         "$helper"
         "$native_host"
@@ -72,6 +72,8 @@ verify_app_bundle() {
         "$gateway_root/app/PushService.xcconfig"
         "$gateway_root/runtime/node-arm64"
         "$gateway_root/runtime/node-x64"
+        "$gateway_root/runtime/npm-arm64/bin/npm-cli.js"
+        "$gateway_root/runtime/npm-x64/bin/npm-cli.js"
         "$gateway_root/runtime/xcodegen/bin/xcodegen"
         "$gateway_root/runtime/xcodegen/share/xcodegen/SettingPresets/base.yml"
     )
@@ -165,6 +167,11 @@ verify_app_bundle() {
         [[ -L "$alias" && "$(readlink "$alias")" == "../node-$runtime_arch" \
             && "$(realpath "$alias")" == "$(realpath "$runtime")" && -x "$alias" ]] \
             || die "Node $runtime_arch command alias is invalid"
+        npm_alias="$root/$gateway_root/runtime/bin-$runtime_arch/npm"
+        [[ -L "$npm_alias" && "$(readlink "$npm_alias")" == "../npm-$runtime_arch/bin/npm-cli.js" \
+            && "$(realpath "$npm_alias")" == "$(realpath "$root/$gateway_root/runtime/npm-$runtime_arch/bin/npm-cli.js")" \
+            && -x "$npm_alias" ]] || die "npm $runtime_arch command alias is invalid"
+        [[ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["version"])' "$root/$gateway_root/runtime/npm-$runtime_arch/package.json" 2>/dev/null)" == "10.9.4" ]] || die "npm $runtime_arch runtime version is not pinned"
         pi_alias="$root/$gateway_root/runtime/bin-$runtime_arch/pi"
         [[ -L "$pi_alias" && "$(readlink "$pi_alias")" == "../../app/node_modules/.bin/pi" \
             && "$(realpath "$pi_alias")" == "$(realpath "$pi_cli")" && -x "$pi_alias" ]] \

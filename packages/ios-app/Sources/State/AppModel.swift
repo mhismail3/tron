@@ -3907,12 +3907,16 @@ final class AppModel {
             guard case .automationChanged = event.preparation else { return }
             automationCatalog.invalidate()
         case "packages.progress", "packages.completed":
+            let completed = event.topic == "packages.completed"
+            let succeeded = event.payload.objectValue?["success"]?.boolValue == true
+            let failed = completed && !succeeded
+            let error = failed ? event.payload.objectValue?["error"]?.stringValue : nil
             postNotice(
-                event.topic == "packages.completed" ? "Package operation completed" : "Updating agent package…",
+                failed ? "Package operation failed\(error.map { ": \($0)" } ?? "")" : completed ? "Package operation completed" : "Updating agent package…",
                 replacing: .packageProgress,
-                role: event.topic == "packages.completed" ? .success : .progress,
+                role: failed ? .error : completed ? .success : .progress,
                 lifetime: .standard,
-                priority: event.topic == "packages.completed" ? .normal : .low
+                priority: failed ? .high : completed ? .normal : .low
             )
         case "session.processTranscript.changed":
             if case .processTranscriptChanged(let changed) = event.preparation {

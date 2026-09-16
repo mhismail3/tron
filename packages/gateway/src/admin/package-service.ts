@@ -96,12 +96,32 @@ export class PackageService {
     private readonly workRegistry?: GatewayWorkRegistry,
   ) {}
 
-  private async manager(cwdInput: string, requireProjectTrust: boolean): Promise<DefaultPackageManager> {
+  private async manager(cwdInput: string, requireProjectTrust: boolean): Promise<{ manager: DefaultPackageManager; settings: SettingsManager }> {
     const trust = requireProjectTrust
       ? await this.trust.requireResolved(cwdInput)
       : await this.trust.inspect(cwdInput).then((inspection) => ({ cwd: inspection.cwd, trusted: inspection.effectiveDecision === true }));
     const settings = SettingsManager.create(trust.cwd, this.agentDir, { projectTrusted: trust.trusted });
-    return new DefaultPackageManager({ cwd: trust.cwd, agentDir: this.agentDir, settingsManager: settings });
+    // The SDK deliberately exposes load failures through drainErrors rather than
+    // throwing from getters. Never let a malformed settings file look like an
+    // empty package inventory or authorize a mutation against that false view.
+    if (settings.drainErrors().length > 0) {
+      throw new GatewayError("conflict", "Canonical package settings could not be loaded");
+    }
+    return { manager: new DefaultPackageManager({ cwd: trust.cwd, agentDir: this.agentDir, settingsManager: settings }), settings };
+  }
+
+  private async flushSettings(settings: SettingsManager): Promise<void> {
+    await settings.flush();
+    if (settings.drainErrors().length > 0) {
+      throw new GatewayError("conflict", "Canonical package settings could not be persisted");
+    }
+  }
+
+  private ensureConfiguredSource(manager: DefaultPackageManager, source: string, local: boolean): void {
+    const scope = local ? "project" : "user";
+    if (!manager.listConfiguredPackages().some((entry) => entry.scope === scope && entry.source === source)) {
+      throw new GatewayError("not_found", "The requested package is not configured in that scope");
+    }
   }
 
   private async trackAdministrative<T>(operation: (work: GatewayWorkHandle | undefined) => Promise<T>): Promise<T> {
@@ -117,36 +137,53 @@ export class PackageService {
   }
 
   async list(cwd: string): Promise<unknown> {
-    return this.trackAdministrative(async () => {
-      const manager = await this.manager(cwd, false);
+    return this.trackAdministrative(() => this.mutex.run(async () => {
+      const { manager } = await this.manager(cwd, false);
       const packages = manager.listConfiguredPackages();
       const resources = await manager.resolve(async () => "skip");
       validatePackageInventory(packages, resources);
       return { packages, resources };
-    });
+    }));
   }
 
   async checkUpdates(cwd: string): Promise<unknown> {
-    return this.trackAdministrative(async () => {
-      const manager = await this.manager(cwd, false);
+    return this.trackAdministrative(() => this.mutex.run(async () => {
+      const { manager } = await this.manager(cwd, false);
       const updates = await manager.checkForAvailableUpdates();
       validatePackageUpdates(updates);
       return { updates };
-    });
+    }));
   }
 
   async mutate(action: "install" | "remove" | "update", source: string | undefined, cwd: string, local: boolean): Promise<{ operationId: string }> {
     return this.trackAdministrative((work) => this.mutex.run(async () => {
       const operationId = randomUUID();
-      const manager = await this.manager(cwd, local);
-      manager.setProgressCallback((event) => {
-        work?.progress();
-        this.broadcast("packages.progress", { operationId, event } as unknown as JsonValue);
-      });
+      let manager: DefaultPackageManager | undefined;
       try {
-        if (action === "install") await manager.installAndPersist(source!, { local });
-        else if (action === "remove") await manager.removeAndPersist(source!, { local });
-        else await manager.update(source);
+        const managed = await this.manager(cwd, local);
+        manager = managed.manager;
+        manager.setProgressCallback((event) => {
+          work?.progress();
+          this.broadcast("packages.progress", { operationId, event } as unknown as JsonValue);
+        });
+        const { settings } = managed;
+        if (action === "install") {
+          await manager.installAndPersist(source!, { local });
+          await this.flushSettings(settings);
+        } else if (action === "remove") {
+          await manager.removeAndPersist(source!, { local });
+          await this.flushSettings(settings);
+        } else if (source === undefined) {
+          // An omitted source retains Pi's existing "update all" command.
+          await manager.update();
+        } else {
+          // Pi's public update(source) intentionally updates every matching
+          // scope. The RPC identifies one row, so use the public scoped install
+          // seam to refresh only that row's user/project installation while
+          // leaving its existing settings entry untouched.
+          this.ensureConfiguredSource(manager, source, local);
+          await manager.install(source, { local });
+        }
         this.broadcast("packages.completed", { operationId, success: true });
       } catch (error) {
         this.broadcast("packages.completed", {
@@ -156,7 +193,7 @@ export class PackageService {
         });
         throw error;
       } finally {
-        manager.setProgressCallback(undefined);
+        manager?.setProgressCallback(undefined);
       }
       return { operationId };
     }));

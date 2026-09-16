@@ -290,6 +290,26 @@ static int required_runtime_alias(const char *root, const char *architecture) {
  * require .bin/pi to match declared bin.pi. This minimal launcher does not
  * duplicate a general JSON parser; it owns the final immutable alias text,
  * package/node_modules containment, fingerprint, and executable checks. */
+static int required_npm_alias(const char *root, const char *architecture) {
+    char directory[PATH_MAX], alias[PATH_MAX], npm[PATH_MAX];
+    char aliasResolved[PATH_MAX], npmResolved[PATH_MAX], target[PATH_MAX], expectedTarget[PATH_MAX];
+    struct stat directoryInfo, aliasInfo, targetInfo;
+    if (snprintf(directory, sizeof(directory), "%s/runtime/bin-%s", root, architecture) >= (int)sizeof(directory) ||
+        snprintf(alias, sizeof(alias), "%s/npm", directory) >= (int)sizeof(alias) ||
+        snprintf(npm, sizeof(npm), "%s/runtime/npm-%s/bin/npm-cli.js", root, architecture) >= (int)sizeof(npm) ||
+        snprintf(expectedTarget, sizeof(expectedTarget), "../npm-%s/bin/npm-cli.js", architecture) >= (int)sizeof(expectedTarget) ||
+        lstat(directory, &directoryInfo) != 0 || !S_ISDIR(directoryInfo.st_mode) || S_ISLNK(directoryInfo.st_mode) ||
+        lstat(alias, &aliasInfo) != 0 || !S_ISLNK(aliasInfo.st_mode)) return -1;
+    ssize_t length = readlink(alias, target, sizeof(target) - 1);
+    if (length <= 0 || length >= (ssize_t)sizeof(target) - 1) return -1;
+    target[length] = '\0';
+    if (strcmp(target, expectedTarget) != 0 || realpath(alias, aliasResolved) == NULL ||
+        realpath(npm, npmResolved) == NULL || strcmp(aliasResolved, npmResolved) != 0 ||
+        !path_is_under(root, aliasResolved) || stat(aliasResolved, &targetInfo) != 0 ||
+        !S_ISREG(targetInfo.st_mode) || access(aliasResolved, X_OK) != 0) return -1;
+    return 0;
+}
+
 static int required_pi_alias(const char *root, const char *architecture) {
     const char *expectedTarget = "../../app/node_modules/.bin/pi";
     char directory[PATH_MAX], alias[PATH_MAX], cli[PATH_MAX], packageRoot[PATH_MAX], nodeModules[PATH_MAX];
@@ -574,10 +594,13 @@ static int validate_payload(const char *payload, const char *expectedChannel, co
     char runtimeRelative[64];
     const char *architectures[] = {"arm64", "x64"};
     for (size_t index = 0; index < sizeof(architectures) / sizeof(architectures[0]); ++index) {
-        char requiredRuntime[64];
+        char requiredRuntime[64], requiredNpm[96];
         if (snprintf(requiredRuntime, sizeof(requiredRuntime), "runtime/node-%s", architectures[index]) >= (int)sizeof(requiredRuntime) ||
+            snprintf(requiredNpm, sizeof(requiredNpm), "runtime/npm-%s/bin/npm-cli.js", architectures[index]) >= (int)sizeof(requiredNpm) ||
             required_path(root, requiredRuntime, node, PATH_MAX, 1, 1024 * 1024, 0) != 0 ||
+            required_path(root, requiredNpm, node, PATH_MAX, 1, 1, 0) != 0 ||
             required_runtime_alias(root, architectures[index]) != 0 ||
+            required_npm_alias(root, architectures[index]) != 0 ||
             required_pi_alias(root, architectures[index]) != 0) return -1;
     }
     if (snprintf(runtimeRelative, sizeof(runtimeRelative), "runtime/%s", runtimeName) >= (int)sizeof(runtimeRelative)) return -1;
@@ -854,6 +877,22 @@ int main(int argc, char **argv) {
     if (!external && validate_payload(bundledRoot, NULL, NULL, NULL, node, entrypoint, helper, &selectedIdentity) != 0) {
         fprintf(stderr, "Tron Gateway payload is incomplete or invalid at %s. Reinstall Tron.\n", bundledRoot);
         return 78;
+    }
+#if defined(__arm64__)
+    const char *runtimeArchitecture = "arm64";
+#elif defined(__x86_64__)
+    const char *runtimeArchitecture = "x64";
+#else
+#error Unsupported macOS architecture
+#endif
+    char runtimeBin[PATH_MAX], childPath[PATH_MAX];
+    const char *inheritedPath = getenv("PATH");
+    if (snprintf(runtimeBin, sizeof(runtimeBin), "%s/runtime/bin-%s", selectedPayloadRoot, runtimeArchitecture) >= (int)sizeof(runtimeBin) ||
+        snprintf(childPath, sizeof(childPath), "%s%s%s", runtimeBin,
+                 inheritedPath == NULL || inheritedPath[0] == '\0' ? "" : ":", inheritedPath == NULL ? "" : inheritedPath) >= (int)sizeof(childPath) ||
+        setenv("PATH", childPath, 1) != 0) {
+        fputs("Tron could not export its bundled command path.\n", stderr);
+        return 70;
     }
     if (setenv("TRON_GATEWAY_SOURCE_REVISION", selectedIdentity.sourceRevision, 1) != 0 ||
         setenv("TRON_GATEWAY_PAYLOAD_VERSION", selectedIdentity.version, 1) != 0 ||

@@ -93,10 +93,17 @@ async function addRuntimeNodeAliases(root) {
   const basePreset = join(root, "runtime", "xcodegen", "share", "xcodegen", "SettingPresets", "base.yml");
   await mkdir(dirname(basePreset), { recursive: true });
   await writeFile(basePreset, "PRODUCT_NAME: $TARGET_NAME\n");
+  const nodeRoot = process.env.TRON_NODE_ROOT ?? "/tmp/tron-consolidation-toolchain-01a0a43d.4qlkoC/node-v22.22.0-darwin-arm64";
+  const officialNpmRoot = join(nodeRoot, "lib/node_modules/npm");
+  const officialNpmPackage = join(officialNpmRoot, "package.json");
+  await lstat(officialNpmPackage);
   for (const architecture of ["arm64", "x64"]) {
     const directory = join(root, "runtime", `bin-${architecture}`);
+    const npmRoot = join(root, "runtime", `npm-${architecture}`);
     await mkdir(directory, { recursive: true });
+    await cp(officialNpmRoot, npmRoot, { recursive: true });
     await symlink(`../node-${architecture}`, join(directory, "node"));
+    await symlink(`../npm-${architecture}/bin/npm-cli.js`, join(directory, "npm"));
     await symlink("../../app/node_modules/.bin/pi", join(directory, "pi"));
   }
 }
@@ -318,7 +325,9 @@ test("payload fingerprints include safe internal node_modules symlinks", async (
       join(staged.root, "app", "node_modules", "@earendil-works"), join(staged.root, "app", "node_modules"),
       join(staged.root, "app", "dist"), join(staged.root, "app", "scripts"),
       join(staged.root, "app"), join(staged.root, "runtime", "bin-arm64"),
-      join(staged.root, "runtime", "bin-x64"),
+      join(staged.root, "runtime", "bin-x64"), join(staged.root, "runtime", "npm-arm64", "bin"),
+      join(staged.root, "runtime", "npm-arm64"), join(staged.root, "runtime", "npm-x64", "bin"),
+      join(staged.root, "runtime", "npm-x64"),
       join(staged.root, "runtime", "xcodegen", "bin"),
       join(staged.root, "runtime", "xcodegen", "share", "xcodegen", "SettingPresets"),
       join(staged.root, "runtime", "xcodegen", "share", "xcodegen"),
@@ -326,7 +335,10 @@ test("payload fingerprints include safe internal node_modules symlinks", async (
       join(staged.root, "runtime", "xcodegen"),
       join(staged.root, "runtime"), staged.root,
     ]) await chmod(directory, 0o755);
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally {
+    await makeTreeWritable(root);
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("source build failure leaves active selection and deployment state unchanged", async () => {

@@ -25,6 +25,11 @@ NODE_VERSION_FILE="$REPO_ROOT/.node-version"
 source "$REPO_ROOT/config/ci-toolchain.env"
 [[ -f "$NODE_VERSION_FILE" ]] || { echo "missing canonical Node version file: $NODE_VERSION_FILE" >&2; exit 3; }
 NODE_VERSION="$(<"$NODE_VERSION_FILE")"
+# Node's official archive is the provenance authority for the bundled npm CLI.
+# Keep the npm package version pinned separately so --skip-download cannot
+# silently publish a stale/replaced npm tree.
+NPM_VERSION="$TRON_NODE_NPM_VERSION"
+NPM_TREE_SHA256="$TRON_NODE_NPM_TREE_SHA256"
 NODE_VERSION_LINES="$(awk 'END { print NR }' "$NODE_VERSION_FILE")"
 PROTOCOL_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["protocolVersion"])' "$REPO_ROOT/config/GatewayProtocol.json")"
 MIN_PROTOCOL_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["minProtocolVersion"])' "$REPO_ROOT/config/GatewayProtocol.json")"
@@ -366,6 +371,35 @@ validate_node_runtime() {
     fi
 }
 
+validate_npm_runtime() {
+    local arch="$1" root="$RUNTIME_DIR/npm-$1"
+    [[ -d "$root" && ! -L "$root" && -f "$root/package.json" && ! -L "$root/package.json" ]] || {
+        echo "missing staged npm runtime: $root" >&2
+        exit 2
+    }
+    [[ -f "$root/bin/npm-cli.js" && ! -L "$root/bin/npm-cli.js" && -x "$root/bin/npm-cli.js" ]] || {
+        echo "staged npm CLI is missing or not executable: $root/bin/npm-cli.js" >&2
+        exit 2
+    }
+    [[ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["version"])' "$root/package.json" 2>/dev/null)" == "$NPM_VERSION" ]] || {
+        echo "staged npm runtime version is not pinned to $NPM_VERSION: $root" >&2
+        exit 2
+    }
+    local digest
+    digest="$(python3 "$REPO_ROOT/scripts/hash-npm-runtime.py" "$root")" || {
+        echo "staged npm runtime contains unsafe content: $root" >&2
+        exit 2
+    }
+    [[ "$digest" == "$NPM_TREE_SHA256" ]] || {
+        echo "staged npm runtime content is not from the pinned Node archive: $root" >&2
+        exit 2
+    }
+    if find "$root" -type l -print -quit | grep -q .; then
+        echo "staged npm runtime contains a symlink: $root" >&2
+        exit 3
+    fi
+}
+
 xcodegen_presets_hash() {
     local root="$1"
     (
@@ -417,18 +451,27 @@ stage_node() {
     local arch="$1" expected="$2" destination="$RUNTIME_DIR/node-$1"
     if ((skip_download)); then
         validate_node_runtime "$arch" "$expected"
+        validate_npm_runtime "$arch"
         return
     fi
     local archive="node-v${NODE_VERSION}-darwin-${arch}.tar.gz"
-    local temp
+    local temp source_root
     temp="$(mktemp -d)"
     curl -fsSL --retry 3 "https://nodejs.org/dist/v${NODE_VERSION}/${archive}" -o "$temp/$archive"
     tar -xzf "$temp/$archive" -C "$temp"
-    install -m 0755 "$temp/node-v${NODE_VERSION}-darwin-${arch}/bin/node" "$destination"
+    source_root="$temp/node-v${NODE_VERSION}-darwin-${arch}"
+    install -m 0755 "$source_root/bin/node" "$destination"
+    # The Gateway's SDK package manager intentionally invokes the public npm
+    # command. Keep the pinned npm CLI from the same official Node archive
+    # beside its matching runtime; relying on launchd's PATH made removal fail
+    # with ENOENT even though the bundled Node binary was present.
+    safe_remove_tree "$RUNTIME_DIR/npm-$arch"
+    /usr/bin/ditto "$source_root/lib/node_modules/npm" "$RUNTIME_DIR/npm-$arch"
     rm -rf "$temp"
     # Downloaded binaries receive the same immutable hash/version/architecture
     # proof as pre-staged binaries before the payload is published.
     validate_node_runtime "$arch" "$expected"
+    validate_npm_runtime "$arch"
 }
 
 mkdir -p "$APP_DIR/dist" "$APP_DIR/scripts" "$RUNTIME_DIR" \
@@ -463,6 +506,7 @@ for arch in arm64 x64; do
     safe_remove_tree "$alias_dir"
     mkdir -p "$alias_dir"
     ln -s "../node-$arch" "$alias_dir/node"
+    ln -s "../npm-$arch/bin/npm-cli.js" "$alias_dir/npm"
     ln -s "../../app/node_modules/.bin/pi" "$alias_dir/pi"
 done
 
@@ -479,6 +523,7 @@ for required_payload in \
     "$APP_DIR/dist/index.js" "$APP_DIR/dist/version.js" "$APP_DIR/package.json" "$APP_DIR/package-lock.json" "$APP_DIR/PushService.xcconfig" \
     "$APP_DIR/scripts/ensure-node-pty-helper.mjs" "$APP_DIR/scripts/gateway-payload-deploy.mjs" \
     "$APP_DIR/node_modules" "$RUNTIME_DIR/node-arm64" "$RUNTIME_DIR/node-x64" \
+    "$RUNTIME_DIR/npm-arm64/bin/npm-cli.js" "$RUNTIME_DIR/npm-x64/bin/npm-cli.js" \
     "$RUNTIME_DIR/xcodegen/bin/xcodegen" "$RUNTIME_DIR/xcodegen/share/xcodegen/SettingPresets/base.yml"; do
     [[ -e "$required_payload" ]] || { echo "missing required staged payload: $required_payload" >&2; exit 3; }
 done
@@ -491,9 +536,15 @@ PI_REAL="$(realpath "$PI_CLI")"; PI_PACKAGE_REAL="$(realpath "$PI_PACKAGE")"; PI
 }
 for arch in arm64 x64; do
     alias="$RUNTIME_DIR/bin-$arch/node"
+    npm_alias="$RUNTIME_DIR/bin-$arch/npm"
     pi_alias="$RUNTIME_DIR/bin-$arch/pi"
     [[ -L "$alias" && "$(readlink "$alias")" == "../node-$arch" && "$(realpath "$alias")" == "$(realpath "$RUNTIME_DIR/node-$arch")" ]] || {
         echo "invalid staged Node command alias: $alias" >&2
+        exit 3
+    }
+    [[ -L "$npm_alias" && "$(readlink "$npm_alias")" == "../npm-$arch/bin/npm-cli.js" \
+        && "$(realpath "$npm_alias")" == "$(realpath "$RUNTIME_DIR/npm-$arch/bin/npm-cli.js")" ]] || {
+        echo "invalid staged npm command alias: $npm_alias" >&2
         exit 3
     }
     [[ -L "$pi_alias" && "$(readlink "$pi_alias")" == "../../app/node_modules/.bin/pi" \

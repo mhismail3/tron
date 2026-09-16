@@ -9,6 +9,8 @@ APP_ROOT="$TMP/Contents"
 BUNDLE="$APP_ROOT/Resources/Gateway"
 HELPER="$APP_ROOT/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
 HASH="$SCRIPT_DIR/hash-gateway-payload.sh"
+NODE_ROOT="${TRON_NODE_ROOT:-/tmp/tron-consolidation-toolchain-01a0a43d.4qlkoC/node-v22.22.0-darwin-arm64}"
+[[ -f "$NODE_ROOT/lib/node_modules/npm/package.json" ]] || { echo "TRON_NODE_ROOT must be an extracted official Node v22.22.0 archive" >&2; exit 2; }
 mkdir -p "$(dirname "$HELPER")" "$BUNDLE"
 xcrun --sdk macosx clang -O2 -Wall -Wextra -Werror -Wno-deprecated-declarations \
   -arch arm64 -arch x86_64 -mmacosx-version-min=15.0 \
@@ -30,12 +32,15 @@ make_payload() {
   printf '%s\n' '#!/usr/bin/env node' > "$root/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
   chmod 755 "$root/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
   ln -s ../@earendil-works/pi-coding-agent/dist/cli.js "$root/app/node_modules/.bin/pi"
-  printf '%s\n' '#!/bin/sh' '[ -n "$TRON_GATEWAY_BUNDLED_PAYLOAD_ROOT" ] || exit 9' 'printf "%s\\n" "$TRON_GATEWAY_PAYLOAD_ROOT"' 'exit 0' > "$root/runtime/node-arm64"
+  printf '%s\n' '#!/bin/sh' '[ -n "$TRON_GATEWAY_BUNDLED_PAYLOAD_ROOT" ] || exit 9' '[ "$(command -v npm)" = "$TRON_GATEWAY_PAYLOAD_ROOT/runtime/bin-arm64/npm" ] || exit 11' 'printf "%s\\n" "$TRON_GATEWAY_PAYLOAD_ROOT"' 'exit 0' > "$root/runtime/node-arm64"
   # Keep each fake runtime over the canonical minimum size without embedding
   # NUL bytes that would make the shell fixture itself invalid.
   dd if=/dev/zero bs=1024 count=1025 2>/dev/null | tr '\\0' '#' >> "$root/runtime/node-arm64"
   cp "$root/runtime/node-arm64" "$root/runtime/node-x64"
   chmod 755 "$root/runtime/node-arm64" "$root/runtime/node-x64"
+  mkdir -p "$root/runtime/npm-arm64/bin" "$root/runtime/npm-x64/bin"
+  cp -R "$NODE_ROOT/lib/node_modules/npm/." "$root/runtime/npm-arm64/"
+  cp -R "$NODE_ROOT/lib/node_modules/npm/." "$root/runtime/npm-x64/"
   mkdir -p "$root/runtime/xcodegen/bin" "$root/runtime/xcodegen/share/xcodegen/SettingPresets"
   cp "$root/runtime/node-arm64" "$root/runtime/xcodegen/bin/xcodegen"
   chmod 755 "$root/runtime/xcodegen/bin/xcodegen"
@@ -43,10 +48,12 @@ make_payload() {
   mkdir -p "$root/runtime/bin-arm64" "$root/runtime/bin-x64"
   ln -s ../node-arm64 "$root/runtime/bin-arm64/node"
   ln -s ../node-x64 "$root/runtime/bin-x64/node"
+  ln -s ../npm-arm64/bin/npm-cli.js "$root/runtime/bin-arm64/npm"
+  ln -s ../npm-x64/bin/npm-cli.js "$root/runtime/bin-x64/npm"
   ln -s ../../app/node_modules/.bin/pi "$root/runtime/bin-arm64/pi"
   ln -s ../../app/node_modules/.bin/pi "$root/runtime/bin-x64/pi"
   fingerprint="$("$HASH" "$root")"
-  printf '{"schema":1,"kind":"tron-gateway-payload","channel":"stable","version":"%s","gatewayVersion":"fixture","protocolVersion":"4","minProtocolVersion":"4","nodeVersion":"fixture","sourceRevision":"0123456789abcdef0123456789abcdef01234567","runtimeEpoch":"01234567-89ab-cdef-0123-456789abcdef","payloadFingerprint":"%s","dependencyTreeCoverage":"app/** and runtime/** regular files"}\n' "$version" "$fingerprint" > "$root/manifest.json"
+  printf '{"schema":1,"kind":"tron-gateway-payload","channel":"stable","version":"%s","gatewayVersion":"fixture","protocolVersion":"5","minProtocolVersion":"5","nodeVersion":"fixture","sourceRevision":"0123456789abcdef0123456789abcdef01234567","runtimeEpoch":"01234567-89ab-cdef-0123-456789abcdef","payloadFingerprint":"%s","dependencyTreeCoverage":"app/** and runtime/** regular files"}\n' "$version" "$fingerprint" > "$root/manifest.json"
   chmod -R a-w "$root"
 }
 
@@ -58,6 +65,13 @@ expected_bundle_fingerprint="$(sed -n 's/.*payloadFingerprint":"\([0-9a-f]*\)".*
 "$HELPER" --verify-payload "$BUNDLE" stable fixture fixture 0123456789abcdef0123456789abcdef01234567 || {
   echo "launcher payload verification mode rejected the valid fixture" >&2; exit 1;
 }
+STALE_NPM="$TMP/invalid-stale-npm"
+cp -R "$BUNDLE" "$STALE_NPM"
+chmod -R u+w "$STALE_NPM"
+printf '%s\n' '{"name":"npm","version":"stale"}' > "$STALE_NPM/runtime/npm-arm64/package.json"
+if "$HASH" "$STALE_NPM" >/dev/null 2>&1; then
+  echo "canonical hash admitted stale npm metadata" >&2; exit 1
+fi
 DIRECTORY_LINK="$TMP/invalid-directory-link"
 cp -R "$BUNDLE" "$DIRECTORY_LINK"
 chmod -R u+w "$DIRECTORY_LINK"
@@ -117,6 +131,23 @@ for invalid_alias in missing regular wrong-target absolute-target; do
   chmod -R a-w "$INVALID"
   if "$HELPER" --verify-payload "$INVALID" stable fixture fixture 0123456789abcdef0123456789abcdef01234567 >/dev/null 2>&1; then
     echo "launcher admitted invalid runtime Node alias: $invalid_alias" >&2; exit 1
+  fi
+done
+for invalid_alias in missing regular wrong-target absolute-target; do
+  INVALID="$TMP/invalid-npm-alias-$invalid_alias"
+  cp -R "$BUNDLE" "$INVALID"
+  chmod -R u+w "$INVALID"
+  alias="$INVALID/runtime/bin-arm64/npm"
+  rm "$alias"
+  case "$invalid_alias" in
+    missing) ;;
+    regular) printf '#!/bin/sh\nexit 0\n' > "$alias"; chmod 755 "$alias" ;;
+    wrong-target) ln -s ../npm-x64/bin/npm-cli.js "$alias" ;;
+    absolute-target) ln -s "$INVALID/runtime/npm-arm64/bin/npm-cli.js" "$alias" ;;
+  esac
+  chmod -R a-w "$INVALID"
+  if "$HELPER" --verify-payload "$INVALID" stable fixture fixture 0123456789abcdef0123456789abcdef01234567 >/dev/null 2>&1; then
+    echo "launcher admitted invalid runtime npm alias: $invalid_alias" >&2; exit 1
   fi
 done
 for invalid_alias in missing regular wrong-target absolute-target; do
