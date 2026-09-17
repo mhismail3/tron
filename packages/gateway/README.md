@@ -144,8 +144,10 @@ Gateway owns only mobile infrastructure:
 - settings, credentials, packages, trust, custom-model administration, generic
   extension UI forwarding, and bounded push-notification admission. Extension activity history revisions are
   derived from the globally sorted canonical receipt sequence; filters and
-  duplicate-content collapse select page content but never change cursor
-  identity. Component placement metadata is committed only with registry
+  duplicate-content collapse select page content but never change revision
+  identity, and each list cursor additionally binds a bounded fingerprint of the
+  exact filter that produced its offset so a cursor cannot be replayed against a
+  different filtered projection at the same revision. Component placement metadata is committed only with registry
   admission, so bounded capacity failures cannot orphan surfaces.
 
 The embedded runtime remains canonical for sessions, provider/model semantics,
@@ -948,7 +950,7 @@ Every canonical `custom_message` is context-bearing input under Pi semantics. Pr
 
 Remote restart is advertised only when `TRON_GATEWAY_SUPERVISED=1` is present from a managed LaunchAgent or repository background supervisor; direct foreground processes fail closed for remote restart. Planned restart exits with code 75 only after the registry drain completes. A handled signal in a supervised runtime also exits 75, while an ordinary foreground signal remains a clean exit; process replacement belongs to the supervisor.
 
-Extension callbacks are wrapped through the public `DefaultResourceLoaderOptions.extensionsOverride` seam on every load and reload. An AsyncLocalStorage owner (an opaque SHA-256 identity derived from stable source/path provenance, a generic humanized title, and exact `sourceInfo.source`) follows handlers, tools, commands, renderers, promises, and timers. Raw extension paths never enter owner IDs. The semantic broker records optional widget owners and per-key status owners; rendered component surfaces retain only exact source provenance. Callbacks that originate outside a wrapped owner context—such as a package-owned long-lived timer created during extension initialization—remain ownerless rather than being guessed, and protocol owner records are bounded at the store and native admission boundary.
+Extension callbacks are wrapped through the public `DefaultResourceLoaderOptions.extensionsOverride` seam on every load and reload. Registration admission is the extension's own registration maps rather than a one-shot pass over the loader result: Pi permits an already-loaded extension to register tools, commands, handlers, shortcuts, and renderers at any time, so a load-time-only pass would let a later `registerTool` replace the admitted entry and lose producer identity or bypass a reserved first-party name. Load-time and late registration therefore share one policy path, and each callback is admitted once even when a handler list is re-set. An AsyncLocalStorage owner (an opaque SHA-256 identity derived from stable source/path provenance, a generic humanized title, and exact `sourceInfo.source`) follows handlers, tools, commands, renderers, promises, and timers. Raw extension paths never enter owner IDs. Owner and reserved-name admission are resolved at invocation time, because the pinned SDK finalizes package `SourceInfo` after `extensionsOverride` returns. The semantic broker records optional widget owners and per-key status owners; rendered component surfaces retain only exact source provenance. Callbacks that originate outside a wrapped owner context—such as a package-owned long-lived timer created during extension initialization—remain ownerless rather than being guessed, and protocol owner records are bounded at the store and native admission boundary.
 
 Parallel tool events carry a monotonic per-run ordinal; each call additionally has
 a monotonic progress sequence, bounded display-safe live-output tail, runtime start,
