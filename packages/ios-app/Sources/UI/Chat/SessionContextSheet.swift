@@ -1,7 +1,7 @@
 import SwiftUI
 
 private enum ManageSessionDestination: String, Identifiable {
-    case agentInstructions, projectResources, history, processHistory, terminal, workspace
+    case agentInstructions, projectResources, projectHooks, history, processHistory, terminal, workspace
     var id: String { rawValue }
 }
 
@@ -328,6 +328,8 @@ struct SessionContextSheet: View {
                         AgentInstructionsSheet(sessionID: sessionID)
                     case .projectResources:
                         ProjectResourcesView(sessionID: sessionID)
+                    case .projectHooks:
+                        ProjectHooksView(sessionID: sessionID)
                     case .history:
                         SessionTreeSheet(
                             sessionID: sessionID,
@@ -631,6 +633,13 @@ struct SessionContextSheet: View {
                     subtitle: "Extensions, prompts, skills, and tools",
                     accent: sessionRowAccent
                 ) { destination = .projectResources }
+                divider()
+                manageRow(
+                    icon: "bolt.horizontal.circle",
+                    title: "Project Hooks",
+                    subtitle: "Registered hooks for this session",
+                    accent: sessionRowAccent
+                ) { destination = .projectHooks }
                 divider()
                 manageRow(
                     icon: "point.3.connected.trianglepath.dotted",

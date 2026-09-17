@@ -8869,7 +8869,7 @@ export default function (pi) {
     const cwdAlias = join(root, "workspace-alias");
     await symlink(cwd, cwdAlias);
     await Promise.all([
-      writeFile(join(pi, "extensions", "tool.ts"), `export default function (pi) { pi.registerTool({ name: "project_echo", label: "Project echo", description: "Echo project text", parameters: { type: "object", properties: { text: { type: "string" } }, required: ["text"] }, execute: async (_id, params) => ({ content: [{ type: "text", text: params.text }], details: {} }) }); }\n`),
+      writeFile(join(pi, "extensions", "tool.ts"), `export default function (pi) { pi.on("session_start", () => {}); pi.registerTool({ name: "project_echo", label: "Project echo", description: "Echo project text", parameters: { type: "object", properties: { text: { type: "string" } }, required: ["text"] }, execute: async (_id, params) => ({ content: [{ type: "text", text: params.text }], details: {} }) }); }\n`),
       writeFile(join(pi, "prompts", "review.md"), `---\ndescription: Review the current change\n---\nReview $ARGUMENTS\n`),
       writeFile(join(pi, "skills", "review", "SKILL.md"), `---\nname: review-skill\ndescription: Inspect a code change\n---\nReview carefully.\n`),
     ]);
@@ -8890,8 +8890,18 @@ export default function (pi) {
 
     const slot = await registry.create(cwd);
     const resources = slot.resources() as any;
+    expect(resources.hookInventory).toEqual(expect.objectContaining({
+      extensions: { total: 1, retained: 1, omitted: 0 },
+      handlerEvents: { total: 1, retained: 1, omitted: 0 },
+      loadErrors: { total: 0, retained: 0, omitted: 0 },
+    }));
     expect(resources.extensions).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: "tool.ts", scope: "project", tools: ["project_echo"] }),
+      expect.objectContaining({
+        name: "tool.ts",
+        scope: "project",
+        tools: ["project_echo"],
+        handlers: [{ event: "session_start", count: 1 }],
+      }),
     ]));
     expect(resources.prompts.prompts).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "review", description: "Review the current change", scope: "project" }),

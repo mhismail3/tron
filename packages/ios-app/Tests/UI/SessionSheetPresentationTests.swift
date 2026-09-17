@@ -1100,6 +1100,127 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testProjectHooksShowSuccessfulExtensionAndEventInventoriesWithDetails() async throws {
+        let runtimeValue: JSONValue = .object([
+            "extensions": .array([.object([
+                "name": .string("review-hook.ts"),
+                "path": .string("/workspace/.tron/extensions/review-hook.ts"),
+                "resolvedPath": .string("/workspace/.tron/extensions/review-hook.ts"),
+                "scope": .string("project"),
+                "source": .string("top-level"),
+                "origin": .string("top-level"),
+                "handlers": .array([
+                    .object(["event": .string("session_start"), "count": .number(1)]),
+                    .object(["event": .string("before_agent_start"), "count": .number(2)])
+                ])
+            ])]),
+            "hookInventory": .object([
+                "extensions": .object(["total": .number(1), "retained": .number(1), "omitted": .number(0)]),
+                "handlerEvents": .object(["total": .number(2), "retained": .number(2), "omitted": .number(0)]),
+                "loadErrors": .object(["total": .number(1), "retained": .number(1), "omitted": .number(0)]),
+                "textFieldsOmitted": .number(0),
+            ]),
+            "extensionLoadErrors": .array([.object([
+                "path": .string("/workspace/.tron/extensions/broken.ts"),
+                "error": .string("SyntaxError: expected handler export")
+            ])])
+        ])
+        let record = try XCTUnwrap(HookInventoryPresentation.extensions(from: runtimeValue).first)
+
+        let gateway = ProcessSheetGatewayFixture()
+        try await withModel(client: gateway.client) { model in
+            try await gateway.connect(model: model)
+            let snapshot = try SessionScenarioBuilder(seed: 9_403).openingTail(targetEncodedBytes: 4_096)
+            model.installHostedSubscribedSnapshot(snapshot)
+            // Seed the same-owner hosted projection so the sheet has a stable
+            // success surface while the real resources request is admitted.
+            model.installHostedSecondaryProjection(context: nil, tree: [], commands: [], resources: runtimeValue)
+
+            func respondToNext(_ method: String, result: JSONValue, startingAt: Int = 1) async throws {
+                var index = startingAt
+                while true {
+                    try await gateway.waitForRequest(at: index)
+                    let request = try JSONDecoder.gateway.decode(JSONValue.self, from: await gateway.socket.sentFrames()[index])
+                    guard request.objectValue?["method"]?.stringValue != method else {
+                        let id = try XCTUnwrap(request.objectValue?["id"]?.stringValue)
+                        await gateway.socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                            "type": .string("response"), "id": .string(id), "ok": .bool(true), "result": result
+                        ])))
+                        return
+                    }
+                    index += 1
+                }
+            }
+            let projectResponse = Task {
+                try await respondToNext("session.resources", result: runtimeValue)
+            }
+            defer { projectResponse.cancel() }
+            try await self.withSheet(ProjectHooksView(sessionID: snapshot.sessionId).environment(model)
+                .preferredColorScheme(.dark)) { controller in
+                try await Task.sleep(for: .milliseconds(300))
+                controller.view.layoutIfNeeded()
+                let methods = (await gateway.socket.sentFrames()).compactMap { try? JSONDecoder.gateway.decode(JSONValue.self, from: $0).objectValue?["method"]?.stringValue }
+                XCTAssertTrue(methods.contains("session.resources"))
+                XCTAssertEqual(model.sessionResources(for: snapshot.sessionId), runtimeValue)
+                XCTAssertEqual(HookInventoryPresentation.extensions(from: model.sessionResources(for: snapshot.sessionId)).first, record)
+                XCTAssertEqual(HookInventoryPresentation.issues(from: model.sessionResources(for: snapshot.sessionId)).first?.message, "SyntaxError: expected handler export")
+                XCTAssertEqual(model.sessionPresentationIdentity(for: snapshot.sessionId)?.sessionID, snapshot.sessionId)
+                self.capture(controller, name: "hooks-project-success-dark")
+            }
+            try await projectResponse.value
+            try await self.withSheet(ProjectHooksView(sessionID: snapshot.sessionId, initialMode: .byEvent, showsUnregisteredEvents: true).environment(model)
+                .preferredColorScheme(.light)) { controller in
+                try await Task.sleep(for: .milliseconds(300))
+                controller.view.layoutIfNeeded()
+                self.capture(controller, name: "hooks-project-by-event-light")
+            }
+            for _ in 0..<20 where model.isReconcilingForeground {
+                try await Task.sleep(for: .milliseconds(50))
+            }
+
+        }
+
+        try await withSheet(HookExtensionDetailView(record: record, accent: .tronSessionTeal)
+            .environment(\.dynamicTypeSize, .accessibility2)
+            .preferredColorScheme(.light)) { controller in
+            XCTAssertEqual(record.provenance, .project)
+            XCTAssertEqual(record.handlers.map(\.event), ["before_agent_start", "session_start"])
+            XCTAssertEqual(record.handlerCount, 3)
+            self.capture(controller, name: "hooks-project-detail-light")
+            let navigationBar = self.views(of: UINavigationBar.self, in: controller.view).first
+            let info = controller.navigationItem.leftBarButtonItem
+                ?? controller.navigationController?.topViewController?.navigationItem.leftBarButtonItem
+                ?? navigationBar?.topItem?.leftBarButtonItems?.first
+            if let info, let action = info.action {
+                UIApplication.shared.sendAction(action, to: info.target, from: info, for: nil)
+                try await self.waitForRouting {
+                    controller.presentedViewController != nil
+                        || controller.navigationController?.presentedViewController != nil
+                }
+                let technical = controller.presentedViewController
+                    ?? controller.navigationController?.presentedViewController
+                if let technical {
+                    self.capture(technical, name: "hooks-project-info-light")
+                }
+            }
+        }
+
+        try await withSheet(TechnicalJSONSheet(
+            value: .object([
+                "path": .string("/workspace/.tron/extensions/review-hook.ts"),
+                "scope": .string("project"),
+                "handlers": .array([
+                    .object(["event": .string("session_start"), "count": .number(1)]),
+                    .object(["event": .string("before_agent_start"), "count": .number(2)])
+                ])
+            ]), title: "Hook Technical Details", accent: .tronSessionTeal,
+            detent: .constant(.medium), onEdit: nil
+        ).preferredColorScheme(.dark)) { controller in
+            for _ in 0..<3 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+            self.capture(controller, name: "hooks-project-info-dark")
+        }
+    }
+
     func testProjectResourceDetailsLoadPromptAndSkillBodies() async throws {
         for kind in [ProjectResourceKind.prompts, .skills] {
             let gateway = ProcessSheetGatewayFixture()

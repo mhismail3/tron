@@ -676,7 +676,20 @@ struct ComposerResourcePicker: View {
 struct ComposerResourceBadges: View {
     let origin: CommandInfo.ResourceOrigin?
     let scope: CommandInfo.ResourceScope?
+    let hookProvenance: HookProvenance?
     let accent: Color
+
+    init(
+        origin: CommandInfo.ResourceOrigin? = nil,
+        scope: CommandInfo.ResourceScope? = nil,
+        hookProvenance: HookProvenance? = nil,
+        accent: Color
+    ) {
+        self.origin = origin
+        self.scope = scope
+        self.hookProvenance = hookProvenance
+        self.accent = accent
+    }
 
     static func titles(origin: CommandInfo.ResourceOrigin?, scope: CommandInfo.ResourceScope?) -> [String] {
         if scope == .project { return ["Project"] }
@@ -684,7 +697,7 @@ struct ComposerResourceBadges: View {
     }
 
     var body: some View {
-        ForEach(Self.titles(origin: origin, scope: scope), id: \.self) { title in
+        ForEach(hookProvenance.map { [$0.rawValue] } ?? Self.titles(origin: origin, scope: scope), id: \.self) { title in
             Text(title)
                 .font(TronTypography.sans(size: TronTypography.sizeXS, weight: .medium))
                 .foregroundStyle(accent)

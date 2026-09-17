@@ -293,6 +293,8 @@ final class SessionPresentationStore {
     private(set) var commands: [CommandInfo] = []
     private(set) var commandCatalogTarget: SessionPresentationIdentity?
     private(set) var resources: JSONValue?
+    private(set) var resourcesError: String?
+    private var resourceTarget: SessionPresentationIdentity?
     private var structureRevision = 0
     private var contextRevision = 0
     private var resourceRevision = 0
@@ -529,6 +531,16 @@ final class SessionPresentationStore {
 
     func resourceRevision(for sessionID: String) -> Int {
         ownsSession(sessionID) ? resourceRevision : 0
+    }
+
+    func resourcesError(for sessionID: String) -> String? {
+        guard let target, target.sessionID == sessionID, resourceTarget == target else { return nil }
+        return resourcesError
+    }
+
+    func resources(for sessionID: String) -> JSONValue? {
+        guard let target, target.sessionID == sessionID, resourceTarget == target else { return nil }
+        return resources
     }
 
     func open(_ sessionID: String) async throws -> Int {
@@ -1430,19 +1442,27 @@ final class SessionPresentationStore {
     }
 
     func loadResources(sessionID: String) async {
-        guard let token = secondaryReadSubscriptionToken(for: sessionID) else { return }
+        guard let token = secondaryReadSubscriptionToken(for: sessionID),
+              let requestedTarget = subscriptionTarget,
+              requestedTarget.sessionID == sessionID else { return }
         resourceLoadGeneration &+= 1
         let generation = resourceLoadGeneration
         struct Params: Codable { let sessionId: String }
         do {
             let loaded = try await client.requestValue("session.resources", Params(sessionId: sessionID), timeout: .seconds(60))
             guard generation == resourceLoadGeneration,
-                  ownsSubscription(sessionID: sessionID, requestedToken: token) else { return }
+                  ownsSubscription(sessionID: sessionID, requestedToken: token),
+                  subscriptionTarget == requestedTarget else { return }
             resources = loaded
+            resourceTarget = requestedTarget
+            resourcesError = nil
         } catch {
             guard !(error is CancellationError),
                   generation == resourceLoadGeneration,
-                  ownsSubscription(sessionID: sessionID, requestedToken: token) else { return }
+                  ownsSubscription(sessionID: sessionID, requestedToken: token),
+                  subscriptionTarget == requestedTarget else { return }
+            resourceTarget = requestedTarget
+            resourcesError = error.localizedDescription
             delegate?.sessionPresentationStoreSurface(error)
         }
     }
@@ -1515,6 +1535,8 @@ final class SessionPresentationStore {
         commands = []
         commandCatalogTarget = nil
         resources = nil
+        resourcesError = nil
+        resourceTarget = nil
     }
 
     private func closeCurrentSubscription() async -> Bool {
@@ -3056,6 +3078,8 @@ final class SessionPresentationStore {
         sessionTree = tree
         self.commands = commands
         self.resources = resources
+        self.resourceTarget = mountedTarget
+        self.resourcesError = nil
     }
 
     func installCompatibilitySelection(_ sessionID: String?) {

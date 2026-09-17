@@ -117,6 +117,7 @@ import { admitToolDisplayProjection, displayArtifactIDs } from "../display/displ
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
+import { projectHookRegistrations } from "./hook-projection.js";
 
 // A lifecycle header is trusted only after RuntimeSlot has parsed and schema-
 // admitted the first property from the exact-owned status file. A payload key
@@ -7000,6 +7001,25 @@ export class RuntimeSlot {
   private resourcesValue(): Record<string, unknown> {
     const session = this.runtime.session;
     const loader = session.resourceLoader;
+    const allExtensions = loader.getExtensions().extensions;
+    const allLoadErrors = loader.getExtensions().errors;
+    const hookProjection = projectHookRegistrations(
+      allExtensions.map((extension) => ({
+        name: basename(extension.path),
+        path: extension.path,
+        resolvedPath: extension.resolvedPath,
+        scope: extension.sourceInfo.scope,
+        source: extension.sourceInfo.source,
+        origin: extension.sourceInfo.origin,
+        tools: extension.tools.keys(),
+        commands: extension.commands.keys(),
+        handlers: extension.handlers,
+      })),
+      allLoadErrors,
+    );
+    const extensionValues = hookProjection.extensions;
+    const loadErrorValues = hookProjection.extensionLoadErrors;
+    const hookInventory = hookProjection.hookInventory;
     return {
       tools: session.getAllTools().map((tool) => ({
         name: tool.name,
@@ -7032,15 +7052,9 @@ export class RuntimeSlot {
         })),
         diagnostics: loader.getPrompts().diagnostics,
       },
-      extensions: loader.getExtensions().extensions.map((extension) => ({
-        name: basename(extension.path),
-        path: extension.path,
-        resolvedPath: extension.resolvedPath,
-        scope: extension.sourceInfo.scope,
-        source: extension.sourceInfo.source,
-        tools: Array.from(extension.tools.keys()),
-        commands: Array.from(extension.commands.keys()),
-      })),
+      extensions: extensionValues,
+      extensionLoadErrors: loadErrorValues,
+      hookInventory,
       contextFiles: loader.getAgentsFiles().agentsFiles.map((file) => ({
         name: basename(file.path),
         path: file.path,

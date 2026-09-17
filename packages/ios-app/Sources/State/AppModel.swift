@@ -272,6 +272,12 @@ final class AppModel {
     var commands: [CommandInfo] { sessionPresentation.commands }
     var commandCatalogTarget: SessionPresentationIdentity? { sessionPresentation.commandCatalogTarget }
     var resources: JSONValue? { sessionPresentation.resources }
+    /// Identity for global read-only inventories. It changes whenever the
+    /// selected profile, transport epoch, or foreground reconciliation owner
+    /// changes, so a late read cannot remain visible under a new Gateway.
+    var globalHooksPresentationIdentity: String {
+        "\(profileRevision):\(lifecycle.selectedProfileID ?? "none"):\(gatewayConnectionID.map(String.init) ?? "offline"):\(foregroundReconciliationGeneration):\(connectionState)"
+    }
     /// Keeps the root setup sheet from reacting to the transient connection
     /// state used while the Connections sheet adds a secondary server.
     var isAddingServer = false
@@ -952,6 +958,18 @@ final class AppModel {
 
     func sessionResourceRevision(for sessionID: String) -> Int {
         sessionPresentation.resourceRevision(for: sessionID)
+    }
+
+    func sessionResourcesError(for sessionID: String) -> String? {
+        sessionPresentation.resourcesError(for: sessionID)
+    }
+
+    func sessionResources(for sessionID: String) -> JSONValue? {
+        sessionPresentation.resources(for: sessionID)
+    }
+
+    func sessionPresentationIdentity(for sessionID: String) -> SessionPresentationIdentity? {
+        sessionPresentation.presentationTarget(for: sessionID)
     }
 
     func settings(for target: SettingsTarget) -> JSONValue? {

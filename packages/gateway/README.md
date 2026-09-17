@@ -1458,6 +1458,13 @@ a correlated protocol error instead of disconnecting the device. `session.contex
 and `session.resources` return runtime-native resource projections. The resource
 projection includes display-safe extension, prompt, skill, context-file, and tool
 metadata while canonical resource files and runtime loaders remain authoritative.
+Extension entries also expose the public loader handler event names and bounded
+registration counts, plus scope/source/origin and separate load errors; callback
+functions are never serialized. The hook inventory reports retained/omitted
+extension, handler-event, load-error, and long-metadata counts rather than
+silently presenting a truncated list. Additive hook metadata is admitted under
+a bounded encoded-byte budget so large registrations cannot overrun transport.
+This is a current runtime registration view, not execution history or health.
 `session.tree` returns the existing newest-first-selected, chronologically restored
 flat outline of at most 1,000 nodes and 700 KiB with depth, child-count, role, and
 current-path metadata; it never recursively serializes an unbounded canonical tree.

@@ -1782,7 +1782,15 @@ live session-state updates reuse those immutable rows, and dense cards use the
 static scroll surface rather than one live glass filter per event. Manage Session's model-card
 Compact Now action invokes Pi's canonical compaction through Gateway and can leave one authoritative request queued
 behind an active turn. Project Resources presents resolved extensions, prompts, skills,
-and tools as named rows over the canonical projection. Instruction files such as `AGENTS.md`
+and tools as named rows over the canonical projection. Manage Session also exposes
+Project Hooks as a separate current-runtime registration inventory: each extension
+is grouped by its truthful User/Project/Runtime provenance, with event names and
+handler counts from the Gateway's public loader projection and load issues shown
+separately. Registration is not execution history or health. The bounded Gateway
+projection reports omitted extension/event/error/long-metadata counts and the
+sheet renders an incomplete notice rather than implying completeness. Resource
+read failures are fenced to the mounted session and render retryable error state.
+Instruction files such as `AGENTS.md`
 have no duplicate row or Context Files section there: their assembled guidance belongs in
 Agent Instructions, which opens the complete document directly. Canonical resource discovery
 is unchanged. Project Resources, Session History, and Subagent History use the originating Manage Session teal titles and

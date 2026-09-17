@@ -1596,6 +1596,27 @@ struct SessionPresentationStoreTests {
         #expect(!store.prepareSecondaryProjectionForRuntimeInstallation(current))
     }
 
+    @Test("resource projection is owned by the exact mounted session generation")
+    func resourceProjectionFenceIsExactGenerationOwned() throws {
+        let first = try SessionScenarioBuilder(seed: 8_504).openingTail(targetEncodedBytes: 4_096)
+        var second = first
+        second.revision += 1
+        let store = SessionPresentationStore(
+            client: GatewayClient(),
+            performanceSignposts: SystemPerformanceSignposts.shared
+        )
+        store.installHostedSubscription(snapshot: first, token: "first")
+        store.installHostedSecondaryProjection(
+            context: nil, tree: [], commands: [], resources: .object(["runtime": .string("first")])
+        )
+        #expect(store.resources(for: first.sessionId) == .object(["runtime": .string("first")]))
+
+        store.installHostedAuthoritativeSnapshot(second)
+
+        #expect(store.resources(for: first.sessionId) == nil)
+        #expect(store.resources(for: second.sessionId) == nil)
+    }
+
     @Test("fork completion cannot revoke a same-session replacement generation")
     func forkFenceIsExactGenerationOwned() throws {
         let store = SessionPresentationStore(
