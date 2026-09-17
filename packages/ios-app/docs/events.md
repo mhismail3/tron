@@ -389,7 +389,9 @@ Tail/keyboard settlement never discards loaded transcript coverage. Snapshot cac
 Phase, operation, tool ordering, and canonical paging cursors remain authoritative. A rolling-upgrade
 client also normalizes the impossible legacy combination of an idle phase and retained running-tool
 overlay to an interrupted chip; it does not expose a fake Stop action for extension-owned detached
-work. Current Gateways project that background work through `ExtensionPresentationState`. Tron
+work. The composer Stop control is scoped to the current run and says so: it never claims to pause an
+extension workflow whose own scheduling may start another run, and an extension detects a user stop
+from the run's aborted terminal state rather than from any Tron-side continuation flag. Current Gateways project that background work through `ExtensionPresentationState`. Tron
 decodes the versioned, bounded projection: one host epoch and aggregate revision cover semantic state,
 authoritative interactions, generic full-frame surfaces, capabilities/diagnostics, and the optional input
 lease. Presentation collections reject their DTO-specific limit during decoding before retaining another

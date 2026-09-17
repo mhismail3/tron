@@ -829,6 +829,12 @@ foreground operation and every owned process settle; an unsuccessful postconditi
 an error rather than `{ aborted: true }`. Runtime replacement also drains the outgoing
 process owner before installing its successor. Extension-managed detached subagents never
 enter that owner and are not cancelled by foreground Stop.
+Stop is scoped to one invocation, not to an extension workflow. A stopped run's canonical
+assistant message carries Pi's `aborted` stop reason, so an extension that schedules its own
+continuations can distinguish a user stop from a completed run and decide whether to
+continue; Tron never silently disables extension continuation on the user's behalf, and the
+Stop affordance must not claim that it does. A continuation that starts after a stop is a
+new invocation with its own identity, never a resurrection of the stopped one.
 Extension commands are resolved before ordinary streaming rejection and still execute through
 Pi's prompt path. Tron registers its release-owned `ask_user` capability as one sequential
 semantic form tool (`tron:ask-user.v1`). Its title, descriptions, multi-select/Other policy,
