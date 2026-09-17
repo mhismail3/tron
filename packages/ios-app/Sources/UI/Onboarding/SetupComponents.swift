@@ -566,7 +566,7 @@ struct ModelPicker: View {
                     }
                     .buttonStyle(.plain)
                     .tronScrollSurface(
-                        accent: selection == model.ref ? .tronEmerald : .tronSlate,
+                        accent: rowAccent(isSelected: selection == model.ref),
                         cornerRadius: 14,
                         tintOpacity: selection == model.ref ? 0.18 : 0.08
                     )
@@ -620,6 +620,10 @@ struct ModelPicker: View {
                 closingSearch = false
             }
         }
+    }
+
+    private func rowAccent(isSelected: Bool) -> Color {
+        settingsTheme?.accent ?? (isSelected ? .tronEmerald : .tronSlate)
     }
 
     private func closeSearch() {

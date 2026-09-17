@@ -38,6 +38,8 @@ extension Color {
     static let tronKnowledge = Color(lightHex: "#6D3BB8", darkHex: "#C4B5FD")
     static let tronKnowledgeText = Color(lightHex: "#54258F", darkHex: "#DDD6FE")
     static let tronRose = Color(lightHex: "#D4245F", darkHex: "#E62B6C")
+    /// Adaptive wine accent for server selection surfaces.
+    static let tronBurgundy = Color(lightHex: "#9F1239", darkHex: "#FB7185")
     static let tronPink = Color(lightHex: "#DB2777", darkHex: "#EC4899")
     static let tronSlate = Color(lightHex: "#64748B", darkHex: "#94A3B8")
 

@@ -1,8 +1,8 @@
 import SwiftUI
 
 enum HookViewMode: String, CaseIterable, Identifiable {
-    case byExtension
     case byEvent
+    case byExtension
     var id: String { rawValue }
     var title: String { self == .byExtension ? "By Extension" : "By Event" }
 }
@@ -45,7 +45,7 @@ struct ProjectHooksView: View {
         NavigationStack {
             ScrollViewReader { proxy in
                 ScrollView(.vertical, showsIndicators: true) {
-                    LazyVStack(alignment: .leading, spacing: 0) {
+                    LazyVStack(alignment: .leading, spacing: 18) {
                         Color.clear.frame(height: 0).id("project-hooks-top")
                     if let resourceError = model.sessionResourcesError(for: sessionID),
                        currentIdentity != nil {
@@ -74,10 +74,13 @@ struct ProjectHooksView: View {
                         )
                         .accessibilityLabel("Hook view")
                         if mode == .byEvent {
-                            Toggle("Show unregistered events", isOn: $showUnregisteredEvents)
-                                .font(TronTypography.bodySM)
-                                .tint(Color.tronSessionTeal)
-                                .padding(.horizontal, 4)
+                            TronToggleRow(
+                                icon: "bolt.horizontal.circle",
+                                title: "Show unregistered events",
+                                detail: "Include supported lifecycle events without registered handlers",
+                                accent: .tronSessionTeal,
+                                isOn: $showUnregisteredEvents
+                            )
                         }
                         if records.isEmpty && issues.isEmpty && !(mode == .byEvent && showUnregisteredEvents) {
                             TronPlaceholderState(
@@ -113,6 +116,7 @@ struct ProjectHooksView: View {
                     }
                     }
                     .padding(.horizontal, 20)
+                    .padding(.vertical, 18)
                 }
                 .tronScrollEdgeChrome()
                 .navigationBarTitleDisplayMode(.inline)
