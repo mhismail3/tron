@@ -2044,10 +2044,16 @@ final class SessionPresentationStore {
                 // quarantine between these ownership transitions.
                 mount(installedTarget)
                 isAuthoritative = true
+                // Initiate the cross-client attention acknowledgement before any
+                // open-time delegate work. The delegate immediately starts
+                // provider/model catalog discovery, which can block on an
+                // interactive provider-auth prompt, and the acknowledgement must
+                // never be starved behind it. Both remain concurrent requests;
+                // only their initiation order is fixed.
+                schedulePendingAttentionRead(targetOverride: installedTarget)
                 delegate?.sessionPresentationStoreDidOpen(installedTarget)
                 delegate?.sessionPresentationStoreDidPublishSnapshot(installed, target: installedTarget)
                 publish(replayEffects, target: installedTarget)
-                schedulePendingAttentionRead(targetOverride: installedTarget)
             case .reconnect:
                 if handoffTarget != nil {
                     // A visible open joined this reconnect while its quarantine
@@ -2056,10 +2062,12 @@ final class SessionPresentationStore {
                     // presentation owner.
                     mount(installedTarget)
                     isAuthoritative = true
+                    // Same ordering rule as the presentation open: acknowledgement
+                    // first, then the delegate work that starts catalog discovery.
+                    schedulePendingAttentionRead(targetOverride: installedTarget)
                     delegate?.sessionPresentationStoreDidOpen(installedTarget)
                     delegate?.sessionPresentationStoreDidPublishSnapshot(installed, target: installedTarget)
                     publish(replayEffects, target: installedTarget)
-                    schedulePendingAttentionRead(targetOverride: installedTarget)
                 } else {
                     publish(replayEffects, target: installedTarget)
                     if pendingTarget?.sessionID != sessionID { schedulePendingAttentionRead() }

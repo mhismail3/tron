@@ -4245,8 +4245,10 @@ extension AppModel: SessionPresentationStoreDelegate {
         Task { [weak self] in
             guard let self else { return }
             // SessionPresentationStore owns the command catalog read after it
-            // installs the exact subscription target. Keep provider refresh
-            // independent; it has a separate catalog owner and admission.
+            // installs the exact subscription target, and it initiates the
+            // cross-client attention acknowledgement before notifying this
+            // delegate, so catalog discovery here cannot delay it. Keep provider
+            // refresh independent; it has a separate catalog owner and admission.
             _ = await self.refreshProviders(target: .session(id: target.sessionID))
         }
     }
