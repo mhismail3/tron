@@ -9,7 +9,7 @@ import {
   TRON_ASK_USER_INLINE_PATH,
   TRON_ASK_USER_SOURCE,
 } from "./tron-ask-user-extension.js";
-import { TRON_FORM_REQUEST } from "../sessions/extension-adapter-contract.js";
+import { TRON_FORM_CAPABILITY } from "../sessions/extension-adapter-contract.js";
 import { SemanticUIBroker } from "../sessions/semantic-ui-broker.js";
 import { ExtensionPresentationStore } from "./host/extension-presentation-store.js";
 
@@ -69,7 +69,7 @@ describe("Tron-owned ask_user extension", () => {
     };
     const result = await tool.execute("call", request, undefined, undefined, {
       hasUI: true,
-      ui: { [TRON_FORM_REQUEST]: async (input: any) => { calls.push(input); return answer; } },
+      ui: { [TRON_FORM_CAPABILITY]: async (input: any) => { calls.push(input); return answer; } },
     });
     expect(tool.executionMode).toBe("sequential");
     expect(calls).toHaveLength(1);
@@ -107,7 +107,7 @@ describe("Tron-owned ask_user extension", () => {
       questions: [{ ...request.questions[0], allowOther: false }],
     }, undefined, undefined, {
       hasUI: true,
-      ui: { [TRON_FORM_REQUEST]: async () => ({
+      ui: { [TRON_FORM_CAPABILITY]: async () => ({
         version: 1,
         answers: [{ questionId: "question-0", optionIds: ["question-0-option-0"] }],
       }) },
@@ -139,7 +139,7 @@ describe("Tron-owned ask_user extension", () => {
     const tool = registeredTool();
     const result = await tool.execute("call", { questions: request.questions, allowCancel: true }, undefined, undefined, {
       hasUI: true,
-      ui: { [TRON_FORM_REQUEST]: async () => undefined },
+      ui: { [TRON_FORM_CAPABILITY]: async () => undefined },
     });
     expect(result.details).toMatchObject({ cancelled: true, answers: {}, title: "Question" });
     expect((result.details as any).questions[0]).not.toHaveProperty("id");
@@ -153,7 +153,7 @@ describe("Tron-owned ask_user extension", () => {
     controller.abort();
     const result = await tool.execute("call", request, controller.signal, undefined, {
       hasUI: true,
-      ui: { [TRON_FORM_REQUEST]: async () => undefined },
+      ui: { [TRON_FORM_CAPABILITY]: async () => undefined },
     });
     expect(result.details).toMatchObject({ cancelled: true, answers: {}, title: request.title });
     expect((result.details as any).questions[0]).not.toHaveProperty("id");
@@ -166,7 +166,7 @@ describe("Tron-owned ask_user extension", () => {
     const protoRequest = { ...request, questions: [{ ...request.questions[0], question: "__proto__" }] };
     const result = await tool.execute("call", protoRequest, undefined, undefined, {
       hasUI: true,
-      ui: { [TRON_FORM_REQUEST]: async () => ({ version: 1, answers: [{ questionId: "question-0", optionIds: ["question-0-option-0"] }] }) },
+      ui: { [TRON_FORM_CAPABILITY]: async () => ({ version: 1, answers: [{ questionId: "question-0", optionIds: ["question-0-option-0"] }] }) },
     });
     expect(JSON.stringify(result.details)).toContain("__proto__");
     expect((result.details as any).answers["__proto__"].selected).toEqual(["Postgres"]);
@@ -205,7 +205,7 @@ describe("Tron-owned ask_user extension", () => {
     }));
     const result = await tool.execute("call", { questions }, undefined, undefined, {
       hasUI: true,
-      ui: { [TRON_FORM_REQUEST]: async () => ({
+      ui: { [TRON_FORM_CAPABILITY]: async () => ({
         version: 1,
         answers: questions.map((_, index) => ({ questionId: `question-${index}`, optionIds: [`question-${index}-option-0`] })),
       }) },

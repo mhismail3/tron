@@ -6,7 +6,8 @@ import type {
   ExtensionFormDescriptor,
   JsonValue,
 } from "../protocol/types.js";
-import { TRON_FORM_REQUEST } from "../sessions/extension-adapter-contract.js";
+import { TRON_FORM_CAPABILITY } from "../sessions/extension-adapter-contract.js";
+import type { FormCapableUI } from "../sessions/extension-adapter-contract.js";
 
 export { TRON_ASK_USER_INLINE_PATH, TRON_ASK_USER_SOURCE } from "./tron-ask-user-contract.js";
 import { TRON_ASK_USER_INLINE_PATH, TRON_ASK_USER_SOURCE } from "./tron-ask-user-contract.js";
@@ -73,9 +74,7 @@ export function createTronAskUserExtension(): ExtensionFactory {
         if (!context?.ui || !context.hasUI) throw new Error("ask_user requires an interactive Tron form host");
         const form = toForm(request);
         if (signal?.aborted) return cancelledResult(form, AGENT_ABORTED_TEXT);
-        const requestForm = (context.ui as typeof context.ui & {
-          [TRON_FORM_REQUEST]?: (input: { form: ExtensionFormDescriptor; signal?: AbortSignal }) => Promise<ExtensionFormAnswer | undefined>;
-        })[TRON_FORM_REQUEST];
+        const requestForm = (context.ui as typeof context.ui & FormCapableUI)[TRON_FORM_CAPABILITY];
         if (!requestForm) throw new Error("Tron semantic form host is unavailable");
         const answer = await requestForm({
           form,

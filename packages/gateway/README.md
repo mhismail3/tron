@@ -859,6 +859,13 @@ per session, preserves canonical option order, caps each Other response at 32 Ki
 interaction/answer envelope at 192 KiB, and never falls back to primitive dialog scripting. Mobile sheet dismissal does not send cancellation or settle the extension promise: the authoritative interaction remains pending until an explicit answer, package timeout/abort, host retirement, or an explicit protocol cancellation from a client that intentionally offers one.
 Malformed or unaudited marker contracts fail closed. Arbitrary custom/overlay TUI is not
 inferred or remotely executed.
+The capability is published to extensions as one documented, versioned host property,
+`tron.form.v1`, on the Pi UI context: presence of that property is the capability signal,
+and its absence means the extension must fall back to Pi's standard primitive dialogs. An
+independently authored extension can therefore feature-detect and request a native form
+without importing Tron internals or receiving a bespoke package adapter. A returned
+`undefined` means no answer was admitted — explicit cancellation, host retirement, or
+abort — and is never a user decision; caller aborts are not treated as answers either.
 A per-bind host epoch and monotonic presentation revision scope
 all retained semantic state and actionable responses; reload/replacement retires
 captured callbacks instead of letting them mutate the replacement host. The lifecycle coordinator counts prompt preflights, command handlers, interactions,

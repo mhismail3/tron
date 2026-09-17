@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { adaptedExtensionEventHandler, adaptedToolDefinition, AUDITED_ASK_USER_PACKAGE } from "./extension-adapters.js";
-import { TRON_FORM_REQUEST } from "../sessions/extension-adapter-contract.js";
+import { TRON_FORM_CAPABILITY } from "../sessions/extension-adapter-contract.js";
 
 const marker = "\0XYZ_ASK_USER";
 const fixtureAgentRoot = mkdtempSync(join(tmpdir(), "tron-ask-user-audit-"));
@@ -81,7 +81,7 @@ function context(answer: unknown, calls: any[] = []) {
   return {
     mode: "rpc", hasUI: true,
     ui: {
-      [TRON_FORM_REQUEST]: async (input: any) => {
+      [TRON_FORM_CAPABILITY]: async (input: any) => {
         calls.push(input);
         return answer;
       },
@@ -229,7 +229,7 @@ describe("exact @zhushanwen/pi-ask-user semantic form adapter", () => {
     const controller = new AbortController(); controller.abort();
     let admitted = false;
     const ctx = context(undefined);
-    ctx.ui[TRON_FORM_REQUEST] = async () => { admitted = true; return undefined; };
+    ctx.ui[TRON_FORM_CAPABILITY] = async () => { admitted = true; return undefined; };
     const original = definition(async (_id: string, _params: unknown, signal: AbortSignal, _update: unknown, adaptedContext: any) =>
       adaptedContext.ui.select(marker, [markerPayload([single])], { signal }));
     await expect(adaptedToolDefinition(extension(), "ask_user", original).execute("call", {}, controller.signal, undefined, ctx)).resolves.toBeUndefined();

@@ -653,7 +653,7 @@ export class RuntimeSlot {
       this.publishSummary();
     }, {
       capabilities: [
-        "semantic.dialogs", "semantic.form.v1", "semantic.notifications", "semantic.status", "semantic.working",
+        "semantic.dialogs", "tron.form.v1", "semantic.notifications", "semantic.status", "semantic.working",
         "semantic.hidden-thinking-label", "semantic.string-widgets", "semantic.title",
         "semantic.revisioned-editor", "semantic.tools-expanded", "surfaces.full-frame",
       ],
