@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DefaultResourceLoader, ExtensionRunner, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
-import { attributeExtensions, attributedCommandOwner, attributedToolOwner, currentExtensionOwner, trustedExtensionOriginKind } from "./owner-attribution.js";
+import { attributeExtensions, attributedCommandOwner, attributedToolOwner, currentExtensionOwner, extensionOwnerFor, trustedExtensionOriginKind } from "./owner-attribution.js";
 import { createTronAskUserExtension, TRON_ASK_USER_INLINE_PATH } from "./tron-ask-user-extension.js";
 
 function fakeExtension(path: string, source = "project") {
@@ -13,6 +13,19 @@ function fakeExtension(path: string, source = "project") {
     handlers: new Map(), tools: new Map(), commands: new Map(), shortcuts: new Map(),
     messageRenderers: new Map(), entryRenderers: new Map(), flags: new Map(),
   };
+}
+
+function titledExtension(path: string, options: { resolvedPath?: string; baseDir?: string; source?: string } = {}) {
+  const resolvedPath = options.resolvedPath ?? path;
+  return {
+    path, resolvedPath,
+    sourceInfo: {
+      path, source: options.source ?? "project", scope: "project", origin: "top-level",
+      ...(options.baseDir === undefined ? {} : { baseDir: options.baseDir }),
+    },
+    handlers: new Map(), tools: new Map(), commands: new Map(), shortcuts: new Map(),
+    messageRenderers: new Map(), entryRenderers: new Map(), flags: new Map(),
+  } as any;
 }
 
 function tool(name: string) {
@@ -114,6 +127,45 @@ describe("extension owner attribution", () => {
     expect(attributedToolOwner(attributedTool)).toEqual(seen[0]);
     expect(attributedCommandOwner(attributedCommand)).toEqual(seen[0]);
     expect(currentExtensionOwner()).toBeUndefined();
+  });
+
+  it("names a project extension by its own file, not its container directory", async () => {
+    // Every project extension lives in `.pi/extensions/`, so a container-derived
+    // title gave every one of them the same user-visible label.
+    const root = "/Users/example/workspace";
+    for (const [file, expected] of [["tool.ts", "Tool"], ["subagents.ts", "Subagents"], ["tool", "Tool"]] as const) {
+      const extension = titledExtension(`${root}/.pi/extensions/${file}`, { baseDir: `${root}/.pi` });
+      expect(extensionOwnerFor(extension).title).toBe(expected);
+    }
+    // Two different project extensions must never share one title.
+    const first = titledExtension(`${root}/.pi/extensions/alpha.ts`, { baseDir: `${root}/.pi` });
+    const second = titledExtension(`${root}/.pi/extensions/beta.ts`, { baseDir: `${root}/.pi` });
+    expect(extensionOwnerFor(first).title).not.toBe(extensionOwnerFor(second).title);
+    // A container-only name is honest rather than misleading.
+    expect(extensionOwnerFor(titledExtension(`${root}/.pi/extensions/index.ts`, { baseDir: `${root}/.pi` })).title).toBe("Extension");
+  });
+
+  it("names an inline capability by its own generated name", async () => {
+    expect(extensionOwnerFor(titledExtension("<inline:tron-ask-user>", { source: "tron:ask-user.v1" })).title).toBe("Tron Ask User");
+    expect(extensionOwnerFor(titledExtension("<inline:tron-notify>", { source: "tron:notify.v1" })).title).toBe("Tron Notify");
+  });
+
+  it("keeps installed package titles and disambiguates generic entry directories", async () => {
+    // A specific entry directory still wins, so installed labels do not change.
+    expect(extensionOwnerFor(titledExtension(
+      "/agent/npm/node_modules/pi-subagents/index.ts",
+      { baseDir: "/agent/npm/node_modules/pi-subagents", source: "npm:pi-subagents" },
+    )).title).toBe("Pi Subagents");
+    expect(extensionOwnerFor(titledExtension(
+      "/agent/git/pi-agent-browser-native/dist/extensions/agent-browser/index.js",
+      { baseDir: "/agent/git/pi-agent-browser-native/dist/extensions/agent-browser", source: "npm:pi-agent-browser-native" },
+    )).title).toBe("Agent Browser");
+    // A package whose entry sits in a generic directory uses its package name
+    // instead of colliding with every other package shaped the same way.
+    expect(extensionOwnerFor(titledExtension(
+      "/agent/npm/node_modules/@mocito/pi-goal/extensions/index.ts",
+      { baseDir: "/agent/npm/node_modules/@mocito/pi-goal/extensions", source: "npm:@mocito/pi-goal" },
+    )).title).toBe("Pi Goal");
   });
 
   it("attributes a shared handler function separately for each extension", async () => {

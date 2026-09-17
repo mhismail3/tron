@@ -66,12 +66,55 @@ export function attributedToolOwner(tool: RegisteredTool | undefined): Extension
   return extension ? extensionOwnerFor(extension) : undefined;
 }
 
+/**
+ * Names that identify a container rather than the extension itself. Every
+ * project extension lives in `.pi/extensions/`, and packages commonly expose
+ * `index.ts`, so deriving a user-visible title from a container name makes
+ * unrelated extensions share one label ("Pi") and collapses them into one
+ * producer group in native presentation.
+ */
+const GENERIC_EXTENSION_NAMES: ReadonlySet<string> = new Set([
+  "index", "main", "mod", "entry", "extension", "extensions", "bundle",
+  ".pi", "pi", "dist", "src", "lib", "libs", "build", "out", "node_modules",
+]);
+
+function titleFromName(value: string): string | undefined {
+  const words = value.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  if (words.length === 0) return undefined;
+  return words.map((word) => word[0]!.toUpperCase() + word.slice(1)).join(" ");
+}
+
+function baseNameWithoutExtension(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const name = basename(value);
+  const extension = extname(name);
+  return extension ? name.slice(0, -extension.length) : name;
+}
+
+/**
+ * The human-readable producer title for one extension, resolved in a fixed
+ * precedence that never accepts a container name: the entry file, then its
+ * immediate directory, then the installed package name. A project extension in
+ * the standard `.pi/extensions/` layout is therefore named by its own file, and
+ * a package whose entry sits in a generic directory falls back to its package
+ * name instead of colliding with every other such package.
+ */
 function humanizedDisplayName(extension: Extension): string {
-  const sourcePath = extension.sourceInfo.baseDir || extension.sourceInfo.path || extension.resolvedPath || extension.path;
-  const directory = basename(sourcePath);
-  const candidate = extname(directory) ? directory.slice(0, -extname(directory).length) : directory;
-  const words = candidate.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-  return words.length === 0 ? "Extension" : words.map((word) => word[0]!.toUpperCase() + word.slice(1)).join(" ");
+  // Pi's inline extensions carry a generated `<kind:name>` path with no directory.
+  const inline = [extension.path, extension.resolvedPath, extension.sourceInfo.path]
+    .find((value) => typeof value === "string" && value.startsWith("<") && value.endsWith(">"));
+  if (inline) {
+    const inner = inline.slice(1, -1);
+    return titleFromName(inner.slice(inner.indexOf(":") + 1) || inner) ?? "Extension";
+  }
+  for (const name of [baseNameWithoutExtension(extension.resolvedPath), baseNameWithoutExtension(extension.sourceInfo.baseDir)]) {
+    if (name && !GENERIC_EXTENSION_NAMES.has(name.toLowerCase())) {
+      const title = titleFromName(name);
+      if (title) return title;
+    }
+  }
+  const npmPackage = /^npm:(?:@[^/]+\/)?(.+)$/u.exec(extension.sourceInfo.source ?? "")?.[1];
+  return (npmPackage ? titleFromName(npmPackage) : undefined) ?? "Extension";
 }
 
 export function extensionOwnerFor(extension: Extension): ExtensionOwner {

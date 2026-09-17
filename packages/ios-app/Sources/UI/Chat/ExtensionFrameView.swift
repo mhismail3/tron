@@ -127,28 +127,44 @@ struct ExtensionFrameView: View {
     let frame: ExtensionFrame
     @Environment(\.colorScheme) private var colorScheme
 
-    private var rows: [ExtensionFrameLine] {
-        frame.lines.filter { !NativeExtensionText.isDetailHint($0.plainText) && !NativeExtensionText.clean($0.plainText).isEmpty }
+    /// One sanitize pass per body evaluation. `clean` already drops detail hints,
+    /// so a single call per line replaces the previous filter-then-reclean pair,
+    /// and the accessibility value reuses the prepared plain text instead of
+    /// sanitizing every line a second time.
+    private var preparedRows: [PreparedRow] {
+        let palette = ExtensionFrameRunPresentation.NativePalette(colorScheme: colorScheme)
+        return frame.lines.compactMap { line in
+            let plain = NativeExtensionText.clean(line.plainText)
+            guard !plain.isEmpty else { return nil }
+            return PreparedRow(attributed: nativeText(for: line, palette: palette), plain: plain)
+        }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(rows.enumerated()), id: \.offset) { _, line in
-                row(line)
+        let rows = preparedRows
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                self.row(row.attributed)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
-        .accessibilityValue(Text(rows.map { NativeExtensionText.clean($0.plainText) }.joined(separator: "\n")))
+        .accessibilityValue(Text(rows.map(\.plain).joined(separator: "\n")))
     }
 
-    private func row(_ line: ExtensionFrameLine) -> some View {
+    /// A frame row prepared once for both rendering and its accessibility value.
+    private struct PreparedRow {
+        let attributed: AttributedString
+        let plain: String
+    }
+
+    private func row(_ attributed: AttributedString) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "circle.fill")
                 .font(TronTypography.sans(size: 5))
                 .foregroundStyle(Color.tronCyan)
                 .padding(.top, 7)
-            Text(nativeText(for: line))
+            Text(attributed)
                 .font(TronTypography.bodySM)
                 .foregroundStyle(Color.tronTextPrimary)
                 .textSelection(.enabled)
@@ -158,8 +174,7 @@ struct ExtensionFrameView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func nativeText(for line: ExtensionFrameLine) -> AttributedString {
-        let palette = ExtensionFrameRunPresentation.NativePalette(colorScheme: colorScheme)
+    private func nativeText(for line: ExtensionFrameLine, palette: ExtensionFrameRunPresentation.NativePalette) -> AttributedString {
         var result = AttributedString()
         for run in line.runs {
             let presentation = ExtensionFrameRunPresentation(run: run, palette: palette)
