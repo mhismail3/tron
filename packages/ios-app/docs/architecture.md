@@ -396,7 +396,11 @@ hooks are absent from Development and Release builds and own no session policy
 or runtime state. The
 composer remains mounted and visible throughout opening so transient synchronization
 cannot remove the primary chat control; sending stays disabled until the authoritative
-baseline is ready. A cancelled opening lease publishes a fresh resume edge when it drains, so a foregrounded connected chat cannot remain non-scrollable with disabled composer actions until an unrelated navigation gesture changes presentation activity. Failed attempts do not automatically reopen from task-revision, connection, or foreground callbacks; the explicit Retry intent survives an old lease's drain without overlapping session opens. The hosted reveal-cancellation regression checks stale-callback rejection, the enabled attachment/native-scroll controls, and a visible outgoing submission after resumption. A failed transport/sync open shows an explicit retry surface. Once that mounted chat is ready, reconnect and
+baseline is ready. A cancelled opening lease publishes a fresh resume edge when it drains, so a foregrounded connected chat cannot remain non-scrollable with disabled composer actions until an unrelated navigation gesture changes presentation activity. A sheet that creates or imports a session hands its
+route off on that sheet's own dismissal edge instead of navigating underneath it:
+a destination chat covered by a presented sibling surface cannot publish the native
+geometry its opening transaction needs, so the open could stall or be cancelled
+before reveal and the transcript would stay blank until a fresh mount. Failed attempts do not automatically reopen from task-revision, connection, or foreground callbacks; the explicit Retry intent survives an old lease's drain without overlapping session opens. The hosted reveal-cancellation regression checks stale-callback rejection, the enabled attachment/native-scroll controls, and a visible outgoing submission after resumption. A failed transport/sync open shows an explicit retry surface. Once that mounted chat is ready, reconnect and
 resynchronization merge compatible live tails with history explicitly loaded in
 that viewport; a detached reader keeps its frozen commit until returning to the tail. Explicit earlier-page loads
 remain request-only, are scoped to the exact mount generation/cursor, and restore the
