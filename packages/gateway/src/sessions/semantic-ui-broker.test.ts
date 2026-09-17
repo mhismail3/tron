@@ -3,6 +3,7 @@ import { SemanticUIBroker, type ExtensionNotificationInput } from "./semantic-ui
 import { ExtensionPresentationStore } from "../extensions/host/extension-presentation-store.js";
 import type { ExtensionInteraction, JsonValue } from "../protocol/types.js";
 import { withInvocationContext } from "../extensions/owner-attribution.js";
+import { TRON_FORM_CAPABILITY } from "./extension-adapter-contract.js";
 
 function brokerWith(
   broadcast: (topic: string, payload: JsonValue) => void = () => {},
@@ -36,6 +37,55 @@ const form = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe("SemanticUIBroker", () => {
+  it("exposes the form capability on the host UI for any installed extension", async () => {
+    const broker = brokerWith(() => {});
+    // An independently authored extension feature-detects the documented key
+    // without importing Tron internals and without a bespoke adapter.
+    const ui = broker.context() as Record<string, unknown>;
+    const requestForm = ui[TRON_FORM_CAPABILITY];
+    expect(TRON_FORM_CAPABILITY).toBe("tron.form.v1");
+    expect(requestForm).toBeTypeOf("function");
+
+    const pending = (requestForm as (input: { form: unknown }) => Promise<unknown>)({ form: form() });
+    const interaction = broker.interactions()[0]!;
+    expect(interaction).toMatchObject({ method: "form" });
+    // A form is atomic: an incomplete answer is rejected outright and the
+    // pending interaction stays authoritative rather than being half-settled.
+    expect(() => broker.respond(interaction.id, interaction.hostEpoch, interaction.presentationRevision, {
+      version: 1,
+      answers: [{ questionId: "q-db", optionIds: ["postgres"] }],
+    }, false)).toThrow(/invalid/);
+    expect(broker.interactions()).toHaveLength(1);
+    broker.respond(interaction.id, interaction.hostEpoch, interaction.presentationRevision, {
+      version: 1,
+      answers: [
+        { questionId: "q-db", optionIds: ["postgres"] },
+        { questionId: "q-region", optionIds: ["eu"] },
+      ],
+    }, false);
+    await expect(pending).resolves.toMatchObject({ version: 1 });
+    expect(broker.interactions()).toHaveLength(0);
+  });
+
+  it("settles a capability form by abort and by host retirement differently", async () => {
+    const broker = brokerWith(() => {});
+    const ui = broker.context() as Record<string, unknown>;
+    const requestForm = ui[TRON_FORM_CAPABILITY] as (input: { form: unknown; signal?: AbortSignal }) => Promise<unknown>;
+
+    // A caller abort resolves with the normal no-answer value; it is never a
+    // decision and never a rejection the caller must catch.
+    const controller = new AbortController();
+    const aborted = requestForm({ form: form(), signal: controller.signal });
+    controller.abort();
+    await expect(aborted).resolves.toBeUndefined();
+
+    // Host retirement is a different event: the continuation can no longer be
+    // settled by any client, so it rejects instead of pretending an answer.
+    const retired = requestForm({ form: form() });
+    broker.cancelAll("Session closed");
+    await expect(retired).rejects.toThrow(/Session closed/);
+  });
+
   it("admits one atomic form and canonicalizes answer order", async () => {
     const broker = brokerWith(() => {});
     const pending = broker.requestForm({ form: form() });
