@@ -1,5 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import { historyPage, historyEntry, type HistoryCursor } from "./history.js";
+import {
+  DELEGATED_PROVIDER_TOOL_NAME,
+  delegatedArtifactPathAllowed,
+  delegatedProviderOrigin,
+  isInstalledDelegatedTool,
+  trustedDelegatedController,
+} from "./delegated-provider.js";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
@@ -3568,79 +3575,32 @@ export class RuntimeSlot {
     }
   }
 
+  /** Provider artifact shape policy lives in the delegated-provider module. */
   private extensionArtifactPathAllowed(asyncPath: string): boolean {
-    if (!isAbsolute(asyncPath)) return false;
-    // Do not normalize away traversal before applying the allowlist. The only
-    // accepted inputs are the run directory or its direct lifecycle contract files.
-    const lexicalParts = asyncPath.split(/[\\/]/u).filter(Boolean);
-    if (lexicalParts.some((part) => part === "." || part === "..")) return false;
-    const canonicalRoot = (value: string): string => {
-      try { return realpathSync(value); } catch { return resolve(value); }
-    };
-    const temporaryRoot = canonicalRoot(tmpdir());
-    const projectRoot = join(canonicalRoot(this.cwd), ".pi", "subagents", "async-subagent-runs");
-    const isAllowedShape = (value: string): boolean => {
-      const temporaryParts = relative(temporaryRoot, value).split(/[\\/]/u).filter(Boolean);
-      const temporaryRun = temporaryParts[0]?.startsWith("pi-subagents-")
-        && temporaryParts[1] === "async-subagent-runs"
-        && temporaryParts.length >= 3
-        && temporaryParts.length <= 4
-        && temporaryParts[2] !== ""
-        && (temporaryParts.length === 3 || temporaryParts[3] === "status.json"
-          || temporaryParts[3] === "events.jsonl" || temporaryParts[3] === "recovery-descriptor.json"
-          || temporaryParts[3] === "process-terminal.json");
-      if (temporaryRun) return true;
-
-      const projectRelative = relative(projectRoot, value);
-      if (projectRelative === "" || isAbsolute(projectRelative)
-        || projectRelative === ".." || projectRelative.startsWith(`..${sep}`)) return false;
-      const projectParts = projectRelative.split(/[\\/]/u).filter(Boolean);
-      return projectParts.length >= 1
-        && projectParts.length <= 2
-        && projectParts[0] !== ""
-        && (projectParts.length === 1 || projectParts[1] === "status.json"
-          || projectParts[1] === "events.jsonl" || projectParts[1] === "recovery-descriptor.json"
-          || projectParts[1] === "process-terminal.json");
-    };
-    const candidate = resolve(asyncPath);
-    // Validate the canonical target. The lexical segment check above rejects
-    // traversal before realpath normalization; the canonical shape rejects
-    // symlinked run directories and status files escaping the exact roots.
-    try {
-      return isAllowedShape(realpathSync(candidate));
-    } catch {
-      return false;
-    }
+    return delegatedArtifactPathAllowed(asyncPath, this.cwd);
   }
 
   private subagentExtensionOrigin(): ExtensionToolOrigin {
-    const extensions = this.runtime?.session.resourceLoader.getExtensions().extensions ?? [];
-    const extension = extensions.find((candidate) => {
-      const paths = [candidate.path, candidate.resolvedPath, candidate.sourceInfo.path, candidate.sourceInfo.baseDir]
-        .filter((value): value is string => typeof value === "string");
-      return paths.some((value) => /(?:^|[\\/])pi-subagents(?:[\\/]|$)/u.test(value));
-    });
-    if (extension) {
-      const owner = attributedToolOwner(extension.tools.get("subagent"));
-      if (owner) return { source: owner.source, owner };
-    }
-    return { source: "pi-subagents" };
+    return delegatedProviderOrigin(this.runtime?.session.resourceLoader.getExtensions().extensions ?? []);
   }
 
   private isForegroundSubagentTool(toolName: string, origin: ExtensionToolOrigin | undefined): boolean {
-    if (toolName !== "subagent" || !origin?.owner) return false;
-    const installedOwner = this.subagentExtensionOrigin().owner;
-    return installedOwner !== undefined && installedOwner.id === origin.owner.id;
+    return isInstalledDelegatedTool(toolName, origin, this.subagentExtensionOrigin().owner?.id);
   }
 
   /** Return only the exact installed controller already admitted for subagent
-   * projection. Pi can reload an npm package through its resolved local path,
+   * projection. Pi can reload a package through its resolved local path,
    * so the opaque installed-owner identity—not the mutable source label—is the
    * authority boundary. */
-  private trustedSubagentController() {
-    const origin = this.extensionToolOrigin("subagent");
-    if (!this.isForegroundSubagentTool("subagent", origin)) return undefined;
-    return this.runtime.session.extensionRunner.getToolDefinition("subagent");
+  private trustedSubagentController(): ToolDefinition | undefined {
+    const session = this.runtime?.session;
+    if (!session) return undefined;
+    return trustedDelegatedController({
+      toolName: DELEGATED_PROVIDER_TOOL_NAME,
+      origin: this.extensionToolOrigin(DELEGATED_PROVIDER_TOOL_NAME),
+      installedOwnerId: this.subagentExtensionOrigin().owner?.id,
+      definitionFor: (name: string) => session.extensionRunner.getToolDefinition(name),
+    });
   }
 
   private async openOwnedExtensionArtifact(
