@@ -145,7 +145,6 @@ struct AutomationDetailView: View {
     }
 
     @ViewBuilder private func detail(_ record: GatewayAutomationRecord) -> some View {
-        statusHeader(record)
         if let highlightedOccurrence = selection.highlightedOccurrence {
             TronInfoCard(
                 icon: "calendar.badge.clock",
@@ -183,6 +182,7 @@ struct AutomationDetailView: View {
             .padding(14)
         }
         section("Schedule", icon: "calendar") {
+            info("Status", record.currentRun?.state.label ?? record.activation.label)
             info("Runs", record.trigger.summary)
             info("Series", record.trigger.kind == "once" ? "One time" : "Repeating")
             info("Timezone", record.trigger.timezone ?? TimeZone.current.identifier)
@@ -237,23 +237,6 @@ struct AutomationDetailView: View {
         }
     }
 
-    private func statusHeader(_ record: GatewayAutomationRecord) -> some View {
-        TronGlassCard(accent: .tronAutomation) {
-            HStack(alignment: .center, spacing: TronSpacing.xl) {
-                Image(systemName: AutomationStatusPresentation.icon(record.activation, run: record.currentRun?.state))
-                    .font(TronTypography.sans(size: 22, weight: .semibold))
-                    .foregroundStyle(AutomationStatusPresentation.color(record.activation, run: record.currentRun?.state))
-                    .frame(width: 28)
-                Text(record.name)
-                    .font(TronTypography.headline)
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: TronSpacing.md)
-                AutomationStatusBadge(activation: record.activation, run: record.currentRun?.state)
-            }
-            .padding(14)
-        }
-    }
     private func currentRun(_ run: GatewayAutomationRun, record: GatewayAutomationRecord) -> some View {
         section("Current run", icon: "play.circle") {
             info("State", run.state.label)
@@ -272,20 +255,20 @@ struct AutomationDetailView: View {
                 .font(TronTypography.sheetSectionHeader)
                 .foregroundStyle(Color.tronTextPrimary)
             HStack(spacing: TronSpacing.md) {
-                    Button("Edit") { formPresented = true }
-                        .buttonStyle(TronActionButtonStyle(role: .primary))
-                    Button("Run Now") { confirmation = .run(record) }
-                        .buttonStyle(TronActionButtonStyle(role: .standard))
-                }
-                HStack(spacing: TronSpacing.md) {
-                    Button(record.activation == .enabled ? "Pause" : "Enable") {
-                        confirmation = .activation(record)
-                    }
+                Button("Run Now") { confirmation = .run(record) }
                     .buttonStyle(TronActionButtonStyle(role: .standard))
-                    .disabled(record.blockedReason == "outcome-unknown")
-                    Button("Delete") { confirmation = .delete(record) }
-                        .buttonStyle(TronActionButtonStyle(role: .destructive))
+                Button("Edit") { formPresented = true }
+                    .buttonStyle(TronActionButtonStyle(role: .primary))
+            }
+            HStack(spacing: TronSpacing.md) {
+                Button(record.activation == .enabled ? "Pause" : "Enable") {
+                    confirmation = .activation(record)
                 }
+                .buttonStyle(TronActionButtonStyle(role: .standard))
+                .disabled(record.blockedReason == "outcome-unknown")
+                Button("Delete") { confirmation = .delete(record) }
+                    .buttonStyle(TronActionButtonStyle(role: .destructive))
+            }
             if record.blockedReason == "outcome-unknown" {
                 Text("Resolve the uncertain run in Recent Runs before enabling this Automation.")
                     .font(TronTypography.secondaryDescription)

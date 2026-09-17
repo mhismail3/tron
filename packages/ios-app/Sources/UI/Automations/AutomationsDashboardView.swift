@@ -411,9 +411,15 @@ struct AutomationsDashboardView: View {
                     if occurrence.isSeries { Text("\(occurrence.count ?? 0) triggers · \(AutomationDateFormatting.date(occurrence.firstAt))–\(AutomationDateFormatting.date(occurrence.lastAt))").font(TronTypography.bodySM).foregroundStyle(Color.tronTextMuted) }
                 }
                 Spacer(minLength: 0)
-            }.padding(TronSpacing.lg)
-        }.buttonStyle(.plain).tronGlassSurface(accent: .tronAutomation, cornerRadius: 14, tintOpacity: 0.08, interactive: true)
-            .accessibilityLabel("Scheduled automation")
+            }
+            .padding(TronSpacing.lg)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("automation-occurrence-card.\(occurrence.automationId)")
+        .tronGlassSurface(accent: .tronAutomation, cornerRadius: 14, tintOpacity: 0.08, interactive: true)
+        .accessibilityLabel("Scheduled automation")
     }
 
     private func automationCard(_ profile: AutomationDashboardProfile, _ summary: GatewayAutomationSummary) -> some View {
@@ -448,8 +454,11 @@ struct AutomationsDashboardView: View {
             }
             .padding(.horizontal, TronSpacing.lg)
             .padding(.vertical, 13)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("automation-card.\(summary.id)")
         .tronGlassSurface(
             accent: summary.isAttentionRequired ? .tronError : .tronAutomation,
             cornerRadius: 12,
