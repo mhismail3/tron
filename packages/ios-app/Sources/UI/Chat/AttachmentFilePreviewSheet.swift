@@ -82,6 +82,9 @@ enum AttachmentFilePreviewPolicy {
         guard ChatMediaPolicy.admitsEncodedByteCount(data.count) else {
             throw ChatMediaLoadError.encodedPayloadTooLarge
         }
+        // A retired surface must not start new decode work; the detached
+        // preparation cannot observe outer cancellation once it has begun.
+        try Task.checkCancellation()
         return try await Task.detached(priority: .userInitiated) {
             try prepareSynchronously(data: data, name: name, mimeType: mimeType)
         }.value
@@ -197,7 +200,10 @@ struct AttachmentFilePreviewSheet: View {
     var fallbackText: String? = nil
 
     @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var phase: Phase = .loading
+    @State private var loadGeneration = 0
+    @State private var loadedSourceID: String?
 
     private enum Phase {
         case loading
@@ -207,7 +213,10 @@ struct AttachmentFilePreviewSheet: View {
 
     var body: some View {
         TronDocumentSheet(title: title ?? name) { content }
-        .task(id: source.loadID) { await load() }
+        .task(id: PresentationActivityTaskID(
+            source: source.loadID,
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) { await load() }
         .onDisappear { cancelRemoteLoad() }
     }
 
@@ -283,6 +292,19 @@ struct AttachmentFilePreviewSheet: View {
     }
 
     private func load() async {
+        // Covered or retired surfaces neither start nor publish this work.
+        guard presentationActivity.allowsPresentationPublication else { return }
+        // A completed attempt for this exact source stays mounted: the sheet is
+        // the one bounded surface for the file and reopening the route retries.
+        if loadedSourceID == source.loadID {
+            switch phase {
+            case .prepared, .unavailable: return
+            case .loading: break
+            }
+        }
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        let sourceID = source.loadID
         phase = .loading
         do {
             let payload: ChatMediaPayload
@@ -296,6 +318,7 @@ struct AttachmentFilePreviewSheet: View {
                 )
             case .unavailable:
                 phase = .unavailable("The file content is not available for preview.")
+                loadedSourceID = sourceID
                 return
             }
             let fetchedMIME = payload.mimeType
@@ -309,20 +332,33 @@ struct AttachmentFilePreviewSheet: View {
                 name: name,
                 mimeType: effectiveMIME
             )
-            guard !Task.isCancelled else { return }
+            guard admitsLoad(generation),
+                  presentationActivity.allowsPresentationPublication else { return }
             phase = .prepared(prepared)
+            loadedSourceID = sourceID
         } catch is CancellationError {
+            // Interrupted work publishes nothing, so the next activation retries.
             return
         } catch AttachmentFilePreviewError.unsupported {
-            guard !Task.isCancelled else { return }
+            guard admitsLoad(generation),
+                  presentationActivity.allowsPresentationPublication else { return }
             phase = .unavailable("This file type does not have an in-app preview.")
+            loadedSourceID = sourceID
         } catch AttachmentFilePreviewError.tooManyPDFPages {
-            guard !Task.isCancelled else { return }
+            guard admitsLoad(generation),
+                  presentationActivity.allowsPresentationPublication else { return }
             phase = .unavailable("This PDF has too many pages to preview safely.")
+            loadedSourceID = sourceID
         } catch {
-            guard !Task.isCancelled else { return }
+            guard admitsLoad(generation),
+                  presentationActivity.allowsPresentationPublication else { return }
             phase = .unavailable("The file could not be prepared for preview.")
+            loadedSourceID = sourceID
         }
+    }
+
+    private func admitsLoad(_ generation: Int) -> Bool {
+        generation == loadGeneration && !Task.isCancelled
     }
 
     private func cancelRemoteLoad() {

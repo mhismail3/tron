@@ -244,7 +244,22 @@ struct WorkspaceInspectorSheet: View {
             )) {
                 guard presentationActivity.allowsPresentationPublication,
                       scenePhase == .active else { return }
-                await owner.loadInitial(service: model.workspaceInspection, sessionID: sessionID)
+                // Only the Files tab needs the directory; History and Changes
+                // resume from inspection alone.
+                await owner.loadInitial(
+                    service: model.workspaceInspection,
+                    sessionID: sessionID,
+                    includeDirectory: selectedTab == .files
+                )
+                guard !Task.isCancelled,
+                      scenePhase == .active,
+                      presentationActivity.allowsPresentationPublication else { return }
+                // Re-check the tab: it can change while inspection is in flight.
+                if selectedTab == .history,
+                   !owner.hasLoadedHistory,
+                   owner.inspection?.repository != nil {
+                    await owner.loadHistory(service: model.workspaceInspection, sessionID: sessionID, append: false)
+                }
                 guard !Task.isCancelled else { return }
                 await reconcileWhileVisible()
             }

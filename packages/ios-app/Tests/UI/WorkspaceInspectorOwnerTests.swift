@@ -100,6 +100,38 @@ struct WorkspaceInspectorOwnerTests {
         #expect(owner.commits.isEmpty)
     }
 
+    @Test("a non-Files activation inspects without reading a directory")
+    func historyActivationSkipsDirectory() async {
+        let probe = WorkspaceMethodProbe()
+        let service = WorkspaceInspectionService { method, params in
+            try await probe.request(method: method, params: params)
+        }
+        let owner = WorkspaceInspectorOwner()
+
+        await owner.loadInitial(service: service, sessionID: "session", includeDirectory: false)
+
+        let methods = await probe.methods
+        #expect(methods == ["session.workspace.inspect"])
+        #expect(owner.inspection?.root == "/workspace")
+        #expect(owner.directory == nil)
+    }
+
+    @Test("the default Files activation still overlaps inspection and the directory read")
+    func filesActivationKeepsBothReads() async {
+        let probe = WorkspaceMethodProbe()
+        let service = WorkspaceInspectionService { method, params in
+            try await probe.request(method: method, params: params)
+        }
+        let owner = WorkspaceInspectorOwner()
+
+        await owner.loadInitial(service: service, sessionID: "session")
+
+        let methods = Set(await probe.methods)
+        #expect(methods == ["session.workspace.inspect", "session.workspace.list"])
+        #expect(owner.inspection?.root == "/workspace")
+        #expect(owner.directory?.path == "")
+    }
+
     @Test("cancel retires visible loading state and late publication")
     func cancellation() async {
         let probe = WorkspaceInspectorProbe()
@@ -126,6 +158,30 @@ struct WorkspaceInspectorOwnerTests {
             "revision": .string(path),
             "entries": .array([]),
         ])
+    }
+}
+
+private actor WorkspaceMethodProbe {
+    private(set) var methods: [String] = []
+
+    func request(method: String, params: JSONValue) throws -> JSONValue {
+        guard params.objectValue?["sessionId"] == .string("session") else {
+            throw GatewayFailure(code: "invalid_test_request", message: method, retryable: false, details: nil)
+        }
+        methods.append(method)
+        switch method {
+        case "session.workspace.inspect":
+            return .object(["root": .string("/workspace"), "revision": .string("inspection")])
+        case "session.workspace.list":
+            return .object([
+                "root": .string("/workspace"),
+                "path": .string(""),
+                "revision": .string("directory"),
+                "entries": .array([]),
+            ])
+        default:
+            throw GatewayFailure(code: "invalid_test_request", message: method, retryable: false, details: nil)
+        }
     }
 }
 

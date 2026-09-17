@@ -425,6 +425,8 @@ struct ProjectResourceDetailSheet: View {
     @State private var detail: CommandResourceDetail?
     @State private var loadError: String?
     @State private var loadRevision = 0
+    @State private var detailGeneration = 0
+    @State private var loadedIdentity: String?
     @State private var showsResourceInfo = false
 
     private var presentation: ProjectResourceDetailPresentation {
@@ -597,22 +599,42 @@ struct ProjectResourceDetailSheet: View {
         return items
     }
 
+    /// Identity of the reader this sheet displays. A completed detail for this
+    /// exact selection/revision stays mounted across a cover, so returning from
+    /// the nested Info sheet neither blanks content nor refetches the source.
+    private var loadIdentity: String {
+        "\(selection.id):\(model.sessionResourceRevision(for: sessionID))"
+    }
+
     private func loadDetail() async {
+        if loadedIdentity == loadIdentity, detail != nil, loadError == nil { return }
+        detailGeneration &+= 1
+        let generation = detailGeneration
+        let identity = loadIdentity
         detail = nil
         loadError = nil
         guard let command = selection.commandInfo else { return }
         do {
             let loaded = try await model.commandDetail(sessionID: sessionID, command: command)
-            guard !Task.isCancelled, presentationActivity.allowsPresentationPublication else { return }
+            guard generation == detailGeneration,
+                  !Task.isCancelled,
+                  presentationActivity.allowsPresentationPublication else { return }
             detail = loaded
+            loadedIdentity = identity
         } catch is CancellationError {
             // A rejected live-session read is not a cancelled presentation.
             // Settle it so disconnected/busy sessions offer retry, not a spinner.
-            guard !Task.isCancelled, presentationActivity.allowsPresentationPublication else { return }
+            guard generation == detailGeneration,
+                  !Task.isCancelled,
+                  presentationActivity.allowsPresentationPublication else { return }
             loadError = "Resource content is unavailable while the session is disconnected or busy. Try again when it is ready."
+            loadedIdentity = identity
         } catch {
-            guard !Task.isCancelled, presentationActivity.allowsPresentationPublication else { return }
+            guard generation == detailGeneration,
+                  !Task.isCancelled,
+                  presentationActivity.allowsPresentationPublication else { return }
             loadError = error.localizedDescription
+            loadedIdentity = identity
         }
     }
 }

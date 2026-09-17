@@ -224,7 +224,7 @@ presentation/intents, cleanup tasks, receipt-aware commands, attach/replay inter
 and reconnect reattachment. Its sole `TerminalReducer` kernel owns per-terminal operations, shared
 attachment leases, typed terminal-event reduction, a global 16-terminal/256-chunk/1 MiB in-flight event
 quarantine, replay revisions, and post-detach event admission. Authoritative terminal inventory and presentation revocation prune replay, last-install, exited, pending, and attachment projections; no historical summary map is retained. Terminal open/attach uses one replay
-installer and closes its interval only after reset, delta, and a strictly contiguous replay prefix are admitted; duplicate, reordered, or missing-middle chunks remain non-canonical and trigger a bounded follow-up reconciliation.
+installer and closes its interval only after reset, delta, and a strictly contiguous replay prefix are admitted; duplicate, reordered, or missing-middle chunks remain non-canonical and trigger a bounded follow-up reconciliation. Within one revision the retained chunks are strictly ascending and contiguous, so the native renderer resolves its pending suffix by lower bound instead of rescanning the whole retained array on every update.
 `terminal.open` requires the exact installed iOS subscription and the Gateway validates the client's
 opened-session ownership before creating a PTY, preventing orphan terminal creation during route/reconnect
 races. Stale successful attachments schedule an exact-connection compensating detach unless a newer
@@ -1736,7 +1736,11 @@ diffs, and tip-pinned paginated current-branch/all-reference History. File conte
 on demand into the existing bounded authenticated blob transport and uses the shared
 Markdown/text/code/PDF/image preview pipeline. The sheet has an isolated observable owner;
 the onboarding selector's global folder listing can neither overwrite it nor become canonical
-workspace state. Initial inspection and root-directory reads overlap, while bounded DTO decoding,
+workspace state. Selector visibility is a local projection over the entries that listing already
+returned: toggling hidden folders issues no additional filesystem read. Initial inspection and
+root-directory reads overlap for the Files tab, while a History or Changes activation inspects first
+and reads the directory only when the showing tab actually needs it, rechecking the tab after the
+inspection await. Bounded DTO decoding,
 change indexing/grouping, history graph preparation, reference collection, relative timestamps, and
 unified-diff parsing execute off the main actor. The owner publishes equal inspection revisions as
 no-ops, indexes changes by path for constant-time Files annotations, and retains at most 400 prepared
@@ -1802,7 +1806,7 @@ than generic `index.ts` filenames and `<inline:…>` wrappers. First-party inlin
 Tron Core, Tron Context Window, Tron Display, Tron Automations, and Tron Notifications. Exact invocation
 names, package sources, paths, schemas, and JSON remain unchanged. Each detail sheet
 foregrounds kind-specific purpose, invocation, availability, capabilities, schema/guidance,
-and source evidence instead of a generic field table. Prompt details additionally fetch the exact loaded template through `session.commandDetail` only while opened and display its full admitted Markdown body, consistent with prompt details in Commands. The canonical resource revision refreshes that read; canceled or retired reads cannot publish, and failures offer local retry. The Gateway's 96-KiB content bound remains authoritative and any truncation is explicitly disclosed with the source file retained below. `ChatCompactPillTests` covers exact prompt identity and `SessionSheetPresentationTests` covers the full-body reading surface. The Install Package source field resolves its tint and border from the Settings accent (blue), matching the rest of the sheet rather than hard-coding green. Project Trust presents a high-signal
+and source evidence instead of a generic field table. Prompt details additionally fetch the exact loaded template through `session.commandDetail` only while opened and display its full admitted Markdown body, consistent with prompt details in Commands. The canonical resource revision refreshes that read; canceled or retired reads cannot publish, and failures offer local retry. A completed reader for the exact selection and revision stays mounted across coverage, so returning from Resource Info neither blanks the body nor repeats the same fetch. The Gateway's 96-KiB content bound remains authoritative and any truncation is explicitly disclosed with the source file retained below. `ChatCompactPillTests` covers exact prompt identity and `SessionSheetPresentationTests` covers the full-body reading surface. The Install Package source field resolves its tint and border from the Settings accent (blue), matching the rest of the sheet rather than hard-coding green. Project Trust presents a high-signal
 state card with an explicit status icon and decision actions before deferring the complete trust record to raw JSON.
 Extension tools and commands use
 separate adaptive collections instead of comma-delimited prose, while resource descriptions
@@ -1875,7 +1879,7 @@ The bounded file copy and HTML rendering continue outside that lane, so running,
 sessions remain exportable while later appends are deterministically excluded. JSONL does not linearize only the active branch.
 Agent Instructions presents only the complete assembled `systemPrompt` from the existing
 subscription-scoped context projection, rendered with the shared `TronMarkdownView` block renderer
-(headings, lists, tables, quotes, and code) in a selectable scroll surface. There is no intervening summary, accounting,
+(headings, lists, tables, quotes, and code) in a selectable scroll surface. Its Markdown document is prepared by the shared detached detail-preparation owner, keyed to the exact assembled source, so a covered or reopened sheet reuses the completed document instead of re-parsing the prompt on the main thread. There is no intervening summary, accounting,
 capabilities inventory, or Read Full Instructions navigation step. It shares `TronDocumentSheet`
 with file previews: large-only presentation, blue title and icon-only Done, hidden native
 navigation background and bottom toolbar, a continuous document background, and the custom

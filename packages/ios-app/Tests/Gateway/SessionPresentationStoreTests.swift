@@ -1635,6 +1635,120 @@ struct SessionPresentationStoreTests {
         #expect(store.owns(replacement))
     }
 
+    @Test("a cancelled resource read keeps the installed projection and installs no error")
+    func cancelledResourceReadPublishesNothing() async throws {
+        try await withTestWatchdog {
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory
+            )
+            let profile = GatewayProfile(
+                id: "gateway",
+                label: "Mac",
+                host: "gateway.test",
+                port: 9_847,
+                machineId: "machine",
+                deviceId: "device"
+            )
+            let connecting = Task { try await client.connect(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            _ = try await connecting.value
+
+            let snapshot = try SessionScenarioBuilder(seed: 86).openingTail(targetEncodedBytes: 4_096)
+            let errorProbe = SecondaryErrorProbe()
+            let store = await MainActor.run {
+                let store = SessionPresentationStore(
+                    client: client,
+                    performanceSignposts: SystemPerformanceSignposts.shared
+                )
+                store.installHostedSubscription(snapshot: snapshot, token: "resources")
+                store.installHostedSecondaryProjection(
+                    context: nil,
+                    tree: [],
+                    commands: [],
+                    resources: .object(["runtime": .string("installed")])
+                )
+                store.delegate = errorProbe
+                return store
+            }
+            #expect(await MainActor.run { store.resources(for: snapshot.sessionId) } == .object(["runtime": .string("installed")]))
+
+            let loading = Task { await store.loadResources(sessionID: snapshot.sessionId) }
+            try await socket.waitUntilSent(count: 2)
+            let frame = await socket.sentFrames()[1]
+            let request = try JSONDecoder.gateway.decode(JSONValue.self, from: frame)
+            #expect(request.objectValue?["method"]?.stringValue == "session.resources")
+
+            // Cancellation must not be mistaken for a failed read: the
+            // installed projection stays and no local error is installed.
+            loading.cancel()
+            _ = await loading.value
+            #expect(await MainActor.run { store.resources(for: snapshot.sessionId) } == .object(["runtime": .string("installed")]))
+            #expect(await MainActor.run { store.resourcesError(for: snapshot.sessionId) } == nil)
+            #expect(await MainActor.run { errorProbe.errors.isEmpty })
+            await client.close()
+        }
+    }
+
+    @Test("a superseded resource response cannot publish over the replaced token")
+    func supersededResourceResponsePublishesNothing() async throws {
+        try await withTestWatchdog {
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory
+            )
+            let profile = GatewayProfile(
+                id: "gateway",
+                label: "Mac",
+                host: "gateway.test",
+                port: 9_847,
+                machineId: "machine",
+                deviceId: "device"
+            )
+            let connecting = Task { try await client.connect(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            _ = try await connecting.value
+
+            let snapshot = try SessionScenarioBuilder(seed: 87).openingTail(targetEncodedBytes: 4_096)
+            let errorProbe = SecondaryErrorProbe()
+            let store = await MainActor.run {
+                let store = SessionPresentationStore(
+                    client: client,
+                    performanceSignposts: SystemPerformanceSignposts.shared
+                )
+                store.installHostedSubscription(snapshot: snapshot, token: "resources-old")
+                store.installHostedSecondaryProjection(
+                    context: nil,
+                    tree: [],
+                    commands: [],
+                    resources: .object(["runtime": .string("installed")])
+                )
+                store.delegate = errorProbe
+                return store
+            }
+
+            let loading = Task { await store.loadResources(sessionID: snapshot.sessionId) }
+            try await socket.waitUntilSent(count: 2)
+            let frame = await socket.sentFrames()[1]
+            let request = try JSONDecoder.gateway.decode(JSONValue.self, from: frame)
+            let requestID = try #require(request.objectValue?["id"]?.stringValue)
+            await MainActor.run { store.replaceHostedSubscriptionToken("resources-replacement") }
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"),
+                "id": .string(requestID),
+                "ok": .bool(true),
+                "result": .object(["runtime": .string("stale")]),
+            ])))
+            await loading.value
+            #expect(await MainActor.run { store.resources(for: snapshot.sessionId) } == .object(["runtime": .string("installed")]))
+            #expect(await MainActor.run { store.resourcesError(for: snapshot.sessionId) } == nil)
+            #expect(await MainActor.run { errorProbe.errors.isEmpty })
+            await client.close()
+        }
+    }
+
     @Test("a secondary response cannot publish after exact token replacement")
     func staleSecondaryResponse() async throws {
         try await withTestWatchdog {

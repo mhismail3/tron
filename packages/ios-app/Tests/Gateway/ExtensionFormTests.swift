@@ -295,4 +295,15 @@ struct ExtensionFormTests {
             ]), descriptor: form
         ) != nil)
     }
+
+    @Test func expiryClockOnlyTicksTowardAnUnexpiredDeadline() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        // No deadline and a reached deadline need no timer at all; the visible
+        // countdown text is self-updating independently of this clock.
+        #expect(!ExtensionFormExpiryClockPolicy.ticks(deadline: nil, now: now))
+        #expect(!ExtensionFormExpiryClockPolicy.ticks(deadline: now, now: now))
+        #expect(!ExtensionFormExpiryClockPolicy.ticks(deadline: now.addingTimeInterval(-1), now: now))
+        #expect(ExtensionFormExpiryClockPolicy.ticks(deadline: now.addingTimeInterval(1), now: now))
+        #expect(ExtensionFormExpiryClockPolicy.ticks(deadline: now.addingTimeInterval(3_600), now: now))
+    }
 }

@@ -390,6 +390,11 @@ struct AutomationsDashboardView: View {
 
     private func occurrenceRow(_ item: AutomationTimelineItem) -> some View {
         let occurrence = item.occurrence
+        // Resolve once for the row's labels; the tap below re-resolves against
+        // current authoritative data so it cannot act on a replaced summary.
+        let match = model.automationCatalog.summaries.first {
+            $0.profile.id == item.profileID && $0.summary.id == occurrence.automationId
+        }
         return Button {
             if let summary = model.automationCatalog.summaries.first(where: { $0.profile.id == item.profileID && $0.summary.id == occurrence.automationId }) {
                 selected = AutomationSummarySelection(
@@ -403,7 +408,7 @@ struct AutomationsDashboardView: View {
                 Text(occurrenceTime(occurrence.presentationTimestamp)).font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronAutomation).frame(width: 64, alignment: .leading)
                 Image(systemName: occurrence.isSeries ? "repeat" : "circle.fill").foregroundStyle(Color.tronAutomation).padding(.top, 3)
                 VStack(alignment: .leading, spacing: 3) {
-                    if let match = model.automationCatalog.summaries.first(where: { $0.profile.id == item.profileID && $0.summary.id == occurrence.automationId }) {
+                    if let match {
                         Text(match.summary.name).font(TronTypography.body).foregroundStyle(Color.tronTextPrimary).lineLimit(1)
                         Text("\(match.summary.typedActionKind?.label ?? "Action") · \(targetLabel(profileID: item.profileID, target: match.summary.target))").font(TronTypography.bodySM).foregroundStyle(Color.tronTextSecondary).lineLimit(2)
                         Text(match.profile.label + (match.summary.trigger.kind == "calendar" ? " · \(match.summary.trigger.timezone ?? "")" : "")).font(TronTypography.bodySM).foregroundStyle(Color.tronTextMuted).lineLimit(2)

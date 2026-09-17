@@ -182,7 +182,7 @@ struct NativeTerminal: UIViewRepresentable {
             }
         }
         keyboard.attach(view)
-        for chunk in chunks where chunk.sequence > context.coordinator.lastSequence {
+        for chunk in chunks.replaySuffix(after: context.coordinator.lastSequence) {
             view.feed(byteArray: Array(chunk.data.utf8)[...])
             context.coordinator.lastSequence = chunk.sequence
         }
