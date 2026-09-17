@@ -410,6 +410,29 @@ describe("session process projection", () => {
       .concat(second.activities.map((activity) => activity.processId))).toEqual(expected);
   });
 
+  it("binds a history cursor to the exact filter that produced it", () => {
+    const manager = SessionManager.inMemory("/tmp/process-cursor-filter", { id: "session-cursor-filter" });
+    for (let index = 0; index < 2; index += 1) {
+      const receipt = makeExtensionActivityReceipt({
+        ...subagent,
+        activityId: `activity-${index}`,
+        toolCallId: `call-${index}`,
+        children: [{ ...subagent.children[0]!, id: `child-${index}`, producerId: `child-${index}`, childSessionRef: `session-${index}` }],
+      }, "session-cursor-filter")!;
+      manager.appendCustomEntry(EXTENSION_ACTIVITY_RECEIPT_TYPE, receipt);
+    }
+    const filtered = listProcessHistory(manager, undefined, 1, { state: "completed" });
+    expect(filtered.activities).toHaveLength(1);
+    expect(filtered.nextCursor).toBeDefined();
+    // The canonical revision is unchanged between these calls, so only the
+    // filter distinguishes the arrays. Replaying a filtered cursor against a
+    // different filter must conflict instead of silently skipping rows.
+    expect(() => listProcessHistory(manager, filtered.nextCursor, 1, { state: "failed" })).toThrow(/cursor conflict/u);
+    expect(() => listProcessHistory(manager, filtered.nextCursor, 1)).toThrow(/cursor conflict/u);
+    // The identical filter still continues paging.
+    expect(listProcessHistory(manager, filtered.nextCursor, 1, { state: "completed" }).activities).toHaveLength(1);
+  });
+
   it("reads subagent receipts only from the selected canonical branch", () => {
     const manager = SessionManager.inMemory("/tmp/process-branch", { id: "session-1" });
     const root = manager.appendMessage({

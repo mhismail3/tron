@@ -650,6 +650,12 @@ struct ComposerTrailingButton: View {
         if mode == .send, offersQueueChoices {
             return "Sends steering after the current turn. Touch and hold to choose follow-up delivery."
         }
+        if mode == .stopAgent {
+            // Stop is scoped to the current run. It deliberately does not claim
+            // to disable an extension workflow that may start another run, so
+            // the control never overpromises what it halts.
+            return "Stops the current run. A workflow that continues on its own can still start another."
+        }
         return ""
     }
 

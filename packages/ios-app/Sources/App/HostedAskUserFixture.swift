@@ -21,6 +21,7 @@ struct HostedAskUserFixtureView: View {
     @State private var photosPresented = false
     @State private var photos: [PhotosPickerItem] = []
     @State private var processesPresented = false
+    @State private var extensionWidgetsPresented = false
     @State private var filesPresented = false
     @State private var editorRequest: ComposerEditorRequest?
     @State private var displaySheet: DisplayRoute?
@@ -87,6 +88,8 @@ struct HostedAskUserFixtureView: View {
                 photos: $photos,
                 onCameraImage: { _ in },
                 processesPresented: $processesPresented,
+                extensionWidgetsPresented: $extensionWidgetsPresented,
+                extensionWidgets: .empty,
                 interaction: $interaction,
                 onInteractionClosed: { value in
                     interaction = nil

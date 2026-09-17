@@ -103,6 +103,23 @@ describe("extension activity canonical receipts", () => {
     expect(ids).toEqual(expectedIDs);
   });
 
+  it("binds an activity history cursor to the exact filter that produced it", () => {
+    const first = makeExtensionActivityReceipt({ ...activity, runId: "run-1" }, "session-1")!;
+    const second = { ...first, activityId: "activity-2", terminalAt: "2026-01-01T00:00:02.000Z", observedAt: "2026-01-01T00:00:02.000Z" };
+    const entries = [
+      { id: "one", type: "custom", customType: EXTENSION_ACTIVITY_RECEIPT_TYPE, data: first },
+      { id: "two", type: "custom", customType: EXTENSION_ACTIVITY_RECEIPT_TYPE, data: second },
+    ];
+    const filtered = listExtensionActivityHistory(entries, "session-1", undefined, 1, undefined, { runId: "run-1" });
+    expect(filtered.activities).toHaveLength(1);
+    expect(filtered.nextCursor).toBeDefined();
+    // The global revision is identical for every filter, so only the cursor's
+    // bound query can prevent cross-filter replay from mispaging.
+    expect(() => listExtensionActivityHistory(entries, "session-1", filtered.nextCursor, 1, undefined, { runId: "run-2" })).toThrow(/cursor conflict/u);
+    expect(() => listExtensionActivityHistory(entries, "session-1", filtered.nextCursor, 1)).toThrow(/cursor conflict/u);
+    expect(listExtensionActivityHistory(entries, "session-1", filtered.nextCursor, 1, undefined, { runId: "run-1" }).activities).toHaveLength(1);
+  });
+
   it("reports and consumes individually oversized rows without stalling the next page", () => {
     const receipt = makeExtensionActivityReceipt(activity, "session-1")!;
     const oversized = { ...receipt, activityId: "oversized", summary: {

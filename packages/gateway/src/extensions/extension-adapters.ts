@@ -3,8 +3,8 @@ import { dirname, join } from "node:path";
 import type { Extension, ExtensionContext, ExtensionUIContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { ExtensionFormAnswer, ExtensionFormDescriptor } from "../protocol/types.js";
 import { EXTENSION_FORM_MAX_INTERACTION_BYTES } from "./semantic-form.js";
-import type { FormRequest } from "../sessions/extension-adapter-contract.js";
-import { TRON_FORM_REQUEST } from "../sessions/extension-adapter-contract.js";
+import type { FormCapableUI, FormRequest } from "../sessions/extension-adapter-contract.js";
+import { TRON_FORM_CAPABILITY } from "../sessions/extension-adapter-contract.js";
 
 const ASK_USER_MARKER = "\0XYZ_ASK_USER";
 export const AUDITED_ASK_USER_PACKAGE = Object.freeze({
@@ -18,7 +18,7 @@ export const AUDITED_ASK_USER_PACKAGE = Object.freeze({
 });
 
 type DialogOptions = { signal?: AbortSignal };
-type AskUserUI = ExtensionUIContext & { [TRON_FORM_REQUEST]?: FormRequest };
+type AskUserUI = ExtensionUIContext & FormCapableUI;
 type ProtoOption = { label: string; description?: string };
 type ProtoQuestion = {
   header?: string;
@@ -219,7 +219,7 @@ function adaptUI(
       if (property !== "select") return Reflect.get(target, property, receiver);
       return async (title: string, options: string[], dialogOptions?: DialogOptions): Promise<string | undefined> => {
         if (title !== ASK_USER_MARKER) return base.select(title, options, dialogOptions);
-        const request = base[TRON_FORM_REQUEST];
+        const request = base[TRON_FORM_CAPABILITY] as FormRequest | undefined;
         if (!request) throw new Error("Tron semantic form host is unavailable");
         const payload = parseProtoPayload(options);
         const signal = dialogOptions?.signal ?? outerSignal;

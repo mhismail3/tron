@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import type { ExtensionRunActivity } from "../protocol/types.js";
+import { subagentProcessesFromActivity } from "./process-activity.js";
 import { admitExtensionLifecycleArtifact, boundExtensionActivities, extensionActivityStatusFromTool, extensionLifecycleState, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasObservedPausedProcessTerminal, hasStructuredExtensionRunActivity, inspectExtensionLifecycleArtifact, inspectExtensionLifecycleProjection, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, usesForegroundSubagentChildIdentity } from "./extension-run-projection.js";
 
 const base = {
@@ -291,6 +293,7 @@ describe("projectExtensionRunActivity", () => {
         runId: "run-1",
         results: [{
           agent: "reviewer",
+          childId: "child-1",
           progress: {
             status: "running",
             lastActivityAt: 1_700_000_000_000,
@@ -317,10 +320,15 @@ describe("projectExtensionRunActivity", () => {
       durationMs: 12_500,
       currentTool: "read",
       currentPath: "file.swift",
-      model: "openai-codex/gpt-5.6-luna",
-      thinking: "high",
-      children: [{ label: "reviewer", status: "running", toolCount: 4, currentPath: "file.swift" }],
+      children: [{ label: "reviewer", status: "running", toolCount: 4, currentPath: "file.swift", model: "openai-codex/gpt-5.6-luna", thinking: "high" }],
     });
+    // Resolved model metadata is authoritative on the child, which is the only
+    // layer the native process row reads it from. Asserting it on the child and
+    // then on the projected row protects the real consumption path instead of
+    // duplicating an unused root field.
+    const rows = subagentProcessesFromActivity("session-1", activity as ExtensionRunActivity);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ model: "openai-codex/gpt-5.6-luna", thinking: "high" });
     expect(JSON.stringify(activity)).not.toContain("sessionFile");
   });
 

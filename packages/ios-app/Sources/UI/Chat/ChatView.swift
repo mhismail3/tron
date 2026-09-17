@@ -176,6 +176,11 @@ struct ChatView: View {
             photos: $sessionPresentation.photos,
             onCameraImage: { image in Task { await importCameraImage(image) } },
             processesPresented: processPresentationBinding,
+            extensionWidgetsPresented: extensionWidgetsPresentationBinding,
+            extensionWidgets: ExtensionWidgetsRoute(
+                content: extensionRetainedContent,
+                omittedContentCount: omittedExtensionContentCount
+            ),
             interaction: interactionBinding,
             onInteractionClosed: closeInteractionPresentation,
             filesPresented: attachmentPresentationBinding(for: .files),
@@ -1583,6 +1588,40 @@ struct ChatView: View {
         )
     }
 
+    /// The widgets sheet is diagnostic presentation, never a competing
+    /// foreground route: it follows the same gate as the process sheet so a
+    /// pending question or editor keeps its leased priority.
+    private var extensionWidgetsPresentationBinding: Binding<Bool> {
+        Binding(
+            get: { sessionPresentation.showWidgets && extensionForegroundPresentation == .none },
+            set: { presented in
+                if !presented { sessionPresentation.showWidgets = false }
+            }
+        )
+    }
+
+    /// Retained extension content is derived from the authoritative snapshot on
+    /// every render; it never polls and never opens provider work. The sheet
+    /// receives this value, so widget updates replace its content in place
+    /// without recreating the sheet or resetting its scroll position.
+    private var extensionRetainedContent: ExtensionRetainedContent {
+        let presentation = selectedAuthoritativeSnapshot?.extensionPresentation
+        return ExtensionRetainedContentPolicy.content(
+            widgets: presentation?.semanticState.widgets,
+            surfaces: presentation?.surfaces,
+            statuses: presentation?.semanticState.statuses,
+            statusOwners: presentation?.semanticState.statusOwners
+        )
+    }
+
+    /// A partial projection must say so rather than implying completeness.
+    private var omittedExtensionContentCount: Int {
+        let presentation = selectedAuthoritativeSnapshot?.extensionPresentation
+        guard presentation?.projection?.complete == false else { return 0 }
+        let omitted = presentation?.projection?.omitted ?? []
+        return omitted.isEmpty ? 0 : omitted.count
+    }
+
     private var pendingPresentedInteraction: ExtensionInteraction? {
         extensionForegroundPresentation == .interaction ? candidatePresentedInteraction : nil
     }
@@ -2779,6 +2818,7 @@ struct ChatView: View {
             sessionFacts: visibleSessionFacts,
             processOverview: selectedAuthoritativeSnapshot?.processOverview,
             processActivities: selectedAuthoritativeSnapshot?.processActivities,
+            extensionRetainedContent: extensionRetainedContent,
             pendingAttachments: pendingAttachments,
             selectedResource: selectedComposerResource,
             resourcePicker: presentedComposerResourcePicker,
@@ -2814,6 +2854,9 @@ struct ChatView: View {
             glassNamespace: composerGlassNamespace,
             onProcessesTap: {
                 sessionPresentation.showProcesses = true
+            },
+            onExtensionWidgetsTap: {
+                sessionPresentation.showWidgets = true
             },
             onRemoveAttachment: { id in
                 guard let target = presentationTarget else { return }

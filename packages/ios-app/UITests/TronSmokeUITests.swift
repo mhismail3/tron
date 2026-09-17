@@ -128,6 +128,62 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
+    func testExtensionWidgetsSheetRendersRetainedContent() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-extension-widgets-fixture"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Extension widgets fixture"].waitForExistence(timeout: 10), app.debugDescription)
+        let sheet = app.otherElements["extension-widgets-sheet"]
+        XCTAssertTrue(sheet.waitForExistence(timeout: 5), app.debugDescription)
+        // Producer attribution for both retained kinds.
+        XCTAssertTrue(app.staticTexts["Goal"].waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["npm:fixture-extension"].exists)
+        // String widget lines render as native text.
+        XCTAssertTrue(app.staticTexts["Goal active"].exists)
+        XCTAssertTrue(app.staticTexts["Used 12k tokens"].exists)
+        // A retained status is presentable on its own, which is the only content a
+        // paused goal leaves behind after it clears its widget.
+        XCTAssertTrue(app.staticTexts["Goal paused (/goal resume)"].exists)
+        // An ownerless status is grouped, never dropped.
+        XCTAssertTrue(app.staticTexts["Unknown extension"].exists)
+        // A retained read-only component frame renders its sanitized content.
+        let frameText = app.staticTexts.containing(
+            NSPredicate(format: "label CONTAINS[c] %@", "Frame progress 3 of 5")
+        ).firstMatch
+        XCTAssertTrue(frameText.waitForExistence(timeout: 3), app.debugDescription)
+        // Admitted-but-unpresentable content is disclosed, not silently dropped.
+        XCTAssertTrue(app.staticTexts["Some extension content is not shown on this device yet."].exists)
+        keepScreenshot(named: "extension-widgets-sheet-content")
+        app.buttons["Done"].tap()
+        XCTAssertFalse(sheet.waitForExistence(timeout: 2))
+    }
+
+    @MainActor
+    func testExtensionWidgetsSheetKeepsContentReachableAtAccessibilityXXXL() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-tron-extension-widgets-fixture",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
+        ]
+        app.launch()
+        let sheet = app.otherElements["extension-widgets-sheet"]
+        XCTAssertTrue(sheet.waitForExistence(timeout: 10), app.debugDescription)
+        // Every retained entry must still be reachable and read at the largest
+        // accessibility size; the sheet scrolls instead of truncating content.
+        for label in ["Goal", "Goal active", "Used 12k tokens", "Goal paused (/goal resume)"] {
+            let text = app.staticTexts[label]
+            if !text.exists { app.swipeUp() }
+            XCTAssertTrue(text.waitForExistence(timeout: 3), app.debugDescription)
+        }
+        let frameText = app.staticTexts.containing(
+            NSPredicate(format: "label CONTAINS[c] %@", "Frame progress 3 of 5")
+        ).firstMatch
+        if !frameText.exists { app.swipeUp() }
+        XCTAssertTrue(frameText.waitForExistence(timeout: 3), app.debugDescription)
+        keepScreenshot(named: "extension-widgets-sheet-accessibility-xxxl")
+    }
+
+    @MainActor
     func testAskUserClosePreservesSelectionsAndOtherDraftOnReopen() {
         let app = launchAskUser()
         waitForAskUserForm(in: app)

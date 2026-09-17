@@ -260,10 +260,19 @@ export function extensionActivityReceipts(entries: readonly unknown[], sessionId
   return result;
 }
 
+/** Bounded fingerprint of the exact filter that produced a page offset. The
+ * shared content revision identifies the canonical sequence, not a position
+ * inside a filtered projection of it. */
+function extensionActivityCursorQuery(filter?: { ownerId?: string; runId?: string; state?: ExtensionActivityReceipt["state"] }): string {
+  return createHash("sha256").update([filter?.ownerId, filter?.runId, filter?.state].map((part) => part ?? "*").join("\u0000")).digest("hex").slice(0, 16);
+}
+
 export function listExtensionActivityHistory(entries: readonly unknown[], sessionId: string, cursor?: string, limit = 25, branchRevision?: string, filter?: { ownerId?: string; runId?: string; state?: ExtensionActivityReceipt["state"] }): ExtensionActivityHistoryPage {
   const canonical = canonicalReceiptSequence(extensionActivityReceipts(entries, sessionId));
   // Filters and duplicate collapse select page content only. Revision identity
-  // remains global so detail and filtered list cursors agree.
+  // remains global so detail and filtered list cursors agree; the list cursor
+  // additionally binds the exact filter so it cannot be replayed against a
+  // different filtered array at the same revision.
   const historyRevision = revisionOf(canonical, sessionId, branchRevision);
   const sorted = canonical
     .filter(({ receipt }) => (!filter?.ownerId || receipt.owner?.id === filter.ownerId)
@@ -278,10 +287,16 @@ export function listExtensionActivityHistory(entries: readonly unknown[], sessio
   // Receipt identity changes still invalidate cursors even when duplicate
   // activity IDs are collapsed from the returned page.
   const boundedLimit = Math.min(MAX_EXTENSION_HISTORY_PAGE, Math.max(1, Math.floor(limit)));
+  const query = extensionActivityCursorQuery(filter);
   let offset = 0;
   if (cursor) {
-    const [revision, encodedOffset] = cursor.split(":");
-    if (revision !== historyRevision || !/^\d+$/u.test(encodedOffset ?? "")) throw new Error("extension activity history cursor conflict");
+    // An unrecognized cursor shape is a conflict rather than a client error: a
+    // cursor from another paging scope or an older Gateway must restart paging.
+    const parts = cursor.split(":");
+    if (parts.length !== 3) throw new Error("extension activity history cursor conflict");
+    const [cursorRevision, cursorQuery, encodedOffset] = parts;
+    if (cursorRevision !== historyRevision || cursorQuery !== query) throw new Error("extension activity history cursor conflict");
+    if (!/^\d+$/u.test(encodedOffset ?? "")) throw new Error("extension activity history cursor invalid");
     offset = Number(encodedOffset);
     if (!Number.isSafeInteger(offset) || offset < 0 || offset > all.length) throw new Error("extension activity history cursor invalid");
   }
@@ -307,7 +322,7 @@ export function listExtensionActivityHistory(entries: readonly unknown[], sessio
     bytes += size;
     nextOffset = index + 1;
   }
-  const next = nextOffset < all.length ? `${historyRevision}:${nextOffset}` : undefined;
+  const next = nextOffset < all.length ? `${historyRevision}:${query}:${nextOffset}` : undefined;
   return {
     activities,
     historyRevision,

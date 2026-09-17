@@ -396,6 +396,13 @@ export function processHistoryRevision(manager: ReadonlySessionManager): string 
   return processHistoryRevisionFor(manager, canonicalProcessHistory(manager));
 }
 
+/** Bounded fingerprint of the exact filter that produced a page offset.
+ * The content revision alone cannot identify a position: the same revision
+ * with a different filter is a different array. */
+function processHistoryCursorQuery(filter?: { kind?: SessionProcessActivity["kind"]; state?: SessionProcessState }): string {
+  return createHash("sha256").update([filter?.kind, filter?.state].map((part) => part ?? "*").join("\u0000")).digest("hex").slice(0, 16);
+}
+
 export function listProcessHistory(
   manager: ReadonlySessionManager,
   cursor?: string,
@@ -406,11 +413,17 @@ export function listProcessHistory(
   const revision = processHistoryRevisionFor(manager, history);
   const all = history.filter((activity) =>
     (!filter?.kind || activity.kind === filter.kind) && (!filter?.state || activity.lifecycle.state === filter.state));
+  const query = processHistoryCursorQuery(filter);
   let offset = 0;
   if (cursor) {
-    const [cursorRevision, rawOffset] = cursor.split(":");
-    if (cursorRevision !== revision || !/^\d+$/u.test(rawOffset ?? "")) throw new Error("process history cursor conflict");
-    offset = Number(rawOffset);
+    // An unrecognized cursor shape is a conflict rather than a client error: a
+    // cursor from another paging scope or an older Gateway must restart paging.
+    const parts = cursor.split(":");
+    if (parts.length !== 3) throw new Error("process history cursor conflict");
+    const [cursorRevision, cursorQuery, encodedOffset] = parts;
+    if (cursorRevision !== revision || cursorQuery !== query) throw new Error("process history cursor conflict");
+    if (!/^\d+$/u.test(encodedOffset ?? "")) throw new Error("process history cursor invalid");
+    offset = Number(encodedOffset);
     if (!Number.isSafeInteger(offset) || offset < 0 || offset > all.length) throw new Error("process history cursor invalid");
   }
   const boundedLimit = Math.min(MAX_PROCESS_HISTORY_PAGE, Math.max(1, Math.floor(limit)));
@@ -439,7 +452,7 @@ export function listProcessHistory(
   return {
     activities,
     historyRevision: revision,
-    ...(nextOffset < all.length ? { nextCursor: `${revision}:${nextOffset}` } : {}),
+    ...(nextOffset < all.length ? { nextCursor: `${revision}:${query}:${nextOffset}` } : {}),
     ...(omittedCount > 0 ? { omissions: { count: omittedCount, bytes: omittedBytes, reason: "bytes" as const } } : {}),
   };
 }
