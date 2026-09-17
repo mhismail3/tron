@@ -273,14 +273,21 @@ struct CustomModelConfigurationCoordinatorTests {
         let model = AppModel()
         model.presentError("existing")
         model.presentConfigurationActionError(CancellationError())
-        #expect(model.visibleNotices.last?.title == "existing")
+        // Cancellation is not a failure and posts nothing.
+        #expect(model.noticeCenter.notices.map(\.title) == ["existing"])
         model.presentConfigurationActionError(GatewayFailure(
             code: "synthetic",
             message: "current failure",
             retryable: false,
             details: nil
         ))
-        #expect(model.visibleNotices.last?.title == "current failure")
+        // One card is readable at a time, so the current error is retained behind
+        // the visible card and surfaces when that card retires. It is queued, not
+        // dropped, and never preempts the card being read.
+        #expect(model.noticeCenter.notices.map(\.title) == ["existing", "current failure"])
+        #expect(model.visibleNotices.map(\.title) == ["existing"])
+        model.noticeCenter.dismissVisible()
+        #expect(model.visibleNotices.map(\.title) == ["current failure"])
     }
 
     @Test("draft save admission changes synchronously and clears only the exact submitted revision")

@@ -40,7 +40,10 @@ struct AppModelInboxDrainTests {
                 flight = model.notificationInbox.scheduleRefresh(profile: profile) { _, _ in
                     Issue.record("The active refresh must retain its operation owner")
                 }
-                await socket.enqueue(Data(#"{"type":"event","topic":"packages.completed","payload":{}}"#.utf8))
+                // The Gateway always states the outcome of a completed package
+                // operation (`{operationId, success}`), and an absent `success` is
+                // deliberately read as failure rather than claimed as success.
+                await socket.enqueue(Data(#"{"type":"event","topic":"packages.completed","payload":{"success":true}}"#.utf8))
                 var iterator = changed.stream.makeAsyncIterator()
                 guard await iterator.next() != nil else { throw CancellationError() }
                 #expect(model.noticeCenter.notices.contains { $0.title == "Package operation completed" })
