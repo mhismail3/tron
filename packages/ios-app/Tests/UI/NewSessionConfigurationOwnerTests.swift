@@ -123,6 +123,63 @@ struct NewSessionConfigurationOwnerTests {
         #expect(admittedRetry)
     }
 
+    @Test("a background revision change keeps the model the user just chose")
+    func modelChoiceSurvivesRevisionReruns() {
+        // Reported defect: pick a model, then dismiss the picker and the row
+        // snapped back to the scope default. The configuration task re-runs on
+        // profile revision, trust invalidation, or presentation activity -- a
+        // profile switch completing in the background, or a `trust.changed`
+        // event -- and every re-run re-derived the default over the selection.
+        let scope = NewSessionModelScope(profileID: "profile-a", workspace: "/workspace/testspace")
+        let chosen = ModelRef(provider: "deepseek", id: "deepseek-v4.1")
+        let configured = ModelRef(provider: "openai-codex", id: "gpt-6-astra")
+        var choice = NewSessionModelChoice()
+        choice.choose(chosen, scope: scope)
+
+        // Any number of revision-only re-runs resolve to the same explicit pick.
+        for _ in 0..<3 {
+            #expect(choice.retain(in: scope) == chosen)
+            #expect(choice.effective(configured: configured, preferred: configured) == chosen)
+        }
+    }
+
+    @Test("a real scope change drops the choice and re-derives the default")
+    func modelChoiceDropsOnScopeChange() {
+        let chosen = ModelRef(provider: "deepseek", id: "deepseek-v4.1")
+        let configured = ModelRef(provider: "openai-codex", id: "gpt-6-astra")
+        var choice = NewSessionModelChoice()
+        choice.choose(chosen, scope: NewSessionModelScope(profileID: "profile-a", workspace: "/workspace/testspace"))
+
+        // Another server, then another directory: each drops explicit intent.
+        #expect(choice.retain(in: NewSessionModelScope(profileID: "profile-b", workspace: "/workspace/testspace")) == nil)
+        #expect(choice.effective(configured: configured, preferred: nil) == configured)
+        #expect(choice.model == nil)
+
+        choice.choose(chosen, scope: NewSessionModelScope(profileID: "profile-a", workspace: "/workspace/testspace"))
+        #expect(choice.retain(in: NewSessionModelScope(profileID: "profile-a", workspace: "/workspace/other")) == nil)
+    }
+
+    @Test("the effective selection falls back from intent to default to preferred")
+    func modelChoiceFallbackOrder() {
+        let chosen = ModelRef(provider: "deepseek", id: "deepseek-v4.1")
+        let configured = ModelRef(provider: "openai-codex", id: "gpt-6-astra")
+        let preferred = ModelRef(provider: "openai-codex", id: "gpt-5.6-luna")
+        let scope = NewSessionModelScope(profileID: "profile-a", workspace: "/workspace/testspace")
+
+        var choice = NewSessionModelChoice()
+        #expect(choice.retain(in: scope) == nil)
+        #expect(choice.effective(configured: configured, preferred: preferred) == configured)
+        #expect(choice.effective(configured: nil, preferred: preferred) == preferred)
+        #expect(choice.effective(configured: nil, preferred: nil) == nil)
+
+        // Clearing to "Default" in the picker is itself an explicit decision that
+        // must also survive a revision-only re-run.
+        choice.choose(nil, scope: scope)
+        #expect(choice.retain(in: scope) == nil)
+        #expect(choice.scope == scope)
+        #expect(choice.effective(configured: configured, preferred: preferred) == configured)
+    }
+
     @Test("only an explicit model choice overrides the configured session default")
     func modelOverridePolicy() {
         let configured = ModelRef(provider: "provider", id: "configured")

@@ -10,6 +10,11 @@ struct NewSessionSheet: View {
     @State private var useDefaultWorkspace = true
     @State private var selectedModel: ModelRef?
     @State private var configuredModel: ModelRef?
+    /// Explicit model intent, retained across configuration re-runs. See
+    /// `NewSessionModelChoice`.
+    @State private var modelChoice = NewSessionModelChoice()
+    /// The scope the currently admitted configuration belongs to.
+    @State private var configuredScope: NewSessionModelScope?
     @State private var sourceControl = SessionSourceControlSelection.existing
     @State private var gitInspection: GitInspection?
     @State private var gitInspectionFailed = false
@@ -216,7 +221,7 @@ struct NewSessionSheet: View {
             .tronManagedSheet(isPresented: $showModels, identity: "new-session.models") {
                 NavigationStack {
                     ModelPicker(
-                        selection: $selectedModel,
+                        selection: modelSelection,
                         models: model.providerCatalog(for: .global)?.models.filter(\.available) ?? []
                     )
                         .tronTopBlurSurface()
@@ -262,8 +267,8 @@ struct NewSessionSheet: View {
                 trustInspection = nil
                 gitInspection = nil
                 gitInspectionFailed = false
-                selectedModel = nil
                 configuredModel = nil
+                configuredScope = nil
                 sourceControl = .existing
                 if workspace.isEmpty, useDefaultWorkspace,
                    let defaultWorkspace = model.defaultWorkspace, !defaultWorkspace.isEmpty {
@@ -271,6 +276,12 @@ struct NewSessionSheet: View {
                     return
                 }
                 let requestedWorkspace = workspace
+                // A revision-only re-run (profile revision, trust invalidation, or
+                // presentation activity) re-derives the scope default but must not
+                // discard a model the user just chose. Only a real scope change
+                // clears explicit intent; see NewSessionModelChoice.
+                let modelScope = NewSessionModelScope(profileID: profileID, workspace: requestedWorkspace)
+                selectedModel = modelChoice.retain(in: modelScope)
                 let settingsTarget = requestedWorkspace.isEmpty
                     ? SettingsTarget.global
                     : .project(cwd: requestedWorkspace)
@@ -314,7 +325,11 @@ struct NewSessionSheet: View {
                         trustReady: trustReady
                       ) else { return }
                 configuredModel = model.configuredDefaultModel(for: settingsTarget)
-                selectedModel = configuredModel ?? model.preferredAvailableModel(for: .global)
+                configuredScope = modelScope
+                selectedModel = modelChoice.effective(
+                    configured: configuredModel,
+                    preferred: model.preferredAvailableModel(for: .global)
+                )
             }
         }
         .interactiveDismissDisabled(creating)
@@ -394,6 +409,23 @@ struct NewSessionSheet: View {
 
     private var needsTrust: Bool {
         NewSessionTrustPolicy.requiresDecision(trustInspection)
+    }
+
+    /// The picker records explicit intent for the scope being configured, so a
+    /// later revision-only re-run restores it instead of the scope default.
+    private var modelSelection: Binding<ModelRef?> {
+        Binding(
+            get: { selectedModel },
+            set: { selection in
+                selectedModel = selection
+                // Attribute the choice to the admitted scope, falling back to the
+                // live scope if a pick somehow precedes configuration admission.
+                modelChoice.choose(selection, scope: configuredScope ?? NewSessionModelScope(
+                    profileID: activeProfileID,
+                    workspace: workspace
+                ))
+            }
+        )
     }
 
     private var quickSelections: [NewSessionQuickSelection] {
