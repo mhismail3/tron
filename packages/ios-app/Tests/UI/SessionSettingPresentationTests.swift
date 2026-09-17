@@ -28,10 +28,17 @@ struct SessionSettingPresentationTests {
             SessionTreeNode(id: "entry", parentId: nil, timestamp: "2026-01-01T00:00:00Z", kind: kind,
                             label: label, preview: "xhigh", role: nil, depth: 0, childCount: 0, isCurrentPath: true)
         }
+        // The typed level is humanized for a thinking-level entry only.
         #expect(SessionHistoryPreview.title(node(kind: "thinkingChange")) == "Extra High")
         #expect(SessionHistoryPreview.preview(node(kind: "thinkingChange")) == "Extra High")
         #expect(SessionHistoryPreview.title(node(kind: "message")) == "xhigh")
-        #expect(SessionHistoryPreview.title(node(kind: "thinkingChange", label: "xhigh")) == "xhigh")
+        // A bookmark label is its own history-row line, so the typed preview stays
+        // the title and authored label text is never rewritten by the
+        // thinking-level formatter. (An earlier presentation put the label in the
+        // title, which is why this case previously expected the label itself.)
+        #expect(SessionHistoryPreview.title(node(kind: "thinkingChange", label: "xhigh")) == "Extra High")
+        #expect(SessionHistoryPreview.title(node(kind: "thinkingChange", label: "investigate the flake"))
+            == SessionHistoryPreview.title(node(kind: "thinkingChange")))
     }
 
     @Test("progress revisions are causal fences, not Manage Session visual changes")
