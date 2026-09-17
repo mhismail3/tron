@@ -251,9 +251,16 @@ struct ConnectionsSettingsView: View {
     private func reload() async {
         dataLoadGeneration &+= 1
         let generation = dataLoadGeneration
-        let loadedDevices = await model.loadAuthorizedDevices()
-        guard generation == dataLoadGeneration else { return }
-        authorizedDevices = loadedDevices
+        do {
+            let loadedDevices = try await model.loadAuthorizedDevices()
+            guard generation == dataLoadGeneration,
+                  presentationActivity.allowsPresentationPublication else { return }
+            authorizedDevices = loadedDevices
+        } catch {
+            // A retired or canceled read keeps the previously published list;
+            // unreachable profiles were already skipped by the read owner.
+            return
+        }
     }
 
 }
@@ -889,7 +896,7 @@ struct GatewayConnectionDetailView: View {
             if generation == infoLoadGeneration { loadingInfo = false }
         }
         let loaded = await model.gatewayInfo(for: currentProfile.id)
-        guard generation == infoLoadGeneration else { return }
+        guard admitsInfoLoad(generation) else { return }
         info = loaded
         guard model.profiles.selected?.id == currentProfile.id else {
             updateConfig = nil
@@ -901,13 +908,13 @@ struct GatewayConnectionDetailView: View {
             return
         }
         updateConfig = await model.loadGatewayUpdateConfig(for: currentProfile)
-        guard generation == infoLoadGeneration else { return }
+        guard admitsInfoLoad(generation) else { return }
         // While a command is tracked, the polling lane is the sole writer of
         // update status. This prevents an older multi-await detail load from
         // overwriting newer helper progress.
         guard activeUpdateCommandID == nil else { return }
         let loadedStatus = await model.loadGatewayUpdateStatus(for: currentProfile)
-        guard generation == infoLoadGeneration, activeUpdateCommandID == nil else { return }
+        guard admitsInfoLoad(generation), activeUpdateCommandID == nil else { return }
         updateStatus = loadedStatus
         if loadedStatus?.isActive == true, let commandID = loadedStatus?.commandId {
             // A sheet reopened during an accepted update adopts its bounded
@@ -915,6 +922,14 @@ struct GatewayConnectionDetailView: View {
             activeUpdateCommandID = commandID
             acceptedOperationLabel = nil
         }
+    }
+
+    /// A multi-await detail read may only publish while it is still the newest
+    /// request for a live, uncovered surface with this task uncancelled.
+    private func admitsInfoLoad(_ generation: Int) -> Bool {
+        generation == infoLoadGeneration
+            && !Task.isCancelled
+            && presentationActivity.allowsPresentationPublication
     }
 
     private func pollGatewayUpdate() async {

@@ -5,6 +5,7 @@ import SwiftUI
 struct ExtensionFormSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.tronPresentationActivityCoordinator) private var presentationActivityCoordinator
     @Environment(\.tronPresentationSurfaceToken) private var presentationSurfaceToken
@@ -115,12 +116,35 @@ struct ExtensionFormSheet: View {
         .onAppear { reset() }
         .onChange(of: ExtensionInteractionScope(interaction)) { _, _ in reset() }
         .onChange(of: currentQuestionIndex) { _, _ in persistDraft() }
-        .task(id: ExtensionInteractionScope(interaction)) {
-            while !Task.isCancelled {
-                now = Date()
-                do { try await Task.sleep(for: .seconds(1)) }
-                catch { return }
-            }
+        .task(id: PresentationActivityTaskID(
+            source: ExtensionInteractionScope(interaction),
+            presentationActive: expiryClockRuns
+        )) {
+            await runExpiryClock()
+        }
+    }
+
+    /// The visible countdown is a self-updating relative text; this clock only
+    /// drives the one-way expiry transition that disables submission. It must
+    /// therefore never tick without a future deadline, and must stop once the
+    /// form has expired.
+    private var expiryClockRuns: Bool {
+        PresentationClockPolicy.runs(
+            surfaceActive: presentationActivity.allowsPresentationPublication,
+            sceneActive: scenePhase == .active
+        )
+    }
+
+    private func runExpiryClock() async {
+        guard expiryClockRuns else { return }
+        // Recompute the wall clock on every activation so a covered, suspended,
+        // or backgrounded form never depends on a timer having fired.
+        now = Date()
+        while !Task.isCancelled {
+            guard ExtensionFormExpiryClockPolicy.ticks(deadline: expiry, now: now) else { return }
+            do { try await Task.sleep(for: .seconds(1)) }
+            catch { return }
+            now = Date()
         }
     }
 
@@ -409,5 +433,16 @@ struct ExtensionFormSheet: View {
                 model.presentError(error)
             }
         }
+    }
+}
+
+/// The only clock demand this sheet has is the one-way expiry transition that
+/// disables submission; the visible countdown is a self-updating relative text.
+/// A missing deadline therefore needs no timer at all, and an expired form needs
+/// no further ticks.
+enum ExtensionFormExpiryClockPolicy {
+    static func ticks(deadline: Date?, now: Date) -> Bool {
+        guard let deadline else { return false }
+        return now < deadline
     }
 }

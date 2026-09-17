@@ -72,10 +72,9 @@ struct WorkspaceBrowser: View {
                 }
             }
             .task { await load(path: initialPath) }
-            .onChange(of: includeHidden) { _, _ in
-                guard !currentPath.isEmpty else { return }
-                Task { await load(path: currentPath, navigation: true) }
-            }
+            // Hidden entries already arrive in the listing, so visibility is a
+            // local projection. Re-requesting the directory here would repeat a
+            // Gateway filesystem read for data this view already holds.
             .onDisappear { loadOwner.cancel() }
         }
         .tronTopBlur(.sheet)

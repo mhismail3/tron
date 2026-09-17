@@ -2318,25 +2318,32 @@ final class AppModel {
         await loadGatewayLogsResult(limit: limit).records
     }
 
-    func loadAuthorizedDevices() async -> [GatewayAuthorizedDevice] {
+    /// Aggregate device read across every configured profile. Cancellation is
+    /// propagated instead of surfacing as an empty or truncated list, so a
+    /// suspended read can never replace the published list with partial data.
+    /// A profile whose device list genuinely cannot be read is still skipped.
+    func loadAuthorizedDevices() async throws -> [GatewayAuthorizedDevice] {
+        guard !Task.isCancelled else { throw CancellationError() }
         let profileSnapshot = profiles.profiles
         let selectedID = profiles.selected?.id
         if selectedID != nil {
             await refreshDevices()
-            guard profiles.selected?.id == selectedID else { return [] }
+            // The selected profile changed while its authoritative list was
+            // loading, so this read no longer describes the requested identity.
+            guard profiles.selected?.id == selectedID else { throw CancellationError() }
         }
 
         var authorized: [GatewayAuthorizedDevice] = []
         for profile in profileSnapshot {
             let devices: [PairedDevice]
             if profile.id == selectedID {
-                guard profiles.selected?.id == selectedID else { continue }
+                guard profiles.selected?.id == selectedID else { throw CancellationError() }
                 devices = pairedDevices
             } else {
                 do {
                     devices = try await dashboardConnections.devices(for: profile.id)
                 } catch is CancellationError {
-                    return authorized
+                    throw CancellationError()
                 } catch {
                     continue
                 }
@@ -2345,6 +2352,7 @@ final class AppModel {
                 GatewayAuthorizedDevice(profileID: profile.id, profileLabel: profile.label, device: $0)
             })
         }
+        try Task.checkCancellation()
         return authorized
     }
 

@@ -137,6 +137,26 @@ struct TerminalReducerTests {
         #expect(coordinator.replay(for: "terminal").chunks.map(\.sequence) == [4])
     }
 
+    @Test("replay suffix lookup matches the ordered filter for every cursor")
+    func replaySuffixLookup() {
+        let chunks = (1...512).map { TerminalChunk(sequence: $0, data: "chunk-\($0)") }
+        func reference(after lastSequence: Int) -> [Int] {
+            chunks.filter { $0.sequence > lastSequence }.map(\.sequence)
+        }
+        // Empty, before the first, every interior boundary, the last, and past
+        // the end must all agree with the ordered filter the renderer replaced.
+        for cursor in [-5, 0, 1, 2, 255, 256, 510, 511, 512, 513, 1_000] {
+            #expect(Array(chunks.replaySuffix(after: cursor)).map(\.sequence) == reference(after: cursor),
+                    "cursor \(cursor)")
+        }
+        // A reset revision can retain a suffix whose first sequence is not one.
+        let reset = (7...9).map { TerminalChunk(sequence: $0, data: "reset-\($0)") }
+        #expect(reset.replaySuffix(after: 0).map(\.sequence) == [7, 8, 9])
+        #expect(reset.replaySuffix(after: 8).map(\.sequence) == [9])
+        #expect(reset.replaySuffix(after: 9).isEmpty)
+        #expect([TerminalChunk]().replaySuffix(after: 0).isEmpty)
+    }
+
     @Test("pending terminal identities are bounded during open")
     func pendingTerminalIdentityBound() throws {
         var coordinator = TerminalReducer()

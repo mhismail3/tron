@@ -532,6 +532,34 @@ struct PackageConfigurationCoordinatorTests {
         }
     }
 
+    @Test("a cancelled package refresh publishes neither rows nor a local error")
+    func cancelledRefreshPublishesNothing() async throws {
+        try await runScenario {
+            let harness = try await makeHarness()
+            let delegate = ErrorDelegate()
+            harness.owner.delegate = delegate
+            harness.owner.installHostedInventory(try inventory("installed").decode(PackageInventory.self), for: .global)
+            #expect(harness.owner.error(for: .global) == nil)
+
+            let cancelledLoad = Task { await harness.owner.load(target: .global) }
+            try await harness.socket.waitUntilSent(count: 2)
+            cancelledLoad.cancel()
+            _ = await cancelledLoad.value
+            #expect(harness.owner.inventory(for: .global)?.packages.map(\.source) == ["installed"])
+            #expect(harness.owner.error(for: .global) == nil)
+            #expect(delegate.messages.isEmpty)
+
+            let cancelledCheck = Task { await harness.owner.checkUpdates(target: .global) }
+            try await harness.socket.waitUntilSent(count: 3)
+            cancelledCheck.cancel()
+            _ = await cancelledCheck.value
+            #expect(harness.owner.updates(for: .global).isEmpty)
+            #expect(harness.owner.error(for: .global) == nil)
+            #expect(delegate.messages.isEmpty)
+            await harness.client.close()
+        }
+    }
+
     @Test("AppModel observes nested package projections")
     func nestedObservation() {
         let model = AppModel()

@@ -672,8 +672,12 @@ struct SessionShellView: View {
     }
 
     private var sessionList: some View {
-        List {
-            sessionSections
+        // Derive the visible projection once per body evaluation. Each access of
+        // `filteredSessions` re-filters the whole dashboard, and this list needs
+        // it for both its rows and its animation key.
+        let filtered = filteredSessions
+        return List {
+            sessionSections(filtered)
         }
         .listStyle(.plain)
         .refreshable { _ = await model.retrySessionCatalog() }
@@ -688,22 +692,24 @@ struct SessionShellView: View {
         )
         .animation(
             TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
-            value: filteredSessions.map(\.dashboardID)
+            value: filtered.map(\.dashboardID)
         )
     }
 
     @ViewBuilder
-    private var sessionSections: some View {
+    private func sessionSections(_ filtered: [SessionSummary]) -> some View {
         if serverFilter.sortMode == .recent {
             Section {
-                ForEach(recentSessions, id: \.dashboardID) { session in
+                ForEach(filtered, id: \.dashboardID) { session in
                     sessionButton(session, showsContext: true)
                 }
             } header: {
                 recentActivityHeader
             }
         } else {
-            ForEach(workspaceGroups) { group in
+            ForEach(SessionListWorkspaceGroup.groups(from: filtered).sorted {
+                $0.path.localizedCaseInsensitiveCompare($1.path) == .orderedAscending
+            }) { group in
             let visibleSessions = sessionExpansion.visibleSessions(in: group)
             let canShowMore = sessionExpansion.canViewMore(
                 groupID: group.id,
@@ -932,17 +938,6 @@ struct SessionShellView: View {
                     || session.title.localizedCaseInsensitiveContains(search)
                     || session.cwd.localizedCaseInsensitiveContains(search))
         }
-    }
-
-    private var recentSessions: [SessionSummary] {
-        filteredSessions
-    }
-
-    private var workspaceGroups: [SessionListWorkspaceGroup] {
-        SessionListWorkspaceGroup.groups(from: filteredSessions)
-            .sorted {
-                $0.path.localizedCaseInsensitiveCompare($1.path) == .orderedAscending
-            }
     }
 
     private func toggleWorkspaceGroup(_ groupID: String, itemCount: Int) {

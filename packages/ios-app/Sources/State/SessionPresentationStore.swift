@@ -1450,14 +1450,16 @@ final class SessionPresentationStore {
         struct Params: Codable { let sessionId: String }
         do {
             let loaded = try await client.requestValue("session.resources", Params(sessionId: sessionID), timeout: .seconds(60))
-            guard generation == resourceLoadGeneration,
+            guard !Task.isCancelled,
+                  generation == resourceLoadGeneration,
                   ownsSubscription(sessionID: sessionID, requestedToken: token),
                   subscriptionTarget == requestedTarget else { return }
             resources = loaded
             resourceTarget = requestedTarget
             resourcesError = nil
         } catch {
-            guard !(error is CancellationError),
+            guard !Task.isCancelled,
+                  !(error is CancellationError),
                   generation == resourceLoadGeneration,
                   ownsSubscription(sessionID: sessionID, requestedToken: token),
                   subscriptionTarget == requestedTarget else { return }

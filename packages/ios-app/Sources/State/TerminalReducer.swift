@@ -15,6 +15,25 @@ struct TerminalReplayProjection: Equatable, Sendable {
     static let empty = TerminalReplayProjection(chunks: [], revision: 0)
 }
 
+extension Array where Element == TerminalChunk {
+    /// Replay chunks are strictly ascending and contiguous inside one revision,
+    /// so the pending suffix is a lower bound rather than a full-array scan on
+    /// every SwiftUI update. Equivalent to filtering on `sequence > after`.
+    func replaySuffix(after lastSequence: Int) -> ArraySlice<TerminalChunk> {
+        var low = startIndex
+        var high = endIndex
+        while low < high {
+            let middle = low + (high - low) / 2
+            if self[middle].sequence > lastSequence {
+                high = middle
+            } else {
+                low = middle + 1
+            }
+        }
+        return self[low...]
+    }
+}
+
 struct TerminalRendererIdentity: Hashable, Sendable {
     let terminalID: String
     let replayRevision: Int

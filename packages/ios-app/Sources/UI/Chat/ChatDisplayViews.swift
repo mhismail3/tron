@@ -756,9 +756,12 @@ private struct DisplayImageArtifactView: View {
     let sessionID: String?
     let display: DisplayProjection
     @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var image: UIImage?
     @State private var failed = false
     @State private var leaseID = UUID()
+    @State private var loadGeneration = 0
+    @State private var loadedIdentity: ChatMediaIdentity?
 
     var body: some View {
         Group {
@@ -776,20 +779,49 @@ private struct DisplayImageArtifactView: View {
             }
         }
         .accessibilityLabel(display.altText)
-        .task(id: mediaIdentity) {
-            image = nil
-            failed = false
-            guard let identity = mediaIdentity else {
-                failed = true
-                return
-            }
-            do { image = try await model.chatMedia.fullPreview(for: identity, leaseID: leaseID) }
-            catch is CancellationError { return }
-            catch { failed = true }
-        }
+        .task(id: PresentationActivityTaskID(
+            source: mediaIdentity,
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) { await load() }
         .onDisappear {
             guard let identity = mediaIdentity else { return }
             model.chatMedia.cancelFullPreview(for: identity, leaseID: leaseID)
+        }
+    }
+
+    private func load() async {
+        // Covered or retired surfaces neither start nor publish this work.
+        guard presentationActivity.allowsPresentationPublication else { return }
+        guard let identity = mediaIdentity else {
+            loadGeneration &+= 1
+            image = nil
+            failed = true
+            loadedIdentity = nil
+            return
+        }
+        // A decoded image for this exact source stays mounted; only a new
+        // source, a failed attempt, or interrupted work reloads it.
+        if loadedIdentity == identity, image != nil { return }
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        image = nil
+        failed = false
+        do {
+            let value = try await model.chatMedia.fullPreview(for: identity, leaseID: leaseID)
+            guard generation == loadGeneration,
+                  !Task.isCancelled,
+                  presentationActivity.allowsPresentationPublication else { return }
+            image = value
+            loadedIdentity = identity
+        } catch is CancellationError {
+            // Interrupted work publishes nothing, so the next activation retries.
+            return
+        } catch {
+            guard generation == loadGeneration,
+                  !Task.isCancelled,
+                  presentationActivity.allowsPresentationPublication else { return }
+            failed = true
+            loadedIdentity = nil
         }
     }
 
@@ -804,9 +836,12 @@ private struct DisplayTextArtifactView: View {
     let display: DisplayProjection
     let context: DisplayRenderContext
     @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var prepared: PreparedAttachmentFilePreview?
     @State private var failed = false
     @State private var leaseID = UUID()
+    @State private var loadGeneration = 0
+    @State private var loadedIdentity: ChatMediaIdentity?
 
     var body: some View {
         Group {
@@ -819,7 +854,10 @@ private struct DisplayTextArtifactView: View {
                     .frame(height: context == .inline ? 180 : 320)
             }
         }
-        .task(id: mediaIdentity) { await load() }
+        .task(id: PresentationActivityTaskID(
+            source: mediaIdentity,
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) { await load() }
         .onDisappear { cancelLoad() }
     }
 
@@ -868,21 +906,44 @@ private struct DisplayTextArtifactView: View {
     }
 
     private func load() async {
-        prepared = nil
-        failed = false
+        // Covered or retired surfaces neither start nor publish this work.
+        guard presentationActivity.allowsPresentationPublication else { return }
         guard let artifact = display.artifact, let identity = mediaIdentity else {
+            loadGeneration &+= 1
+            prepared = nil
             failed = true
+            loadedIdentity = nil
             return
         }
+        // A completed preparation for this exact source stays mounted; only a
+        // new source, a failed attempt, or interrupted work reloads.
+        if loadedIdentity == identity, prepared != nil { return }
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        prepared = nil
+        failed = false
         do {
             let payload = try await model.chatMedia.filePreviewPayload(for: identity, leaseID: leaseID)
-            prepared = try await AttachmentFilePreviewPolicy.prepare(
+            let value = try await AttachmentFilePreviewPolicy.prepare(
                 data: payload.data,
                 name: artifact.name,
                 mimeType: payload.mimeType
             )
-        } catch is CancellationError { return }
-        catch { failed = true }
+            guard generation == loadGeneration,
+                  !Task.isCancelled,
+                  presentationActivity.allowsPresentationPublication else { return }
+            prepared = value
+            loadedIdentity = identity
+        } catch is CancellationError {
+            // Interrupted work publishes nothing, so the next activation retries.
+            return
+        } catch {
+            guard generation == loadGeneration,
+                  !Task.isCancelled,
+                  presentationActivity.allowsPresentationPublication else { return }
+            failed = true
+            loadedIdentity = nil
+        }
     }
 }
 
@@ -911,9 +972,12 @@ private struct DisplayHTMLArtifactView: View {
     let sessionID: String?
     let display: DisplayProjection
     @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var html: String?
     @State private var failed = false
     @State private var leaseID = UUID()
+    @State private var loadGeneration = 0
+    @State private var loadedIdentity: ChatMediaIdentity?
 
     var body: some View {
         Group {
@@ -925,7 +989,10 @@ private struct DisplayHTMLArtifactView: View {
                 TronLoadingState(label: "Preparing HTML…", accent: .tronBlue)
             }
         }
-        .task(id: mediaIdentity) { await load() }
+        .task(id: PresentationActivityTaskID(
+            source: mediaIdentity,
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) { await load() }
         .onDisappear { cancelLoad() }
     }
 
@@ -940,19 +1007,43 @@ private struct DisplayHTMLArtifactView: View {
     }
 
     private func load() async {
-        html = nil
-        failed = false
+        // Covered or retired surfaces neither start nor publish this work.
+        guard presentationActivity.allowsPresentationPublication else { return }
         guard let artifact = display.artifact, artifact.size <= 5 * 1_024 * 1_024,
               let identity = mediaIdentity else {
+            loadGeneration &+= 1
+            html = nil
             failed = true
+            loadedIdentity = nil
             return
         }
+        // Prepared markup for this exact source stays mounted; only a new
+        // source, a failed attempt, or interrupted work reloads it.
+        if loadedIdentity == identity, html != nil { return }
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        html = nil
+        failed = false
         do {
             let payload = try await model.chatMedia.filePreviewPayload(for: identity, leaseID: leaseID)
-            guard let source = String(data: payload.data, encoding: .utf8) else { throw CocoaError(.fileReadCorruptFile) }
+            guard let source = String(data: payload.data, encoding: .utf8) else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+            guard generation == loadGeneration,
+                  !Task.isCancelled,
+                  presentationActivity.allowsPresentationPublication else { return }
             html = source
-        } catch is CancellationError { return }
-        catch { failed = true }
+            loadedIdentity = identity
+        } catch is CancellationError {
+            // Interrupted work publishes nothing, so the next activation retries.
+            return
+        } catch {
+            guard generation == loadGeneration,
+                  !Task.isCancelled,
+                  presentationActivity.allowsPresentationPublication else { return }
+            failed = true
+            loadedIdentity = nil
+        }
     }
 }
 

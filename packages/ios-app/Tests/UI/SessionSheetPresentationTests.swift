@@ -1303,10 +1303,44 @@ final class SessionSheetPresentationTests: XCTestCase {
                 context: .object(["systemPrompt": .string(instructions)]), tree: [], commands: [], resources: nil
             )
             try await self.withSheet(AgentInstructionsSheet(sessionID: "document-fixture").environment(model)) { controller in
-                XCTAssertFalse(self.views(of: UIScrollView.self, in: controller.view).isEmpty)
+                let mounted = await self.waitForFirstView(of: UIScrollView.self, in: controller.view)
+                XCTAssertNotNil(mounted, "Prepared instructions must mount their scroll document")
+                let content = try XCTUnwrap(mounted)
+                XCTAssertTrue(content.isScrollEnabled)
                 XCTAssertFalse(self.views(of: TronDocumentTextView.self, in: controller.view).contains { $0.text == instructions },
                                "Instructions must use block markdown, not the plain document reader")
                 self.capture(controller, name: "instructions-markdown")
+            }
+        }
+    }
+
+    func testInstructionsRetainThePreparedDocumentAcrossCoverAndUncover() async throws {
+        let instructions = "# Project Rules\n\n" + String(repeating: "Preserve **user data** and read the owning docs.\n\n", count: 400)
+        try await withModel { model in
+            model.installHostedSecondaryProjection(
+                context: .object(["systemPrompt": .string(instructions)]), tree: [], commands: [], resources: nil
+            )
+            let activity = DocumentSurfaceActivity()
+            try await self.withSheet(AgentInstructionsSheet(sessionID: "document-fixture")
+                .environment(model)
+                .environment(\.tronPresentationActivity, activity.value)) { controller in
+                let mounted = await self.waitForFirstView(of: UIScrollView.self, in: controller.view)
+                XCTAssertNotNil(mounted)
+                let prepared = try XCTUnwrap(mounted)
+                XCTAssertTrue(self.views(of: TronDocumentTextView.self, in: controller.view).isEmpty)
+
+                activity.value = .covered
+                await self.settleSheetPresentation()
+                activity.value = .active
+                await self.settleSheetPresentation()
+
+                // A cover/uncover cycle must reuse the completed document rather
+                // than blanking it into a loading placeholder or re-parsing it.
+                XCTAssertFalse(self.views(of: UIScrollView.self, in: controller.view).isEmpty,
+                               "Uncovering must keep the prepared instruction document mounted")
+                XCTAssertTrue(self.views(of: UIScrollView.self, in: controller.view).first === prepared,
+                              "Uncovering must not rebuild the prepared instruction document")
+                XCTAssertTrue(self.views(of: TronDocumentTextView.self, in: controller.view).isEmpty)
             }
         }
     }
@@ -2174,6 +2208,37 @@ final class SessionSheetPresentationTests: XCTestCase {
     private func views<T: UIView>(of type: T.Type, in root: UIView) -> [T] {
         ((root as? T).map { [$0] } ?? []) + root.subviews.flatMap { views(of: type, in: $0) }
     }
+
+    /// Some sheets mount their content only after a bounded asynchronous
+    /// preparation. Waiting for the native view is stronger than assuming one
+    /// runloop turn is enough.
+    private func waitForFirstView<T: UIView>(
+        of type: T.Type,
+        in root: UIView,
+        timeout: TimeInterval = 5
+    ) async -> T? {
+        let deadline = Date().addingTimeInterval(timeout)
+        while true {
+            root.setNeedsLayout()
+            root.layoutIfNeeded()
+            if let match = views(of: type, in: root).first { return match }
+            if Date() >= deadline { return nil }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
+    /// Lets SwiftUI run its update pass after an observable/environment change.
+    private func settleSheetPresentation() async {
+        for _ in 0..<4 {
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(30))
+        }
+    }
+}
+
+@MainActor @Observable
+private final class DocumentSurfaceActivity {
+    var value: PresentationSurfaceActivity = .active
 }
 
 private struct InlinePhotoResumeFixture: View {

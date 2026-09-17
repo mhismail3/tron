@@ -97,6 +97,12 @@ final class PackageConfigurationCoordinator {
         if mutationAdmission == nil, mutationReloadingTargets[target] != nil {
             return true
         }
+        // An ordinary refresh publishes only while it is still the newest,
+        // uncancelled read. A confirmed mutation's post-mutation reload is part
+        // of that mutation's completion, so it keeps publishing authority even
+        // if the requesting view was dismissed after confirmation.
+        let requiresLiveTask = mutationAdmission == nil
+        if requiresLiveTask, Task.isCancelled { return false }
         let admission = beginAdmission(target: target, generations: &loadGenerationByTarget)
         do {
             let inventory: PackageInventory = try await client.request(
@@ -104,7 +110,8 @@ final class PackageConfigurationCoordinator {
                 TargetParams(cwd: target.cwd),
                 timeout: Self.listTimeout
             )
-            guard admits(admission, generations: loadGenerationByTarget),
+            guard (!requiresLiveTask || !Task.isCancelled),
+                  admits(admission, generations: loadGenerationByTarget),
                   mutationAdmission.map({ admits($0, generations: mutationGenerationByTarget) }) ?? true else {
                 return false
             }
@@ -115,7 +122,10 @@ final class PackageConfigurationCoordinator {
         } catch is CancellationError {
             return false
         } catch {
-            guard admits(admission, generations: loadGenerationByTarget),
+            // A retired or cancelled request must not install a local error over
+            // the projection that owns this target.
+            guard (!requiresLiveTask || !Task.isCancelled),
+                  admits(admission, generations: loadGenerationByTarget),
                   mutationAdmission.map({ admits($0, generations: mutationGenerationByTarget) }) ?? true else {
                 return false
             }
@@ -130,6 +140,7 @@ final class PackageConfigurationCoordinator {
         if mutationReloadingTargets[target] != nil {
             return true
         }
+        guard !Task.isCancelled else { return false }
         let admission = beginAdmission(target: target, generations: &updateGenerationByTarget)
         do {
             let response: UpdateResponse = try await client.request(
@@ -137,7 +148,8 @@ final class PackageConfigurationCoordinator {
                 TargetParams(cwd: target.cwd),
                 timeout: Self.checkUpdatesTimeout
             )
-            guard admits(admission, generations: updateGenerationByTarget) else { return false }
+            guard !Task.isCancelled,
+                  admits(admission, generations: updateGenerationByTarget) else { return false }
             let admitted = try PackageCatalogPolicy.admit(response.updates)
             updatesByTarget[target] = admitted
             errorByTarget[target] = nil
@@ -145,7 +157,10 @@ final class PackageConfigurationCoordinator {
         } catch is CancellationError {
             return false
         } catch {
-            guard admits(admission, generations: updateGenerationByTarget) else { return false }
+            // A retired or cancelled request must not install a local error over
+            // the projection that owns this target.
+            guard !Task.isCancelled,
+                  admits(admission, generations: updateGenerationByTarget) else { return false }
             errorByTarget[target] = error.localizedDescription
             if surfaceError { delegate?.packageConfigurationCoordinatorSurface(error) }
             return false
