@@ -19,9 +19,10 @@ struct ExtensionFrameRunPresentation {
     let usesSecondaryForeground: Bool
 
     /// Native text/surface colors for the current scheme. The frame policy needs
-    /// concrete values to test contrast; the sheet material is translucent, so
-    /// these mirror the theme's text and surface colors as the conservative
-    /// reference pair rather than claiming exact composited contrast.
+    /// concrete values to test contrast, so these carry the exact literals behind
+    /// `Color.tronTextPrimary` and `Color.tronBackground`; the sheet material is
+    /// translucent, so this is the conservative reference pair rather than a claim
+    /// about composited contrast.
     struct NativePalette {
         let foreground: String
         let background: String
@@ -29,11 +30,11 @@ struct ExtensionFrameRunPresentation {
         init(colorScheme: ColorScheme) {
             switch colorScheme {
             case .dark:
-                foreground = "#F8FAFC"
-                background = "#090A0C"
+                foreground = "F8FAFC"
+                background = "090A0C"
             default:
-                foreground = "#111827"
-                background = "#FFFFFF"
+                foreground = "111827"
+                background = "F7F8FA"
             }
         }
     }
@@ -163,8 +164,14 @@ struct ExtensionFrameView: View {
         for run in line.runs {
             let presentation = ExtensionFrameRunPresentation(run: run, palette: palette)
             var segment = AttributedString(presentation.text)
-            if presentation.isBold { segment.font = .body.bold() }
-            if presentation.isItalic { segment.font = (segment.font ?? .body).italic() }
+            // Bold/italic use inline presentation intents so the surrounding
+            // font and size are preserved; assigning a font directly would
+            // render emphasized runs at the system body size instead of the
+            // frame's own typography.
+            var intents: InlinePresentationIntent = []
+            if presentation.isBold { intents.insert(.stronglyEmphasized) }
+            if presentation.isItalic { intents.insert(.emphasized) }
+            if !intents.isEmpty { segment.inlinePresentationIntent = intents }
             if presentation.isUnderline { segment.underlineStyle = .single }
             if presentation.isStrikethrough { segment.strikethroughStyle = .single }
             if let hex = presentation.foregroundHex {

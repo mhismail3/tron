@@ -154,6 +154,31 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
+    func testExtensionWidgetsSheetKeepsContentReachableAtAccessibilityXXXL() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-tron-extension-widgets-fixture",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
+        ]
+        app.launch()
+        let sheet = app.otherElements["extension-widgets-sheet"]
+        XCTAssertTrue(sheet.waitForExistence(timeout: 10), app.debugDescription)
+        // Every retained entry must still be reachable and read at the largest
+        // accessibility size; the sheet scrolls instead of truncating content.
+        for label in ["Goal", "Goal active", "Used 12k tokens"] {
+            let text = app.staticTexts[label]
+            if !text.exists { app.swipeUp() }
+            XCTAssertTrue(text.waitForExistence(timeout: 3), app.debugDescription)
+        }
+        let frameText = app.staticTexts.containing(
+            NSPredicate(format: "label CONTAINS[c] %@", "Frame progress 3 of 5")
+        ).firstMatch
+        if !frameText.exists { app.swipeUp() }
+        XCTAssertTrue(frameText.waitForExistence(timeout: 3), app.debugDescription)
+        keepScreenshot(named: "extension-widgets-sheet-accessibility-xxxl")
+    }
+
+    @MainActor
     func testAskUserClosePreservesSelectionsAndOtherDraftOnReopen() {
         let app = launchAskUser()
         waitForAskUserForm(in: app)

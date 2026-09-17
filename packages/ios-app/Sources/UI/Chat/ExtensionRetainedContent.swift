@@ -127,7 +127,10 @@ struct ExtensionWidgetsButton: View {
             if !content.isEmpty {
                 Button(action: onTap) {
                     Image(systemName: "square.on.square.dashed")
-                        .font(TronTypography.sans(size: 16, weight: .semibold))
+                        .font(TronTypography.sans(
+                            size: ComposerControlMetrics.symbolSize,
+                            weight: .semibold
+                        ))
                         .foregroundStyle(Color.tronIndigo)
                         .frame(
                             width: ComposerControlMetrics.hitTarget,
@@ -136,8 +139,10 @@ struct ExtensionWidgetsButton: View {
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
+                // The composer control family shares one glass tint; the symbol
+                // carries the extension accent, as the process orb does.
                 .glassEffect(
-                    .regular.tint(Color.tronIndigo.opacity(0.25)).interactive(),
+                    .regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(),
                     in: .circle
                 )
                 .glassEffectID("chat-extension-widgets", in: glassNamespace)

@@ -5,8 +5,8 @@ import SwiftUI
 /// Retained widgets are not transcript rows and not ambient composer chrome.
 /// A discrete extension event belongs in a notification pill; retained state is
 /// only visible when the user opens this sheet. The sheet owns no extension
-/// execution and starts no provider work: it renders the current authoritative
-/// session projection and disappears with the sheet.
+/// execution and starts no provider work: it renders the content it was given
+/// and disappears with the sheet.
 struct ExtensionWidgetsSheet: View {
     /// Content is an input, not a second read path: the presenting route owns
     /// where retained content comes from, so this sheet stays a pure function of
@@ -47,53 +47,22 @@ struct ExtensionWidgetsSheet: View {
     @ViewBuilder
     private var retainedContent: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
+            LazyVStack(alignment: .leading, spacing: 8) {
                 if omittedContentCount > 0 {
                     ExtensionContentNotice(
                         text: "Some extension content is not shown on this device yet."
                     )
                 }
                 ForEach(content.producers, id: \.self) { producer in
-                    producerSection(producer)
+                    ExtensionContentSectionHeader(title: producer)
+                    ForEach(content.entries(forProducer: producer)) { entry in
+                        ExtensionContentEntryCard(entry: entry)
+                    }
                 }
             }
             .padding(18)
         }
-    }
-
-    @ViewBuilder
-    private func producerSection(_ producer: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(producer)
-                .font(TronTypography.sheetSectionHeader)
-                .foregroundStyle(Color.tronTextSecondary)
-                .accessibilityAddTraits(.isHeader)
-            ForEach(content.entries(forProducer: producer)) { entry in
-                entryView(entry)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func entryView(_ entry: ExtensionRetainedContent.Entry) -> some View {
-        TronGlassCard(accent: .tronIndigo) {
-            switch entry.style {
-            case .text(let lines):
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                        Text(line)
-                            .font(TronTypography.bodySM)
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                .accessibilityElement(children: .combine)
-            case .frame(let frame):
-                ExtensionFrameView(frame: frame)
-            }
-        }
+        .tronScrollEdgeChrome()
     }
 
     @ToolbarContentBuilder
@@ -109,20 +78,70 @@ struct ExtensionWidgetsSheet: View {
     }
 }
 
+/// Section header follows the same caption/muted treatment as the Subagents
+/// sheet's section headers.
+private struct ExtensionContentSectionHeader: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(TronTypography.caption)
+            .foregroundStyle(Color.tronTextMuted)
+            .padding(.top, 4)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// One read-only retained entry. Card geometry and internal padding match the
+/// existing activity rows so the sheet reads as part of the same system.
+private struct ExtensionContentEntryCard: View {
+    let entry: ExtensionRetainedContent.Entry
+
+    var body: some View {
+        TronGlassCard(accent: .tronIndigo, cornerRadius: 14) {
+            content
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch entry.style {
+        case .text(let lines):
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                    Text(line)
+                        .font(TronTypography.bodySM)
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .accessibilityElement(children: .combine)
+        case .frame(let frame):
+            ExtensionFrameView(frame: frame)
+        }
+    }
+}
+
+/// A partial projection is disclosed rather than presented as complete.
 private struct ExtensionContentNotice: View {
     let text: String
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: 6) {
             Image(systemName: "info.circle")
-                .font(TronTypography.sans(size: 13))
-                .foregroundStyle(Color.tronTextSecondary)
+                .font(TronTypography.caption)
+                .foregroundStyle(Color.tronTextMuted)
             Text(text)
                 .font(TronTypography.caption)
-                .foregroundStyle(Color.tronTextSecondary)
+                .foregroundStyle(Color.tronTextMuted)
                 .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.bottom, 2)
         .accessibilityElement(children: .combine)
     }
 }

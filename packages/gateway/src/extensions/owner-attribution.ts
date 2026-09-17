@@ -46,8 +46,10 @@ export interface InvocationExecutionContext {
 const invocationStorage = new AsyncLocalStorage<InvocationExecutionContext>();
 const attributedCommandOwners = new WeakMap<RegisteredCommand["handler"], Extension>();
 const attributedToolOwners = new WeakMap<ToolDefinition["execute"], Extension>();
-/** Every callback admitted at this boundary, so repeat registration of the same
- * function cannot double-wrap it. */
+/** Every callback admitted at this boundary, keyed by its owning extension, so
+ * repeat registration of the same function by one extension cannot double-wrap
+ * it while a different extension still receives its own correctly attributed
+ * wrapper. */
 const admittedCallbackOwners = new WeakMap<Function, Extension>();
 
 export function currentExtensionOwner(): ExtensionOwner | undefined { return ownerStorage.getStore(); }
@@ -91,10 +93,13 @@ export function trustedExtensionOriginKind(owner: ExtensionOwner): "subagent" | 
 /**
  * Wraps one callback in its owning extension context. `extensionOwnerFor` is
  * resolved at invocation time, not admission time: the pinned SDK finalizes
- * package `SourceInfo` after `extensionsOverride` returns.
+ * package `SourceInfo` after `extensionsOverride` returns. Admission is
+ * idempotent per extension, so re-setting an already-admitted handler list
+ * keeps one wrapper while a different extension sharing the same function
+ * object still gets its own attributed wrapper.
  */
 function ownCallback<T extends (...args: any[]) => any>(callback: T, extension: Extension): T {
-  if (admittedCallbackOwners.has(callback)) return callback;
+  if (admittedCallbackOwners.get(callback) === extension) return callback;
   const wrapper = ((...args: Parameters<T>) => ownerStorage.run(extensionOwnerFor(extension), () => callback(...args))) as T;
   admittedCallbackOwners.set(wrapper, extension);
   return wrapper;
@@ -157,9 +162,10 @@ function assertAdmissibleToolName(state: RegistrationAdmission, name: string): v
 }
 
 function admitTool(state: RegistrationAdmission, name: string, registered: RegisteredTool): RegisteredTool {
-  // A tool that already carries the host wrapper is admitted; re-setting it
-  // (for example during a normalizing pass) must not wrap it a second time.
-  if (admittedCallbackOwners.has(registered.definition.execute)) return registered;
+  // A tool that already carries this extension's host wrapper is admitted;
+  // re-setting it (for example during a normalizing pass) must not wrap it a
+  // second time.
+  if (admittedCallbackOwners.get(registered.definition.execute) === state.extension) return registered;
   assertAdmissibleToolName(state, name);
   const definition = adaptedToolDefinition(state.extension, name, registered.definition);
   const execute = ownCallback(async (...args: Parameters<ToolDefinition["execute"]>) => {
@@ -194,20 +200,20 @@ function admitTool(state: RegistrationAdmission, name: string, registered: Regis
 function admitHandlers(state: RegistrationAdmission, _event: string, handlers: ExtensionHandlerList): ExtensionHandlerList {
   // `on()` re-sets the whole list each time, so already-admitted handlers must
   // keep their existing wrapper identity instead of being adapted twice.
-  return handlers.map((handler) => admittedCallbackOwners.has(handler)
+  return handlers.map((handler) => admittedCallbackOwners.get(handler) === state.extension
     ? handler
     : ownCallback(adaptedExtensionEventHandler(state.extension, handler), state.extension));
 }
 
 function admitCommand(state: RegistrationAdmission, _name: string, command: RegisteredCommand): RegisteredCommand {
-  if (admittedCallbackOwners.has(command.handler)) return command;
+  if (admittedCallbackOwners.get(command.handler) === state.extension) return command;
   const handler = ownCallback(command.handler, state.extension);
   attributedCommandOwners.set(handler, state.extension);
   return { ...command, handler };
 }
 
 function admitShortcut(state: RegistrationAdmission, _key: ExtensionShortcutKey, shortcut: ExtensionShortcut): ExtensionShortcut {
-  if (admittedCallbackOwners.has(shortcut.handler)) return shortcut;
+  if (admittedCallbackOwners.get(shortcut.handler) === state.extension) return shortcut;
   return { ...shortcut, handler: ownCallback(shortcut.handler, state.extension) };
 }
 

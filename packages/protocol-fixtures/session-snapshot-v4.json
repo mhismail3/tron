@@ -368,7 +368,7 @@
     "revision": 9,
     "capabilities": [
       "semantic.dialogs",
-      "semantic.form.v1",
+      "tron.form.v1",
       "semantic.status",
       "semantic.revisioned-editor"
     ],

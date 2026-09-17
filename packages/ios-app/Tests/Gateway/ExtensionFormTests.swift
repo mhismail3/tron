@@ -35,7 +35,7 @@ struct ExtensionFormTests {
 
     private func state(_ interactions: [ExtensionInteraction]) -> ExtensionPresentationState {
         ExtensionPresentationState(
-            version: 3, hostEpoch: "epoch", revision: 1, capabilities: ["semantic.form.v1"], diagnostics: [],
+            version: 3, hostEpoch: "epoch", revision: 1, capabilities: ["tron.form.v1"], diagnostics: [],
             semanticState: .init(statuses: [:], statusOwners: [:], working: .init(visible: true, indicator: .init(kind: .default, frames: [])), widgets: [], toolsExpanded: false, editorRevision: 0, editorText: ""),
             surfaces: [], pendingInteractions: interactions
         )

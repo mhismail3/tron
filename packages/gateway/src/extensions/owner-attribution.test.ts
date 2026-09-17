@@ -116,6 +116,28 @@ describe("extension owner attribution", () => {
     expect(currentExtensionOwner()).toBeUndefined();
   });
 
+  it("attributes a shared handler function separately for each extension", async () => {
+    // Two extensions can legitimately share one helper module's function. Each
+    // must still receive its own attributed wrapper rather than inheriting the
+    // first extension's identity.
+    const seen: Array<ReturnType<typeof currentExtensionOwner>> = [];
+    const shared = async () => { seen.push(currentExtensionOwner()); };
+    const first = fakeExtension("/extensions/first.ts", "package-one");
+    const second = fakeExtension("/extensions/second.ts", "package-two");
+    attributeExtensions({ extensions: [first as any, second as any], errors: [], runtime: {} as any });
+    for (const extension of [first, second]) {
+      const list = extension.handlers.get("session_start") ?? [];
+      list.push(shared);
+      extension.handlers.set("session_start", list);
+    }
+    await first.handlers.get("session_start")![0]!({}, {} as any);
+    await second.handlers.get("session_start")![0]!({}, {} as any);
+    expect(seen).toHaveLength(2);
+    expect(seen[0]?.source).toBe("package-one");
+    expect(seen[1]?.source).toBe("package-two");
+    expect(seen[0]?.id).not.toBe(seen[1]?.id);
+  });
+
   it("admits tools registered after load through the same boundary", async () => {
     const extension = fakeExtension("/extensions/late.ts");
     attributeExtensions({ extensions: [extension as any], errors: [], runtime: {} as any });

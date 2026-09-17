@@ -8893,15 +8893,14 @@ export default function (pi) {
     // The inventory is the complete display-safe registration view for every
     // loaded extension: this project extension plus Tron's own inline
     // capabilities. Assert the accounting contract rather than a fixed count,
-    // which changes whenever Tron adds or removes a first-party capability.
+    // which changes whenever Tron adds or removes a first-party capability;
+    // the exact per-extension rows are asserted below.
     const inventory = resources.hookInventory;
     for (const key of ["extensions", "handlerEvents", "loadErrors"] as const) {
       expect(inventory[key].retained + inventory[key].omitted).toBe(inventory[key].total);
       expect(inventory[key].omitted).toBe(0);
     }
     expect(inventory.extensions.total).toBeGreaterThanOrEqual(2);
-    // The project extension's single session_start handler is inside the
-    // reported handler-event total, not dropped by the bounded projection.
     expect(inventory.handlerEvents.total).toBeGreaterThanOrEqual(1);
     expect(inventory.encodedBytes).toBeGreaterThan(0);
     expect(inventory.encodedBytes).toBeLessThanOrEqual(inventory.encodedBytesLimit);
