@@ -853,6 +853,54 @@ struct ChatTranscriptPresentationTests {
         ) == .none)
     }
 
+    @Test("admitted frame run styles reach the native attributed string")
+    func extensionFrameRunPresentationMapping() {
+        let palette = ExtensionFrameRunPresentation.NativePalette(colorScheme: .light)
+        var styled = ExtensionFrameStyle()
+        styled.bold = true
+        styled.italic = true
+        styled.underline = true
+        styled.strike = true
+        styled.dim = true
+        styled.link = "https://example.com/doc"
+        let presentation = ExtensionFrameRunPresentation(
+            run: ExtensionFrameRun(text: "status", style: styled),
+            palette: palette
+        )
+        #expect(presentation.isBold)
+        #expect(presentation.isItalic)
+        #expect(presentation.isUnderline)
+        #expect(presentation.isStrikethrough)
+        #expect(presentation.isDim)
+        #expect(presentation.link?.absoluteString == "https://example.com/doc")
+        // No explicit color means the native text color is retained.
+        #expect(presentation.foregroundHex == nil)
+
+        var unsafe = ExtensionFrameStyle()
+        unsafe.link = "javascript:alert(1)"
+        #expect(ExtensionFrameRunPresentation(
+            run: ExtensionFrameRun(text: "link", style: unsafe),
+            palette: palette
+        ).link == nil)
+
+        // An unreadable extension foreground falls back to the native color
+        // rather than painting invisible text.
+        var unreadable = ExtensionFrameStyle()
+        unreadable.foreground = "FFFFFF"
+        #expect(ExtensionFrameRunPresentation(
+            run: ExtensionFrameRun(text: "faint", style: unreadable),
+            palette: palette
+        ).foregroundHex == palette.foreground)
+
+        // A readable extension foreground is preserved for native rendering.
+        var readable = ExtensionFrameStyle()
+        readable.foreground = "1D4ED8"
+        #expect(ExtensionFrameRunPresentation(
+            run: ExtensionFrameRun(text: "accent", style: readable),
+            palette: palette
+        ).foregroundHex == "1D4ED8")
+    }
+
     @Test("extreme frame colors fall back when contrast is unreadable")
     func extensionFrameContrastPolicy() {
         #expect(ExtensionFrameColorPolicy.contrastRatio("000000", "FFFFFF") > 20)

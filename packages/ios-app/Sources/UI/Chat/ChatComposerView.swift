@@ -6,6 +6,7 @@ struct ChatComposerView: View {
     let sessionFacts: ChatVisibleSessionFacts?
     let processOverview: SessionProcessOverview?
     let processActivities: [SessionProcessActivity]?
+    let extensionRetainedContent: ExtensionRetainedContent
     let pendingAttachments: [PendingAttachment]
     let selectedResource: ComposerResourceEntry?
     let resourcePicker: ComposerResourcePickerSource?
@@ -38,6 +39,7 @@ struct ChatComposerView: View {
     let glassNamespace: Namespace.ID
 
     let onProcessesTap: () -> Void
+    let onExtensionWidgetsTap: () -> Void
     let onRemoveAttachment: (String) -> Void
     let onRemoveResource: () -> Void
     let onSelectResource: (ComposerResourceEntry) -> Void
@@ -79,6 +81,12 @@ struct ChatComposerView: View {
                             glassNamespace: glassNamespace,
                             reduceMotion: reduceMotion,
                             onTap: onProcessesTap
+                        )
+                        ExtensionWidgetsButton(
+                            content: extensionRetainedContent,
+                            glassNamespace: glassNamespace,
+                            reduceMotion: reduceMotion,
+                            onTap: onExtensionWidgetsTap
                         )
                         inputBar
                         if showsCatchUp { catchUpButton }

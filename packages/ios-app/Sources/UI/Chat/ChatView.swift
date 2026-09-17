@@ -176,6 +176,7 @@ struct ChatView: View {
             photos: $sessionPresentation.photos,
             onCameraImage: { image in Task { await importCameraImage(image) } },
             processesPresented: processPresentationBinding,
+            extensionWidgetsPresented: extensionWidgetsPresentationBinding,
             interaction: interactionBinding,
             onInteractionClosed: closeInteractionPresentation,
             filesPresented: attachmentPresentationBinding(for: .files),
@@ -1583,6 +1584,28 @@ struct ChatView: View {
         )
     }
 
+    /// The widgets sheet is diagnostic presentation, never a competing
+    /// foreground route: it follows the same gate as the process sheet so a
+    /// pending question or editor keeps its leased priority.
+    private var extensionWidgetsPresentationBinding: Binding<Bool> {
+        Binding(
+            get: { sessionPresentation.showWidgets && extensionForegroundPresentation == .none },
+            set: { presented in
+                if !presented { sessionPresentation.showWidgets = false }
+            }
+        )
+    }
+
+    /// Retained extension content is derived from the authoritative snapshot on
+    /// every render; it never polls and never opens provider work.
+    private var extensionRetainedContent: ExtensionRetainedContent {
+        let presentation = selectedAuthoritativeSnapshot?.extensionPresentation
+        return ExtensionRetainedContentPolicy.content(
+            widgets: presentation?.semanticState.widgets,
+            surfaces: presentation?.surfaces
+        )
+    }
+
     private var pendingPresentedInteraction: ExtensionInteraction? {
         extensionForegroundPresentation == .interaction ? candidatePresentedInteraction : nil
     }
@@ -2779,6 +2802,7 @@ struct ChatView: View {
             sessionFacts: visibleSessionFacts,
             processOverview: selectedAuthoritativeSnapshot?.processOverview,
             processActivities: selectedAuthoritativeSnapshot?.processActivities,
+            extensionRetainedContent: extensionRetainedContent,
             pendingAttachments: pendingAttachments,
             selectedResource: selectedComposerResource,
             resourcePicker: presentedComposerResourcePicker,
@@ -2814,6 +2838,9 @@ struct ChatView: View {
             glassNamespace: composerGlassNamespace,
             onProcessesTap: {
                 sessionPresentation.showProcesses = true
+            },
+            onExtensionWidgetsTap: {
+                sessionPresentation.showWidgets = true
             },
             onRemoveAttachment: { id in
                 guard let target = presentationTarget else { return }

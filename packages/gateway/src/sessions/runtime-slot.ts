@@ -651,7 +651,7 @@ export class RuntimeSlot {
         "semantic.revisioned-editor", "semantic.tools-expanded", "surfaces.full-frame",
       ],
       diagnostics: [
-        { code: "remote-components.enabled", message: "Retained component widgets are projected as bounded read-only surfaces; blocking custom and overlay UI remain deferred." },
+        { code: "remote-components.enabled", message: "Retained string widgets and bounded read-only component frames are presented through the general extension-content sheet; blocking custom and overlay UI remain deferred." },
         { code: "remote-components.overlay-deferred", message: "Overlay and interactive component UI remain deferred until native rendering and input leases are available." },
         { code: "theme.baseline-only", message: "Per-session process-global Pi theme synchronization is unavailable through the pinned public API." },
       ],

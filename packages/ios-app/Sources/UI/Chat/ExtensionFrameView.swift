@@ -1,5 +1,68 @@
 import SwiftUI
 
+/// Resolves one admitted extension frame run into native attributes. Styles are
+/// applied from the sanitized wire fields; colors pass through the contrast
+/// policy so unreadable pairs fall back to the native palette instead of
+/// making content inaccessible.
+struct ExtensionFrameRunPresentation {
+    let text: String
+    let isBold: Bool
+    let isItalic: Bool
+    let isUnderline: Bool
+    let isStrikethrough: Bool
+    let foregroundHex: String?
+    let link: URL?
+    let isDim: Bool
+    /// A dim run keeps native text color and communicates de-emphasis through
+    /// the theme's secondary color, which preserves contrast rather than
+    /// applying an opacity that can become unreadable.
+    let usesSecondaryForeground: Bool
+
+    /// Native text/surface colors for the current scheme. The frame policy needs
+    /// concrete values to test contrast; the sheet material is translucent, so
+    /// these mirror the theme's text and surface colors as the conservative
+    /// reference pair rather than claiming exact composited contrast.
+    struct NativePalette {
+        let foreground: String
+        let background: String
+
+        init(colorScheme: ColorScheme) {
+            switch colorScheme {
+            case .dark:
+                foreground = "#F8FAFC"
+                background = "#090A0C"
+            default:
+                foreground = "#111827"
+                background = "#FFFFFF"
+            }
+        }
+    }
+
+    init(run: ExtensionFrameRun, palette: NativePalette) {
+        text = run.text
+        let style = run.style
+        let resolved = ExtensionFrameColorPolicy.resolvedColors(
+            foreground: style.foreground,
+            background: style.background,
+            inverse: style.inverse == true,
+            nativeForeground: palette.foreground,
+            nativeBackground: palette.background,
+            fallbackBackground: palette.background
+        )
+        // A readable extension color wins; otherwise keep the native text color
+        // and let dim express the weaker emphasis.
+        let requestedForeground = style.foreground != nil || style.background != nil || style.inverse == true
+        foregroundHex = requestedForeground ? resolved.foreground : nil
+        isBold = style.bold == true
+        isItalic = style.italic == true
+        isUnderline = style.underline == true
+        isStrikethrough = style.strike == true
+        isDim = style.dim == true
+        usesSecondaryForeground = style.dim == true && !requestedForeground
+        link = style.link.flatMap(NativeExtensionText.safeURL)
+    }
+}
+
 /// Pure, conservative contrast policy for extension-provided RGB styles.
 /// Admitted colors remain package-agnostic, but unreadable pairs fall back to
 /// the native Tron palette rather than making the chat inaccessible.
@@ -61,6 +124,7 @@ enum ExtensionFrameColorPolicy {
 
 struct ExtensionFrameView: View {
     let frame: ExtensionFrame
+    @Environment(\.colorScheme) private var colorScheme
 
     private var rows: [ExtensionFrameLine] {
         frame.lines.filter { !NativeExtensionText.isDetailHint($0.plainText) && !NativeExtensionText.clean($0.plainText).isEmpty }
@@ -94,12 +158,21 @@ struct ExtensionFrameView: View {
     }
 
     private func nativeText(for line: ExtensionFrameLine) -> AttributedString {
+        let palette = ExtensionFrameRunPresentation.NativePalette(colorScheme: colorScheme)
         var result = AttributedString()
         for run in line.runs {
-            var segment = AttributedString(run.text)
-            if let rawLink = run.style.link, let url = NativeExtensionText.safeURL(rawLink) {
-                segment.link = url
+            let presentation = ExtensionFrameRunPresentation(run: run, palette: palette)
+            var segment = AttributedString(presentation.text)
+            if presentation.isBold { segment.font = .body.bold() }
+            if presentation.isItalic { segment.font = (segment.font ?? .body).italic() }
+            if presentation.isUnderline { segment.underlineStyle = .single }
+            if presentation.isStrikethrough { segment.strikethroughStyle = .single }
+            if let hex = presentation.foregroundHex {
+                segment.foregroundColor = Color(hex: hex)
+            } else if presentation.usesSecondaryForeground {
+                segment.foregroundColor = Color.tronTextSecondary
             }
+            if let url = presentation.link { segment.link = url }
             result += segment
         }
         if result.characters.isEmpty {

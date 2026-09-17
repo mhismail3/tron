@@ -44,6 +44,7 @@ struct ChatRoutes: ViewModifier {
     @Binding var photos: [PhotosPickerItem]
     let onCameraImage: (UIImage) -> Void
     @Binding var processesPresented: Bool
+    @Binding var extensionWidgetsPresented: Bool
     @Binding var interaction: ExtensionInteraction?
     let onInteractionClosed: (ExtensionInteraction) -> Void
     @Binding var filesPresented: Bool
@@ -121,6 +122,12 @@ struct ChatRoutes: ViewModifier {
                 identity: "chat.\(sessionID).processes"
             ) {
                 SessionProcessesSheet(sessionID: sessionID)
+            }
+            .tronManagedSheet(
+                isPresented: $extensionWidgetsPresented,
+                identity: "chat.\(sessionID).extension-widgets"
+            ) {
+                ExtensionWidgetsSheet(sessionID: sessionID)
             }
             .tronManagedSheet(
                 item: $interaction,

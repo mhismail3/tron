@@ -1,0 +1,148 @@
+import SwiftUI
+
+/// Authoritative, disposable projection of extension-provided retained content.
+///
+/// Retained widgets are deliberately not ambient transcript or composer chrome:
+/// a discrete extension *event* belongs in a notification pill, while retained
+/// *state* is only visible through the general widgets sheet. Nothing here owns
+/// extension execution or presentation authority; it is derived from the
+/// current authoritative session snapshot on every render.
+struct ExtensionRetainedContent: Equatable {
+    enum Style: Equatable {
+        /// String widget lines, already sanitized for display.
+        case text([String])
+        /// A bounded, read-only captured component frame.
+        case frame(ExtensionFrame)
+    }
+
+    struct Entry: Equatable, Identifiable {
+        let id: String
+        let producer: String
+        let style: Style
+    }
+
+    let entries: [Entry]
+
+    var isEmpty: Bool { entries.isEmpty }
+
+    /// Deterministic producer order: first appearance wins, and unknown
+    /// producers sort last so a stable list never reshuffles on update.
+    var producers: [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+        var unknownCount = 0
+        for entry in entries {
+            guard entry.producer != Self.unknownProducer else { continue }
+            guard seen.insert(entry.producer).inserted else { continue }
+            ordered.append(entry.producer)
+        }
+        unknownCount = entries.filter { $0.producer == Self.unknownProducer }.count
+        return unknownCount > 0 ? ordered + [Self.unknownProducer] : ordered
+    }
+
+    func entries(forProducer producer: String) -> [Entry] {
+        entries.filter { $0.producer == producer }
+    }
+
+    static let unknownProducer = "Unknown extension"
+}
+
+enum ExtensionRetainedContentPolicy {
+    /// A string widget is presentable only if it has visible, sanitized content.
+    /// Empty or detail-hint-only widgets must not create an empty sheet.
+    static func presentableWidgetLines(_ widget: ExtensionWidget) -> [String] {
+        widget.lines
+            .map(NativeExtensionText.clean)
+            .filter { !$0.isEmpty }
+    }
+
+    /// Only retained, non-blocking widget surfaces are presentable here.
+    /// Header/footer/custom/overlay/editor/renderer surfaces have no native
+    /// consumer and must never be advertised as shown.
+    static func presentableSurfaces(_ surfaces: [ExtensionSurface]) -> [ExtensionSurface] {
+        surfaces
+            .filter { $0.kind == .widget && $0.lifecycle != .blocking }
+            .filter { !$0.frame.lines.isEmpty }
+            .sorted { $0.id < $1.id }
+    }
+
+    static func content(widgets: [ExtensionWidget]?, surfaces: [ExtensionSurface]?) -> ExtensionRetainedContent {
+        var entries: [ExtensionRetainedContent.Entry] = []
+        for widget in widgets ?? [] {
+            let lines = presentableWidgetLines(widget)
+            guard !lines.isEmpty else { continue }
+            // The authoritative widget array order is stable across updates
+            // because the store replaces entries in place by key.
+            entries.append(.init(
+                id: "widget:\(widget.key)",
+                producer: widget.owner?.title ?? ExtensionRetainedContent.unknownProducer,
+                style: .text(lines)
+            ))
+        }
+        for surface in presentableSurfaces(surfaces ?? []) {
+            entries.append(.init(
+                id: "surface:\(surface.id)",
+                producer: surfaceProvenanceTitle(surface.provenance?.source),
+                style: .frame(surface.frame)
+            ))
+        }
+        return ExtensionRetainedContent(entries: entries)
+    }
+
+    /// Surface provenance carries a resolver source string, never a display
+    /// name. Show that exact identity (bounded) instead of guessing a friendlier
+    /// label: two packages can share a last path component.
+    static func surfaceProvenanceTitle(_ source: String?) -> String {
+        guard let source else { return ExtensionRetainedContent.unknownProducer }
+        let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return ExtensionRetainedContent.unknownProducer }
+        return trimmed.count <= maximumProvenanceTitleLength
+            ? trimmed
+            : String(trimmed.prefix(maximumProvenanceTitleLength)) + "…"
+    }
+
+    static let maximumProvenanceTitleLength = 64
+}
+
+/// Mirrors the process-projection control: one compact, permanently mounted
+/// composer owner that appears only while retained extension content exists.
+struct ExtensionWidgetsButton: View {
+    let content: ExtensionRetainedContent
+    let glassNamespace: Namespace.ID
+    let reduceMotion: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Group {
+            if !content.isEmpty {
+                Button(action: onTap) {
+                    Image(systemName: "square.on.square.dashed")
+                        .font(TronTypography.sans(size: 16, weight: .semibold))
+                        .foregroundStyle(Color.tronIndigo)
+                        .frame(
+                            width: ComposerControlMetrics.hitTarget,
+                            height: ComposerControlMetrics.hitTarget
+                        )
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .glassEffect(
+                    .regular.tint(Color.tronIndigo.opacity(0.25)).interactive(),
+                    in: .circle
+                )
+                .glassEffectID("chat-extension-widgets", in: glassNamespace)
+                .glassEffectTransition(.matchedGeometry)
+                .transition(.opacity)
+                .accessibilityLabel("Extension widgets")
+                .accessibilityValue("\(content.entries.count) available")
+                .accessibilityHint("Shows content provided by extensions")
+            }
+        }
+        .animation(
+            reduceMotion
+                ? .easeOut(duration: 0.12)
+                : .spring(response: 0.32, dampingFraction: 0.82),
+            value: content.isEmpty
+        )
+    }
+}
