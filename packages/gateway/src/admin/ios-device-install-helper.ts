@@ -10,12 +10,13 @@ function option(name: string): string {
   return value;
 }
 
-let input: { tronHome: string; deviceId: string; commandId: string } | undefined;
+let input: { tronHome: string; deviceId: string; commandId: string; buildMode: "fast-debug" | "optimized" } | undefined;
 try {
   input = {
     tronHome: option("--tron-home"),
     deviceId: option("--device-id"),
     commandId: option("--command-id"),
+    buildMode: option("--build-mode") as "fast-debug" | "optimized",
   };
   await runIosDeviceInstallHelper(input);
 } catch (error) {

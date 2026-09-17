@@ -2357,7 +2357,7 @@ final class AppModel {
     }
 
     nonisolated static func supportsIosDeviceInstall(capabilities: [String]) -> Bool {
-        capabilities.contains("ios-device-install.v2")
+        capabilities.contains("ios-device-install.v3")
     }
 
     func loadIosDeviceInstallConfig(for authorized: GatewayAuthorizedDevice) async throws -> IosDeviceInstallConfig? {
@@ -2428,9 +2428,12 @@ final class AppModel {
     }
 
     @discardableResult
-    func requestIosDeviceInstall(for authorized: GatewayAuthorizedDevice) async throws -> String {
+    func requestIosDeviceInstall(
+        for authorized: GatewayAuthorizedDevice,
+        buildMode: IosDeviceInstallBuildMode
+    ) async throws -> String {
         let admission = try selectedAdministrativeAdmission(for: authorized.profileID)
-        struct Params: Codable { let commandId: String; let deviceId: String }
+        struct Params: Codable { let commandId: String; let deviceId: String; let buildMode: IosDeviceInstallBuildMode }
         let commandID = uuidSource.next().uuidString
         let acknowledgement: IosDeviceInstallAcknowledgement = try await mutationExecutor.perform(
             method: "device.install",
@@ -2438,7 +2441,7 @@ final class AppModel {
         ) {
             try await self.client.request(
                 "device.install",
-                Params(commandId: commandID, deviceId: authorized.device.id),
+                Params(commandId: commandID, deviceId: authorized.device.id, buildMode: buildMode),
                 timeout: .seconds(30)
             )
         }

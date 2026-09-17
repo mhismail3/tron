@@ -38,7 +38,7 @@ async function fixture() {
     await mkdir(join(source, path, ".."), { recursive: true });
     await writeFile(join(source, path), "fixture\n");
   }
-  const launched: Array<{ tronHome: string; deviceId: string; commandId: string }> = [];
+  const launched: Array<{ tronHome: string; deviceId: string; commandId: string; buildMode: "fast-debug" | "optimized" }> = [];
   const service = new IosDeviceInstallService({
     tronHome,
     gatewayChannel: "stable",
@@ -79,11 +79,13 @@ describe("IosDeviceInstallService", () => {
   });
 
   it("fixes the repository helper to the ordinary LocalDevice install operation", () => {
-    expect(iosDeviceInstallInvocation("/trusted/tron", target.identifier)).toEqual({
+    expect(iosDeviceInstallInvocation("/trusted/tron", target.identifier, "optimized")).toEqual({
       executable: "/bin/bash",
       args: ["/trusted/tron/scripts/tron-ios-device", "install", "--device-id", target.identifier],
       cwd: "/trusted/tron",
     });
+    expect(iosDeviceInstallInvocation("/trusted/tron", target.identifier, "fast-debug").args)
+      .toEqual(["/trusted/tron/scripts/tron-ios-device", "install", "--device-id", target.identifier, "--fast-debug"]);
   });
 
   it("keeps CoreDevice identity owner-only while auto-binding the sole eligible device", async () => {
@@ -91,7 +93,7 @@ describe("IosDeviceInstallService", () => {
     const configured = await service.configure({ deviceId: "device-alpha", sourceRoot: source });
     expect(configured.target).toBeUndefined();
 
-    await service.install("device-alpha", "command-install-1");
+    await service.install("device-alpha", "command-install-1", "optimized");
     const bound = await service.configStatus("device-alpha");
     expect(bound?.target?.identifier).toBe(target.identifier);
     const projection = projectIosDeviceInstallConfig(bound!);
@@ -108,7 +110,7 @@ describe("IosDeviceInstallService", () => {
       launcher: async () => {},
     });
     await ambiguous.configure({ deviceId: "device-alpha", sourceRoot: source });
-    await expect(ambiguous.install("device-alpha", "command-install-1"))
+    await expect(ambiguous.install("device-alpha", "command-install-1", "optimized"))
       .rejects.toMatchObject({ code: "conflict", retryable: true });
   });
 
@@ -116,19 +118,38 @@ describe("IosDeviceInstallService", () => {
     const { source, service, launched, tronHome } = await fixture();
     await service.configure({ deviceId: "device-alpha", sourceRoot: source });
 
-    await expect(service.install("device-alpha", "command-install-1")).resolves.toEqual({
+    await expect(service.install("device-alpha", "command-install-1", "optimized")).resolves.toEqual({
       accepted: true,
       commandId: "command-install-1",
       state: "install-requested",
+      buildMode: "optimized",
     });
-    expect(launched).toEqual([{ tronHome, deviceId: "device-alpha", commandId: "command-install-1" }]);
+    expect(launched).toEqual([{ tronHome, deviceId: "device-alpha", commandId: "command-install-1", buildMode: "optimized" }]);
     await expect(service.status("device-alpha")).resolves.toEqual(expect.objectContaining({
       state: "requested",
       targetName: target.name,
       commandId: "command-install-1",
     }));
-    await expect(service.install("device-alpha", "command-install-2"))
+    await expect(service.install("device-alpha", "command-install-2", "optimized"))
       .rejects.toMatchObject({ code: "busy", retryable: true });
+  });
+
+  it("round-trips each build mode through requested status and active ownership", async () => {
+    for (const buildMode of ["fast-debug", "optimized"] as const) {
+      const { source, service } = await fixture();
+      await service.configure({ deviceId: "device-alpha", sourceRoot: source });
+      await service.install("device-alpha", `command-${buildMode}`, buildMode);
+      await expect(service.status("device-alpha")).resolves.toEqual(expect.objectContaining({
+        schema: 2,
+        buildMode,
+        state: "requested",
+        commandId: `command-${buildMode}`,
+      }));
+      await expect(service.activeStatus()).resolves.toEqual(expect.objectContaining({
+        buildMode,
+        commandId: `command-${buildMode}`,
+      }));
+    }
   });
 
   it("recovers a generated multiline install failure as a bounded projection", async () => {
@@ -137,9 +158,10 @@ describe("IosDeviceInstallService", () => {
     await mkdir(statusDirectory, { recursive: true });
     const statusFile = join(statusDirectory, "device-alpha.json");
     await writeFile(statusFile, JSON.stringify({
-      schema: 1,
+      schema: 2,
       kind: "tron-ios-device-install-status",
       deviceId: "device-alpha",
+      buildMode: "optimized",
       state: "failed",
       commandId: "command-install-1",
       targetName: target.name,
@@ -158,7 +180,7 @@ describe("IosDeviceInstallService", () => {
   it("persists detached helper failures in the status projection's own admission language", async () => {
     const { source, tronHome, service } = await fixture();
     await service.configure({ deviceId: "device-alpha", sourceRoot: source });
-    await service.install("device-alpha", "command-install-1");
+    await service.install("device-alpha", "command-install-1", "optimized");
 
     await recordIosDeviceInstallHelperFailure(
       tronHome,
@@ -219,14 +241,14 @@ describe("IosDeviceInstallService", () => {
       attachTerminal: () => {}, detachTerminal: () => {}, ownsTerminal: () => false,
       isSubscribed: () => true, isRevoked: () => false, revokeDevice: () => {},
     };
-    expect((gateway.info() as Record<string, unknown>).capabilities).toContain("ios-device-install.v2");
+    expect((gateway.info() as Record<string, unknown>).capabilities).toContain("ios-device-install.v3");
     const configured = await gateway.invoke(client, "device.install.config", {
       commandId: "command-config-1", deviceId: "device-alpha", sourceRoot: source,
     });
     expect(JSON.stringify(configured)).not.toContain(target.identifier);
     await expect(gateway.invoke(client, "device.install", {
-      commandId: "command-install-1", deviceId: "device-alpha",
-    })).resolves.toMatchObject({ accepted: true, state: "install-requested" });
+      commandId: "command-install-1", deviceId: "device-alpha", buildMode: "optimized",
+    })).resolves.toMatchObject({ accepted: true, state: "install-requested", buildMode: "optimized" });
     await expect(gateway.invoke(client, "device.install.config.status", { deviceId: "unknown-device" }))
       .rejects.toMatchObject({ code: "not_found" });
     await expect(gateway.invoke(client, "gateway.update", {
@@ -237,7 +259,7 @@ describe("IosDeviceInstallService", () => {
 
   it("fails closed for incomplete, linked, and unsupervised configuration", async () => {
     const { source, service, tronHome } = await fixture();
-    await expect(service.install("device-alpha", "command-install-1"))
+    await expect(service.install("device-alpha", "command-install-1", "optimized"))
       .rejects.toMatchObject({ code: "conflict" });
 
     const linked = `${source}-link`;

@@ -39,7 +39,7 @@ struct PairedDeviceCatalogPolicyTests {
         #expect(config.target?.name == "Development iPhone")
         #expect(String(decoding: configData, as: UTF8.self).contains("identifier") == false)
 
-        let statusData = Data(#"{"schema":1,"kind":"tron-ios-device-install-status","deviceId":"device-one","state":"running","commandId":"command-install-1","targetName":"Development iPhone","startedAt":"2026-08-31T00:00:00.000Z","updatedAt":"2026-08-31T00:00:01.000Z"}"#.utf8)
+        let statusData = Data(#"{"schema":2,"kind":"tron-ios-device-install-status","deviceId":"device-one","buildMode":"fast-debug","state":"running","commandId":"command-install-1","targetName":"Development iPhone","startedAt":"2026-08-31T00:00:00.000Z","updatedAt":"2026-08-31T00:00:01.000Z"}"#.utf8)
         let status = try JSONDecoder().decode(IosDeviceInstallStatus.self, from: statusData)
         #expect(status.state.isActive)
     }

@@ -434,14 +434,15 @@ export class GatewayService {
       }
       case "device.install":
         return this.mutation(client, method, params, async () => {
-          if (Object.keys(params).some((key) => !["commandId", "deviceId"].includes(key))) {
-            throw new GatewayError("invalid_request", "iOS device installation accepts only deviceId");
+          if (Object.keys(params).some((key) => !["commandId", "deviceId", "buildMode"].includes(key))) {
+            throw new GatewayError("invalid_request", "iOS device installation accepts only deviceId and buildMode");
           }
           const deviceId = string(params.deviceId, "deviceId", { max: 100 });
           const commandId = string(params.commandId, "commandId", { min: 8, max: 160 });
+          const buildMode = string(params.buildMode, "buildMode", { min: 1, max: 32 });
           await this.requirePairedDevice(deviceId);
           await this.requireNoActiveGatewayUpdate();
-          return safeJson(await this.iosDeviceInstallService.install(deviceId, commandId));
+          return safeJson(await this.iosDeviceInstallService.install(deviceId, commandId, buildMode));
         });
       case "device.revoke": {
         const deviceId = string(params.deviceId, "deviceId", { max: 100 });

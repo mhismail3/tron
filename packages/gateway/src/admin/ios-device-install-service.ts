@@ -11,7 +11,7 @@ import { atomicWriteJson, removeIfExists } from "../util/json.js";
 import { readSecureJson } from "../util/secure-json.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 
-export const IOS_DEVICE_INSTALL_CAPABILITY = "ios-device-install.v2";
+export const IOS_DEVICE_INSTALL_CAPABILITY = "ios-device-install.v3";
 const CONFIG_KIND = "tron-ios-device-install-config";
 const STATUS_KIND = "tron-ios-device-install-status";
 const ACTIVE_KIND = "tron-ios-device-install-active";
@@ -28,6 +28,7 @@ const COMMAND_ID = /^[A-Za-z0-9._:-]{8,160}$/u;
 const execFileAsync = promisify(execFile);
 
 export type IosDeviceInstallChannel = "stable" | "dev";
+export type IosDeviceInstallBuildMode = "fast-debug" | "optimized";
 export type IosDeviceInstallState = "requested" | "running" | "succeeded" | "failed";
 
 export interface IosPhysicalDeviceTarget {
@@ -60,9 +61,10 @@ export interface IosDeviceInstallConfigProjection {
 }
 
 export interface IosDeviceInstallStatus {
-  schema: 1;
+  schema: 2;
   kind: typeof STATUS_KIND;
   deviceId: string;
+  buildMode: IosDeviceInstallBuildMode;
   state: IosDeviceInstallState;
   commandId: string;
   targetName: string;
@@ -72,10 +74,11 @@ export interface IosDeviceInstallStatus {
 }
 
 interface ActiveInstall {
-  schema: 1;
+  schema: 2;
   kind: typeof ACTIVE_KIND;
   deviceId: string;
   commandId: string;
+  buildMode: IosDeviceInstallBuildMode;
   startedAt: string;
 }
 
@@ -84,6 +87,7 @@ export type IosDeviceInstallLauncher = (request: {
   tronHome: string;
   deviceId: string;
   commandId: string;
+  buildMode: IosDeviceInstallBuildMode;
 }) => Promise<void>;
 
 function boundedText(value: unknown, name: string, maximum: number): string {
@@ -218,16 +222,18 @@ function statusDocument(value: unknown): IosDeviceInstallStatus {
     throw new GatewayError("conflict", "iOS device install status is malformed");
   }
   const raw = value as Record<string, unknown>;
-  if (Object.keys(raw).some((key) => !["schema", "kind", "deviceId", "state", "commandId", "targetName", "startedAt", "updatedAt", "error"].includes(key))
-    || raw.schema !== 1 || raw.kind !== STATUS_KIND
+  if (Object.keys(raw).some((key) => !["schema", "kind", "deviceId", "buildMode", "state", "commandId", "targetName", "startedAt", "updatedAt", "error"].includes(key))
+    || raw.schema !== 2 || raw.kind !== STATUS_KIND
+    || !["fast-debug", "optimized"].includes(String(raw.buildMode))
     || !["requested", "running", "succeeded", "failed"].includes(String(raw.state))) {
     throw new GatewayError("conflict", "iOS device install status is malformed");
   }
   const error = raw.error === undefined ? undefined : admittedFailure(raw.error);
   return {
-    schema: 1,
+    schema: 2,
     kind: STATUS_KIND,
     deviceId: admitDeviceId(raw.deviceId),
+    buildMode: raw.buildMode as IosDeviceInstallBuildMode,
     state: raw.state as IosDeviceInstallState,
     commandId: admitCommandId(raw.commandId),
     targetName: boundedText(raw.targetName, "target name", 320),
@@ -242,15 +248,17 @@ function activeDocument(value: unknown): ActiveInstall {
     throw new GatewayError("conflict", "iOS device install activity is malformed");
   }
   const raw = value as Record<string, unknown>;
-  if (Object.keys(raw).some((key) => !["schema", "kind", "deviceId", "commandId", "startedAt"].includes(key))
-    || raw.schema !== 1 || raw.kind !== ACTIVE_KIND) {
+  if (Object.keys(raw).some((key) => !["schema", "kind", "deviceId", "commandId", "buildMode", "startedAt"].includes(key))
+    || raw.schema !== 2 || raw.kind !== ACTIVE_KIND
+    || !["fast-debug", "optimized"].includes(String(raw.buildMode))) {
     throw new GatewayError("conflict", "iOS device install activity is malformed");
   }
   return {
-    schema: 1,
+    schema: 2,
     kind: ACTIVE_KIND,
     deviceId: admitDeviceId(raw.deviceId),
     commandId: admitCommandId(raw.commandId),
+    buildMode: raw.buildMode as IosDeviceInstallBuildMode,
     startedAt: admitTimestamp(raw.startedAt, "activity timestamp"),
   };
 }
@@ -358,6 +366,7 @@ function defaultLauncher(environment: NodeJS.ProcessEnv): IosDeviceInstallLaunch
       "--tron-home", request.tronHome,
       "--device-id", request.deviceId,
       "--command-id", request.commandId,
+      "--build-mode", request.buildMode,
     ], { detached: true, stdio: "ignore", windowsHide: true });
     child.once("error", (error) => {
       void recordIosDeviceInstallHelperFailure(request.tronHome, request.deviceId, request.commandId, error);
@@ -375,10 +384,12 @@ export async function recordIosDeviceInstallHelperFailure(
   const current = await readDocument(statusPath(tronHome, deviceId)).catch(() => undefined);
   const startedAt = current === undefined ? new Date().toISOString() : statusDocument(current).startedAt;
   const targetName = current === undefined ? "iOS device" : statusDocument(current).targetName;
+  const buildMode = current === undefined ? "optimized" : statusDocument(current).buildMode;
   await atomicWriteJson(statusPath(tronHome, deviceId), {
-    schema: 1,
+    schema: 2,
     kind: STATUS_KIND,
     deviceId,
+    buildMode,
     state: "failed",
     commandId,
     targetName,
@@ -458,7 +469,7 @@ export class IosDeviceInstallService {
     if (value === undefined) return null;
     const active = activeDocument(value);
     const status = await this.status(active.deviceId);
-    if (!status || status.commandId !== active.commandId) {
+    if (!status || status.commandId !== active.commandId || status.buildMode !== active.buildMode) {
       throw new GatewayError("conflict", "iOS device install activity has unresolved owner state");
     }
     return status;
@@ -474,10 +485,18 @@ export class IosDeviceInstallService {
     return status;
   }
 
-  async install(deviceIdValue: unknown, commandIdValue: unknown): Promise<{ accepted: true; commandId: string; state: string }> {
+  async install(
+    deviceIdValue: unknown,
+    commandIdValue: unknown,
+    buildModeValue: unknown,
+  ): Promise<{ accepted: true; commandId: string; state: string; buildMode: IosDeviceInstallBuildMode }> {
     this.requireUsable();
     const deviceId = admitDeviceId(deviceIdValue);
     const commandId = admitCommandId(commandIdValue);
+    if (buildModeValue !== "fast-debug" && buildModeValue !== "optimized") {
+      throw new GatewayError("invalid_request", "iOS device install build mode is invalid");
+    }
+    const buildMode = buildModeValue as IosDeviceInstallBuildMode;
     return this.mutex.run(async () => {
       let config = await this.configStatus(deviceId);
       if (!config?.sourceRoot) {
@@ -525,9 +544,10 @@ export class IosDeviceInstallService {
       }
       const startedAt = new Date().toISOString();
       const status: IosDeviceInstallStatus = {
-        schema: 1,
+        schema: 2,
         kind: STATUS_KIND,
         deviceId,
+        buildMode,
         state: "requested",
         commandId,
         targetName: currentTarget.name,
@@ -537,15 +557,15 @@ export class IosDeviceInstallService {
       await mkdir(join(installRoot(this.options.tronHome), "status"), { recursive: true, mode: 0o700 });
       await atomicWriteJson(statusPath(this.options.tronHome, deviceId), status);
       await atomicWriteJson(activePath(this.options.tronHome), {
-        schema: 1, kind: ACTIVE_KIND, deviceId, commandId, startedAt,
+        schema: 2, kind: ACTIVE_KIND, deviceId, commandId, buildMode, startedAt,
       } satisfies ActiveInstall);
       try {
-        await this.launcher!({ tronHome: this.options.tronHome, deviceId, commandId });
+        await this.launcher!({ tronHome: this.options.tronHome, deviceId, commandId, buildMode });
       } catch (error) {
         await recordIosDeviceInstallHelperFailure(this.options.tronHome, deviceId, commandId, error);
         throw new GatewayError("conflict", `iOS install helper could not be started: ${failureText(error, 256)}`);
       }
-      return { accepted: true, commandId, state: "install-requested" };
+      return { accepted: true, commandId, state: "install-requested", buildMode };
     });
   }
 
@@ -582,10 +602,16 @@ function appendTail(current: string, chunk: Buffer): string {
 export function iosDeviceInstallInvocation(
   sourceRoot: string,
   targetIdentifier: string,
+  buildMode: IosDeviceInstallBuildMode,
 ): { executable: "/bin/bash"; args: string[]; cwd: string } {
   return {
     executable: "/bin/bash",
-    args: [join(sourceRoot, "scripts", "tron-ios-device"), "install", "--device-id", targetIdentifier],
+    args: [
+      join(sourceRoot, "scripts", "tron-ios-device"),
+      "install",
+      "--device-id", targetIdentifier,
+      ...(buildMode === "fast-debug" ? ["--fast-debug"] : []),
+    ],
     cwd: sourceRoot,
   };
 }
@@ -626,10 +652,14 @@ export async function runIosDeviceInstallHelper(input: {
   tronHome: string;
   deviceId: string;
   commandId: string;
+  buildMode: IosDeviceInstallBuildMode;
 }): Promise<void> {
   const tronHome = await realpath(input.tronHome);
   const deviceId = admitDeviceId(input.deviceId);
   const commandId = admitCommandId(input.commandId);
+  if (input.buildMode !== "fast-debug" && input.buildMode !== "optimized") {
+    throw new Error("iOS device install build mode is invalid");
+  }
   const configValue = await readDocument(configPath(tronHome, deviceId));
   if (configValue === undefined) throw new Error("iOS device install configuration is missing");
   const config = configDocument(configValue);
@@ -647,7 +677,8 @@ export async function runIosDeviceInstallHelper(input: {
 
   let tail = "";
   let timedOut = false;
-  const invocation = iosDeviceInstallInvocation(sourceRoot, config.target.identifier);
+  if (current.buildMode !== input.buildMode) throw new Error("iOS device install build mode ownership changed");
+  const invocation = iosDeviceInstallInvocation(sourceRoot, config.target.identifier, input.buildMode);
   const child = spawn(invocation.executable, invocation.args, {
     cwd: invocation.cwd,
     env: iosDeviceInstallHelperEnvironment(config),

@@ -15,6 +15,7 @@ struct PairedDeviceDetailView: View {
     @State private var statusReadGeneration = 0
     @State private var configuringSource = false
     @State private var confirmingInstall = false
+    @State private var fastDebugRebuild = true
     @State private var confirmingRevoke = false
 
     private var profile: GatewayProfile? {
@@ -110,12 +111,25 @@ struct PairedDeviceDetailView: View {
         ) {
             TronConfirmationSheet(
                 title: "Rebuild and install Tron?",
-                message: "The Mac will resolve this authorized device to the sole eligible physical iOS device, build the fixed Tron Device + LocalDevice configuration from the configured repository, validate its signing and Gateway protocol, overwrite-install it on \(authorized.device.name), and relaunch it without erasing app or Keychain data.",
+                message: fastDebugRebuild
+                    ? "The Mac will build the development-signed Tron Device app for UI iteration, validate its signing and Gateway protocol, overwrite-install it on \(authorized.device.name), and relaunch it without erasing app or Keychain data."
+                    : "The Mac will build the optimized development-signed Tron Device app, validate its signing and Gateway protocol, overwrite-install it on \(authorized.device.name), and relaunch it without erasing app or Keychain data.",
                 confirmTitle: "Install",
                 centersTitle: true,
                 alwaysUsesToolbarActions: true,
                 icon: "iphone.and.arrow.forward",
-                onConfirm: { Task { await requestInstall() } }
+                onConfirm: { Task { await requestInstall() } },
+                additionalContent: AnyView(
+                    TronSettingsGroup("Build", detail: "Fast debug uses incremental, unoptimized compilation for UI iteration.", accent: .tronEmerald) {
+                        TronToggleRow(
+                            icon: "hare",
+                            title: "Fast debug rebuild",
+                            detail: "Use optimized compilation when off",
+                            accent: .tronEmerald,
+                            isOn: $fastDebugRebuild
+                        )
+                    }
+                )
             )
         }
         .tronManagedSheet(
@@ -218,6 +232,7 @@ struct PairedDeviceDetailView: View {
 
         if installSupported {
             Button {
+                fastDebugRebuild = true
                 confirmingInstall = true
             } label: {
                 HStack(spacing: 8) {
@@ -262,7 +277,7 @@ struct PairedDeviceDetailView: View {
         TronValueRow(
             icon: statusIcon(status),
             title: statusTitle(status),
-            detail: status.error.map { String($0.prefix(512)) } ?? "Target: \(status.targetName)",
+            detail: "\(status.buildMode.label) build · " + (status.error.map { String($0.prefix(512)) } ?? "Target: \(status.targetName)"),
             accent: statusAccent(status)
         ) {
             if status.state.isActive {
@@ -362,7 +377,10 @@ struct PairedDeviceDetailView: View {
 
     private func requestInstall() async {
         do {
-            _ = try await model.requestIosDeviceInstall(for: authorized)
+            _ = try await model.requestIosDeviceInstall(
+                for: authorized,
+                buildMode: fastDebugRebuild ? .fastDebug : .optimized
+            )
             await loadStatus()
         } catch is CancellationError {
             return

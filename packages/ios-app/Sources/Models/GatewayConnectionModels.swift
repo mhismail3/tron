@@ -384,6 +384,13 @@ struct IosDeviceInstallConfig: Codable, Hashable, Sendable {
     }
 }
 
+enum IosDeviceInstallBuildMode: String, Codable, Hashable, Sendable {
+    case fastDebug = "fast-debug"
+    case optimized
+
+    var label: String { self == .fastDebug ? "Fast debug" : "Optimized" }
+}
+
 struct IosDeviceInstallStatus: Codable, Hashable, Sendable {
     enum State: String, Codable, Hashable, Sendable {
         case requested, running, succeeded, failed
@@ -393,6 +400,7 @@ struct IosDeviceInstallStatus: Codable, Hashable, Sendable {
     let schema: Int
     let kind: String
     let deviceId: String
+    let buildMode: IosDeviceInstallBuildMode
     let state: State
     let commandId: String
     let targetName: String
@@ -405,6 +413,7 @@ struct IosDeviceInstallStatus: Codable, Hashable, Sendable {
         schema = try values.decode(Int.self, forKey: .schema)
         kind = try values.decode(String.self, forKey: .kind)
         deviceId = try values.decode(String.self, forKey: .deviceId)
+        buildMode = try values.decode(IosDeviceInstallBuildMode.self, forKey: .buildMode)
         state = try values.decode(State.self, forKey: .state)
         commandId = try values.decode(String.self, forKey: .commandId)
         targetName = try values.decode(String.self, forKey: .targetName)
@@ -449,7 +458,7 @@ enum IosDeviceInstallProjectionPolicy {
     }
 
     static func validate(status: IosDeviceInstallStatus) throws {
-        guard status.schema == 1,
+        guard status.schema == 2,
               status.kind == "tron-ios-device-install-status",
               bounded(status.deviceId, maximum: 100),
               bounded(status.commandId, maximum: 160),

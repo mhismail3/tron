@@ -94,25 +94,24 @@ struct ProvidersSettingsView: View {
         _ title: String,
         providers: [ProviderSummary]
     ) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(title)
-                .font(TronTypography.sheetSectionHeader)
-                .foregroundStyle(Color.tronTextPrimary)
-                .accessibilityAddTraits(.isHeader)
-                .padding(.bottom, 6)
-            // Each provider owns its rounded row surface; section headings
-            // group the rows without adding another enclosing container.
-            VStack(spacing: 6) {
-                ForEach(providers) { provider in
-                    ProviderSetupRow(
-                        provider: provider,
-                        sessionID: sessionID,
-                        usageSnapshot: usageController.snapshots[provider.id]
-                    )
+        TronSettingsGroup(
+            title,
+            accent: .tronPurple,
+            surfaceStyle: .glass
+        ) {
+            ForEach(Array(providers.enumerated()), id: \.element.id) { index, provider in
+                ProviderSetupRow(
+                    surfaceStyle: .grouped,
+                    provider: provider,
+                    sessionID: sessionID,
+                    usageSnapshot: usageController.snapshots[provider.id]
+                )
+                if index < providers.count - 1 {
+                    TronSettingsDivider(accent: .tronPurple)
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, title == "Available" ? TronSpacing.section : 0)
     }
 
     private func reload() {

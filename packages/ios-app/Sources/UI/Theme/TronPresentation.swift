@@ -1015,6 +1015,7 @@ struct TronConfirmationSheet: View {
     let alwaysUsesToolbarActions: Bool
     let onConfirm: () -> Void
     let onSecondary: (() -> Void)?
+    let additionalContent: AnyView?
     let icon: String
 
     @Environment(\.dismiss) private var dismiss
@@ -1030,7 +1031,8 @@ struct TronConfirmationSheet: View {
         alwaysUsesToolbarActions: Bool = false,
         icon: String = "exclamationmark.triangle.fill",
         onConfirm: @escaping () -> Void,
-        onSecondary: (() -> Void)? = nil
+        onSecondary: (() -> Void)? = nil,
+        additionalContent: AnyView? = nil
     ) {
         self.title = title
         self.message = message
@@ -1042,6 +1044,7 @@ struct TronConfirmationSheet: View {
         self.icon = icon
         self.onConfirm = onConfirm
         self.onSecondary = onSecondary
+        self.additionalContent = additionalContent
     }
 
     var body: some View {
@@ -1071,6 +1074,10 @@ struct TronConfirmationSheet: View {
                             .foregroundStyle(Color.tronTextSecondary)
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
+                        if let additionalContent {
+                            additionalContent
+                                .frame(maxWidth: .infinity)
+                        }
                         if placement == .content {
                             confirmButton
                                 .buttonStyle(TronActionButtonStyle(role: destructive ? .destructive : .primary))

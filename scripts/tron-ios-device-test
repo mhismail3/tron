@@ -68,4 +68,86 @@ grep -Fq "use Tron Device + LocalDevice" /tmp/tron-ios-device-reject.$$ || {
 }
 rm -f /tmp/tron-ios-device-reject.$$
 [[ "$rejected" -ne 0 ]] || { echo "unsafe legacy pair was accepted" >&2; exit 1; }
-printf 'tron-ios-device defaults, rejection, and process parsing tests passed\n'
+cat > "$tool_fixture/xcodebuild" <<'EOF'
+#!/usr/bin/env bash
+: > "$CAPTURE"
+for argument in "$@"; do
+    printf '%s\n' "$argument" >> "$CAPTURE"
+done
+EOF
+chmod 0755 "$tool_fixture/xcodebuild"
+
+capture_xcodebuild_args() {
+    local mode="$1"
+    local derived_data="$2"
+    local result_bundle="$3"
+    local device_id="$4"
+    local capture="$5"
+    prepare_xcodebuild_args "$derived_data" "$result_bundle" "$device_id" "$mode"
+    CAPTURE="$capture" PATH="$tool_fixture:$PATH" xcodebuild "${XCODEBUILD_ARGS[@]}"
+}
+
+optimized_capture="$tool_fixture/optimized-args"
+capture_xcodebuild_args optimized \
+    'build/Derived Data' '/tmp/optimized result.xcresult' 'device with spaces' "$optimized_capture"
+cat > "$tool_fixture/optimized-expected" <<'EOF'
+build
+-project
+TronMobile.xcodeproj
+-scheme
+Tron Device
+-configuration
+LocalDevice
+-destination
+platform=iOS,id=device with spaces
+-destination-timeout
+30
+-derivedDataPath
+build/Derived Data
+-resultBundlePath
+/tmp/optimized result.xcresult
+-allowProvisioningUpdates
+-allowProvisioningDeviceRegistration
+EOF
+cmp -s "$optimized_capture" "$tool_fixture/optimized-expected" || {
+    echo "optimized xcodebuild argv changed unexpectedly" >&2
+    diff -u "$tool_fixture/optimized-expected" "$optimized_capture" >&2 || true
+    exit 1
+}
+
+fast_capture="$tool_fixture/fast-args"
+capture_xcodebuild_args fast-debug \
+    'build/DerivedData-fast-debug' '/tmp/fast result.xcresult' 'device with spaces' "$fast_capture"
+cat > "$tool_fixture/fast-expected" <<'EOF'
+build
+-project
+TronMobile.xcodeproj
+-scheme
+Tron Device
+-configuration
+LocalDevice
+-destination
+platform=iOS,id=device with spaces
+-destination-timeout
+30
+-derivedDataPath
+build/DerivedData-fast-debug
+-resultBundlePath
+/tmp/fast result.xcresult
+-allowProvisioningUpdates
+-allowProvisioningDeviceRegistration
+SWIFT_OPTIMIZATION_LEVEL=-Onone
+SWIFT_COMPILATION_MODE=singlefile
+GCC_OPTIMIZATION_LEVEL=0
+DEBUG_INFORMATION_FORMAT=dwarf
+ENABLE_TESTABILITY=YES
+ONLY_ACTIVE_ARCH=YES
+MTL_ENABLE_DEBUG_INFO=INCLUDE_SOURCE
+EOF
+cmp -s "$fast_capture" "$tool_fixture/fast-expected" || {
+    echo "fast-debug xcodebuild argv is missing expected overrides" >&2
+    diff -u "$tool_fixture/fast-expected" "$fast_capture" >&2 || true
+    exit 1
+}
+
+printf 'tron-ios-device defaults, rejection, process parsing, and build argv tests passed\n'

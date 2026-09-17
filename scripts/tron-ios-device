@@ -9,6 +9,7 @@ source "$ROOT_DIR/config/ci-toolchain.env"
 IOS_DIR="$ROOT_DIR/packages/ios-app"
 PROJECT="TronMobile.xcodeproj"
 DERIVED_DATA="build/DerivedData"
+BUILD_MODE="optimized"
 PHYSICAL_BUNDLE_ID="com.tron.mobile"
 SCHEME="${TRON_IOS_SCHEME:-Tron Device}"
 CONFIG="${TRON_IOS_CONFIGURATION:-LocalDevice}"
@@ -23,7 +24,7 @@ GATEWAY_MAC_APP="${TRON_IOS_GATEWAY_MAC_APP:-/Applications/Tron.app}"
 usage() {
     cat <<'USAGE'
 Usage:
-  scripts/tron-ios-device install [--device-id ID] [--device-name NAME] [--no-launch]
+  scripts/tron-ios-device install [--device-id ID] [--device-name NAME] [--no-launch] [--fast-debug]
   scripts/tron-ios-device launch [--device-id ID] [--device-name NAME]
   scripts/tron-ios-device stop [--device-id ID] [--device-name NAME]
   scripts/tron-ios-device status [--device-id ID] [--device-name NAME]
@@ -33,6 +34,7 @@ Environment overrides:
   TRON_IOS_DEVICE_NAME     Physical iOS device name
   TRON_IOS_SCHEME          Install compatibility input; defaults to Tron Device
   TRON_IOS_CONFIGURATION   Install compatibility input; defaults to LocalDevice
+  --fast-debug              Use the separate unoptimized incremental UI-iteration build
 
 The canonical install pair is Tron Device + LocalDevice. The exact legacy
 Tron Fast + ProdDebug pair remains accepted only for the untouched Codex
@@ -175,6 +177,10 @@ parse_common_args() {
                 LAUNCH_AFTER_INSTALL=0
                 shift
                 ;;
+            --fast-debug)
+                BUILD_MODE="fast-debug"
+                shift
+                ;;
             -h|--help)
                 usage
                 exit 0
@@ -269,6 +275,43 @@ pretty_xcode_output() {
     fi
 }
 
+XCODEBUILD_ARGS=()
+
+# Build the complete argv once so optimized mode never expands an empty
+# optional array under Bash's nounset mode. Fast debug only appends compiler
+# overrides; both modes retain the same scheme, destination, signing, and
+# result-bundle arguments.
+prepare_xcodebuild_args() {
+    local derived_data_path="$1"
+    local result_bundle_path="$2"
+    local device_id="$3"
+    local build_mode="$4"
+
+    XCODEBUILD_ARGS=(
+        build
+        -project "$PROJECT"
+        -scheme "$SCHEME"
+        -configuration "$CONFIG"
+        -destination "platform=iOS,id=${device_id}"
+        -destination-timeout 30
+        -derivedDataPath "$derived_data_path"
+        -resultBundlePath "$result_bundle_path"
+        -allowProvisioningUpdates
+        -allowProvisioningDeviceRegistration
+    )
+    if [[ "$build_mode" == "fast-debug" ]]; then
+        XCODEBUILD_ARGS+=(
+            SWIFT_OPTIMIZATION_LEVEL=-Onone
+            SWIFT_COMPILATION_MODE=singlefile
+            GCC_OPTIMIZATION_LEVEL=0
+            DEBUG_INFORMATION_FORMAT=dwarf
+            ENABLE_TESTABILITY=YES
+            ONLY_ACTIVE_ARCH=YES
+            MTL_ENABLE_DEBUG_INFO=INCLUDE_SOURCE
+        )
+    fi
+}
+
 build_install_launch() {
     require_full_xcode
     validate_gateway_protocol_target_prebuild
@@ -295,17 +338,13 @@ build_install_launch() {
     xcresult="/tmp/xcode-${ts}.xcresult"
 
     set +e
-    xcodebuild \
-        build \
-        -project "$PROJECT" \
-        -scheme "$SCHEME" \
-        -configuration "$CONFIG" \
-        -destination "platform=iOS,id=${device_id}" \
-        -destination-timeout 30 \
-        -derivedDataPath "$DERIVED_DATA" \
-        -resultBundlePath "$xcresult" \
-        -allowProvisioningUpdates \
-        -allowProvisioningDeviceRegistration \
+    if [[ "$BUILD_MODE" == "fast-debug" ]]; then
+        DERIVED_DATA="build/DerivedData-fast-debug"
+    else
+        DERIVED_DATA="build/DerivedData"
+    fi
+    prepare_xcodebuild_args "$DERIVED_DATA" "$xcresult" "$device_id" "$BUILD_MODE"
+    xcodebuild "${XCODEBUILD_ARGS[@]}" \
         2>&1 \
         | tee "$log" \
         | pretty_xcode_output
@@ -443,14 +482,17 @@ main() {
             ;;
         launch)
             parse_common_args "$@"
+            [[ "$BUILD_MODE" == "optimized" ]] || die "--fast-debug is only valid with install"
             launch_installed_app
             ;;
         stop)
             parse_common_args "$@"
+            [[ "$BUILD_MODE" == "optimized" ]] || die "--fast-debug is only valid with install"
             stop_installed_app
             ;;
         status)
             parse_common_args "$@"
+            [[ "$BUILD_MODE" == "optimized" ]] || die "--fast-debug is only valid with install"
             status_installed_app
             ;;
         help|-h|--help)

@@ -66,55 +66,27 @@ enum ProviderConfigurationPresentation {
     }
 }
 
+enum ProviderSetupRowSurfaceStyle {
+    case standalone
+    case grouped
+}
+
 struct ProviderSetupRow: View {
+    var surfaceStyle: ProviderSetupRowSurfaceStyle = .standalone
     let provider: ProviderSummary
     var sessionID: String? = nil
     var usageSnapshot: ProviderUsageSnapshot? = nil
     @State private var showsConfiguration = false
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+    @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var providerTarget: ProviderCatalogTarget {
         sessionID.map(ProviderCatalogTarget.session(id:)) ?? .global
     }
 
     var body: some View {
-        Group {
-            if provider.configured {
-                Button { showsConfiguration = true } label: {
-                    rowContents {
-                        Text("Details")
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                            .tronSettingsButtonForeground(settingsTheme?.accent ?? .tronEmerald)
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                    }
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Details for \(provider.displayName)")
-                .accessibilityValue(usageSnapshot.map { "Account usage: \(ProviderUsagePresentation.summary($0))" } ?? "Account usage unavailable")
-            } else {
-                rowContents {
-                    Button { showsConfiguration = true } label: {
-                        Text("Connect")
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                            .tronSettingsButtonForeground(settingsTheme?.accent ?? .tronEmerald)
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .frame(minHeight: 44, alignment: .center)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Connect \(provider.displayName)")
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
-        .tronScrollSurface(
-            accent: .tronEmerald,
-            cornerRadius: 12,
-            tintOpacity: provider.configured ? 0.14 : 0.08
-        )
+        surfacedRow
         .tronManagedSheet(
             isPresented: $showsConfiguration,
             identity: "onboarding.provider.\(provider.id)"
@@ -127,35 +99,112 @@ struct ProviderSetupRow: View {
     }
 
     @ViewBuilder
-    private func rowContents<Trailing: View>(@ViewBuilder trailing: () -> Trailing) -> some View {
-        HStack(alignment: .center, spacing: 10) {
-            let rowAccent = settingsTheme?.accent
-                ?? (provider.configured ? Color.tronEmerald : Color.tronTextSecondary)
-            Image(systemName: provider.configured ? "checkmark.seal.fill" : "key")
-                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(rowAccent)
-                .frame(width: 22, height: 22)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(provider.displayName)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .lineLimit(1)
-                Text(ProviderConfigurationPresentation.connectionDetail(for: provider))
-                    .font(TronTypography.secondaryDescription)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .lineLimit(1)
-                if let usageSnapshot {
-                    Text(ProviderUsagePresentation.summary(usageSnapshot))
-                        .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(usageSnapshot.status == .available ? Color.tronEmerald : Color.tronTextMuted)
-                        .lineLimit(1)
-                        .accessibilityLabel("Account usage: \(ProviderUsagePresentation.summary(usageSnapshot))")
+    private var surfacedRow: some View {
+        if surfaceStyle == .standalone {
+            row
+                .tronScrollSurface(
+                    accent: .tronEmerald,
+                    cornerRadius: 12,
+                    tintOpacity: provider.configured ? 0.14 : 0.08
+                )
+        } else {
+            row
+        }
+    }
+
+    private var row: some View {
+        Group {
+            if provider.configured {
+                Button { showsConfiguration = true } label: {
+                    rowContents {
+                        detailsPill
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Details for \(provider.displayName)")
+                .accessibilityValue(usageSnapshot.map { "Account usage: \(ProviderUsagePresentation.summary($0))" } ?? "Account usage unavailable")
+            } else {
+                rowContents {
+                    Button { showsConfiguration = true } label: {
+                        TronInlineActionLabel("Connect", accent: settingsTheme?.accent ?? .tronEmerald)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Connect \(provider.displayName)")
                 }
             }
-            .layoutPriority(1)
-            Spacer(minLength: 8)
-            trailing()
+        }
+        .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
+        .padding(.vertical, dynamicTypeSize.isAccessibilitySize ? TronSpacing.md : TronSpacing.sm)
+        .frame(maxWidth: .infinity, minHeight: TronSettingsLayoutPolicy.rowMinimumHeight, alignment: .leading)
+    }
+
+    private var detailsPill: some View {
+        TronInlineActionLabel("Details", accent: settingsTheme?.accent ?? .tronEmerald)
+            .fixedSize(horizontal: true, vertical: false)
+    }
+
+    @ViewBuilder
+    private func rowContents<Trailing: View>(@ViewBuilder trailing: () -> Trailing) -> some View {
+        let rowAccent = settingsTheme?.accent
+            ?? (provider.configured ? Color.tronEmerald : Color.tronTextSecondary)
+        let stacksTrailing = dynamicTypeSize.isAccessibilitySize
+        if stacksTrailing {
+            HStack(alignment: .top, spacing: TronSpacing.xl) {
+                providerIcon(rowAccent)
+                VStack(alignment: .leading, spacing: TronSpacing.md) {
+                    providerLabels
+                    trailing()
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        } else {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: TronSpacing.xl) {
+                    providerIcon(rowAccent)
+                    providerLabels.fixedSize(horizontal: true, vertical: true)
+                    Spacer(minLength: TronSpacing.md)
+                    trailing()
+                }
+                HStack(alignment: .top, spacing: TronSpacing.xl) {
+                    providerIcon(rowAccent)
+                    VStack(alignment: .leading, spacing: TronSpacing.md) {
+                        providerLabels
+                        trailing()
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
+
+    private func providerIcon(_ accent: Color) -> some View {
+        Image(systemName: provider.configured ? "checkmark.seal.fill" : "key")
+            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+            .foregroundStyle(accent)
+            .frame(width: TronSettingsLayoutPolicy.iconSize, height: TronSettingsLayoutPolicy.iconSize)
+            .accessibilityHidden(true)
+    }
+
+    private var providerLabels: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(provider.displayName)
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                .foregroundStyle(Color.tronTextPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(ProviderConfigurationPresentation.connectionDetail(for: provider))
+                .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
+                .foregroundStyle(Color.tronTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let usageSnapshot {
+                Text(ProviderUsagePresentation.summary(usageSnapshot))
+                    .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
+                    .foregroundStyle(usageSnapshot.status == .available ? Color.tronEmerald : Color.tronTextMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("Account usage: \(ProviderUsagePresentation.summary(usageSnapshot))")
+            }
         }
     }
 }

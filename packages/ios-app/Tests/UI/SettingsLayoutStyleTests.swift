@@ -310,6 +310,66 @@ final class SettingsLayoutStyleTests: XCTestCase {
         }
     }
 
+    func testProviderGroupsCoverUsageActionsAndAccessibilitySizing() async throws {
+        let configuredWithoutUsage = ProviderSummary(
+            id: "configured-without-usage", name: "Configured Provider Without Usage", configured: true,
+            authSource: "api-key", credentialType: "api-key", authMethods: ["api-key"], modelCount: 1
+        )
+        let available = ProviderSummary(
+            id: "available-provider", name: "Available Provider With A Longer Display Name", configured: false,
+            authSource: nil, credentialType: nil, authMethods: ["api-key"], modelCount: 1
+        )
+        let usage = ProviderUsageSnapshot(
+            providerId: "configured-with-usage", status: .available, source: "provider.usage", scope: .account,
+            updatedAt: "2026-01-02T03:04:05.123Z",
+            windows: [
+                UsageWindow(id: "primary", label: "5h", usedPercent: 24, resetsAt: "2026-01-02T05:00:00Z", windowSeconds: 18_000),
+                UsageWindow(id: "weekly", label: "Weekly", usedPercent: 63, resetsAt: "2026-01-08T03:00:00Z", windowSeconds: 604_800)
+            ]
+        )
+        let configuredWithUsage = ProviderSummary(
+            id: "configured-with-usage", name: "Configured Provider", configured: true,
+            authSource: "oauth", credentialType: "oauth", authMethods: ["oauth"], modelCount: 1
+        )
+        for width in [320, 375, 393] {
+            try await withHost(
+                ProviderSetupRow(provider: configuredWithUsage, usageSnapshot: usage)
+                    .padding(16)
+                    .tronPresentation().tronSettingsLayout()
+                    .tronSettingsVisualTheme(accent: .tronPurple),
+                size: CGSize(width: width, height: 140), scheme: .light
+            ) { host in
+                attach(image(host), name: "provider-usage-light-\(width)")
+            }
+        }
+        for (name, typeSize) in [("grouped-light", DynamicTypeSize.large), ("grouped-accessibility", .accessibility3)] {
+            try await withHost(
+                VStack(spacing: TronSpacing.section) {
+                    TronSettingsGroup("Configured", accent: .tronPurple, surfaceStyle: .glass) {
+                        ProviderSetupRow(surfaceStyle: .grouped, provider: configuredWithUsage, usageSnapshot: usage)
+                        TronSettingsDivider(accent: .tronPurple)
+                        ProviderSetupRow(surfaceStyle: .grouped, provider: configuredWithoutUsage)
+                    }
+                    TronSettingsGroup("Available", accent: .tronPurple, surfaceStyle: .glass) {
+                        ProviderSetupRow(surfaceStyle: .grouped, provider: available)
+                        TronSettingsDivider(accent: .tronPurple)
+                        ProviderSetupRow(surfaceStyle: .grouped, provider: ProviderSummary(
+                            id: "available-second", name: "Another Available Provider", configured: false,
+                            authSource: nil, credentialType: nil, authMethods: ["api-key"], modelCount: 1
+                        ))
+                    }
+                }
+                .padding(16)
+                .tronPresentation().tronSettingsLayout()
+                .tronSettingsVisualTheme(accent: .tronPurple)
+                .environment(\.dynamicTypeSize, typeSize),
+                size: CGSize(width: 393, height: name == "grouped-light" ? 700 : 1_500), scheme: name == "grouped-light" ? .light : .dark
+            ) { host in
+                attach(image(host), name: "provider-rows-\(name)")
+            }
+        }
+    }
+
     func testConfiguredProviderRowAndDetailSheetRenderLightDarkAndLargeText() async throws {
         let provider = ProviderSummary(
             id: "openai-codex", name: "OpenAI Codex", configured: true,

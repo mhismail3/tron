@@ -27,7 +27,10 @@ for the physical normal-use app. Do not create a shadow bundle or add a second
 profiling scheme.
 
 The canonical physical install pair is `Tron Device` + `LocalDevice`.
-Build role, push route, and exact Gateway protocol range are emitted into
+The supervised Rebuild and Install sheet may explicitly select Fast debug (on by
+default for UI iteration); it uses the same pair and identity with
+`--fast-debug`, unoptimized incremental compilation, and a separate DerivedData
+cache. It is never a Release mode. Build role, push route, and exact Gateway protocol range are emitted into
 `Info.plist`; signed artifacts are authoritative. Test's beta relay route is
 internal compatibility only and is not a real APNs lane. A Stable device install
 must follow a verified matching Mac app/Gateway install; the device helper fails

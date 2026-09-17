@@ -520,7 +520,7 @@ struct GatewayUpdateControlPlaneTests {
         try await socket.waitUntilSent(count: 1)
         await socket.enqueue(helloFrame(
             machineID: "stable-machine",
-            capabilities: ["gateway-update.v1", "ios-device-install.v2"]
+            capabilities: ["gateway-update.v1", "ios-device-install.v3"]
         ))
         try await connecting.value
 
@@ -553,17 +553,19 @@ struct GatewayUpdateControlPlaneTests {
         ])))
         #expect(try await configuring.value.target == nil)
 
-        let installing = Task { try await model.requestIosDeviceInstall(for: authorized) }
+        let installing = Task { try await model.requestIosDeviceInstall(for: authorized, buildMode: .fastDebug) }
         try await socket.waitUntilSent(count: 3)
         let installRequest = try requestFrame(await socket.sentFrames()[2])
         #expect(installRequest.method == "device.install")
         #expect(installRequest.params?["deviceId"] == .string("stable-device"))
+        #expect(installRequest.params?["buildMode"] == .string("fast-debug"))
         let installCommandID = try #require(installRequest.params?["commandId"]?.stringValue)
         #expect(installCommandID == commandIDs[1].uuidString)
         await socket.enqueue(successResponse(id: installRequest.id, result: .object([
             "accepted": .bool(true),
             "commandId": .string(installCommandID),
             "state": .string("install-requested"),
+            "buildMode": .string("fast-debug"),
         ])))
         #expect(try await installing.value == installCommandID)
 
