@@ -1608,7 +1608,9 @@ struct ChatView: View {
         let presentation = selectedAuthoritativeSnapshot?.extensionPresentation
         return ExtensionRetainedContentPolicy.content(
             widgets: presentation?.semanticState.widgets,
-            surfaces: presentation?.surfaces
+            surfaces: presentation?.surfaces,
+            statuses: presentation?.semanticState.statuses,
+            statusOwners: presentation?.semanticState.statusOwners
         )
     }
 

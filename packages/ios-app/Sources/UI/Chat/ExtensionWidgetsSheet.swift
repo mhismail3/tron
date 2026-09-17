@@ -122,6 +122,14 @@ private struct ExtensionContentEntryCard: View {
             .accessibilityElement(children: .combine)
         case .frame(let frame):
             ExtensionFrameView(frame: frame)
+        case .status(let text):
+            Text(text)
+                .font(TronTypography.bodySM)
+                .foregroundStyle(Color.tronTextPrimary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
         }
     }
 }

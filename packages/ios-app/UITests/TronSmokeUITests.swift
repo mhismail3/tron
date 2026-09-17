@@ -141,6 +141,11 @@ final class TronSmokeUITests: XCTestCase {
         // String widget lines render as native text.
         XCTAssertTrue(app.staticTexts["Goal active"].exists)
         XCTAssertTrue(app.staticTexts["Used 12k tokens"].exists)
+        // A retained status is presentable on its own, which is the only content a
+        // paused goal leaves behind after it clears its widget.
+        XCTAssertTrue(app.staticTexts["Goal paused (/goal resume)"].exists)
+        // An ownerless status is grouped, never dropped.
+        XCTAssertTrue(app.staticTexts["Unknown extension"].exists)
         // A retained read-only component frame renders its sanitized content.
         let frameText = app.staticTexts.containing(
             NSPredicate(format: "label CONTAINS[c] %@", "Frame progress 3 of 5")
@@ -165,7 +170,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(sheet.waitForExistence(timeout: 10), app.debugDescription)
         // Every retained entry must still be reachable and read at the largest
         // accessibility size; the sheet scrolls instead of truncating content.
-        for label in ["Goal", "Goal active", "Used 12k tokens"] {
+        for label in ["Goal", "Goal active", "Used 12k tokens", "Goal paused (/goal resume)"] {
             let text = app.staticTexts[label]
             if !text.exists { app.swipeUp() }
             XCTAssertTrue(text.waitForExistence(timeout: 3), app.debugDescription)

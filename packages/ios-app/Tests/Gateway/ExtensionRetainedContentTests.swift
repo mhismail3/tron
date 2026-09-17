@@ -102,6 +102,57 @@ struct ExtensionRetainedContentTests {
         #expect(content.entries(forProducer: ExtensionRetainedContent.unknownProducer).count == 2)
     }
 
+    @Test("a status outlives its cleared widget so a paused goal stays inspectable")
+    func statusOnlyContent() {
+        // The real pi-goal shape: while a goal is paused it clears its widget and
+        // leaves only `setStatus("pi-goal", "Goal paused (/goal resume)")`. Before
+        // retained statuses were presentable this produced no content at all, so
+        // the composer entry point disappeared and the state was unreachable.
+        let content = ExtensionRetainedContentPolicy.content(
+            widgets: nil,
+            surfaces: nil,
+            statuses: ["pi-goal": "Goal paused (/goal resume)"],
+            statusOwners: ["pi-goal": .init(id: "owner-goal", title: "Goal", source: "npm:@mocito/pi-goal")]
+        )
+        #expect(!content.isEmpty)
+        #expect(content.producers == ["Goal"])
+        #expect(content.entries == [.init(id: "status:pi-goal", producer: "Goal", style: .status("Goal paused (/goal resume)"))])
+    }
+
+    @Test("statuses normalize whitespace, drop empties, and order by key")
+    func statusPresentation() {
+        let content = ExtensionRetainedContentPolicy.content(
+            widgets: nil,
+            surfaces: nil,
+            statuses: [
+                "z": "  multitask \n running  ",
+                "a": "one line",
+                "blank": "   ",
+                "empty": "",
+            ],
+            statusOwners: nil
+        )
+        // Wire dictionaries are unordered, so key order is the stability rule.
+        #expect(content.entries.map(\.id) == ["status:a", "status:z"])
+        #expect(content.entries.map(\.style) == [.status("one line"), .status("multitask running")])
+        // An ownerless status is grouped rather than dropped or guessed.
+        #expect(content.producers == [ExtensionRetainedContent.unknownProducer])
+        // A status is not subject to the widget detail-hint filter.
+        #expect(ExtensionRetainedContentPolicy.presentableStatusText("Press x to inspect ↓") == "Press x to inspect ↓")
+    }
+
+    @Test("statuses render after widgets and frames for the same producer")
+    func statusOrdering() {
+        let content = ExtensionRetainedContentPolicy.content(
+            widgets: [widget(key: "goal", lines: ["active"], owner: .init(id: "owner-goal", title: "Goal", source: "npm:pkg"))],
+            surfaces: nil,
+            statuses: ["pi-goal": "Pursuing goal"],
+            statusOwners: ["pi-goal": .init(id: "owner-goal", title: "Goal", source: "npm:pkg")]
+        )
+        #expect(content.producers == ["Goal"])
+        #expect(content.entries.map(\.id) == ["widget:goal", "status:pi-goal"])
+    }
+
     @Test("surface producers never invent a friendlier identity than provenance")
     func surfaceProducerTitle() {
         #expect(ExtensionRetainedContentPolicy.surfaceProvenanceTitle("npm:@example/extension") == "npm:@example/extension")

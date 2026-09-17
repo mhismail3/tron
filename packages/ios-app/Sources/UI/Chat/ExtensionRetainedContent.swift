@@ -13,6 +13,8 @@ struct ExtensionRetainedContent: Equatable {
         case text([String])
         /// A bounded, read-only captured component frame.
         case frame(ExtensionFrame)
+        /// One retained keyed status line.
+        case status(String)
     }
 
     struct Entry: Equatable, Identifiable {
@@ -66,6 +68,26 @@ enum ExtensionRetainedContentPolicy {
             .filter { !$0.isEmpty }
     }
 
+    /// Status text is one display line. The Gateway already removed terminal
+    /// presentation, so only whitespace is normalized: the widget detail-hint
+    /// filter is deliberately not applied here, because it removes a widget-line
+    /// artifact rather than a status.
+    static func presentableStatusText(_ raw: String) -> String {
+        raw.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Retained statuses in deterministic key order. Wire dictionaries have no
+    /// order, so sorting by key is what keeps the list stable across updates.
+    static func presentableStatuses(
+        _ statuses: [String: String]?
+    ) -> [(key: String, text: String)] {
+        (statuses ?? [:]).keys.sorted().compactMap { key in
+            let text = presentableStatusText(statuses?[key] ?? "")
+            return text.isEmpty ? nil : (key, text)
+        }
+    }
+
     /// Only retained, non-blocking widget surfaces are presentable here.
     /// Header/footer/custom/overlay/editor/renderer surfaces have no native
     /// consumer and must never be advertised as shown.
@@ -76,7 +98,12 @@ enum ExtensionRetainedContentPolicy {
             .sorted { $0.id < $1.id }
     }
 
-    static func content(widgets: [ExtensionWidget]?, surfaces: [ExtensionSurface]?) -> ExtensionRetainedContent {
+    static func content(
+        widgets: [ExtensionWidget]?,
+        surfaces: [ExtensionSurface]?,
+        statuses: [String: String]? = nil,
+        statusOwners: [String: ExtensionOwner]? = nil
+    ) -> ExtensionRetainedContent {
         var entries: [ExtensionRetainedContent.Entry] = []
         for widget in widgets ?? [] {
             let lines = presentableWidgetLines(widget)
@@ -94,6 +121,17 @@ enum ExtensionRetainedContentPolicy {
                 id: "surface:\(surface.id)",
                 producer: surfaceProvenanceTitle(surface.provenance?.source),
                 style: .frame(surface.frame)
+            ))
+        }
+        // A status outlives its owner's widget (a paused goal clears its widget
+        // and keeps only its status), so it is retained content in its own right.
+        // The key stays out of the visible card: the section header already names
+        // the producer, and the key is an extension-internal slot name.
+        for status in presentableStatuses(statuses) {
+            entries.append(.init(
+                id: "status:\(status.key)",
+                producer: statusOwners?[status.key]?.title ?? ExtensionRetainedContent.unknownProducer,
+                style: .status(status.text)
             ))
         }
         return ExtensionRetainedContent(entries: entries)
