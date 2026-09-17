@@ -334,84 +334,37 @@ struct SessionProcessRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(process.title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
                     .foregroundStyle(Color.tronTextPrimary)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if startedText != nil || elapsedMilliseconds != nil {
-                    ViewThatFits(in: .horizontal) {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            if let startedText {
-                                Text(startedText)
-                                    .font(TronTypography.secondaryCodeDescription)
-                                    .foregroundStyle(Color.tronTextSecondary)
-                                    .lineLimit(1)
-                            }
-                            if let elapsedMilliseconds {
-                                if style == .history, startedText != nil {
-                                    Text("·")
-                                        .font(TronTypography.secondaryCodeDescription)
-                                        .foregroundStyle(Color.tronTextSecondary)
-                                        .accessibilityHidden(true)
-                                }
-                                elapsedText(elapsedMilliseconds)
-                            }
-                        }
-                        .fixedSize(horizontal: true, vertical: false)
-                        VStack(alignment: .trailing, spacing: 2) {
-                            if let startedText {
-                                Text(startedText)
-                                    .font(TronTypography.secondaryCodeDescription)
-                                    .foregroundStyle(Color.tronTextSecondary)
-                            }
-                            if let elapsedMilliseconds {
-                                elapsedText(elapsedMilliseconds)
-                            }
-                        }
-                    }
-                }
-                if tone == .unsuccessful {
-                    Image(systemName: "exclamationmark.circle.fill")
-                        .font(TronTypography.caption2)
-                        .foregroundStyle(cardAccent)
-                        .accessibilityHidden(true)
-                }
+                if let elapsedMilliseconds { elapsedText(elapsedMilliseconds) }
+            }
+            if let metadataLine {
+                Text(metadataLine)
+                    .font(TronTypography.secondaryCodeDescription)
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let countsLine {
+                Text(countsLine)
+                    .font(TronTypography.secondaryCodeDescription)
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .lineLimit(1)
+            }
+            HStack {
+                SessionProcessPill(icon: statusIcon, text: statusText, accent: cardAccent)
+                Spacer(minLength: 0)
             }
 
-            ToolChipFlowLayout(spacing: 5) {
-                if !process.executionMode.displayName.isEmpty {
-                    SessionProcessPill(
-                        icon: process.executionMode == .asynchronous ? "arrow.triangle.branch" : "arrow.right",
-                        text: process.executionMode.displayName,
-                        accent: cardAccent
-                    )
-                }
-                if let toolCount = process.toolCount {
-                    SessionProcessPill(
-                        icon: "wrench.and.screwdriver",
-                        text: SessionProcessRowPresentation.countLabel(toolCount, singular: "tool"),
-                        accent: cardAccent
-                    )
-                }
-                if let turnCount = process.turnCount {
-                    SessionProcessPill(
-                        icon: "arrow.triangle.2.circlepath",
-                        text: SessionProcessRowPresentation.countLabel(turnCount, singular: "turn"),
-                        accent: cardAccent
-                    )
-                }
-            }
-
-            if latestAction != nil || outputPreview != nil {
+            if currentAction != nil || outputPreview != nil {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(SessionProcessRowPresentation.activityLabel(for: process.lifecycle.state))
-                        .font(TronTypography.caption)
-                        .foregroundStyle(cardAccent)
-                    if let latestAction {
-                        Label(latestAction, systemImage: "hammer")
-                            .font(TronTypography.code(size: TronTypography.sizeBody2, weight: .semibold))
-                            .foregroundStyle(Color.tronTextSecondary)
-                            .lineLimit(1)
+                    if let currentAction {
+                        Text("CURRENT ACTIVITY")
+                            .font(TronTypography.caption)
+                            .foregroundStyle(cardAccent)
+                        activityLabel(currentAction)
                     }
                     if let outputPreview {
                         Text(outputPreview)
@@ -437,8 +390,44 @@ struct SessionProcessRow: View {
             .fixedSize(horizontal: true, vertical: false)
     }
 
-    private var latestAction: String? {
+    private var currentAction: String? {
         SessionProcessRowPresentation.latestAction(for: process)
+    }
+
+    private func activityLabel(_ text: String) -> some View {
+        Label(text, systemImage: "hammer")
+            .font(TronTypography.code(size: TronTypography.sizeBody2, weight: .semibold))
+            .foregroundStyle(Color.tronTextSecondary)
+            .lineLimit(1)
+    }
+
+    private var metadataLine: String? {
+        let parts = [
+            process.model.map(SessionProcessRowPresentation.modelDisplayName),
+            process.thinking.map { "\($0.capitalized) thinking" },
+            startedText,
+        ].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private var countsLine: String? {
+        let parts = [
+            process.toolCount.map { SessionProcessRowPresentation.countLabel($0, singular: "tool") },
+            process.turnCount.map { SessionProcessRowPresentation.countLabel($0, singular: "turn") },
+            process.childCount.map { SessionProcessRowPresentation.countLabel($0, singular: "child") },
+            process.executionMode.displayName.isEmpty ? nil : process.executionMode.displayName,
+        ].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private var statusIcon: String {
+        switch process.lifecycle.state {
+        case .running: return "circle.fill"
+        case .queued: return "clock"
+        case .paused: return "pause.circle"
+        case .failed, .rejected, .interrupted: return "exclamationmark.circle"
+        default: return "checkmark.circle"
+        }
     }
 
     private var outputPreview: String? {
@@ -462,10 +451,7 @@ struct SessionProcessRow: View {
     }
 
     private var startedText: String? {
-        if style == .history {
-            return SessionProcessRowPresentation.completedText(for: process, relativeTo: now)
-        }
-        return SessionProcessRowPresentation.startedText(for: process, relativeTo: now)
+        SessionProcessRowPresentation.startedText(for: process, relativeTo: now)
     }
 
     private var elapsedMilliseconds: Int? {
@@ -478,7 +464,7 @@ struct SessionProcessRow: View {
             startedText,
             process.executionMode.displayName.isEmpty ? nil : process.executionMode.displayName,
             elapsedMilliseconds.map(SessionProcessRowPresentation.durationText),
-            latestAction,
+            currentAction,
             process.toolCount.map { SessionProcessRowPresentation.countLabel($0, singular: "tool") },
             process.turnCount.map { SessionProcessRowPresentation.countLabel($0, singular: "turn") },
         ].compactMap { $0 }
@@ -605,6 +591,18 @@ enum SessionProcessRowPresentation {
         case .paused: "PAUSED"
         default: "RECENT ACTIVITY"
         }
+    }
+
+    static func modelDisplayName(_ model: String) -> String {
+        let value = model.split(separator: "/").last.map(String.init) ?? model
+        return value
+            .replacingOccurrences(of: "-", with: " ")
+            .split(separator: " ")
+            .map {
+                if $0.lowercased() == "gpt" { return "GPT" }
+                return $0.first?.isNumber == true ? String($0).uppercased() : $0.prefix(1).uppercased() + $0.dropFirst()
+            }
+            .joined(separator: " ")
     }
 
     static func latestAction(for process: SessionProcessActivity) -> String? {

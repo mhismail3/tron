@@ -52,8 +52,11 @@ struct DashboardModeMenuButton: UIViewRepresentable {
         var parent: DashboardModeMenuButton
         init(parent: DashboardModeMenuButton) { self.parent = parent }
         func makeMenu() -> UIMenu {
-            UIMenu(title: "Dashboard", children: DashboardMode.allCases.map { mode in
-                let action = UIAction(title: mode.rawValue, image: UIImage(systemName: mode.systemImage), state: mode == parent.mode ? .on : .off) { [weak self] _ in
+            UIMenu(title: "", children: DashboardMode.allCases.map { mode in
+                let image = UIImage(systemName: mode.systemImage)?.withTintColor(
+                    UIColor(mode.accent), renderingMode: .alwaysOriginal
+                )
+                let action = UIAction(title: mode.rawValue, image: image, state: mode == parent.mode ? .on : .off) { [weak self] _ in
                     guard let self else { return }
                     Task { @MainActor in
                         await Task.yield()

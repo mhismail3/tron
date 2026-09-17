@@ -111,8 +111,8 @@ struct PackageConfigurationCoordinatorTests {
     @Test("resource categories retain Manage Session accents")
     func resourceCategoryAccents() {
         #expect(PackageResourceKind.extensions.accent == .tronPurple)
-        #expect(PackageResourceKind.skills.accent == .tronEmerald)
-        #expect(PackageResourceKind.prompts.accent == .tronCyan)
+        #expect(PackageResourceKind.skills.accent == .tronCyan)
+        #expect(PackageResourceKind.prompts.accent == ChatSemanticPillRole.prompt.accent)
         #expect(PackageResourceKind.themes.accent == .tronTeal)
     }
 

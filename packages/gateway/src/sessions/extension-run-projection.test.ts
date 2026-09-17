@@ -301,6 +301,8 @@ describe("projectExtensionRunActivity", () => {
             turnCount: 2,
             durationMs: 12_500,
             recentOutput: ["first", "latest"],
+            model: "openai-codex/gpt-5.6-luna",
+            thinking: "high",
           },
           sessionFile: "/private/project/session.jsonl",
         }],
@@ -315,6 +317,8 @@ describe("projectExtensionRunActivity", () => {
       durationMs: 12_500,
       currentTool: "read",
       currentPath: "file.swift",
+      model: "openai-codex/gpt-5.6-luna",
+      thinking: "high",
       children: [{ label: "reviewer", status: "running", toolCount: 4, currentPath: "file.swift" }],
     });
     expect(JSON.stringify(activity)).not.toContain("sessionFile");

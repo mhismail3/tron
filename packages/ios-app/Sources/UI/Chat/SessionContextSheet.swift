@@ -254,6 +254,14 @@ struct SessionContextSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItemGroup(placement: .topBarLeading) {
+                    Button { destination = .terminal } label: {
+                        Image(systemName: "terminal")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronEmerald)
+                    }
+                    .disabled(displayedPresentation == nil)
+                    .accessibilityLabel("Terminal")
+                    .accessibilityIdentifier("manage-session-terminal")
                     Button {
                         name = displayedPresentation?.name ?? ""
                         showRename = true
@@ -265,14 +273,6 @@ struct SessionContextSheet: View {
                     .disabled(displayedPresentation == nil)
                     .accessibilityLabel("Rename Session")
                     .accessibilityIdentifier("manage-session-rename")
-                    Button { destination = .terminal } label: {
-                        Image(systemName: "terminal")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
-                    }
-                    .disabled(displayedPresentation == nil)
-                    .accessibilityLabel("Terminal")
-                    .accessibilityIdentifier("manage-session-terminal")
                 }
                 ToolbarItem(placement: .principal) {
                     TronSheetTitle(title: "Manage Session", accent: .tronEmerald)

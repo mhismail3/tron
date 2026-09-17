@@ -203,6 +203,8 @@ function childRows(
       title: utf8Prefix(child.label, 512).value,
       ...(child.currentTool ? { currentTool: utf8Prefix(child.currentTool, 2_048).value } : {}),
       ...(child.currentPath ? { currentPathBasename: utf8Prefix(basename(child.currentPath), 2_048).value } : {}),
+      ...(child.model ? { model: utf8Prefix(child.model, 256).value } : {}),
+      ...(child.thinking ? { thinking: utf8Prefix(child.thinking, 64).value } : {}),
       ...(output ? { outputTail: output.value } : {}),
       outputTruncated: output?.truncated === true,
       ...(child.toolCount === undefined ? {} : { toolCount: Math.max(0, child.toolCount) }),

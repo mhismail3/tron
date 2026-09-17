@@ -145,7 +145,7 @@ struct ToolDetailSheet: View {
                     fullDiffButton(diff)
                     if density == .glance, diff.compactLines != diff.lines {
                         Text("Pull up for more context, or open the full diff.")
-                            .font(TronTypography.caption)
+                            .font(TronTypography.sans(size: TronTypography.sizeSecondary + TronSettingsLayoutPolicy.metadataSizeAdjustment))
                             .foregroundStyle(Color.tronTextMuted)
                     }
                 }
@@ -164,24 +164,14 @@ struct ToolDetailSheet: View {
         title: String? = nil
     ) -> some View {
         Button { showingChanges = true } label: {
-            HStack(spacing: 11) {
-                Image(systemName: "rectangle.stack.badge.plus")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                    .foregroundStyle(accent)
-                    .frame(width: 24)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title ?? diff.changesTitle)
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                        .foregroundStyle(Color.tronTextPrimary)
-                    Text(diff.changesSubtitle)
-                        .font(TronTypography.caption)
-                        .foregroundStyle(Color.tronTextSecondary)
-                }
-                Spacer(minLength: 8)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .contentShape(Rectangle())
+            TronSettingsRow(
+                icon: "rectangle.stack.badge.plus",
+                title: title ?? diff.changesTitle,
+                subtitle: diff.changesSubtitle,
+                accent: accent,
+                subtitleColor: Color.tronTextSecondary
+            )
+            .environment(\.tronSettingsSecondaryTextSizeAdjustment, TronSettingsLayoutPolicy.metadataSizeAdjustment)
         }
         .buttonStyle(.plain)
         .tronGlassSurface(accent: accent, tintOpacity: 0.08, interactive: true)
@@ -259,7 +249,7 @@ struct ToolDetailSheet: View {
 
     private func boundedPreviewNote(_ text: String) -> some View {
         Text(text)
-            .font(TronTypography.caption)
+            .font(TronTypography.sans(size: TronTypography.sizeSecondary + TronSettingsLayoutPolicy.metadataSizeAdjustment))
             .foregroundStyle(Color.tronTextMuted)
             .fixedSize(horizontal: false, vertical: true)
     }

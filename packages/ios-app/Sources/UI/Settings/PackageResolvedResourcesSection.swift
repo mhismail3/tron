@@ -14,6 +14,7 @@ struct PackageResolvedResourcesSection: View {
                         TronSettingsRow(icon: "tray", title: "No \(category.kind.title.lowercased()) are currently available.",
                                         accent: category.kind.accent)
                     }
+                    .environment(\.tronSettingsVisualTheme, nil)
                 } else {
                     TronSettingsGroup(category.kind.title, detail: category.summary, accent: category.kind.accent) {
                         VStack(spacing: 0) {
@@ -31,6 +32,9 @@ struct PackageResolvedResourcesSection: View {
                         }
                     }
                     .tronSettingsCaption(category.caption)
+                    // The package page may inherit a settings accent, but each
+                    // resource category owns the same hue as the chat picker.
+                    .environment(\.tronSettingsVisualTheme, nil)
                 }
             }
             if resources.objectValue?.isEmpty == false {

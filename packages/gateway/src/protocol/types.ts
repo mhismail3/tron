@@ -330,6 +330,9 @@ export interface ExtensionRunChild {
   currentTool?: string;
   currentToolStartedAt?: string;
   currentPath?: string;
+  /** Optional resolved child model metadata read from canonical producer status. */
+  model?: string;
+  thinking?: string;
   toolCount?: number;
   turnCount?: number;
   durationMs?: number;
@@ -412,6 +415,8 @@ export interface SessionProcessActivity {
   command?: string;
   currentTool?: string;
   currentPathBasename?: string;
+  model?: string;
+  thinking?: string;
   outputTail?: string;
   outputTruncated: boolean;
   toolCount?: number;

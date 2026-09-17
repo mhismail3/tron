@@ -23,13 +23,13 @@ enum PackageResourceKind: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    // Match the resource accents used by Manage Session so provenance remains
-    // legible when package resources are shown inline on this page.
-    var accent: Color {
+    // Prompt and skill accents are owned by the chat picker and shared with
+    // Project Resources. Package extensions retain their purple category hue.
+    @MainActor var accent: Color {
         switch self {
-        case .extensions: .tronPurple
-        case .skills: .tronEmerald
-        case .prompts: .tronCyan
+        case .extensions: ProjectResourceKind.extensions.accent
+        case .skills: ProjectResourceKind.skills.accent
+        case .prompts: ProjectResourceKind.prompts.accent
         case .themes: .tronTeal
         }
     }

@@ -671,6 +671,8 @@ function child(
   const currentTool = text(progress?.currentTool ?? source.currentTool ?? sourceActivity?.currentTool, 256);
   const currentToolStartedAt = isoTime(progress?.currentToolStartedAt ?? source.currentToolStartedAt ?? sourceActivity?.currentToolStartedAt);
   const currentPath = displayPath(progress?.currentPath ?? source.currentPath ?? sourceActivity?.currentPath);
+  const model = text(progress?.model ?? source.model ?? sourceActivity?.model, 256);
+  const thinking = text(progress?.thinking ?? source.thinking ?? sourceActivity?.thinking, 64);
   const toolCount = number(progress?.toolCount ?? source.toolCount ?? sourceActivity?.toolCount);
   const turnCount = number(progress?.turnCount ?? source.turnCount ?? sourceActivity?.turnCount);
   const durationMs = number(progress?.durationMs ?? source.durationMs);
@@ -715,6 +717,8 @@ function child(
     ...(currentTool ? { currentTool } : {}),
     ...(currentToolStartedAt ? { currentToolStartedAt } : {}),
     ...(currentPath ? { currentPath } : {}),
+    ...(model ? { model } : {}),
+    ...(thinking ? { thinking } : {}),
     ...(toolCount === undefined ? {} : { toolCount: Math.max(0, Math.round(toolCount)) }),
     ...(turnCount === undefined ? {} : { turnCount: Math.max(0, Math.round(turnCount)) }),
     ...(durationMs === undefined ? {} : { durationMs: Math.max(0, Math.round(durationMs)) }),

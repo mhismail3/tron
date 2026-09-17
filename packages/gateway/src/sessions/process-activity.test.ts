@@ -33,6 +33,8 @@ const subagent: ExtensionRunActivity = {
     childSessionRef: "child-session-1",
     durationMs: 1_800,
     toolCount: 2,
+    model: "openai-codex/gpt-5.6-luna",
+    thinking: "high",
   }],
   lifecycle: {
     version: 1,
@@ -66,6 +68,8 @@ describe("session process projection", () => {
     };
     const asyncProcess = subagentProcessesFromActivity("session", running)[0];
     expect(asyncProcess?.parentProcessId).toBeUndefined();
+    expect(asyncProcess?.model).toBe("openai-codex/gpt-5.6-luna");
+    expect(asyncProcess?.thinking).toBe("high");
     expect(subagentAbortRoute(
       asyncProcess,
       { runId: "run-1", producerId: "child-1" },

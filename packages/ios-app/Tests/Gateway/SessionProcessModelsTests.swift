@@ -30,6 +30,22 @@ struct SessionProcessModelsTests {
         #expect(SessionProcessProjection.sections([command, subagent]).recent.map(\.processId) == [subagent.processId])
     }
 
+    @Test("subagent metadata decodes and validates")
+    func subagentMetadata() throws {
+        let data = Data(#"""
+        {
+          "version":1,"processId":"process:subagent:metadata","kind":"subagent","executionMode":"asynchronous","source":"delegatedAgent",
+          "lifecycle":{"version":1,"state":"completed","attention":"none","sequence":4,"observedAt":"2026-01-01T00:00:02Z","terminalAt":"2026-01-01T00:00:01Z","recentUntil":"2026-01-01T00:05:01Z"},
+          "visibility":"recent","title":"worker","model":"openai-codex/gpt-5.6-luna","thinking":"high",
+          "outputTruncated":false
+        }
+        """#.utf8)
+        let process = try JSONDecoder.gateway.decode(SessionProcessActivity.self, from: data)
+        #expect(SessionProcessAdmissionPolicy.admits(process))
+        #expect(process.model == "openai-codex/gpt-5.6-luna")
+        #expect(process.thinking == "high")
+    }
+
     @Test("canonical history uses the Gateway activities key")
     func historyWireShape() throws {
         let data = Data(#"""

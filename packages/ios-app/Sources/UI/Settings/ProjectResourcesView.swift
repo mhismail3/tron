@@ -81,6 +81,8 @@ private struct ProjectResourceOverviewRow: Identifiable, Equatable, Sendable {
     let title: String
     let subtitle: String?
     let value: JSONValue
+    let resourceScope: CommandInfo.ResourceScope?
+    let resourceOrigin: CommandInfo.ResourceOrigin?
 }
 
 private struct ProjectResourceOverviewSection: Identifiable, Equatable, Sendable {
@@ -312,7 +314,13 @@ struct ProjectResourcesView: View {
                                 subtitle: row.subtitle,
                                 subtitleLineLimit: 1,
                                 accent: kind.accent
-                            )
+                            ) {
+                                ComposerResourceBadges(
+                                    origin: row.resourceOrigin,
+                                    scope: row.resourceScope,
+                                    accent: kind.accent
+                                )
+                            }
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("project-resource-\(kind.key)-\(index)")
@@ -368,7 +376,9 @@ struct ProjectResourcesView: View {
                     id: "\(kind.key):\(semanticID):\(index)",
                     title: title,
                     subtitle: resourceSubtitle(value),
-                    value: value
+                    value: value,
+                    resourceScope: value.objectValue?["scope"]?.stringValue.flatMap(CommandInfo.ResourceScope.init(rawValue:)),
+                    resourceOrigin: value.objectValue?["origin"]?.stringValue.flatMap(CommandInfo.ResourceOrigin.init(rawValue:))
                 )
             }
             return ProjectResourceOverviewSection(kind: kind, rows: rows)

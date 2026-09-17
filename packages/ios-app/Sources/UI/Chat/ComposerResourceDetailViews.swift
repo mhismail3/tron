@@ -72,7 +72,7 @@ struct ComposerResourceContentBody: View {
             }
             if preview.isTruncated {
                 Label("Content truncated", systemImage: "text.badge.minus")
-                    .font(TronTypography.caption)
+                    .font(TronTypography.sans(size: TronTypography.sizeSecondary + TronSettingsLayoutPolicy.metadataSizeAdjustment))
                     .foregroundStyle(Color.tronTextMuted)
             }
         }

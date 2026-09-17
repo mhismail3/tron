@@ -83,6 +83,8 @@ struct SessionProcessActivity: Codable, Hashable, Identifiable, Sendable {
     let command: String?
     let currentTool: String?
     let currentPathBasename: String?
+    let model: String?
+    let thinking: String?
     let outputTail: String?
     let outputTruncated: Bool
     let durationMs: Int?
@@ -112,6 +114,8 @@ struct SessionProcessActivity: Codable, Hashable, Identifiable, Sendable {
         command: String? = nil,
         currentTool: String? = nil,
         currentPathBasename: String? = nil,
+        model: String? = nil,
+        thinking: String? = nil,
         outputTail: String? = nil,
         outputTruncated: Bool = false,
         durationMs: Int? = nil,
@@ -136,6 +140,8 @@ struct SessionProcessActivity: Codable, Hashable, Identifiable, Sendable {
         self.command = command
         self.currentTool = currentTool
         self.currentPathBasename = currentPathBasename
+        self.model = model
+        self.thinking = thinking
         self.outputTail = outputTail
         self.outputTruncated = outputTruncated
         self.durationMs = durationMs
@@ -162,7 +168,7 @@ struct SessionProcessActivity: Codable, Hashable, Identifiable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case version, processId, kind, executionMode, source, parentProcessId, lifecycle, visibility,
-             startedAt, title, command, currentTool, currentPathBasename, outputTail, outputTruncated,
+             startedAt, title, command, currentTool, currentPathBasename, model, thinking, outputTail, outputTruncated,
              durationMs, toolCount, turnCount, childCount, toolCallId, runId, childSessionRef
     }
 }
@@ -251,6 +257,8 @@ enum SessionProcessAdmissionPolicy {
               process.startedAt.map(validTimestamp) ?? true,
               process.currentTool.map({ bounded($0, maximumStringBytes) }) ?? true,
               process.currentPathBasename.map(validBasename) ?? true,
+              process.model.map({ boundedNonempty($0, maximumStringBytes) }) ?? true,
+              process.thinking.map({ boundedNonempty($0, 128) }) ?? true,
               process.outputTail.map({ bounded($0, maximumOutputBytes, newlines: true) }) ?? true,
               process.toolCallId.map({ boundedNonempty($0, maximumStringBytes) }) ?? true,
               process.runId.map({ boundedNonempty($0, 512) }) ?? true,

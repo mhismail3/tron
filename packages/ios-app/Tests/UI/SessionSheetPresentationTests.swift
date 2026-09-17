@@ -795,6 +795,8 @@ final class SessionSheetPresentationTests: XCTestCase {
             try await withSheet(TronDocumentSheet(title: "Edit file") {
                 ToolDetailSheet(tool: tool, density: .glance)
             }.preferredColorScheme(scheme)) { controller in
+                // Capture the mounted shared settings row in both appearances;
+                // its subtitle typography is owned by TronSettingsRow.
                 self.capture(controller, name: "edit-detail-counts-\(scheme)")
             }
         }
@@ -1072,6 +1074,32 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testProjectResourcesRowsShowAuthoritativeScopeBadges() async throws {
+        try await withModel { model in
+            let resources: JSONValue = .object([
+                "prompts": .array([.object([
+                    "name": .string("review"), "description": .string("Review changes."),
+                    "scope": .string("project"), "origin": .string("top-level")
+                ])]),
+                "skills": .array([.object([
+                    "name": .string("audit"), "description": .string("Audit the code."),
+                    "scope": .string("user"), "origin": .string("top-level")
+                ])]),
+                "tools": .array([.object([
+                    "name": .string("read"), "description": .string("Read a file."),
+                    "scope": .string("user"), "origin": .string("package")
+                ])]),
+                "extensions": .array([])
+            ])
+            model.installHostedSecondaryProjection(context: nil, tree: [], commands: [], resources: resources)
+            try await withSheet(ProjectResourcesView(sessionID: "resource-fixture").environment(model)
+                .preferredColorScheme(.light)) { controller in
+                try await Task.sleep(for: .milliseconds(120))
+                self.capture(controller, name: "project-resources-scope-badges-light")
+            }
+        }
+    }
+
     func testProjectResourceDetailsLoadPromptAndSkillBodies() async throws {
         for kind in [ProjectResourceKind.prompts, .skills] {
             let gateway = ProcessSheetGatewayFixture()
@@ -1202,7 +1230,7 @@ final class SessionSheetPresentationTests: XCTestCase {
 
     func testCommandPromptContentContainerShowsCompleteScrollableBody() async throws {
         let content = (0..<40).map { "## Instruction \($0)\n\nComplete this step before continuing.\n" }.joined(separator: "\n") + "\nFINAL PROMPT INSTRUCTION"
-        let preview = ComposerResourceContentPresentation.preview(content, source: .prompt, sourceTruncated: false)
+        let preview = ComposerResourceContentPresentation.preview(content, source: .prompt, sourceTruncated: true)
         for scheme: ColorScheme in [.light, .dark] {
             try await withSheet(TronDocumentSheet(title: "Prompt") {
                 ScrollView {
@@ -1215,9 +1243,25 @@ final class SessionSheetPresentationTests: XCTestCase {
             }.preferredColorScheme(scheme)) { controller in
                 let scroll = try XCTUnwrap(self.views(of: UIScrollView.self, in: controller.view).first)
                 XCTAssertGreaterThan(scroll.contentSize.height, 2_000, "Prompt containers must include instructions beyond the extension excerpt limit")
+                // Capture the mounted shared content body; SwiftUI text is not
+                // guaranteed to materialize as UILabel, so the regression is
+                // the rendered component rather than an implementation detail.
+                self.capture(controller, name: "prompt-truncation-\(scheme)")
                 scroll.setContentOffset(CGPoint(x: 0, y: scroll.contentSize.height - scroll.bounds.height), animated: false)
                 controller.view.layoutIfNeeded()
                 self.capture(controller, name: "command-prompt-final-instructions-\(scheme)")
+            }
+        }
+    }
+
+    func testTruncationNoticeUsesSharedSecondaryDescriptionSurface() async throws {
+        let preview = ComposerResourceContentPresentation.Preview(text: "A bounded preview.", isTruncated: true)
+        for scheme: ColorScheme in [.light, .dark] {
+            try await withSheet(TronDocumentSheet(title: "Prompt") {
+                ComposerResourceContentBody(preview: preview, source: .prompt)
+                    .padding(18)
+            }.preferredColorScheme(scheme)) { controller in
+                self.capture(controller, name: "prompt-truncation-notice-\(scheme)")
             }
         }
     }
@@ -1434,6 +1478,20 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    private func subagentProcessFixture(state: SessionProcessLifecycleState) -> SessionProcessActivity {
+        SessionProcessActivity(
+            processId: state.rawValue, kind: .subagent, executionMode: .asynchronous, source: .delegatedAgent,
+            lifecycle: SessionProcessLifecycle(state: state, sequence: 1, observedAt: "2026-01-01T00:00:02Z",
+                terminalAt: state == .running ? nil : GatewayTimestamp.string(from: .now)),
+            visibility: state == .running ? .active : .recent,
+            startedAt: GatewayTimestamp.string(from: .now.addingTimeInterval(-42)),
+            title: state.displayName, currentTool: state == .running ? "read" : nil,
+            model: "openai-codex/gpt-5.6-luna", thinking: "high",
+            outputTail: "Reviewing the selected files.", durationMs: 42_000,
+            toolCount: 12, turnCount: 4, childCount: 1
+        )
+    }
+
     private func assertSubagentOpeningOffset(_ scroll: UIScrollView, isLong: Bool) {
         let top = -scroll.adjustedContentInset.top
         let tail = max(top, scroll.contentSize.height + scroll.adjustedContentInset.bottom - scroll.bounds.height)
@@ -1442,17 +1500,11 @@ final class SessionSheetPresentationTests: XCTestCase {
     }
 
     func testSubagentThemeRowsAndChildSheet() async throws {
-        let processes = [SessionProcessLifecycleState.running, .completed, .failed].map { state in
-            SessionProcessActivity(
-                processId: state.rawValue, kind: .subagent, executionMode: .asynchronous, source: .delegatedAgent,
-                lifecycle: SessionProcessLifecycle(state: state, sequence: 1, observedAt: "2026-01-01T00:00:02Z",
-                    terminalAt: state == .running ? nil : GatewayTimestamp.string(from: .now)),
-                visibility: state == .running ? .active : .recent,
-                startedAt: GatewayTimestamp.string(from: .now.addingTimeInterval(-42)),
-                title: state.displayName, currentTool: "read", outputTail: "Reviewing the selected files.",
-                durationMs: 42_000
-            )
-        }
+        let processes = [
+            subagentProcessFixture(state: .running),
+            subagentProcessFixture(state: .completed),
+            subagentProcessFixture(state: .failed),
+        ]
         for scheme: ColorScheme in [.light, .dark] {
             try await withSheet(NavigationStack {
                 ScrollView {

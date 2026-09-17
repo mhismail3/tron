@@ -1827,7 +1827,12 @@ headers/cookies, long and short credential flags, JSON/query keys, URL userinfo,
 blocks, recognizable provider tokens, JWTs, and high-entropy bearer-like strings without
 modifying canonical JSONL. `SessionProcessOverview` is the shallow composer authority:
 active/recent/problem counts, revision, Gateway `asOf`, and nearest expiry. High-frequency
-output remains in bounded process deltas and does not require a transcript rebuild.
+output remains in bounded process deltas and does not require a transcript rebuild. Optional
+resolved model and thinking metadata is copied only from bounded fields already present in
+the canonical producer status. The upstream producer does not publish durable completed-tool
+identity, so Gateway and iOS intentionally show only the authoritative current tool and
+bounded output; they do not invent or cache a last-tool record.
+
 
 The Gateway owns process recency for exactly five minutes from authoritative terminal
 admission. It converts that wall deadline to a monotonic in-process timer, emits a
