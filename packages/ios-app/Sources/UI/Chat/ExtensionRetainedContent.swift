@@ -47,6 +47,16 @@ struct ExtensionRetainedContent: Equatable {
     static let unknownProducer = "Unknown extension"
 }
 
+/// One presentation input for the general extension-content sheet. The
+/// presenting route owns where retained content comes from, so the sheet itself
+/// holds no read path.
+struct ExtensionWidgetsRoute: Equatable {
+    var content: ExtensionRetainedContent
+    var omittedContentCount: Int = 0
+
+    static let empty = ExtensionWidgetsRoute(content: ExtensionRetainedContent(entries: []))
+}
+
 enum ExtensionRetainedContentPolicy {
     /// A string widget is presentable only if it has visible, sanitized content.
     /// Empty or detail-hint-only widgets must not create an empty sheet.

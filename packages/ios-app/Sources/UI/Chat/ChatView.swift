@@ -177,6 +177,10 @@ struct ChatView: View {
             onCameraImage: { image in Task { await importCameraImage(image) } },
             processesPresented: processPresentationBinding,
             extensionWidgetsPresented: extensionWidgetsPresentationBinding,
+            extensionWidgets: ExtensionWidgetsRoute(
+                content: extensionRetainedContent,
+                omittedContentCount: omittedExtensionContentCount
+            ),
             interaction: interactionBinding,
             onInteractionClosed: closeInteractionPresentation,
             filesPresented: attachmentPresentationBinding(for: .files),
@@ -1597,13 +1601,23 @@ struct ChatView: View {
     }
 
     /// Retained extension content is derived from the authoritative snapshot on
-    /// every render; it never polls and never opens provider work.
+    /// every render; it never polls and never opens provider work. The sheet
+    /// receives this value, so widget updates replace its content in place
+    /// without recreating the sheet or resetting its scroll position.
     private var extensionRetainedContent: ExtensionRetainedContent {
         let presentation = selectedAuthoritativeSnapshot?.extensionPresentation
         return ExtensionRetainedContentPolicy.content(
             widgets: presentation?.semanticState.widgets,
             surfaces: presentation?.surfaces
         )
+    }
+
+    /// A partial projection must say so rather than implying completeness.
+    private var omittedExtensionContentCount: Int {
+        let presentation = selectedAuthoritativeSnapshot?.extensionPresentation
+        guard presentation?.projection?.complete == false else { return 0 }
+        let omitted = presentation?.projection?.omitted ?? []
+        return omitted.isEmpty ? 0 : omitted.count
     }
 
     private var pendingPresentedInteraction: ExtensionInteraction? {

@@ -128,6 +128,32 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
+    func testExtensionWidgetsSheetRendersRetainedContent() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-extension-widgets-fixture"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Extension widgets fixture"].waitForExistence(timeout: 10), app.debugDescription)
+        let sheet = app.otherElements["extension-widgets-sheet"]
+        XCTAssertTrue(sheet.waitForExistence(timeout: 5), app.debugDescription)
+        // Producer attribution for both retained kinds.
+        XCTAssertTrue(app.staticTexts["Goal"].waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["npm:fixture-extension"].exists)
+        // String widget lines render as native text.
+        XCTAssertTrue(app.staticTexts["Goal active"].exists)
+        XCTAssertTrue(app.staticTexts["Used 12k tokens"].exists)
+        // A retained read-only component frame renders its sanitized content.
+        let frameText = app.staticTexts.containing(
+            NSPredicate(format: "label CONTAINS[c] %@", "Frame progress 3 of 5")
+        ).firstMatch
+        XCTAssertTrue(frameText.waitForExistence(timeout: 3), app.debugDescription)
+        // Admitted-but-unpresentable content is disclosed, not silently dropped.
+        XCTAssertTrue(app.staticTexts["Some extension content is not shown on this device yet."].exists)
+        keepScreenshot(named: "extension-widgets-sheet-content")
+        app.buttons["Done"].tap()
+        XCTAssertFalse(sheet.waitForExistence(timeout: 2))
+    }
+
+    @MainActor
     func testAskUserClosePreservesSelectionsAndOtherDraftOnReopen() {
         let app = launchAskUser()
         waitForAskUserForm(in: app)

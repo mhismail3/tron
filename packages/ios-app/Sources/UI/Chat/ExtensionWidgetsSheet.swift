@@ -8,8 +8,12 @@ import SwiftUI
 /// execution and starts no provider work: it renders the current authoritative
 /// session projection and disappears with the sheet.
 struct ExtensionWidgetsSheet: View {
-    let sessionID: String
-    @Environment(AppModel.self) private var model
+    /// Content is an input, not a second read path: the presenting route owns
+    /// where retained content comes from, so this sheet stays a pure function of
+    /// the authoritative projection it was given.
+    let content: ExtensionRetainedContent
+    /// Bounded count of admitted-but-unpresentable content, if any.
+    var omittedContentCount: Int = 0
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -38,24 +42,6 @@ struct ExtensionWidgetsSheet: View {
         .tronSettingsVisualTheme(accent: .tronIndigo)
         .tronPresentation()
         .accessibilityIdentifier("extension-widgets-sheet")
-    }
-
-    /// Live authoritative read: widget updates replace this content in place
-    /// without recreating the sheet or resetting its scroll position.
-    private var content: ExtensionRetainedContent {
-        let presentation = model.authoritativeSnapshot(for: sessionID)?.extensionPresentation
-        return ExtensionRetainedContentPolicy.content(
-            widgets: presentation?.semanticState.widgets,
-            surfaces: presentation?.surfaces
-        )
-    }
-
-    /// A partial projection must say so rather than implying the list is complete.
-    private var omittedContentCount: Int {
-        let presentation = model.authoritativeSnapshot(for: sessionID)?.extensionPresentation
-        guard presentation?.projection?.complete == false else { return 0 }
-        let omitted = presentation?.projection?.omitted ?? []
-        return omitted.isEmpty ? 0 : omitted.count
     }
 
     @ViewBuilder

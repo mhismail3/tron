@@ -89,6 +89,7 @@ struct HostedAskUserFixtureView: View {
                 onCameraImage: { _ in },
                 processesPresented: $processesPresented,
                 extensionWidgetsPresented: $extensionWidgetsPresented,
+                extensionWidgets: .empty,
                 interaction: $interaction,
                 onInteractionClosed: { value in
                     interaction = nil
