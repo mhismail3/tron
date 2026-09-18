@@ -1907,6 +1907,64 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    @Test("an empty session renders command and notification pills before its first reply")
+    func emptySessionMaterializesExtensionPills() async throws {
+        try await withTestWatchdog(timeout: .seconds(15)) {
+            var empty = try SessionScenarioBuilder(seed: 1_193).openingTail(targetEncodedBytes: 10_000)
+            empty.transcript = []
+            empty.transcriptStart = 0
+            empty.transcriptTotal = 0
+            empty.toolExecutions = []
+            let initial = empty
+            try await withHarness(snapshot: initial) { harness in
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady }
+                var running = initial
+                running.phase = .running
+                // Slash commands have no optimistic user row. The first
+                // installed content can consist entirely of compact pills.
+                running.transcript = try decodeTranscriptFixture([TranscriptItem].self, from: Data("""
+                [
+                {"id":"command","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"customEntry","customType":"tron.chat-invocation.v1","semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"command","origin":{"kind":"extension","ownerId":"extension:goal","title":"Pi Goal","confidence":"adapter"},"invocationId":"invocation","operationId":"operation","sequence":1,"lifecycle":"completed","resourceInvocation":{"source":"extension","name":"goal","arguments":"Reply ok"}}},
+                {"id":"notice","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"customEntry","customType":"tron.extension-notification.v1","data":{"writer":"gateway","version":1,"receiptId":"notification:goal","sessionId":"session","message":"Goal created.","tone":"info","origin":{"kind":"extension","ownerId":"extension:goal","title":"Pi Goal","confidence":"receipt"},"sequence":1,"createdAt":"2026-01-01T00:00:00.000Z"},"semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"status","origin":{"kind":"extension","ownerId":"extension:goal","title":"Pi Goal","confidence":"receipt"},"sequence":1}}
+                ]
+                """.utf8))
+                running.transcriptTotal = running.transcript.count
+                running.revision += 1
+                running.eventSequence += 1
+                let installBaseline = harness.probeObservation.projectionInstallCount
+                harness.replaceAuthoritativeSnapshot(running)
+                let rendered = try await harness.recorder.waitUntil {
+                    $0.observation.projectionInstallCount > installBaseline
+                        && $0.nativeRows.filter { $0.isVisible && $0.frame.height > 20 }.count == 2
+                }
+                #expect(rendered.observation.geometry.contentHeight > 64)
+                let pillIdentities = Dictionary(uniqueKeysWithValues: rendered.nativeRows.map {
+                    ($0.semanticID, $0.instance)
+                })
+
+                var completed = running
+                completed.phase = .idle
+                completed.transcript.append(try harnessAssistantMessage(
+                    id: "first-reply", presentationID: "first-reply", text: "ok"
+                ))
+                completed.transcriptTotal = completed.transcript.count
+                completed.revision += 1
+                completed.eventSequence += 1
+                harness.replaceAuthoritativeSnapshot(completed)
+                let reply = try await harness.recorder.waitUntil {
+                    $0.nativeRows.contains {
+                        $0.semanticID == "first-reply" && $0.isVisible && $0.frame.height > 20
+                    } && $0.nativeRows.filter { $0.isVisible && $0.frame.height > 20 }.count == 3
+                }
+                // The first reply must not require remounting the chat or its
+                // existing pills to become visible.
+                for (id, instance) in pillIdentities {
+                    #expect(reply.nativeRows.first { $0.semanticID == id }?.instance == instance)
+                }
+            }
+        }
+    }
+
     @Test("running tool entrance uses displayed install when desired completion advances first")
     func displayedInstallOwnsRunningToolEntrance() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
@@ -2792,8 +2850,8 @@ final class ChatViewScrollHarness {
     ) throws {
         self.snapshot = snapshot
         transcriptIDs = Set(snapshot.transcript.map(\.id)).union(["transcript-bottom"])
-        firstTranscriptID = try Self.require(snapshot.transcript.first?.id)
-        lastTranscriptID = try Self.require(snapshot.transcript.last?.id)
+        firstTranscriptID = snapshot.transcript.first?.id ?? "transcript-bottom"
+        lastTranscriptID = snapshot.transcript.last?.id ?? "transcript-bottom"
         let signposts = RecordingPerformanceSignposts()
         self.signposts = signposts
         suiteName = dependencies.suiteName

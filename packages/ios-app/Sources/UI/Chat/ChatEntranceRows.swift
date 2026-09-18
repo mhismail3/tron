@@ -38,7 +38,11 @@ enum ChatEntranceGrowthPolicy {
     static func height(natural: CGFloat, progress: CGFloat) -> CGFloat {
         guard natural.isFinite, natural > 0 else { return 0 }
         guard natural <= maximumAnimatedHeight else { return natural }
-        return natural * normalizedProgress(progress)
+        // A zero-height run of pending compact pills can be culled by the
+        // lazy stack before placement, preventing the geometry that admits
+        // their entrance. Keep an invisible layout footprint, not a new view
+        // identity or retry; opacity still hides the pending content.
+        return min(natural, max(1, natural * normalizedProgress(progress)))
     }
 
     static func requiresClip(progress: CGFloat) -> Bool {

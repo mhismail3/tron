@@ -73,7 +73,6 @@ struct SessionShellView: View {
     @State private var search = ""
     @State private var showingSearch = false
     @State private var presentedSession: AppModel.SessionNavigationRoute?
-    @State private var stagedNavigationRoute: AppModel.SessionNavigationRoute?
     @State private var sessionToDelete: SessionSummary?
     @State private var sessionToRename: SessionSummary?
     @State private var renameName = ""
@@ -112,13 +111,12 @@ struct SessionShellView: View {
         dashboardNavigation
             .tronManagedSheet(
                 isPresented: $showNewSession,
-                identity: "dashboard.new-session",
-                onDismiss: { deliverStagedNavigationRoute() }
+                identity: "dashboard.new-session"
             ) {
                 NewSessionSheet(initialDraftText: knowledgeDraftText, pinnedProfileID: knowledgeDraftIdentity?.profileID) { route in
                     knowledgeDraftText = nil
                     knowledgeDraftIdentity = nil
-                    stageNavigationRoute(route)
+                    present(route)
                 }
                     .tronTopBlur(.sheet)
                     .presentationDetents([.medium, .large], selection: $newSessionDetent)
@@ -126,12 +124,11 @@ struct SessionShellView: View {
             }
             .tronManagedSheet(
                 isPresented: $showSettings,
-                identity: "dashboard.settings",
-                onDismiss: { deliverStagedNavigationRoute() }
+                identity: "dashboard.settings"
             ) {
                 SettingsView(onImported: { route in
-                    stageNavigationRoute(route)
                     showSettings = false
+                    present(route)
                 })
                 .presentationDragIndicator(.hidden)
             }
@@ -378,27 +375,6 @@ struct SessionShellView: View {
         )
     }
 
-    /// A sheet that creates or imports a session must not open its destination
-    /// itself. The destination would mount beneath the still-presented sheet,
-    /// where a covered chat cannot publish the native geometry its opening
-    /// transaction needs; the open can then stall or be cancelled before it is
-    /// revealed, leaving a blank transcript until a fresh mount. Stage the
-    /// route and let the managed sheet's dismissal edge deliver it.
-    private func stageNavigationRoute(_ route: AppModel.SessionNavigationRoute) {
-        stagedNavigationRoute = route
-        // A sheet dismissed before its session finished being created has no
-        // dismissal edge left to deliver it, so deliver on that late path only.
-        if !showNewSession, !showSettings { deliverStagedNavigationRoute() }
-    }
-
-    private func deliverStagedNavigationRoute() {
-        guard let route = stagedNavigationRoute else { return }
-        stagedNavigationRoute = nil
-        // `present` retains the exact route-currency guard, so a superseded
-        // request is dropped by the same authority that admits live ones.
-        present(route)
-    }
-
     private func present(_ route: AppModel.SessionNavigationRoute) {
         guard model.ownsNavigationRoute(route) else { return }
         navigationOwner.invalidate()
@@ -449,9 +425,6 @@ struct SessionShellView: View {
     private func presentPushNavigation(_ request: AppModel.PushNavigationRequest) async {
         navigationOwner.invalidate()
         routeReplacementOwner.invalidate()
-        // An arriving push target owns the presentation; a sheet handoff that
-        // has not been delivered yet must not compete with it.
-        stagedNavigationRoute = nil
         showNewSession = false
         showSettings = false
         showingServerFilter = false
