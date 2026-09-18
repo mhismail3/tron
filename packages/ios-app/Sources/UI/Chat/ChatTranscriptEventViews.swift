@@ -183,9 +183,7 @@ struct ExtensionChipGroupDetailsSheet: View {
                         }
                         .padding(.top, TronSpacing.sm)
                     } label: {
-                        Text("Technical details")
-                            .font(TronTypography.sheetSectionHeader)
-                            .foregroundStyle(Color.tronTextPrimary)
+                        TronTechnicalSectionLabel("Technical details")
                     }
                 }
                 .padding(18)
@@ -194,6 +192,10 @@ struct ExtensionChipGroupDetailsSheet: View {
             .defaultScrollAnchor(.top, for: .initialOffset)
             .defaultScrollAnchor(.top, for: .sizeChanges)
             .tronScrollEdgeChrome()
+            // Use the shared inline sheet chrome; a default large title leaves
+            // an oversized empty region before the first activity section.
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     TronSheetTitle(title: "Extension activity", accent: accent)
@@ -202,7 +204,7 @@ struct ExtensionChipGroupDetailsSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .foregroundStyle(accent)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -272,7 +274,8 @@ struct ExtensionChipGroupDetailsSheet: View {
                 if duplicateOf == nil {
                     TronMarkdownView(text: text.isEmpty ? "No text content" : text, streaming: false)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(TronSpacing.lg)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
                         .tronGlassSurface(accent: .tronPurple, tintOpacity: 0.08)
                 } else {
                     duplicateNote(for: event)
@@ -304,22 +307,20 @@ struct ExtensionChipGroupDetailsSheet: View {
 
     private func readableHeader(_ title: String, producer: String) -> some View {
         VStack(alignment: .leading, spacing: TronSpacing.xs) {
-            Text(title)
-                .font(TronTypography.sheetSectionHeader)
-                .foregroundStyle(Color.tronTextPrimary)
+            TronTechnicalSectionLabel(title)
             Text(producer)
                 .font(TronTypography.caption)
                 .foregroundStyle(Color.tronTextMuted)
         }
-        .accessibilityAddTraits(.isHeader)
     }
 
     private func readableCard(_ text: String, accent: Color) -> some View {
         Text(text)
-            .font(TronTypography.body)
+            .font(TronTypography.bodySM)
             .foregroundStyle(Color.tronTextPrimary)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(TronSpacing.lg)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
             .tronGlassSurface(accent: accent, tintOpacity: 0.08)
     }
 
@@ -328,33 +329,52 @@ struct ExtensionChipGroupDetailsSheet: View {
             Text(title)
                 .font(TronTypography.sheetSectionHeader)
                 .foregroundStyle(Color.tronTextPrimary)
-            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                HStack(alignment: .firstTextBaseline, spacing: TronSpacing.sm) {
-                    Text(item.title)
-                        .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(accent)
-                    Spacer(minLength: TronSpacing.sm)
-                    Text(item.value)
-                        .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(Color.tronTextSecondary)
-                        .multilineTextAlignment(.trailing)
+            VStack(alignment: .leading, spacing: TronSpacing.sm) {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    if item.title == "Objective" {
+                        VStack(alignment: .leading, spacing: TronSpacing.xs) {
+                            Text(item.title)
+                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                                .foregroundStyle(accent)
+                            Text(item.value)
+                                .font(TronTypography.secondaryDescription)
+                                .foregroundStyle(Color.tronTextSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    } else {
+                        HStack(alignment: .firstTextBaseline, spacing: TronSpacing.sm) {
+                            Text(item.title)
+                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                                .foregroundStyle(accent)
+                            Spacer(minLength: TronSpacing.sm)
+                            Text(item.value)
+                                .font(TronTypography.secondaryDescription)
+                                .foregroundStyle(Color.tronTextSecondary)
+                                .multilineTextAlignment(.trailing)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                 }
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .tronGlassSurface(accent: accent, tintOpacity: 0.08)
         }
-        .padding(TronSpacing.lg)
-        .tronGlassSurface(accent: accent, tintOpacity: 0.08)
     }
 
     private func statusLine(_ label: String, _ value: String, accent: Color) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: TronSpacing.sm) {
             Text(label)
-                .font(TronTypography.sheetSectionHeader)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                 .foregroundStyle(accent)
             Text(value)
                 .font(TronTypography.secondaryDescription)
                 .foregroundStyle(Color.tronTextSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .tronGlassSurface(accent: accent, tintOpacity: 0.08)
     }
 
     @ViewBuilder

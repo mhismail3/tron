@@ -1681,8 +1681,13 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
         try await withSheet(ExtensionChipGroupDetailsSheet(group: group)) { controller in
             for _ in 0..<8 { try await DisplayFrameScheduler.displayLink.nextFrame() }
-            XCTAssertNotNil(self.views(of: UINavigationBar.self, in: controller.view).first)
-            XCTAssertGreaterThan(controller.view.bounds.height, 0)
+            let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
+            self.assertToolbarPaint(.tronPurple, bar: bar, leading: false, controller: controller)
+            let scroll = try XCTUnwrap(self.views(of: UIScrollView.self, in: controller.view).first)
+            XCTAssertGreaterThan(scroll.contentSize.height, 0)
+            XCTAssertEqual(scroll.contentOffset.y, -scroll.adjustedContentInset.top, accuracy: 2,
+                           "Sheet content should begin at the top rather than below a large-title spacer")
+            XCTAssertGreaterThan(bar.bounds.height, 0)
             // SwiftUI text is drawn, not backed by UILabels in this host.
             // Inspect the rendered content rather than the projection helper.
             let image = UIGraphicsImageRenderer(size: controller.view.bounds.size).image { _ in
@@ -1696,7 +1701,20 @@ final class SessionSheetPresentationTests: XCTestCase {
             XCTAssertTrue(lines.contains { $0.contains("Preserved objective") }, "Deduplicating prose must retain structured context: \(lines)")
             XCTAssertTrue(lines.contains { $0.contains("Active") })
             XCTAssertEqual(lines.filter { $0.contains("Goal created.") }.count, 1)
-            self.capture(controller, name: "combined-extension-chip-details")
+            self.capture(controller, name: "combined-extension-chip-details-purple")
+        }
+
+        let centeredItems = items.filter { $0.id == "command" || $0.id == "notice" }
+        let centered = try XCTUnwrap(ChatExtensionChipAggregationPolicy.aggregate(
+            centeredItems.map(ChatTranscriptRenderItem.transcript)
+        ).compactMap({ item -> ChatExtensionChipGroup? in
+            guard case .notification(let presentation) = item else { return nil }
+            return presentation.extensionGroup
+        }).first)
+        try await withSheet(ExtensionChipGroupDetailsSheet(group: centered)) { controller in
+            let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
+            self.assertToolbarPaint(.tronBlue, bar: bar, leading: false, controller: controller)
+            self.capture(controller, name: "combined-extension-chip-details-blue")
         }
     }
 
