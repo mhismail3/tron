@@ -497,8 +497,14 @@ and invalid advanced JSON retain the previous valid configuration. Reset/inherit
 only on confirmed exact-revision completion, and proxy text is then scrubbed. Every textual toolbar action uses the shared system-weight label with a leading SF Symbol (or its
 in-progress indicator); toolbar typography does not impose bold, semibold, or medium text. Explicit credential/message-edit submit actions retain the shared outline `externaldrive` symbol; ordinary preference editing no longer has Save actions. The dashboard Settings
 action is deliberately icon-only and retains an explicit accessibility label. Technical-detail sheets use the shared
-`TronTechnicalMetadataSection`/`TronTechnicalSectionLabel` treatment and drill into bounded JSON through
-`TronTechnicalJSONRow` instead of inventing sheet-local metadata cards or displaying large raw payloads inline. Custom provider editors use shared plain value fields and an API-format value capsule. Their sheet
+`TronMetadataTable`/`TronTechnicalSectionLabel` treatment and drill into bounded JSON through
+`TronTechnicalJSONRow` instead of inventing sheet-local metadata cards or displaying large raw payloads inline.
+One component owns the section label, the divided glass card, and the row geometry, so the icon-led
+`TronTechnicalMetadataSection` (runtime facts, tool metadata, server info) and the generalized JSON table
+(`TronStructuredJSONView`, and every nested field sheet it opens) read identically; a layout test pins their
+equal height for equal rows. The JSON table is that same table without icons: each row keeps its title,
+qualifies it with the value's JSON type in the smaller secondary scale, and right-aligns a bounded
+preview — the complete value stays behind the row's progressive target. Custom provider editors use shared plain value fields and an API-format value capsule. Their sheet
 identity follows the stable provider draft ID, not the identifier being typed. Each row has one Configure
 capsule; a leading Remove action inside its editor opens `TronConfirmationSheet`. Provider field bindings
 resolve by UUID and cannot update a removed or reordered neighbor during dismissal.

@@ -175,7 +175,6 @@ struct TronStructuredJSONView: View {
     var rootValue: JSONValue? = nil
     var pathComponents: [StructuredJSONPathComponent] = []
     @State private var selectedField: JSONFieldSelection?
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var authoritativeRoot: JSONValue { rootValue ?? value }
 
@@ -191,7 +190,6 @@ struct TronStructuredJSONView: View {
             case .bool(let value): primitive(value ? "True" : "False")
             case .null: primitive("No value")
             }
-
             if showsRawDisclosure {
                 TronTechnicalJSONRow(value: value)
             }
@@ -213,58 +211,26 @@ struct TronStructuredJSONView: View {
         if fields.isEmpty {
             primitive("Empty collection")
         } else {
-            VStack(alignment: .leading, spacing: TronSpacing.md) {
-                if showsSectionHeader {
-                    Text(title.uppercased())
-                        .font(TronTypography.sheetSectionHeader)
-                        .foregroundStyle(Color.tronTextMuted)
-                }
-                TronGlassCard(accent: accent) {
-                    LazyVStack(spacing: 0) {
-                        ForEach(fields) { field in
-                            if field.position > 0 {
-                                Divider().overlay(accent.opacity(0.14))
-                                    .padding(.leading, TronSettingsLayoutPolicy.rowHorizontalPadding)
-                            }
-                            Button {
-                                selectedField = JSONFieldSelection(
-                                    title: field.label,
-                                    components: pathComponents + [field.component]
-                                )
-                            } label: {
-                                let layout = dynamicTypeSize.isAccessibilitySize
-                                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-                                    : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
-                                layout {
-                                    Text(field.label)
-                                        .font(TronTypography.bodySM.weight(.semibold))
-                                        .foregroundStyle(Color.tronTextPrimary)
-                                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
-                                        .layoutPriority(1)
-                                    Text(field.typeLabel)
-                                        .font(TronTypography.secondaryDescription)
-                                        .foregroundStyle(Color.tronTextMuted)
-                                        .fixedSize(horizontal: true, vertical: false)
-                                    Text(field.valuePreview)
-                                        .font(TronTypography.code(size: TronTypography.sizeBodySM))
-                                        .foregroundStyle(Color.tronTextSecondary)
-                                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
-                                        .truncationMode(.head)
-                                        .frame(maxWidth: .infinity, alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
-                                }
-                                .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
-                                .padding(.vertical, 12)
-                                .frame(minHeight: TronSettingsLayoutPolicy.rowMinimumHeight)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityElement(children: .ignore)
-                            .accessibilityLabel("\(field.label), \(field.typeLabel), \(field.valuePreview)")
-                            .accessibilityHint("Opens the complete value")
-                        }
-                    }
-                }
+            // The generalized JSON table is the standard metadata table without
+            // icons: the value's JSON type qualifies its title and each row is a
+            // progressive target for the complete value.
+            let selections = fields.map {
+                JSONFieldSelection(title: $0.label, components: pathComponents + [$0.component])
             }
+            let rows = fields.map {
+                TronMetadataTableRow(id: String($0.position), title: $0.label,
+                                     value: $0.valuePreview, type: $0.typeLabel)
+            }
+            TronMetadataTable(
+                title: showsSectionHeader ? title : nil,
+                accent: accent,
+                rows: rows,
+                valueStyle: .preview,
+                onSelect: { row in
+                    guard let index = rows.firstIndex(where: { $0.id == row.id }) else { return }
+                    selectedField = selections[index]
+                }
+            )
         }
     }
 

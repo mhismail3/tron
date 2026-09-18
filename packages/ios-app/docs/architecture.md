@@ -1602,8 +1602,10 @@ for older Gateways and canonical history, handling both fractional and whole-sec
 repeated formatter allocation. Technical execution rows use compact selectable label/value geometry; a bounded bash
 preview records its completeness fact there, followed by on-demand Request JSON and Result JSON summary rows
 with explicit `null` for a truly missing side. Tool sheets foreground readable live/completed output before generic extension
-metadata. Actual JSON text and structured-only results use the shared field table, which owns exactly one section title
-and places field name, short data type, and code-family value on one row; Accessibility Dynamic Type stacks those values.
+metadata. Actual JSON text and structured-only results use the same `TronMetadataTable` every technical-detail sheet
+uses, so the section title, divided card, and row geometry are one implementation; the JSON table simply drops
+the leading icon and shows the field name, its short data type in the smaller secondary scale, and a
+right-aligned code-family preview on one row; Accessibility Dynamic Type stacks those values.
 Complete values remain available by tapping the row. SDK content/details envelopes are unwrapped, and empty envelopes
 show the waiting/no-output state rather than transport fields. Raw JSON stays behind Technical details; response data
 wins over JSON-text fallback, and a fallback identical to Request is rejected. Raw JSON sheet edit/done controls inherit
