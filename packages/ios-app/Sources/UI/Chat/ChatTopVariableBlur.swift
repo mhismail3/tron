@@ -13,27 +13,13 @@ enum TronTopBlurStyle {
     case toolDetail
     case logs
 
-    /// The band's total depth, measured from the surface's top edge. It ends
-    /// where resting content begins: a presented sheet's content starts below
-    /// its own inset plus the inline navigation bar (70pt) and its own padding
-    /// (18pt), so the band must not reach past that or the first row reads
-    /// washed out before any scrolling.
     var height: CGFloat {
         switch self {
-        case .chat, .dashboard: 176
-        case .sheet, .toolDetail: 88
+        case .chat: 176
+        case .dashboard: 176
+        case .sheet: 116
+        case .toolDetail: 100
         case .logs: 184
-        }
-    }
-
-    /// The part of the band that stays fully covered: the surface's own top
-    /// inset and its navigation chrome. Only the remainder is the soft edge into
-    /// content. The chat/dashboard header and the logs destination keep their
-    /// previous opaque depth.
-    var solidHeight: CGFloat {
-        switch self {
-        case .chat, .dashboard, .logs: (TronTopBlurProfile.baseSolidFraction * height).rounded()
-        case .sheet, .toolDetail: 70
         }
     }
 
@@ -46,55 +32,35 @@ enum TronTopBlurStyle {
     }
 }
 
-/// One profile builder for both blur paths and the tint. A band holds its full
-/// effect through `solidFraction` and then eases out over the remainder, so the
-/// chrome is covered and resting content is not.
-enum TronTopBlurProfile {
-    /// The fraction every base stop is expressed against: stops at or below it
-    /// belong to the solid band, later stops to the fade.
-    static let baseSolidFraction: CGFloat = 0.30
-
-    static func locations(solidFraction: CGFloat, base: [CGFloat]) -> [CGFloat] {
-        let solid = min(max(solidFraction, 0), 1)
-        let scale = baseSolidFraction > 0 ? solid / baseSolidFraction : 0
-        let tailScale = baseSolidFraction < 1 ? (1 - solid) / (1 - baseSolidFraction) : 0
-        return base.map { fraction in
-            fraction <= baseSolidFraction
-                ? fraction * scale
-                : solid + (fraction - baseSolidFraction) * tailScale
-        }
-    }
-
-    /// How much of a band stays solid before its fade, as a location fraction.
-    static func solidFraction(of style: TronTopBlurStyle) -> CGFloat {
-        guard style.height > 0 else { return 0 }
-        return min(max(style.solidHeight / style.height, 0), 1)
-    }
-}
-
 struct TronTopBlurOverlay: View {
     let style: TronTopBlurStyle
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        let solid = TronTopBlurProfile.solidFraction(of: style)
-        // Dark mode uses a dark material plus black tint so it stays soft
-        // without the regular UIBlurEffect's gray lift.
-        let tint: [Color] = colorScheme == .dark
-            ? [.black.opacity(0.46), .black.opacity(0.40), .black.opacity(0.24), .black.opacity(0.08), .clear]
-            : [
-                Color.tronBackground.opacity(0.98), Color.tronBackground.opacity(0.94),
-                Color.tronBackground.opacity(0.72), Color.tronBackground.opacity(0.28), .clear,
-            ]
-        let tintLocations = TronTopBlurProfile.locations(solidFraction: solid, base: [0, 0.25, 0.5, 0.75, 1])
-        let stops = Array(zip(tint, tintLocations)).map { Gradient.Stop(color: $0.0, location: $0.1) }
         ZStack {
-            ChatTopVariableBlur(
-                maxBlurRadius: style.radius,
-                darkMode: colorScheme == .dark,
-                solidFraction: solid
+            // Keep the native/variable backdrop blur and radius unchanged.
+            // Dark mode uses a dark material plus black tint so it stays soft
+            // without the regular UIBlurEffect's gray lift.
+            ChatTopVariableBlur(maxBlurRadius: style.radius, darkMode: colorScheme == .dark)
+            LinearGradient(
+                colors: colorScheme == .dark
+                    ? [
+                        Color.black.opacity(0.46),
+                        Color.black.opacity(0.40),
+                        Color.black.opacity(0.24),
+                        Color.black.opacity(0.08),
+                        Color.clear,
+                    ]
+                    : [
+                        Color.tronBackground.opacity(0.98),
+                        Color.tronBackground.opacity(0.94),
+                        Color.tronBackground.opacity(0.72),
+                        Color.tronBackground.opacity(0.28),
+                        Color.clear,
+                    ],
+                startPoint: .top,
+                endPoint: .bottom
             )
-            LinearGradient(stops: stops, startPoint: .top, endPoint: .bottom)
         }
         .frame(maxWidth: .infinity)
         .frame(height: style.height)
@@ -216,14 +182,12 @@ struct ChatTopVariableBlur: UIViewRepresentable {
     var maxBlurRadius: CGFloat = 18
     var darkMode = false
     var fadesFromBottom = false
-    var solidFraction: CGFloat = TronTopBlurProfile.baseSolidFraction
 
     func makeUIView(context: Context) -> VariableBackdropBlurView {
         VariableBackdropBlurView(
             maxBlurRadius: maxBlurRadius,
             darkMode: darkMode,
-            fadesFromBottom: fadesFromBottom,
-            solidFraction: solidFraction
+            fadesFromBottom: fadesFromBottom
         )
     }
 
@@ -231,7 +195,6 @@ struct ChatTopVariableBlur: UIViewRepresentable {
         blurView.maxBlurRadius = maxBlurRadius
         blurView.darkMode = darkMode
         blurView.fadesFromBottom = fadesFromBottom
-        blurView.solidFraction = solidFraction
     }
 }
 
@@ -263,19 +226,6 @@ final class VariableBackdropBlurView: UIVisualEffectView {
         }
     }
 
-    /// Fraction of the band that stays fully covered before the fade begins.
-    var solidFraction: CGFloat {
-        didSet {
-            guard solidFraction != oldValue else { return }
-            installEdgeMask()
-            #if TRON_PRIVATE_VARIABLE_BLUR
-            renderedMask = nil
-            configuredRadius = nil
-            #endif
-            setNeedsLayout()
-        }
-    }
-
     private let edgeMask = CAGradientLayer()
 
     #if TRON_PRIVATE_VARIABLE_BLUR
@@ -287,16 +237,10 @@ final class VariableBackdropBlurView: UIVisualEffectView {
     private var renderedMaskScale: CGFloat = 0
     #endif
 
-    init(
-        maxBlurRadius: CGFloat,
-        darkMode: Bool = false,
-        fadesFromBottom: Bool = false,
-        solidFraction: CGFloat = TronTopBlurProfile.baseSolidFraction
-    ) {
+    init(maxBlurRadius: CGFloat, darkMode: Bool = false, fadesFromBottom: Bool = false) {
         self.maxBlurRadius = maxBlurRadius
         self.darkMode = darkMode
         self.fadesFromBottom = fadesFromBottom
-        self.solidFraction = solidFraction
         #if TRON_PRIVATE_VARIABLE_BLUR
         variableBlurFilter = TronMakePrivateVariableBlurFilter()
         #endif
@@ -334,10 +278,7 @@ final class VariableBackdropBlurView: UIVisualEffectView {
 
     private func installEdgeMask() {
         edgeMask.colors = Self.edgeMaskColors
-        edgeMask.locations = TronTopBlurProfile.locations(
-            solidFraction: solidFraction,
-            base: Self.edgeMaskBaseLocations
-        ).map { NSNumber(value: $0) }
+        edgeMask.locations = Self.edgeMaskLocations
         edgeMask.startPoint = CGPoint(x: 0.5, y: fadesFromBottom ? 1 : 0)
         edgeMask.endPoint = CGPoint(x: 0.5, y: fadesFromBottom ? 0 : 1)
         layer.mask = edgeMask
@@ -357,7 +298,7 @@ final class VariableBackdropBlurView: UIVisualEffectView {
         UIColor.white.withAlphaComponent(0).cgColor,
     ]
 
-    private static let edgeMaskBaseLocations: [CGFloat] = [0, 0.30, 0.43, 0.57, 0.69, 0.78, 0.86, 1]
+    private static let edgeMaskLocations: [NSNumber] = [0, 0.30, 0.43, 0.57, 0.69, 0.78, 0.86, 1]
 
     private static let gradientColors = [
         UIColor.white.cgColor,
@@ -370,7 +311,7 @@ final class VariableBackdropBlurView: UIVisualEffectView {
         UIColor.white.withAlphaComponent(0).cgColor,
     ]
 
-    private static let gradientBaseLocations: [CGFloat] = [0, 0.14, 0.30, 0.46, 0.61, 0.73, 0.82, 1]
+    private static let gradientLocations: [NSNumber] = [0, 0.14, 0.30, 0.46, 0.61, 0.73, 0.82, 1]
 
     private func applyPublicEffect() {
         effect = nil
@@ -396,8 +337,7 @@ final class VariableBackdropBlurView: UIVisualEffectView {
             renderedMask = Self.makeTopGradientMask(
                 size: bounds.size,
                 scale: renderedMaskScale,
-                fadesFromBottom: fadesFromBottom,
-                solidFraction: solidFraction
+                fadesFromBottom: fadesFromBottom
             )
         }
         guard let renderedMask else { return false }
@@ -417,8 +357,7 @@ final class VariableBackdropBlurView: UIVisualEffectView {
     private static func makeTopGradientMask(
         size: CGSize,
         scale: CGFloat,
-        fadesFromBottom: Bool,
-        solidFraction: CGFloat
+        fadesFromBottom: Bool
     ) -> CGImage? {
         guard size.width > 0, size.height > 0 else { return nil }
 
@@ -426,10 +365,7 @@ final class VariableBackdropBlurView: UIVisualEffectView {
         format.opaque = false
         format.scale = max(1, scale)
         return UIGraphicsImageRenderer(size: size, format: format).image { rendererContext in
-            let locations = TronTopBlurProfile.locations(
-                solidFraction: solidFraction,
-                base: Self.gradientBaseLocations
-            )
+            let locations = Self.gradientLocations.map(CGFloat.init(truncating:))
             guard let gradient = CGGradient(
                 colorsSpace: CGColorSpaceCreateDeviceRGB(),
                 colors: Self.gradientColors as CFArray,

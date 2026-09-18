@@ -1550,7 +1550,7 @@ without rescanning the full timeline. The run, individual tool, Changes, and
 Technical details sheets share one inline navigation-chrome policy; principal toolbar titles
 therefore cannot reserve an empty large-title region above the scroll view. Each medium/large
 tool detail sheet explicitly top-anchors short scroll content and begins immediately below
-native toolbar chrome. Every surface shares one top-blur band, expressed once in `TronTopBlurStyle`: a solid region that covers the surface's own top inset and navigation chrome, then a short fade that ends where resting content begins. Presented sheets and tool-detail surfaces use the same 88-point band (70 solid) because they share the same inline navigation chrome, so a first line is never washed out before scrolling; the main chat and dashboard keep 176 points and the logs destination 184, where only the fade shape is shared rather than the depth. Its medium
+native toolbar chrome. Top blur uses one shared implementation with a continuous proportional fade, not a solid navigation band. `TronTopBlurStyle` centralizes the depths: sheets use 116 points and tool details 100, each reduced by 8 points from its previous depth without changing the mask, tint, or radius. Main chat and dashboard remain 176 points and logs 184. Its medium
 detent is a glance surface: aggregate runs use lazy full-width summary rows with
 state, elapsed time, high-signal request context, and at most the newest two bounded
 readable output lines. Each row vertically centers status with its title, places the

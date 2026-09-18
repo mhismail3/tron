@@ -2,9 +2,8 @@ import SwiftUI
 import XCTest
 @testable import TronMobile
 
-/// The expanded thinking trace starts at a consistent position, and the shared
-/// top blur band covers the sheet's chrome without washing the first resting
-/// line. These are hosted-sheet checks, not physical-device visual acceptance.
+/// Completed traces rest at their beginning; streaming traces follow their tail.
+/// Hosted-sheet checks do not establish physical-device visual acceptance.
 @MainActor
 final class ThinkingTraceSheetTests: XCTestCase {
     private static let longTrace = (1...60)
@@ -12,7 +11,7 @@ final class ThinkingTraceSheetTests: XCTestCase {
         .joined(separator: "\n")
     private static let shortTrace = (1...4).map { "Reasoning line \($0)" }.joined(separator: "\n")
 
-    func testThinkingTraceStartsAtRestAndClearsTheTopBlurBand() async throws {
+    func testThinkingTraceStartsAtRestUnlessStreaming() async throws {
         for (name, streaming, source) in [
             ("completed-short", false, Self.shortTrace),
             ("completed-long", false, Self.longTrace),
@@ -26,7 +25,6 @@ final class ThinkingTraceSheetTests: XCTestCase {
             try await withSheet(sheet) { controller in
                 controller.view.layoutIfNeeded()
                 let scroll = try XCTUnwrap(self.views(of: UIScrollView.self, in: controller.view).first)
-                let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
                 let restingOffset = -scroll.adjustedContentInset.top
                 if streaming {
                     XCTAssertGreaterThan(scroll.contentOffset.y, restingOffset + 1,
@@ -36,37 +34,9 @@ final class ThinkingTraceSheetTests: XCTestCase {
                                    "\(name): a completed trace rests at its beginning instead of one row down")
                 }
 
-                // The band holds its effect through the sheet's chrome and ends
-                // at or above the first resting line (the scroll inset plus the
-                // content's own padding).
-                XCTAssertGreaterThanOrEqual(TronTopBlurStyle.sheet.solidHeight, bar.frame.maxY,
-                                            "\(name): the solid band must cover the navigation chrome")
-                XCTAssertLessThanOrEqual(TronTopBlurStyle.sheet.height, scroll.adjustedContentInset.top + 18,
-                                         "\(name): the band must clear the first resting line")
                 self.capture(controller, name: "thinking-trace-\(name)")
             }
         }
-    }
-
-    func testTopBlurProfileHoldsTheChromeAndPreservesExistingBands() {
-        // A 30% solid fraction (chat, dashboard, logs) reproduces the previous
-        // proportional profile exactly.
-        XCTAssertEqual(TronTopBlurProfile.locations(solidFraction: 0.30, base: [0, 0.14, 0.30, 0.46, 1]),
-                       [0, 0.14, 0.30, 0.46, 1])
-        // Sheet styles hold their full effect through the chrome, then fade.
-        let solid = TronTopBlurProfile.solidFraction(of: .sheet)
-        let locations = TronTopBlurProfile.locations(solidFraction: solid, base: [0, 0.14, 0.30, 0.46, 0.61, 1])
-        XCTAssertEqual(locations.first, 0)
-        XCTAssertEqual(locations.last, 1)
-        XCTAssertTrue(zip(locations, locations.dropFirst()).allSatisfy { $0 < $1 }, "Stops stay ordered")
-        XCTAssertTrue(locations.filter { $0 <= solid + 0.0001 }.count >= 3,
-                      "The base's hold stops stay inside the solid band")
-        for style in [TronTopBlurStyle.chat, .dashboard, .sheet, .toolDetail, .logs] {
-            XCTAssertGreaterThan(style.solidHeight, 0)
-            XCTAssertLessThanOrEqual(style.solidHeight, style.height, "The solid band cannot exceed its band")
-        }
-        XCTAssertLessThan(TronTopBlurStyle.toolDetail.height, TronTopBlurStyle.sheet.height + 1,
-                          "Sheet and tool-detail surfaces share one band")
     }
 
     private func capture(_ controller: UIViewController, name: String) {
