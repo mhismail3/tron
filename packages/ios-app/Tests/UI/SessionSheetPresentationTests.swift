@@ -1674,15 +1674,27 @@ final class SessionSheetPresentationTests: XCTestCase {
             statusOwners: ["goal": ExtensionOwner(id: "goal", title: "Goal", source: "npm:@mocito/pi-goal")]
         )
         XCTAssertEqual(content.entries.count, 2)
-        try await withSheet(SessionActivitySheet(
-            sessionID: "fixture", extensionContent: content, omittedExtensionContentCount: 0,
-            processActivities: [subagentProcessFixture(state: .running), subagentProcessFixture(state: .completed)]
-        )) { controller in
-            controller.sheetPresentationController?.selectedDetentIdentifier = .large
-            for _ in 0..<8 { try await DisplayFrameScheduler.displayLink.nextFrame() }
-            let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
-            self.assertToolbarPaint(.tronEmerald, bar: bar, leading: false, controller: controller)
-            self.capture(controller, name: "unified-activity-mixed")
+        for size: DynamicTypeSize in [.large, .accessibility3] {
+            try await withSheet(SessionActivitySheet(
+                sessionID: "fixture", extensionContent: content, omittedExtensionContentCount: 0,
+                processActivities: [subagentProcessFixture(state: .running), subagentProcessFixture(state: .completed)]
+            ).environment(\.dynamicTypeSize, size)) { controller in
+                let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    MainActor.assumeIsolated {
+                        guard controller.view.window != nil else { return false }
+                        let layer = controller.view.layer
+                        let painted = layer.presentation() ?? layer
+                        return controller.view.bounds.height > 0
+                            && abs(painted.bounds.height - layer.bounds.height) < 0.5
+                            && abs(painted.position.y - layer.position.y) < 0.5
+                    }
+                }, object: nil)
+                let settledResult = await XCTWaiter.fulfillment(of: [settled], timeout: 3)
+                XCTAssertEqual(settledResult, .completed)
+                let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
+                self.assertToolbarPaint(.tronEmerald, bar: bar, leading: false, controller: controller)
+                self.capture(controller, name: "unified-activity-typography-\(size)")
+            }
         }
     }
 

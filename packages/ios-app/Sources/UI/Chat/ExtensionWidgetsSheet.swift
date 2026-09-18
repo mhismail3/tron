@@ -75,11 +75,7 @@ struct SessionActivitySheet: View {
 
     @ViewBuilder
     private func processSection(_ title: String, processes: [SessionProcessActivity], now: Date) -> some View {
-        Text(title)
-            .font(TronTypography.caption)
-            .foregroundStyle(Color.tronTextMuted)
-            .padding(.top, 4)
-            .accessibilityAddTraits(.isHeader)
+        ActivitySectionHeader(title: title)
         ForEach(processes) { process in
             SessionProcessRow(process: process, style: .activity, now: now) {
                 selectedProcess = process
@@ -96,7 +92,7 @@ struct SessionActivitySheet: View {
                 )
             }
             ForEach(extensionContent.producers, id: \.self) { producer in
-                ExtensionContentSectionHeader(title: producer)
+                ActivitySectionHeader(title: producer)
                 ForEach(extensionContent.entries(forProducer: producer)) { entry in
                     ExtensionContentEntryCard(entry: entry)
                 }
@@ -117,15 +113,14 @@ struct SessionActivitySheet: View {
     }
 }
 
-/// Section header follows the same caption/muted treatment as the Subagents
-/// sheet's section headers.
-private struct ExtensionContentSectionHeader: View {
+/// Shared sheet-header typography for both native processes and extensions.
+private struct ActivitySectionHeader: View {
     let title: String
 
     var body: some View {
         Text(title)
-            .font(TronTypography.caption)
-            .foregroundStyle(Color.tronTextMuted)
+            .font(TronTypography.sheetSectionHeader)
+            .foregroundStyle(Color.tronTextPrimary)
             .padding(.top, 4)
             .accessibilityAddTraits(.isHeader)
     }

@@ -233,7 +233,7 @@ struct SessionProcessRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(process.title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                     .foregroundStyle(Color.tronTextPrimary)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -241,14 +241,14 @@ struct SessionProcessRow: View {
             }
             if let metadataLine {
                 Text(metadataLine)
-                    .font(TronTypography.secondaryCodeDescription)
+                    .font(TronTypography.secondaryDescription)
                     .foregroundStyle(Color.tronTextSecondary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let countsLine {
                 Text(countsLine)
-                    .font(TronTypography.secondaryCodeDescription)
+                    .font(TronTypography.secondaryDescription)
                     .foregroundStyle(Color.tronTextSecondary)
                     .lineLimit(1)
             }
@@ -260,14 +260,14 @@ struct SessionProcessRow: View {
             if currentAction != nil || outputPreview != nil {
                 VStack(alignment: .leading, spacing: 4) {
                     if let currentAction {
-                        Text("CURRENT ACTIVITY")
-                            .font(TronTypography.caption)
+                        Text("Current activity")
+                            .font(TronTypography.sheetSectionHeader)
                             .foregroundStyle(cardAccent)
                         activityLabel(currentAction)
                     }
                     if let outputPreview {
                         Text(outputPreview)
-                            .font(TronTypography.code(size: TronTypography.sizeBody2, weight: .medium))
+                            .font(TronTypography.secondaryDescription)
                             .foregroundStyle(Color.tronTextSecondary)
                             .lineLimit(SessionProcessRowPresentation.outputLineLimit)
                             .frame(maxWidth: .infinity, alignment: .leading)
