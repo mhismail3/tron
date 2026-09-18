@@ -21,6 +21,10 @@ final class ProviderUsageReadController {
     private(set) var snapshots: [String: ProviderUsageSnapshot] = [:]
     private(set) var isLoading = false
     private(set) var didFail = false
+    /// True once the current read has settled (succeeded or failed). Rows use it
+    /// to stop reserving their usage line after a failed read instead of leaving
+    /// a permanent loading placeholder.
+    private(set) var hasResolved = false
     private(set) var requestGeneration = 0
     private var activeIdentity: ProviderUsageReadIdentity?
 
@@ -34,6 +38,7 @@ final class ProviderUsageReadController {
         if clear { snapshots = [:] }
         isLoading = false
         didFail = false
+        hasResolved = false
     }
 
     func read(
@@ -45,6 +50,7 @@ final class ProviderUsageReadController {
         activeIdentity = identity
         isLoading = true
         didFail = false
+        hasResolved = false
         defer {
             if admitted(identity, current: current) { isLoading = false }
         }
@@ -52,11 +58,13 @@ final class ProviderUsageReadController {
             let response = try await fetch()
             guard admitted(identity, current: current) else { return }
             snapshots = Dictionary(uniqueKeysWithValues: response.providers.map { ($0.providerId, $0) })
+            hasResolved = true
         } catch is CancellationError {
             return
         } catch {
             guard admitted(identity, current: current) else { return }
             didFail = true
+            hasResolved = true
         }
     }
 

@@ -43,7 +43,7 @@ struct ProviderUsagePresentationTests {
     @Test("ordering is configured first then stable friendly name and ID")
     func configuredFirstOrdering() {
         let provider: (String, String, Bool) -> ProviderSummary = { id, name, configured in
-            ProviderSummary(id: id, name: name, configured: configured, authSource: nil,
+            ProviderSummary(id: id, name: name, configured: configured, usageSupported: nil, authSource: nil,
                             credentialType: nil, authMethods: [], modelCount: 0)
         }
         let result = ProviderUsageOrdering.sorted([
@@ -122,5 +122,59 @@ struct ProviderUsagePresentationTests {
         #expect(ProviderUsagePresentation.windowSummary(
             UsageWindow(id: "quota", label: "Quota", used: 24, limit: 100, unit: "requests")
         ) == "24/100 requests used")
+    }
+
+    @Test("only a supported configured row reserves its usage line while the read is pending")
+    func usagePlaceholderDecision() {
+        func shows(
+            snapshot: ProviderUsageSnapshot? = nil,
+            configured: Bool = true,
+            usageSupported: Bool = true,
+            capabilityAvailable: Bool = true,
+            readResolved: Bool = false
+        ) -> Bool {
+            ProviderUsagePresentation.showsUsageLoadingLine(
+                snapshot: snapshot, configured: configured, usageSupported: usageSupported,
+                capabilityAvailable: capabilityAvailable, readResolved: readResolved
+            )
+        }
+
+        #expect(shows())
+        #expect(!shows(readResolved: true))
+        #expect(!shows(configured: false))
+        #expect(!shows(usageSupported: false))
+        #expect(!shows(capabilityAvailable: false))
+        #expect(!shows(snapshot: ProviderUsageSnapshot(providerId: "p", status: .available)))
+    }
+
+    @Test("the usage skeleton breathes within a bounded opacity range")
+    func loadingLineOpacityIsBounded() {
+        let engine = ProviderUsageLoadingLineEngine.self
+        #expect(abs(engine.opacity(progress: 0.25) - engine.maximumOpacity) < 1e-9)
+        #expect(abs(engine.opacity(progress: 0.75) - engine.minimumOpacity) < 1e-9)
+        for step in 0...40 {
+            let value = engine.opacity(progress: Double(step) / 40)
+            #expect(value >= engine.minimumOpacity)
+            #expect(value <= engine.maximumOpacity)
+        }
+        // Out-of-range progress clamps instead of extrapolating the wave.
+        for progress in [-1.0, 2.0] {
+            let value = engine.opacity(progress: progress)
+            #expect(value >= engine.minimumOpacity)
+            #expect(value <= engine.maximumOpacity)
+        }
+    }
+
+    @Test("the catalog usage flag decodes and a Gateway without it stays unsupported")
+    func decodesUsageSupportFlag() throws {
+        func provider(_ json: String) throws -> ProviderSummary {
+            try JSONDecoder.gateway.decode(ProviderSummary.self, from: Data(json.utf8))
+        }
+        let supported = try provider(#"{"id":"opencode-go","name":"OpenCode Go","configured":true,"usageSupported":true,"authSource":"api-key","credentialType":"api-key","authMethods":["api_key"],"modelCount":3}"#)
+        #expect(supported.supportsUsage)
+        let legacy = try provider(#"{"id":"openrouter","name":"OpenRouter","configured":true,"authSource":"api-key","credentialType":"api-key","authMethods":["api_key"],"modelCount":3}"#)
+        #expect(!legacy.supportsUsage)
+        let explicitFalse = try provider(#"{"id":"ollama","name":"Ollama","configured":true,"usageSupported":false,"authSource":null,"credentialType":null,"authMethods":[],"modelCount":0}"#)
+        #expect(!explicitFalse.supportsUsage)
     }
 }

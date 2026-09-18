@@ -273,6 +273,8 @@ reports its account-wide rolling 5-hour, weekly, and monthly percent windows; a
 valid key whose account is not on Go reports unsupported rather than a rejected
 credential. Global reads include only configured
 supported providers, while a provider ID requests one bounded status snapshot.
+The provider catalog reports the same first-party predicate as `usageSupported`, so
+a client can reserve a loading row only for providers that will actually answer.
 Responses contain at most 16 providers, 16 windows, and 4 balances. Successful
 observations are cached for 60 seconds and failed/rate-limited reads use bounded
 negative backoff. Cache and in-flight identity include the effective provider and

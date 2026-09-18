@@ -304,6 +304,11 @@ function parseBalances(value: unknown): UsageBalance[] {
   return amount === null ? [] : capBalances([{ id: "credits", label: "Credits", amount, currency }]);
 }
 
+/** True when this runtime's effective composition has a first-party usage adapter. */
+export function providerUsageSupported(runtime: ModelRuntime, providerId: string): boolean {
+  return adapterFor(runtime, providerId) !== undefined;
+}
+
 function providerBinding(runtime: ModelRuntime, id: string): ProviderBinding {
   const models = runtime.getModels(id);
   const provider = runtime.getProvider(id);

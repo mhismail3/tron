@@ -263,10 +263,15 @@ struct ProviderSummary: Codable, Hashable, Identifiable, Sendable {
     let id: String
     let name: String
     let configured: Bool
+    /// Gateway-reported first-party usage support. Optional so a Gateway that
+    /// predates the field simply reserves no usage placeholder.
+    let usageSupported: Bool?
     let authSource: String?
     let credentialType: String?
     let authMethods: [String]
     let modelCount: Int
+
+    var supportsUsage: Bool { usageSupported == true }
 }
 
 struct ContextWindowLimits: Codable, Hashable, Sendable {

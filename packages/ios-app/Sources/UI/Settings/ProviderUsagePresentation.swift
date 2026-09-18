@@ -2,6 +2,25 @@ import Foundation
 import SwiftUI
 
 enum ProviderUsagePresentation {
+    /// Skeleton copy shown while a supported row waits for its first snapshot.
+    /// It shares the usage line's font and stays single-line at ordinary widths
+    /// so the resolved text does not change the row height.
+    static let loadingPlaceholder = "5h 00% used · Weekly 00% used"
+
+    /// A supported configured row reserves its usage line while the bounded read
+    /// is pending. Once the read settles, the snapshot (or its absence) owns the
+    /// line, so a failed read never leaves a permanent skeleton.
+    static func showsUsageLoadingLine(
+        snapshot: ProviderUsageSnapshot?,
+        configured: Bool,
+        usageSupported: Bool,
+        capabilityAvailable: Bool,
+        readResolved: Bool
+    ) -> Bool {
+        guard snapshot == nil, configured, usageSupported, capabilityAvailable else { return false }
+        return !readResolved
+    }
+
     /// Keep summary-only states from reserving an empty detail row and its gap.
     static func hasDetailContent(_ snapshot: ProviderUsageSnapshot) -> Bool {
         guard snapshot.status == .available || snapshot.status == .rateLimited else { return false }
@@ -128,6 +147,14 @@ struct ProviderUsageSummaryView: View {
     let snapshot: ProviderUsageSnapshot
     var detail: Bool = false
     var includeSummary: Bool = true
+    @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
+
+    /// Account usage detail copy uses the app's standard secondary sub-text
+    /// treatment: the settings-adjusted secondary size in the reading family
+    /// with the standard secondary color. Caption scale was too small here.
+    private var detailFont: Font {
+        TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -145,21 +172,21 @@ struct ProviderUsageSummaryView: View {
                             Spacer()
                             Text(ProviderUsagePresentation.detailValue(window)).monospacedDigit()
                         }
-                        .font(TronTypography.secondaryDescription)
+                        .font(detailFont)
                         .foregroundStyle(Color.tronTextSecondary)
                         if let percent = window.usedPercent {
                             ProviderUsageProgress(percent: percent, accent: .tronEmerald)
                         }
                         if let quantities = ProviderUsagePresentation.quantityDetail(window) {
                             Text(quantities)
-                                .font(TronTypography.caption)
+                                .font(detailFont)
                                 .foregroundStyle(Color.tronTextSecondary)
                         }
                         if let resetsAt = window.resetsAt,
                            let date = GatewayTimestamp.parse(resetsAt) {
                             Text("Resets \(date.formatted(date: .abbreviated, time: .shortened))")
-                                .font(TronTypography.caption)
-                                .foregroundStyle(Color.tronTextMuted)
+                                .font(detailFont)
+                                .foregroundStyle(Color.tronTextSecondary)
                         }
                     }
                 }
@@ -170,18 +197,18 @@ struct ProviderUsageSummaryView: View {
                         Text("\(ProviderUsagePresentation.amount(balance.amount)) \(balance.currency)")
                             .monospacedDigit()
                     }
-                    .font(TronTypography.secondaryDescription)
+                    .font(detailFont)
                     .foregroundStyle(Color.tronTextSecondary)
                 }
                 if let updated = ProviderUsagePresentation.updatedCopy(snapshot) {
                     Text(updated)
-                        .font(TronTypography.caption)
-                        .foregroundStyle(Color.tronTextMuted)
+                        .font(detailFont)
+                        .foregroundStyle(Color.tronTextSecondary)
                 }
                 if let retry = ProviderUsagePresentation.retryCopy(snapshot) {
                     Text(retry)
-                        .font(TronTypography.caption)
-                        .foregroundStyle(Color.tronTextMuted)
+                        .font(detailFont)
+                        .foregroundStyle(Color.tronTextSecondary)
                 }
                 // Gateway message is retained only as the bounded wire field;
                 // presentation uses fixed local status copy and never renders
@@ -206,5 +233,58 @@ struct ProviderUsageProgress: View {
         }
         .frame(height: 5)
         .accessibilityHidden(true)
+    }
+}
+
+/// Breathing opacity for the usage skeleton. Kept as pure math so the bounded
+/// range is testable without rendering.
+enum ProviderUsageLoadingLineEngine {
+    static let cycleDuration: Double = 1.8
+    static let minimumOpacity: Double = 0.32
+    static let maximumOpacity: Double = 0.8
+
+    static func opacity(progress: Double) -> Double {
+        let clamped = min(1, max(0, progress))
+        let wave = (sin(clamped * 2 * .pi) + 1) / 2
+        return minimumOpacity + (maximumOpacity - minimumOpacity) * wave
+    }
+}
+
+/// Placeholder for the provider row's usage line. It renders the exact usage
+/// line layout (same font, same single-line text) with redacted skeleton bars,
+/// so the row holds its height while the snapshot is in flight and the resolved
+/// text can crossfade in without a layout jump.
+struct ProviderUsageLoadingLine: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
+    @State private var isVisible = false
+
+    var body: some View {
+        TimelineView(.animation(
+            minimumInterval: 1 / 30,
+            paused: TronPulseLoadingIndicatorEngine.animationPaused(
+                reduceMotion: reduceMotion,
+                sceneActive: scenePhase == .active,
+                surfaceActive: presentationActivity.allowsContinuousAnimation && isVisible
+            )
+        )) { context in
+            Text(verbatim: ProviderUsagePresentation.loadingPlaceholder)
+                .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
+                .foregroundStyle(Color.tronTextMuted)
+                .redacted(reason: .placeholder)
+                .fixedSize(horizontal: false, vertical: true)
+                .opacity(reduceMotion
+                    ? ProviderUsageLoadingLineEngine.maximumOpacity
+                    : ProviderUsageLoadingLineEngine.opacity(
+                        progress: context.date.timeIntervalSinceReferenceDate
+                            .truncatingRemainder(dividingBy: ProviderUsageLoadingLineEngine.cycleDuration)
+                            / ProviderUsageLoadingLineEngine.cycleDuration
+                    ))
+        }
+        .onAppear { isVisible = true }
+        .onDisappear { isVisible = false }
+        .accessibilityLabel("Loading account usage")
     }
 }
