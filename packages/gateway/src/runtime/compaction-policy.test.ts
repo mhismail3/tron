@@ -5,7 +5,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createAgentSessionServices, createAgentSessionFromServices, ModelRuntime, SessionManager, type AgentSession, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { fauxProvider, fauxAssistantMessage, fauxToolCall, type Context, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { abortAwareStream } from "./abort-aware-stream.js";
-import { CompactionOperationPolicy, compactionPolicyExtension, resolveCompactionPolicy } from "./compaction-policy.js";
+import { CompactionOperationPolicy, compactionPolicyExtension, oversizedRequestOverflow, resolveCompactionPolicy } from "./compaction-policy.js";
+
+/** Captured verbatim from opencode-go rejecting a 48MB conversation: the
+ * provider edge answered HTTP 413 with an opaque body, so the pinned SDK
+ * classified it as a transient server error, retried the identical oversized
+ * request, and left the session unable to continue until it was compacted. */
+const OVERSIZED_REQUEST_ERROR = "413: {\"type\":\"server_error\",\"code\":\"server_error\",\"message\":\"Error from provider (Console Go): Upstream request failed: [server_error] Upstream response was not valid JSON\"}";
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose(); });
@@ -70,6 +76,21 @@ function checkpoint(session: AgentSession) {
   return { ...result, retained: session.sessionManager.getEntry(firstKeptEntryId)?.type,
     context: session.sessionManager.buildSessionContext().messages.map(message => JSON.stringify(message, (key, value) => key === "timestamp" ? undefined : value)) };
 }
+
+describe.sequential("provider request-size overflow classification", () => {
+  it("treats a provider body-limit rejection as recoverable context overflow and leaves other failures alone", () => {
+    const rejected = fauxAssistantMessage("", { stopReason: "error", errorMessage: OVERSIZED_REQUEST_ERROR });
+    const recovered = oversizedRequestOverflow(rejected);
+    expect(recovered?.errorMessage).toBe(`context_length_exceeded: ${OVERSIZED_REQUEST_ERROR}`);
+    expect(recovered?.content).toEqual(rejected.content);
+    // Idempotent, and limited to a 413 status prefix.
+    expect(oversizedRequestOverflow(recovered!)).toBeUndefined();
+    for (const errorMessage of ["429: rate limit reached", "500: internal server error", "413 tokens were counted in the prompt"]) {
+      expect(oversizedRequestOverflow(fauxAssistantMessage("", { stopReason: "error", errorMessage }))).toBeUndefined();
+    }
+    expect(oversizedRequestOverflow(fauxAssistantMessage("completed"))).toBeUndefined();
+  });
+});
 
 describe.sequential("pinned SDK compaction request policy", () => {
   it("keeps exact built-in split-summary requests, checkpoint, file tracking and rebuilt context under standard behavior", async () => {

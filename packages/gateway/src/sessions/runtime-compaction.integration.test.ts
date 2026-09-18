@@ -361,6 +361,39 @@ describe.sequential("compaction operation admission and authoritative reconcilia
     expect(states.slice(finalIdle).every(snapshot => snapshot.phase === "idle")).toBe(true);
   });
 
+  it("recovers a provider request-size rejection by compacting and retrying once", async () => {
+    const item = await boundaryFixture();
+    await item.update({ enabled: true, reserveTokens: 4_096, keepRecentTokens: 0 });
+    let ordinary = 0;
+    let summaries = 0;
+    const reasons: string[] = [];
+    item.session.subscribe(event => { if (event.type === "compaction_start") reasons.push(event.reason); });
+    const respond = () => {
+      if (item.slot.snapshot().compactionPolicy?.active) {
+        summaries += 1;
+        return fauxAssistantMessage("The API contract remains authoritative. Continue the latest request.");
+      }
+      ordinary += 1;
+      // Captured verbatim from opencode-go rejecting an oversized conversation:
+      // it matches none of the pinned SDK's overflow patterns.
+      return ordinary === 1
+        ? fauxAssistantMessage("", { stopReason: "error", errorMessage: "413: {\"type\":\"server_error\",\"code\":\"server_error\",\"message\":\"Error from provider (Console Go): Upstream request failed: [server_error] Upstream response was not valid JSON\"}" })
+        : fauxAssistantMessage("Recovered after the provider request-size rejection");
+    };
+    item.faux.setResponses(Array.from({ length: 6 }, () => respond));
+    const { operationId } = await item.slot.prompt("Continue the oversized request");
+    await expectSettled(item);
+    expect(reasons).toEqual(["overflow"]);
+    expect(ordinary).toBe(2);
+    expect(summaries).toBeGreaterThan(0);
+    const entries = await item.entries();
+    expect(entries.filter(entry => entry.type === "compaction")).toHaveLength(1);
+    // Provider text stays intact; the classification prefix is what the SDK recovered from.
+    expect(entries.find(entry => entry.message?.role === "assistant" && entry.message.stopReason === "error")?.message.errorMessage)
+      .toContain("context_length_exceeded: 413:");
+    expect(entries.find(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data.operationId === operationId && entry.data.receiptKind === "terminal")?.data.lifecycle).toBe("completed");
+  });
+
   it("retires late manual Stop intent after durable marker cleanup", async () => {
     const item = await boundaryFixture();
     item.faux.setResponses(Array.from({ length: 3 }, () => fauxAssistantMessage("Preserved API contract")));

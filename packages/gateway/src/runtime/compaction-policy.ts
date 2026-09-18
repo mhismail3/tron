@@ -1,4 +1,4 @@
-import { clampThinkingLevel, type Context } from "@earendil-works/pi-ai";
+import { clampThinkingLevel, type AssistantMessage, type Context } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { SettingsManager, type AgentSession, type ExtensionFactory, type SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
@@ -153,8 +153,36 @@ export class CompactionOperationPolicy {
   }
 }
 
+/**
+ * Report a provider request-size rejection as the generic overflow Pi already
+ * recovers from. A provider that enforces a request-body limit answers with
+ * HTTP 413 and an opaque body (for example opencode-go: "server_error",
+ * "Upstream response was not valid JSON"), which matches none of pi-ai's
+ * overflow patterns. Pi then retries the identical oversized request until it
+ * fails permanently, leaving the session unable to continue until it is
+ * compacted. Compaction is the correct recovery for a request the provider
+ * refuses to accept, so select it with the phrase `isContextOverflow` matches.
+ * Provider text is preserved verbatim and the rewrite is idempotent.
+ */
+export function oversizedRequestOverflow(message: AssistantMessage): AssistantMessage | undefined {
+  if (message.stopReason !== "error") return undefined;
+  const errorMessage = message.errorMessage ?? "";
+  if (!OVERSIZED_REQUEST.test(errorMessage) || CONTEXT_OVERFLOW_PHRASE.test(errorMessage)) return undefined;
+  return { ...message, errorMessage: `context_length_exceeded: ${errorMessage}` };
+}
+
+// Pi surfaces provider failures as `${status}: ${body}` (pi-ai's
+// formatProviderError); some transports keep the RFC reason phrase instead.
+const OVERSIZED_REQUEST = /^413(?::| (?:Request Entity Too Large|Content Too Large)\b)/u;
+const CONTEXT_OVERFLOW_PHRASE = /context[_ ]length[_ ]exceeded/iu;
+
 export function compactionPolicyExtension(policy: () => CompactionOperationPolicy | undefined, stopped: (event: SessionBeforeCompactEvent) => boolean, changed: () => void): ExtensionFactory {
   return pi => {
+    pi.on("message_end", (event) => {
+      if (event.message.role !== "assistant") return;
+      const recovered = oversizedRequestOverflow(event.message);
+      return recovered ? { message: recovered } : undefined;
+    });
     pi.on("session_start", () => { policy()?.restore(); });
     pi.on("session_before_compact", (event) => {
       if (stopped(event)) return { cancel: true };

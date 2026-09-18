@@ -1669,6 +1669,30 @@ which lets it remove a malformed failed staging tree without touching an externa
 An unexpected process death remains an interruption represented by the durable run marker
 and is never automatically replayed.
 
+### Prompt attachments and request size
+
+Pi bounds the images that enter session history through `read`, `@file` arguments,
+and tool results (2000x2000, 4.5MB encoded) but passes prompt-supplied attachments
+through untouched. Tron owns prompt attachments, so `RuntimeSlot.prompt` bounds them
+through the pinned SDK's own image pipeline before they become canonical entries. The
+original upload stays in the upload store for previews and durable ownership; only the
+copy admitted to model context is bounded. Every provider request re-serializes the
+whole conversation, so an unbounded attachment is not a per-turn cost: a handful of
+full-resolution phone screenshots can push a request past the provider's body limit,
+which rejects the entire conversation instead of the offending turn. When the pinned
+image backend cannot decode or bound an image, the original is kept rather than
+dropping the user's attachment, matching Pi's tool-result normalization.
+
+A provider that enforces a request-body limit answers with HTTP 413. Pi recovers an
+oversized conversation by compacting it and retrying once, but only when the failure
+matches an overflow pattern; an opaque provider body (for example opencode-go's
+`server_error` wrapper) matches none, so the runtime retried the identical request and
+then reported a permanent error, leaving the session unable to continue until it was
+compacted. Tron's compaction policy classifies a 413 status as the generic
+`context_length_exceeded` overflow so that existing recovery applies. The provider's own
+text is preserved intact, and a session that cannot continue without shedding context
+always has the user-visible **Compact Now** action as well.
+
 ## Session invariants
 
 1. `RuntimeRegistry` owns at most one `RuntimeSlot` per session in this process.

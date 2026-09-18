@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
-import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxProvider, fauxToolCall, type ImageContent } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { SessionListPaginationStore } from "../transport/session-list-pagination.js";
@@ -26,6 +26,8 @@ import { KnowledgeStore } from "../knowledge/knowledge-store.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { RunMarkerCompletionConflictError, type RunMarkerStore } from "./run-markers.js";
 import { toolSegmentId } from "./projection.js";
+import { pngDimensions } from "../../test-fixtures/pi-sdk/computer-use-image.js";
+import { syntheticPng } from "../../test-fixtures/synthetic-image.js";
 
 async function collectStream(stream: NodeJS.ReadableStream): Promise<Buffer> {
   const chunks: Buffer[] = [];
@@ -4727,6 +4729,45 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const duplicateFact = internal.canonicalExtensionRunFacts().get("duplicate-canonical-run");
     expect(duplicateFact?.toolCallId).toBeUndefined();
     expect(duplicateFact?.ambiguous).toBe(true);
+  });
+
+  it("bounds oversized prompt attachments before they enter canonical session history", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-prompt-image-bound-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const faux = fauxProvider({ provider: "tron-prompt-image-bound", tokensPerSecond: 10_000 });
+    faux.setResponses([fauxAssistantMessage("complete")]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
+      modelRuntimeFactory: async () => runtime,
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+
+    // A phone screenshot at native resolution: Pi bounds read and tool-result
+    // images but not prompt attachments, and every later request re-serializes
+    // whatever entered history here.
+    const screenshot: ImageContent = { type: "image", mimeType: "image/png", data: syntheticPng(1320, 2868).toString("base64") };
+    await slot.prompt("Look at this screenshot", [screenshot]);
+    await waitUntil(() => !slot.isBusy);
+
+    const entries = (await readFile(slot.sessionFile!, "utf8"))
+      .trimEnd().split("\n").map(line => JSON.parse(line) as any);
+    const recorded = entries.find(entry => entry.type === "message" && entry.message?.role === "user")
+      ?.message.content.find((part: any) => part.type === "image") as ImageContent | undefined;
+    expect(recorded).toBeDefined();
+    expect(recorded!.data).not.toBe(screenshot.data);
+    const dimensions = pngDimensions(recorded!);
+    expect(Math.max(dimensions.width, dimensions.height)).toBe(2000);
   });
 
   it("admits multiline plain prompts without duplicating their body into invocation receipts", async () => {

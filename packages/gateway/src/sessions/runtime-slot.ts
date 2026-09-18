@@ -32,6 +32,7 @@ import { GatewayError } from "../errors.js";
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
 import { compactionPolicyExtension, CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import { contextWindowExtension, SessionContextWindowPolicy } from "../providers/context-window-policy.js";
+import { boundPromptImages } from "../providers/prompt-images.js";
 import type {
   ChatOrigin,
   CommandDetail,
@@ -5683,6 +5684,11 @@ export class RuntimeSlot {
         this.compactionPolicies.get(session)?.applyBudgets();
         this.contextPolicies.get(session)?.apply();
       }
+      // Bound prompt attachments before they enter canonical history. Pi bounds
+      // every other image ingress point, so an unbounded prompt attachment is
+      // re-serialized into every later provider request and can make the
+      // provider reject the whole conversation instead of the offending turn.
+      if (images.length > 0) images = await boundPromptImages(images);
       let queuesIntoActiveRun = session.isStreaming && behavior !== undefined && !isExactExtensionCommand;
       const operationId = ownership?.operationId ?? randomUUID();
       if (ownership && this.automationTerminalObservers.has(operationId)) {
