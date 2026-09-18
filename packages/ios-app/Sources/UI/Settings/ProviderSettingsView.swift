@@ -104,7 +104,8 @@ struct ProvidersSettingsView: View {
                     surfaceStyle: .grouped,
                     provider: provider,
                     sessionID: sessionID,
-                    usageSnapshot: usageController.snapshots[provider.id]
+                    usageSnapshot: usageController.snapshots[provider.id],
+                    isUsageLoading: showsUsageLoadingLine(for: provider)
                 )
                 if index < providers.count - 1 {
                     TronSettingsDivider(accent: .tronPurple)
@@ -118,6 +119,19 @@ struct ProvidersSettingsView: View {
         guard !reloading, presentationActivity.allowsPresentationPublication else { return }
         reloading = true
         manualReloadGeneration &+= 1
+    }
+
+    /// Rows the Gateway reports as first-party usage capable reserve their usage
+    /// line while the bounded read is pending. The Gateway owns that support set
+    /// so the client never duplicates the adapter table.
+    private func showsUsageLoadingLine(for provider: ProviderSummary) -> Bool {
+        ProviderUsagePresentation.showsUsageLoadingLine(
+            snapshot: usageController.snapshots[provider.id],
+            configured: provider.configured,
+            usageSupported: provider.supportsUsage,
+            capabilityAvailable: model.gatewayInfo?.capabilities.contains(ProviderUsageCapability.name) == true,
+            readResolved: usageController.hasResolved
+        )
     }
 
     private func loadProviders(for requestedTarget: ProviderCatalogTarget) async -> Bool {

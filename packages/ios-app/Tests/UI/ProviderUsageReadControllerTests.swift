@@ -198,6 +198,36 @@ struct ProviderUsageReadControllerTests {
         #expect(!owner.didFail)
     }
 
+    @Test("settlement fences the loading placeholder on success and failure")
+    func resolvedStateTracksSettlement() async {
+        let owner = ProviderUsageReadController()
+        var continuation: CheckedContinuation<ProviderUsageResponse, Error>?
+        #expect(!owner.hasResolved)
+        let read = Task {
+            await owner.read(
+                identity: identity(owner: owner, providerID: "openrouter"),
+                fetch: { try await withCheckedThrowingContinuation { continuation = $0 } },
+                current: { true }
+            )
+        }
+        while continuation == nil { await Task.yield() }
+        #expect(owner.isLoading)
+        #expect(!owner.hasResolved)
+        continuation?.resume(returning: response(providerID: "openrouter"))
+        await read.value
+        #expect(owner.hasResolved)
+        #expect(!owner.didFail)
+
+        owner.begin(clear: true)
+        #expect(!owner.hasResolved)
+        await owner.read(
+            identity: identity(owner: owner, providerID: "openrouter"),
+            fetch: { throw FixtureError.rejected }, current: { true }
+        )
+        #expect(owner.hasResolved)
+        #expect(owner.didFail)
+    }
+
     private func identity(
         owner: ProviderUsageReadController,
         providerID: String?,

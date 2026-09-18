@@ -27,3 +27,30 @@ describe("provider.usage RPC", () => {
     expect(read).not.toHaveBeenCalled();
   });
 });
+
+describe("provider.list usage support", () => {
+  const goModels = [
+    { provider: "opencode-go", id: "a", api: "anthropic-messages", baseUrl: "https://opencode.ai/zen/go" },
+    { provider: "opencode-go", id: "b", api: "openai-completions", baseUrl: "https://opencode.ai/zen/go/v1" },
+    { provider: "opencode-go", id: "c", api: "openai-responses", baseUrl: "https://opencode.ai/zen/go/v1" },
+  ];
+  const runtime = {
+    getProviders: () => [
+      { id: "opencode-go", name: "OpenCode Go", auth: { apiKey: {} }, baseUrl: undefined, getModels: () => goModels },
+      { id: "ollama", name: "Ollama", auth: { apiKey: {} }, baseUrl: undefined, getModels: () => [] },
+    ],
+    getModels: (id: string) => id === "opencode-go" ? goModels : [],
+    getProvider: (id: string) => ({ id, baseUrl: undefined, auth: { apiKey: {} } }),
+    checkAuth: async () => ({ source: "stored" }),
+    listCredentials: async () => [{ providerId: "opencode-go", type: "api_key" }],
+  };
+
+  it("marks only first-party composed providers as usage-supported", async () => {
+    const service = new GatewayService({ modelRuntime: runtime } as unknown as GatewayServiceDependencies);
+    const result = await service.invoke(client, "provider.list", {}) as { providers: Array<{ id: string; usageSupported: boolean }> };
+    expect(result.providers).toEqual([
+      expect.objectContaining({ id: "opencode-go", usageSupported: true }),
+      expect.objectContaining({ id: "ollama", usageSupported: false }),
+    ]);
+  });
+});

@@ -43,6 +43,7 @@ struct ProviderConfigurationPresentationTests {
             id: "provider",
             name: "Provider",
             configured: configured,
+            usageSupported: false,
             authSource: nil,
             credentialType: nil,
             authMethods: authMethods,

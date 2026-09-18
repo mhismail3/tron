@@ -603,6 +603,9 @@ and managed-presentation activity fences clear or reject late account data.
 Detail does not seed data from list rows: only its own admitted read can publish measurements,
 so opening the sheet across an account change cannot resurrect an unverified list snapshot.
 Supported, unsupported, stale, rate-limited, and authentication-required statuses remain explicit.
+The provider catalog's `usageSupported` flag marks rows that will answer, so a supported configured row
+reserves its usage line with an animated skeleton and crossfades to the resolved summary instead of
+growing mid-load; a failed read retires the skeleton, and a Gateway without the flag reserves nothing.
 
 Compaction Settings consolidates automatic compaction and advanced reserve/recent controls
 formerly duplicated under Models and Defaults and Runtime Behavior. The existing scoped draft

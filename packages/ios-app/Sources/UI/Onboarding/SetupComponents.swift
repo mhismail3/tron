@@ -76,10 +76,13 @@ struct ProviderSetupRow: View {
     let provider: ProviderSummary
     var sessionID: String? = nil
     var usageSnapshot: ProviderUsageSnapshot? = nil
+    /// True while the bounded usage read is still pending for a supported row.
+    var isUsageLoading: Bool = false
     @State private var showsConfiguration = false
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var providerTarget: ProviderCatalogTarget {
         sessionID.map(ProviderCatalogTarget.session(id:)) ?? .global
@@ -122,7 +125,7 @@ struct ProviderSetupRow: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Details for \(provider.displayName)")
-                .accessibilityValue(usageSnapshot.map { "Account usage: \(ProviderUsagePresentation.summary($0))" } ?? "Account usage unavailable")
+                .accessibilityValue(usageAccessibilityValue)
             } else {
                 rowContents {
                     Button { showsConfiguration = true } label: {
@@ -198,14 +201,40 @@ struct ProviderSetupRow: View {
                 .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
                 .foregroundStyle(Color.tronTextSecondary)
                 .fixedSize(horizontal: false, vertical: true)
-            if let usageSnapshot {
-                Text(ProviderUsagePresentation.summary(usageSnapshot))
-                    .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
-                    .foregroundStyle(usageSnapshot.status == .available ? Color.tronEmerald : Color.tronTextMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityLabel("Account usage: \(ProviderUsagePresentation.summary(usageSnapshot))")
-            }
+            usageLine
         }
+        // The loading placeholder and the resolved usage line share one slot, so
+        // only their opacity changes: the row never animates a height jump.
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.28), value: usageLineIdentity)
+    }
+
+    @ViewBuilder
+    private var usageLine: some View {
+        if let usageSnapshot {
+            Text(ProviderUsagePresentation.summary(usageSnapshot))
+                .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
+                .foregroundStyle(usageSnapshot.status == .available ? Color.tronEmerald : Color.tronTextMuted)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel("Account usage: \(ProviderUsagePresentation.summary(usageSnapshot))")
+                .transition(.opacity)
+        } else if isUsageLoading {
+            ProviderUsageLoadingLine()
+                .transition(.opacity)
+        }
+    }
+
+    private var usageLineIdentity: String {
+        if let usageSnapshot {
+            return "usage:\(usageSnapshot.providerId):\(usageSnapshot.updatedAt ?? "")"
+        }
+        return isUsageLoading ? "loading" : "none"
+    }
+
+    private var usageAccessibilityValue: String {
+        if let usageSnapshot {
+            return "Account usage: \(ProviderUsagePresentation.summary(usageSnapshot))"
+        }
+        return isUsageLoading ? "Account usage is loading" : "Account usage unavailable"
     }
 }
 

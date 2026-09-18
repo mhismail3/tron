@@ -292,7 +292,7 @@ final class SettingsLayoutStyleTests: XCTestCase {
     }
     func testProviderRowsKeepLightweightIndividualSurfaces() async throws {
         let provider = ProviderSummary(
-            id: "openai-codex", name: "OpenAI Codex", configured: true,
+            id: "openai-codex", name: "OpenAI Codex", configured: true, usageSupported: true,
             authSource: "oauth", credentialType: "oauth", authMethods: ["oauth"], modelCount: 2
         )
         try await withHost(
@@ -312,11 +312,11 @@ final class SettingsLayoutStyleTests: XCTestCase {
 
     func testProviderGroupsCoverUsageActionsAndAccessibilitySizing() async throws {
         let configuredWithoutUsage = ProviderSummary(
-            id: "configured-without-usage", name: "Configured Provider Without Usage", configured: true,
+            id: "configured-without-usage", name: "Configured Provider Without Usage", configured: true, usageSupported: false,
             authSource: "api-key", credentialType: "api-key", authMethods: ["api-key"], modelCount: 1
         )
         let available = ProviderSummary(
-            id: "available-provider", name: "Available Provider With A Longer Display Name", configured: false,
+            id: "available-provider", name: "Available Provider With A Longer Display Name", configured: false, usageSupported: nil,
             authSource: nil, credentialType: nil, authMethods: ["api-key"], modelCount: 1
         )
         let usage = ProviderUsageSnapshot(
@@ -328,7 +328,7 @@ final class SettingsLayoutStyleTests: XCTestCase {
             ]
         )
         let configuredWithUsage = ProviderSummary(
-            id: "configured-with-usage", name: "Configured Provider", configured: true,
+            id: "configured-with-usage", name: "Configured Provider", configured: true, usageSupported: true,
             authSource: "oauth", credentialType: "oauth", authMethods: ["oauth"], modelCount: 1
         )
         for width in [320, 375, 393] {
@@ -354,7 +354,7 @@ final class SettingsLayoutStyleTests: XCTestCase {
                         ProviderSetupRow(surfaceStyle: .grouped, provider: available)
                         TronSettingsDivider(accent: .tronPurple)
                         ProviderSetupRow(surfaceStyle: .grouped, provider: ProviderSummary(
-                            id: "available-second", name: "Another Available Provider", configured: false,
+                            id: "available-second", name: "Another Available Provider", configured: false, usageSupported: nil,
                             authSource: nil, credentialType: nil, authMethods: ["api-key"], modelCount: 1
                         ))
                     }
@@ -370,9 +370,62 @@ final class SettingsLayoutStyleTests: XCTestCase {
         }
     }
 
+    func testProviderUsagePlaceholderReservesTheResolvedUsageLineHeight() async throws {
+        let provider = ProviderSummary(
+            id: "opencode-go", name: "Opencode Go", configured: true, usageSupported: true,
+            authSource: "api-key", credentialType: "api-key", authMethods: ["api-key"], modelCount: 3
+        )
+        let usage = ProviderUsageSnapshot(
+            providerId: "opencode-go", status: .available,
+            windows: [
+                UsageWindow(id: "rolling", label: "5h", usedPercent: 0, windowSeconds: 18_000),
+                UsageWindow(id: "weekly", label: "Weekly", usedPercent: 7, windowSeconds: 604_800)
+            ]
+        )
+        // The placeholder must occupy the same slot as the resolved summary, or
+        // the row would still jump when the snapshot lands.
+        for width in [320, 375, 393] {
+            let loading = UIHostingController(
+                rootView: ProviderSetupRow(surfaceStyle: .grouped, provider: provider, isUsageLoading: true)
+                    .tronPresentation().tronSettingsLayout()
+            )
+            let resolved = UIHostingController(
+                rootView: ProviderSetupRow(surfaceStyle: .grouped, provider: provider, usageSnapshot: usage)
+                    .tronPresentation().tronSettingsLayout()
+            )
+            loading.safeAreaRegions = []
+            resolved.safeAreaRegions = []
+            let proposal = CGSize(width: CGFloat(width), height: 400)
+            XCTAssertEqual(
+                loading.sizeThatFits(in: proposal).height,
+                resolved.sizeThatFits(in: proposal).height,
+                accuracy: 1,
+                "The usage placeholder must match the resolved line height at width \(width)"
+            )
+        }
+        try await withHost(
+            ProviderSetupRow(surfaceStyle: .grouped, provider: provider, isUsageLoading: true)
+                .padding(16)
+                .tronPresentation().tronSettingsLayout()
+                .tronSettingsVisualTheme(accent: .tronPurple),
+            size: CGSize(width: 393, height: 120), scheme: .dark
+        ) { host in
+            attach(image(host), name: "provider-usage-loading")
+        }
+        try await withHost(
+            ProviderSetupRow(surfaceStyle: .grouped, provider: provider, isUsageLoading: true)
+                .padding(16)
+                .tronPresentation().tronSettingsLayout()
+                .tronSettingsVisualTheme(accent: .tronPurple),
+            size: CGSize(width: 393, height: 120), scheme: .light
+        ) { host in
+            attach(image(host), name: "provider-usage-loading-light")
+        }
+    }
+
     func testConfiguredProviderRowAndDetailSheetRenderLightDarkAndLargeText() async throws {
         let provider = ProviderSummary(
-            id: "openai-codex", name: "OpenAI Codex", configured: true,
+            id: "openai-codex", name: "OpenAI Codex", configured: true, usageSupported: true,
             authSource: "oauth", credentialType: "oauth", authMethods: ["oauth"], modelCount: 2
         )
         let snapshot = ProviderUsageSnapshot(

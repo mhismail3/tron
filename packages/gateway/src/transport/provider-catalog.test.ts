@@ -5,6 +5,7 @@ function provider(id: string, name = id) {
   return {
     id,
     name,
+    usageSupported: false,
     authSource: null,
     credentialType: null,
     authMethods: [] as string[],
@@ -19,9 +20,11 @@ describe("provider catalog bounds", () => {
     )).toThrow(/item limit/);
   });
 
-  it("rejects duplicate identities and strings generic projection would truncate", () => {
+  it("rejects duplicate identities, malformed usage flags, and strings generic projection would truncate", () => {
     expect(() => validateProviderCatalog([provider("same"), provider("same")]))
       .toThrow(/duplicate IDs/);
+    expect(() => validateProviderCatalog([{ ...provider("p"), usageSupported: "yes" as unknown as boolean }]))
+      .toThrow(/invalid usage flag/);
     expect(() => validateProviderCatalog([provider("large", "x".repeat(100_001))]))
       .toThrow(/string limit/);
   });
