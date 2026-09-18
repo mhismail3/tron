@@ -1356,6 +1356,39 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(candidate.toolPayloads.callIDs.isEmpty)
     }
 
+    @Test("an assembled live extension singleton retains live semantic ownership")
+    func liveExtensionSingletonSemanticAnchors() throws {
+        var snapshot = try fixture(transcript: "[]")
+        snapshot.streaming = try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
+        {"id":"live-context","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"customMessage","customType":"goal.context","content":[{"id":"live-context-text","ordinal":0,"type":"text","text":"Goal created."}],"semantic":{"version":1,"direction":"inboundContext","contextEffect":"modelInput","delivery":"stored","visibility":"visible","kind":"message","origin":{"kind":"extension","ownerId":"extension:goal","title":"Pi Goal","confidence":"receipt"},"sequence":2}}
+        """.utf8))
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        #expect(candidate.timeline.items.count == 1)
+        let host = try #require(candidate.timeline.items.first)
+        #expect(host.id == "live-context")
+        #expect(candidate.timeline.preferredSemanticIDByRenderedID.live[host.id] == "live-context")
+        #expect(candidate.timeline.renderedIDBySemanticID.live["live-context"] == host.id)
+        #expect(!candidate.timeline.renderedIDBySemanticID.canonical.keys.contains("live-context"))
+    }
+
+    @Test("assembled canonical-live extension groups keep one host and both member anchors")
+    func canonicalLiveExtensionGroupSemanticAnchors() throws {
+        var snapshot = try fixture(transcript: """
+        [{"id":"canonical-command","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"customEntry","customType":"tron.chat-invocation.v1","semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"command","origin":{"kind":"extension","ownerId":"extension:goal","title":"Pi Goal","confidence":"receipt"},"invocationId":"canonical-invocation","operationId":"canonical-operation","sequence":1,"lifecycle":"completed","resourceInvocation":{"source":"extension","name":"goal","arguments":"create"}}}]
+        """)
+        snapshot.transcriptTotal = 1
+        snapshot.streaming = try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
+        {"id":"live-context","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"customMessage","customType":"goal.context","content":[{"id":"live-context-text","ordinal":0,"type":"text","text":"Goal created."}],"semantic":{"version":1,"direction":"inboundContext","contextEffect":"modelInput","delivery":"stored","visibility":"visible","kind":"message","origin":{"kind":"extension","ownerId":"extension:goal","title":"Pi Goal","confidence":"receipt"},"sequence":2}}
+        """.utf8))
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        #expect(candidate.timeline.items.count == 1)
+        let host = try #require(candidate.timeline.items.first)
+        #expect(host.id == "canonical-command")
+        #expect(candidate.timeline.preferredSemanticIDByRenderedID[host.id] == "canonical-command")
+        #expect(candidate.timeline.renderedIDBySemanticID["canonical-command"] == host.id)
+        #expect(candidate.timeline.renderedIDBySemanticID.live["live-context"] == host.id)
+    }
+
     @Test("canonical extension notifications are centered status rows rather than app notices")
     func extensionNotificationIsCanonicalStatus() throws {
         var snapshot = try fixture(transcript: """

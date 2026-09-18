@@ -1,4 +1,5 @@
 import SwiftUI
+import Vision
 import Observation
 import UIKit
 import XCTest
@@ -1661,6 +1662,96 @@ final class SessionSheetPresentationTests: XCTestCase {
             "Initial and resized sheets must show the tail (or top-aligned short content), never an empty lazy-layout gap")
     }
 
+    func testCombinedExtensionChipPresentsConsolidatedDetailSheet() async throws {
+        let items = try JSONDecoder.gateway.decode([TranscriptItem].self, from: Data("""
+        [
+          {"id":"command","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"customEntry","customType":"tron.chat-invocation.v1","semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"command","origin":{"kind":"extension","ownerId":"goal","title":"Goal","confidence":"receipt"},"invocationId":"i1","operationId":"o1","sequence":1,"lifecycle":"failed","resourceInvocation":{"source":"extension","name":"goal","arguments":"create"}}},
+          {"id":"context","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"customMessage","customType":"goal.context","presentationId":"context","content":[{"id":"context-text","type":"text","text":"Goal created.","ordinal":0}],"details":{"goal":{"objective":"Preserved objective","status":"active","tokensUsed":4}},"semantic":{"version":1,"direction":"inboundContext","contextEffect":"modelInput","delivery":"stored","visibility":"visible","kind":"message","origin":{"kind":"extension","ownerId":"goal","title":"Goal","confidence":"receipt"},"sequence":2}},
+          {"id":"notice","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"customEntry","customType":"tron.extension-notification.v1","data":{"message":"Goal created.","tone":"info"},"semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"status","origin":{"kind":"extension","ownerId":"goal","title":"Goal","confidence":"receipt"},"sequence":3}}
+        ]
+        """.utf8))
+        // A notification may precede equal context prose. Deduplication must
+        // still show the context's distinct structured state and objective.
+        let rendered = items.dropFirst().reversed().map(ChatTranscriptRenderItem.transcript)
+        let aggregated = ChatExtensionChipAggregationPolicy.aggregate(rendered)
+        let first = try XCTUnwrap(aggregated.first)
+        guard case .notification(let presentation) = first,
+              let group = presentation.extensionGroup else {
+            return XCTFail("Expected consolidated extension presentation")
+        }
+        try await withSheet(ExtensionChipGroupDetailsSheet(group: group)) { controller in
+            for _ in 0..<8 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+            XCTAssertNotNil(self.views(of: UINavigationBar.self, in: controller.view).first)
+            XCTAssertGreaterThan(controller.view.bounds.height, 0)
+            // SwiftUI text is drawn, not backed by UILabels in this host.
+            // Inspect the rendered content rather than the projection helper.
+            let image = UIGraphicsImageRenderer(size: controller.view.bounds.size).image { _ in
+                controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
+            }
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            request.recognitionLanguages = ["en-US"]
+            try VNImageRequestHandler(cgImage: XCTUnwrap(image.cgImage)).perform([request])
+            let lines = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+            XCTAssertTrue(lines.contains { $0.contains("Preserved objective") }, "Deduplicating prose must retain structured context: \(lines)")
+            XCTAssertTrue(lines.contains { $0.contains("Active") })
+            XCTAssertEqual(lines.filter { $0.contains("Goal created.") }.count, 1)
+            self.capture(controller, name: "combined-extension-chip-details")
+        }
+    }
+
+    func testCombinedExtensionChipAccessibilityActivationPresentsManagedSheet() async throws {
+        let items = try JSONDecoder.gateway.decode([TranscriptItem].self, from: Data("""
+        [
+          {"id":"command","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"customEntry","customType":"tron.chat-invocation.v1","semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"command","origin":{"kind":"extension","ownerId":"goal","title":"Goal","confidence":"receipt"},"invocationId":"i1","operationId":"o1","sequence":1,"lifecycle":"completed","resourceInvocation":{"source":"extension","name":"goal","arguments":"create"}}},
+          {"id":"context","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"customMessage","customType":"goal.context","content":[{"id":"context-text","type":"text","text":"Goal created.","ordinal":0}],"details":{"status":"active","goal":{"objective":"Create the goal","status":"active","tokensUsed":4}},"semantic":{"version":1,"direction":"inboundContext","contextEffect":"modelInput","delivery":"stored","visibility":"visible","kind":"message","origin":{"kind":"extension","ownerId":"goal","title":"Goal","confidence":"receipt"},"sequence":2}},
+          {"id":"notice","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"customEntry","customType":"tron.extension-notification.v1","data":{"message":"Goal created.","tone":"info"},"semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"status","origin":{"kind":"extension","ownerId":"goal","title":"Goal","confidence":"receipt"},"sequence":3}}
+        ]
+        """.utf8))
+        let rendered = items.map(ChatTranscriptRenderItem.transcript)
+        let aggregated = ChatExtensionChipAggregationPolicy.aggregate(rendered)
+        guard case .notification(let presentation) = try XCTUnwrap(aggregated.first),
+              let group = presentation.extensionGroup else {
+            return XCTFail("Expected consolidated extension presentation")
+        }
+        try await withModel { model in
+            let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+            let previous = scene.windows.first(where: \.isKeyWindow)
+            let appeared = expectation(description: "Chip appeared")
+            let host = UIHostingController(rootView: ChatNotificationView(presentation: presentation)
+                .environment(model)
+                .onAppear { appeared.fulfill() })
+            let window = UIWindow(windowScene: scene)
+            window.frame = scene.coordinateSpace.bounds
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+                previous?.makeKeyAndVisible()
+            }
+            let appearance = await XCTWaiter.fulfillment(of: [appeared], timeout: 3)
+            XCTAssertEqual(appearance, .completed)
+            host.view.layoutIfNeeded()
+            let element = try XCTUnwrap(self.accessibilityElements(in: host.view).first {
+                ($0 as? NSObject)?.value(forKey: "accessibilityLabel") as? String == "Extension activity, 3 updates"
+            })
+            let selector = NSSelectorFromString("accessibilityActivate")
+            guard (element as AnyObject).responds(to: selector) else {
+                return XCTFail("Combined chip did not expose accessibility activation")
+            }
+            _ = (element as AnyObject).perform(selector)
+            let presented = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in host.presentedViewController != nil }, object: nil)
+            let result = await XCTWaiter.fulfillment(of: [presented], timeout: 3)
+            XCTAssertEqual(result, .completed)
+            let sheet = try XCTUnwrap(host.presentedViewController)
+            for _ in 0..<8 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+            sheet.view.layoutIfNeeded()
+            XCTAssertTrue(sheet.view.window != nil)
+            self.capture(sheet, name: "combined-extension-chip-details-final")
+        }
+    }
+
     func testMixedActivitySheetUsesNativeRowsAndEmeraldTheme() async throws {
         let content = ExtensionRetainedContentPolicy.content(
             widgets: [
@@ -2251,6 +2342,11 @@ final class SessionSheetPresentationTests: XCTestCase {
 
     private func views<T: UIView>(of type: T.Type, in root: UIView) -> [T] {
         ((root as? T).map { [$0] } ?? []) + root.subviews.flatMap { views(of: type, in: $0) }
+    }
+
+    private func accessibilityElements(in root: UIView) -> [Any] {
+        if let elements = root.accessibilityElements { return elements }
+        return root.subviews.flatMap { accessibilityElements(in: $0) }
     }
 
     /// Some sheets mount their content only after a bounded asynchronous

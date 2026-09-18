@@ -36,7 +36,7 @@ struct ChatNotificationView: View {
     @State private var titleMeasurement: ChatCompactPillTitleMeasurement?
 
     private var showsDetailAction: Bool {
-        presentation.hasDetailSheet
+        presentation.extensionGroup != nil || presentation.hasDetailSheet
             || (presentation.expandsOnTruncation && titleMeasurement?.isTruncated == true)
     }
 
@@ -64,7 +64,11 @@ struct ChatNotificationView: View {
                 pill
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: 44,
+            alignment: presentation.extensionGroup?.containsContext == true ? .trailing : .center
+        )
         .contentTransition(.interpolate)
         .accessibilityLabel(accessibilityLabel)
         .onPreferenceChange(ChatCompactPillTitleMeasurementKey.self) { measurements in
@@ -77,8 +81,14 @@ struct ChatNotificationView: View {
         }
         .tronManagedSheet(
             isPresented: $showingDetail,
-            identity: "chat.transcript-event-detail"
-        ) { detailSheet }
+            identity: "chat.transcript-event-detail.\(presentation.id)"
+        ) {
+            if let group = presentation.extensionGroup {
+                ExtensionChipGroupDetailsSheet(group: group)
+            } else {
+                detailSheet
+            }
+        }
     }
 
     private var pill: some View {
@@ -100,7 +110,10 @@ struct ChatNotificationView: View {
     }
 
     private var accessibilityLabel: String {
-        [presentation.title, presentation.detail].compactMap { $0 }.joined(separator: ", ")
+        if let group = presentation.extensionGroup {
+            return "Extension activity, \(group.events.count) updates"
+        }
+        return [presentation.title, presentation.detail].compactMap { $0 }.joined(separator: ", ")
     }
 
     private var detailSheet: some View {
@@ -144,6 +157,252 @@ struct ChatNotificationView: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
+    }
+}
+
+struct ExtensionChipGroupDetailsSheet: View {
+    let group: ChatExtensionChipGroup
+    @Environment(\.dismiss) private var dismiss
+    @State private var detent: PresentationDetent = .medium
+    @State private var technicalDetailsExpanded = false
+
+    private var accent: Color { group.containsContext ? .tronPurple : .tronBlue }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: TronSpacing.section) {
+                    ForEach(Array(group.events.enumerated()), id: \.offset) { index, event in
+                        readableEventSection(event, duplicateOf: duplicateEventIndex(for: event, before: index))
+                    }
+                    DisclosureGroup(isExpanded: $technicalDetailsExpanded) {
+                        LazyVStack(alignment: .leading, spacing: TronSpacing.section) {
+                            ForEach(Array(group.events.enumerated()), id: \.offset) { _, event in
+                                technicalEventSection(event)
+                            }
+                        }
+                        .padding(.top, TronSpacing.sm)
+                    } label: {
+                        Text("Technical details")
+                            .font(TronTypography.sheetSectionHeader)
+                            .foregroundStyle(Color.tronTextPrimary)
+                    }
+                }
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .defaultScrollAnchor(.top, for: .initialOffset)
+            .defaultScrollAnchor(.top, for: .sizeChanges)
+            .tronScrollEdgeChrome()
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    TronSheetTitle(title: "Extension activity", accent: accent)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronEmerald)
+                    }
+                    .accessibilityLabel("Done")
+                }
+            }
+        }
+        .tronTopBlur(.sheet)
+        .presentationDetents([.medium, .large], selection: $detent)
+        .presentationDragIndicator(.hidden)
+        .tronPresentation()
+    }
+
+    private func duplicateEventIndex(for event: ChatExtensionChipEvent, before index: Int) -> Int? {
+        guard let key = userFacingContentKey(for: event) else { return nil }
+        return group.events[..<index].firstIndex { userFacingContentKey(for: $0) == key }
+    }
+
+    private func userFacingContentKey(for event: ChatExtensionChipEvent) -> String? {
+        ChatExtensionChipContentDeduplicationPolicy.key(for: event)
+    }
+
+    private func producer(for event: ChatExtensionChipEvent) -> String {
+        event.item?.semantic?.origin.title ?? "Extension"
+    }
+
+    private func eventKind(_ event: ChatExtensionChipEvent) -> String {
+        switch event {
+        case .command: return "command"
+        case .context: return "context"
+        case .notification: return "notification"
+        }
+    }
+
+    private func duplicateNote(for event: ChatExtensionChipEvent) -> some View {
+        Label("Already shown above; retained as a separate \(eventKind(event)) event.", systemImage: "arrow.triangle.merge")
+            .font(TronTypography.secondaryDescription)
+            .foregroundStyle(Color.tronTextSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder
+    private func readableEventSection(_ event: ChatExtensionChipEvent, duplicateOf: Int?) -> some View {
+        switch event {
+        case .command(let item):
+            let resource = item.semantic?.resourceInvocation
+            VStack(alignment: .leading, spacing: TronSpacing.sm) {
+                readableHeader("Command", producer: producer(for: event))
+                if duplicateOf == nil {
+                    readableCard("/\(resource?.name ?? "Extension command")", accent: .tronIndigo)
+                    if let arguments = resource?.arguments, !arguments.isEmpty {
+                        Text(arguments).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
+                    }
+                } else {
+                    duplicateNote(for: event)
+                }
+                if let lifecycle = item.semantic?.lifecycle?.rawValue {
+                    statusLine("Status", ComposerResourceNameFormatter.friendly(lifecycle), accent: CommandLifecyclePresentationPolicy.tone(lifecycle).primaryColor)
+                }
+                if let error = item.errorMessage, !error.isEmpty {
+                    statusLine("Error", error, accent: Color.tronError)
+                }
+            }
+        case .context(let item):
+            let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let goal = InboundContextGoalPresentation.project(item.details)
+            VStack(alignment: .leading, spacing: TronSpacing.sm) {
+                readableHeader("Context", producer: producer(for: event))
+                if duplicateOf == nil {
+                    TronMarkdownView(text: text.isEmpty ? "No text content" : text, streaming: false)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(TronSpacing.lg)
+                        .tronGlassSurface(accent: .tronPurple, tintOpacity: 0.08)
+                } else {
+                    duplicateNote(for: event)
+                }
+                // Equal message text does not imply equal state or payload.
+                // Keep this event's structured facts even when its prose repeats.
+                let status = InboundContextCompactPresentationPolicy.status(details: item.details)
+                if goal?.status != status {
+                    statusLine("Status", status, accent: .tronPurple)
+                }
+                if let goal {
+                    readableMetadata("Goal", goal.metadata, accent: .tronPurple)
+                }
+            }
+        case .notification(let presentation):
+            VStack(alignment: .leading, spacing: TronSpacing.sm) {
+                readableHeader("Notification", producer: producer(for: event))
+                if let body = presentation.body, !body.isEmpty, duplicateOf == nil {
+                    readableCard(body, accent: presentation.tone.surfaceColor)
+                } else if duplicateOf != nil {
+                    duplicateNote(for: event)
+                }
+                if let detail = presentation.detail {
+                    statusLine("Status", detail, accent: presentation.tone.surfaceColor)
+                }
+            }
+        }
+    }
+
+    private func readableHeader(_ title: String, producer: String) -> some View {
+        VStack(alignment: .leading, spacing: TronSpacing.xs) {
+            Text(title)
+                .font(TronTypography.sheetSectionHeader)
+                .foregroundStyle(Color.tronTextPrimary)
+            Text(producer)
+                .font(TronTypography.caption)
+                .foregroundStyle(Color.tronTextMuted)
+        }
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    private func readableCard(_ text: String, accent: Color) -> some View {
+        Text(text)
+            .font(TronTypography.body)
+            .foregroundStyle(Color.tronTextPrimary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(TronSpacing.lg)
+            .tronGlassSurface(accent: accent, tintOpacity: 0.08)
+    }
+
+    private func readableMetadata(_ title: String, _ items: [TronTechnicalMetadataItem], accent: Color) -> some View {
+        VStack(alignment: .leading, spacing: TronSpacing.sm) {
+            Text(title)
+                .font(TronTypography.sheetSectionHeader)
+                .foregroundStyle(Color.tronTextPrimary)
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                HStack(alignment: .firstTextBaseline, spacing: TronSpacing.sm) {
+                    Text(item.title)
+                        .font(TronTypography.secondaryDescription)
+                        .foregroundStyle(accent)
+                    Spacer(minLength: TronSpacing.sm)
+                    Text(item.value)
+                        .font(TronTypography.secondaryDescription)
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .multilineTextAlignment(.trailing)
+                }
+            }
+        }
+        .padding(TronSpacing.lg)
+        .tronGlassSurface(accent: accent, tintOpacity: 0.08)
+    }
+
+    private func statusLine(_ label: String, _ value: String, accent: Color) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: TronSpacing.sm) {
+            Text(label)
+                .font(TronTypography.sheetSectionHeader)
+                .foregroundStyle(accent)
+            Text(value)
+                .font(TronTypography.secondaryDescription)
+                .foregroundStyle(Color.tronTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private func technicalEventSection(_ event: ChatExtensionChipEvent) -> some View {
+        let item = event.item
+        VStack(alignment: .leading, spacing: TronSpacing.sm) {
+            Text("\(eventKind(event).capitalized) · \(producer(for: event))")
+                .font(TronTypography.sheetSectionHeader)
+                .foregroundStyle(Color.tronTextPrimary)
+            if let item {
+                extensionIdentity(item, accent: accent)
+                rawSection(item, accent: accent)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func rawSection(_ item: TranscriptItem, accent: Color) -> some View {
+        let payload = (try? JSONValue.encode(item)) ?? .object([:])
+        TronTechnicalJSONRow(
+            value: payload,
+            title: "Inspect raw event",
+            subtitle: ToolTechnicalPayloadSummary.summary(for: payload),
+            sheetTitle: "Raw extension event",
+            accent: accent
+        )
+    }
+
+    private func extensionIdentity(_ item: TranscriptItem, accent: Color) -> some View {
+        let origin = item.semantic?.origin
+        var items: [TronTechnicalMetadataItem] = [
+            .init(title: "Producer", value: origin?.title ?? "Extension", icon: "puzzlepiece.extension"),
+            .init(title: "Type", value: item.customType ?? item.semantic?.kind.rawValue ?? "unknown", icon: "doc.badge.ellipsis")
+        ]
+        if let goalID = item.details?.objectValue?["goalId"]?.stringValue {
+            items.append(.init(title: "Goal", value: goalID, icon: "target"))
+        }
+        if let invocationID = item.semantic?.invocationId {
+            items.append(.init(title: "Invocation", value: invocationID, icon: "point.3.connected.trianglepath.dotted"))
+        }
+        if let operationID = item.semantic?.operationId {
+            items.append(.init(title: "Operation", value: operationID, icon: "number"))
+        }
+        items.append(contentsOf: [
+            .init(title: "Entry", value: item.id, icon: "number"),
+            .init(title: "Timestamp", value: item.timestamp, icon: "clock")
+        ])
+        return TronTechnicalMetadataSection(title: "Source and identity", items: items, accent: accent)
     }
 }
 

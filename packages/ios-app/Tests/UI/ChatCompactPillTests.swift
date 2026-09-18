@@ -1,10 +1,161 @@
 import SwiftUI
 import Testing
+import Foundation
 import UIKit
 @testable import TronMobile
 
 @Suite("Chat compact pill and prompt typography")
 struct ChatCompactPillTests {
+    @Test("adjacent extension chips consolidate with context alignment and conservative deduplication")
+    func extensionChipAggregation() throws {
+        let items = try Self.decodeItems("""
+        [
+          {"id":"command","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"customEntry","customType":"tron.chat-invocation.v1","semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"command","origin":{"kind":"extension","ownerId":"goal","title":"Goal","confidence":"receipt"},"invocationId":"i1","operationId":"o1","sequence":1,"lifecycle":"completed","resourceInvocation":{"source":"extension","name":"goal","arguments":"create"}}},
+          {"id":"context","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"customMessage","customType":"goal.context","presentationId":"context","content":[{"id":"context-text","type":"text","text":"Goal created.","ordinal":0}],"semantic":{"version":1,"direction":"inboundContext","contextEffect":"modelInput","delivery":"stored","visibility":"visible","kind":"message","origin":{"kind":"extension","ownerId":"goal","title":"Goal","confidence":"receipt"},"sequence":2}},
+          {"id":"notice1","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"customEntry","customType":"tron.extension-notification.v1","data":{"message":"Goal created.","tone":"info"},"semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"status","origin":{"kind":"extension","ownerId":"other","title":"Other","confidence":"receipt"},"sequence":3}},
+          {"id":"notice2","parentId":null,"timestamp":"2026-01-01T00:00:03Z","kind":"customEntry","customType":"tron.extension-notification.v1","data":{"message":"Goal created.","tone":"info"},"semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"status","origin":{"kind":"extension","ownerId":"other","title":"Other","confidence":"receipt"},"sequence":4}},
+          {"id":"notice3","parentId":null,"timestamp":"2026-01-01T00:00:04Z","kind":"customEntry","customType":"tron.extension-notification.v1","data":{"message":"Goal failed.","tone":"error"},"semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"status","origin":{"kind":"extension","ownerId":"other","title":"Other","confidence":"receipt"},"sequence":5}}
+        ]
+        """)
+        let rendered = items.map(ChatTranscriptRenderItem.transcript)
+        let aggregated = ChatExtensionChipAggregationPolicy.aggregate(rendered)
+        #expect(aggregated.count == 1)
+        guard case .notification(let presentation) = aggregated[0], let group = presentation.extensionGroup else {
+            Issue.record("Expected one consolidated extension chip")
+            return
+        }
+        #expect(group.containsContext)
+        #expect(group.events.count == 5)
+        #expect(group.events.filter(\.isContext).count == 1)
+        let notificationIDs = group.events.compactMap { event -> String? in
+            if case .notification(let value) = event { return value.sourceItem?.id }
+            return nil
+        }
+        let repeatedNotificationCount = notificationIDs.filter { id in
+            id == "notice1" || id == "notice2"
+        }.count
+        #expect(repeatedNotificationCount == 2)
+        #expect(group.events.contains { event in
+            if case .notification(let value) = event { return value.detail == "Error" }
+            return false
+        })
+    }
+
+    @Test("deduplication uses trusted producer identity across event kinds")
+    func extensionChipContentDeduplication() throws {
+        let items = try Self.decodeItems("""
+        [
+          {"id":"context","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"customMessage","customType":"goal.context","presentationId":"context","content":[{"id":"context-text","type":"text","text":"Goal created.","ordinal":0}],"semantic":{"version":1,"direction":"inboundContext","contextEffect":"modelInput","delivery":"stored","visibility":"visible","kind":"message","origin":{"kind":"extension","ownerId":"goal","title":"Goal","confidence":"receipt"},"sequence":1}},
+          {"id":"other","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"customMessage","customType":"other.context","presentationId":"other","content":[{"id":"other-text","type":"text","text":"Goal created.","ordinal":0}],"semantic":{"version":1,"direction":"inboundContext","contextEffect":"modelInput","delivery":"stored","visibility":"visible","kind":"message","origin":{"kind":"extension","ownerId":"other","title":"Other","confidence":"receipt"},"sequence":2}}
+        ]
+        """)
+        let context = ChatExtensionChipEvent.context(items[0])
+        let matchingNotification = ChatExtensionChipEvent.notification(ChatNotificationPresentation(
+            id: "notice", semanticID: nil, icon: "bell", title: "Goal · Notification", detail: "Info",
+            body: "Goal created.", tone: .information, material: .glass, sourceItem: items[0]
+        ))
+        let otherProducer = ChatExtensionChipEvent.context(items[1])
+        #expect(ChatExtensionChipContentDeduplicationPolicy.key(for: context) == ChatExtensionChipContentDeduplicationPolicy.key(for: matchingNotification))
+        #expect(ChatExtensionChipContentDeduplicationPolicy.key(for: context) != ChatExtensionChipContentDeduplicationPolicy.key(for: otherProducer))
+        let unknownNotification = ChatExtensionChipEvent.notification(ChatNotificationPresentation(
+            id: "unknown", semanticID: nil, icon: "bell", title: "Unknown", detail: "Info",
+            body: "Goal created.", tone: .information, material: .glass
+        ))
+        #expect(ChatExtensionChipContentDeduplicationPolicy.key(for: unknownNotification) == nil)
+    }
+
+    @Test("canonical and live tails share one first-member host and context alignment")
+    func extensionChipAggregationAcrossOwnershipBoundary() throws {
+        let items = try Self.decodeItems("""
+        [
+          {"id":"command","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"customEntry","customType":"tron.chat-invocation.v1","semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"command","origin":{"kind":"extension","ownerId":"goal","title":"Goal","confidence":"receipt"},"invocationId":"i1","operationId":"o1","sequence":1,"lifecycle":"completed","resourceInvocation":{"source":"extension","name":"goal","arguments":"create"}}},
+          {"id":"context","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"customMessage","customType":"goal.context","presentationId":"context","content":[{"id":"context-text","type":"text","text":"Goal created.","ordinal":0}],"semantic":{"version":1,"direction":"inboundContext","contextEffect":"modelInput","delivery":"stored","visibility":"visible","kind":"message","origin":{"kind":"extension","ownerId":"goal","title":"Goal","confidence":"receipt"},"sequence":2}}
+        ]
+        """)
+        let entries = ChatExtensionChipAggregationPolicy.aggregateWithOrigins(
+            items.map(ChatTranscriptRenderItem.transcript),
+            origins: [.canonical, .live]
+        )
+        #expect(entries.count == 1)
+        #expect(entries[0].origin == .canonical)
+        #expect(entries[0].item.id == "command")
+        guard case .notification(let presentation) = entries[0].item,
+              let group = presentation.extensionGroup else {
+            Issue.record("Expected cross-boundary group")
+            return
+        }
+        #expect(group.containsContext)
+        #expect(group.events.count == 2)
+    }
+
+    @Test("live-only extension groups retain one first-member host")
+    func liveOnlyExtensionChipAggregation() throws {
+        let items = try Self.decodeItems("""
+        [
+          {"id":"live-command","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"customEntry","customType":"tron.chat-invocation.v1","semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"command","origin":{"kind":"extension","ownerId":"goal","title":"Goal","confidence":"receipt"},"invocationId":"i1","operationId":"o1","sequence":1,"lifecycle":"completed","resourceInvocation":{"source":"extension","name":"goal","arguments":"create"}}},
+          {"id":"live-context","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"customMessage","customType":"goal.context","content":[{"id":"live-context-text","type":"text","text":"Goal created.","ordinal":0}],"semantic":{"version":1,"direction":"inboundContext","contextEffect":"modelInput","delivery":"stored","visibility":"visible","kind":"message","origin":{"kind":"extension","ownerId":"goal","title":"Goal","confidence":"receipt"},"sequence":2}}
+        ]
+        """)
+        let entries = ChatExtensionChipAggregationPolicy.aggregateWithOrigins(
+            items.map(ChatTranscriptRenderItem.transcript), origins: [.live, .live]
+        )
+        #expect(entries.count == 1)
+        #expect(entries[0].origin == .live)
+        guard case .notification(let presentation) = entries[0].item,
+              let group = presentation.extensionGroup else {
+            Issue.record("Expected one live extension group")
+            return
+        }
+        #expect(group.events.count == 2)
+        #expect(group.containsContext)
+        #expect(group.id == "live-command")
+    }
+
+    @Test("repeated commands and notifications remain lossless across barriers")
+    func extensionChipAggregationRetainsRepeatedKinds() throws {
+        let items = try Self.decodeItems("""
+        [
+          {"id":"first","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"customEntry","customType":"tron.chat-invocation.v1","semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"command","origin":{"kind":"extension","ownerId":"goal","title":"Goal","confidence":"receipt"},"invocationId":"i1","operationId":"o1","sequence":1,"lifecycle":"completed","resourceInvocation":{"source":"extension","name":"goal","arguments":"same"}}},
+          {"id":"second","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"customEntry","customType":"tron.chat-invocation.v1","semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"command","origin":{"kind":"extension","ownerId":"goal","title":"Goal","confidence":"receipt"},"invocationId":"i2","operationId":"o2","sequence":2,"lifecycle":"completed","resourceInvocation":{"source":"extension","name":"goal","arguments":"same"}}},
+          {"id":"ordinary","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","presentationId":"ordinary","content":[{"id":"ordinary-text","type":"text","text":"ordinary","ordinal":0}]},
+          {"id":"third","parentId":null,"timestamp":"2026-01-01T00:00:03Z","kind":"customEntry","customType":"tron.chat-invocation.v1","semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"command","origin":{"kind":"extension","ownerId":"goal","title":"Goal","confidence":"receipt"},"invocationId":"i3","operationId":"o3","sequence":3,"lifecycle":"failed","resourceInvocation":{"source":"extension","name":"goal","arguments":"same"}}}
+        ]
+        """)
+        let result = ChatExtensionChipAggregationPolicy.aggregate(items.map(ChatTranscriptRenderItem.transcript))
+        #expect(result.count == 3)
+        #expect(result[0].id == "first")
+        #expect(result[1].id == "ordinary")
+        #expect(result[2].id == "third")
+        guard case .notification(let first) = result[0], let firstGroup = first.extensionGroup else {
+            Issue.record("Expected pair group before barrier")
+            return
+        }
+        #expect(firstGroup.events.count == 2)
+        guard case .transcript = result[2] else {
+            Issue.record("Expected singleton after barrier to remain its original event")
+            return
+        }
+    }
+
+    @Test("non-extension rows break aggregation and singleton extension rows preserve identity")
+    func extensionChipAggregationBoundaries() throws {
+        let items = try Self.decodeItems("""
+        [
+          {"id":"command","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"customEntry","customType":"tron.chat-invocation.v1","semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"command","origin":{"kind":"extension","ownerId":"a","title":"A","confidence":"receipt"},"invocationId":"i1","operationId":"o1","sequence":1,"lifecycle":"completed","resourceInvocation":{"source":"extension","name":"goal","arguments":"create"}}},
+          {"id":"ordinary","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","presentationId":"ordinary","content":[{"id":"ordinary-text","type":"text","text":"ordinary","ordinal":0}]},
+          {"id":"context","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"customMessage","customType":"goal.context","presentationId":"context","content":[{"id":"context-text","type":"text","text":"context","ordinal":0}],"semantic":{"version":1,"direction":"inboundContext","contextEffect":"modelInput","delivery":"stored","visibility":"visible","kind":"message","origin":{"kind":"extension","ownerId":"b","title":"B","confidence":"receipt"},"sequence":2}}
+        ]
+        """)
+        let aggregated = ChatExtensionChipAggregationPolicy.aggregate(items.map(ChatTranscriptRenderItem.transcript))
+        #expect(aggregated.count == 3)
+        #expect(aggregated[0].id == "command")
+        #expect(aggregated[2].id == "context")
+    }
+
+    private static func decodeItems(_ source: String) throws -> [TranscriptItem] {
+        try JSONDecoder().decode([TranscriptItem].self, from: Data(source.utf8))
+    }
+
     @Test("prompt lines use logical leading alignment inside a right-anchored bound")
     func promptAlignment() {
         #expect(UserPromptTextLayoutPolicy.alignment(layoutDirection: .leftToRight) == .left)

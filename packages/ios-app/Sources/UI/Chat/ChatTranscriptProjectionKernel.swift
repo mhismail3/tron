@@ -73,7 +73,7 @@ fileprivate enum ChatToolPatchClassification: Hashable, Sendable {
 /// Row ownership is kept separate from semantic identity. Canonical rows may
 /// be enriched by live execution facts, but runtime-only and streaming rows
 /// remain in the live region until canonical JSONL owns their exact calls.
-fileprivate enum ChatTranscriptRowOrigin: Hashable, Sendable {
+enum ChatTranscriptRowOrigin: Hashable, Sendable {
     case canonical
     case live
 }
@@ -1184,10 +1184,10 @@ enum ChatTranscriptProjectionKernel {
                     globalOrdinal: rawOrdinalByID[item.id]
                 ) {
                     flushTools()
-                    appendRendered(.notification(notification), origin: .canonical)
+                    appendRendered(.notification(notification), origin: streaming ? .live : .canonical)
                 } else if tools.isEmpty {
                     flushTools()
-                    appendRendered(.transcript(item), origin: .canonical)
+                    appendRendered(.transcript(item), origin: streaming ? .live : .canonical)
                 } else {
                     for tool in tools {
                         appendToolRunMember(tool, allowsLegacyContinuation: true)
@@ -1418,15 +1418,18 @@ enum ChatTranscriptProjectionKernel {
         rendered = merged.items
         renderedOrigins = merged.origins
 
-        // Keep the canonical ledger and the live region as separate physical
-        // collections. Their concatenated order is still deterministic, but a
-        // runtime row can no longer become committed merely because assembly
-        // appended it after the canonical tail.
-        let canonicalRendered = rendered.enumerated().compactMap { index, item in
-            renderedOrigins[index] == .canonical ? item : nil
+        // Aggregate the final physical spine, not each ownership region in
+        // isolation. A canonical tail followed by a live head is adjacent in
+        // the rendered transcript and must therefore share one stable chip.
+        let aggregated = ChatExtensionChipAggregationPolicy.aggregateWithOrigins(
+            rendered,
+            origins: renderedOrigins
+        )
+        let canonicalRendered = aggregated.compactMap { entry in
+            entry.origin == .canonical ? entry.item : nil
         }
-        let liveRendered = rendered.enumerated().compactMap { index, item in
-            renderedOrigins[index] == .live ? item : nil
+        let liveRendered = aggregated.compactMap { entry in
+            entry.origin == .live ? entry.item : nil
         }
 
         // Patch sites are recorded while assembling, so rebase them onto the
@@ -1459,44 +1462,71 @@ enum ChatTranscriptProjectionKernel {
         var preferredSemanticIDByRenderedIDLive: [String: String] = [:]
         var renderedIDBySemanticID: [String: String] = [:]
         var renderedIDBySemanticIDLive: [String: String] = [:]
-        for (index, item) in rendered.enumerated() {
-            func record(
-                preferredID: String,
-                semanticID: String,
-                origin: ChatTranscriptRowOrigin
-            ) {
-                if origin == .canonical {
-                    preferredSemanticIDByRenderedID[preferredID] = semanticID
-                    renderedIDBySemanticID[semanticID] = item.id
-                } else {
-                    preferredSemanticIDByRenderedIDLive[preferredID] = semanticID
-                    renderedIDBySemanticIDLive[semanticID] = item.id
-                }
+        let extensionEventOrigins: [String: ChatTranscriptRowOrigin] = zip(rendered, renderedOrigins)
+            .reduce(into: [:]) { origins, entry in
+                guard let event = ChatExtensionChipAggregationPolicy.event(for: entry.0),
+                      let source = event.item,
+                      origins[source.id] == nil else { return }
+                origins[source.id] = entry.1
             }
-            let origin = renderedOrigins[index]
-            switch item {
-            case .transcript(let transcript):
-                record(preferredID: item.id, semanticID: transcript.id, origin: origin)
-            case .message(let message):
-                record(preferredID: item.id, semanticID: message.semanticID, origin: origin)
-            case .toolRun(let run):
-                let semanticID = run.groupIDs.isEmpty ? (run.tools.last?.id ?? run.id) : run.id
-                record(preferredID: item.id, semanticID: semanticID, origin: origin)
-                for tool in run.tools {
+        func recordSemanticIDs(
+            in items: [ChatTranscriptRenderItem],
+            origin: ChatTranscriptRowOrigin
+        ) {
+            for item in items {
+                func record(
+                    preferredID: String,
+                    semanticID: String
+                ) {
                     if origin == .canonical {
-                        renderedIDBySemanticID[tool.id] = item.id
+                        preferredSemanticIDByRenderedID[preferredID] = semanticID
+                        renderedIDBySemanticID[semanticID] = item.id
                     } else {
-                        renderedIDBySemanticIDLive[tool.id] = item.id
+                        preferredSemanticIDByRenderedIDLive[preferredID] = semanticID
+                        renderedIDBySemanticIDLive[semanticID] = item.id
                     }
                 }
-            case .notification(let notification):
-                record(
-                    preferredID: item.id,
-                    semanticID: notification.semanticID ?? item.id,
-                    origin: origin
-                )
+                switch item {
+                case .transcript(let transcript):
+                    record(preferredID: item.id, semanticID: transcript.id)
+                case .message(let message):
+                    record(preferredID: item.id, semanticID: message.semanticID)
+                case .toolRun(let run):
+                    let semanticID = run.groupIDs.isEmpty ? (run.tools.last?.id ?? run.id) : run.id
+                    record(preferredID: item.id, semanticID: semanticID)
+                    for tool in run.tools {
+                        if origin == .canonical {
+                            renderedIDBySemanticID[tool.id] = item.id
+                        } else {
+                            renderedIDBySemanticIDLive[tool.id] = item.id
+                        }
+                    }
+                case .notification(let notification):
+                    if let group = notification.extensionGroup,
+                       let firstSource = group.events.first?.item {
+                        // The mounted group keeps the first member's semantic
+                        // identity. Reverse anchors follow each member's
+                        // physical authority, including a live-only group.
+                        record(preferredID: item.id, semanticID: firstSource.id)
+                        for event in group.events {
+                            guard let source = event.item else { continue }
+                            if extensionEventOrigins[source.id] == .live {
+                                renderedIDBySemanticIDLive[source.id] = item.id
+                            } else {
+                                renderedIDBySemanticID[source.id] = item.id
+                            }
+                        }
+                    } else {
+                        record(
+                            preferredID: item.id,
+                            semanticID: notification.semanticID ?? item.id
+                        )
+                    }
+                }
             }
         }
+        recordSemanticIDs(in: canonicalRendered, origin: .canonical)
+        recordSemanticIDs(in: liveRendered, origin: .live)
         // `canonicalRendered`/`liveRendered` intentionally use the same
         // identities and payloads as the assembled array; only ownership and
         // physical placement change at this boundary.

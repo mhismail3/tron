@@ -1953,7 +1953,7 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    @Test("an empty session renders command and notification pills before its first reply")
+    @Test("an empty session renders a consolidated extension chip before its first reply")
     func emptySessionMaterializesExtensionPills() async throws {
         try await withTestWatchdog(timeout: .seconds(15)) {
             var empty = try SessionScenarioBuilder(seed: 1_193).openingTail(targetEncodedBytes: 10_000)
@@ -1977,19 +1977,35 @@ struct ChatViewScrollHarnessTests {
                 running.transcriptTotal = running.transcript.count
                 running.revision += 1
                 running.eventSequence += 1
+                var singleton = running
+                singleton.transcript = Array(running.transcript.prefix(1))
+                singleton.transcriptTotal = 1
+                let singletonBaseline = harness.probeObservation.projectionInstallCount
+                harness.replaceAuthoritativeSnapshot(singleton)
+                let single = try await harness.recorder.waitUntil {
+                    $0.observation.projectionInstallCount > singletonBaseline
+                        && $0.nativeRows.contains { $0.semanticID == "command" && $0.isVisible && $0.frame.height > 20 }
+                }
+                let singleInstance = try #require(single.nativeRows.first { $0.semanticID == "command" }?.instance)
+                running.revision += 1
+                running.eventSequence += 1
                 let installBaseline = harness.probeObservation.projectionInstallCount
                 harness.replaceAuthoritativeSnapshot(running)
                 let rendered = try await harness.recorder.waitUntil {
                     $0.observation.projectionInstallCount > installBaseline
-                        && $0.nativeRows.filter { $0.isVisible && $0.frame.height > 20 }.count == 2
+                        && $0.nativeRows.filter { $0.isVisible && $0.frame.height > 20 }.count == 1
                 }
                 #expect(rendered.observation.geometry.contentHeight > 64)
-                let pillIdentities = Dictionary(uniqueKeysWithValues: rendered.nativeRows.map {
-                    ($0.semanticID, $0.instance)
-                })
+                #expect(rendered.nativeRows.first { $0.semanticID == "command" }?.instance == singleInstance)
+                let pillIdentities = Dictionary(uniqueKeysWithValues: rendered.nativeRows
+                    .filter { $0.isVisible && $0.frame.height > 20 }
+                    .map { ($0.semanticID, $0.instance) })
 
                 var completed = running
                 completed.phase = .idle
+                completed.transcript.insert(try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
+                {"id":"context","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"customMessage","customType":"goal.context","presentationId":"context","content":[{"id":"context-text","type":"text","text":"Goal created.","ordinal":0}],"semantic":{"version":1,"direction":"inboundContext","contextEffect":"modelInput","delivery":"stored","visibility":"visible","kind":"message","origin":{"kind":"extension","ownerId":"extension:goal","title":"Pi Goal","confidence":"receipt"},"sequence":2}}
+                """.utf8)), at: 2)
                 completed.transcript.append(try harnessAssistantMessage(
                     id: "first-reply", presentationID: "first-reply", text: "ok"
                 ))
@@ -2000,7 +2016,7 @@ struct ChatViewScrollHarnessTests {
                 let reply = try await harness.recorder.waitUntil {
                     $0.nativeRows.contains {
                         $0.semanticID == "first-reply" && $0.isVisible && $0.frame.height > 20
-                    } && $0.nativeRows.filter { $0.isVisible && $0.frame.height > 20 }.count == 3
+                    } && $0.nativeRows.filter { $0.isVisible && $0.frame.height > 20 }.count == 2
                 }
                 // The first reply must not require remounting the chat or its
                 // existing pills to become visible.

@@ -1420,6 +1420,9 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
     /// Compaction summaries remain interactive, but their long-form sheet
     /// content keeps the rounded container with flat rather than glass styling.
     let detailUsesGlassSurface: Bool
+    /// Canonical source retained for presentation-only extension grouping.
+    let sourceItem: TranscriptItem?
+    let extensionGroup: ChatExtensionChipGroup?
 
     init(
         id: String,
@@ -1431,7 +1434,9 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
         tone: ChatNotificationTone,
         material: ChatNotificationMaterial,
         expandsOnTruncation: Bool = false,
-        detailUsesGlassSurface: Bool = true
+        detailUsesGlassSurface: Bool = true,
+        sourceItem: TranscriptItem? = nil,
+        extensionGroup: ChatExtensionChipGroup? = nil
     ) {
         self.id = id
         self.semanticID = semanticID
@@ -1443,6 +1448,16 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
         self.material = material
         self.expandsOnTruncation = expandsOnTruncation
         self.detailUsesGlassSurface = detailUsesGlassSurface
+        self.sourceItem = sourceItem
+        self.extensionGroup = extensionGroup
+    }
+
+    func withExtensionGroup(_ group: ChatExtensionChipGroup) -> Self {
+        Self(id: id, semanticID: semanticID, icon: icon, title: title, detail: detail,
+             body: body, tone: tone, material: material,
+             expandsOnTruncation: expandsOnTruncation,
+             detailUsesGlassSurface: detailUsesGlassSurface,
+             sourceItem: sourceItem, extensionGroup: group)
     }
 
     var hasDetailSheet: Bool { material == .glass && body?.isEmpty == false }
@@ -1554,7 +1569,8 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
                 detail: severity,
                 body: message,
                 tone: tone,
-                material: .glass
+                material: .glass,
+                sourceItem: item
             )
         case .message, .bash, .customMessage:
             return nil
@@ -1803,6 +1819,137 @@ struct ChatMessagePresentation: Hashable, Identifiable, Sendable {
     let streaming: Bool
     let showsFooter: Bool
 
+}
+
+enum ChatExtensionChipEvent: Hashable, Sendable {
+    case command(TranscriptItem)
+    case context(TranscriptItem)
+    case notification(ChatNotificationPresentation)
+
+    var item: TranscriptItem? {
+        switch self {
+        case .command(let item), .context(let item): item
+        case .notification(let presentation): presentation.sourceItem
+        }
+    }
+
+    var isContext: Bool {
+        if case .context = self { return true }
+        return false
+    }
+
+}
+
+struct ChatExtensionChipGroup: Hashable, Sendable {
+    let id: String
+    let events: [ChatExtensionChipEvent]
+
+    var containsContext: Bool { events.contains(where: \.isContext) }
+}
+
+struct ChatExtensionChipAggregationEntry: Hashable, Sendable {
+    let item: ChatTranscriptRenderItem
+    let origin: ChatTranscriptRowOrigin
+}
+
+enum ChatExtensionChipContentDeduplicationPolicy {
+    static func key(for event: ChatExtensionChipEvent) -> String? {
+        let ownerID: String?
+        let text: String
+        switch event {
+        case .command(let item):
+            ownerID = item.semantic?.origin.ownerId
+            let resource = item.semantic?.resourceInvocation
+            text = "/\(resource?.name ?? "Extension command") \(resource?.arguments ?? "")"
+        case .context(let item):
+            ownerID = item.semantic?.origin.ownerId
+            text = item.text
+        case .notification(let presentation):
+            ownerID = presentation.sourceItem?.semantic?.origin.ownerId
+            text = presentation.body ?? ""
+        }
+        // Titles are presentation labels, not authoritative producer identity.
+        guard let ownerID, !ownerID.isEmpty else { return nil }
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+        return "\(ownerID)|\(normalized)"
+    }
+}
+
+enum ChatExtensionChipAggregationPolicy {
+    static func event(for item: ChatTranscriptRenderItem) -> ChatExtensionChipEvent? {
+        switch item {
+        case .transcript(let transcript):
+            guard let semantic = transcript.semantic,
+                  semantic.origin.kind == .extension,
+                  semantic.visibility == .visible else { return nil }
+            switch semantic.kind {
+            case .command: return .command(transcript)
+            case .message where semantic.direction == .inboundContext:
+                return .context(transcript)
+            case .status:
+                guard let notification = ChatNotificationPresentation.canonical(transcript, globalOrdinal: nil) else { return nil }
+                return .notification(notification)
+            default: return nil
+            }
+        case .notification(let notification):
+            guard let source = notification.sourceItem,
+                  source.semantic?.origin.kind == .extension,
+                  source.semantic?.kind == .status,
+                  source.semantic?.visibility == .visible else { return nil }
+            return .notification(notification)
+        case .message, .toolRun: return nil
+        }
+    }
+
+    /// Groups only adjacent eligible events; all other render items are hard
+    /// barriers. The original events are never discarded here. User-facing
+    /// duplicate text is handled by the detail sheet, where attribution and
+    /// raw inspection for every receipt remain available.
+    static func aggregate(_ items: [ChatTranscriptRenderItem]) -> [ChatTranscriptRenderItem] {
+        aggregateWithOrigins(items, origins: items.map { _ in .canonical }).map(\.item)
+    }
+
+    static func aggregateWithOrigins(
+        _ items: [ChatTranscriptRenderItem],
+        origins: [ChatTranscriptRowOrigin]
+    ) -> [ChatExtensionChipAggregationEntry] {
+        precondition(items.count == origins.count)
+        var result: [ChatExtensionChipAggregationEntry] = []
+        var run: [(item: ChatTranscriptRenderItem, event: ChatExtensionChipEvent, origin: ChatTranscriptRowOrigin)] = []
+        func flush() {
+            guard !run.isEmpty else { return }
+            guard run.count > 1 else {
+                result.append(.init(item: run[0].item, origin: run[0].origin))
+                run.removeAll(keepingCapacity: true)
+                return
+            }
+            let events = run.map(\.event)
+            let groupID = run[0].item.id
+            let grouped = ChatNotificationPresentation(
+                id: groupID, semanticID: nil,
+                icon: "square.stack.3d.up.fill", title: "Extension activity",
+                detail: "\(events.count) updates", body: nil,
+                tone: events.contains(where: \.isContext) ? .purple : .information,
+                material: .glass,
+                sourceItem: nil
+            ).withExtensionGroup(ChatExtensionChipGroup(id: groupID, events: events))
+            // The first member owns the mounted row. This keeps a singleton's
+            // identity and host alive when later adjacent events arrive.
+            result.append(.init(item: .notification(grouped), origin: run[0].origin))
+            run.removeAll(keepingCapacity: true)
+        }
+        for (item, origin) in zip(items, origins) {
+            if let event = event(for: item) {
+                run.append((item: item, event: event, origin: origin))
+            } else {
+                flush()
+                result.append(.init(item: item, origin: origin))
+            }
+        }
+        flush()
+        return result
+    }
 }
 
 enum ChatTranscriptRenderItem: Hashable, Identifiable, Sendable {
