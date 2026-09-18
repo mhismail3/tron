@@ -118,6 +118,37 @@ describe("Knowledge canonical catalog", () => {
     expect(await f.store.read(f.old.id, f.old.revisionId)).toEqual(f.old);
   });
 
+  it("filters coverage pages to the dispositions a client displays", async () => {
+    const f = await fixture(); await f.store.configure("catalog-coverage-filter", structuredClone(DEFAULT_KNOWLEDGE_CONFIG));
+    const dispositions = ["observed", "empty", "excluded", "pending", "failed", "unavailable"] as const;
+    const catalog = new KnowledgeCatalog(await catalogPath(f.root), false);
+    try {
+      catalog.begin(); const coverage = catalog.table<ObservationCoverage>("coverage");
+      for (let index = 0; index < 60; index += 1) {
+        const record = observation(index);
+        coverage.set(`cut-${record.id}`, { schemaVersion: 1, id: `cut-${record.id}`, revisionId: record.revisionId, range: record.content.range,
+          disposition: dispositions[index % dispositions.length]!, groupRevisionIds: [], recordedAt: record.createdAt });
+      }
+      catalog.commit();
+    } finally { catalog.close(); }
+    // A client that lists cuts needing attention must not receive settled rows.
+    const attention = ["pending", "failed", "unavailable"] as const;
+    const unsettled = Array.from({ length: 60 }, (_, index) => index).filter(index => index % dispositions.length >= 3);
+    const id = (index: number) => `cut-observation-${String(index).padStart(5, "0")}`;
+    const page = await f.store.observationCoveragePage(100, undefined, [...attention]);
+    expect(page.coverage.map(cut => cut.id)).toEqual(unsettled.map(id));
+    expect(page.nextCursor).toBeUndefined();
+    const first = await f.store.observationCoveragePage(7, undefined, [...attention]);
+    const second = await f.store.observationCoveragePage(7, first.nextCursor, [...attention]);
+    expect(first.coverage.map(cut => cut.id)).toEqual(unsettled.slice(0, 7).map(id));
+    expect(second.coverage.map(cut => cut.id)).toEqual(unsettled.slice(7, 14).map(id));
+    // The unfiltered ledger still pages every cut, and the filter is validated.
+    expect((await f.store.observationCoveragePage(100)).coverage).toHaveLength(60);
+    await expect(f.store.observationCoveragePage(10, undefined, ["pending", "pending"])).rejects.toThrow(/disposition/);
+    await expect(f.store.observationCoveragePage(10, undefined, [])).rejects.toThrow(/disposition/);
+    await expect(f.store.observationCoveragePage(10, undefined, ["bogus" as "pending"])).rejects.toThrow(/disposition/);
+  });
+
   it("preserves NUL-separated receipt identities and invalidates migrated replay after forgetting", async () => {
     const f = await legacyFixture();
     const draft: KnowledgeRecordDraft & { kind: "note" } = { id: "receipt-note", kind: "note", scope: "personal", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "Receipt test", body: "Exact receipt", role: "fact", confirmed: true } };

@@ -6,6 +6,9 @@ import Foundation
 final class KnowledgeRPCClient {
     static let globalObservationCapability = "knowledge-global-observation.v1"
     static let coverageDismissCapability = "knowledge-coverage-dismiss.v1"
+    /// Lets coverage be read by disposition, so a client can list the cuts that
+    /// need attention instead of scanning a ledger that is mostly settled.
+    static let coverageFilterCapability = "knowledge-coverage-filter.v1"
     typealias Request = @MainActor @Sendable (String, JSONValue, Duration) async throws -> JSONValue
     private let requestValue: Request
     private let mutationExecutor: ConfirmedMutationExecutor?
@@ -39,10 +42,11 @@ final class KnowledgeRPCClient {
               value.coverage.remainingCount == value.coverage.pendingCount + value.coverage.failedCount + value.coverage.unavailableCount else { throw invalidResponse() }
         return value
     }
-    func coverage(cursor: String? = nil, limit: Int = 50) async throws -> KnowledgeCoveragePage {
-        struct Params: Encodable { let cursor: String?; let limit: Int }
-        let value: KnowledgeCoveragePage = try await request("knowledge.observation.coverage", Params(cursor: cursor, limit: min(100, max(1, limit))))
-        guard value.coverage.count <= 100, value.nextCursor == nil || value.nextCursor != cursor else { throw invalidResponse() }
+    func coverage(cursor: String? = nil, limit: Int = 50, dispositions: [KnowledgeCoverageDisposition]? = nil) async throws -> KnowledgeCoveragePage {
+        struct Params: Encodable { let cursor: String?; let limit: Int; let dispositions: [KnowledgeCoverageDisposition]? }
+        let value: KnowledgeCoveragePage = try await request("knowledge.observation.coverage", Params(cursor: cursor, limit: min(100, max(1, limit)), dispositions: dispositions))
+        guard value.coverage.count <= 100, value.nextCursor == nil || value.nextCursor != cursor,
+              dispositions == nil || value.coverage.allSatisfy({ dispositions!.contains($0.disposition) }) else { throw invalidResponse() }
         return value
     }
     func dismissCoverage(_ cut: KnowledgeObservationCoverage, capabilities: [String]) async throws -> KnowledgeCoverageDismissResult {

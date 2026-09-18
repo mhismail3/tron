@@ -96,23 +96,35 @@ struct KnowledgeObservationStatement: View {
     }
 }
 
-/// Bounded copy for the observation coverage container. Opaque cut ids stay in
-/// the mutation owner; the dashboard only needs a citation short enough that a
-/// dense row cannot be dominated by a hash.
+/// Bounded copy for observation coverage, plus the disposition set a client
+/// asks the Gateway for. Opaque cut ids stay in the mutation owner; a row only
+/// needs a citation short enough that a dense list cannot be dominated by a
+/// hash.
 enum KnowledgeCoveragePresentationPolicy {
     /// Short enough that a citation cannot compete with the reason copy, even
     /// beside the row's two action capsules.
     static let citationPrefixLength = 8
-
-    static func actionable(_ cuts: [KnowledgeObservationCoverage]) -> [KnowledgeObservationCoverage] {
-        cuts.filter { $0.disposition == .pending || $0.disposition == .failed || $0.disposition == .unavailable }
-    }
+    /// The cuts the coverage detail lists. `observed`, `empty`, and `excluded`
+    /// are terminal and carry no user action, so they are never requested: the
+    /// Gateway filters the page instead of the client scanning a settled ledger.
+    static let attentionDispositions: [KnowledgeCoverageDisposition] = [.pending, .failed, .unavailable]
 
     static func settledLabel(_ coverage: KnowledgeCoverageSummary) -> String {
         "\(coverage.observedCount + coverage.emptyCount + coverage.excludedCount) settled"
     }
 
-    static func summaryTitle(_ coverage: KnowledgeCoverageSummary) -> String {
+    /// The settled breakdown the overview reports before any action.
+    static func settledDetail(_ coverage: KnowledgeCoverageSummary) -> String {
+        "Observed \(coverage.observedCount) · Empty \(coverage.emptyCount) · Excluded \(coverage.excludedCount)"
+    }
+
+    static func attentionDetail(_ coverage: KnowledgeCoverageSummary) -> String {
+        "pending \(coverage.pendingCount) · failed \(coverage.failedCount) · unavailable \(coverage.unavailableCount)"
+    }
+
+    /// Names the cuts needing attention. The overview shows this on the button
+    /// that opens the detail sheet, and the sheet repeats it as its section.
+    static func attentionTitle(_ coverage: KnowledgeCoverageSummary) -> String {
         switch coverage.remainingCount {
         case 0: "No cuts need attention"
         case 1: "1 cut needs attention"
@@ -120,13 +132,10 @@ enum KnowledgeCoveragePresentationPolicy {
         }
     }
 
-    /// The attention breakdown while cuts remain; otherwise the settled counts
-    /// the previous container always showed inline.
-    static func summaryDetail(_ coverage: KnowledgeCoverageSummary) -> String {
-        guard coverage.remainingCount > 0 else {
-            return "Observed \(coverage.observedCount) · Empty \(coverage.emptyCount) · Excluded \(coverage.excludedCount)"
-        }
-        return "pending \(coverage.pendingCount) · failed \(coverage.failedCount) · unavailable \(coverage.unavailableCount)"
+    /// States a partial list instead of implying the loaded page is everything.
+    static func listProgress(_ coverage: KnowledgeCoverageSummary, loaded: Int) -> String? {
+        guard loaded < coverage.remainingCount else { return nil }
+        return "Showing \(loaded) of \(coverage.remainingCount) cuts needing attention."
     }
 
     static func title(_ disposition: KnowledgeCoverageDisposition) -> String {
@@ -169,33 +178,17 @@ enum KnowledgeCoveragePresentationPolicy {
     }
 }
 
-/// The dashboard's coverage container. One tappable summary row expands to the
-/// cuts that need attention, so a healthy corpus costs a single row and every
-/// actionable cut keeps its own Open/Clear target instead of being merged into
-/// a combined container element.
-struct KnowledgeCoverageSection: View {
+/// The dashboard's coverage overview: the settled breakdown and one button that
+/// opens the cuts needing attention. It carries no list and no action of its
+/// own, so a healthy corpus costs two short rows.
+struct KnowledgeCoverageOverview: View {
     let coverage: KnowledgeCoverageSummary
-    let cuts: [KnowledgeObservationCoverage]
-    let showsInitialLoading: Bool
-    let loadingMore: Bool
-    let canLoadMore: Bool
-    let errorText: String?
-    let mutationErrorText: String?
-    let clearingCutID: String?
-    let allowsActions: Bool
-    let onOpenSession: (KnowledgeObservationCoverage) -> Void
-    let onRequestClear: (KnowledgeObservationCoverage) -> Void
-    let onLoadMore: () -> Void
-    /// The dashboard owns disclosure state so a Gateway change resets it with
-    /// the rest of its presentation state.
-    @Binding var expanded: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The paired Gateway cannot list cuts by disposition, so the button would
+    /// have no list behind it. State that instead of offering a dead control.
+    let requiresGatewayUpdate: Bool
+    let onOpen: () -> Void
 
-    private var attentionCuts: [KnowledgeObservationCoverage] { KnowledgeCoveragePresentationPolicy.actionable(cuts) }
     private var needsAttention: Bool { coverage.remainingCount > 0 }
-    /// Only the summary row expands; an error notice stays visible outside the
-    /// disclosure so a failed coverage read cannot hide behind a collapsed row.
-    private var canExpand: Bool { needsAttention || canLoadMore || showsInitialLoading }
 
     var body: some View {
         VStack(alignment: .leading, spacing: TronSpacing.md) {
@@ -210,77 +203,52 @@ struct KnowledgeCoverageSection: View {
                     .foregroundStyle(Color.tronTextMuted)
             }
             VStack(spacing: 0) {
-                summaryRow
-                if let errorText {
-                    TronSettingsDivider(accent: .tronKnowledge)
-                    notice("Coverage unavailable: \(errorText)")
+                TronSettingsRow(
+                    icon: "eye",
+                    title: KnowledgeCoveragePresentationPolicy.settledDetail(coverage),
+                    accent: .tronKnowledge,
+                    titleFont: TronTypography.secondaryDescription,
+                    titleColor: .tronTextSecondary
+                )
+                TronSettingsDivider(accent: .tronKnowledge)
+                if requiresGatewayUpdate {
+                    TronSettingsNotice(message: "Update this Gateway to list the cuts that need attention.", accent: .tronAmber)
+                        .padding(TronSpacing.md)
+                } else if needsAttention {
+                    Button { onOpen() } label: {
+                        TronSettingsRow(
+                            icon: "exclamationmark.triangle",
+                            title: KnowledgeCoveragePresentationPolicy.attentionTitle(coverage),
+                            subtitle: KnowledgeCoveragePresentationPolicy.attentionDetail(coverage),
+                            subtitleLineLimit: 2,
+                            accent: .tronAmber
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(KnowledgeCoveragePresentationPolicy.attentionTitle(coverage))
+                    .accessibilityHint("Shows each cut needing attention")
+                } else {
+                    TronSettingsRow(icon: "checkmark.circle", title: KnowledgeCoveragePresentationPolicy.attentionTitle(coverage), accent: .tronKnowledge)
                 }
-                if let mutationErrorText {
-                    TronSettingsDivider(accent: .tronKnowledge)
-                    notice(mutationErrorText)
-                }
-                if expanded { expandedContent }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .tronScrollSurface(accent: .tronKnowledge, tintOpacity: 0.10)
         }
         .controlSize(.small)
     }
+}
 
-    @ViewBuilder private var summaryRow: some View {
-        let row = TronSettingsRow(
-            icon: KnowledgeCoveragePresentationPolicy.icon(needsAttention ? .failed : .observed),
-            title: KnowledgeCoveragePresentationPolicy.summaryTitle(coverage),
-            subtitle: KnowledgeCoveragePresentationPolicy.summaryDetail(coverage),
-            subtitleLineLimit: 2,
-            accent: needsAttention ? .tronAmber : .tronKnowledge
-        ) {
-            if canExpand {
-                Image(systemName: "chevron.right")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
-                    .foregroundStyle(Color.tronKnowledge)
-                    .rotationEffect(.degrees(expanded ? 90 : 0))
-                    .accessibilityHidden(true)
-            }
-        }
-        if canExpand {
-            Button {
-                withAnimation(TronDashboardContentMotion.animation(reduceMotion: reduceMotion)) { expanded.toggle() }
-            } label: {
-                row
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Observation coverage")
-            .accessibilityValue("\(KnowledgeCoveragePresentationPolicy.summaryTitle(coverage)). \(KnowledgeCoveragePresentationPolicy.summaryDetail(coverage))")
-            .accessibilityHint(expanded ? "Hides observation cuts" : "Shows observation cuts that need attention")
-        } else {
-            row
-        }
-    }
+/// One cut needing attention: disposition, reason, bounded citation, and its own
+/// Open/Clear targets. Shared by the coverage detail sheet and its layout test so
+/// the two actions stay separate elements.
+struct KnowledgeCoverageCutRow: View {
+    let cut: KnowledgeObservationCoverage
+    let clearing: Bool
+    let allowsClear: Bool
+    let onOpen: () -> Void
+    let onClear: () -> Void
 
-    @ViewBuilder private var expandedContent: some View {
-        if showsInitialLoading {
-            TronSettingsDivider(accent: .tronKnowledge)
-            TronLoadingState(label: "Loading coverage…", accent: .tronKnowledge)
-                .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
-                .padding(.vertical, TronSpacing.xl)
-        }
-        ForEach(attentionCuts) { cut in
-            TronSettingsDivider(accent: .tronKnowledge)
-            cutRow(cut)
-        }
-        if canLoadMore {
-            TronSettingsDivider(accent: .tronKnowledge)
-            Button(loadingMore ? "Loading…" : "Inspect more coverage") { onLoadMore() }
-                .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
-                .disabled(loadingMore || !allowsActions)
-                .padding(.horizontal, TronSettingsLayoutPolicy.rowHorizontalPadding)
-                .padding(.vertical, TronSpacing.xl)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private func cutRow(_ cut: KnowledgeObservationCoverage) -> some View {
+    var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: TronSpacing.xl) {
             Image(systemName: KnowledgeCoveragePresentationPolicy.icon(cut.disposition))
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
@@ -305,15 +273,15 @@ struct KnowledgeCoverageSection: View {
             .accessibilityElement(children: .combine)
             Spacer(minLength: TronSpacing.md)
             HStack(spacing: TronSpacing.sm) {
-                Button { onOpenSession(cut) } label: { TronInlineActionLabel("Open", accent: .tronKnowledge) }
+                Button { onOpen() } label: { TronInlineActionLabel("Open", accent: .tronKnowledge) }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Open originating session")
                 if cut.disposition == .failed || cut.disposition == .unavailable {
-                    Button { onRequestClear(cut) } label: {
-                        TronInlineActionLabel("Clear", isWorking: clearingCutID == cut.id, accent: .tronKnowledge)
+                    Button { onClear() } label: {
+                        TronInlineActionLabel("Clear", isWorking: clearing, accent: .tronKnowledge)
                     }
                     .buttonStyle(.plain)
-                    .disabled(clearingCutID != nil)
+                    .disabled(!allowsClear)
                     .accessibilityLabel("Clear observation failure")
                 }
             }
@@ -322,10 +290,95 @@ struct KnowledgeCoverageSection: View {
         .padding(.vertical, TronSpacing.xl)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+}
 
-    private func notice(_ message: String) -> some View {
-        TronSettingsNotice(message: message, accent: .tronAmber)
-            .padding(TronSpacing.md)
+/// Standard detail sheet for every cut needing attention. Clear is confirmed
+/// here because this sheet owns the presented surface; the dashboard keeps the
+/// mutation and reload ownership.
+struct KnowledgeCoverageDetailSheet: View {
+    let coverage: KnowledgeCoverageSummary
+    let cuts: [KnowledgeObservationCoverage]
+    let showsInitialLoading: Bool
+    let loadingMore: Bool
+    let canLoadMore: Bool
+    let errorText: String?
+    let mutationErrorText: String?
+    let clearingCutID: String?
+    let allowsActions: Bool
+    let onOpenSession: (KnowledgeObservationCoverage) -> Void
+    let onClear: (KnowledgeObservationCoverage) -> Void
+    let onLoadMore: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var detent: PresentationDetent = .medium
+    @State private var cutToClear: KnowledgeObservationCoverage?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: TronSpacing.section) {
+                    TronSettingsGroup(
+                        "Cuts needing attention",
+                        detail: KnowledgeCoveragePresentationPolicy.attentionDetail(coverage),
+                        accent: .tronKnowledge
+                    ) {
+                        VStack(spacing: 0) {
+                            if cuts.isEmpty {
+                                TronSettingsRow(icon: "checkmark.circle",
+                                                title: KnowledgeCoveragePresentationPolicy.attentionTitle(coverage),
+                                                accent: .tronKnowledge)
+                            }
+                            ForEach(Array(cuts.enumerated()), id: \.element.id) { index, cut in
+                                if index > 0 { TronSettingsDivider(accent: .tronKnowledge) }
+                                KnowledgeCoverageCutRow(
+                                    cut: cut,
+                                    clearing: clearingCutID == cut.id,
+                                    allowsClear: clearingCutID == nil && allowsActions,
+                                    onOpen: { onOpenSession(cut) },
+                                    onClear: { cutToClear = cut }
+                                )
+                            }
+                        }
+                    }
+                    if showsInitialLoading { TronLoadingState(label: "Loading coverage…", accent: .tronKnowledge) }
+                    if let errorText { TronSettingsNotice(message: "Coverage unavailable: \(errorText)", accent: .tronAmber) }
+                    if let mutationErrorText { TronSettingsNotice(message: mutationErrorText, accent: .tronAmber) }
+                    if let progress = KnowledgeCoveragePresentationPolicy.listProgress(coverage, loaded: cuts.count) {
+                        TronSettingsCaption(progress)
+                    }
+                    if canLoadMore {
+                        Button(loadingMore ? "Loading…" : "Load more cuts needing attention") { onLoadMore() }
+                            .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
+                            .disabled(loadingMore || !allowsActions)
+                    }
+                }
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .tronSettingsLayout()
+            .tronScrollEdgeChrome()
+            .tronNavigationTitle("Observation coverage", accent: .tronKnowledge)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark").font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronKnowledge)
+                    }
+                    .accessibilityLabel("Done")
+                }
+            }
+        }
+        .tronTopBlur(.sheet)
+        .presentationDetents([.medium, .large], selection: $detent)
+        .presentationDragIndicator(.hidden)
+        .tronSettingsVisualTheme(accent: .tronKnowledge)
+        .tronPresentation()
+        .confirmationDialog("Clear this observation failure?", isPresented: Binding(
+            get: { cutToClear != nil }, set: { if !$0 { cutToClear = nil } }
+        ), presenting: cutToClear) { cut in
+            Button("Clear failure") { onClear(cut) }
+        } message: { _ in
+            Text("Skip only this cut without retrying it. Conversation history and other observations stay unchanged.")
+        }
     }
 }
 

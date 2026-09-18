@@ -26,17 +26,15 @@ final class KnowledgeDashboardLayoutTests: XCTestCase {
         XCTAssertEqual(runawayRow, threeLineRow, accuracy: 1, "A long statement is capped instead of growing the row")
         XCTAssertLessThanOrEqual(threeLineRow, 100, "Catalogue rows must stay dense enough to show several per screen")
 
-        try await withHost(KnowledgeRecordRow(record: record).tronPresentation().frame(width: width)
-            .padding(20).background(Color.tronBackground)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top),
-            size: CGSize(width: 402, height: 200)) { host in
+        try await withHost(Self.hosted(KnowledgeRecordRow(record: record).frame(width: width)),
+                           size: CGSize(width: 402, height: 200)) { host in
             Self.attach(host.view, named: "knowledge-catalogue-row", to: self)
         }
 
         // The changed regions composed the way the dashboard stacks them; an
         // honest preview of catalogue density, not a live Gateway screenshot.
         let composition = VStack(alignment: .leading, spacing: KnowledgeDashboardLayout.recordSpacing) {
-            Self.section(cuts: Self.cuts(), expanded: false)
+            Self.overview()
             Text("All knowledge").font(TronTypography.sheetSectionHeader)
                 .foregroundStyle(Color.tronKnowledge)
                 .padding(.top, TronSpacing.md)
@@ -61,64 +59,115 @@ final class KnowledgeDashboardLayoutTests: XCTestCase {
         }
     }
 
-    func testCoverageContainerCollapsesToASummaryAndKeepsCutActionsSeparate() async throws {
-        let cuts = Self.cuts()
-        let collapsed = Self.section(cuts: cuts, expanded: false)
-        let expanded = Self.section(cuts: cuts, expanded: true)
-        let collapsedHeight = Self.intrinsicHeight(collapsed, width: 402)
-        let expandedHeight = Self.intrinsicHeight(expanded, width: 402)
-        XCTAssertLessThanOrEqual(collapsedHeight, 100, "A collapsed coverage container costs one summary row")
-        XCTAssertGreaterThan(expandedHeight, collapsedHeight + 120, "Expanding reveals the actionable cuts")
+    func testCoverageOverviewIsInformationalAndOpensTheDetailSheet() async throws {
+        let overview = Self.overview()
+        XCTAssertLessThanOrEqual(Self.intrinsicHeight(overview, width: 402),
+                                 KnowledgeDashboardLayout.coverageSectionReservedHeight,
+                                 "The overview must fit the height the dashboard reserves for it")
 
-        try await withHost(collapsed.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top),
-                           size: CGSize(width: 402, height: 200)) { host in
+        try await withHost(Self.hosted(overview), size: CGSize(width: 402, height: 200)) { host in
             let elements = Self.accessibilityElements(in: host.view)
-            XCTAssertEqual(elements.filter { $0.label == "Observation coverage" && $0.traits.contains(.button) }.count, 1,
-                           "The summary row is one disclosure control")
-            let summary = try XCTUnwrap(elements.first { $0.label == "Observation coverage" && $0.traits.contains(.button) })
-            XCTAssertLessThanOrEqual(summary.frame.height, 72)
+            XCTAssertTrue(elements.contains { $0.label == "Observed 367 · Empty 3 · Excluded 27" },
+                          "The overview reports the settled breakdown")
+            let attention = elements.filter { $0.label == "6 cuts need attention" }
+            XCTAssertEqual(attention.count, 1, "The cuts needing attention are one button")
+            XCTAssertTrue(try XCTUnwrap(attention.first).traits.contains(.button))
             XCTAssertFalse(elements.contains { $0.label == "Open originating session" },
-                           "Collapsed coverage must not expose hidden cut actions")
-            Self.attach(host.view, named: "knowledge-coverage-collapsed", to: self)
+                           "The overview carries no cut actions; those belong to the sheet")
+            XCTAssertFalse(elements.contains { $0.label == "Clear observation failure" })
+            Self.attach(host.view, named: "knowledge-coverage-overview", to: self)
         }
 
-        try await withHost(expanded.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top),
-                           size: CGSize(width: 402, height: 560)) { host in
+        // Nothing to act on: the card stays informational, with no button.
+        try await withHost(Self.hosted(Self.overview(Self.coverage(remaining: 0, failed: 0, unavailable: 0))),
+                           size: CGSize(width: 402, height: 200)) { host in
+            let elements = Self.accessibilityElements(in: host.view)
+            XCTAssertTrue(elements.contains { $0.label == "No cuts need attention" })
+            XCTAssertFalse(elements.contains { $0.traits.contains(.button) })
+        }
+
+        // A paired Gateway that cannot filter coverage states that instead of
+        // offering a button with no list behind it.
+        try await withHost(Self.hosted(Self.overview(requiresGatewayUpdate: true)),
+                           size: CGSize(width: 402, height: 220)) { host in
+            let elements = Self.accessibilityElements(in: host.view)
+            XCTAssertFalse(elements.contains { $0.traits.contains(.button) },
+                           "A Gateway without the filter offers no coverage control")
+            XCTAssertTrue(elements.contains { $0.label.contains("Update this Gateway to list the cuts that need attention.") })
+        }
+    }
+
+    func testCoverageDetailSheetListsEveryCutWithItsOwnActions() async throws {
+        try await withHost(Self.detailSheet(), size: CGSize(width: 402, height: 620)) { host in
             let elements = Self.accessibilityElements(in: host.view)
             let opens = elements.filter { $0.label == "Open originating session" }
             let clears = elements.filter { $0.label == "Clear observation failure" }
-            // Two failing/unavailable cuts; the observed cut is not an attention row.
-            XCTAssertEqual(opens.count, 2)
+            XCTAssertEqual(opens.count, 2, "The sheet lists every cut needing attention")
             XCTAssertEqual(clears.count, 2)
             for target in opens + clears {
                 XCTAssertGreaterThanOrEqual(target.frame.height, 44, "Each cut action keeps a full tap target")
             }
-            for index in 0..<2 {
-                XCTAssertFalse(opens[index].frame.intersects(clears[index].frame),
-                               "Open and Clear must stay distinct targets")
+            for (open, clear) in zip(opens, clears) {
+                XCTAssertFalse(open.frame.intersects(clear.frame), "Open and Clear must stay distinct targets")
             }
-            Self.attach(host.view, named: "knowledge-coverage-expanded", to: self)
+            XCTAssertTrue(elements.contains { $0.label == "Done" }, "The sheet uses the standard Done control")
+            Self.attach(host.view, named: "knowledge-coverage-detail", to: self)
+        }
+
+        // More cuts need attention than the loaded page holds: the sheet says
+        // how many it is showing and offers the only control that helps.
+        try await withHost(Self.detailSheet(coverage: Self.coverage(remaining: 6, failed: 1, unavailable: 1), canLoadMore: true),
+                           size: CGSize(width: 402, height: 620)) { host in
+            let elements = Self.accessibilityElements(in: host.view)
+            XCTAssertTrue(elements.contains { $0.label == "Showing 2 of 6 cuts needing attention." },
+                          "The sheet states that the list is partial")
+            XCTAssertTrue(elements.contains { $0.label == "Load more cuts needing attention" },
+                          "Paging is offered under a label that says what it does")
         }
     }
 
-    private static func section(cuts: [KnowledgeObservationCoverage], expanded: Bool) -> some View {
-        KnowledgeCoverageSection(
-            coverage: coverage(remaining: 2, failed: 1, unavailable: 1),
-            cuts: cuts,
+    private static func overview(
+        _ coverage: KnowledgeCoverageSummary? = nil,
+        requiresGatewayUpdate: Bool = false
+    ) -> some View {
+        KnowledgeCoverageOverview(
+            coverage: coverage ?? Self.coverage(remaining: 6, failed: 1, unavailable: 1),
+            requiresGatewayUpdate: requiresGatewayUpdate,
+            onOpen: {}
+        )
+        .tronPresentation()
+    }
+
+    /// A mounted component on the dashboard's background, top-aligned so a
+    /// capture shows the geometry under test rather than a centered card.
+    private static func hosted(_ content: some View) -> some View {
+        content
+            .padding(20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(Color.tronBackground)
+            .tronPresentation()
+    }
+
+    private static func detailSheet(
+        coverage: KnowledgeCoverageSummary? = nil,
+        canLoadMore: Bool = false
+    ) -> some View {
+        KnowledgeCoverageDetailSheet(
+            coverage: coverage ?? Self.coverage(remaining: 2, failed: 1, unavailable: 1),
+            cuts: cuts(),
             showsInitialLoading: false,
             loadingMore: false,
-            canLoadMore: true,
+            canLoadMore: canLoadMore,
             errorText: nil,
             mutationErrorText: nil,
             clearingCutID: nil,
             allowsActions: true,
             onOpenSession: { _ in },
-            onRequestClear: { _ in },
-            onLoadMore: {},
-            expanded: .constant(expanded)
+            onClear: { _ in },
+            onLoadMore: {}
         )
-        .tronPresentation()
         .background(Color.tronBackground)
+        .tronPresentation()
     }
 
     private struct Element {
@@ -127,12 +176,26 @@ final class KnowledgeDashboardLayoutTests: XCTestCase {
         let frame: CGRect
     }
 
+    /// Walks the whole hosted tree: a scrollable sheet exposes its controls on
+    /// nested containers, not only at the root.
     private static func accessibilityElements(in view: UIView) -> [Element] {
-        (view.accessibilityElements ?? []).compactMap { element in
-            guard let object = element as? NSObject else { return nil }
-            return Element(label: object.accessibilityLabel ?? "", traits: object.accessibilityTraits,
-                           frame: object.accessibilityFrame)
+        var seen = Set<ObjectIdentifier>()
+        var collected: [Element] = []
+        func walk(_ view: UIView) {
+            for element in view.accessibilityElements ?? [] {
+                guard let object = element as? NSObject else { continue }
+                if seen.insert(ObjectIdentifier(object)).inserted {
+                    collected.append(Element(label: object.accessibilityLabel ?? "", traits: object.accessibilityTraits,
+                                             frame: object.accessibilityFrame))
+                }
+                if let nested = element as? UIAccessibilityElement, let container = nested.accessibilityContainer as? UIView {
+                    walk(container)
+                }
+            }
+            for subview in view.subviews { walk(subview) }
         }
+        walk(view)
+        return collected
     }
 
     private static func intrinsicHeight(_ content: some View, width: CGFloat) -> CGFloat {
@@ -203,12 +266,14 @@ final class KnowledgeDashboardLayoutTests: XCTestCase {
         )
     }
 
+    /// The Gateway returns only cuts needing attention, so a settled cut is not a
+    /// fixture input here; the client boundary rejects one that ignores the
+    /// disposition filter.
     private static func cuts() -> [KnowledgeObservationCoverage] {
         let range = KnowledgeObservationPresentation(record: KnowledgeObservationFixture.record())!.observation.range
         return [
             cut("failed-cut", .failed, range: range, reason: "entry-exceeds-model-input-bound"),
             cut("unavailable-cut", .unavailable, range: range, reason: "provider-credentials-unavailable"),
-            cut("observed-cut", .observed, range: range, reason: nil),
         ]
     }
 
@@ -239,3 +304,4 @@ private final class KnowledgeLayoutHostingController<Content: View>: UIHostingCo
         onAppear?()
     }
 }
+

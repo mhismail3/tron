@@ -109,6 +109,14 @@ Session/project eligibility, conversation history, and observations are not
 changed. A stale or late worker loses the coverage revision race. This requires
 the updated Gateway; clients never hide failures in local acknowledgment state.
 
+Coverage pages can also be read by disposition (`knowledge-coverage-filter.v1`):
+`knowledge.observation.coverage` accepts an optional `dispositions` array that
+narrows the page to those rows while keeping the same `recordedAt` cursor. This
+exists so a client can list the cuts that need attention (`pending`, `failed`,
+`unavailable`) directly instead of paging a ledger whose rows are mostly settled.
+An unknown, duplicated, or empty disposition list is rejected as invalid, and an
+unfiltered page keeps its previous behavior.
+
 Mutations serialize per workspace and require stable command IDs with exact
 request hashes. Record/config/coverage expected revisions reject stale
 writers. Receipt payloads contain references rather than full record bodies.

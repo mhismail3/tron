@@ -95,6 +95,38 @@ final class KnowledgeModelsTests: XCTestCase {
     }
 
     @MainActor
+    func testCoverageRequestCarriesTheDispositionFilterAndAdmitsOnlyItsRows() async throws {
+        let cut = { (id: String, disposition: String) in JSONValue.object([
+            "schemaVersion": .number(1), "id": .string(id), "revisionId": .string("\(id)-revision"),
+            "range": .object(["sessionId": .string("session"), "fromEntryId": .string("from"), "toEntryId": .string("to"),
+                              "entryIds": .array([.string("from")]), "entryDigest": .string(String(repeating: "a", count: 64))]),
+            "disposition": .string(disposition), "groupRevisionIds": .array([]), "recordedAt": .string("2026-01-01T00:00:00Z")]) }
+        var requests: [JSONValue] = []
+        let client = KnowledgeRPCClient(request: { method, parameters, _ in
+            XCTAssertEqual(method, "knowledge.observation.coverage")
+            requests.append(parameters)
+            return .object(["coverage": .array([cut("cut-1", "failed")]), "stateRevision": .number(4)])
+        })
+        let page = try await client.coverage(limit: 400, dispositions: KnowledgeCoveragePresentationPolicy.attentionDispositions)
+        XCTAssertEqual(page.coverage.map(\.id), ["cut-1"])
+        XCTAssertEqual(requests.first?.objectValue?["limit"]?.intValue, 100, "The Gateway page bound stays authoritative")
+        XCTAssertEqual(requests.first?.objectValue?["dispositions"]?.arrayValue?.compactMap(\.stringValue), ["pending", "failed", "unavailable"])
+        XCTAssertNil(requests.first?.objectValue?["cursor"]?.stringValue)
+
+        // A Gateway that ignores the filter must not publish settled rows as
+        // cuts needing attention.
+        let unfiltered = KnowledgeRPCClient(request: { _, _, _ in
+            .object(["coverage": .array([cut("cut-2", "observed")]), "stateRevision": .number(4)])
+        })
+        do {
+            _ = try await unfiltered.coverage(dispositions: KnowledgeCoveragePresentationPolicy.attentionDispositions)
+            XCTFail("A page outside the requested dispositions must be rejected")
+        } catch let failure as GatewayFailure {
+            XCTAssertEqual(failure.code, "invalid_response")
+        }
+    }
+
+    @MainActor
     func testGatewayDTOResponsesDriveCatalogueEntryAndObjectContinuation() async throws {
         let hash = String(repeating: "b", count: 64)
         var requests: [(String, JSONValue)] = []
@@ -178,24 +210,25 @@ final class KnowledgeModelsTests: XCTestCase {
     }
 
     @MainActor
-    func testCoveragePresentationOwnerRetainsCursorAndRestartsChangedRevision() async {
+    func testCoverageContinuationAdvancesAcrossARevisionChange() async {
         let identity = KnowledgePresentationIdentity(profileID: "fixture", lifecycleGeneration: 1, connectionID: 1)
         let range = KnowledgeObservationRange(sessionId: "session", branchId: nil, fromEntryId: "from", toEntryId: "to", entryIds: ["from"], entryDigest: String(repeating: "a", count: 64), projectId: nil, invocationIds: nil)
         let store = KnowledgeCoveragePresentationStore()
         let recorder = CoverageTestRecorder()
         await store.load(identity: identity, request: { cursor in
             await recorder.append(cursor)
-            if cursor == nil { return KnowledgeCoveragePage(coverage: (0..<50).map { Self.syntheticCut("cut-\($0)", .observed, range: range) }, stateRevision: 1, nextCursor: "page-2") }
-            return KnowledgeCoveragePage(coverage: [Self.syntheticCut("cut-50", .pending, range: range), Self.syntheticCut("cut-51", .failed, range: range), Self.syntheticCut("cut-52", .unavailable, range: range)], stateRevision: 1, nextCursor: nil)
+            return KnowledgeCoveragePage(coverage: [Self.syntheticCut("cut-pending", .pending, range: range)], stateRevision: 1, nextCursor: "page-2")
         }, isCurrent: { true })
         await store.loadMore(identity: identity, request: { cursor in
             await recorder.append(cursor)
-            return KnowledgeCoveragePage(coverage: [Self.syntheticCut("cut-50", .pending, range: range)], stateRevision: 2, nextCursor: nil)
+            // The ledger advanced while the next page was in flight and
+            // re-recorded the already-loaded cut with a new disposition.
+            return KnowledgeCoveragePage(coverage: [Self.syntheticCut("cut-pending", .failed, range: range), Self.syntheticCut("cut-unavailable", .unavailable, range: range)], stateRevision: 2, nextCursor: nil)
         }, isCurrent: { true })
         let recordedCalls = await recorder.takeCalls()
-        XCTAssertEqual(recordedCalls, [nil, "page-2", nil])
-        XCTAssertEqual(store.cuts.count, 1)
-        XCTAssertEqual(store.cuts.first?.disposition, .pending)
+        XCTAssertEqual(recordedCalls, [nil, "page-2"], "Paging must advance instead of restarting at the head when the ledger changes")
+        XCTAssertEqual(store.cuts.map(\.id), ["cut-pending", "cut-unavailable"])
+        XCTAssertEqual(store.cuts.first?.disposition, .failed, "A re-recorded cut replaces its retained copy")
         XCTAssertNil(store.nextCursor)
         XCTAssertEqual(store.stateRevision, 2)
 
@@ -354,21 +387,19 @@ final class KnowledgeModelsTests: XCTestCase {
         }
 
         XCTAssertEqual(KnowledgeCoveragePresentationPolicy.settledLabel(summary(remaining: 6)), "397 settled")
-        XCTAssertEqual(KnowledgeCoveragePresentationPolicy.summaryTitle(summary(remaining: 6)), "6 cuts need attention")
-        XCTAssertEqual(KnowledgeCoveragePresentationPolicy.summaryDetail(summary(remaining: 6, failed: 2, unavailable: 4)),
+        XCTAssertEqual(KnowledgeCoveragePresentationPolicy.attentionTitle(summary(remaining: 6)), "6 cuts need attention")
+        XCTAssertEqual(KnowledgeCoveragePresentationPolicy.attentionDetail(summary(remaining: 6, failed: 2, unavailable: 4)),
                        "pending 0 · failed 2 · unavailable 4")
-        XCTAssertEqual(KnowledgeCoveragePresentationPolicy.summaryTitle(summary(remaining: 1, failed: 1)), "1 cut needs attention")
-        XCTAssertEqual(KnowledgeCoveragePresentationPolicy.summaryTitle(summary(remaining: 0)), "No cuts need attention")
-        XCTAssertEqual(KnowledgeCoveragePresentationPolicy.summaryDetail(summary(remaining: 0)),
-                       "Observed 367 · Empty 3 · Excluded 27", "A settled container still reports the retained counts")
+        XCTAssertEqual(KnowledgeCoveragePresentationPolicy.attentionTitle(summary(remaining: 1, failed: 1)), "1 cut needs attention")
+        XCTAssertEqual(KnowledgeCoveragePresentationPolicy.attentionTitle(summary(remaining: 0)), "No cuts need attention")
+        XCTAssertEqual(KnowledgeCoveragePresentationPolicy.settledDetail(summary(remaining: 0)),
+                       "Observed 367 · Empty 3 · Excluded 27", "The overview always reports the settled counts")
+        XCTAssertNil(KnowledgeCoveragePresentationPolicy.listProgress(summary(remaining: 2), loaded: 2))
+        XCTAssertEqual(KnowledgeCoveragePresentationPolicy.listProgress(summary(remaining: 6), loaded: 2),
+                       "Showing 2 of 6 cuts needing attention.", "A partial list says so instead of implying completeness")
 
-        let cuts = [Self.syntheticCut("observed", .observed, range: range),
-                    Self.syntheticCut("pending", .pending, range: range),
-                    Self.syntheticCut("failed", .failed, range: range),
-                    Self.syntheticCut("unavailable", .unavailable, range: range)]
-        XCTAssertEqual(KnowledgeCoveragePresentationPolicy.actionable(cuts).map(\.id),
-                       ["pending", "failed", "unavailable"],
-                       "Only cuts that need attention become rows, in Gateway order")
+        XCTAssertEqual(KnowledgeCoveragePresentationPolicy.attentionDispositions, [.pending, .failed, .unavailable],
+                       "The container asks the Gateway for only the cuts it lists")
 
         let citation = KnowledgeCoveragePresentationPolicy.citation(range)
         XCTAssertEqual(citation, "fixture-…–fixture-… · session fixture-…")

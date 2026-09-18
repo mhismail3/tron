@@ -209,7 +209,7 @@ export interface ObservationCoverage {
   id: string;
   revisionId: string;
   range: ObservationRange;
-  disposition: "observed" | "empty" | "excluded" | "pending" | "failed" | "unavailable";
+  disposition: ObservationCoverageDisposition;
   groupRevisionIds: string[];
   recordedAt: string;
   reason?: string;
@@ -267,7 +267,13 @@ export const DEFAULT_KNOWLEDGE_CONFIG: KnowledgeConfig = {
   currentInterests: [],
 };
 
+/** Every disposition an observation cut can hold. `observed`, `empty`, and
+ * `excluded` are terminal; the remaining three still need retry, user action, or
+ * evidence recovery, and are what a client asks for when it lists cuts that
+ * need attention rather than scanning a mostly settled ledger. */
 export type ObservationCoverageDisposition = "observed" | "empty" | "excluded" | "pending" | "failed" | "unavailable";
+export const OBSERVATION_COVERAGE_DISPOSITIONS: readonly ObservationCoverageDisposition[] = ["observed", "empty", "excluded", "pending", "failed", "unavailable"];
+export const OBSERVATION_ATTENTION_DISPOSITIONS: readonly ObservationCoverageDisposition[] = ["pending", "failed", "unavailable"];
 
 export interface KnowledgeCoverageSummary {
   observedCount: number;
@@ -303,6 +309,10 @@ export interface KnowledgeStatus {
 export interface KnowledgeCoverageRequest {
   cursor?: string;
   limit?: number;
+  /** Narrows the page to these dispositions. A client that lists cuts needing
+   * attention asks for `pending`, `failed`, and `unavailable` instead of
+   * scanning the whole ledger, which is mostly settled cuts. */
+  dispositions?: ObservationCoverageDisposition[];
 }
 
 export interface KnowledgeListRequest {

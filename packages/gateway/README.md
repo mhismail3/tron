@@ -87,7 +87,11 @@ bit; agent-tool notes remain agent-authored and unconfirmed. `knowledge.status`
 returns typed coverage counts (`observedCount`, `emptyCount`, `excludedCount`,
 `pendingCount`, `failedCount`, `unavailableCount`, and `remainingCount`), while
 `knowledge.observation.coverage` returns bounded canonical coverage pages with a
-`nextCursor`; remaining means pending, failed, or unavailable cuts—not empty or
+`nextCursor`. A page can carry an optional `dispositions` filter (capability
+`knowledge-coverage-filter.v1`), so a client that lists cuts needing attention
+reads only those rows instead of paging a ledger that is mostly settled; the
+cursor stays anchored to the same `recordedAt` index. `remainingCount` means
+pending, failed, or unavailable cuts—not empty or
 intentionally excluded scope. Recovery preserves the admitted terminal outcome
 only when its canonical Gateway invocation receipt is present and unambiguous;
 otherwise it marks the cut unavailable with an explicit reason.

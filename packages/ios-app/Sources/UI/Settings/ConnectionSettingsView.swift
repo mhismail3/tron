@@ -265,13 +265,6 @@ struct ConnectionsSettingsView: View {
 
 }
 
-struct GatewayTechnicalDetail: Identifiable, Equatable {
-    let icon: String
-    let title: String
-    let value: String
-    var id: String { title }
-}
-
 enum AdministrativeDrainPollingOwner: Equatable {
     case restart(drainID: String)
     case update(commandID: String, drainID: String?)
@@ -366,18 +359,38 @@ enum GatewayUpdatePollingDecision: Equatable {
 }
 
 enum GatewayConnectionDetailPresentation {
+    /// What a paired server reports about itself. This is the `Gateway Info`
+    /// table of the server info sheet.
+    static func metadata(info: GatewayInfo?) -> [TronTechnicalMetadataItem] {
+        guard let info else { return [] }
+        return [
+            TronTechnicalMetadataItem(title: "Machine", value: info.machineName, icon: "desktopcomputer"),
+            TronTechnicalMetadataItem(title: "Gateway", value: info.gatewayVersion, icon: "network"),
+            TronTechnicalMetadataItem(title: "Agent runtime", value: info.piVersion, icon: "cpu"),
+            TronTechnicalMetadataItem(title: "Protocol", value: String(info.protocolVersion),
+                                      icon: "point.3.connected.trianglepath.dotted"),
+            TronTechnicalMetadataItem(
+                title: "Restart supervision",
+                value: info.capabilities.contains("restart-supervised.v1") ? "Managed LaunchAgent" : "Unavailable",
+                icon: "lock.shield"
+            ),
+        ]
+    }
+
+    /// Opaque runtime and payload identities. They stay in the info sheet's
+    /// runtime table rather than the server sheet's visible surface.
     static func technicalDetails(
         info: GatewayInfo?,
         updateStatus: GatewayUpdateStatus?
-    ) -> [GatewayTechnicalDetail] {
+    ) -> [TronTechnicalMetadataItem] {
         let identity = updateStatus?.currentIdentity
         return [
             (info?.sourceRevision ?? identity?.sourceRevision)
-                .map { GatewayTechnicalDetail(icon: "number", title: "Source revision", value: $0) },
+                .map { TronTechnicalMetadataItem(title: "Source revision", value: $0, icon: "number") },
             (info?.runtimeEpoch ?? identity?.runtimeEpoch)
-                .map { GatewayTechnicalDetail(icon: "clock", title: "Runtime epoch", value: $0) },
+                .map { TronTechnicalMetadataItem(title: "Runtime epoch", value: $0, icon: "clock") },
             identity?.payloadFingerprint
-                .map { GatewayTechnicalDetail(icon: "number", title: "Payload identity", value: $0) },
+                .map { TronTechnicalMetadataItem(title: "Payload identity", value: $0, icon: "number") },
         ].compactMap { $0 }
     }
 
@@ -412,8 +425,8 @@ enum GatewayUpdateIntent: Identifiable, Equatable {
 
     var actionTitle: String {
         switch self {
-        case .debug: return "Promote Debug Gateway to Stable"
-        case .source: return "Rebuild Gateway from Source"
+        case .debug: return "Promote Debug to Stable"
+        case .source: return "Rebuild from Source"
         }
     }
 
@@ -471,7 +484,7 @@ struct GatewayConnectionDetailView: View {
     @State private var drainSnapshot: AdministrativeDrainSnapshot?
     @State private var acceptedOperationLabel: String?
     @State private var configuringSourceRepository = false
-    @State private var showingTechnicalDetails = false
+    @State private var showingServerInfo = false
     @State private var confirmingForget = false
 
     private var currentProfile: GatewayProfile {
@@ -485,7 +498,7 @@ struct GatewayConnectionDetailView: View {
 
     private var statusColor: Color { status.color }
 
-    private var technicalDetails: [GatewayTechnicalDetail] {
+    private var technicalDetails: [TronTechnicalMetadataItem] {
         GatewayConnectionDetailPresentation.technicalDetails(info: info, updateStatus: updateStatus)
     }
 
@@ -555,96 +568,16 @@ struct GatewayConnectionDetailView: View {
                     }
                 }
 
-                TronSettingsGroup("Gateway Info", accent: .tronCyan) {
-                    VStack(spacing: 0) {
-                        if let info {
-                            infoRow("desktopcomputer", "Machine", info.machineName)
-                            TronSettingsDivider(accent: .tronCyan)
-                            infoRow("network", "Gateway", info.gatewayVersion)
-                            TronSettingsDivider(accent: .tronCyan)
-                            infoRow("cpu", "Agent runtime", info.piVersion)
-                            TronSettingsDivider(accent: .tronCyan)
-                            infoRow("point.3.connected.trianglepath.dotted", "Protocol", String(info.protocolVersion))
-                            TronSettingsDivider(accent: .tronCyan)
-                            infoRow(
-                                "lock.shield",
-                                "Restart supervision",
-                                info.capabilities.contains("restart-supervised.v1") ? "Managed LaunchAgent" : "Unavailable"
-                            )
-                            if !technicalDetails.isEmpty {
-                                TronSettingsDivider(accent: .tronCyan)
-                                Button { showingTechnicalDetails = true } label: {
-                                    TronValueRow(
-                                        icon: "info.circle",
-                                        title: "Technical details",
-                                        detail: "Runtime and deployment identities",
-                                        accent: .tronCyan
-                                    ) {
-                                        Image(systemName: "chevron.right")
-                                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                                            .foregroundStyle(Color.tronTextMuted)
-                                    }
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        } else {
-                            TronValueRow(
-                                icon: loadingInfo ? "arrow.clockwise" : "questionmark.circle",
-                                title: loadingInfo ? "Loading gateway info…" : "Gateway info unavailable",
-                                detail: loadingInfo ? nil : "Connect to this server to load its metadata.",
-                                accent: .tronCyan
-                            ) {
-                                if loadingInfo { TronPulseLoadingIndicator(accent: .tronCyan, size: 18) }
-                            }
-                        }
-                    }
-                }
-
                 if updateStatus != nil || updateConfig != nil {
                     gatewayUpdateGroup(config: updateConfig)
                 }
 
-                VStack(alignment: .leading, spacing: 12) {
-                    if let updateStatus,
-                       let admittedIntent = GatewayUpdateIntent.admitted(
-                        info: info,
-                        status: updateStatus,
-                        config: updateConfig
-                       ) {
-                        gatewayActionButton(
-                            admittedIntent.actionTitle,
-                            accent: .tronEmerald,
-                            disabled: updateIsActive
-                        ) { updateIntent = admittedIntent }
-                    }
-
-                    if let updateStatus, Self.canShowGatewayRollback(info: info, status: updateStatus) {
-                        gatewayActionButton("Roll Back Gateway", accent: .tronAmber, disabled: updateIsActive) {
-                            confirmingRollback = true
-                        }
-                    }
-
-                    gatewayActionButton(
-                        "Restart Gateway",
-                        accent: .tronCyan,
-                        disabled: !currentProfile.isEnabled || !supportsSafeRestart || updateIsActive
-                    ) { confirmingRestart = true }
-
-                    if currentProfile.isEnabled {
-                        gatewayActionButton("Disable", accent: .tronAmber) {
-                            Task { await model.disableGateway(currentProfile) }
-                        }
-                    } else {
-                        gatewayActionButton("Enable", accent: .tronEmerald) {
-                            model.setGatewayEnabled(true, profile: currentProfile)
-                        }
-                    }
-
-                    gatewayActionButton("Forget Server", accent: .tronError) {
+                GatewayMaintenanceActions(
+                    lifecycle: lifecycleActions,
+                    destructive: GatewayMaintenanceAction(id: "forget", title: "Forget Server") {
                         confirmingForget = true
                     }
-                }
+                )
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 18)
@@ -652,6 +585,13 @@ struct GatewayConnectionDetailView: View {
         .tronScrollEdgeChrome()
         .tronNavigationTitle(currentProfile.label)
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button { showingServerInfo = true } label: {
+                    Image(systemName: "info.circle")
+                        .tronSettingsAccent()
+                }
+                .accessibilityLabel("Server info")
+            }
             ToolbarItem(placement: .confirmationAction) {
                 Button { dismiss() } label: {
                     Image(systemName: "checkmark")
@@ -705,10 +645,14 @@ struct GatewayConnectionDetailView: View {
             }
         }
         .tronManagedSheet(
-            isPresented: $showingTechnicalDetails,
-            identity: "settings.gateway.technical"
+            isPresented: $showingServerInfo,
+            identity: "settings.gateway.server-info"
         ) {
-            GatewayTechnicalDetailsSheet(details: technicalDetails)
+            GatewayServerInfoSheet(
+                metadata: GatewayConnectionDetailPresentation.metadata(info: info),
+                identities: technicalDetails,
+                loading: loadingInfo
+            )
         }
         .tronManagedSheet(
             item: $updateIntent,
@@ -837,28 +781,30 @@ struct GatewayConnectionDetailView: View {
         }
     }
 
-    private func gatewayActionButton(
-        _ title: String,
-        accent: Color,
-        disabled: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .contentShape(RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous))
+    /// The lifecycle actions as the grid sees them: what this server currently
+    /// admits, in one order, with their owners' commands attached.
+    private var lifecycleActions: [GatewayMaintenanceAction] {
+        var actions: [GatewayMaintenanceAction] = []
+        if let updateStatus,
+           let admittedIntent = GatewayUpdateIntent.admitted(info: info, status: updateStatus, config: updateConfig) {
+            actions.append(GatewayMaintenanceAction(id: "update", title: admittedIntent.actionTitle, disabled: updateIsActive) {
+                updateIntent = admittedIntent
+            })
         }
-        .buttonStyle(.plain)
-        .tronSettingsButtonForeground(accent)
-        .tronGlassSurface(
-            accent: accent,
-            tintOpacity: 0.16,
-            interactive: true,
-            respectsSettingsTheme: false
-        )
-        .opacity(disabled ? 0.48 : 1)
-        .disabled(disabled)
+        if let updateStatus, Self.canShowGatewayRollback(info: info, status: updateStatus) {
+            actions.append(GatewayMaintenanceAction(id: "rollback", title: "Roll Back", disabled: updateIsActive) {
+                confirmingRollback = true
+            })
+        }
+        actions.append(GatewayMaintenanceAction(
+            id: "restart",
+            title: "Restart",
+            disabled: !currentProfile.isEnabled || !supportsSafeRestart || updateIsActive
+        ) { confirmingRestart = true })
+        actions.append(currentProfile.isEnabled
+            ? GatewayMaintenanceAction(id: "enabled", title: "Disable") { Task { await model.disableGateway(currentProfile) } }
+            : GatewayMaintenanceAction(id: "enabled", title: "Enable") { model.setGatewayEnabled(true, profile: currentProfile) })
+        return actions
     }
 
     private var supportsSafeRestart: Bool {
@@ -1019,82 +965,116 @@ struct GatewayConnectionDetailView: View {
         }
     }
 
-    private func infoRow(_ icon: String, _ title: String, _ value: String) -> some View {
-        TronValueRow(icon: icon, title: title, value: value, accent: .tronCyan)
+}
+
+/// One server maintenance action. The descriptor keeps the command with its
+/// owner while the shared component owns layout, order, and accents.
+struct GatewayMaintenanceAction: Identifiable {
+    let id: String
+    let title: String
+    var disabled = false
+    let perform: () -> Void
+}
+
+/// The server sheet's maintenance actions: the lifecycle actions share one
+/// accent in a two-column grid, and the irreversible pairing action stands alone
+/// below them in the error accent.
+struct GatewayMaintenanceActions: View {
+    let lifecycle: [GatewayMaintenanceAction]
+    let destructive: GatewayMaintenanceAction
+    var accent: Color = .tronEmerald
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Eager rows, not a lazy grid: four short actions need no
+            // materialization window, and each stays one labelled target.
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: 12) {
+                    ForEach(row) { action in
+                        button(action, accent: accent)
+                    }
+                    if row.count == 1 { Spacer(minLength: 0) }
+                }
+            }
+            button(destructive, accent: .tronError)
+        }
+    }
+
+    private var rows: [[GatewayMaintenanceAction]] {
+        stride(from: 0, to: lifecycle.count, by: 2).map { Array(lifecycle[$0..<min($0 + 2, lifecycle.count)]) }
+    }
+
+    private func button(_ action: GatewayMaintenanceAction, accent: Color) -> some View {
+        Button(action: action.perform) { label(action.title) }
+            .buttonStyle(.plain)
+            .tronSettingsButtonForeground(accent)
+            .tronGlassSurface(accent: accent, tintOpacity: 0.16, interactive: true, respectsSettingsTheme: false)
+            .opacity(action.disabled ? 0.48 : 1)
+            .disabled(action.disabled)
+    }
+
+    private func label(_ title: String) -> some View {
+        Text(title)
+            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+            .multilineTextAlignment(.center)
+            .lineLimit(2)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .contentShape(RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous))
     }
 }
 
-private struct GatewayTechnicalDetailsSheet: View {
+/// The server sheet's info destination. Both tables use the shared metadata
+/// component, so the gateway facts and the opaque runtime identities read the
+/// same as every other technical table in the app.
+struct GatewayServerInfoSheet: View {
     @Environment(\.dismiss) private var dismiss
-    let details: [GatewayTechnicalDetail]
+    let metadata: [TronTechnicalMetadataItem]
+    let identities: [TronTechnicalMetadataItem]
+    let loading: Bool
+    @State private var detent: PresentationDetent = .medium
 
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                TronSettingsGroup(
-                    "Runtime identities",
-                    detail: "Diagnostic values for the active Gateway payload.",
-                    accent: .tronCyan
-                ) {
-                    VStack(spacing: 0) {
-                        ForEach(Array(details.enumerated()), id: \.element.id) { index, detail in
-                            if index > 0 { TronSettingsDivider(accent: .tronCyan) }
-                            GatewayTechnicalIdentityRow(detail: detail)
+                VStack(alignment: .leading, spacing: 18) {
+                    if metadata.isEmpty {
+                        TronSettingsRow(
+                            icon: loading ? "arrow.clockwise" : "questionmark.circle",
+                            title: loading ? "Loading server info…" : "Server info unavailable",
+                            subtitle: loading ? nil : "Connect to this server to load its metadata.",
+                            accent: .tronCyan
+                        ) {
+                            if loading { TronPulseLoadingIndicator(accent: .tronCyan, size: 18) }
                         }
+                        .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.09)
+                    } else {
+                        TronTechnicalMetadataSection(title: "Gateway", items: metadata, accent: .tronCyan)
                     }
-                    .textSelection(.enabled)
+                    if !identities.isEmpty {
+                        TronTechnicalMetadataSection(title: "Runtime identities", items: identities, accent: .tronCyan)
+                            .textSelection(.enabled)
+                    }
                 }
                 .padding(20)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
             .tronScrollEdgeChrome()
-            .navigationBarTitleDisplayMode(.inline)
+            .tronNavigationTitle("Server Info", accent: .tronCyan)
             .toolbar {
-                ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: "Technical Details", accent: .tronCyan)
-                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .tronSettingsAccent(.tronCyan)
+                            .foregroundStyle(Color.tronCyan)
                     }
                     .accessibilityLabel("Done")
                 }
             }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.hidden)
-    }
-}
-
-private struct GatewayTechnicalIdentityRow: View {
-    let detail: GatewayTechnicalDetail
-
-    var body: some View {
-        HStack(alignment: .top, spacing: TronSpacing.xl) {
-            Image(systemName: detail.icon)
-                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .tronSettingsAccent(.tronCyan)
-                .frame(width: 22, height: 20)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 5) {
-                Text(detail.title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                    .foregroundStyle(Color.tronTextPrimary)
-                Text(detail.value)
-                    .font(TronTypography.codeContent)
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-        .accessibilityElement(children: .combine)
+        .tronPresentation()
     }
 }
 

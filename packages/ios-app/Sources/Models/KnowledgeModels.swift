@@ -46,9 +46,11 @@ struct KnowledgeCoveragePage: Codable, Hashable, Sendable {
     let coverage: [KnowledgeObservationCoverage]; let stateRevision: Int; let nextCursor: String?
 }
 
-/// Owns the bounded coverage projection and its cursor. A continuation from a
-/// previous state revision is discarded and restarted rather than mixed with
-/// newer cuts, so later pending/failed/unavailable cuts remain inspectable.
+/// Owns the bounded coverage projection and its cursor. Pages are requested by
+/// disposition, so the projection holds cuts that need attention rather than the
+/// settled majority of the ledger. A continuation appends to that projection
+/// across a revision change (deduplicating re-recorded cuts) so paging always
+/// advances instead of restarting at the head.
 @MainActor @Observable
 final class KnowledgeCoveragePresentationStore {
     private(set) var cuts: [KnowledgeObservationCoverage] = []
@@ -83,14 +85,19 @@ final class KnowledgeCoveragePresentationStore {
         do {
             let page = try await request(cursor)
             guard !Task.isCancelled, ticket == generation, isCurrent() else { return }
-            // Never append a page from a changed canonical revision. Restart
-            // at the head so the retained projection has one coherent cursor.
-            if let oldRevision = stateRevision, cursor != nil, oldRevision != page.stateRevision {
-                loading = false
-                await load(identity: identity, cursor: nil, request: request, isCurrent: isCurrent)
-                return
+            if cursor == nil {
+                cuts = page.coverage
+            } else {
+                // The coverage ledger is ordered by recordedAt and only ever
+                // appends a cut or moves one forward (new and re-recorded cuts
+                // are stamped with the current time), so a continuation stays
+                // coherent across a revision change. A cut that was re-recorded
+                // after this page started replaces its retained copy rather than
+                // appearing twice; a page of already-known cuts still advances
+                // the cursor instead of restarting at the head.
+                let refreshed = Set(page.coverage.map(\.id))
+                cuts = cuts.filter { !refreshed.contains($0.id) } + page.coverage
             }
-            if cursor == nil { cuts = page.coverage } else { cuts.append(contentsOf: page.coverage.filter { !cuts.contains($0) }) }
             nextCursor = page.nextCursor; stateRevision = page.stateRevision; loading = false
         } catch is CancellationError {
             if ticket == generation { loading = false }

@@ -8,13 +8,13 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import { durableAtomicWriteJson, durableRemove } from "../util/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import {
-  DEFAULT_KNOWLEDGE_CONFIG, KNOWLEDGE_SCHEMA_VERSION, knowledgeScopeEligible,
+  DEFAULT_KNOWLEDGE_CONFIG, KNOWLEDGE_SCHEMA_VERSION, OBSERVATION_ATTENTION_DISPOSITIONS, OBSERVATION_COVERAGE_DISPOSITIONS, knowledgeScopeEligible,
   type KnowledgeConfig, type KnowledgeEvidenceRef, type KnowledgeListRequest,
   type KnowledgeListResponse, type KnowledgeObjectRef, type KnowledgeRecallRequest,
   type KnowledgeRecallResponse, type KnowledgeRecord, type KnowledgeRecordDraft,
   type KnowledgeSearchRequest, type KnowledgeSearchResponse, type KnowledgeSearchHit,
   type KnowledgeNoteMutationRequest, type KnowledgeCoverageDismissRequest,
-  type KnowledgeConnectorState, type ObservationCoverage, type ObservationRange, type KnowledgeCoveragePage, type KnowledgeCoverageSummary, validateKnowledgeConfig,
+  type KnowledgeConnectorState, type ObservationCoverage, type ObservationCoverageDisposition, type ObservationRange, type KnowledgeCoveragePage, type KnowledgeCoverageSummary, validateKnowledgeConfig,
   validateKnowledgeRecord, validateObjectRef, assertKnowledgeId, assertKnowledgeProjectId,
 } from "./knowledge-contract.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
@@ -190,7 +190,7 @@ function readListCursor(cursor: string, scope: string): { sortAt: number; id: st
 function validateCoverage(value: unknown): asserts value is ObservationCoverage {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new KnowledgeStoreError("invalid", "Invalid observation coverage");
   const coverage = value as Record<string, unknown>;
-  if (coverage.schemaVersion !== KNOWLEDGE_SCHEMA_VERSION || typeof coverage.id !== "string" || typeof coverage.revisionId !== "string" || !Array.isArray(coverage.groupRevisionIds) || typeof coverage.recordedAt !== "string" || !["observed", "empty", "excluded", "pending", "failed", "unavailable"].includes(coverage.disposition as string)) throw new KnowledgeStoreError("invalid", "Invalid observation coverage");
+  if (coverage.schemaVersion !== KNOWLEDGE_SCHEMA_VERSION || typeof coverage.id !== "string" || typeof coverage.revisionId !== "string" || !Array.isArray(coverage.groupRevisionIds) || typeof coverage.recordedAt !== "string" || !OBSERVATION_COVERAGE_DISPOSITIONS.includes(coverage.disposition as ObservationCoverageDisposition)) throw new KnowledgeStoreError("invalid", "Invalid observation coverage");
   safeId(coverage.id, "coverage id"); safeId(coverage.revisionId, "coverage revision");
   if (!validTimestamp(coverage.recordedAt)) throw new KnowledgeStoreError("invalid", "Invalid coverage timestamp");
   const range = coverage.range as Record<string, unknown>;
@@ -614,7 +614,7 @@ export class KnowledgeStore {
         const counts = state.catalog!.coverageCounts();
         const coverage = { observedCount: counts.observed ?? 0, emptyCount: counts.empty ?? 0, excludedCount: counts.excluded ?? 0,
           pendingCount: counts.pending ?? 0, failedCount: counts.failed ?? 0, unavailableCount: counts.unavailable ?? 0,
-          remainingCount: (counts.pending ?? 0) + (counts.failed ?? 0) + (counts.unavailable ?? 0) };
+          remainingCount: OBSERVATION_ATTENTION_DISPOSITIONS.reduce((total, disposition) => total + (counts[disposition] ?? 0), 0) };
         return { available: true, state: "ready", stateRevision: state.stateRevision, recordCount: state.records.size, coverageCount: state.coverage.size, coverage,
           suppressedCount: state.catalog!.count("suppressions", "json_extract(value, '$.excluded') = 1 OR json_extract(value, '$.forgotten') = 1"),
           pendingCleanupCount: state.cleanup.size, config: state.config, observationConfigured: state.config.observation.enabled && state.config.observation.model !== undefined };
@@ -1108,16 +1108,26 @@ export class KnowledgeStore {
   }
 
   /** Coverage pages seek through the canonical date index. A missing cursor
-   * fails explicitly rather than silently replaying the first page. */
-  async observationCoveragePage(limit = 100, cursor?: string): Promise<KnowledgeCoveragePage> {
+   * fails explicitly rather than silently replaying the first page. An optional
+   * disposition filter lets a client list the cuts that need attention without
+   * scanning a ledger whose rows are mostly settled. */
+  async observationCoveragePage(limit = 100, cursor?: string, dispositions?: ObservationCoverageDisposition[]): Promise<KnowledgeCoveragePage> {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new KnowledgeStoreError("invalid", "Invalid observation coverage page limit");
     if (cursor !== undefined) safeId(cursor, "observation coverage cursor");
+    if (dispositions !== undefined && (dispositions.length === 0 || dispositions.length > OBSERVATION_COVERAGE_DISPOSITIONS.length
+      || new Set(dispositions).size !== dispositions.length
+      || dispositions.some(disposition => !OBSERVATION_COVERAGE_DISPOSITIONS.includes(disposition)))) {
+      throw invalid("Invalid observation coverage disposition filter");
+    }
     return this.inspect(async state => {
       const anchor = cursor ? state.coverage.get(cursor) : undefined;
       if (cursor && !anchor) throw invalid("Observation coverage cursor is unavailable; reload coverage");
-      const rows = state.catalog?.scan<ObservationCoverage>("coverage",
-        anchor ? "json_extract(value, '$.recordedAt') >= ? AND (json_extract(value, '$.recordedAt') > ? OR key > json_quote(?))" : "",
-        anchor ? [anchor.recordedAt, anchor.recordedAt, anchor.id] : [], "json_extract(value, '$.recordedAt'), key") ?? [];
+      const conditions: string[] = []; const parameters: SQLInputValue[] = [];
+      // A cut's recordedAt only ever moves forward (new and re-recorded cuts are
+      // stamped with now()), so a filtered page keeps one coherent cursor.
+      if (anchor) { conditions.push("json_extract(value, '$.recordedAt') >= ? AND (json_extract(value, '$.recordedAt') > ? OR key > json_quote(?))"); parameters.push(anchor.recordedAt, anchor.recordedAt, anchor.id); }
+      if (dispositions) { conditions.push(`json_extract(value, '$.disposition') IN (${dispositions.map(() => "?").join(", ")})`); parameters.push(...dispositions); }
+      const rows = state.catalog?.scan<ObservationCoverage>("coverage", conditions.join(" AND "), parameters, "json_extract(value, '$.recordedAt'), key") ?? [];
       const coverage: ObservationCoverage[] = []; const budget = new KnowledgePageBudget(); let nextCursor: string | undefined;
       for (const { value } of rows) {
         validateCoverage(value);

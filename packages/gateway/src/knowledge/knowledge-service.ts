@@ -1,7 +1,7 @@
 import { Type, type Static } from "typebox";
 import type { Api, AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import type { KnowledgeAction, KnowledgeConfig, KnowledgeListRequest, KnowledgeRecallRequest, KnowledgeSearchRequest, SourceAssessment } from "./knowledge-contract.js";
+import type { KnowledgeAction, KnowledgeConfig, KnowledgeListRequest, KnowledgeRecallRequest, KnowledgeSearchRequest, ObservationCoverageDisposition, SourceAssessment } from "./knowledge-contract.js";
 import type { KnowledgeStore } from "./knowledge-store.js";
 import { KnowledgeObservationService, type ObservationSettlement } from "./knowledge-observation.js";
 import { captureSource, type SourceAssessmentModel } from "./source-capture.js";
@@ -190,7 +190,7 @@ export class KnowledgeService {
 
   observe(settlement: ObservationSettlement): void { this.observer.admit(settlement); }
   async pendingObservationCoverage(limit = 100) { return this.store.pendingObservationCoverage(limit); }
-  async observationCoveragePage(limit = 100, cursor?: string) { return this.store.observationCoveragePage(limit, cursor); }
+  async observationCoveragePage(limit = 100, cursor?: string, dispositions?: ObservationCoverageDisposition[]) { return this.store.observationCoveragePage(limit, cursor, dispositions); }
   dispose(): void { this.observer.dispose(); }
 
   private async synthesizeRevisions(commandId: string, sessionId: string, sourceRevisionIds: string[], signal?: AbortSignal): Promise<unknown> {
@@ -217,7 +217,7 @@ export class KnowledgeService {
   async invoke(action: KnowledgeAction, signal?: AbortSignal): Promise<unknown> {
     switch (action.operation) {
       case "knowledge.status": return this.store.status();
-      case "knowledge.observation.coverage": return this.store.observationCoveragePage(action.request.limit ?? 100, action.request.cursor);
+      case "knowledge.observation.coverage": return this.store.observationCoveragePage(action.request.limit ?? 100, action.request.cursor, action.request.dispositions);
       case "knowledge.observation.dismiss": return this.store.dismissCoverage(action.request);
       case "knowledge.object.read": {
         const bytes = await this.store.readObject({ hash: action.request.hash, mediaType: action.request.mediaType, bytes: action.request.bytes }, { recordId: action.request.recordId, revisionId: action.request.revisionId });

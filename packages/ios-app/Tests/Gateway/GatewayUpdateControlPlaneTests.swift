@@ -43,7 +43,7 @@ struct GatewayUpdateControlPlaneTests {
         }
     }
 
-    @Test("server detail keeps opaque identities behind technical details and unifies source configuration")
+    @Test("server info presents gateway facts and opaque identities as shared metadata tables")
     func serverDetailPresentation() throws {
         let info = GatewayInfo(
             gatewayVersion: "1", piVersion: "2", protocolVersion: 5, minProtocolVersion: 5,
@@ -58,6 +58,11 @@ struct GatewayUpdateControlPlaneTests {
             ),
             candidateIdentity: nil, candidateAvailable: false, error: nil, updatedAt: nil
         )
+        let metadata = GatewayConnectionDetailPresentation.metadata(info: info)
+        #expect(metadata.map(\.title) == ["Machine", "Gateway", "Agent runtime", "Protocol", "Restart supervision"])
+        #expect(metadata.map(\.value) == ["Mac", "1", "2", "5", "Unavailable"])
+        #expect(metadata.allSatisfy { !$0.icon.isEmpty }, "Every fact row carries its own icon")
+        #expect(GatewayConnectionDetailPresentation.metadata(info: nil).isEmpty)
         let details = GatewayConnectionDetailPresentation.technicalDetails(info: info, updateStatus: status)
         #expect(details.map(\.title) == ["Source revision", "Runtime epoch", "Payload identity"])
         #expect(details.map(\.value) == ["source-revision", "runtime-epoch", "payload-identity"])
@@ -152,7 +157,7 @@ struct GatewayUpdateControlPlaneTests {
         #expect(GatewayUpdateIntent.admitted(info: capableInfo, status: debug, config: config) == .debug(provenDebug))
         #expect(GatewayUpdateIntent.admitted(info: capableInfo, status: available, config: nil) == nil)
         #expect(GatewayUpdateIntent.admitted(info: capableInfo, status: available, config: config) == .source)
-        #expect(GatewayUpdateIntent.source.actionTitle == "Rebuild Gateway from Source")
+        #expect(GatewayUpdateIntent.source.actionTitle == "Rebuild from Source")
         #expect(GatewayUpdateIntent.source.confirmationPresentation.confirmTitle == "Rebuild")
         #expect(GatewayUpdateIntent.source.confirmationPresentation.centersTitle)
         #expect(!GatewayUpdateIntent.debug(provenDebug).confirmationPresentation.centersTitle)

@@ -12,10 +12,10 @@ enum KnowledgeCatalogPaginationPolicy {
 /// long retained list stays scannable; section boundaries add their own inset.
 enum KnowledgeDashboardLayout {
     static let recordSpacing: CGFloat = 8
-    /// Height of the collapsed coverage container, reserved while sizing
-    /// full-height loading/empty/error states so they are not pushed past the
-    /// viewport by a section that costs one row.
-    static let coverageSectionReservedHeight: CGFloat = 116
+    /// Height of the coverage overview, reserved while sizing full-height
+    /// loading/empty/error states so they are not pushed past the viewport by a
+    /// section that costs two short rows.
+    static let coverageSectionReservedHeight: CGFloat = 136
 }
 
 enum KnowledgeImportPresentationPolicy {
@@ -56,9 +56,9 @@ struct KnowledgeDashboardView: View {
     @State private var loadingMore = false
     @State private var status: KnowledgeStatus?
     @State private var coverageStore = KnowledgeCoveragePresentationStore()
-    @State private var coverageToClear: KnowledgeObservationCoverage?
     @State private var clearingCoverageID: String?
     @State private var coverageMutationError: String?
+    @State private var coverageSheet = false
     @State private var loadGeneration = 0
     @State private var connectorRefreshGeneration: [String: Int] = [:]
     @State private var configSheet = false
@@ -68,7 +68,6 @@ struct KnowledgeDashboardView: View {
     @State private var noteSheet = false
     @State private var showingFilters = false
     @State private var showingSearch = false
-    @State private var coverageExpanded = false
 
     private var filterSummary: String {
         let summary = [kind?.label, scope?.label].compactMap { $0 }.joined(separator: " · ")
@@ -80,7 +79,7 @@ struct KnowledgeDashboardView: View {
             GeometryReader { geometry in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: KnowledgeDashboardLayout.recordSpacing) {
-                        if let status { coverageSection(status) }
+                        if let status { coverageOverview(status) }
                         dashboardContent(minimumHeight: max(280, geometry.size.height - (status == nil ? 0 : KnowledgeDashboardLayout.coverageSectionReservedHeight) - 100))
                     }
                     .padding(.horizontal, 20)
@@ -163,9 +162,12 @@ struct KnowledgeDashboardView: View {
             loadGeneration += 1
             loadingMore = false
             coverageStore.reset()
-            coverageToClear = nil; clearingCoverageID = nil; coverageMutationError = nil
+            clearingCoverageID = nil; coverageMutationError = nil; coverageSheet = false
             records.removeAll(); selected = nil; selectedIdentity = nil; pendingDetailAction = nil
-            nextCursor = nil; status = nil; error = nil; coverageExpanded = false
+            nextCursor = nil; status = nil; error = nil
+        }
+        .tronManagedSheet(isPresented: $coverageSheet, identity: "knowledge.coverage", onDismiss: finishDetailDismissal) {
+            coverageDetailSheet
         }
         .tronManagedSheet(isPresented: $showingFilters, identity: "knowledge.filters") {
             knowledgeFilterSheet
@@ -193,13 +195,6 @@ struct KnowledgeDashboardView: View {
             if !active { coverageStore.suspend() }
         }
         .onDisappear { coverageStore.suspend() }
-        .confirmationDialog("Clear this observation failure?", isPresented: Binding(
-            get: { coverageToClear != nil }, set: { if !$0 { coverageToClear = nil } }
-        ), presenting: coverageToClear) { cut in
-            Button("Clear failure") { clearCoverage(cut) }
-        } message: { _ in
-            Text("Skip only this cut without retrying it. Conversation history and other observations stay unchanged.")
-        }
     }
 
     private func dismissSearch() {
@@ -266,29 +261,52 @@ struct KnowledgeDashboardView: View {
             }
         }
     }
-    private func coverageSection(_ status: KnowledgeStatus) -> some View {
-        KnowledgeCoverageSection(
+    private func coverageOverview(_ status: KnowledgeStatus) -> some View {
+        KnowledgeCoverageOverview(
             coverage: status.coverage,
-            cuts: coverageStore.cuts,
-            showsInitialLoading: coverageStore.showsInitialLoading,
-            loadingMore: coverageStore.loading,
-            canLoadMore: coverageStore.nextCursor != nil,
-            errorText: coverageStore.error,
-            mutationErrorText: coverageMutationError,
-            clearingCutID: clearingCoverageID,
-            allowsActions: activity.allowsPresentationPublication,
-            onOpenSession: { cut in onOpenSession(cut.range.sessionId, cut.range.fromEntryId) },
-            onRequestClear: { coverageToClear = $0 },
-            onLoadMore: loadMoreCoverage,
-            expanded: $coverageExpanded
+            requiresGatewayUpdate: !supportsCoverageFilter,
+            onOpen: openCoverageDetail
         )
+    }
+
+    /// The coverage list lives in its own detail sheet so the dashboard card
+    /// stays an informational overview.
+    @ViewBuilder private var coverageDetailSheet: some View {
+        if let status {
+            KnowledgeCoverageDetailSheet(
+                coverage: status.coverage,
+                cuts: coverageStore.cuts,
+                showsInitialLoading: coverageStore.showsInitialLoading,
+                loadingMore: coverageStore.loading,
+                canLoadMore: coverageStore.nextCursor != nil,
+                errorText: coverageStore.error,
+                mutationErrorText: coverageMutationError,
+                clearingCutID: clearingCoverageID,
+                allowsActions: activity.allowsPresentationPublication,
+                onOpenSession: { cut in stageCoverageNavigation(.session(cut.range.sessionId, cut.range.fromEntryId)) },
+                onClear: { clearCoverage($0) },
+                onLoadMore: loadMoreCoverage
+            )
+        }
+    }
+
+    /// Coverage is read by disposition. An older Gateway cannot filter the
+    /// ledger, so the container reports that instead of listing the cuts that
+    /// happen to sit in the first settled page.
+    private var supportsCoverageFilter: Bool {
+        model.gatewayInfo?.capabilities.contains(KnowledgeRPCClient.coverageFilterCapability) == true
+    }
+
+    private func coverageRequest(cursor: String?) async throws -> KnowledgeCoveragePage {
+        try await model.knowledge.coverage(cursor: cursor, limit: 100,
+            dispositions: KnowledgeCoveragePresentationPolicy.attentionDispositions)
     }
 
     private func loadMoreCoverage() {
         let identity = model.knowledgePresentationIdentity
         Task { @MainActor in
             await coverageStore.loadMore(identity: identity,
-                request: { cursor in try await model.knowledge.coverage(cursor: cursor, limit: 50) },
+                request: coverageRequest,
                 isCurrent: { activity.allowsPresentationPublication && model.knowledgePresentationIdentity == identity })
         }
     }
@@ -324,9 +342,15 @@ struct KnowledgeDashboardView: View {
             let currentStatus = try await loadedStatus
             guard generation == loadGeneration, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
             records = response.records; nextCursor = response.nextCursor; status = currentStatus
-            await coverageStore.load(identity: identity, expectedStateRevision: currentStatus.stateRevision ?? 0,
-                request: { cursor in try await model.knowledge.coverage(cursor: cursor, limit: 50) },
-                isCurrent: { generation == loadGeneration && activity.allowsPresentationPublication && model.knowledgePresentationIdentity == identity })
+            // A Gateway that cannot filter coverage by disposition must not be
+            // asked for a page whose settled rows this container never lists.
+            if supportsCoverageFilter {
+                await coverageStore.load(identity: identity, expectedStateRevision: currentStatus.stateRevision ?? 0,
+                    request: coverageRequest,
+                    isCurrent: { generation == loadGeneration && activity.allowsPresentationPublication && model.knowledgePresentationIdentity == identity })
+            } else {
+                coverageStore.reset()
+            }
             guard generation == loadGeneration, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
         } catch is CancellationError { return } catch { guard generation == loadGeneration, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }; self.error = error.localizedDescription }
     }
@@ -359,6 +383,24 @@ struct KnowledgeDashboardView: View {
         pendingDetailAction = action
         selected = nil
     }
+
+    /// The coverage sheet belongs to the dashboard rather than to one record.
+    /// It captures the presented identity here so a Gateway switch while it
+    /// dismisses cannot navigate a stale citation.
+    private func openCoverageDetail() {
+        selectedIdentity = model.knowledgePresentationIdentity
+        coverageSheet = true
+    }
+
+    private func stageCoverageNavigation(_ action: DetailAction) {
+        guard model.knowledgePresentationIdentity == selectedIdentity, pendingDetailAction == nil else { return }
+        pendingDetailAction = action
+        coverageSheet = false
+    }
+
+    /// Both detail sheets hand navigation off only after they dismiss, because
+    /// the session owner must not present through a sheet that is still going
+    /// away.
     private func finishDetailDismissal() {
         let action = pendingDetailAction
         pendingDetailAction = nil

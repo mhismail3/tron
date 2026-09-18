@@ -281,6 +281,23 @@ describe("KnowledgeService integration", () => {
     expect(result.details).toEqual({ operation: "knowledge.connector.run", accepted: true });
   });
 
+  it("routes a disposition filter through the coverage request", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const initial = await store.config();
+    const config = await store.configure("service-coverage-filter", { ...initial, eligibility: { ...initial.eligibility, sessionIds: ["session-filter"] } });
+    const range = (entry: string) => ({ sessionId: "session-filter", fromEntryId: entry, toEntryId: entry, entryIds: [entry], entryDigest: "a".repeat(64) });
+    for (const [entry, disposition] of [["e1", "pending"], ["e2", "failed"], ["e3", "unavailable"]] as const) {
+      await store.setCoverage({ commandId: `service-filter-${entry}`, expectedConfigRevision: config.revision,
+        coverage: { id: `cut-${entry}`, range: range(entry), disposition, groupRevisionIds: [] } });
+    }
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined));
+    const page = await service.invoke({ operation: "knowledge.observation.coverage", request: { limit: 100, dispositions: ["pending", "failed", "unavailable"] } });
+    expect((page as { coverage: Array<{ id: string }> }).coverage.map(cut => cut.id).sort()).toEqual(["cut-e1", "cut-e2", "cut-e3"]);
+    const settledOnly = await service.invoke({ operation: "knowledge.observation.coverage", request: { limit: 100, dispositions: ["observed", "empty", "excluded"] } });
+    expect((settledOnly as { coverage: unknown[] }).coverage).toEqual([]);
+  });
+
   it("rejects connector and importer calls without an installed extension", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));
