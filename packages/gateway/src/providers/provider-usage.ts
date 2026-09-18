@@ -40,15 +40,19 @@ export interface ProviderUsageSnapshot {
 }
 export interface ProviderUsageResponse { providers: ProviderUsageSnapshot[]; }
 
+/** One wire API paired with the base URL a first-party model resolves to. */
+interface ProviderShape { api: string; baseUrl: string; }
 interface Adapter {
   id: string;
-  baseUrl: string;
-  api: string;
+  /** Every first-party (api, effective base URL) shape the provider may resolve to. */
+  shapes: readonly ProviderShape[];
   endpoint: string;
   source: string;
   scope: "account" | "key";
   headers(auth: ResolvedAuth): Record<string, string> | undefined;
   parse(body: unknown): { windows: UsageWindow[]; balances: UsageBalance[] };
+  /** Optional: a first-party status the default credential/limit mapping would misreport. */
+  failure?(status: number): { status: ProviderStatus; message: string } | undefined;
 }
 interface ResolvedAuth { apiKey?: string; headers?: Record<string, string | null>; baseUrl?: string; }
 interface CacheEntry { key: string; snapshot: ProviderUsageSnapshot; expiresAt: number; }
@@ -72,35 +76,51 @@ export interface ProviderUsageOptions {
 
 const adapters: Record<string, Adapter> = {
   "openai-codex": {
-    id: "openai-codex", baseUrl: "https://chatgpt.com/backend-api", api: "openai-codex-responses",
+    id: "openai-codex", shapes: [{ api: "openai-codex-responses", baseUrl: "https://chatgpt.com/backend-api" }],
     endpoint: "https://chatgpt.com/backend-api/wham/usage", source: "openai-codex.wham", scope: "account",
     headers: codexHeaders, parse: parseCodex,
   },
   openrouter: {
-    id: "openrouter", baseUrl: "https://openrouter.ai/api/v1", api: "openai-completions",
+    id: "openrouter", shapes: [{ api: "openai-completions", baseUrl: "https://openrouter.ai/api/v1" }],
     endpoint: "https://openrouter.ai/api/v1/key", source: "openrouter.key", scope: "key",
     headers: bearerHeaders, parse: parseOpenRouter,
   },
   "kimi-coding": {
-    id: "kimi-coding", baseUrl: "https://api.kimi.com/coding", api: "anthropic-messages",
+    id: "kimi-coding", shapes: [{ api: "anthropic-messages", baseUrl: "https://api.kimi.com/coding" }],
     endpoint: "https://api.kimi.com/coding/v1/usages", source: "kimi-coding.usages", scope: "account",
     headers: bearerHeaders, parse: parseKimi,
   },
   zai: {
-    id: "zai", baseUrl: "https://api.z.ai/api/coding/paas/v4", api: "openai-completions",
+    id: "zai", shapes: [{ api: "openai-completions", baseUrl: "https://api.z.ai/api/coding/paas/v4" }],
     endpoint: "https://api.z.ai/api/monitor/usage/quota/limit", source: "zai.monitor", scope: "account",
     headers: rawHeaders, parse: parseZai,
   },
   "zai-coding-cn": {
-    id: "zai-coding-cn", baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4", api: "openai-completions",
+    id: "zai-coding-cn", shapes: [{ api: "openai-completions", baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4" }],
     endpoint: "https://open.bigmodel.cn/api/monitor/usage/quota/limit", source: "zai-coding-cn.monitor", scope: "account",
     headers: rawHeaders, parse: parseZai,
+  },
+  "opencode-go": {
+    // Go models resolve across three wire APIs under two base URLs; the plan's
+    // account usage is the one endpoint both the console and the CLI report.
+    id: "opencode-go", shapes: [
+      { api: "anthropic-messages", baseUrl: "https://opencode.ai/zen/go" },
+      { api: "openai-completions", baseUrl: "https://opencode.ai/zen/go/v1" },
+      { api: "openai-responses", baseUrl: "https://opencode.ai/zen/go/v1" },
+    ],
+    endpoint: "https://opencode.ai/zen/go/v1/usage", source: "opencode-go.usage", scope: "account",
+    headers: bearerHeaders, parse: parseOpenCodeGo,
+    // A valid key whose account is not on Go answers 403 EntitlementError. That
+    // is not a rejected credential, so it must not ask the user to sign in again.
+    failure: (status) => status === 403 ? { status: "unsupported", message: "This account has no OpenCode Go subscription" } : undefined,
   },
 };
 
 function emptySnapshot(providerId: string, status: ProviderStatus, source: string | null = null, scope: "account" | "key" | null = null, message: string | null = null): ProviderUsageSnapshot {
   return { providerId, status, source, scope, updatedAt: null, retryAt: null, stale: false, message, windows: [], balances: [] };
 }
+function normalizeBaseUrl(baseUrl: string): string { return baseUrl.replace(/\/+$/u, ""); }
+function adapterBaseUrls(adapter: Adapter): Set<string> { return new Set(adapter.shapes.map((shape) => normalizeBaseUrl(shape.baseUrl))); }
 function number(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))) return Number(value);
@@ -264,6 +284,20 @@ function parseZai(body: unknown) {
   if (windows.length === 0) throw new Error("usage body has no known Z.ai quota");
   return { windows: capWindows(windows), balances: [] };
 }
+function parseOpenCodeGo(body: unknown) {
+  const root = object(body); if (!root) throw new Error("usage body is not an object");
+  const usage = object(root.usage); if (!usage) throw new Error("usage body has no usage object");
+  const windows: UsageWindow[] = [];
+  // The Go plan fixes these three account-wide windows; the endpoint reports a
+  // used percent and reset only, so amounts stay null rather than invented.
+  for (const [id, label, windowSeconds] of [["rolling", "5h", 18_000], ["weekly", "Weekly", 604_800], ["monthly", "Monthly", 2_592_000]] as const) {
+    const row = object(usage[id]); if (!row) throw new Error("invalid OpenCode Go usage window");
+    const usedPercent = number(row.percent);
+    if (usedPercent === null || usedPercent < 0 || usedPercent > 100) throw new Error("invalid OpenCode Go usage percent");
+    windows.push(window(id, label, { usedPercent, resetsAt: iso(row.resetsAt), windowSeconds }));
+  }
+  return { windows: capWindows(windows), balances: [] };
+}
 function parseBalances(value: unknown): UsageBalance[] {
   const row = object(value); if (!row) return [];
   const amount = number(row.balance) ?? number(row.amount) ?? number(row.remaining); const currency = text(row.currency) ?? "USD";
@@ -274,19 +308,21 @@ function providerBinding(runtime: ModelRuntime, id: string): ProviderBinding {
   const models = runtime.getModels(id);
   const provider = runtime.getProvider(id);
   return {
-    providerBaseUrl: provider?.baseUrl ? provider.baseUrl.replace(/\/+$/u, "") : null,
-    modelSignature: models.map((model) => `${model.api}:${model.baseUrl.replace(/\/+$/u, "")}`).join("|"),
+    providerBaseUrl: provider?.baseUrl ? normalizeBaseUrl(provider.baseUrl) : null,
+    modelSignature: models.map((model) => `${model.api}:${normalizeBaseUrl(model.baseUrl)}`).join("|"),
     authBinding: provider ? Object.keys(provider.auth).sort().join(",") : "",
   };
 }
 function adapterFor(runtime: ModelRuntime, id: string): Adapter | undefined {
   const adapter = adapters[id]; if (!adapter) return undefined;
   const binding = providerBinding(runtime, id);
-  // Matching the effective composed model is intentional: provider IDs alone can
-  // be reused by models.json or an extension for an unrelated upstream.
+  // Matching the effective composed models is intentional: provider IDs alone can
+  // be reused by models.json or an extension for an unrelated upstream, so every
+  // resolved (api, base URL) must be a declared first-party shape.
+  const declared = new Set(adapter.shapes.map((shape) => `${shape.api}:${normalizeBaseUrl(shape.baseUrl)}`));
   const models = runtime.getModels(id);
-  const exactModels = models.length > 0 && models.every((model) => model.api === adapter.api && model.baseUrl.replace(/\/+$/u, "") === adapter.baseUrl);
-  const exactProvider = binding.providerBaseUrl === null || binding.providerBaseUrl === adapter.baseUrl;
+  const exactModels = models.length > 0 && models.every((model) => declared.has(`${model.api}:${normalizeBaseUrl(model.baseUrl)}`));
+  const exactProvider = binding.providerBaseUrl === null || adapterBaseUrls(adapter).has(binding.providerBaseUrl);
   return exactModels && exactProvider ? adapter : undefined;
 }
 function sameBinding(left: ProviderBinding, right: ProviderBinding): boolean {
@@ -349,7 +385,7 @@ export class ProviderUsageOwner {
       admission.release();
       return emptySnapshot(providerId, "unconfigured", adapter.source, adapter.scope, "Provider authentication is not configured");
     }
-    if (authResult.auth.baseUrl !== undefined && authResult.auth.baseUrl.replace(/\/+$/u, "") !== adapter.baseUrl) {
+    if (authResult.auth.baseUrl !== undefined && !adapterBaseUrls(adapter).has(normalizeBaseUrl(authResult.auth.baseUrl))) {
       admission.release();
       return emptySnapshot(providerId, "unsupported", adapter.source, adapter.scope, "Usage is not supported for this provider configuration");
     }
@@ -492,6 +528,11 @@ export class ProviderUsageOwner {
       const headers = adapter.headers(auth); if (!headers) return emptySnapshot(adapter.id, "unconfigured", adapter.source, adapter.scope, "Provider authentication is not configured");
       const response = await this.options.fetch(adapter.endpoint, { method: "GET", headers, redirect: "error", signal: controller.signal });
       const retry = response.status === 429 ? retryAfter(response.headers, started, this.options.now) : null;
+      const override = response.status >= 400 ? adapter.failure?.(response.status) : undefined;
+      if (override) {
+        await cancelResponseBody(response);
+        return this.failed(adapter, key, override.status, override.message, retry);
+      }
       if (response.status === 401 || response.status === 403) {
         await cancelResponseBody(response);
         return this.failed(adapter, key, "authentication_required", "Provider authentication was rejected", retry);

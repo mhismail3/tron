@@ -5,6 +5,19 @@ const model = (provider: string, baseUrl: string, api = "openai-completions") =>
 function runtime(provider: string, baseUrl: string, auth: unknown = { auth: { apiKey: "fixture-secret" } }, api = "openai-completions") {
   return { getModels: () => [model(provider, baseUrl, api)], getAuth: vi.fn(async () => auth), getProvider: () => undefined, hasConfiguredAuth: () => auth !== null } as any;
 }
+function shapedRuntime(provider: string, shapes: Array<{ api: string; baseUrl: string }>, auth: unknown = { auth: { apiKey: "fixture-secret" } }) {
+  return {
+    getModels: () => shapes.map((shape, index) => ({ provider, id: `fixture-${index}`, api: shape.api, baseUrl: shape.baseUrl })),
+    getAuth: vi.fn(async () => auth),
+    getProvider: () => undefined,
+    hasConfiguredAuth: () => auth !== null,
+  } as any;
+}
+const openCodeGoShapes = [
+  { api: "anthropic-messages", baseUrl: "https://opencode.ai/zen/go" },
+  { api: "openai-completions", baseUrl: "https://opencode.ai/zen/go/v1" },
+  { api: "openai-responses", baseUrl: "https://opencode.ai/zen/go/v1" },
+];
 function response(body: unknown, status = 200, headers: Record<string, string> = {}) {
   return new Response(typeof body === "string" ? body : JSON.stringify(body), { status, headers });
 }
@@ -63,6 +76,64 @@ describe("provider usage owner", () => {
       expect(snapshot.windows.some((item) => item.usedPercent !== null)).toBe(true);
       expect(fetch).toHaveBeenCalledTimes(1);
     }
+  });
+
+  it("projects OpenCode Go account windows across every first-party model shape", async () => {
+    const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe("https://opencode.ai/zen/go/v1/usage");
+      expect(init?.redirect).toBe("error");
+      expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer fixture-secret");
+      return response({ usage: {
+        rolling: { status: "ok", percent: 12.5, resetsAt: "2026-09-18T12:58:26.147Z" },
+        weekly: { status: "ok", percent: 34, resetsAt: "2026-09-21T00:00:00.147Z" },
+        monthly: { status: "rate-limited", percent: 100, resetsAt: "2026-09-18T21:13:14.147Z" },
+      } });
+    });
+    const owner = new ProviderUsageOwner({ fetch });
+    const result = await owner.read(shapedRuntime("opencode-go", openCodeGoShapes), "opencode-go");
+    const snapshot = result.providers[0]!;
+    expect(snapshot).toMatchObject({ providerId: "opencode-go", status: "available", scope: "account", source: "opencode-go.usage" });
+    // The endpoint reports percents and resets only; amounts stay absent rather than invented.
+    expect(snapshot.windows.map((item) => [item.id, item.usedPercent, item.windowSeconds, item.used, item.limit])).toEqual([
+      ["rolling", 12.5, 18_000, null, null],
+      ["weekly", 34, 604_800, null, null],
+      ["monthly", 100, 2_592_000, null, null],
+    ]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports an OpenCode Go entitlement 403 as unsupported but still fences a rejected key", async () => {
+    const notSubscribed = vi.fn(async () => response({ type: "error", error: { type: "EntitlementError", message: "OpenCode Go subscription required." } }, 403));
+    const notSubscribedResult = await new ProviderUsageOwner({ fetch: notSubscribed, now: () => 1_700_000_000_000 }).read(shapedRuntime("opencode-go", openCodeGoShapes), "opencode-go");
+    expect(notSubscribedResult.providers[0]).toMatchObject({ status: "unsupported", stale: false, windows: [], message: "This account has no OpenCode Go subscription" });
+
+    const rejected = vi.fn(async () => response({ type: "error", error: { type: "AuthError", message: "Unauthorized" } }, 401));
+    const rejectedResult = await new ProviderUsageOwner({ fetch: rejected }).read(shapedRuntime("opencode-go", openCodeGoShapes), "opencode-go");
+    expect(rejectedResult.providers[0]).toMatchObject({ status: "authentication_required", windows: [] });
+  });
+
+  it("leaves OpenCode Go unsupported when its models resolve to another host", async () => {
+    const fetch = vi.fn(async () => response({ usage: {} }));
+    const owner = new ProviderUsageOwner({ fetch });
+    const remapped = await owner.read(shapedRuntime("opencode-go", [{ api: "openai-completions", baseUrl: "https://proxy.example/v1" }]), "opencode-go");
+    expect(remapped.providers[0]).toMatchObject({ status: "unsupported", windows: [] });
+    const unexpectedApi = await owner.read(shapedRuntime("opencode-go", [{ api: "google-generative-ai", baseUrl: "https://opencode.ai/zen/go/v1" }]), "opencode-go");
+    expect(unexpectedApi.providers[0]).toMatchObject({ status: "unsupported", windows: [] });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("includes OpenCode Go in a global configured read without querying unrelated providers", async () => {
+    const fetch = vi.fn(async (url: string) => {
+      expect(url).toBe("https://opencode.ai/zen/go/v1/usage");
+      return response({ usage: {
+        rolling: { status: "ok", percent: 0, resetsAt: "2026-09-18T12:58:26.147Z" },
+        weekly: { status: "ok", percent: 0, resetsAt: "2026-09-21T00:00:00.147Z" },
+        monthly: { status: "ok", percent: 0, resetsAt: "2026-09-18T21:13:14.147Z" },
+      } });
+    });
+    const result = await new ProviderUsageOwner({ fetch }).read(shapedRuntime("opencode-go", openCodeGoShapes));
+    expect(result.providers.map((snapshot) => snapshot.providerId)).toEqual(["opencode-go"]);
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("does not query overridden providers and lists only supported configured providers", async () => {
