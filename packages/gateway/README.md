@@ -266,9 +266,12 @@ recovery decision; they are not silently merged into rollback.
 
 `provider.usage` is the additive `provider-usage.v1` read capability. It resolves
 credentials through the selected `ModelRuntime`, and queries only exact first-party
-configurations for OpenAI Codex, OpenRouter, Kimi Coding, and Z.ai (including its
-China endpoint). Custom or overridden base URLs are reported unsupported; they are
-never sent to a first-party quota endpoint. Global reads include only configured
+configurations for OpenAI Codex, OpenRouter, Kimi Coding, Z.ai (including its
+China endpoint), and OpenCode Go. Custom or overridden base URLs are reported
+unsupported; they are never sent to a first-party quota endpoint. OpenCode Go
+reports its account-wide rolling 5-hour, weekly, and monthly percent windows; a
+valid key whose account is not on Go reports unsupported rather than a rejected
+credential. Global reads include only configured
 supported providers, while a provider ID requests one bounded status snapshot.
 Responses contain at most 16 providers, 16 windows, and 4 balances. Successful
 observations are cached for 60 seconds and failed/rate-limited reads use bounded
