@@ -38,8 +38,10 @@ struct ChatComposerView: View {
     let promptPickerAvailable: Bool
     let glassNamespace: Namespace.ID
 
-    let onProcessesTap: () -> Void
-    let onExtensionWidgetsTap: () -> Void
+    @State private var locallyExpiredRecentExpiry: String?
+    @State private var appBehaviorSettings = AppLocalBehaviorSettings.shared
+
+    let onActivityTap: () -> Void
     let onRemoveAttachment: (String) -> Void
     let onRemoveResource: () -> Void
     let onSelectResource: (ComposerResourceEntry) -> Void
@@ -53,6 +55,9 @@ struct ChatComposerView: View {
     let onComposerHeightSettled: (CGFloat) -> Void
 
     var body: some View {
+        // Sample one selection for both the rendered child and its animation
+        // key; a deadline must not split those reads across different states.
+        let activityKind = activityButtonKind
         ChatComposerStructuralHost(
             accessoryIdentity: ChatComposerAccessoryLayoutIdentity(
                 attachmentIDs: pendingAttachments.map(\.id),
@@ -72,22 +77,15 @@ struct ChatComposerView: View {
                 resourcePickerView
                 GlassEffectContainer(spacing: 8) {
                     HStack(alignment: .bottom, spacing: 8) {
-                        SessionProcessButton(
-                            overview: processOverview,
-                            processActivities: processActivities,
-                            hasAdmittedActivity: processActivities?.contains(where: {
-                                $0.kind == .subagent && SessionProcessAdmissionPolicy.admits($0)
-                            }) == true,
-                            glassNamespace: glassNamespace,
-                            reduceMotion: reduceMotion,
-                            onTap: onProcessesTap
-                        )
-                        ExtensionWidgetsButton(
-                            content: extensionRetainedContent,
-                            glassNamespace: glassNamespace,
-                            reduceMotion: reduceMotion,
-                            onTap: onExtensionWidgetsTap
-                        )
+                        if let activityKind {
+                            UnifiedActivityButton(
+                                kind: activityKind,
+                                contentCount: extensionRetainedContent.entries.count,
+                                glassNamespace: glassNamespace,
+                                onTap: onActivityTap
+                            )
+                            .id("chat-unified-activity")
+                        }
                         inputBar
                         if showsCatchUp { catchUpButton }
                     }
@@ -97,6 +95,14 @@ struct ChatComposerView: View {
                         ? .easeOut(duration: 0.12)
                         : .spring(response: 0.32, dampingFraction: 0.82),
                     value: showsCatchUp
+                )
+                // Visibility and glyph changes animate at the shared layout
+                // owner so the input bar participates in the glass morph too.
+                .animation(
+                    reduceMotion
+                        ? .easeOut(duration: 0.12)
+                        : .spring(response: 0.32, dampingFraction: 0.82),
+                    value: activityKind
                 )
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
@@ -123,6 +129,18 @@ struct ChatComposerView: View {
                 value: resourcePicker?.kind
             )
         }
+        .task(id: recentExpiryIdentity) {
+            guard let expiryText = recentExpiryIdentity,
+                  let expiry = GatewayTimestamp.parse(expiryText) else { return }
+            let milliseconds = max(0, Int(expiry.timeIntervalSinceNow * 1_000))
+            if milliseconds > 0 {
+                try? await Task.sleep(for: .milliseconds(milliseconds))
+            }
+            guard !Task.isCancelled else { return }
+            // One managed deadline wakes an otherwise idle composer. Identity
+            // fencing prevents an older task from hiding newer process evidence.
+            locallyExpiredRecentExpiry = expiryText
+        }
         .background(alignment: .bottom) {
             ChatBottomActivityBlur(
                 isActive: showsAmbientWorkingBlur,
@@ -132,6 +150,35 @@ struct ChatComposerView: View {
             .ignoresSafeArea(edges: .bottom)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: keyboardVisible)
         }
+    }
+
+    private var activityButtonKind: UnifiedActivityButtonKind? {
+        let admitted = (processActivities ?? []).filter(SessionProcessAdmissionPolicy.admits)
+        let activeSubagents = admitted.contains {
+            $0.kind == .subagent && $0.visibility == .active
+        }
+        let recentAvailable = if let expiryText = recentExpiryIdentity,
+                                  locallyExpiredRecentExpiry != expiryText {
+            // Reject elapsed retained input before the deadline task runs.
+            // The common container animates this same selection whether expiry
+            // is first observed during a data update or by the deadline task.
+            GatewayTimestamp.parse(expiryText).map { $0 > .now } == true
+        } else {
+            false
+        }
+        return UnifiedActivityButtonKind.select(
+            hasActiveSubagents: activeSubagents,
+            hasExtensionContent: !extensionRetainedContent.isEmpty,
+            hasRecentSubagents: recentAvailable
+        )
+    }
+
+    private var recentExpiryIdentity: String? {
+        SessionProcessButtonPolicy.preferredRecentExpiry(
+            overview: processOverview,
+            activities: processActivities,
+            retentionMinutes: appBehaviorSettings.subagentRecentFinishedRetentionMinutes
+        )
     }
 
     private var attachmentStrip: some View {

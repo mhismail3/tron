@@ -7,62 +7,101 @@ import SwiftUI
 /// only visible when the user opens this sheet. The sheet owns no extension
 /// execution and starts no provider work: it renders the content it was given
 /// and disappears with the sheet.
-struct ExtensionWidgetsSheet: View {
-    /// Content is an input, not a second read path: the presenting route owns
-    /// where retained content comes from, so this sheet stays a pure function of
-    /// the authoritative projection it was given.
-    let content: ExtensionRetainedContent
-    /// Bounded count of admitted-but-unpresentable content, if any.
-    var omittedContentCount: Int = 0
+struct SessionActivitySheet: View {
+    let sessionID: String
+    let extensionContent: ExtensionRetainedContent
+    let omittedExtensionContentCount: Int
+    let processActivities: [SessionProcessActivity]
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var selectedProcess: SessionProcessActivity?
+    @State private var detent: PresentationDetent = .medium
+    @State private var appSettings = AppLocalBehaviorSettings.shared
 
     var body: some View {
         NavigationStack {
-            Group {
-                if content.isEmpty {
-                    TronGlassCard(accent: .tronSlate) {
-                        TronPlaceholderState(
-                            title: "No extension content",
-                            detail: "Extensions can share status and progress here while the session is open.",
-                            icon: "square.on.square.dashed",
-                            accent: .tronIndigo
-                        )
+            TimelineView(.animation(minimumInterval: 1, paused: activities.isEmpty || !PresentationClockPolicy.runs(
+                surfaceActive: presentationActivity.allowsContinuousAnimation,
+                sceneActive: scenePhase == .active
+            ))) { context in
+                let processes = SessionProcessButtonPolicy.visibleActivities(
+                    activities,
+                    retentionMinutes: appSettings.subagentRecentFinishedRetentionMinutes,
+                    now: context.date
+                )
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        let sections = SessionProcessProjection.sections(processes)
+                        if !sections.active.isEmpty {
+                            processSection("Running subagents", processes: sections.active, now: context.date)
+                        }
+                        if !extensionContent.isEmpty {
+                            retainedContent
+                        }
+                        if !sections.recent.isEmpty {
+                            processSection("Completed subagents", processes: sections.recent, now: context.date)
+                        }
+                        if sections.active.isEmpty && sections.recent.isEmpty && extensionContent.isEmpty {
+                            TronGlassCard(accent: .tronSlate) {
+                                TronPlaceholderState(
+                                    title: "No activity",
+                                    detail: "Running subagents and retained extension content appear here.",
+                                    icon: "square.on.square.dashed",
+                                    accent: .tronEmerald
+                                )
+                            }
+                        }
                     }
                     .padding(18)
-                } else {
-                    retainedContent
                 }
+                .tronScrollEdgeChrome()
             }
-            .tronNavigationTitle("Extension content", accent: .tronIndigo)
+            .tronNavigationTitle("Activity", accent: .tronEmerald)
             .toolbar { doneToolbar }
         }
+        .tronManagedSheet(item: $selectedProcess, identity: { "activity-process.\($0.id)" }) { process in
+            ReadOnlySubagentSessionSheet(parentSessionID: sessionID, process: process)
+        }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.hidden)
-        .tronSettingsVisualTheme(accent: .tronIndigo)
+        .tronSettingsVisualTheme(accent: .tronEmerald)
         .tronPresentation()
-        .accessibilityIdentifier("extension-widgets-sheet")
+        .accessibilityIdentifier("session-activity-sheet")
+    }
+
+    private var activities: [SessionProcessActivity] { processActivities }
+
+    @ViewBuilder
+    private func processSection(_ title: String, processes: [SessionProcessActivity], now: Date) -> some View {
+        Text(title)
+            .font(TronTypography.caption)
+            .foregroundStyle(Color.tronTextMuted)
+            .padding(.top, 4)
+            .accessibilityAddTraits(.isHeader)
+        ForEach(processes) { process in
+            SessionProcessRow(process: process, style: .activity, now: now) {
+                selectedProcess = process
+            }
+        }
     }
 
     @ViewBuilder
     private var retainedContent: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 8) {
-                if omittedContentCount > 0 {
-                    ExtensionContentNotice(
-                        text: "Some extension content is not shown on this device yet."
-                    )
-                }
-                ForEach(content.producers, id: \.self) { producer in
-                    ExtensionContentSectionHeader(title: producer)
-                    ForEach(content.entries(forProducer: producer)) { entry in
-                        ExtensionContentEntryCard(entry: entry)
-                    }
+        Group {
+            if omittedExtensionContentCount > 0 {
+                ExtensionContentNotice(
+                    text: "Some extension content is not shown on this device yet."
+                )
+            }
+            ForEach(extensionContent.producers, id: \.self) { producer in
+                ExtensionContentSectionHeader(title: producer)
+                ForEach(extensionContent.entries(forProducer: producer)) { entry in
+                    ExtensionContentEntryCard(entry: entry)
                 }
             }
-            .padding(18)
         }
-        .tronScrollEdgeChrome()
     }
 
     @ToolbarContentBuilder
@@ -71,7 +110,7 @@ struct ExtensionWidgetsSheet: View {
             Button { dismiss() } label: {
                 Image(systemName: "checkmark")
                     .font(TronTypography.buttonSM)
-                    .foregroundStyle(Color.tronIndigo)
+                    .foregroundStyle(Color.tronEmerald)
             }
             .accessibilityLabel("Done")
         }
@@ -98,15 +137,15 @@ private struct ExtensionContentEntryCard: View {
     let entry: ExtensionRetainedContent.Entry
 
     var body: some View {
-        TronGlassCard(accent: .tronIndigo, cornerRadius: 14) {
-            content
+        TronGlassCard(accent: .tronEmerald, cornerRadius: 14) {
+            entryContent
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
         }
     }
 
     @ViewBuilder
-    private var content: some View {
+    private var entryContent: some View {
         switch entry.style {
         case .text(let lines):
             VStack(alignment: .leading, spacing: 4) {

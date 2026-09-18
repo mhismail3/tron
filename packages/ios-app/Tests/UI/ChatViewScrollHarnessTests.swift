@@ -1907,6 +1907,52 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    @Test("recent subagent expiry animates the adjacent composer width")
+    func recentSubagentExpiryAnimatesComposerWidth() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) {
+            let snapshot = try SessionScenarioBuilder(seed: 1_194).openingTail(targetEncodedBytes: 10_000)
+            try await withHarness(snapshot: snapshot) { harness in
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady }
+                let fullWidth = try harness.composerWidth()
+                let now = Date.now
+                let expiry = now.addingTimeInterval(1.5)
+                var recent = harness.snapshot
+                recent.processActivities = [SessionProcessActivity(
+                    processId: "recent-worker", kind: .subagent, executionMode: .asynchronous,
+                    source: .delegatedAgent,
+                    lifecycle: SessionProcessLifecycle(
+                        state: .completed, sequence: 1,
+                        observedAt: GatewayTimestamp.preciseString(from: now),
+                        terminalAt: GatewayTimestamp.preciseString(from: expiry.addingTimeInterval(-300)),
+                        recentUntil: GatewayTimestamp.preciseString(from: expiry)
+                    ), visibility: .recent, title: "Finished worker"
+                )]
+                recent.processOverview = SessionProcessOverview(
+                    revision: 1, asOf: GatewayTimestamp.preciseString(from: now),
+                    activeCount: 0, recentCount: 1, problemCount: 0, visibility: .recent,
+                    nearestExpiry: GatewayTimestamp.preciseString(from: expiry)
+                )
+                recent.revision += 1
+                recent.eventSequence += 1
+                harness.replaceAuthoritativeSnapshot(recent)
+                var insertion: [CGFloat] = []
+                var removal: [CGFloat] = []
+                let end = expiry.addingTimeInterval(0.8)
+                while Date.now < end {
+                    try await DisplayFrameScheduler.displayLink.nextFrame()
+                    let width = try harness.composerWidth()
+                    if Date.now < expiry { insertion.append(width) }
+                    else { removal.append(width) }
+                }
+                let narrow = try #require(insertion.min())
+                #expect(fullWidth - narrow > 30)
+                #expect(insertion.contains { $0 > narrow + 2 && $0 < fullWidth - 2 })
+                #expect(removal.contains { $0 > narrow + 2 && $0 < fullWidth - 2 })
+                #expect(abs(try harness.composerWidth() - fullWidth) < 1)
+            }
+        }
+    }
+
     @Test("an empty session renders command and notification pills before its first reply")
     func emptySessionMaterializesExtensionPills() async throws {
         try await withTestWatchdog(timeout: .seconds(15)) {
@@ -2989,6 +3035,13 @@ final class ChatViewScrollHarness {
         hostingController.beginAppearanceTransition(true, animated: true)
         hostingController.endAppearanceTransition()
         try? await DisplayFrameScheduler.displayLink.nextFrame()
+    }
+
+    func composerWidth() throws -> CGFloat {
+        guard let textView = Self.textViews(in: hostingController.view).first else {
+            throw HarnessError.missingComposer
+        }
+        return textView.bounds.width
     }
 
     func removeChatRoute() { hostingController.rootView = AnyView(EmptyView()) }

@@ -27,14 +27,16 @@ struct HostedExtensionWidgetsFixtureView: View {
                 isPresented: $presented,
                 identity: "hosted.extension-widgets"
             ) {
-                ExtensionWidgetsSheet(
-                    content: ExtensionRetainedContentPolicy.content(
+                SessionActivitySheet(
+                    sessionID: "hosted-extension-widgets-session",
+                    extensionContent: ExtensionRetainedContentPolicy.content(
                         widgets: Self.widgets,
                         surfaces: Self.surfaces,
                         statuses: Self.statuses,
                         statusOwners: Self.statusOwners
                     ),
-                    omittedContentCount: 1
+                    omittedExtensionContentCount: 1,
+                    processActivities: []
                 )
             }
         }

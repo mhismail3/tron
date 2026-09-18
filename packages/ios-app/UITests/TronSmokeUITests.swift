@@ -133,7 +133,7 @@ final class TronSmokeUITests: XCTestCase {
         app.launchArguments = ["-tron-extension-widgets-fixture"]
         app.launch()
         XCTAssertTrue(app.staticTexts["Extension widgets fixture"].waitForExistence(timeout: 10), app.debugDescription)
-        let sheet = app.otherElements["extension-widgets-sheet"]
+        let sheet = app.otherElements["session-activity-sheet"]
         XCTAssertTrue(sheet.waitForExistence(timeout: 5), app.debugDescription)
         // Producer attribution for both retained kinds.
         XCTAssertTrue(app.staticTexts["Goal"].waitForExistence(timeout: 3), app.debugDescription)
@@ -166,7 +166,7 @@ final class TronSmokeUITests: XCTestCase {
             "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
         ]
         app.launch()
-        let sheet = app.otherElements["extension-widgets-sheet"]
+        let sheet = app.otherElements["session-activity-sheet"]
         XCTAssertTrue(sheet.waitForExistence(timeout: 10), app.debugDescription)
         // Every retained entry must still be reachable and read at the largest
         // accessibility size; the sheet scrolls instead of truncating content.

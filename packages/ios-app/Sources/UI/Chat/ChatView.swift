@@ -175,12 +175,10 @@ struct ChatView: View {
             photosPresented: attachmentPresentationBinding(for: .photos),
             photos: $sessionPresentation.photos,
             onCameraImage: { image in Task { await importCameraImage(image) } },
-            processesPresented: processPresentationBinding,
-            extensionWidgetsPresented: extensionWidgetsPresentationBinding,
-            extensionWidgets: ExtensionWidgetsRoute(
-                content: extensionRetainedContent,
-                omittedContentCount: omittedExtensionContentCount
-            ),
+            activityPresented: activityPresentationBinding,
+            extensionContent: extensionRetainedContent,
+            omittedExtensionContentCount: omittedExtensionContentCount,
+            processActivities: selectedAuthoritativeSnapshot?.processActivities ?? [],
             interaction: interactionBinding,
             onInteractionClosed: closeInteractionPresentation,
             filesPresented: attachmentPresentationBinding(for: .files),
@@ -1578,24 +1576,14 @@ struct ChatView: View {
     }
 
     /// Interactive extension prompts and editors retain foreground priority.
-    /// A process-sheet intent resumes after those leased routes settle.
-    private var processPresentationBinding: Binding<Bool> {
+    /// The unified activity sheet resumes after those leased routes settle and
+    /// owns both process and retained-extension presentation.
+    /// Foreground extension interactions retain priority over this read-only route.
+    private var activityPresentationBinding: Binding<Bool> {
         Binding(
-            get: { sessionPresentation.showProcesses && extensionForegroundPresentation == .none },
+            get: { sessionPresentation.showActivity && extensionForegroundPresentation == .none },
             set: { presented in
-                if !presented { sessionPresentation.showProcesses = false }
-            }
-        )
-    }
-
-    /// The widgets sheet is diagnostic presentation, never a competing
-    /// foreground route: it follows the same gate as the process sheet so a
-    /// pending question or editor keeps its leased priority.
-    private var extensionWidgetsPresentationBinding: Binding<Bool> {
-        Binding(
-            get: { sessionPresentation.showWidgets && extensionForegroundPresentation == .none },
-            set: { presented in
-                if !presented { sessionPresentation.showWidgets = false }
+                if !presented { sessionPresentation.showActivity = false }
             }
         )
     }
@@ -2852,11 +2840,8 @@ struct ChatView: View {
             commandPickerAvailable: currentComposerResourceCatalog != nil,
             promptPickerAvailable: currentComposerResourceCatalog != nil,
             glassNamespace: composerGlassNamespace,
-            onProcessesTap: {
-                sessionPresentation.showProcesses = true
-            },
-            onExtensionWidgetsTap: {
-                sessionPresentation.showWidgets = true
+            onActivityTap: {
+                sessionPresentation.showActivity = true
             },
             onRemoveAttachment: { id in
                 guard let target = presentationTarget else { return }

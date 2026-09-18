@@ -1576,10 +1576,15 @@ final class SessionSheetPresentationTests: XCTestCase {
                     // Users can still expand this presentation; a fresh presentation starts medium.
                     sheet.selectedDetentIdentifier = .large
                 }
-                try await self.withSheet(SessionProcessesSheet(sessionID: "process-fixture").environment(model)) { controller in
+                try await self.withSheet(SessionActivitySheet(
+                    sessionID: "process-fixture",
+                    extensionContent: ExtensionRetainedContent(entries: []),
+                    omittedExtensionContentCount: 0,
+                    processActivities: []
+                ).environment(model)) { controller in
                     XCTAssertEqual(controller.sheetPresentationController?.selectedDetentIdentifier, .medium)
                     let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
-                    self.assertToolbarPaint(.tronSubagent, bar: bar, leading: false, controller: controller)
+                    self.assertToolbarPaint(.tronEmerald, bar: bar, leading: false, controller: controller)
                 }
             }
         }
@@ -1634,10 +1639,12 @@ final class SessionSheetPresentationTests: XCTestCase {
     }
 
     private func subagentProcessFixture(state: SessionProcessLifecycleState) -> SessionProcessActivity {
-        SessionProcessActivity(
+        let now = Date.now
+        return SessionProcessActivity(
             processId: state.rawValue, kind: .subagent, executionMode: .asynchronous, source: .delegatedAgent,
-            lifecycle: SessionProcessLifecycle(state: state, sequence: 1, observedAt: "2026-01-01T00:00:02Z",
-                terminalAt: state == .running ? nil : GatewayTimestamp.string(from: .now)),
+            lifecycle: SessionProcessLifecycle(state: state, sequence: 1, observedAt: GatewayTimestamp.string(from: now),
+                terminalAt: state == .running ? nil : GatewayTimestamp.string(from: now),
+                recentUntil: state == .running ? nil : GatewayTimestamp.string(from: now.addingTimeInterval(300))),
             visibility: state == .running ? .active : .recent,
             startedAt: GatewayTimestamp.string(from: .now.addingTimeInterval(-42)),
             title: state.displayName, currentTool: state == .running ? "read" : nil,
@@ -1652,6 +1659,31 @@ final class SessionSheetPresentationTests: XCTestCase {
         let tail = max(top, scroll.contentSize.height + scroll.adjustedContentInset.bottom - scroll.bounds.height)
         XCTAssertEqual(scroll.contentOffset.y, isLong ? tail : top, accuracy: 2,
             "Initial and resized sheets must show the tail (or top-aligned short content), never an empty lazy-layout gap")
+    }
+
+    func testMixedActivitySheetUsesNativeRowsAndEmeraldTheme() async throws {
+        let content = ExtensionRetainedContentPolicy.content(
+            widgets: [
+                ExtensionWidget(key: "goal", revision: 1, lines: ["Checking the selected files"],
+                    placement: .belowEditor,
+                    owner: ExtensionOwner(id: "goal", title: "Goal", source: "npm:@mocito/pi-goal")),
+                ExtensionWidget(key: "subagents", revision: 1, lines: ["PI_SUBAGENT_ASYNC_JSON:hidden"],
+                    placement: .belowEditor,
+                    owner: ExtensionOwner(id: "subagent", title: "Pi Subagents", source: "npm:pi-subagents@0.59.0"))
+            ], surfaces: [], statuses: ["goal": "Goal active"],
+            statusOwners: ["goal": ExtensionOwner(id: "goal", title: "Goal", source: "npm:@mocito/pi-goal")]
+        )
+        XCTAssertEqual(content.entries.count, 2)
+        try await withSheet(SessionActivitySheet(
+            sessionID: "fixture", extensionContent: content, omittedExtensionContentCount: 0,
+            processActivities: [subagentProcessFixture(state: .running), subagentProcessFixture(state: .completed)]
+        )) { controller in
+            controller.sheetPresentationController?.selectedDetentIdentifier = .large
+            for _ in 0..<8 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+            let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
+            self.assertToolbarPaint(.tronEmerald, bar: bar, leading: false, controller: controller)
+            self.capture(controller, name: "unified-activity-mixed")
+        }
     }
 
     func testSubagentThemeRowsAndChildSheet() async throws {

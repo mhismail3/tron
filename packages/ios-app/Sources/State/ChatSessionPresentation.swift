@@ -88,8 +88,7 @@ final class ChatSessionPresentation {
     var queuedAttachmentDestination: ChatAttachmentDestination?
 
     var showContext = false
-    var showProcesses = false
-    var showWidgets = false
+    var showActivity = false
     var showSettings = false
     var queuedMessageEditor: QueuedMessageEditorRoute?
     var displaySheet: DisplayRoute?

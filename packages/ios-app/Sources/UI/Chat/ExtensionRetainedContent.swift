@@ -49,14 +49,18 @@ struct ExtensionRetainedContent: Equatable {
     static let unknownProducer = "Unknown extension"
 }
 
-/// One presentation input for the general extension-content sheet. The
-/// presenting route owns where retained content comes from, so the sheet itself
-/// holds no read path.
-struct ExtensionWidgetsRoute: Equatable {
-    var content: ExtensionRetainedContent
-    var omittedContentCount: Int = 0
+enum ExtensionOwnerIdentity {
+    static let piSubagentsPackage = "npm:pi-subagents"
 
-    static let empty = ExtensionWidgetsRoute(content: ExtensionRetainedContent(entries: []))
+    /// Gateway owner-attribution emits npm sources with an optional version.
+    /// Normalize only that owned package identity; unknown sources remain
+    /// presentable instead of being guessed away by title or content matching.
+    static func isPiSubagents(_ source: String?) -> Bool {
+        guard let source else { return false }
+        let normalized = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized == piSubagentsPackage
+            || normalized.hasPrefix(piSubagentsPackage + "@")
+    }
 }
 
 enum ExtensionRetainedContentPolicy {
@@ -106,6 +110,7 @@ enum ExtensionRetainedContentPolicy {
     ) -> ExtensionRetainedContent {
         var entries: [ExtensionRetainedContent.Entry] = []
         for widget in widgets ?? [] {
+            guard !ExtensionOwnerIdentity.isPiSubagents(widget.owner?.source) else { continue }
             let lines = presentableWidgetLines(widget)
             guard !lines.isEmpty else { continue }
             // The authoritative widget array order is stable across updates
@@ -117,6 +122,7 @@ enum ExtensionRetainedContentPolicy {
             ))
         }
         for surface in presentableSurfaces(surfaces ?? []) {
+            guard !ExtensionOwnerIdentity.isPiSubagents(surface.provenance?.source) else { continue }
             entries.append(.init(
                 id: "surface:\(surface.id)",
                 producer: surfaceProvenanceTitle(surface.provenance?.source),
@@ -128,6 +134,7 @@ enum ExtensionRetainedContentPolicy {
         // The key stays out of the visible card: the section header already names
         // the producer, and the key is an extension-internal slot name.
         for status in presentableStatuses(statuses) {
+            guard !ExtensionOwnerIdentity.isPiSubagents(statusOwners?[status.key]?.source) else { continue }
             entries.append(.init(
                 id: "status:\(status.key)",
                 producer: statusOwners?[status.key]?.title ?? ExtensionRetainedContent.unknownProducer,
@@ -152,50 +159,72 @@ enum ExtensionRetainedContentPolicy {
     static let maximumProvenanceTitleLength = 64
 }
 
-/// Mirrors the process-projection control: one compact, permanently mounted
-/// composer owner that appears only while retained extension content exists.
-struct ExtensionWidgetsButton: View {
-    let content: ExtensionRetainedContent
+enum UnifiedActivityButtonKind: Equatable {
+    case activeSubagents
+    case extensionContent
+    case recentSubagents
+
+    static func select(
+        hasActiveSubagents: Bool,
+        hasExtensionContent: Bool,
+        hasRecentSubagents: Bool
+    ) -> Self? {
+        if hasActiveSubagents { return .activeSubagents }
+        if hasExtensionContent { return .extensionContent }
+        if hasRecentSubagents { return .recentSubagents }
+        return nil
+    }
+
+    var symbolName: String {
+        switch self {
+        case .activeSubagents, .recentSubagents: "person.2"
+        case .extensionContent: "square.on.square.dashed"
+        }
+    }
+}
+
+struct UnifiedActivityButton: View {
+    let kind: UnifiedActivityButtonKind
+    let contentCount: Int
     let glassNamespace: Namespace.ID
-    let reduceMotion: Bool
     let onTap: () -> Void
 
     var body: some View {
-        Group {
-            if !content.isEmpty {
-                Button(action: onTap) {
-                    Image(systemName: "square.on.square.dashed")
+        Button(action: onTap) {
+            // The glass button keeps its identity; only its glyph crossfades.
+            // A symbol content transition cannot animate replacement by Canvas.
+            ZStack {
+                if kind == .extensionContent {
+                    Image(systemName: kind.symbolName)
                         .font(TronTypography.sans(
                             size: ComposerControlMetrics.symbolSize,
                             weight: .semibold
                         ))
-                        .foregroundStyle(Color.tronIndigo)
-                        .frame(
-                            width: ComposerControlMetrics.hitTarget,
-                            height: ComposerControlMetrics.hitTarget
-                        )
-                        .contentShape(Circle())
+                        .foregroundStyle(Color.tronEmerald)
+                        .transition(.opacity)
+                } else {
+                    ProcessActivityOrb(
+                        mode: kind == .activeSubagents ? .solving : .thinking,
+                        isVisible: true,
+                        accent: .tronSubagent
+                    )
+                    .transition(.opacity)
                 }
-                .buttonStyle(.plain)
-                // The composer control family shares one glass tint; the symbol
-                // carries the extension accent, as the process orb does.
-                .glassEffect(
-                    .regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(),
-                    in: .circle
-                )
-                .glassEffectID("chat-extension-widgets", in: glassNamespace)
-                .glassEffectTransition(.matchedGeometry)
-                .transition(.opacity)
-                .accessibilityLabel("Extension widgets")
-                .accessibilityValue("\(content.entries.count) available")
-                .accessibilityHint("Shows content provided by extensions")
             }
+            .frame(width: ComposerControlMetrics.hitTarget, height: ComposerControlMetrics.hitTarget)
+            .contentShape(Circle())
         }
-        .animation(
-            reduceMotion
-                ? .easeOut(duration: 0.12)
-                : .spring(response: 0.32, dampingFraction: 0.82),
-            value: content.isEmpty
+        .buttonStyle(.plain)
+        .glassEffect(
+            .regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(),
+            in: .circle
         )
+        .glassEffectID("chat-unified-activity", in: glassNamespace)
+        .glassEffectTransition(.matchedGeometry)
+        // Liquid Glass owns the composer morph, without a competing scale.
+        .transition(.opacity)
+        .accessibilityLabel(kind == .extensionContent ? "Extension content" : "Subagents")
+        .accessibilityValue(kind == .extensionContent ? "\(contentCount) available" : "Shows current and recently finished subagents")
+        .accessibilityHint("Shows activity details")
     }
 }

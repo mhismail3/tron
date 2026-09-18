@@ -20,7 +20,8 @@ struct ExtensionRetainedContentTests {
         id: String,
         kind: ExtensionSurface.Kind,
         lifecycle: ExtensionSurface.Lifecycle = .retained,
-        frameLines: [String]
+        frameLines: [String],
+        source: String? = "npm:@example/extension"
     ) -> ExtensionSurface {
         ExtensionSurface(
             id: id,
@@ -28,7 +29,7 @@ struct ExtensionRetainedContentTests {
             placement: .fullscreen,
             lifecycle: lifecycle,
             targetId: nil,
-            provenance: .init(source: "npm:@example/extension", path: nil),
+            provenance: .init(source: source, path: nil),
             revision: 1,
             focused: false,
             inputMode: .none,
@@ -39,6 +40,18 @@ struct ExtensionRetainedContentTests {
                 plainText: frameLines.joined(separator: "\n")
             )
         )
+    }
+
+    @Test("unified activity button gives active subagents highest priority")
+    func unifiedActivityButtonPrecedence() {
+        #expect(UnifiedActivityButtonKind.select(hasActiveSubagents: true, hasExtensionContent: true, hasRecentSubagents: true) == .activeSubagents)
+        #expect(UnifiedActivityButtonKind.select(hasActiveSubagents: true, hasExtensionContent: true, hasRecentSubagents: false) == .activeSubagents)
+        #expect(UnifiedActivityButtonKind.select(hasActiveSubagents: true, hasExtensionContent: false, hasRecentSubagents: true) == .activeSubagents)
+        #expect(UnifiedActivityButtonKind.select(hasActiveSubagents: true, hasExtensionContent: false, hasRecentSubagents: false) == .activeSubagents)
+        #expect(UnifiedActivityButtonKind.select(hasActiveSubagents: false, hasExtensionContent: true, hasRecentSubagents: false) == .extensionContent)
+        #expect(UnifiedActivityButtonKind.select(hasActiveSubagents: false, hasExtensionContent: true, hasRecentSubagents: true) == .extensionContent)
+        #expect(UnifiedActivityButtonKind.select(hasActiveSubagents: false, hasExtensionContent: false, hasRecentSubagents: true) == .recentSubagents)
+        #expect(UnifiedActivityButtonKind.select(hasActiveSubagents: false, hasExtensionContent: false, hasRecentSubagents: false) == nil)
     }
 
     @Test("no retained content means no sheet entry point")
@@ -64,6 +77,23 @@ struct ExtensionRetainedContentTests {
         #expect(content.entries[0].style == .text(["second"]))
         // Producer order follows first appearance so the list never reshuffles.
         #expect(content.producers == ["Beta", "Alpha"])
+    }
+
+    @Test("pi-subagents owned retained state is excluded while unknown state remains")
+    func subagentOwnedContentFiltering() {
+        let content = ExtensionRetainedContentPolicy.content(
+            widgets: [
+                widget(key: "subagent", lines: ["private tracker"], owner: .init(id: "subagents", title: "Pi Subagents", source: "npm:pi-subagents@0.59.0")),
+                widget(key: "unknown", lines: ["keep this"], owner: nil),
+                widget(key: "different-package", lines: ["keep similarly named producer"], owner: .init(id: "different", title: "Pi Subagents", source: "npm:pi-subagents-helper@1.0"))
+            ],
+            surfaces: [surface(id: "subagent-frame", kind: .widget, frameLines: ["private frame"], source: "npm:pi-subagents"),
+                       surface(id: "unknown-frame", kind: .widget, frameLines: ["keep frame"], source: nil)],
+            statuses: ["subagent": "private status", "unknown": "keep status"],
+            statusOwners: ["subagent": .init(id: "subagents", title: "Pi Subagents", source: "npm:pi-subagents@0.59.0")]
+        )
+        #expect(content.entries.map(\.id) == ["widget:unknown", "widget:different-package", "surface:unknown-frame", "status:unknown"])
+        #expect(content.entries.contains { $0.producer == "Pi Subagents" })
     }
 
     @Test("only retained non-blocking widget surfaces are presentable")

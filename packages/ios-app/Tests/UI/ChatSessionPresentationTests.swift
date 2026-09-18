@@ -9,7 +9,7 @@ struct ChatSessionPresentationTests {
         let retired = ChatSessionPresentation(sessionID: "session-a")
         retired.showContext = true
         retired.showSettings = true
-        retired.showProcesses = true
+        retired.showActivity = true
         retired.modelPresentationGeneration = 7
         retired.canonicalSubmissionHandoffs.formUnion(["prompt-a"])
         retired.queueMutationCommandIsPending = true
@@ -24,7 +24,7 @@ struct ChatSessionPresentationTests {
         #expect(reopened.locallyMutatedQueueOperationIDs.isEmpty)
         #expect(!reopened.showContext)
         #expect(!reopened.showSettings)
-        #expect(!reopened.showProcesses)
+        #expect(!reopened.showActivity)
         #expect(!reopened.permitsExtensionInteractionPresentation)
         #expect(reopened.requestedInteractionScope == nil)
         #expect(reopened.suppressedInteractionScope == nil)
