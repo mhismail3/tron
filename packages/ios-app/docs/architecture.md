@@ -2093,7 +2093,13 @@ The stack is never persisted and is not a second state authority.
 uses the existing confirmed-mutation receipt owner for every change and bounds
 search, pages, connector runs, and imports before exposing them to SwiftUI.
 `KnowledgeDashboardView` presents All Knowledge (including All Links), filters by
-record kind and Personal/Research scope, and loads detail evidence on demand. Observation rows use a
+record kind and Personal/Research scope, and loads detail evidence on demand. The catalogue is dense by
+design—statement rows use one type step below the detail sheet with a bounded statement preview, and
+non-observation rows use a smaller title, two-line summary, and caption metadata—so many retained
+records stay visible. Observation coverage is one collapsible container whose summary row reports the
+attention or settled counts and expands to the cuts needing attention; each actionable cut keeps its own
+Open and Clear controls so the container never merges them into one inaccessible element. Observation
+rows use a
 statement, scope tag, and source date; detail is a standard medium/large managed sheet with a single
 originating-session row, not a repeated list of entry IDs. Its info button opens shared technical
 metadata and the exact retained-record JSON, preserving all evidence/qualifications without duplicating

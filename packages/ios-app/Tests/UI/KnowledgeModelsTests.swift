@@ -345,6 +345,38 @@ final class KnowledgeModelsTests: XCTestCase {
         KnowledgeObservationCoverage(schemaVersion: 1, id: id, revisionId: "revision-\(id)", range: range, disposition: disposition, groupRevisionIds: [], recordedAt: "2026-01-01T00:00:00Z", reason: "fixture")
     }
 
+    func testCoveragePresentationNamesAttentionAndBoundsCitations() {
+        let range = KnowledgeObservationPresentation(record: KnowledgeObservationFixture.record())!.observation.range
+        func summary(remaining: Int, pending: Int = 0, failed: Int = 0, unavailable: Int = 0) -> KnowledgeCoverageSummary {
+            KnowledgeCoverageSummary(observedCount: 367, emptyCount: 3, excludedCount: 27,
+                                     pendingCount: pending, failedCount: failed, unavailableCount: unavailable,
+                                     remainingCount: remaining)
+        }
+
+        XCTAssertEqual(KnowledgeCoveragePresentationPolicy.settledLabel(summary(remaining: 6)), "397 settled")
+        XCTAssertEqual(KnowledgeCoveragePresentationPolicy.summaryTitle(summary(remaining: 6)), "6 cuts need attention")
+        XCTAssertEqual(KnowledgeCoveragePresentationPolicy.summaryDetail(summary(remaining: 6, failed: 2, unavailable: 4)),
+                       "pending 0 · failed 2 · unavailable 4")
+        XCTAssertEqual(KnowledgeCoveragePresentationPolicy.summaryTitle(summary(remaining: 1, failed: 1)), "1 cut needs attention")
+        XCTAssertEqual(KnowledgeCoveragePresentationPolicy.summaryTitle(summary(remaining: 0)), "No cuts need attention")
+        XCTAssertEqual(KnowledgeCoveragePresentationPolicy.summaryDetail(summary(remaining: 0)),
+                       "Observed 367 · Empty 3 · Excluded 27", "A settled container still reports the retained counts")
+
+        let cuts = [Self.syntheticCut("observed", .observed, range: range),
+                    Self.syntheticCut("pending", .pending, range: range),
+                    Self.syntheticCut("failed", .failed, range: range),
+                    Self.syntheticCut("unavailable", .unavailable, range: range)]
+        XCTAssertEqual(KnowledgeCoveragePresentationPolicy.actionable(cuts).map(\.id),
+                       ["pending", "failed", "unavailable"],
+                       "Only cuts that need attention become rows, in Gateway order")
+
+        let citation = KnowledgeCoveragePresentationPolicy.citation(range)
+        XCTAssertEqual(citation, "fixture-…–fixture-… · session fixture-…")
+        XCTAssertLessThan(citation.count, 48, "A citation cannot dominate the row beside its actions")
+        XCTAssertEqual(KnowledgeCoveragePresentationPolicy.short("bd1ff330"), "bd1ff330")
+        XCTAssertEqual(KnowledgeCoveragePresentationPolicy.title(.unavailable), "Observation unavailable")
+    }
+
     func testCataloguePaginationAllowsListContinuationButNotSearchPages() {
         XCTAssertTrue(KnowledgeCatalogPaginationPolicy.admits(cursor: "page-2", search: "", loadingMore: false))
         XCTAssertTrue(KnowledgeCatalogPaginationPolicy.admits(cursor: "page-2", search: "  \n", loadingMore: false))

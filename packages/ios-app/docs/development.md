@@ -24,9 +24,11 @@ import, capture, note, and correction forms compose `KnowledgeFormSheet` with th
 `TronSettingsGroup`, selection, toggle, inline-field, editor, caption, and notice controls—not native
 Form chrome. The shared wrapper only owns presentation; each form keeps its draft and command owner.
 Model selection opens the existing progressive picker rather than nesting a scrolling picker in a form. Type and scope selections remain
-obvious in the filter sheet. Observation cards show only the statement (bounded to four preview lines),
-Personal/Research tag, and localized source date—not a repeated Observation title/type, eye icon, raw
-timestamp, or revision counter. Corrections do not redate the source observation. Opening a record uses
+obvious in the filter sheet. Observation cards are the dense catalogue form: one type step below the
+detail sheet, a three-line statement preview, Personal/Research tag, and localized source date—not a
+repeated Observation title/type, eye icon, raw timestamp, or revision counter, and not a separate
+per-row inspector. Source, note, and other non-observation rows follow the same density with a
+smaller row title, a two-line summary, and caption metadata. Corrections do not redate the source observation. Opening a record uses
 `KnowledgeDetailSheet`, initially medium and expandable to large, with the standard violet title,
 Done control, edge chrome, and hidden grabber. It inherits the same native sheet background as technical
 details, without a dashboard-black override. Observation detail shows the full statement once and a
@@ -39,6 +41,18 @@ Reflection remains available in the actions menu rather than a redundant Observe
 Session navigation and editable drafts are handed off only after the record sheet dismisses, with the
 originating Gateway identity rechecked. `KnowledgeModelsTests` and the focused observation case in
 `SessionSheetPresentationTests` cover retained evidence/source dates and real medium/large sheets.
+Coverage is one collapsible container above the catalogue: a section label with the settled count, then a
+single summary row (attention state, pending/failed/unavailable or observed/empty/excluded counts, and a
+rotating chevron) that expands to the cuts needing attention. A healthy corpus therefore costs one row
+instead of the whole page top, and the dashboard owns the disclosure state so a Gateway change resets it
+with the rest of its presentation state. Expanded cut rows keep their own icon, disposition title,
+reason, and bounded entry-range/session citation, and each row keeps a separate 44-point Open and (for
+failed/unavailable) Clear target—never one combined container element that hides the actions from
+VoiceOver. `Open` navigates with the exact session/entry citation; `Clear` is only offered on a
+failed/unavailable cut. Coverage read and mutation failures stay visible outside the disclosure rather
+than hiding behind a collapsed row. `KnowledgeCoveragePresentationPolicy` owns the attention copy and the
+bounded citation; `KnowledgeDashboardLayoutTests` mounts the real row and container to pin the dense row
+height, the statement cap, the collapsed cost, the tighter catalogue row gap, and the separate cut actions.
 Coverage retains its rows through sheet dismissal and same-Gateway refresh. An unchanged canonical
 revision reuses the loaded page/cursor; a changed revision replaces it after arrival, without a loading
 placeholder. Initial/new-Gateway reads still show loading. Clear on a failed/unavailable cut uses the

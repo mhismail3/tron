@@ -8,6 +8,16 @@ enum KnowledgeCatalogPaginationPolicy {
     }
 }
 
+/// Dashboard rhythm. Catalogue rows pack closer than the section rhythm so a
+/// long retained list stays scannable; section boundaries add their own inset.
+enum KnowledgeDashboardLayout {
+    static let recordSpacing: CGFloat = 8
+    /// Height of the collapsed coverage container, reserved while sizing
+    /// full-height loading/empty/error states so they are not pushed past the
+    /// viewport by a section that costs one row.
+    static let coverageSectionReservedHeight: CGFloat = 116
+}
+
 enum KnowledgeImportPresentationPolicy {
     static func corpusProgress(planned: Int, selected: Int, offset: Int) -> String {
         "\(min(max(0, planned), max(0, offset) + max(0, selected))) of \(max(0, planned))"
@@ -58,6 +68,7 @@ struct KnowledgeDashboardView: View {
     @State private var noteSheet = false
     @State private var showingFilters = false
     @State private var showingSearch = false
+    @State private var coverageExpanded = false
 
     private var filterSummary: String {
         let summary = [kind?.label, scope?.label].compactMap { $0 }.joined(separator: " · ")
@@ -68,9 +79,9 @@ struct KnowledgeDashboardView: View {
         ZStack(alignment: .bottom) {
             GeometryReader { geometry in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: TronSpacing.section) {
-                        if let status { coverageSummary(status) }
-                        dashboardContent(minimumHeight: max(280, geometry.size.height - (status == nil ? 0 : 150) - 100))
+                    LazyVStack(alignment: .leading, spacing: KnowledgeDashboardLayout.recordSpacing) {
+                        if let status { coverageSection(status) }
+                        dashboardContent(minimumHeight: max(280, geometry.size.height - (status == nil ? 0 : KnowledgeDashboardLayout.coverageSectionReservedHeight) - 100))
                     }
                     .padding(.horizontal, 20)
                     .padding(.vertical, 16)
@@ -154,7 +165,7 @@ struct KnowledgeDashboardView: View {
             coverageStore.reset()
             coverageToClear = nil; clearingCoverageID = nil; coverageMutationError = nil
             records.removeAll(); selected = nil; selectedIdentity = nil; pendingDetailAction = nil
-            nextCursor = nil; status = nil; error = nil
+            nextCursor = nil; status = nil; error = nil; coverageExpanded = false
         }
         .tronManagedSheet(isPresented: $showingFilters, identity: "knowledge.filters") {
             knowledgeFilterSheet
@@ -213,7 +224,10 @@ struct KnowledgeDashboardView: View {
                                  icon: filtered ? "line.3.horizontal.decrease.circle" : "book.closed", accent: .tronKnowledge)
                 .frame(minHeight: minimumHeight)
         } else {
+            // The catalogue header opens a new section, so it keeps the section
+            // rhythm while the rows themselves pack tighter.
             Text(filterSummary).font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronKnowledge)
+                .padding(.top, TronSpacing.md)
             ForEach(records) { record in
                 Button {
                     selected = record
@@ -226,6 +240,7 @@ struct KnowledgeDashboardView: View {
                     .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
                     .disabled(loadingMore)
                     .frame(maxWidth: .infinity)
+                    .padding(.top, TronSpacing.md)
             }
         }
     }
@@ -251,85 +266,31 @@ struct KnowledgeDashboardView: View {
             }
         }
     }
-    @ViewBuilder
-    private func coverageSummary(_ status: KnowledgeStatus) -> some View {
-        let coverage = status.coverage
-        VStack(alignment: .leading, spacing: TronSpacing.md) {
-            HStack(alignment: .firstTextBaseline) {
-                Label("Observation coverage", systemImage: "eye")
-                    .font(TronTypography.sheetSectionHeader)
-                    .foregroundStyle(Color.tronKnowledge)
-                Spacer(minLength: TronSpacing.md)
-                Text("\(coverage.observedCount + coverage.emptyCount + coverage.excludedCount) settled")
-                    .font(TronTypography.secondaryCodeDescription)
-                    .foregroundStyle(Color.tronTextMuted)
-            }
-            Text("Observed \(coverage.observedCount) · Empty \(coverage.emptyCount) · Excluded \(coverage.excludedCount)")
-                .font(TronTypography.secondaryDescription)
-                .foregroundStyle(Color.tronTextSecondary)
-            if coverage.remainingCount > 0 {
-                TronSettingsNotice(
-                    message: "\(coverage.remainingCount) cuts need attention (pending \(coverage.pendingCount), failed \(coverage.failedCount), unavailable \(coverage.unavailableCount))",
-                    accent: .tronAmber
-                )
-                ForEach(coverageStore.cuts.filter { $0.disposition == .pending || $0.disposition == .failed || $0.disposition == .unavailable }) { cut in
-                    HStack(alignment: .top, spacing: TronSpacing.md) {
-                        VStack(alignment: .leading, spacing: TronSpacing.xs) {
-                            Text("\(cut.disposition.rawValue.capitalized) · \(cut.id)")
-                                .font(TronTypography.secondaryCodeDescription)
-                                .foregroundStyle(Color.tronTextPrimary)
-                            Text("\(cut.range.fromEntryId)…\(cut.range.toEntryId) · \(cut.reason ?? "No reason recorded")")
-                                .font(TronTypography.caption)
-                                .foregroundStyle(Color.tronTextSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer(minLength: TronSpacing.md)
-                        VStack(spacing: TronSpacing.xs) {
-                            Button { onOpenSession(cut.range.sessionId, cut.range.fromEntryId) } label: {
-                                TronInlineActionLabel("Open", accent: .tronKnowledge)
-                            }
-                            .buttonStyle(.plain)
-                            if cut.disposition == .failed || cut.disposition == .unavailable {
-                                Button { coverageToClear = cut } label: {
-                                    TronInlineActionLabel("Clear", isWorking: clearingCoverageID == cut.id, accent: .tronKnowledge)
-                                }
-                                .buttonStyle(.plain)
-                                .disabled(clearingCoverageID != nil)
-                                .accessibilityLabel("Clear observation failure")
-                            }
-                        }
-                        .controlSize(.small)
-                    }
-                }
-            } else {
-                Text("No pending, failed, or unavailable observation cuts.")
-                    .font(TronTypography.secondaryDescription)
-                    .foregroundStyle(Color.tronTextSecondary)
-            }
-            if let coverageMutationError {
-                TronSettingsNotice(message: coverageMutationError, accent: .tronAmber)
-            }
-            if let coverageError = coverageStore.error {
-                TronSettingsNotice(message: "Coverage unavailable: \(coverageError)", accent: .tronAmber)
-            }
-            if coverageStore.showsInitialLoading { TronLoadingState(label: "Loading coverage…", accent: .tronKnowledge) }
-            if coverageStore.nextCursor != nil {
-                Button(coverageStore.loading ? "Loading…" : "Inspect more coverage") {
-                    let identity = model.knowledgePresentationIdentity
-                    Task { @MainActor in
-                        await coverageStore.loadMore(identity: identity,
-                            request: { cursor in try await model.knowledge.coverage(cursor: cursor, limit: 50) },
-                            isCurrent: { activity.allowsPresentationPublication && model.knowledgePresentationIdentity == identity })
-                    }
-                }
-                .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
-                .disabled(coverageStore.loading || !activity.allowsPresentationPublication)
-            }
+    private func coverageSection(_ status: KnowledgeStatus) -> some View {
+        KnowledgeCoverageSection(
+            coverage: status.coverage,
+            cuts: coverageStore.cuts,
+            showsInitialLoading: coverageStore.showsInitialLoading,
+            loadingMore: coverageStore.loading,
+            canLoadMore: coverageStore.nextCursor != nil,
+            errorText: coverageStore.error,
+            mutationErrorText: coverageMutationError,
+            clearingCutID: clearingCoverageID,
+            allowsActions: activity.allowsPresentationPublication,
+            onOpenSession: { cut in onOpenSession(cut.range.sessionId, cut.range.fromEntryId) },
+            onRequestClear: { coverageToClear = $0 },
+            onLoadMore: loadMoreCoverage,
+            expanded: $coverageExpanded
+        )
+    }
+
+    private func loadMoreCoverage() {
+        let identity = model.knowledgePresentationIdentity
+        Task { @MainActor in
+            await coverageStore.loadMore(identity: identity,
+                request: { cursor in try await model.knowledge.coverage(cursor: cursor, limit: 50) },
+                isCurrent: { activity.allowsPresentationPublication && model.knowledgePresentationIdentity == identity })
         }
-        .padding(TronSpacing.xl)
-        .tronGlassSurface(accent: .tronKnowledge, tintOpacity: 0.10)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Observation coverage. Observed \(coverage.observedCount), empty \(coverage.emptyCount), excluded \(coverage.excludedCount), remaining \(coverage.remainingCount)")
     }
 
     private func clearCoverage(_ cut: KnowledgeObservationCoverage) {
@@ -411,7 +372,10 @@ struct KnowledgeDashboardView: View {
     }
 }
 
-private struct KnowledgeRecordRow: View {
+/// The catalogue row for one retained record. Dense by design: several of these
+/// should fit on a phone screen, so the row keeps one type step below the
+/// detail sheet and only the statement's leading lines.
+struct KnowledgeRecordRow: View {
     let record: KnowledgeRecord
 
     var body: some View {
@@ -424,32 +388,32 @@ private struct KnowledgeRecordRow: View {
             }
         }
         .padding(.horizontal, TronSpacing.xl)
-        .padding(.vertical, TronSpacing.lg)
+        .padding(.vertical, TronSpacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
         .tronScrollSurface(accent: .tronKnowledge, tintOpacity: 0.08)
         .contentShape(Rectangle())
     }
 
     private var otherRecord: some View {
-        HStack(alignment: .top, spacing: TronSpacing.xl) {
+        HStack(alignment: .top, spacing: TronSpacing.lg) {
             Image(systemName: record.kind.icon)
-                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                 .foregroundStyle(Color.tronKnowledge)
                 .frame(width: TronSettingsLayoutPolicy.iconSize, height: TronSettingsLayoutPolicy.iconSize)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: TronSpacing.xs) {
                 Text(record.title)
-                    .font(TronTypography.headline)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                     .foregroundStyle(Color.tronTextPrimary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(record.summary)
-                    .font(TronTypography.bodySM)
+                    .font(TronTypography.secondaryDescription)
                     .foregroundStyle(Color.tronTextSecondary)
-                    .lineLimit(3)
+                    .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                 Text("\(record.kind.label) · \(record.scope.label) · \(record.updatedAt)")
-                    .font(TronTypography.secondaryCodeDescription)
+                    .font(TronTypography.code(size: TronTypography.sizeCaption))
                     .foregroundStyle(Color.tronTextMuted)
                     .lineLimit(1)
                     .truncationMode(.middle)
