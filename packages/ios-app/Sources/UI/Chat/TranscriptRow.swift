@@ -699,13 +699,17 @@ private struct ChatThinkingTraceMetricsKey: PreferenceKey {
     }
 }
 
-private struct ThinkingTraceDetailSheet: View {
+/// The expanded thinking trace. It starts at the beginning of the trace unless
+/// the trace is still arriving, in which case it follows the tail.
+struct ThinkingTraceDetailSheet: View {
     let inline: MarkdownPresentation.Inline
     let identity: String
     let streaming: Bool
     @Environment(\.dismiss) private var dismiss
 
     private let title = "Thinking"
+    /// Scroll target for tail following; a completed trace never scrolls here.
+    private static let traceID = "thinking-detail-trace"
 
     var body: some View {
         NavigationStack {
@@ -725,7 +729,7 @@ private struct ThinkingTraceDetailSheet: View {
                         .foregroundStyle(Color.tronTextSecondary)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
-                        .id("thinking-detail-bottom")
+                        .id(Self.traceID)
                     }
                     .padding(18)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -733,14 +737,18 @@ private struct ThinkingTraceDetailSheet: View {
                 .defaultScrollAnchor(.top)
                 .tronScrollEdgeChrome()
                 .onAppear {
-                    proxy.scrollTo("thinking-detail-bottom", anchor: .top)
+                    // A completed trace starts at its beginning. Scrolling to it
+                    // here would drop the content padding out of view and start
+                    // the sheet one row down under the top blur.
+                    guard streaming else { return }
+                    proxy.scrollTo(Self.traceID, anchor: .bottom)
                 }
                 .onChange(of: inline.source) { _, _ in
                     guard streaming else { return }
                     var transaction = Transaction()
                     transaction.animation = nil
                     withTransaction(transaction) {
-                        proxy.scrollTo("thinking-detail-bottom", anchor: .bottom)
+                        proxy.scrollTo(Self.traceID, anchor: .bottom)
                     }
                 }
             }

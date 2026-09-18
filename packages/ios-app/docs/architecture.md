@@ -1550,7 +1550,7 @@ without rescanning the full timeline. The run, individual tool, Changes, and
 Technical details sheets share one inline navigation-chrome policy; principal toolbar titles
 therefore cannot reserve an empty large-title region above the scroll view. Each medium/large
 tool detail sheet explicitly top-anchors short scroll content and begins immediately below
-native toolbar chrome. Tool-detail surfaces use their own 108-point top blur while the main chat uses 176 points, without changing either radius. Its medium
+native toolbar chrome. Every surface shares one top-blur band, expressed once in `TronTopBlurStyle`: a solid region that covers the surface's own top inset and navigation chrome, then a short fade that ends where resting content begins. Presented sheets and tool-detail surfaces use the same 88-point band (70 solid) because they share the same inline navigation chrome, so a first line is never washed out before scrolling; the main chat and dashboard keep 176 points and the logs destination 184, where only the fade shape is shared rather than the depth. Its medium
 detent is a glance surface: aggregate runs use lazy full-width summary rows with
 state, elapsed time, high-signal request context, and at most the newest two bounded
 readable output lines. Each row vertically centers status with its title, places the
@@ -1622,7 +1622,8 @@ actually overflows, the compact viewport presents only the latest four measured 
 scrolling; the oldest visible line fades at the top to signal earlier content. Tapping opens a full
 trace sheet. The sheet reads the same live presentation source, so an
 active trace updates in place; it uses the shared Tron sheet title, top blur, typography, confirmation
-action, detents, and hidden drag indicator. Short traces remain their natural one-line height. Adjacent
+action, detents, and hidden drag indicator. A completed trace opens at its beginning, at the same resting position
+every time; only a trace that is still arriving follows its tail. Short traces remain their natural one-line height. Adjacent
 thinking parts and their nonempty lines form the run, whitespace is normalized without
 adding or replacing terminal punctuation, and newly appended words fade in unless Reduce Motion is enabled. Tool chips and system
 events share compact capsule geometry while preserving their role alignment and interaction semantics.
