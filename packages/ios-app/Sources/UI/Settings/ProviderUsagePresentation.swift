@@ -147,6 +147,14 @@ struct ProviderUsageSummaryView: View {
     let snapshot: ProviderUsageSnapshot
     var detail: Bool = false
     var includeSummary: Bool = true
+    @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
+
+    /// Account usage detail copy uses the app's standard secondary sub-text
+    /// treatment: the settings-adjusted secondary size in the reading family
+    /// with the standard secondary color. Caption scale was too small here.
+    private var detailFont: Font {
+        TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -164,21 +172,21 @@ struct ProviderUsageSummaryView: View {
                             Spacer()
                             Text(ProviderUsagePresentation.detailValue(window)).monospacedDigit()
                         }
-                        .font(TronTypography.secondaryDescription)
+                        .font(detailFont)
                         .foregroundStyle(Color.tronTextSecondary)
                         if let percent = window.usedPercent {
                             ProviderUsageProgress(percent: percent, accent: .tronEmerald)
                         }
                         if let quantities = ProviderUsagePresentation.quantityDetail(window) {
                             Text(quantities)
-                                .font(TronTypography.caption)
+                                .font(detailFont)
                                 .foregroundStyle(Color.tronTextSecondary)
                         }
                         if let resetsAt = window.resetsAt,
                            let date = GatewayTimestamp.parse(resetsAt) {
                             Text("Resets \(date.formatted(date: .abbreviated, time: .shortened))")
-                                .font(TronTypography.caption)
-                                .foregroundStyle(Color.tronTextMuted)
+                                .font(detailFont)
+                                .foregroundStyle(Color.tronTextSecondary)
                         }
                     }
                 }
@@ -189,18 +197,18 @@ struct ProviderUsageSummaryView: View {
                         Text("\(ProviderUsagePresentation.amount(balance.amount)) \(balance.currency)")
                             .monospacedDigit()
                     }
-                    .font(TronTypography.secondaryDescription)
+                    .font(detailFont)
                     .foregroundStyle(Color.tronTextSecondary)
                 }
                 if let updated = ProviderUsagePresentation.updatedCopy(snapshot) {
                     Text(updated)
-                        .font(TronTypography.caption)
-                        .foregroundStyle(Color.tronTextMuted)
+                        .font(detailFont)
+                        .foregroundStyle(Color.tronTextSecondary)
                 }
                 if let retry = ProviderUsagePresentation.retryCopy(snapshot) {
                     Text(retry)
-                        .font(TronTypography.caption)
-                        .foregroundStyle(Color.tronTextMuted)
+                        .font(detailFont)
+                        .foregroundStyle(Color.tronTextSecondary)
                 }
                 // Gateway message is retained only as the bounded wire field;
                 // presentation uses fixed local status copy and never renders

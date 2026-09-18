@@ -510,7 +510,10 @@ final class SettingsLayoutStyleTests: XCTestCase {
                     ProviderUsageSummaryView(snapshot: snapshot, detail: true)
                 }
                 .padding(16)
-                .background(Color.tronSurface),
+                .background(Color.tronSurface)
+                // Match the provider detail sheet, which inherits the settings
+                // layout's secondary text adjustment.
+                .tronPresentation().tronSettingsLayout(),
                 size: CGSize(width: 404, height: 360), scheme: scheme
             ) { host in
                 attach(image(host), name: "provider-usage-\(name)")

@@ -514,11 +514,12 @@ search, persistence, and mutation while labels use product casing such as “Ope
 Provider rows are configured-first and deterministic within each Configured / Available group. When the
 Gateway advertises `provider-usage.v1`, a provider list performs one bounded account-usage read; rows show
 short and weekly windows with explicit labels, while the existing configuration sheet fetches the selected
-provider's exact snapshot and lists every window, reset, balance, stale, and safe error state. The provider
-catalog's `usageSupported` flag marks the rows that will answer, so a supported configured row reserves its
-usage line with an animated skeleton and crossfades to the resolved summary instead of growing mid-load; a
-failed read retires that skeleton rather than leaving it pending, and a Gateway without the flag simply
-reserves nothing. Configured rows are
+provider's exact snapshot and lists every window, reset, balance, stale, and safe error state. Detail rows,
+including reset and updated lines, use the standard settings secondary sub-text size and color rather than
+the smaller caption scale. The provider catalog's `usageSupported` flag marks the rows that will answer, so
+a supported configured row reserves its usage line with an animated skeleton and crossfades to the resolved
+summary instead of growing mid-load; a failed read retires that skeleton rather than leaving it pending, and
+a Gateway without the flag reserves nothing. Configured rows are
 whole-row Details links; unconfigured rows retain their Connect action and automatic single-method setup. Both actions
 use the shared compact settings-pill treatment, and usage appears beneath the connection subtitle in the leading provider text stack when present. The Providers sheet owns one rounded Configured container and one rounded Available container, with standard dividers between rows; standalone onboarding rows retain their own surface.
 Usage is an account projection only: it never represents session context or local token totals, and a missing capability
