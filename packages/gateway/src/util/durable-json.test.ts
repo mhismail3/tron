@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { durableAtomicWriteJson, durableRemove, type DurableJsonFileSystem } from "./durable-json.js";
+import { durableAtomicWriteJson, durableRemove, isDurablePublicationUncertain, type DurableJsonFileSystem } from "./durable-json.js";
 
 function fileSystem(overrides: Partial<DurableJsonFileSystem> = {}): DurableJsonFileSystem {
   const fileHandle = {
@@ -72,6 +72,7 @@ describe("durable JSON publication", () => {
       open: vi.fn(async () => opens++ === 0 ? temporaryHandle : directoryHandle) as unknown as DurableJsonFileSystem["open"],
     });
     await expect(durableAtomicWriteJson("/state/record.json", {}, 0o600, fs)).rejects.toMatchObject({ code: "ENOSPC" });
+    expect(isDurablePublicationUncertain(failure)).toBe(stage === "directory-sync");
     expect(temporaryHandle.close).toHaveBeenCalledOnce();
     expect(fs.rm).not.toHaveBeenCalledWith("/state/record.json", expect.anything());
     if (stage === "directory-sync") {

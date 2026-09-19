@@ -11,6 +11,14 @@ export interface DurableJsonFileSystem {
 
 const productionFileSystem: DurableJsonFileSystem = { mkdir, open, rename, rm };
 
+type DurablePublicationError = Error & { publicationVisible?: true };
+
+/** Returns whether an error happened after the replacement was made visible. */
+export function isDurablePublicationUncertain(error: unknown): boolean {
+  return typeof error === "object" && error !== null
+    && (error as DurablePublicationError).publicationVisible === true;
+}
+
 /**
  * Atomically publishes one owner-only JSON document and synchronizes both the
  * document and directory entry before acknowledgement. The unique temporary
@@ -26,6 +34,7 @@ export async function durableAtomicWriteJson(
   await fileSystem.mkdir(directory, { recursive: true, mode: 0o700 });
   const temporary = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
   let temporaryExists = false;
+  let publicationVisible = false;
   try {
     const handle = await fileSystem.open(temporary, "wx", mode);
     temporaryExists = true;
@@ -36,6 +45,7 @@ export async function durableAtomicWriteJson(
       await handle.close();
     }
     await fileSystem.rename(temporary, path);
+    publicationVisible = true;
     temporaryExists = false;
     const directoryHandle = await fileSystem.open(directory, "r");
     try {
@@ -45,6 +55,9 @@ export async function durableAtomicWriteJson(
     }
   } catch (error) {
     if (temporaryExists) await fileSystem.rm(temporary, { force: true }).catch(() => {});
+    if (publicationVisible && error && typeof error === "object") {
+      (error as DurablePublicationError).publicationVisible = true;
+    }
     throw error;
   }
 }

@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, open, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import * as durableJson from "../util/durable-json.js";
+import type { DurableJsonFileSystem } from "../util/durable-json.js";
 import { DeviceStore } from "./device-store.js";
 
 async function fixture(): Promise<{ root: string; store: DeviceStore }> {
@@ -227,6 +229,72 @@ describe("DeviceStore", () => {
     }
     expect(publications).toBe(0);
     expect(await store.authenticateAndAdmit(paired.token, (identity) => identity)).toEqual({ kind: "device", deviceId: paired.deviceId });
+  });
+
+  it("retires transport authority when revocation rename is visible but directory sync fails", async () => {
+    const { root, store } = await fixture();
+    const enrollment = await store.ensureEnrollment();
+    const paired = await store.pair(enrollment.code, "Phone");
+    await store.ensureEnrollment();
+    const gatewayPath = join(root, "gateway");
+    const failure = Object.assign(new Error("directory sync failed"), { code: "ENOSPC" });
+    const realWrite = durableJson.durableAtomicWriteJson;
+    const faultedFileSystem: DurableJsonFileSystem = {
+      mkdir,
+      rename,
+      rm,
+      open: (async (path: string, ...args: unknown[]) => {
+        const handle = await open(path, ...(args as [never]));
+        if (path === gatewayPath) {
+          Object.defineProperty(handle, "sync", { value: async () => { throw failure; } });
+        }
+        return handle;
+      }) as DurableJsonFileSystem["open"],
+    };
+    vi.spyOn(durableJson, "durableAtomicWriteJson").mockImplementationOnce((path, value, mode) =>
+      realWrite(path, value, mode, faultedFileSystem));
+    let publications = 0;
+    try {
+      await expect(store.revoke(paired.deviceId, () => { publications += 1; })).rejects.toMatchObject({ code: "ENOSPC" });
+      expect(publications).toBe(1);
+      expect(await store.authenticateAndAdmit(paired.token, (identity) => identity)).toBeNull();
+      expect(await store.revoke(paired.deviceId, () => { publications += 1; })).toBe(false);
+      expect(publications).toBe(1);
+    } finally {
+      vi.restoreAllMocks();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("retains the paired device when its publication is visible but durability is uncertain", async () => {
+    const { root, store } = await fixture();
+    const first = await store.ensureEnrollment();
+    const gatewayPath = join(root, "gateway");
+    const failure = Object.assign(new Error("directory sync failed"), { code: "ENOSPC" });
+    const realWrite = durableJson.durableAtomicWriteJson;
+    const faultedFileSystem: DurableJsonFileSystem = {
+      mkdir,
+      rename,
+      rm,
+      open: (async (path: string, ...args: unknown[]) => {
+        const handle = await open(path, ...(args as [never]));
+        if (path === gatewayPath) {
+          Object.defineProperty(handle, "sync", { value: async () => { throw failure; } });
+        }
+        return handle;
+      }) as DurableJsonFileSystem["open"],
+    };
+    vi.spyOn(durableJson, "durableAtomicWriteJson").mockImplementationOnce((path, value, mode) =>
+      realWrite(path, value, mode, faultedFileSystem));
+    try {
+      await expect(store.pair(first.code, "Phone")).rejects.toMatchObject({ code: "ENOSPC" });
+      expect(await store.listDevices()).toHaveLength(1);
+      const replacement = await store.ensureEnrollment();
+      expect(replacement.code).not.toBe(first.code);
+    } finally {
+      vi.restoreAllMocks();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("publishes revocation after the durable replacement and only once", async () => {

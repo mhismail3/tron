@@ -371,6 +371,7 @@ export class DisplayArtifactStore {
   private async reserve(size: number): Promise<void> {
     await this.serialize(async () => {
       this.assertInitialized();
+      this.assertFullyValidated();
       if (this.index.size >= this.maximumItems || size > this.maximumLogicalBytes - this.logicalBytes) {
         throw new GatewayError("busy", "Retained display artifact storage is full; remove an unused session", true);
       }
@@ -386,6 +387,7 @@ export class DisplayArtifactStore {
     sessionID: string;
   }): Promise<DisplayArtifactDescriptor> {
     return this.serialize(async () => {
+      this.assertFullyValidated();
       if (this.index.size >= this.maximumItems || input.size > this.maximumLogicalBytes - this.logicalBytes) {
         throw new GatewayError("busy", "Retained display artifact storage is full; remove an unused session", true);
       }
@@ -537,6 +539,7 @@ export class DisplayArtifactStore {
       }
     }
     await this.serialize(async () => {
+      this.assertFullyValidated();
       for (const [id, metadata] of [...this.index]) {
         if (metadata.owners.includes(sessionID) && !canonicalArtifactIDs.has(id)) {
           await this.revokeOwner(id, sessionID);
@@ -622,7 +625,11 @@ export class DisplayArtifactStore {
   }
 
   private async removeObjectIfUnreferenced(digest: string): Promise<void> {
-    if ([...this.index.values()].some((value) => value.digest === digest)) return;
+    // An unavailable artifact is a reference and quota authority even though
+    // its metadata could not be read. Do not let releasing a known sibling
+    // turn uncertainty into destructive object cleanup.
+    if (this.unavailableArtifacts.size > 0
+      || [...this.index.values()].some((value) => value.digest === digest)) return;
     await rm(this.objectPath(digest), { force: true });
     this.verifiedDigests.delete(digest);
   }
@@ -670,6 +677,16 @@ export class DisplayArtifactStore {
 
   private assertInitialized(): void {
     if (!this.initialized) throw new GatewayError("busy", "Display artifact storage is warming", true);
+  }
+
+  private assertFullyValidated(): void {
+    if (this.unavailableArtifacts.size > 0) {
+      throw new GatewayError(
+        "conflict",
+        "Display artifact storage is unavailable while startup validation is incomplete",
+        true,
+      );
+    }
   }
 
   private async serialize<T>(operation: () => Promise<T>): Promise<T> {

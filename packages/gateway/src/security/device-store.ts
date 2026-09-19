@@ -3,7 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { abortableRead } from "../util/abortable-read.js";
-import { durableAtomicWriteJson, durableRemove } from "../util/durable-json.js";
+import { durableAtomicWriteJson, durableRemove, isDurablePublicationUncertain } from "../util/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import { GatewayError } from "../errors.js";
@@ -343,7 +343,20 @@ export class DeviceStore {
       const document = await this.readDevices();
       const next = document.devices.filter((device) => device.id !== deviceId);
       if (next.length === document.devices.length) return false;
-      await durableAtomicWriteJson(this.devicePath, { version: 1, devices: next });
+      try {
+        await durableAtomicWriteJson(this.devicePath, { version: 1, devices: next });
+      } catch (error) {
+        // A directory-sync failure happens after rename may have made the
+        // removal visible. Re-read under this mutex before retiring transport
+        // authority; the original error remains observable to the caller.
+        if (isDurablePublicationUncertain(error)) {
+          const published = await this.readDevices().then(document =>
+            !document.devices.some(device => device.id === deviceId),
+          ).catch(() => false);
+          if (published) onRevoked();
+        }
+        throw error;
+      }
       // The replacement above is the authority cut. Publication is deliberately
       // synchronous and precedes install cleanup or any other long effect.
       onRevoked();
