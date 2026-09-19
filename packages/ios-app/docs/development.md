@@ -11,84 +11,14 @@ scripts/install-ci-tools.sh xcodegen
 scripts/tron ios generate
 ```
 
-## Dashboard controls
-
-Sessions, Automations, and Knowledge compose `DashboardChrome`: a leading
-34-point base-size heading, a scroll-revealed top blur, and one bottom-right
-56-point glass button containing a 34-point Tron logo. Titles and controls use each
-dashboard's accent; long headings fit narrow/accessibility layouts before motion is applied.
-The header and content start 25 points lower. Over the first 80 points of upward
-scroll, the header rises to its original position and gently scales from 34 to
-32 points; the list's extra 25-point content margin scrolls away natively. Pull-down leaves that 25-point resting position intact while stretching
-the title by at most 6%, reached at 120 points of native rubber-band displacement.
-Smooth-ended transforms follow the signed, inset-normalized native scroll offset;
-there is no extra animator, gesture recognizer, timer, or scroll-dependent content inset.
-Only the title and backdrop observe `DashboardHeaderState`, not the catalogue or row
-builders. The native scroll viewport and its insets stay stationary throughout the
-gesture; non-scrolling loading placeholders use the same static initial offset.
-The logo/search controls stay stationary. Reduce Motion
-keeps the original fixed position and title size while retaining the existing blur fade.
-Row identity, search state, and managed-sheet/mutation owners remain dashboard-owned.
-
-The native `UIButton`/`UIMenu` keeps four inline sections in fixed top-to-bottom order:
-Settings and configuration actions; Filter/Search and view-specific controls;
-Sessions/Automations/Knowledge; creation actions. Knowledge settings sits directly below
-Settings in the first section. UIKit owns the presented menu tree through all submenu
-navigation. `DashboardModeMenuButton` refreshes its coordinator on SwiftUI updates,
-but builds a fresh menu only at creation and the native `menuActionTriggered` opening
-boundary—not in `updateUIView`. Assigning `UIButton.menu` during presentation can
-collapse a submenu. Each new opening uses the latest action closures and view-specific
-controls without an extra timer, menu cache, or dismissal/reopening workaround.
-`DashboardChromeTests` checks menu identity during parent updates and fresh callbacks
-on reopening. The `HOSTED_TEST`-only `HostedDashboardMenuFixtureView` and
-`TronSmokeUITests.testKnowledgeSettingsSubmenuStaysOpenDuringParentUpdates` tap the
-actual Knowledge submenu, then apply thirty updates while it remains visible and
-select Configuration; updates are gated on rendered submenu content so XCTest's
-idle waiting cannot run the test entirely after the updates. Filter has no subtext. Settings always opens
-the shell's existing app settings sheet. Sessions ends with New Session; Automations
-ends with Create Automation and retains Choose agenda date in Upcoming; Knowledge
-groups Observation configuration, Connectors, and Import legacy records under
-Knowledge settings, with Capture URL and New note visible in the root menu's final
-section rather than pushed below its scrolling boundary. Search on Automations
-explicitly selects All through its persistent preference owner before focusing the
-existing inventory search. Keyboard overlays cover the unchanged floating button,
-which is not interactive or accessible while searching. `DashboardChromeTests` mounts
-all three dashboards, opens their native menus and original sheets, and checks heading
-motion bounds, native inset/offset stability, pull-down recovery, stationary controls,
-accents, accessibility sizing, and search routing.
-
 ## Knowledge dashboard
-
-The dashboard opens on **Chronicle**, the observation timeline. The top-level **Library**
-area contains **Sources** and **Syntheses** as nested sections. Both navigation levels use
-`TronSegmentedControl`, matching Manage Session → Workspace's custom glass tabs and
-40-point minimum height, with the Knowledge accent and readable text color—not native
-segmented pickers. Notes are treated as
-syntheses only when their canonical role is `synthesis`, never relabeled from their source
-or manual-note identity. Pending
-intake and archived sources live behind a separate **Intake & archive** control and are
-not mixed into the retained Sources page. Sources show a usable title, safe original
-HTTP(S) domain/link, and compact capture coverage; partial, metadata/media-only,
-inaccessible, failed, and reference-only states do not imply complete text; a complete
-object without extracted text is identified as an object, not as readable text. Detail
-shows only captured text that exists, exact capture limitations, origin/provenance, and
-any user-approved admission reason. Secondary assessment metadata includes provider
-classification/coverage and version/usage fields without conflating them with capture
-coverage or epistemic confidence. Source detail keeps the original title, domain, and safe link
-above the capture-coverage warning and the one captured-content body; origin/provenance and
-technical revision/object/assessment metadata remain secondary. The existing Gateway list
-contract has no synthesis-role filter, so the Syntheses view filters the bounded canonical note
-page and states that limitation rather than inventing a synthesis endpoint. Filtered pages retain
-their Gateway cursor and keep **Load more** available even when a page contributes no visible rows.
-The `HOSTED_TEST` Knowledge layout fixture captures Chronicle/Library, source disposition
-examples, and an empty Syntheses page with continuation; captures are synthetic rendering
-evidence, not live Gateway or VoiceOver validation.
 
 Knowledge is styled as its own adaptive identity rather than inheriting the Sessions emerald or
 Automations cyan palette: use `Color.tronKnowledge` for deep violet in light appearance and lavender
 in dark appearance, with `tronKnowledgeText` only where readable text contrast requires it. Keep warning,
-success, and destructive states semantic. The dashboard uses the shared heading and floating logo menu,
-`TronSearchBar`, `TronDashboardFilterSheet`, `TronPlaceholderState`, loading pulse, and edge chrome. Coverage and records share one scroll owner with bottom-control
+success, and destructive states semantic. The dashboard uses the standard tinted title, toolbar filter,
+floating search/add controls, `TronSearchBar`, `TronDashboardFilterSheet`, `TronPlaceholderState`,
+loading pulse, and edge chrome. Coverage and records share one scroll owner with bottom-control
 clearance; closing search clears its query instead of hiding an active filter. Configuration, connector,
 import, capture, note, and correction forms compose `KnowledgeFormSheet` with the existing
 `TronSettingsGroup`, selection, toggle, inline-field, editor, caption, and notice controls—not native
@@ -150,15 +80,16 @@ positive-grant encoding, retained exclusions/selections, and unsupported-Gateway
 
 ## Automations dashboard
 
-The shared logo menu's selection callback feeds an exhaustive root-mode switch between the
-independent Sessions, Automations, and Knowledge projections; adding a future mode therefore requires an
+The top-left Tron logo on the session dashboard is a native `UIButton`/`UIMenu`
+selector. One generic selection callback feeds an exhaustive root-mode switch between the
+independent Sessions and Automations projections; adding a future mode therefore requires an
 explicit destination instead of compiling into a Sessions fallback. Switching does not replace
 session navigation state. The logo's template tint comes
 from the selected dashboard mode—emerald for Sessions and a saturated automation blue
 (`#31889A` in light appearance and `#74CBDC` in dark appearance) for Automations—and adding
 a future mode requires declaring its matching accent. Automations uses the `.tronAutomation`
-visual theme across its dashboard and managed sheets. The logo menu's
-Filter action uses the shared dashboard filter sheet chrome, retaining a medium-only presentation; Sessions' server filter starts at medium and expands to large before scrolling;
+visual theme across its dashboard and managed sheets. The top-right
+filter action uses the shared dashboard filter sheet chrome, retaining a medium-only presentation; Sessions' server filter starts at medium and expands to large before scrolling;
 it owns the Upcoming/All view choice, status/action filters, and connected-Gateway selection.
 The shared sheet forces short and long content into the same top-aligned frame, padding, title,
 selection transition, and scroll behavior. All-only controls fade into that stable layout rather
@@ -166,8 +97,9 @@ than entering through a separate motion path. The selected Upcoming/All mode, in
 action type, and Gateway are stored as one bounded versioned preference owner in the persistent dashboard
 shell. The shell's binding writes every accepted dashboard mutation before returning it to the child view,
 so the settings survive both dashboard switching and app relaunch; transient search text and the agenda date
-are not persisted. Search opens the existing All-mode overlay from the logo menu,
-selecting All when invoked from Upcoming. The search field does not permanently occupy dashboard space. Upcoming retains its current agenda or neutral empty state while
+are not persisted. All-mode search uses the same
+bottom-left reveal/close interaction as the Sessions dashboard rather than permanently
+occupying dashboard space. Upcoming retains its current agenda or neutral empty state while
 refreshing; its no-occurrence placeholder stays centered in the available dashboard viewport
 above the bottom controls. Only a refresh that outlasts the short presentation delay adds a compact
 activity badge, so transient reloads never replace the dashboard content. Upcoming extends in canonical
@@ -184,36 +116,20 @@ rows, fields, segmented controls, and keyboard dismissal behavior; do not reintr
 large-title reservation or custom control styling there. Selection rows put the current value in the
 standard action pill; new prompt automations default to New Session in Workspace, while loaded edits
 retain their canonical target. Date values use localized standard action pills: the date opens a native calendar and the time
-opens a time-only wheel, each bound to the same field without changing the other component.
-Inventory cards and the expanded detail summary share `AutomationSummaryCard` and the same facts.
-Inventory puts the icon/title on the left and plain lifecycle/current-run status in the upper-right.
-Below, cadence/server and inline Last run/Updated values use two tight, edge-aligned rows with no divider.
-Timestamp labels have a six-point baseline-aligned gap before their values, rather than a text-space separator.
-Rows fall back to a vertical layout when their full values cannot fit. Inventory timestamps are relative;
-the expanded summary retains its divided layout, full localized dates, and untruncated headline. The latest started execution is Last run, falling back to the previous run's start, completion,
-or scheduled time when needed; a future occurrence is never presented as a past run. Titles, cadence,
-server names, and timestamps wrap, with stacked metrics at accessibility sizes. The entire inventory
-card, including padded blank space, opens the existing detail route. Its VoiceOver label includes all
-summary facts and attention reasons. The open sheet builds its summary from the authoritative record,
-not the possibly older selection/catalog value; its toolbar is titled Automation.
-
-Below the summary, remaining action, schedule, target, current-run, and provenance facts use the same
-`TronMetadataTable` as tool/subagent details: divided glass rows, reading-family labels, selectable code
-values, no type qualifiers, and no row navigation. Text-led rows stack at accessibility sizes. Summary
-fields are not repeated in these tables. The four controls remain a bare 2×2 action grid with Run Now
-before Edit; Cancel run joins Controls only for a current execution. Recent Runs is last, below all
-controls, and retains its existing run-detail route. Confirmation, color, and disabled behavior remain
-with the existing action owner. Action availability separates selected-Gateway ownership from readiness and
+opens a time-only wheel, each bound to the same field without changing the other component. The dashboard cards and detail sheet use the same inline navigation, settings
+containers, semantic typography, and responsive key/value rows; the entire visible dashboard card,
+including its padded blank area, opens the existing detail route. Inventory cards use one concise
+status/frequency/timing line, while detail leads with action, target, schedule, status, and recent runs.
+The detail toolbar owns the title exactly once; lifecycle status remains a compact Schedule row rather than
+another title card. Technical schedule/target/about metadata stays in the main readable detail containers;
+the four controls remain a bare 2×2 action grid with Run Now before Edit, preserving each action's
+existing color, confirmation, and disabled behavior. Action availability separates selected-Gateway ownership from readiness and
 in-flight mutation state; a lagging or absent catalog row cannot veto an authoritative detail read.
 The Gateway still checks each command's expected revision. Save uses an accessible blue checkmark-only
 control, and deadline steppers share the compact pill height. Existing-session target selection uses a large, scoped picker with dashboard
 project grouping. An unset workspace omits the browse path so the Gateway resolves its own default;
 explicit selections retain their exact path. Validate changes with
-`AutomationProtocolTests`, `AutomationCoordinatorTests`, and `AutomationPresentationTests`; hosted
-`SessionSheetPresentationTests` cover summary geometry and `StructuredJSONTableLayoutTests` protects
-shared row sizing. The native Automation UI regression covers all inventory facts, a newer detail
-record replacing stale catalog metadata, non-tappable table rows, controls-before-history ordering,
-and the retained run-detail route. Its read-only `HOSTED_TEST` transport accepts no mutations. Workspace targets are selected through the existing focused-Gateway WorkspaceBrowser and trust
+`AutomationProtocolTests` and `AutomationCoordinatorTests`. Workspace targets are selected through the existing focused-Gateway WorkspaceBrowser and trust
 flow, and their paths remain transient form state. Every workspace run creates and retains a new
 ordinary session; Run Details offers Open Session only through the owning profile/session route.
 Do not add recurrence calculation, workspace mirrors, prompt/notification text to caches, or local
@@ -226,10 +142,6 @@ Its two eager row groups use the shared emerald Liquid Glass surface, matching t
 controls; subagent retention inherits this settings theme rather than the activity palette.
 **Chats per project** accepts 1–100 (default 10) through the shared numeric settings field. It sets
 both the initial project row count and Show more batch size; Show less returns to that baseline.
-The two actions stay leading-aligned with a 24-point gap, rather than placing Show less beneath the
-bottom-right dashboard menu. Accessibility sizes stack the actions; either sole action remains leading.
-Hosted sizing and the native `testSessionPaginationKeepsShowLessBesideShowMoreAndClearOfLogo` regression
-cover single/paired controls, the scroll-end logo boundary, and both action callbacks.
 Changes apply when the dashboard becomes visible, without resetting project disclosure or changing
 Recent Activity ordering or Gateway catalog reads. Pagination retires pending animations while
 retaining generation counters so old completions cannot affect the new setting.
@@ -542,9 +454,7 @@ reattachment; `AppModel` only routes admitted events/lifecycle work and preserve
 same lifecycle suite drives an injected monotonic clock to prove the 120 ms resize boundary, same-intent
 coalescing, established dimension clamps, independent presentation slots, and revocation with no late wire send.
 The onboarding flow retains step/state orchestration while navigation-title, pairing-field, page, card, and info-row
-chrome lives in a separate presentation component file with unchanged UIKit/SwiftUI behavior. Onboarding navigation
-uses leading `‹ Back` and trailing `Next ›` labels with matching spacing; the hosted onboarding toolbar capture
-in `SessionSheetPresentationTests` supports visual review of the label order. Workspace browsing
+chrome lives in a separate presentation component file with unchanged UIKit/SwiftUI behavior. Workspace browsing
 uses one generation-owned cancellable load flight; only the newest path request may clear its exclusive busy
 phase, publish an error, or request transient reconnect recovery, and dismissal synchronously retires that
 presentation state. Possibly-sent folder creation may finish canonically, but navigation/dismissal generation-gates
@@ -561,11 +471,9 @@ run detail lists order newest invocation first from producer `startedAt` values,
 locale-aware invocation copy; progress/result/completion timestamps never reorder or relabel a call. The primary
 tool sheet, diff destination, technical-payload destination, and shared navigation chrome also have separate
 presentation owners; only their directly shared layout/diff primitives use module-internal access.
-The settings shell and its appearance, connection/import, provider, runtime-behavior (including model defaults), dedicated compaction, resource-path,
-package, trust, custom-model, connected-service, and MCP destinations live in separate source owners while retaining the same progressive sheet links and shared draft/state coordinators. Every shared toggle row keeps a fixed 50×30 control while its thumb briefly stretches horizontally during the state slide and settles without moving row layout; Reduce Motion preserves state/tint feedback but disables that spatial stretch. The main settings sheet uses four eager divider-owned Liquid Glass groups: emerald App & Connections, purple Agent Behavior, cyan Integrations, and blue Workspace & Diagnostics. Each row icon and divider matches its group, each row carries a concise secondary summary, and project scope inserts Project Trust while dashboard scope inserts Import. A progressive destination inherits that row accent for its titles, controls, icons, dividers, and ordinary containers, including nested sheets. Connected Services and MCP root destinations are ordinary content inside that progressive navigation owner (one Done control); only setup and detail forms own standalone form navigation and action toolbars. Informational text cards—including the bottom guidance in Custom Models, Available Resources, integrations, and Project Trust—retain the originating hue but mix toward slate so they stay lighter and visually secondary. Settings-row and full-width action labels use white in dark mode and their accent in light mode; Project Trust and Gateway actions keep semantic button tints that match their light-mode text, while warning, error, destructive, and log-level state semantics keep their explicit colors. Connections owns the server-management surface: paired-server rows open per-server detail sheets, authorized devices remain below the server list, and push-notification readiness follows the authorized-device section. Each authorized-device row opens a detail sheet and shows its paired server's connection status instead of a redundant disclosure chevron; after explicitly focusing its server, a supervised `ios-device-install.v3` Gateway can configure a validated source checkout and request the fixed development-signed LocalDevice overwrite install for that authorized device. The Mac requires an explicit owner-only physical binding established by `scripts/tron-ios-device-bind.mjs`; every install rediscovers that exact connected Developer Mode target and refuses missing targets rather than selecting another phone. Use the helper's `--list` mode to obtain paired-device IDs, and `xcrun devicectl list devices` for physical targets. Existing Settings clients need no iOS rebuild for this setup path. Manual acceptance must cover unavailable/multiple target discovery, Developer Mode disabled, signing/provisioning failure, Stable protocol mismatch, background socket replacement during the build, successful app relaunch without data or Keychain reset, reconnect recovery of terminal install status, emerald sheet dismissal, and stable parent-sheet presentation after the repository browser closes. The UI must never display or retain a CoreDevice identifier. Logs are a separate final top-level Settings destination, so Connections and its detail sheets never fetch or render Gateway log history. The Logs destination performs one bounded Gateway read when opened, merges the app's bounded in-memory iOS response-diagnostic ring, indexes level filters once per admitted load, and renders stable record identities directly through a lazy compact list. Each row keeps action, server/source, colored level text, and timestamp in one leading-aligned metadata line with separators and one shared compact type style; the message remains directly below and no icon column is reserved. Initial and foreground refreshes are structured tasks keyed to a diagnostics-readiness generation that advances only after admitted reconnect or in-place foreground reconciliation completes. An automatic empty result cannot erase a useful visible projection, manual refresh remains available, and loading/empty copy uses Tron typography and surfaces instead of stock placeholders. An actionable invalid-response in-app notification can open Logs directly. Gateway Update status/config decoding is bounded and capability-aware. The live update state sits directly below connection state and one exact command-owned polling lane follows file-authoritative helper progress through transient reconnect; an older command marker cannot cancel a newly acknowledged observation, and multi-await detail loading cannot overwrite that lane. Authenticated replacement transport becomes Connected before subordinate projection reconciliation finishes. Lifecycle and restart-drain additions use the same icon/title/detail row structure so long status copy wraps beneath its title instead of competing for a trailing column. The per-server sheet carries no inline gateway metadata: its leading info button opens **Server Info**, whose **Gateway** table (machine, gateway, agent runtime, protocol, restart supervision) and **Runtime identities** table (source revision, runtime epoch, payload identity) both use the shared `TronTechnicalMetadataSection` metadata table, so opaque runtime/deployment identities stay one tap away instead of on the server surface. That sheet is the standard component for any metadata/value table. Maintenance actions drop the redundant "Gateway" from their labels and render as a two-column grid of lifecycle actions under one accent, followed by the full-width error-accent **Forget Server**; source configuration remains one row whose selected-path capsule reuses the Gateway-backed workspace browser before submitting the selected Mac path through lifecycle admission and command receipts. Update and rollback confirmations remain separate full-width actions outside the configuration container. Stable on 9847 and local Debug on 9848 remain separately paired profiles with their own persisted credentials. Pairing, initial hello, reconnect hello, and authenticated `system.info` require an asserted `stable`/`dev` channel matching that profile; missing, malformed, or endpoint-mismatched identities fail closed. A planned Debug `system.stopping` event uses the existing immediate reconnect path with the same profile endpoint and token, then installs the replacement runtime epoch and authoritative projections without replaying an accepted prompt. A Debug-origin candidate exposes the confirmed **Promote Debug Gateway to Stable** action only when its focused Stable-channel status carries an available exact version, lowercase SHA-256 fingerprint, source revision, tested Debug runtime epoch, and candidate runtime epoch whose provenance matches the verified candidate identity; the confirmation pins the immutable version and fingerprint. The separate **Rebuild from Source** maintenance action is user-initiated only, requires a valid configured source root, and sends source mode only; repository agents may prepare and validate the change but must not press the action or submit its RPC. Its copy does not imply a pending update, and generic or unpinned artifact candidates are never promoted automatically. The dashboard server filter keeps multi-selection separate from ordering: the default groups by project/server, while Recent Activity renders active sessions first with stable active-period ordering, followed by reverse-chronological history with project/server context beneath each row. The filter action lives in the bottom-right logo menu. Its server sheet starts at medium on every presentation, lets an upward content drag expand to large before scrolling, and keeps filter changes independent of the current height. The Sessions logo menu's Search action presents the existing keyboard-avoiding overlay and dismisses on close, focus loss, or a downward swipe. Sessions no longer has a separate search button or filter/settings toolbar group; New Session is the last section of the logo menu. Its leading Tron title uses the shared bounded rise, slight shrink, and pull-down stretch described under Dashboard controls. Pull-down overscroll stays unblurred. Narrow presentation wrappers observe scroll state, not the session projection or rows; the fixed safe-area header footprint avoids inset feedback and exposes a heading rather than a toolbar button. Chat destinations explicitly restore their native navigation bar. The floating logo retains the old + button's 56-point target, glass treatment, and bottom/right insets, with list clearance unchanged. The blur fade follows scrolling directly without a trailing animation, including with Reduce Motion. `DashboardChromeTests` covers the shared menu sections/routing, progress bounds, and mounted dashboard presentation. Shared model/session search fields hide placeholder copy while focused and use a regular, more opaque tinted glass treatment. Model search keeps its parent sheet non-dismissible while active and lets keyboard dismissal settle before removing the field, so its close action cannot fall through into sheet dismissal. Its selection guidance belongs in a compact header block directly below the Servers section label, with stronger separation above that block, and uses the shared 11-point secondary-description scale matching the other adjusted sheet descriptions. The selected ordering and bounded server-ID selection are stored together in a versioned local UI preference and restored when the app launches; transient search text is never persisted. Empty startup source projections retain the saved selection until a non-empty authoritative server set can prune removed identities without corrupting the all-servers sentinel. Project headers show the project folder in bold monospace with the server name as a right-aligned secondary monospace label. The dashboard settings overview uses an eager stack so the Gateway Import destination is materialized with the initial sheet; project-scoped settings intentionally omit that dashboard-only action.
-Runtime Behavior uses the standard Liquid Glass group surface; Model Defaults order is Model, Thinking, Context Window, and the shared slider host and row identity fences remain unchanged. The Custom Models editor uses the same inherited Liquid Glass group as Connection and Protocol, with no separately tinted input surface. `SettingsLayoutStyleTests.testCustomModelEditorUsesSurroundingSettingsGlass` captures the production editor beside those shared surfaces in light and dark mode.
-
-Available Resources is one destination: a Liquid Glass scope summary with inventory counts and project-trust access, a Liquid Glass Installed group, a standalone Install Package row, then inline Skills, Prompts and Themes containers. Those resource groups opt out of the page-wide tint to preserve the session resource colors (emerald, cyan, teal); resolved extensions are not listed twice. Source titles without whitespace stay continuous in a bounded horizontal viewport, while ordinary names/provenance wrap. Locations and Overrides is a separate standard sheet in Workspace & Diagnostics, with the same scoped autosave owner. Resolved Skills/Prompts/Themes use friendly display names; common source/scope is a caption below each category rather than repeated in rows. Empty categories have no info card; scope counts describe inventory rather than tools loaded in existing conversations. Full paths, metadata and additive categories remain available in Technical Details. Package reload
+The settings shell and its appearance, connection/import, provider, agent-default, runtime-behavior, dedicated compaction, resource-path,
+package, trust, and custom-model destinations live in separate source owners while retaining the same progressive sheet links and shared draft/state coordinators. Every shared toggle row keeps a fixed 50×30 control while its thumb briefly stretches horizontally during the state slide and settles without moving row layout; Reduce Motion preserves state/tint feedback but disables that spatial stretch. The main settings sheet uses three eager divider-owned Liquid Glass groups: emerald App & Connections, purple Agent, and blue Workspace & Diagnostics. Each row icon and divider matches its group, each row carries a concise secondary summary, and project scope inserts Project Trust while dashboard scope inserts Import. A progressive destination inherits that row accent for its titles, controls, icons, dividers, and ordinary containers, including nested sheets. Informational text cards—including the bottom guidance in Custom Models, Packages and Resources, and Project Trust—retain the originating hue but mix toward slate so they stay lighter and visually secondary. Settings-row and full-width action labels use white in dark mode and their accent in light mode; Project Trust and Gateway actions keep semantic button tints that match their light-mode text, while warning, error, destructive, and log-level state semantics keep their explicit colors. Connections owns the server-management surface: paired-server rows open per-server detail sheets, authorized devices remain below the server list, and push-notification readiness follows the authorized-device section. Each authorized-device row opens a detail sheet and shows its paired server's connection status instead of a redundant disclosure chevron; after explicitly focusing its server, a supervised `ios-device-install.v3` Gateway can configure a validated source checkout and request the fixed development-signed LocalDevice overwrite install for that authorized device. The Mac requires an explicit owner-only physical binding established by `scripts/tron-ios-device-bind.mjs`; every install rediscovers that exact connected Developer Mode target and refuses missing targets rather than selecting another phone. Use the helper's `--list` mode to obtain paired-device IDs, and `xcrun devicectl list devices` for physical targets. Existing Settings clients need no iOS rebuild for this setup path. Manual acceptance must cover unavailable/multiple target discovery, Developer Mode disabled, signing/provisioning failure, Stable protocol mismatch, background socket replacement during the build, successful app relaunch without data or Keychain reset, reconnect recovery of terminal install status, emerald sheet dismissal, and stable parent-sheet presentation after the repository browser closes. The UI must never display or retain a CoreDevice identifier. Logs are a separate final top-level Settings destination, so Connections and its detail sheets never fetch or render Gateway log history. The Logs destination performs one bounded Gateway read when opened, merges the app's bounded in-memory iOS response-diagnostic ring, indexes level filters once per admitted load, and renders stable record identities directly through a lazy compact list. Each row keeps action, server/source, colored level text, and timestamp in one leading-aligned metadata line with separators and one shared compact type style; the message remains directly below and no icon column is reserved. Initial and foreground refreshes are structured tasks keyed to a diagnostics-readiness generation that advances only after admitted reconnect or in-place foreground reconciliation completes. An automatic empty result cannot erase a useful visible projection, manual refresh remains available, and loading/empty copy uses Tron typography and surfaces instead of stock placeholders. An actionable invalid-response in-app notification can open Logs directly. Gateway Update status/config decoding is bounded and capability-aware. The live update state sits directly below connection state and one exact command-owned polling lane follows file-authoritative helper progress through transient reconnect; an older command marker cannot cancel a newly acknowledged observation, and multi-await detail loading cannot overwrite that lane. Authenticated replacement transport becomes Connected before subordinate projection reconciliation finishes. Lifecycle and restart-drain additions use the same icon/title/detail row structure so long status copy wraps beneath its title instead of competing for a trailing column. The per-server sheet carries no inline gateway metadata: its leading info button opens **Server Info**, whose **Gateway** table (machine, gateway, agent runtime, protocol, restart supervision) and **Runtime identities** table (source revision, runtime epoch, payload identity) both use the shared `TronTechnicalMetadataSection` metadata table, so opaque runtime/deployment identities stay one tap away instead of on the server surface. That sheet is the standard component for any metadata/value table. Maintenance actions drop the redundant "Gateway" from their labels and render as a two-column grid of lifecycle actions under one accent, followed by the full-width error-accent **Forget Server**; source configuration remains one row whose selected-path capsule reuses the Gateway-backed workspace browser before submitting the selected Mac path through lifecycle admission and command receipts. Update and rollback confirmations remain separate full-width actions outside the configuration container. Stable on 9847 and local Debug on 9848 remain separately paired profiles with their own persisted credentials. Pairing, initial hello, reconnect hello, and authenticated `system.info` require an asserted `stable`/`dev` channel matching that profile; missing, malformed, or endpoint-mismatched identities fail closed. A planned Debug `system.stopping` event uses the existing immediate reconnect path with the same profile endpoint and token, then installs the replacement runtime epoch and authoritative projections without replaying an accepted prompt. A Debug-origin candidate exposes the confirmed **Promote Debug Gateway to Stable** action only when its focused Stable-channel status carries an available exact version, lowercase SHA-256 fingerprint, source revision, tested Debug runtime epoch, and candidate runtime epoch whose provenance matches the verified candidate identity; the confirmation pins the immutable version and fingerprint. The separate **Rebuild from Source** maintenance action is user-initiated only, requires a valid configured source root, and sends source mode only; repository agents may prepare and validate the change but must not press the action or submit its RPC. Its copy does not imply a pending update, and generic or unpinned artifact candidates are never promoted automatically. The dashboard server filter keeps multi-selection separate from ordering: the default groups by project/server, while Recent Activity renders active sessions first with stable active-period ordering, followed by reverse-chronological history with project/server context beneath each row. The filter action lives in the top toolbar. Its server sheet starts at medium on every presentation, lets an upward content drag expand to large before scrolling, and keeps filter changes independent of the current height. The bottom-leading search action presents a keyboard-avoiding overlay above the unchanged dashboard controls and dismisses on close, focus loss, or a downward swipe. Shared model/session search fields hide placeholder copy while focused and use a regular, more opaque tinted glass treatment. Model search keeps its parent sheet non-dismissible while active and lets keyboard dismissal settle before removing the field, so its close action cannot fall through into sheet dismissal. Its selection guidance belongs in a compact header block directly below the Servers section label, with stronger separation above that block, and uses the shared 11-point secondary-description scale matching the other adjusted sheet descriptions. The selected ordering and bounded server-ID selection are stored together in a versioned local UI preference and restored when the app launches; transient search text is never persisted. Empty startup source projections retain the saved selection until a non-empty authoritative server set can prune removed identities without corrupting the all-servers sentinel. Project headers show the project folder in bold monospace with the server name as a right-aligned secondary monospace label. The dashboard settings overview uses an eager stack so the Gateway Import destination is materialized with the initial sheet; project-scoped settings intentionally omit that dashboard-only action.
+Packages and Resources is one destination: installed packages, a standalone Install Package row, then inline Skills, Prompts and Themes containers. Those resource groups opt out of the page-wide tint to preserve the session resource colors (emerald, cyan, teal); resolved extensions are not listed twice. Source titles without whitespace stay continuous in a bounded horizontal viewport, while ordinary names/provenance wrap. Locations and Overrides is a separate standard sheet directly below Packages and Resources, with the same scoped autosave owner. Resolved Skills/Prompts/Themes use friendly display names; common source/scope is a caption below each category rather than repeated in rows. Empty categories have no info card, and the aggregate resource-count card is removed. Full paths, metadata and additive categories remain available in Technical Details. Package reload
 refreshes the inventory and update projection together: SwiftUI’s structured `.task(id:)` owns and awaits automatic
 refresh, target/invalidation changes reject stale completions, and confirmed mutation reloads have priority over
 ordinary refresh. Successful foreground/reconnect reconciliation also keys the visible Settings read tasks;
@@ -1070,28 +978,15 @@ are in [performance-baseline.md](performance-baseline.md).
 The checked-in `UIValidation.xctestplan` keeps routine UI diagnostics disabled.
 UI journeys run the `HOSTED_TEST` app through the `Tron UI Validation` scheme's
 Test configuration, only on the exact owned test simulator; they never use the
-persistent Development simulator. `TronSmokeUITests` includes the rendered Ask User
-journey and the Knowledge submenu regression. The unit helper selects `UnitTests`,
-not UI tests. Run these selectors with `xcodebuild test`, scheme `Tron UI Validation`,
-configuration `Test`, and plan `UIValidation`, under `scripts/ios-test-lock.py` and
-`scripts/ios-test-process.py`; resolve the exact owned destination through
-`scripts/ios-test-simulator.py validate`. Use `-only-testing:TronMobileUITests/TronSmokeUITests/<test>`
-for focused interaction checks rather than running every journey during diagnosis.
+persistent Development simulator. `TronSmokeUITests` includes the focused
+rendered Ask User journey; run it with:
 
-`TronSmokeUITests.testRuntimeBehaviorThinkingSliderOpensAfterDefaultsConsolidation`
-launches the test-only Runtime Behavior fixture and taps the real moved Thinking control,
-then verifies its slider opens. It guards against losing the configuration-slider host when
-consolidating sheets. Hosted layout tests retain root, account-list, inline-defaults and
-accessibility-sized resource captures; those captures are not live-provider validation.
-`TronSmokeUITests.testIntegrationDestinationsHaveOneDoneButtonThroughSettings` enters
-Connected Services and MCP Servers through the real Settings root in light mode, asserts
-one hittable Done control, and verifies dismissal back to Settings. Its offline fixture
-isolates navigation ownership without contacting a Gateway or any provider.
-`SettingsLayoutStyleTests.testIntegrationMutationSettlementRejoinsAfterPresentationSuspension`
-checks that accepted success/failure settles while covered, publishes only when active again,
-and never replays the command. Global default trust retains the standard autosave error/retry notice.
+```bash
+scripts/tron-ios-test build # builds the reusable hosted products
+scripts/tron-ios-test run --only-testing TronMobileUITests/TronSmokeUITests
+```
 
-The Ask User fixture's socket is test-only and records the real `extension.respond` RPC;
+The fixture's socket is test-only and records the real `extension.respond` RPC;
 no Gateway or provider is contacted. The test taps the rendered form controls,
 checks allow-cancel versus close behavior, restores the ID-keyed draft, and
 checks the completed read-only form. The styled active-form case also checks that
@@ -1196,7 +1091,7 @@ show their values in trailing capsules. Both open the same configuration-slider 
 container; Thinking must no longer open a menu. Tap Context Window to grow the glass slider;
 verify smooth finger tracking, gentle magnetic stops, exact minimum/maximum, and the default
 near 200k/272k plus 500k/750k for million-token models. Other capacities use rounded quarters.
-Thinking must show only the live runtime's ordered supported choices; Runtime Behavior → Model Defaults
+Thinking must show only the live runtime's ordered supported choices; Models and Defaults
 retains the full model-independent list. Verify discrete dragging/tapping and selection haptics,
 with the top-right header updating live (Extra High displayed while `xhigh` remains the raw
 selection). Thinking has no lower label section and uses a 140-point nominal panel rather than
@@ -1269,7 +1164,7 @@ Compact Now must retain idle, running-prompt queue, queued, in-progress, retry, 
 admission behavior. Slim action/value capsules retain full touch height. Every small
 metadata face is half a point larger only within this sheet. The model picker must
 inherit purple across title, search, icons, and cards while keeping its ordinary type scale.
-Its title reads Models both from Manage Session and from Settings → Runtime Behavior → Model Defaults.
+Its title reads Models both from Manage Session and from Settings → Models and Defaults.
 `SessionSummaryLayoutTests` measures the actual native cards/actions, retains light/dark and
 long-name/accessibility captures, and excludes screen safe areas from card-size assertions.
 Compact action rows must match equivalent ordinary Session row heights without adding row
@@ -1387,53 +1282,6 @@ control and native menu appearance must remain unchanged; the three resource act
 the native keyboard plus the floating shortcut and command-key surfaces rather
 than validating only PTY output.
 
-### Composer image paste
-
-The native composer Paste action accepts one or multiple copied images, using the
-same `ComposerDraftCoordinator.uploadBatch` admission, thumbnail chips, previews,
-removal, and send path as Select Photos. Image items take precedence over alternate
-text/URL clipboard flavors; text-only paste retains UIKit's normal editing behavior.
-Only the user's Paste action reads clipboard contents. `ComposerPastedImages` reads
-bounded provider files during their callback lifetime without decoding full-size
-images; the existing 10-file/25-MiB draft limits still apply. Oversized selections
-are reported instead of silently losing images. Preparation is scoped to the exact
-chat and cancelled on retirement/coverage; after admission, uploads belong to the
-draft coordinator. Repeated pastes append rather than cancelling previous uploads.
-
-`ComposerPastedImagesTests` covers provider loading, byte limits, image ordering,
-unchanged text/selection, overflow, stale editor scope, and late cancellation.
-`ChatViewScrollHarnessTests.pastedImagesUsePhotoAttachmentFlow` mounts the real
-composer, proves batch chips appear before transport completes, captures a simulator
-preview, and checks repeated image paste plus ordinary text paste. On-device manual
-validation should also copy multiple photos from Photos and paste into a focused
-chat using the native editing menu and hardware Command-V; verify preview, removal,
-and send after upload. No clipboard polling or separate attachment UI is introduced.
-
-### Tool results and question actions
-
-All plain-text Result/Live output containers in `ToolDetailSheet` use the same
-literal, selectable 12-point code font, including subagent and other extension
-tools. Tool names no longer switch these containers to Markdown. Structured JSON,
-diffs, other subagent sections, and assistant Markdown keep their existing renderers.
-`SessionSheetPresentationTests.testAllToolResultContainersUseLiteralMonospace`
-compares rendered extension results with the standard built-in result container.
-
-The Ask User form toolbar places Cancel alone on the left and Close (X) immediately
-left of Send on the right, with separate native surfaces. Close retains the draft;
-Cancel still resolves the request. The native Ask User cancellation UI test checks
-button frames and the single scoped cancellation receipt.
-
-Other answers use the queued/steering message editor's native `TextEditor` and
-shared `tronTextEditor` surface. Selecting Other smoothly reveals it without
-requesting focus before it is mounted; deselection fades it out and releases focus.
-Reduce Motion installs the size change without animation. Tapping the editor selects
-the large sheet detent as it takes focus, keeping the paged question viewport usable
-while the keyboard appears; changing question pages clears focus. The Other button
-and editor have separate hit targets and accessibility values, with glass drawn only
-as their decorative background. A retiring editor cannot write an answer back after
-Other was deselected. Native Ask User UI regressions exercise medium-to-large typing,
-multiline input, both kinds of deselection, close/reopen drafts, and exact submission.
-
 Historical onboarding references captured by executing commit `c3f12c17c` live
 under `docs/assets/parity/`. `TronSmokeUITests` keeps matching medium/pairing
 screenshots in its result bundle. Compare the medium sheet crop as well as the
@@ -1549,7 +1397,7 @@ scripts/tron-ios-test run \
   --only-testing TronMobileTests/ChatSessionPresentationTests
 ```
 
-On a physical device verify solving-to-thinking-to-hidden expiry, simultaneous synchronous and asynchronous rows, and live-to-terminal updates. A no-edit worker used only as a visual lifecycle fixture must declare `agentContract: { version: 1 }` and an explicit reason-bearing `acceptance: { level: "none", reason: "visual lifecycle probe" }`; otherwise the legacy implementation completion guard can pause the worker after its command and final output have finished, which is canonical resumable state rather than a running process. The composer subagent orb must enter and leave with the same scoped spring as the catch-up arrow; Subagents, a tapped child transcript, and Subagent History open at medium and can expand to large. Row taps present a bottom sheet instead of a rightward push. Activity and History cards share the aggregate tool cards' scroll-optimized surface, 12-point corners, 12/11-point horizontal/vertical padding, and 8-point section spacing. The title leads; plain colored lifecycle text sits at the top-right immediately left of elapsed time on the same baseline, separated by a middle dot, with no status pill or icon. Accessibility text sizes place the status/timing line below the title instead of squeezing the heading. A DETAILS block renders model/thinking/Started and counts/execution mode in the tool FILE/COMMAND field's 12-point medium code font, natural line spacing, and a 4-point caption gap. Metadata wraps rather than dropping counts. The LIVE OUTPUT (or terminal RESULT/ERROR) block uses the tool result's 11-point medium code font and shared bounded-tail fade, retaining three newest nonempty logical lines without clipping away the newest line when they wrap. Queued and paused previews say LATEST OUTPUT. The existing authoritative process projection updates the open sheet's output and lifecycle without a separate poller or transcript read; VoiceOver includes this bounded latest result. Activity uses one lazy row collection across running/completed headers and retained extension content, so an exact process keeps one identity rather than handing a stale live cell between separate collections. Orb-sheet rows retain the friendly local **Started** timestamp. Verify running counters advance each second without incoming progress, continue across scroll/remount and child-sheet round trips, and settle to the authoritative final duration; queued and paused rows stay fixed. Backgrounded or covered sheets stop refreshing, then catch up from the same receipt-local clock when visible. The lifecycle text and active-sheet container color identify status: amber while in progress, success green after completion, and red after failure, stop, rejection, or interruption. History also uses amber for in-progress rows; terminal history cards and child-session chrome use `tronSubagent` seafoam (`#03C3A8`, darkened in light mode for contrast), as do subagent context/update/fork pills. The History title and Done action retain their originating Manage Session theme. `ManageSessionThemeTests` covers the palette and lifecycle scope; focused `SessionSheetPresentationTests` inspect rendered toolbar colors and capture light/dark rows under an unrelated inherited theme. Confirm queued and paused producer states say `QUEUED` and `PAUSED` rather than `LIVE ACTIVITY`; a paused completion guard is resumable canonical state, not a still-running child process. Both subagent lists use the same scroll-optimized card treatment; history retains its bounded 400-row projection incrementally through a standard Load More pill. `SessionSheetPresentationTests.testSubagentResultsUpdateInOpenActivitySheet` verifies successive canonical output samples and terminal results replace the visible preview while preserving the native scroll owner and sheet detent. Active rows remain tappable before child-session binding, show a waiting state, and open the canonical tail once that binding appears. Short/empty child transcripts stay top-aligned while long newest pages open at the tail. Verify content is already visible without dragging on first open and after medium/large resizing, including long prepared Markdown; scrolling away must disable tail-following during subsequent resizing. Closing a child must reveal the same loaded history and cursor without an extra request, automatic Load More, or a spurious History changed card. An active child sheet shows the leading stop icon only when `process-transcript-abort.v1` is advertised; it stays muted gray while the lease loads, transitions to enabled red only after abort authority arrives, and tapping it disables the control and stops only that exact lease-bound execution through the synchronous parent abort or asynchronous trusted-controller path. Terminal sheets omit it, and earlier-page loading uses the same compact transcript pill as the main chat. Child transcript checks must verify the main transcript's zero-spacing stack, shared 16-point horizontal inset, 12-point top/tail affordances, eight-point row spacing, prepared Markdown in thinking and assistant text, one reconciled run chip per exact invocation/result identity during both live refresh and history paging, preserved orphan results, and no second process-summary tool/output card; explicit earlier paging, append-aware transcript refresh, VoiceOver, large Dynamic Type, and Reduce Motion remain correct. Assistant bash—including `nohup x &`—remains ordinary transcript/tool activity and never appears in Subagents.
+On a physical device verify solving-to-thinking-to-hidden expiry, simultaneous synchronous and asynchronous rows, and live-to-terminal updates. A no-edit worker used only as a visual lifecycle fixture must declare `agentContract: { version: 1 }` and an explicit reason-bearing `acceptance: { level: "none", reason: "visual lifecycle probe" }`; otherwise the legacy implementation completion guard can pause the worker after its command and final output have finished, which is canonical resumable state rather than a running process. The composer subagent orb must enter and leave with the same scoped spring as the catch-up arrow; Subagents, a tapped child transcript, and Subagent History open at medium and can expand to large. Row taps present a bottom sheet instead of a rightward push; rows keep standardized caption-scale mode/tool/turn pills with shared padding and one square icon frame in one flow, so every metadata pill has the same height despite different SF Symbol bounds; durations remain plain and right aligned, with no redundant lifecycle pill or per-row animated orb, and one normalized latest-action/output preview. Orb-sheet rows show the friendly local **Started** timestamp. Verify running counters advance each second without incoming progress, continue across scroll/remount and child-sheet round trips, and settle to the authoritative final duration; queued and paused rows stay fixed. Backgrounded or covered sheets stop refreshing, then catch up from the same receipt-local clock when visible. Active-sheet container color is the lifecycle signal: amber while in progress, success green after completion, and red after failure, stop, rejection, or interruption. History also uses amber for in-progress rows; terminal history cards and child-session chrome use `tronSubagent` seafoam (`#03C3A8`, darkened in light mode for contrast), as do subagent context/update/fork pills. The History title and Done action retain their originating Manage Session theme. `ManageSessionThemeTests` covers the palette and lifecycle scope; focused `SessionSheetPresentationTests` inspect rendered toolbar colors and capture light/dark rows under an unrelated inherited theme. Confirm queued and paused producer states say `QUEUED` and `PAUSED` rather than `LIVE ACTIVITY`; a paused completion guard is resumable canonical state, not a still-running child process. Liquid Glass containers exist only in the bounded active sheet; history uses scroll-optimized containers and retains its bounded 400-row projection incrementally through a standard Load More pill. Active rows remain tappable before child-session binding, show a waiting state, and open the canonical tail once that binding appears. Short/empty child transcripts stay top-aligned while long newest pages open at the tail. Verify content is already visible without dragging on first open and after medium/large resizing, including long prepared Markdown; scrolling away must disable tail-following during subsequent resizing. Closing a child must reveal the same loaded history and cursor without an extra request, automatic Load More, or a spurious History changed card. An active child sheet shows the leading stop icon only when `process-transcript-abort.v1` is advertised; it stays muted gray while the lease loads, transitions to enabled red only after abort authority arrives, and tapping it disables the control and stops only that exact lease-bound execution through the synchronous parent abort or asynchronous trusted-controller path. Terminal sheets omit it, and earlier-page loading uses the same compact transcript pill as the main chat. Child transcript checks must verify the main transcript's zero-spacing stack, shared 16-point horizontal inset, 12-point top/tail affordances, eight-point row spacing, prepared Markdown in thinking and assistant text, one reconciled run chip per exact invocation/result identity during both live refresh and history paging, preserved orphan results, and no second process-summary tool/output card; explicit earlier paging, append-aware transcript refresh, VoiceOver, large Dynamic Type, and Reduce Motion remain correct. Assistant bash—including `nohup x &`—remains ordinary transcript/tool activity and never appears in Subagents.
 
 ## Manual iOS release validation and delivery
 
