@@ -25,25 +25,50 @@ enum DashboardMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// Own image geometry independently of the menu's fixed native touch target.
+final class DashboardLogoButton: UIButton {
+    var logoSize: CGFloat = 24 {
+        didSet { if logoSize != oldValue { setNeedsLayout() } }
+    }
+
+    override func imageRect(forContentRect contentRect: CGRect) -> CGRect {
+        let side = min(logoSize, contentRect.width, contentRect.height)
+        return CGRect(x: contentRect.midX - side / 2, y: contentRect.midY - side / 2, width: side, height: side)
+    }
+}
+
 /// Native UIMenu presentation keeps dashboard switching consistent with the
 /// attachment popup and lets UIKit own dismissal before navigation changes.
 struct DashboardModeMenuButton: UIViewRepresentable {
     let mode: DashboardMode
     let onSelect: @MainActor (DashboardMode) -> Void
+    var sessionActions: SessionActions?
+    var logoSize: CGFloat = 24
+
+    struct SessionActions {
+        let search: @MainActor () -> Void
+        let filter: @MainActor () -> Void
+        let settings: @MainActor () -> Void
+        let newSession: @MainActor () -> Void
+    }
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
-    func makeUIView(context: Context) -> UIButton {
-        let button = UIButton(type: .custom)
+    func makeUIView(context: Context) -> DashboardLogoButton {
+        let button = DashboardLogoButton(type: .custom)
         button.showsMenuAsPrimaryAction = true
-        button.accessibilityLabel = "Switch dashboard"
+        // Preserve section order even when the floating button opens upward.
+        button.preferredMenuElementOrder = .fixed
+        button.accessibilityIdentifier = "dashboard.menu"
         button.setImage(UIImage(named: "TronLogoVector")?.withRenderingMode(.alwaysTemplate), for: .normal)
         button.imageView?.contentMode = .scaleAspectFit
         return button
     }
-    func updateUIView(_ button: UIButton, context: Context) {
+    func updateUIView(_ button: DashboardLogoButton, context: Context) {
         context.coordinator.parent = self
         button.menu = context.coordinator.makeMenu()
         button.tintColor = UIColor(mode.accent)
+        button.logoSize = logoSize
+        button.accessibilityLabel = sessionActions == nil ? "Switch dashboard" : "Dashboard menu"
         button.accessibilityValue = mode.rawValue
     }
 
@@ -52,7 +77,7 @@ struct DashboardModeMenuButton: UIViewRepresentable {
         var parent: DashboardModeMenuButton
         init(parent: DashboardModeMenuButton) { self.parent = parent }
         func makeMenu() -> UIMenu {
-            UIMenu(title: "", children: DashboardMode.allCases.map { mode in
+            let dashboards = DashboardMode.allCases.map { mode in
                 let image = UIImage(systemName: mode.systemImage)?.withTintColor(
                     UIColor(mode.accent), renderingMode: .alwaysOriginal
                 )
@@ -64,7 +89,34 @@ struct DashboardModeMenuButton: UIViewRepresentable {
                     }
                 }
                 return action
-            })
+            }
+            guard let actions = parent.sessionActions else {
+                return UIMenu(title: "", children: dashboards)
+            }
+            return UIMenu(children: [
+                UIMenu(options: .displayInline, children: dashboards),
+                UIMenu(options: .displayInline, children: [
+                    action("Search", symbol: "magnifyingglass", perform: actions.search),
+                    action("Filter", symbol: "line.3.horizontal.decrease", perform: actions.filter),
+                ]),
+                UIMenu(options: .displayInline, children: [
+                    action("Settings", symbol: "gearshape", perform: actions.settings),
+                ]),
+                UIMenu(options: .displayInline, children: [
+                    action("New Session", symbol: "plus", perform: actions.newSession),
+                ]),
+            ])
+        }
+
+        private func action(_ title: String, symbol: String, perform: @escaping @MainActor () -> Void) -> UIAction {
+            UIAction(title: title, image: UIImage(systemName: symbol)) { _ in
+                // Match mode switching: let UIKit retire the popup before the
+                // existing presentation owner opens a sheet or the keyboard.
+                Task { @MainActor in
+                    await Task.yield()
+                    perform()
+                }
+            }
         }
     }
 }

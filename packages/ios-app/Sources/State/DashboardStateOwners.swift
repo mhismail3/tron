@@ -373,14 +373,6 @@ struct DashboardServerFilterState: Equatable, Sendable {
 
     var isFiltering: Bool { !selectedProfileIDs.isEmpty || sortMode != .projectServer }
     var isAllSelected: Bool { selectedProfileIDs.isEmpty }
-    var accessibilityLabel: String {
-        let serverSelection = isAllSelected
-            ? "all servers selected"
-            : "\(selectedProfileIDs.count) servers selected"
-        let ordering = sortMode == .recent ? ", recent activity order" : ""
-        return "Filter servers, \(serverSelection)\(ordering)"
-    }
-
     mutating func reconcile(profileIDs: [String]) {
         let admitted = Set(profileIDs)
         availableProfileIDs = admitted

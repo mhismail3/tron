@@ -65,6 +65,7 @@ struct SessionShellView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dashboardMode: DashboardMode = .sessions
+    @State private var dashboardHeader = SessionDashboardHeaderState()
     @State private var showNewSession = false
     @State private var knowledgeDraftText: String?
     @State private var knowledgeDraftIdentity: KnowledgePresentationIdentity?
@@ -259,9 +260,11 @@ struct SessionShellView: View {
     }
 
     private func selectDashboard(_ mode: DashboardMode) {
+        guard dashboardMode != mode else { return }
         var transaction = Transaction(animation: nil)
         transaction.disablesAnimations = true
         withTransaction(transaction) {
+            dashboardHeader.update(offset: 0)
             dashboardMode = mode
         }
     }
@@ -306,8 +309,10 @@ struct SessionShellView: View {
         ZStack(alignment: .bottom) {
             ZStack(alignment: .bottomTrailing) {
                 sessionDashboardContent
-                TronTopBlurOverlay(style: .dashboard)
-                dashboardBottomControls
+                SessionDashboardBackdrop(state: dashboardHeader)
+                dashboardMenuButton
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 8)
                     .accessibilityHidden(showingSearch)
             }
             .ignoresSafeArea(.keyboard, edges: .bottom)
@@ -321,8 +326,11 @@ struct SessionShellView: View {
         .background(Color.tronBackground)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if dashboardMode == .sessions { dashboardToolbar }
+        .toolbar(.hidden, for: .navigationBar)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            SessionDashboardTitle()
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .padding(.horizontal, 20)
         }
         .scrollDismissesKeyboard(.interactively)
         .navigationDestination(item: $presentedSession) { route in
@@ -334,6 +342,7 @@ struct SessionShellView: View {
                 onForkCreated: present,
                 performanceSignposts: model.performanceSignpostsForCapture
             )
+            .toolbar(.visible, for: .navigationBar)
             .id(route.id)
             .tronPresentationSurface(
                 id: "chat.\(route.id)",
@@ -473,25 +482,6 @@ struct SessionShellView: View {
         }
     }
 
-    private var dashboardBottomControls: some View {
-        HStack(alignment: .bottom) {
-            dashboardSearchControl
-            Spacer(minLength: 12)
-            newSessionButton
-        }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 8)
-    }
-
-    private var dashboardSearchControl: some View {
-        Button(action: showDashboardSearch) {
-            Image(systemName: "magnifyingglass")
-                .font(TronTypography.sans(size: 22, weight: .semibold))
-        }
-        .buttonStyle(TronIconButtonStyle(size: 56))
-        .accessibilityLabel("Search sessions")
-    }
-
     private func showDashboardSearch() {
         withAnimation(.snappy(duration: 0.18)) {
             showingSearch = true
@@ -564,45 +554,21 @@ struct SessionShellView: View {
         DashboardServerFilterPreferences.save(serverFilter)
     }
 
-    private var newSessionButton: some View {
-        Button {
-            showNewSession = true
-        } label: {
-            Image(systemName: "plus")
-        }
-        .buttonStyle(TronIconButtonStyle(size: 56))
-        .accessibilityLabel("New Session")
-        .accessibilityHint("Opens the new session sheet")
-    }
-
-    @ToolbarContentBuilder
-    private var dashboardToolbar: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
-            DashboardModeMenuButton(mode: dashboardMode, onSelect: selectDashboard)
-            .frame(width: 34, height: 34)
-            .accessibilityLabel("Switch dashboard")
-            .accessibilityValue(dashboardMode.rawValue)
-        }
-        ToolbarItem(placement: .principal) {
-            Text("Tron")
-                .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
-                .foregroundStyle(Color.tronEmerald)
-        }
-        ToolbarItemGroup(placement: .primaryAction) {
-            Button {
-                showingServerFilter = true
-            } label: {
-                Image(systemName: "line.3.horizontal.decrease")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
-                    .foregroundStyle(Color.tronEmerald)
-            }
-            .accessibilityLabel(serverFilter.accessibilityLabel)
-            Button { showSettings = true } label: {
-                Image(systemName: "gearshape")
-                    .foregroundStyle(Color.tronEmerald)
-            }
-            .accessibilityLabel("Settings")
-        }
+    private var dashboardMenuButton: some View {
+        DashboardModeMenuButton(
+            mode: dashboardMode,
+            onSelect: selectDashboard,
+            sessionActions: .init(
+                search: showDashboardSearch,
+                filter: { showingServerFilter = true },
+                settings: { showSettings = true },
+                newSession: { showNewSession = true }
+            ),
+            logoSize: 34
+        )
+        .frame(width: 56, height: 56)
+        .contentShape(Circle())
+        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.22)).interactive(), in: .circle)
     }
 
     private var renameConfirmationPresented: Binding<Bool> {
@@ -681,6 +647,12 @@ struct SessionShellView: View {
         .contentMargins(.bottom, 92)
         .tronCollectionSurface()
         .tronScrollEdgeChrome()
+        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+            // Normalize the resting offset by the actual safe-area/content inset.
+            min(SessionDashboardHeaderState.blurFadeDistance, max(0, geometry.contentOffset.y + geometry.contentInsets.top))
+        } action: { _, offset in
+            dashboardHeader.update(offset: offset)
+        }
         .animation(
             TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
             value: dashboardPresentation
