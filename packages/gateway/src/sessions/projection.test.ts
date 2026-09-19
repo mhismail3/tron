@@ -27,6 +27,7 @@ import {
   mergeLiveToolOutput,
   MINIMUM_TRANSCRIPT_CONTINUITY_MESSAGES,
   projectToolOutput,
+  projectToolResult,
   projectTranscript,
   projectTranscriptPage,
   projectTree,
@@ -1050,6 +1051,23 @@ describe("transcript projection", () => {
     expect((projected as Record<string, unknown>)[projectedKey]).toBe("value");
   });
 
+  it("preserves sparse JSON slots and stops getter traversal at the byte budget", () => {
+    expect(projectJson(new Array(2), 512)).toEqual([null, null]);
+    const sparse = projectJson(new Array(1_000), 512);
+    expect(Buffer.byteLength(JSON.stringify(sparse))).toBeLessThanOrEqual(512);
+    let getterReads = 0;
+    const source: Record<string, unknown> = {};
+    for (let index = 0; index < 10_000; index += 1) {
+      Object.defineProperty(source, `leaf-${index}`, {
+        enumerable: true,
+        get: () => { getterReads += 1; return index; },
+      });
+    }
+    const projected = projectJson(source, 512);
+    expect(Buffer.byteLength(JSON.stringify(projected))).toBeLessThanOrEqual(512);
+    expect(getterReads).toBeLessThan(100);
+  });
+
   it("stops reverse tool traversal once a newest oversized block fills the tail", () => {
     const source = new Proxy(new Array(1_000_000), {
       get(target, property) {
@@ -1067,11 +1085,29 @@ describe("transcript projection", () => {
     expect(projectToolOutput({ content: [{ type: "text", text: "building\nstep two" }] })).toEqual({
       output: "building\nstep two",
     });
+    expect(projectToolOutput({ content: [
+      { type: "text", text: "FIRST" },
+      { type: "text", text: "SECOND" },
+      { type: "text", text: "THIRD" },
+    ] })).toEqual({ output: "FIRST\nSECOND\nTHIRD" });
+    const boundedBlocks = projectToolOutput({ content: [
+      { type: "text", text: `old-${"🙂".repeat(80)}` },
+      { type: "text", text: "FINAL-LINE" },
+    ] }, 64);
+    expect(boundedBlocks.outputTruncated).toBe(true);
+    expect(boundedBlocks.output).toMatch(/FINAL-LINE$/);
+    expect(Buffer.byteLength(boundedBlocks.output!)).toBeLessThanOrEqual(64);
     const bounded = projectToolOutput({ output: `old-${"x".repeat(80_000)}-new` }, 1_024);
     expect(bounded.outputTruncated).toBe(true);
     expect(bounded.output).toContain("earlier live output truncated");
     expect(bounded.output).toMatch(/-new$/);
     expect(Buffer.byteLength(bounded.output!)).toBeLessThanOrEqual(1_024);
+  });
+
+  it("tails a large scalar before JSON projection preserves the result shape", () => {
+    const projected = projectToolResult({ content: [{ type: "text", text: `${"old-".repeat(30_000)}LATEST-END` }] });
+    expect(projected).toMatchObject({ content: [{ type: "text", text: expect.stringContaining("LATEST-END") }] });
+    expect(Buffer.byteLength(JSON.stringify(projected))).toBeLessThanOrEqual(24_000);
   });
 
   it("replaces live output frames in place while empty updates preserve readable output", () => {

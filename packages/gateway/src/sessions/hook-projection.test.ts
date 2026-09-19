@@ -70,6 +70,12 @@ describe("hook registration projection", () => {
     expect(registrations.hookInventory.loadErrors.omitted).toBeGreaterThan(0);
     expect(registrations.hookInventory.encodedBytes).toBeLessThanOrEqual(MAX_HOOK_PROJECTION_BYTES);
     expect(registrations.extensions).toHaveLength(1);
+    expect(registrations.extensions[0]).toMatchObject({
+      name: "hook-1.ts",
+      path: expect.stringContaining("exact-exact-"),
+      tools: [],
+      commands: [],
+    });
   });
 
   it("omits oversized event names rather than truncating their identity", () => {

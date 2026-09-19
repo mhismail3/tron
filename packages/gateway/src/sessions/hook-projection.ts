@@ -45,121 +45,90 @@ function boundedText(value: string, onOmitted: () => void): string {
   return `${value.slice(0, MAX_HOOK_STRING_CHARACTERS)}…`;
 }
 
-function arrayBytes(items: readonly number[]): number {
-  return 2 + items.reduce((total, bytes, index) => total + bytes + (index > 0 ? 1 : 0), 0);
-}
-
-/**
- * Projects loader registrations under one aggregate envelope. A row is admitted
- * only when its complete identity and selected additions fit the envelope; this
- * keeps the reported encoded byte count equal to the actual bounded projection
- * rather than budgeting handlers separately from the rows that contain them.
- */
+/** Projects registrations under one aggregate envelope. Identity rows are
+ * admitted first; handlers, tools, and commands are optional additions and can
+ * never make an already-admitted identity disappear. */
 export function projectHookRegistrations(
   extensions: readonly HookProjectionExtension[],
   loadErrors: readonly HookProjectionLoadError[],
 ): HookRegistrationProjection {
   let textFieldsOmitted = 0;
   let retainedHandlerEvents = 0;
-  let retainedLoadErrors = 0;
-  let retainedExtensions = 0;
   const projectedExtensions: Array<Record<string, unknown>> = [];
-  const projectedLoadErrors: Array<{ path: string; error: string }> = [];
   const prefixBytes = Buffer.byteLength(EXTENSION_PREFIX);
   const separatorBytes = Buffer.byteLength(ERROR_SEPARATOR);
   const suffixBytes = Buffer.byteLength(PROJECTION_SUFFIX);
-  let encodedBytes = prefixBytes;
+  const rowBytes = (row: Record<string, unknown>): number => Buffer.byteLength(JSON.stringify(row));
+  const rowsBytes = (): number => prefixBytes
+    + projectedExtensions.reduce((total, row) => total + rowBytes(row), 0)
+    + Math.max(0, projectedExtensions.length - 1);
+  const canAdmitIdentity = (candidateBytes: number): boolean =>
+    rowsBytes() + (projectedExtensions.length > 0 ? 1 : 0) + candidateBytes
+      + separatorBytes + suffixBytes <= MAX_HOOK_PROJECTION_BYTES;
 
-  const baseRow = (extension: HookProjectionExtension, handlers: Array<{ event: string; count: number }>): Record<string, unknown> => ({
-    name: boundedText(extension.name, () => { textFieldsOmitted += 1; }),
-    path: boundedText(extension.path, () => { textFieldsOmitted += 1; }),
-    resolvedPath: boundedText(extension.resolvedPath, () => { textFieldsOmitted += 1; }),
-    scope: boundedText(extension.scope, () => { textFieldsOmitted += 1; }),
-    source: boundedText(extension.source, () => { textFieldsOmitted += 1; }),
-    origin: boundedText(extension.origin, () => { textFieldsOmitted += 1; }),
-    tools: [],
-    commands: [],
-    handlers,
-  });
-
-  for (let extensionIndex = 0; extensionIndex < extensions.length && extensionIndex < GENERIC_RESOURCE_ARRAY_LIMIT; extensionIndex += 1) {
-    const extension = extensions[extensionIndex]!;
-    const totalHandlers = extension.handlers.size;
-    const handlers: Array<{ event: string; count: number }> = [];
-    let handlerBytes = 2;
-    let handlerIndex = 0;
-    for (const [event, registeredHandlers] of extension.handlers) {
-      if (handlerIndex >= MAX_HOOK_HANDLER_EVENTS_PER_EXTENSION) break;
-      handlerIndex += 1;
-      if (event.length > MAX_HOOK_STRING_CHARACTERS) {
-        textFieldsOmitted += 1;
-        continue;
-      }
-      const projected = { event, count: registeredHandlers.length };
-      const itemBytes = Buffer.byteLength(JSON.stringify(projected));
-      handlers.push(projected);
-      handlerBytes += itemBytes + (handlers.length > 1 ? 1 : 0);
-    }
-
-    const row = baseRow(extension, handlers);
-    const rowBaseBytes = Buffer.byteLength(JSON.stringify(row));
-    const fixedRowBytes = rowBaseBytes - 4; // replace the two empty arrays below
-    const toolValues: string[] = [];
-    const commandValues: string[] = [];
-    const toolBytes: number[] = [];
-    const commandBytes: number[] = [];
-    const rowBytes = (): number => fixedRowBytes + arrayBytes(toolBytes) + arrayBytes(commandBytes) - handlerBytes + handlerBytes;
-    // The handler array is already represented in rowBaseBytes; the final two
-    // terms make the accounting explicit and keep this expression symmetric.
-    let candidateBytes = rowBytes();
-    const canFit = (nextBytes: number): boolean => encodedBytes
-      + (projectedExtensions.length > 0 ? 1 : 0)
-      + nextBytes + separatorBytes + suffixBytes <= MAX_HOOK_PROJECTION_BYTES;
-
-    const admitValues = (values: Iterable<string>, target: string[], targetBytes: number[]): void => {
-      let seen = 0;
-      for (const value of values) {
-        if (seen >= GENERIC_RESOURCE_ARRAY_LIMIT) {
-          textFieldsOmitted += 1;
-          break;
-        }
-        seen += 1;
-        const bounded = boundedText(value, () => { textFieldsOmitted += 1; });
-        const valueBytes = Buffer.byteLength(JSON.stringify(bounded));
-        const nextBytes = candidateBytes
-          - arrayBytes(targetBytes) + arrayBytes([...targetBytes, valueBytes]);
-        if (!canFit(nextBytes)) {
-          textFieldsOmitted += 1;
-          break;
-        }
-        target.push(bounded);
-        targetBytes.push(valueBytes);
-        candidateBytes = nextBytes;
-      }
+  // Reserve every identity before optional inventories are admitted. A large
+  // handler map can therefore never evict a later extension's identity.
+  for (let index = 0; index < extensions.length && index < GENERIC_RESOURCE_ARRAY_LIMIT; index += 1) {
+    const extension = extensions[index]!;
+    const row: Record<string, unknown> = {
+      name: boundedText(extension.name, () => { textFieldsOmitted += 1; }),
+      path: boundedText(extension.path, () => { textFieldsOmitted += 1; }),
+      resolvedPath: boundedText(extension.resolvedPath, () => { textFieldsOmitted += 1; }),
+      scope: boundedText(extension.scope, () => { textFieldsOmitted += 1; }),
+      source: boundedText(extension.source, () => { textFieldsOmitted += 1; }),
+      origin: boundedText(extension.origin, () => { textFieldsOmitted += 1; }),
+      tools: [], commands: [], handlers: [],
     };
-    admitValues(extension.tools, toolValues, toolBytes);
-    admitValues(extension.commands, commandValues, commandBytes);
-    row.tools = toolValues;
-    row.commands = commandValues;
-    candidateBytes = rowBytes();
-
-    if (!canFit(candidateBytes)) {
-      // The identity row itself is too large for the remaining envelope. Do
-      // not publish a partial identity; the omission is reflected below.
-      continue;
-    }
+    if (!canAdmitIdentity(rowBytes(row))) break;
     projectedExtensions.push(row);
-    retainedExtensions += 1;
-    retainedHandlerEvents += handlers.length;
-    encodedBytes += (projectedExtensions.length > 1 ? 1 : 0) + candidateBytes;
+  }
+  const retainedExtensions = projectedExtensions.length;
+
+  const admitValues = (extension: HookProjectionExtension, index: number, field: "tools" | "commands"): void => {
+    const target = projectedExtensions[index]![field] as string[];
+    let seen = 0;
+    for (const value of extension[field]) {
+      if (seen >= GENERIC_RESOURCE_ARRAY_LIMIT) { textFieldsOmitted += 1; break; }
+      seen += 1;
+      const bounded = boundedText(value, () => { textFieldsOmitted += 1; });
+      target.push(bounded);
+      if (rowsBytes() + separatorBytes + suffixBytes > MAX_HOOK_PROJECTION_BYTES) {
+        target.pop();
+        textFieldsOmitted += 1;
+        break;
+      }
+    }
+  };
+
+  for (let index = 0; index < retainedExtensions; index += 1) {
+    const extension = extensions[index]!;
+    const row = projectedExtensions[index]!;
+    const handlerItems: Array<{ event: string; count: number }> = [];
+    let seenHandlers = 0;
+    for (const [event, registeredHandlers] of extension.handlers) {
+      if (seenHandlers >= MAX_HOOK_HANDLER_EVENTS_PER_EXTENSION) break;
+      seenHandlers += 1;
+      if (event.length > MAX_HOOK_STRING_CHARACTERS) { textFieldsOmitted += 1; continue; }
+      const item = { event, count: registeredHandlers.length };
+      // Mutate the bounded accumulator only while measuring this candidate;
+      // cloning a growing handler list here would make admission quadratic.
+      const previousHandlers = row.handlers;
+      handlerItems.push(item);
+      row.handlers = handlerItems;
+      const fits = rowsBytes() + separatorBytes + suffixBytes <= MAX_HOOK_PROJECTION_BYTES;
+      if (!fits) {
+        handlerItems.pop();
+        row.handlers = previousHandlers;
+        textFieldsOmitted += 1;
+      }
+    }
+    retainedHandlerEvents += handlerItems.length;
+    admitValues(extension, index, "tools");
+    admitValues(extension, index, "commands");
   }
 
-  // Rows after the explicit scan bound are omitted without walking a lazy source
-  // again; the inventory remains exact because the input is an array.
-  const omittedExtensionCount = Math.max(0, extensions.length - projectedExtensions.length);
-  if (extensions.length > GENERIC_RESOURCE_ARRAY_LIMIT) textFieldsOmitted += 1;
-
-  encodedBytes += separatorBytes;
+  const projectedLoadErrors: Array<{ path: string; error: string }> = [];
+  let encodedBytes = rowsBytes() + separatorBytes;
   for (let index = 0; index < loadErrors.length && index < GENERIC_RESOURCE_ARRAY_LIMIT; index += 1) {
     const loadError = loadErrors[index]!;
     const projected = {
@@ -167,37 +136,21 @@ export function projectHookRegistrations(
       error: boundedText(loadError.error, () => { textFieldsOmitted += 1; }),
     };
     const bytes = Buffer.byteLength(JSON.stringify(projected));
-    if (encodedBytes + (projectedLoadErrors.length > 0 ? 1 : 0) + bytes + suffixBytes > MAX_HOOK_PROJECTION_BYTES) {
-      textFieldsOmitted += 1;
-      continue;
-    }
+    const comma = projectedLoadErrors.length > 0 ? 1 : 0;
+    if (encodedBytes + comma + bytes + suffixBytes > MAX_HOOK_PROJECTION_BYTES) { textFieldsOmitted += 1; continue; }
     projectedLoadErrors.push(projected);
-    retainedLoadErrors += 1;
-    encodedBytes += (projectedLoadErrors.length > 1 ? 1 : 0) + bytes;
+    encodedBytes += comma + bytes;
   }
-  if (loadErrors.length > GENERIC_RESOURCE_ARRAY_LIMIT) textFieldsOmitted += 1;
+  if (extensions.length > GENERIC_RESOURCE_ARRAY_LIMIT || loadErrors.length > GENERIC_RESOURCE_ARRAY_LIMIT) textFieldsOmitted += 1;
   encodedBytes += suffixBytes;
-
   const totalHookHandlerEvents = extensions.reduce((total, extension) => total + extension.handlers.size, 0);
   return {
     extensions: projectedExtensions,
     extensionLoadErrors: projectedLoadErrors,
     hookInventory: {
-      extensions: {
-        total: extensions.length,
-        retained: retainedExtensions,
-        omitted: omittedExtensionCount,
-      },
-      handlerEvents: {
-        total: totalHookHandlerEvents,
-        retained: retainedHandlerEvents,
-        omitted: totalHookHandlerEvents - retainedHandlerEvents,
-      },
-      loadErrors: {
-        total: loadErrors.length,
-        retained: retainedLoadErrors,
-        omitted: loadErrors.length - retainedLoadErrors,
-      },
+      extensions: { total: extensions.length, retained: retainedExtensions, omitted: extensions.length - retainedExtensions },
+      handlerEvents: { total: totalHookHandlerEvents, retained: retainedHandlerEvents, omitted: totalHookHandlerEvents - retainedHandlerEvents },
+      loadErrors: { total: loadErrors.length, retained: projectedLoadErrors.length, omitted: loadErrors.length - projectedLoadErrors.length },
       textFieldsOmitted,
       encodedBytes,
       encodedBytesLimit: MAX_HOOK_PROJECTION_BYTES,
