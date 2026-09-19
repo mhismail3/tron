@@ -48,7 +48,7 @@ enum AutomationTimelinePresentationPolicy {
 
 struct AutomationsDashboardView: View {
     let onSelectDashboard: @MainActor (DashboardMode) -> Void
-    let onOpenSettings: () -> Void
+    let onOpenSettings: @MainActor () -> Void
     let onOpenSession: @MainActor (String, String) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
@@ -57,6 +57,7 @@ struct AutomationsDashboardView: View {
     @Binding private var viewPreferences: AutomationDashboardViewPreferences
     @State private var search = ""
     @State private var showingSearch = false
+    @State private var dashboardHeader = DashboardHeaderState()
     @State private var showingFilters = false
     @State private var selected: AutomationSummarySelection?
     @State private var createPresented = false
@@ -68,7 +69,7 @@ struct AutomationsDashboardView: View {
     init(
         viewPreferences: Binding<AutomationDashboardViewPreferences>,
         onSelectDashboard: @escaping @MainActor (DashboardMode) -> Void,
-        onOpenSettings: @escaping () -> Void,
+        onOpenSettings: @escaping @MainActor () -> Void,
         onOpenSession: @escaping @MainActor (String, String) -> Void
     ) {
         _viewPreferences = viewPreferences
@@ -145,24 +146,18 @@ struct AutomationsDashboardView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            ZStack(alignment: .bottomTrailing) {
-                content
-                TronTopBlurOverlay(style: .dashboard)
-                dashboardBottomControls
-                    .accessibilityHidden(showingSearch)
-            }
-            .ignoresSafeArea(.keyboard, edges: .bottom)
-
-            if showingSearch {
-                automationSearchBar
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
+        DashboardChrome(
+            mode: .automations,
+            header: dashboardHeader,
+            onSelect: onSelectDashboard,
+            actions: dashboardMenuActions,
+            showingSearch: showingSearch,
+            isRefreshing: mode == .upcoming && timelineRefreshIndicatorVisible && !isInitiallyLoading
+        ) {
+            content
+        } search: {
+            automationSearchBar
         }
-        .background(Color.tronBackground)
-        .navigationTitle("")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar { toolbar }
         .tronPresentation()
         .tronSettingsVisualTheme(accent: .tronAutomation)
         .task(id: PresentationActivityTaskID(
@@ -217,6 +212,7 @@ struct AutomationsDashboardView: View {
             if mode == .upcoming { timeline?.load(start: selectedDate) }
         }
         .onChange(of: mode) { _, nextMode in
+            dashboardHeader.update(offset: 0)
             if nextMode == .upcoming {
                 dismissAutomationSearch()
                 timeline?.load(start: selectedDate)
@@ -311,6 +307,7 @@ struct AutomationsDashboardView: View {
             .padding(.horizontal, 20).padding(.vertical, 16).padding(.bottom, 80)
         }
         .tronScrollEdgeChrome()
+        .tronDashboardScroll(dashboardHeader)
     }
 
     private var upcomingContent: some View {
@@ -368,6 +365,7 @@ struct AutomationsDashboardView: View {
                 .padding(.bottom, AutomationTimelinePresentationPolicy.bottomControlClearance)
             }
             .tronScrollEdgeChrome()
+            .tronDashboardScroll(dashboardHeader)
         }
     }
 
@@ -524,31 +522,16 @@ struct AutomationsDashboardView: View {
         }
     }
 
-    private var dashboardBottomControls: some View {
-        HStack(alignment: .bottom) {
-            if mode == .all {
-                Button(action: showAutomationSearch) {
-                    Image(systemName: "magnifyingglass")
-                        .font(TronTypography.sans(size: 22, weight: .semibold))
-                }
-                .buttonStyle(TronIconButtonStyle(accent: .tronAutomation, size: 56))
-                .accessibilityLabel("Search Automations")
-            } else {
-                Button { datePickerPresented = true } label: {
-                    Image(systemName: "calendar")
-                }
-                .buttonStyle(TronIconButtonStyle(accent: .tronAutomation, size: 56))
-                .accessibilityLabel("Choose agenda date")
-            }
-            Spacer(minLength: 12)
-            Button { createPresented = true } label: {
-                Image(systemName: "plus")
-            }
-            .buttonStyle(TronIconButtonStyle(accent: .tronAutomation, size: 56))
-            .accessibilityLabel("Create Automation")
-        }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 8)
+    private var dashboardMenuActions: DashboardMenuActions {
+        DashboardMenuActions(
+            search: showAutomationSearch,
+            filter: { showingFilters = true },
+            settings: onOpenSettings,
+            additionalControls: mode == .upcoming
+                ? [.init(title: "Choose agenda date", symbol: "calendar", perform: { datePickerPresented = true })]
+                : [],
+            creation: [.init(title: "Create Automation", symbol: "plus", perform: { createPresented = true })]
+        )
     }
 
     private var automationSearchBar: some View {
@@ -575,6 +558,9 @@ struct AutomationsDashboardView: View {
     }
 
     private func showAutomationSearch() {
+        // Search targets the inventory, never the chronological agenda. Admit
+        // that explicit view choice through the existing preference owner.
+        updateViewPreferences { $0.mode = .all }
         withAnimation(.snappy(duration: 0.18)) { showingSearch = true }
     }
 
@@ -704,36 +690,4 @@ struct AutomationsDashboardView: View {
         }
     }
 
-    @ToolbarContentBuilder private var toolbar: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
-            DashboardModeMenuButton(mode: .automations, onSelect: onSelectDashboard)
-                .frame(width: 34, height: 34)
-        }
-        ToolbarItem(placement: .principal) {
-            Text("Automations")
-                .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
-                .foregroundStyle(Color.tronAutomation)
-                .overlay(alignment: .trailing) {
-                    if mode == .upcoming && timelineRefreshIndicatorVisible && !isInitiallyLoading {
-                        TronPulseLoadingIndicator(accent: .tronAutomation, size: 14)
-                            .offset(x: 22)
-                            .accessibilityElement(children: .ignore)
-                            .accessibilityLabel("Refreshing upcoming Automations")
-                            .transition(.opacity)
-                    }
-                }
-        }
-        ToolbarItemGroup(placement: .primaryAction) {
-            Button { showingFilters = true } label: {
-                Image(systemName: "line.3.horizontal.decrease")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
-                    .foregroundStyle(Color.tronAutomation)
-            }
-            .accessibilityLabel("View and filter Automations, \(mode.rawValue)")
-            Button(action: onOpenSettings) {
-                Image(systemName: "gearshape").foregroundStyle(Color.tronAutomation)
-            }
-            .accessibilityLabel("Settings")
-        }
-    }
 }

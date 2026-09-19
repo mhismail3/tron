@@ -14,11 +14,16 @@ struct DashboardStateOwnerTests {
         #expect(DashboardMode.automations.accent == .tronAutomation)
         #expect(Set(DashboardMode.allCases.map(\.id)).count == DashboardMode.allCases.count)
         #expect(Set(DashboardMode.allCases.map(\.systemImage)).count == DashboardMode.allCases.count)
-        let menuButton = DashboardModeMenuButton(mode: .sessions, onSelect: { _ in })
+        let menuButton = DashboardModeMenuButton(mode: .sessions, onSelect: { _ in }, actions: .init(
+            search: {}, filter: {}, settings: {},
+            creation: [.init(title: "New Session", symbol: "plus", perform: {})]
+        ))
         let coordinator = menuButton.makeCoordinator()
         let menu = coordinator.makeMenu()
         #expect(menu.title.isEmpty, "The native dashboard menu must not show a redundant Dashboard header")
-        for action in menu.children.compactMap({ $0 as? UIAction }) {
+        let dashboards = (menu.children.first as? UIMenu)?.children.compactMap { $0 as? UIAction } ?? []
+        #expect(dashboards.count == DashboardMode.allCases.count)
+        for action in dashboards {
             #expect(action.image?.renderingMode == .alwaysOriginal,
                     "Dashboard menu entries retain their per-mode symbol tint")
         }

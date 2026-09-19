@@ -65,7 +65,7 @@ struct SessionShellView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dashboardMode: DashboardMode = .sessions
-    @State private var dashboardHeader = SessionDashboardHeaderState()
+    @State private var dashboardHeader = DashboardHeaderState()
     @State private var showNewSession = false
     @State private var knowledgeDraftText: String?
     @State private var knowledgeDraftIdentity: KnowledgePresentationIdentity?
@@ -238,6 +238,7 @@ struct SessionShellView: View {
         case .knowledge:
             KnowledgeDashboardView(
                 onSelectDashboard: selectDashboard,
+                onOpenSettings: { showSettings = true },
                 onOpenDraft: openKnowledgeDraft,
                 onOpenSession: openKnowledgeEvidence
             )
@@ -306,32 +307,18 @@ struct SessionShellView: View {
     }
 
     private var sessionDashboardScreen: some View {
-        ZStack(alignment: .bottom) {
-            ZStack(alignment: .bottomTrailing) {
-                sessionDashboardContent
-                SessionDashboardBackdrop(state: dashboardHeader)
-                dashboardMenuButton
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 8)
-                    .accessibilityHidden(showingSearch)
-            }
-            .ignoresSafeArea(.keyboard, edges: .bottom)
-
-            if showingSearch {
-                dashboardSearchBar
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
+        DashboardChrome(
+            mode: .sessions,
+            header: dashboardHeader,
+            onSelect: selectDashboard,
+            actions: dashboardMenuActions,
+            showingSearch: showingSearch
+        ) {
+            sessionDashboardContent
+        } search: {
+            dashboardSearchBar
         }
         .scrollContentBackground(.hidden)
-        .background(Color.tronBackground)
-        .navigationTitle("")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .navigationBar)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            SessionDashboardTitle()
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                .padding(.horizontal, 20)
-        }
         .scrollDismissesKeyboard(.interactively)
         .navigationDestination(item: $presentedSession) { route in
             ChatView(
@@ -554,21 +541,13 @@ struct SessionShellView: View {
         DashboardServerFilterPreferences.save(serverFilter)
     }
 
-    private var dashboardMenuButton: some View {
-        DashboardModeMenuButton(
-            mode: dashboardMode,
-            onSelect: selectDashboard,
-            sessionActions: .init(
-                search: showDashboardSearch,
-                filter: { showingServerFilter = true },
-                settings: { showSettings = true },
-                newSession: { showNewSession = true }
-            ),
-            logoSize: 34
+    private var dashboardMenuActions: DashboardMenuActions {
+        DashboardMenuActions(
+            search: showDashboardSearch,
+            filter: { showingServerFilter = true },
+            settings: { showSettings = true },
+            creation: [.init(title: "New Session", symbol: "plus", perform: { showNewSession = true })]
         )
-        .frame(width: 56, height: 56)
-        .contentShape(Circle())
-        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.22)).interactive(), in: .circle)
     }
 
     private var renameConfirmationPresented: Binding<Bool> {
@@ -647,12 +626,7 @@ struct SessionShellView: View {
         .contentMargins(.bottom, 92)
         .tronCollectionSurface()
         .tronScrollEdgeChrome()
-        .onScrollGeometryChange(for: CGFloat.self) { geometry in
-            // Normalize the resting offset by the actual safe-area/content inset.
-            min(SessionDashboardHeaderState.blurFadeDistance, max(0, geometry.contentOffset.y + geometry.contentInsets.top))
-        } action: { _, offset in
-            dashboardHeader.update(offset: offset)
-        }
+        .tronDashboardScroll(dashboardHeader)
         .animation(
             TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
             value: dashboardPresentation

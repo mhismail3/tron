@@ -40,6 +40,7 @@ struct KnowledgeDashboardView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var activity
     let onSelectDashboard: @MainActor (DashboardMode) -> Void
+    let onOpenSettings: @MainActor () -> Void
     let onOpenDraft: @MainActor (KnowledgeRecord) -> Void
     let onOpenSession: @MainActor (String, String) -> Void
     @State private var records: [KnowledgeRecord] = []
@@ -68,6 +69,7 @@ struct KnowledgeDashboardView: View {
     @State private var noteSheet = false
     @State private var showingFilters = false
     @State private var showingSearch = false
+    @State private var dashboardHeader = DashboardHeaderState()
 
     private var filterSummary: String {
         let summary = [kind?.label, scope?.label].compactMap { $0 }.joined(separator: " · ")
@@ -75,7 +77,13 @@ struct KnowledgeDashboardView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
+        DashboardChrome(
+            mode: .knowledge,
+            header: dashboardHeader,
+            onSelect: onSelectDashboard,
+            actions: dashboardMenuActions,
+            showingSearch: showingSearch
+        ) {
             GeometryReader { geometry in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: KnowledgeDashboardLayout.recordSpacing) {
@@ -88,62 +96,14 @@ struct KnowledgeDashboardView: View {
                     .padding(.bottom, 80)
                 }
                 .tronScrollEdgeChrome()
+                .tronDashboardScroll(dashboardHeader)
             }
-            .ignoresSafeArea(.keyboard, edges: .bottom)
-            TronTopBlurOverlay(style: .dashboard)
-            if showingSearch {
-                TronSearchBar(text: $search, prompt: "Search Knowledge", accent: .tronKnowledge,
-                              focusOnAppear: true, onClose: dismissSearch,
-                              onFocusChange: { if !$0 { dismissSearch() } })
-                    .padding(.horizontal, TronSpacing.section)
-                    .padding(.vertical, 8)
-            } else {
-                HStack {
-                    Button { showingSearch = true } label: { Image(systemName: "magnifyingglass") }
-                        .buttonStyle(TronIconButtonStyle(accent: .tronKnowledge, size: 56))
-                        .accessibilityLabel("Search Knowledge")
-                    Spacer(minLength: 12)
-                    Menu {
-                        Button("Capture URL", systemImage: "link.badge.plus") { captureSheet = true }
-                        Button("New note", systemImage: "note.text.badge.plus") { noteSheet = true }
-                    } label: { Image(systemName: "plus") }
-                        .buttonStyle(TronIconButtonStyle(accent: .tronKnowledge, size: 56))
-                        .accessibilityLabel("Add Knowledge")
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 8)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.tronBackground)
-        .navigationTitle("")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                DashboardModeMenuButton(mode: .knowledge, onSelect: onSelectDashboard)
-                    .frame(width: 34, height: 34)
-            }
-            ToolbarItem(placement: .principal) {
-                Text("Knowledge")
-                    .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
-                    .foregroundStyle(Color.tronKnowledge)
-                    .accessibilityAddTraits(.isHeader)
-            }
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button { showingFilters = true } label: {
-                    Image(systemName: "line.3.horizontal.decrease").foregroundStyle(Color.tronKnowledge)
-                }
-                .accessibilityLabel("Knowledge filters")
-                .accessibilityValue(filterSummary)
-                Menu {
-                    Button("Observation configuration", systemImage: "eye") { configSheet = true }
-                    Button("Connectors", systemImage: "arrow.triangle.2.circlepath") { connectorSheet = true }
-                    Button("Capture URL", systemImage: "link.badge.plus") { captureSheet = true }
-                    Button("New note", systemImage: "note.text.badge.plus") { noteSheet = true }
-                    Button("Import legacy records", systemImage: "square.and.arrow.down") { importSheet = true }
-                } label: { Image(systemName: "ellipsis").foregroundStyle(Color.tronKnowledge) }
-                    .accessibilityLabel("Knowledge actions")
-            }
+        } search: {
+            TronSearchBar(text: $search, prompt: "Search Knowledge", accent: .tronKnowledge,
+                          focusOnAppear: true, onClose: dismissSearch,
+                          onFocusChange: { if !$0 { dismissSearch() } })
+                .padding(.horizontal, TronSpacing.section)
+                .padding(.vertical, 8)
         }
         .font(TronTypography.body)
         .foregroundStyle(Color.tronTextPrimary)
@@ -194,6 +154,23 @@ struct KnowledgeDashboardView: View {
             if !active { coverageStore.suspend() }
         }
         .onDisappear { coverageStore.suspend() }
+    }
+
+    private var dashboardMenuActions: DashboardMenuActions {
+        DashboardMenuActions(
+            search: { showingSearch = true },
+            filter: { showingFilters = true },
+            settings: onOpenSettings,
+            settingsMenu: .init(title: "Knowledge settings", symbol: "slider.horizontal.3", actions: [
+                .init(title: "Observation configuration", symbol: "eye", perform: { configSheet = true }),
+                .init(title: "Connectors", symbol: "arrow.triangle.2.circlepath", perform: { connectorSheet = true }),
+                .init(title: "Import legacy records", symbol: "square.and.arrow.down", perform: { importSheet = true }),
+            ]),
+            creation: [
+                .init(title: "Capture URL", symbol: "link.badge.plus", perform: { captureSheet = true }),
+                .init(title: "New note", symbol: "note.text.badge.plus", perform: { noteSheet = true }),
+            ]
+        )
     }
 
     private func dismissSearch() {

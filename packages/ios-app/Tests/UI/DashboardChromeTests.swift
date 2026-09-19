@@ -3,22 +3,18 @@ import XCTest
 @testable import TronMobile
 
 @MainActor
-final class SessionDashboardHeaderTests: XCTestCase {
-    func testNativeLogoSizingKeepsToolbarIconsUnchanged() {
+final class DashboardChromeTests: XCTestCase {
+    func testNativeLogoSizingKeepsTheFixedTouchTarget() {
         let button = DashboardLogoButton(type: .custom)
         button.setImage(UIImage(named: "TronLogoVector"), for: .normal)
-        button.frame = CGRect(x: 0, y: 0, width: 34, height: 34)
-        button.layoutIfNeeded()
-        XCTAssertEqual(button.imageView?.bounds.size, CGSize(width: 24, height: 24))
-        button.logoSize = 34
-        button.frame.size = CGSize(width: 56, height: 56)
+        button.frame = CGRect(x: 0, y: 0, width: 56, height: 56)
         button.layoutIfNeeded()
         XCTAssertEqual(button.imageView?.bounds.size, CGSize(width: 34, height: 34))
         XCTAssertEqual(button.imageView?.center, CGPoint(x: 28, y: 28))
     }
 
     func testScrollProgressIsBoundedReversibleAndIgnoresInvalidGeometry() {
-        let state = SessionDashboardHeaderState()
+        let state = DashboardHeaderState()
         for (offset, expected): (CGFloat, CGFloat) in [(-80, 0), (0, 0), (20, 0.25), (40, 0.5), (80, 1), (800, 1), (40, 0.5), (0, 0)] {
             state.update(offset: offset)
             XCTAssertEqual(state.progress, expected)
@@ -32,9 +28,10 @@ final class SessionDashboardHeaderTests: XCTestCase {
     func testMenuSectionsAndActionsRetainTheirOwners() async throws {
         var selected: DashboardMode?
         var invoked: [String] = []
-        let button = DashboardModeMenuButton(mode: .sessions, onSelect: { selected = $0 }, sessionActions: .init(
+        let button = DashboardModeMenuButton(mode: .sessions, onSelect: { selected = $0 }, actions: .init(
             search: { invoked.append("Search") }, filter: { invoked.append("Filter") },
-            settings: { invoked.append("Settings") }, newSession: { invoked.append("New Session") }
+            settings: { invoked.append("Settings") },
+            creation: [.init(title: "New Session", symbol: "plus", perform: { invoked.append("New Session") })]
         ))
         let coordinator = button.makeCoordinator()
         let menu = coordinator.makeMenu()
@@ -155,9 +152,115 @@ final class SessionDashboardHeaderTests: XCTestCase {
         }
     }
 
+    func testOtherDashboardsUseTheSameChromeAndNativeMenu() async throws {
+        for mode in [DashboardMode.automations, .knowledge] {
+            try await withDashboard { host in
+                let menu = try await self.select(mode, in: host)
+                let frame = menu.convert(menu.bounds, to: host.view)
+                XCTAssertEqual(frame.size, CGSize(width: 56, height: 56))
+                XCTAssertEqual(menu.imageView?.bounds.size, CGSize(width: 34, height: 34))
+                XCTAssertGreaterThan(frame.midY, host.view.bounds.height * 0.8)
+                XCTAssertGreaterThan(frame.midX, host.view.bounds.midX)
+                XCTAssertEqual(menu.tintColor, UIColor(mode.accent))
+                let title = try XCTUnwrap(self.elements(in: host.view).first { $0.accessibilityLabel == mode.title })
+                XCTAssertTrue(title.accessibilityTraits.contains(.header))
+                XCTAssertLessThan(title.accessibilityFrame.minX, 30)
+                XCTAssertLessThanOrEqual(title.accessibilityFrame.maxX, host.view.bounds.width - 20)
+                let sections = try XCTUnwrap(menu.menu).children.compactMap { $0 as? UIMenu }
+                let expected = mode == .automations
+                    ? [["Sessions", "Automations", "Knowledge"], ["Search", "Filter", "Choose agenda date"], ["Settings"], ["Create Automation"]]
+                    : [["Sessions", "Automations", "Knowledge"], ["Search", "Filter"], ["Settings", "Knowledge settings"], ["Capture URL", "New note"]]
+                XCTAssertEqual(sections.map { $0.children.map(\.title) }, expected)
+                if mode == .knowledge {
+                    let configuration = try XCTUnwrap(sections[2].children.last as? UIMenu)
+                    XCTAssertFalse(configuration.options.contains(.displayInline))
+                    XCTAssertEqual(configuration.children.map(\.title), ["Observation configuration", "Connectors", "Import legacy records"])
+                }
+                XCTAssertEqual(sections[0].children.compactMap { $0 as? UIAction }.map(\.state),
+                               DashboardMode.allCases.map { $0 == mode ? .on : .off })
+                XCTAssertNil(try self.action("Filter", in: menu).subtitle)
+                try await self.attach(host.view, name: "\(mode.id)-dashboard")
+                menu.performPrimaryAction()
+                defer { menu.interactions.compactMap { $0 as? UIContextMenuInteraction }.forEach { $0.dismissMenu() } }
+                let window = try XCTUnwrap(host.view.window)
+                try await self.waitUntil { self.elements(in: window).contains { $0.accessibilityLabel == expected.last?.last } }
+                try await self.attach(window, name: "\(mode.id)-logo-menu")
+                let lastCreation = try XCTUnwrap(self.elements(in: window).first { $0.accessibilityLabel == expected.last?.last })
+                XCTAssertLessThanOrEqual(lastCreation.accessibilityFrame.maxY, menu.convert(menu.bounds, to: window).maxY + 1,
+                                         "Creation actions must fit in the initial menu without scrolling")
+            }
+        }
+    }
+
+    func testOtherDashboardActionsKeepExistingSheetOwners() async throws {
+        let destinations: [(DashboardMode, String, String)] = [
+            (.automations, "Filter", "View Automations"),
+            (.automations, "Settings", "Settings"),
+            (.automations, "Choose agenda date", "Jump to date"),
+            (.automations, "Create Automation", "New Automation"),
+            (.knowledge, "Filter", "Knowledge filters"),
+            (.knowledge, "Settings", "Settings"),
+            (.knowledge, "Observation configuration", "Observation"),
+            (.knowledge, "Connectors", "Connectors"),
+            (.knowledge, "Import legacy records", "Import Knowledge"),
+            (.knowledge, "Capture URL", "Capture URL"),
+            (.knowledge, "New note", "New note"),
+        ]
+        for (mode, action, title) in destinations {
+            try await withDashboard { host in
+                let menu = try await self.select(mode, in: host)
+                self.invoke(try self.action(action, in: menu))
+                try await self.waitUntil { host.presentedViewController != nil }
+                let sheet = try XCTUnwrap(host.presentedViewController)
+                try await self.waitUntil { self.elements(in: sheet.view).contains { $0.accessibilityLabel == title } }
+                XCTAssertFalse(self.views(UINavigationBar.self, in: sheet.view).allSatisfy(\.isHidden),
+                               "Dashboard chrome must not hide the destination's navigation bar: \(title)")
+                await withCheckedContinuation { continuation in
+                    host.dismiss(animated: false) { continuation.resume() }
+                }
+            }
+        }
+    }
+
+    func testOtherDashboardSearchAndAccessibilityHeaders() async throws {
+        for mode in [DashboardMode.automations, .knowledge] {
+            try await withDashboard(style: .light, dynamicType: .accessibility3) { host in
+                let menu = try await self.select(mode, in: host)
+                let title = try XCTUnwrap(self.elements(in: host.view).first { $0.accessibilityLabel == mode.title })
+                XCTAssertGreaterThan(title.accessibilityFrame.width, 0)
+                XCTAssertLessThanOrEqual(title.accessibilityFrame.maxX, host.view.bounds.width - 20)
+                try await self.attach(host.view, name: "\(mode.id)-accessibility-header")
+                self.invoke(try self.action("Search", in: menu))
+                try await self.waitUntil { self.views(UITextField.self, in: host.view).contains { $0.isFirstResponder } }
+                XCTAssertTrue(self.elements(in: host.view).contains { $0.accessibilityLabel == "Close search" })
+                if mode == .automations {
+                    XCTAssertEqual(AutomationDashboardPreferences.load().mode, .all,
+                                   "Searching the agenda explicitly selects the inventory through its preference owner")
+                    XCTAssertFalse(try XCTUnwrap(menu.menu).children.compactMap { $0 as? UIMenu }.flatMap(\.children).contains { $0.title == "Choose agenda date" })
+                }
+                host.view.endEditing(true)
+                try await self.waitUntil { !self.views(UITextField.self, in: host.view).contains { $0.isFirstResponder } }
+            }
+        }
+    }
+
+    private func select(_ mode: DashboardMode, in host: UIViewController) async throws -> UIButton {
+        let menu = try await menuButton(in: host.view)
+        invoke(try action(mode.rawValue, in: menu))
+        try await waitUntil {
+            self.views(UIButton.self, in: host.view).contains { $0.accessibilityIdentifier == "dashboard.menu" && $0.accessibilityValue == mode.rawValue }
+        }
+        return try await menuButton(in: host.view)
+    }
+
     private func action(_ title: String, in button: UIButton) throws -> UIAction {
-        let children = try XCTUnwrap(button.menu).children.flatMap { ($0 as? UIMenu)?.children ?? [$0] }
-        return try XCTUnwrap(children.compactMap { $0 as? UIAction }.first { $0.title == title })
+        func actions(in menu: UIMenu) -> [UIAction] {
+            menu.children.flatMap { element -> [UIAction] in
+                if let nested = element as? UIMenu { return actions(in: nested) }
+                return (element as? UIAction).map { [$0] } ?? []
+            }
+        }
+        return try XCTUnwrap(actions(in: XCTUnwrap(button.menu)).first { $0.title == title })
     }
 
     private func invoke(_ action: UIAction) {
@@ -205,6 +308,12 @@ final class SessionDashboardHeaderTests: XCTestCase {
         dynamicType: DynamicTypeSize = .large,
         _ check: (UIViewController) async throws -> Void
     ) async throws {
+        // Search changes the persisted Automation view. Bound that write to
+        // this hosted-test fixture and restore the exact prior preference.
+        let preferenceKey = AutomationDashboardPreferences.documentKey
+        let previousPreference = UserDefaults.standard.object(forKey: preferenceKey)
+        AutomationDashboardPreferences.save(AutomationDashboardViewPreferences())
+        defer { UserDefaults.standard.set(previousPreference, forKey: preferenceKey) }
         let suite = "dashboard-header-tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         let cache = FileManager.default.temporaryDirectory.appending(path: suite)
