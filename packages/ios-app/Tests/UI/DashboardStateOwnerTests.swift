@@ -21,7 +21,7 @@ struct DashboardStateOwnerTests {
         let coordinator = menuButton.makeCoordinator()
         let menu = coordinator.makeMenu()
         #expect(menu.title.isEmpty, "The native dashboard menu must not show a redundant Dashboard header")
-        let dashboards = (menu.children.first as? UIMenu)?.children.compactMap { $0 as? UIAction } ?? []
+        let dashboards = (menu.children.dropFirst(2).first as? UIMenu)?.children.compactMap { $0 as? UIAction } ?? []
         #expect(dashboards.count == DashboardMode.allCases.count)
         for action in dashboards {
             #expect(action.image?.renderingMode == .alwaysOriginal,

@@ -22,8 +22,9 @@ scroll view feeds inset-normalized geometry through `tronDashboardScroll`. Conte
 row identity, search state, and managed-sheet/mutation owners remain dashboard-owned.
 
 The native `UIButton`/`UIMenu` keeps four inline sections in fixed top-to-bottom order:
-Sessions/Automations/Knowledge; Search/Filter and view-specific controls; Settings and
-configuration actions; creation actions. Filter has no subtext. Settings always opens
+Settings and configuration actions; Filter/Search and view-specific controls;
+Sessions/Automations/Knowledge; creation actions. Knowledge settings sits directly below
+Settings in the first section. Filter has no subtext. Settings always opens
 the shell's existing app settings sheet. Sessions ends with New Session; Automations
 ends with Create Automation and retains Choose agenda date in Upcoming; Knowledge
 groups Observation configuration, Connectors, and Import legacy records under

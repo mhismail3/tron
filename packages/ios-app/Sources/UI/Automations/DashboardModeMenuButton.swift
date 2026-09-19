@@ -108,12 +108,12 @@ struct DashboardModeMenuButton: UIViewRepresentable {
                 settings.append(UIMenu(title: menu.title, image: UIImage(systemName: menu.symbol), children: menu.actions.map(action)))
             }
             return UIMenu(children: [
-                UIMenu(options: .displayInline, children: dashboards),
-                UIMenu(options: .displayInline, children: [
-                    action(.init(title: "Search", symbol: "magnifyingglass", perform: actions.search)),
-                    action(.init(title: "Filter", symbol: "line.3.horizontal.decrease", perform: actions.filter)),
-                ] + actions.additionalControls.map(action)),
                 UIMenu(options: .displayInline, children: settings),
+                UIMenu(options: .displayInline, children: [
+                    action(.init(title: "Filter", symbol: "line.3.horizontal.decrease", perform: actions.filter)),
+                    action(.init(title: "Search", symbol: "magnifyingglass", perform: actions.search)),
+                ] + actions.additionalControls.map(action)),
+                UIMenu(options: .displayInline, children: dashboards),
                 UIMenu(options: .displayInline, children: actions.creation.map(action)),
             ])
         }

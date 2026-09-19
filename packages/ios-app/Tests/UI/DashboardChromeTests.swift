@@ -39,19 +39,19 @@ final class DashboardChromeTests: XCTestCase {
         XCTAssertEqual(sections.count, 4)
         XCTAssertTrue(sections.allSatisfy { $0.options.contains(.displayInline) })
         XCTAssertEqual(sections.map { $0.children.map(\.title) }, [
-            ["Sessions", "Automations", "Knowledge"], ["Search", "Filter"], ["Settings"], ["New Session"],
+            ["Settings"], ["Filter", "Search"], ["Sessions", "Automations", "Knowledge"], ["New Session"],
         ])
-        XCTAssertNil((sections[1].children[1] as? UIAction)?.subtitle, "Filter stays a single-line entry")
-        let dashboards = sections[0].children.compactMap { $0 as? UIAction }
+        XCTAssertNil((sections[1].children[0] as? UIAction)?.subtitle, "Filter stays a single-line entry")
+        let dashboards = sections[2].children.compactMap { $0 as? UIAction }
         XCTAssertEqual(dashboards.map(\.state), [.on, .off, .off])
         XCTAssertTrue(dashboards.allSatisfy { $0.image?.renderingMode == .alwaysOriginal })
         invoke(dashboards[2])
         try await waitUntil { selected == .knowledge }
-        for action in sections.dropFirst().flatMap(\.children).compactMap({ $0 as? UIAction }) {
+        for action in [sections[0], sections[1], sections[3]].flatMap(\.children).compactMap({ $0 as? UIAction }) {
             invoke(action)
             try await waitUntil { invoked.last == action.title }
         }
-        XCTAssertEqual(invoked, ["Search", "Filter", "Settings", "New Session"])
+        XCTAssertEqual(invoked, ["Settings", "Filter", "Search", "New Session"])
     }
 
     func testRealDashboardHeaderScrollAndExistingDestinations() async throws {
@@ -138,7 +138,7 @@ final class DashboardChromeTests: XCTestCase {
             let window = try XCTUnwrap(host.view.window)
             menu.performPrimaryAction()
             defer { menu.interactions.compactMap { $0 as? UIContextMenuInteraction }.forEach { $0.dismissMenu() } }
-            let titles = ["Sessions", "Automations", "Knowledge", "Search", "Filter", "Settings", "New Session"]
+            let titles = ["Settings", "Filter", "Search", "Sessions", "Automations", "Knowledge", "New Session"]
             try await self.waitUntil {
                 titles.allSatisfy { title in self.elements(in: window).contains { $0.accessibilityLabel == title } }
             }
@@ -168,15 +168,15 @@ final class DashboardChromeTests: XCTestCase {
                 XCTAssertLessThanOrEqual(title.accessibilityFrame.maxX, host.view.bounds.width - 20)
                 let sections = try XCTUnwrap(menu.menu).children.compactMap { $0 as? UIMenu }
                 let expected = mode == .automations
-                    ? [["Sessions", "Automations", "Knowledge"], ["Search", "Filter", "Choose agenda date"], ["Settings"], ["Create Automation"]]
-                    : [["Sessions", "Automations", "Knowledge"], ["Search", "Filter"], ["Settings", "Knowledge settings"], ["Capture URL", "New note"]]
+                    ? [["Settings"], ["Filter", "Search", "Choose agenda date"], ["Sessions", "Automations", "Knowledge"], ["Create Automation"]]
+                    : [["Settings", "Knowledge settings"], ["Filter", "Search"], ["Sessions", "Automations", "Knowledge"], ["Capture URL", "New note"]]
                 XCTAssertEqual(sections.map { $0.children.map(\.title) }, expected)
                 if mode == .knowledge {
-                    let configuration = try XCTUnwrap(sections[2].children.last as? UIMenu)
+                    let configuration = try XCTUnwrap(sections[0].children.last as? UIMenu)
                     XCTAssertFalse(configuration.options.contains(.displayInline))
                     XCTAssertEqual(configuration.children.map(\.title), ["Observation configuration", "Connectors", "Import legacy records"])
                 }
-                XCTAssertEqual(sections[0].children.compactMap { $0 as? UIAction }.map(\.state),
+                XCTAssertEqual(sections[2].children.compactMap { $0 as? UIAction }.map(\.state),
                                DashboardMode.allCases.map { $0 == mode ? .on : .off })
                 XCTAssertNil(try self.action("Filter", in: menu).subtitle)
                 try await self.attach(host.view, name: "\(mode.id)-dashboard")
