@@ -121,7 +121,10 @@ struct OnboardingView: View {
                         .accessibilityLabel(pairing ? "Connecting" : "Connect to Mac")
                     } else if step != .model {
                         Button { goForward() } label: {
-                            TronToolbarTextLabel("Next", systemImage: "chevron.right")
+                            HStack(spacing: 5) {
+                                Text("Next")
+                                Image(systemName: "chevron.right")
+                            }
                         }
                         .tronToolbarAction()
                         .disabled(!canAdvance || finishing)

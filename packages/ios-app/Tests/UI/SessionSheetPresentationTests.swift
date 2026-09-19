@@ -7,6 +7,18 @@ import WebKit
 
 @MainActor
 final class SessionSheetPresentationTests: XCTestCase {
+    func testOnboardingNextToolbarRendersTrailingChevron() async throws {
+        try await withModel { model in
+            try await withSheet(OnboardingView(selectedDetent: .constant(.medium), onComplete: {})
+                .environment(model).preferredColorScheme(.light)) { controller in
+                let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
+                self.assertToolbarPaint(.tronEmerald, bar: bar, leading: false, controller: controller)
+                // Keep the actual toolbar rendering for visual review of Next ›.
+                self.capture(controller, name: "onboarding-next-trailing-chevron")
+            }
+        }
+    }
+
     func testSessionHistoryUsesTighterSummaryAndTopPagingGaps() {
         XCTAssertEqual(SessionHistoryLayout.summaryBottomPadding, 4)
         XCTAssertEqual(SessionHistoryLayout.pagingTopPadding, 4)

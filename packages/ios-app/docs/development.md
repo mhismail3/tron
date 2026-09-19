@@ -454,7 +454,9 @@ reattachment; `AppModel` only routes admitted events/lifecycle work and preserve
 same lifecycle suite drives an injected monotonic clock to prove the 120 ms resize boundary, same-intent
 coalescing, established dimension clamps, independent presentation slots, and revocation with no late wire send.
 The onboarding flow retains step/state orchestration while navigation-title, pairing-field, page, card, and info-row
-chrome lives in a separate presentation component file with unchanged UIKit/SwiftUI behavior. Workspace browsing
+chrome lives in a separate presentation component file with unchanged UIKit/SwiftUI behavior. Onboarding navigation
+uses leading `‹ Back` and trailing `Next ›` labels with matching spacing; the hosted onboarding toolbar capture
+in `SessionSheetPresentationTests` supports visual review of the label order. Workspace browsing
 uses one generation-owned cancellable load flight; only the newest path request may clear its exclusive busy
 phase, publish an error, or request transient reconnect recovery, and dismissal synchronously retires that
 presentation state. Possibly-sent folder creation may finish canonically, but navigation/dismissal generation-gates
