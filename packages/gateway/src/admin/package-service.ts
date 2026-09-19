@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { access } from "node:fs/promises";
+import { resolve } from "node:path";
 import {
   DefaultPackageManager,
   SettingsManager,
@@ -124,6 +126,26 @@ export class PackageService {
     }
   }
 
+  private async validateInstallSource(source: string, cwd: string): Promise<void> {
+    const trimmed = source.trim();
+    if (!trimmed) throw new GatewayError("invalid_request", "Package source is required");
+    // Pi treats bare names and file: URLs as local paths. Reject a missing
+    // path before admitting the SDK mutation; unlike an admitted npm/git
+    // command, this is a definite no-effect validation failure.
+    const remote = /^(?:npm|git|github|http|https|ssh):/u.test(trimmed);
+    if (!remote) {
+      const path = trimmed.startsWith("file:") ? trimmed.slice("file:".length) : trimmed;
+      try {
+        await access(resolve(cwd, path));
+      } catch {
+        throw new GatewayError("not_found", `Package source path does not exist: ${path}`);
+      }
+    }
+    if (trimmed.startsWith("npm:") && trimmed.slice("npm:".length).trim() === "") {
+      throw new GatewayError("invalid_request", "Package source is required");
+    }
+  }
+
   private async trackAdministrative<T>(operation: (work: GatewayWorkHandle | undefined) => Promise<T>): Promise<T> {
     const work = this.workRegistry?.begin({
       kind: "administrative-provider-package-operation",
@@ -159,12 +181,10 @@ export class PackageService {
     return this.trackAdministrative((work) => this.mutex.run(async () => {
       const operationId = randomUUID();
       let manager: DefaultPackageManager | undefined;
-      // Set once the package owner's own operation returned. Its filesystem
-      // effect (an installed/removed package or a refreshed installation) has
-      // already landed, so any later failure -- settings flush or progress
-      // publication -- must not be reported as a clean rejection that permits a
-      // replay. A failure inside the package owner's call keeps its own
-      // classification; that operation owns whether it applied anything.
+      // Set at mutation admission, before invoking the SDK. The pinned SDK has
+      // no atomicity receipt: install/remove/update can apply an earlier item
+      // and then throw. Once admitted, every failure is therefore fenced as
+      // unknown rather than permitting a replay that duplicates side effects.
       let effectApplied = false;
       try {
         const managed = await this.manager(cwd, local);
@@ -175,25 +195,30 @@ export class PackageService {
         });
         const { settings } = managed;
         if (action === "install") {
-          await manager.installAndPersist(source!, { local });
+          if (source === undefined) throw new GatewayError("invalid_request", "Package source is required");
+          await this.validateInstallSource(source, cwd);
           effectApplied = true;
+          await manager.install(source, { local });
+          manager.addSourceToSettings(source, { local });
           await this.flushSettings(settings);
         } else if (action === "remove") {
-          await manager.removeAndPersist(source!, { local });
+          if (source === undefined) throw new GatewayError("invalid_request", "Package source is required");
           effectApplied = true;
+          await manager.remove(source, { local });
+          manager.removeSourceFromSettings(source, { local });
           await this.flushSettings(settings);
         } else if (source === undefined) {
           // An omitted source retains Pi's existing "update all" command.
-          await manager.update();
           effectApplied = true;
+          await manager.update();
         } else {
           // Pi's public update(source) intentionally updates every matching
           // scope. The RPC identifies one row, so use the public scoped install
           // seam to refresh only that row's user/project installation while
           // leaving its existing settings entry untouched.
           this.ensureConfiguredSource(manager, source, local);
-          await manager.install(source, { local });
           effectApplied = true;
+          await manager.install(source, { local });
         }
         this.broadcast("packages.completed", { operationId, success: true });
       } catch (error) {

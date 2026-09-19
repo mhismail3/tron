@@ -93,6 +93,49 @@ describe("GitWorktreeService", () => {
     }
   });
 
+  it("preserves the winner branch when concurrent new-branch requests race", async () => {
+    const { root, tronHome } = await repository();
+    try {
+      const service = new GitWorktreeService(tronHome);
+      const results = await Promise.allSettled(Array.from({ length: 8 }, () => service.prepare(root, {
+        mode: "newBranchWorktree",
+        branch: "feature/concurrent",
+      })));
+      const winners = results.filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<GitWorktreeService["prepare"]>>> => result.status === "fulfilled");
+      const losers = results.filter((result) => result.status === "rejected");
+      expect(winners).toHaveLength(1);
+      expect(losers).toHaveLength(7);
+      // The losing add has no proof that it created the branch and must not
+      // delete the successful request's branch during its failure cleanup.
+      expect(await git(root, "show-ref", "--verify", "--quiet", "refs/heads/feature/concurrent")).toBe("");
+      await winners[0].value.cleanup();
+      await expect(git(root, "show-ref", "--verify", "--quiet", "refs/heads/feature/concurrent")).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(tronHome, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves a branch that changed while its owned worktree is active", async () => {
+    const { root, tronHome } = await repository();
+    try {
+      const service = new GitWorktreeService(tronHome);
+      const prepared = await service.prepare(root, {
+        mode: "newBranchWorktree",
+        branch: "feature/changed",
+      });
+      await writeFile(join(prepared.cwd, "changed.txt"), "changed\n");
+      await git(prepared.cwd, "add", "changed.txt");
+      await git(prepared.cwd, "commit", "-qm", "changed");
+      await prepared.cleanup();
+      expect(await git(root, "branch", "--list", "feature/changed")).toContain("feature/changed");
+      await expect(readFile(prepared.cwd, "README.md")).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(tronHome, { recursive: true, force: true });
+    }
+  });
+
   it("creates a worktree from an existing local branch without changing the source checkout", async () => {
     const { root, tronHome } = await repository();
     try {
