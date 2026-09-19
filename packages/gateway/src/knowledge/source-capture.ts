@@ -263,7 +263,12 @@ function sourceDraft(input: SourceCaptureInput, content: SourceContent, evidence
 export async function captureSource(store: KnowledgeStore, input: SourceCaptureInput, options: SourceCaptureOptions = {}): Promise<SourceCaptureResult> {
   const now = options.now ?? (() => new Date().toISOString());
   const limits = { ...SOURCE_CAPTURE_LIMITS, ...(options.limits ?? {}) };
-  if (!Number.isSafeInteger(limits.maxBytes) || limits.maxBytes < 1 || limits.maxBytes > SOURCE_CAPTURE_LIMITS.maxBytes || !Number.isSafeInteger(limits.maxRedirects) || limits.maxRedirects < 0 || limits.maxRedirects > SOURCE_CAPTURE_LIMITS.maxRedirects || !Number.isSafeInteger(limits.timeoutMs) || limits.timeoutMs < 100 || limits.timeoutMs > SOURCE_CAPTURE_LIMITS.timeoutMs) throw invalid("Invalid source capture limits");
+  if (!Number.isSafeInteger(limits.maxBytes) || limits.maxBytes < 1 || limits.maxBytes > SOURCE_CAPTURE_LIMITS.maxBytes
+    || !Number.isSafeInteger(limits.maxRedirects) || limits.maxRedirects < 0 || limits.maxRedirects > SOURCE_CAPTURE_LIMITS.maxRedirects
+    || !Number.isSafeInteger(limits.timeoutMs) || limits.timeoutMs < 100 || limits.timeoutMs > SOURCE_CAPTURE_LIMITS.timeoutMs
+    || !Number.isSafeInteger(limits.maxReadableChars) || limits.maxReadableChars < 1 || limits.maxReadableChars > SOURCE_CAPTURE_LIMITS.maxReadableChars) {
+    throw invalid("Invalid source capture limits");
+  }
   const sourceUrl = assertSafeUrl(input.url);
   const initialConfig = await store.config();
   if (options.signal?.aborted) throw invalid("Source capture was cancelled");
@@ -336,7 +341,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
     origin: kind, origins: [...(retryTarget?.content.origins ?? []), ...sourceOrigin(kind, capturedAt, { uri: fetched.finalUrl, ...(input.identity ? { identity: input.identity } : {}) }), ...(fetched.finalUrl !== sourceUrl.toString() ? [{ kind, capturedAt, uri: sourceUrl.toString(), ...(input.identity ? { identity: input.identity } : {}) }] : [])], ...(input.identity ? { identity: input.identity } : {}),
   };
   const request = { commandId: input.commandId, ...(input.expectedRevision ? { expectedRevision: input.expectedRevision } : retryTarget ? { expectedRevision: retryTarget.revisionId } : {}), record: { ...sourceDraft(input, content), ...(retryTarget ? { id: retryTarget.id, createdAt: retryTarget.createdAt } : {}) } };
-  let result = await store.captureSource(request);
+  let result = await store.captureSource({ ...request, signal: operationController.signal });
   if (result.record.kind !== "source") throw new Error("Source capture returned a non-source record");
   let sourceRecord = result.record;
   let assessmentError: string | undefined;

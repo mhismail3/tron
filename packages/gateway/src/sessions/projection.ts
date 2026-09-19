@@ -237,7 +237,8 @@ export function safeJson(value: unknown, depth = 0, seen = new WeakSet<object>()
         collision += 1;
       }
       usedKeys.add(boundedKey);
-      result[boundedKey] = safeJson((value as Record<string, unknown>)[key], depth + 1, seen);
+      Object.defineProperty(result, boundedKey, { value: safeJson((value as Record<string, unknown>)[key], depth + 1, seen),
+        enumerable: true, configurable: true, writable: true });
       entries += 1;
     }
     // `seen` is a recursion stack, not a global visited set. Pi reuses
@@ -380,13 +381,7 @@ export function mergeLiveToolOutput(
   maximumBytes = MAX_LIVE_TOOL_OUTPUT_BYTES,
 ): { output?: string; outputTruncated?: true } {
   if (incoming.output) {
-    if (Buffer.byteLength(incoming.output) > maximumBytes) {
-      const marker = "… earlier live output truncated by gateway …\n";
-      return {
-        output: marker + utf8Suffix(incoming.output, Math.max(0, maximumBytes - Buffer.byteLength(marker))),
-        outputTruncated: true,
-      };
-    }
+    if (Buffer.byteLength(incoming.output) > maximumBytes) return projectToolOutput(incoming.output, maximumBytes);
     return {
       output: incoming.output,
       ...(incoming.outputTruncated ? { outputTruncated: true } : {}),
@@ -493,8 +488,8 @@ function boundedJsonNode(
   if (value === undefined || typeof value === "function" || typeof value === "symbol") {
     return { value: null, bytes: 4, truncated: false };
   }
-  if (depth >= 12) return { value: "[maximum depth]", bytes: 16, truncated: false };
-  if (seen.has(value)) return { value: "[circular]", bytes: 10, truncated: false };
+  if (depth >= 12) return { value: "[maximum depth]", bytes: jsonBytes("[maximum depth]"), truncated: false };
+  if (seen.has(value)) return { value: "[circular]", bytes: jsonBytes("[circular]"), truncated: false };
 
   seen.add(value);
   let result: JsonValue;
@@ -507,16 +502,15 @@ function boundedJsonNode(
     for (let index = 0; index < length; index += 1) {
       const separator = items.length === 0 ? 0 : 1;
       const remaining = maximumBytes - bytes - separator;
-      if (remaining < 4) { truncated = true; break; }
-      const child = boundedJsonNode(value[index], remaining - 1, depth + 1, seen);
-      if (bytes + separator + child.bytes + 1 > maximumBytes) { truncated = true; break; }
+      if (remaining < 1) { truncated = true; break; }
+      const child = boundedJsonNode(value[index], remaining, depth + 1, seen);
+      if (bytes + separator + child.bytes > maximumBytes) { truncated = true; break; }
       items.push(child.value);
       bytes += separator + child.bytes;
       truncated ||= child.truncated;
     }
     if (items.length < length) truncated = true;
     result = items;
-    bytes += 0; // the opening/closing brackets are already accounted for
   } else {
     const object = value as Record<string, unknown>;
     const output: Record<string, JsonValue> = {};
@@ -539,14 +533,14 @@ function boundedJsonNode(
       usedKeys.add(boundedKey);
       const keyBytes = jsonBytes(boundedKey);
       const separator = entries === 0 ? 0 : 1;
-      const remaining = maximumBytes - bytes - separator - keyBytes - 1 - 1;
-      if (remaining < 4) { truncated = true; break; }
+      const remaining = maximumBytes - bytes - separator - keyBytes - 1;
+      if (remaining < 1) { truncated = true; break; }
       const child = boundedJsonNode(object[key], remaining, depth + 1, seen);
-      if (bytes + separator + keyBytes + 1 + child.bytes + 1 > maximumBytes) {
+      if (bytes + separator + keyBytes + 1 + child.bytes > maximumBytes) {
         truncated = true;
         break;
       }
-      output[boundedKey] = child.value;
+      Object.defineProperty(output, boundedKey, { value: child.value, enumerable: true, configurable: true, writable: true });
       bytes += separator + keyBytes + 1 + child.bytes;
       entries += 1;
       truncated ||= child.truncated;
@@ -579,15 +573,16 @@ function boundedProjectionEnvelope(preview: string, maximumBytes: number): JsonV
     const candidate = `${best}${marker}`;
     if (envelopeBytes(candidate) <= maximumBytes) return { truncated: true, preview: candidate };
   }
-  // Four bytes is the smallest useful JSON value. Returning null rather than
-  // an oversized marker makes tiny test and caller budgets honest.
+  // Below the diagnostic envelope budget, return the smallest fitting JSON
+  // scalar. No JSON representation exists for a zero-byte budget.
   if (maximumBytes >= 4) return null;
   if (maximumBytes >= 2) return "";
-  return null;
+  return 0;
 }
 
 export function projectJson(value: unknown, maximumBytes = MAX_PROJECTED_JSON_BYTES): JsonValue {
-  const bounded = boundedJsonNode(value, Math.max(0, maximumBytes));
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) throw new RangeError("JSON projection requires a positive byte budget");
+  const bounded = boundedJsonNode(value, maximumBytes);
   if (!bounded.truncated && bounded.bytes <= maximumBytes) return bounded.value;
   // Keep previews useful without allowing the diagnostic envelope to become a
   // second copy of a large projected graph.

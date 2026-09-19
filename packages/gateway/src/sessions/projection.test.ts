@@ -1043,6 +1043,33 @@ describe("transcript projection", () => {
     expect(projected).toMatchObject({ truncated: true });
   });
 
+  it("accounts for JSON circular/depth markers and exact small containers without exceeding their budgets", () => {
+    const cycle: { x?: unknown } = {};
+    cycle.x = cycle;
+    for (const budget of [1, 2, 4, 17, 18, 32]) {
+      expect(Buffer.byteLength(JSON.stringify(projectJson(cycle, budget)))).toBeLessThanOrEqual(budget);
+    }
+    expect(projectJson(cycle, 18)).toEqual({ x: "[circular]" });
+    const protoKey = JSON.parse('{"__proto__":{"value":"ordinary JSON data"}}');
+    expect(JSON.stringify(projectJson(protoKey))).toBe(JSON.stringify(protoKey));
+    expect(JSON.stringify(safeJson(protoKey))).toBe(JSON.stringify(protoKey));
+    expect(projectJson({ a: 1 }, 7)).toEqual({ a: 1 });
+    expect(projectJson([1], 3)).toEqual([1]);
+    let deep: unknown = "leaf";
+    for (let index = 0; index < 14; index += 1) deep = { x: deep };
+    const expected = safeJson(deep);
+    const bytes = Buffer.byteLength(JSON.stringify(expected));
+    expect(projectJson(deep, bytes)).toEqual(expected);
+    expect(Buffer.byteLength(JSON.stringify(projectJson(deep, bytes - 1)))).toBeLessThanOrEqual(bytes - 1);
+    expect(() => projectJson(cycle, 0)).toThrow(/positive byte budget/);
+  });
+
+  it.each([0, 1, 8, 48, 49, 50])("honors the %s-byte live-output merge budget", (budget) => {
+    const result = mergeLiveToolOutput(undefined, { output: "終わり".repeat(100) }, budget);
+    expect(Buffer.byteLength(result.output ?? "")).toBeLessThanOrEqual(budget);
+    expect(result.outputTruncated).toBe(true);
+  });
+
   it("bounds object keys before projecting a large extension-owned object", () => {
     const key = "k".repeat(8 * 1024 * 1024);
     const projected = safeJson({ [key]: "value" });

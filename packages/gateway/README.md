@@ -54,16 +54,20 @@ cut is branch-lineage-scoped (not the changing leaf), exact, redacted, and
 input-bounded. Distinct terminal envelopes retain their own invocation/outcome
 when queued. Cancellation or a
 configuration/privacy change leaves the cut retryable and cannot publish late.
-A failed durable admission retries the exact cut under bounded backoff instead of
-dropping a terminal snapshot that has no coverage authority yet, while the
-process-local queue is itself bounded: an overflow (or shutdown) sheds its oldest
-prospective cuts and reports the count, which is the same boundary as a restart.
-Model-bound text removes the platform filesystem roots it can observe plus
-credential shapes, and URL paths are preserved; this is a bounded privacy filter,
-not a complete secret scrubber. Every model-bound await is bounded against its
-signal, so an adapter that ignores cancellation cannot hold an RPC or work token
-open, and a late result stays fenced by the aborted attempt and a
-revision/scope revalidation.
+A failed durable admission retains its exact cut with bounded backoff; transition
+receipt IDs include the current coverage revision so failed/pending recovery does
+not conflict with an earlier command's request hash. Prospective admission is
+bounded by 64 cuts, 100,000 entries, and a conservative 32 MiB retained-data budget
+including the active cut. Excess new input is rejected with a diagnostic rather
+than evicting accepted cuts or starting unbounded gap-write tasks. Pre-coverage
+cuts remain process-local and may be lost on shutdown/restart; only a committed
+coverage row is recovery authority. Model-bound text removes recognized machine
+paths and credential shapes without claiming complete secret scrubbing.
+A model timeout bounds the caller wait, not the operation lifetime: the exact
+Gateway work token remains held until the task and all provider promises settle.
+Admission and derivative publication carry cancellation through serialized store
+entry; an already-admitted record-body/catalog transaction finishes its receipt
+rather than abandoning durable private bodies after a late cancellation.
 Branch scope uses append-order first-child continuation, so adding a sibling
 never changes the original branch identity; recovery compares exact canonical
 entry IDs and digest and marks missing/non-active coverage unavailable rather
@@ -315,8 +319,8 @@ renderer grant or pixels. Only the canonical display result on the active branch
 permits viewing. The existing live-view registry, authenticated HTTP routes and
 mobile renderer serve both producers with shared viewer/decode budgets. Each native transport operation
 (`request`, local retirement) is bounded by an owner deadline: a signed host that never replies produces an
-explicit uncertain failure instead of a retirement that stays pending forever, so viewer teardown and
-Gateway drain cannot be held open indefinitely.
+explicit uncertain failure rather than a fabricated remote join. This bounds the
+caller wait; it does not prove host-side retirement or authorize replay.
 
 `machine/native-capture-client.ts` binds one connection to the canonical session
 and extension load. Import is inert; explicit catalog opens the API-versioned,
@@ -602,7 +606,11 @@ share that mutex, but long body, stream, or provider operations are not awaited
 under it. The local wrapper credential, pairing invitation, paired-device document,
 and revocation replacement are published through the durable file-plus-directory
 synchronization primitive, so an acknowledged pairing or revocation is not lost to
-a power failure between the rename and the filesystem metadata flush. Device revocation atomically
+a power failure between the rename and the filesystem metadata flush. If the
+replacement rename succeeded but later synchronization fails, transport authority
+is retired under the credential mutex while the durability error remains visible.
+A failed pairing attempt regenerates the invitation even when its consumption
+unlinked the old invitation before a directory-sync failure. Device revocation atomically
 replaces that document, publishes transport retirement immediately, then performs
 best-effort install cleanup. Requests and canonical mutations admitted before the
 cut settle independently of their sockets; revoked connections reject later
@@ -676,8 +684,10 @@ reads explicitly rather than silently dropping history. Orphan objects and malfo
 after logical inventory is reconciled. An operational filesystem failure during startup validation (for
 example a transient I/O or permission error while reading metadata or proving object ownership) is not
 treated as corruption: the durable artifact and its immutable object are preserved, the identifier stays
-explicitly unavailable to reads until a later validation succeeds, and the orphan sweep is deferred rather
-than risking deletion of bytes whose metadata could not be read. The same distinction applies to a direct
+explicitly unavailable to reads until a later validation succeeds. Quota-affecting ingest and
+canonical reconciliation fail closed while any retained artifact cannot be accounted for. Both
+orphan sweeps and healthy-sibling release preserve unknown object references; a failed validation
+must not become data loss on the next initialization. The same distinction applies to a direct
 upload lookup: only confirmed absence, symlink escape, or malformed evidence self-cleans, while an
 operational ownership-check failure preserves the canonical folder and its indexed ownership.
 
@@ -1021,6 +1031,13 @@ UI, native custom/overlay rendering, footer/header/editor/autocomplete, theme UI
 renderer hosting, package-specific integration, and truthful TUI activation remain
 deferred.
 
+Bounded JSON projection admits nodes before copying their values, accounts for
+sparse-array null slots and diagnostic markers, and preserves repeated sibling
+references without expanding an unbounded intermediate tree. Tool-output suffixes
+retain chronological block order and newest text; large tool-result text is tailed
+before generic JSON previews so its text/type identity survives. Focused oracles
+in `projection.test.ts` and `hook-projection.test.ts` cover these boundary cases.
+
 Live and canonical transcript projections preserve the canonical tool name while optionally carrying the bounded human-readable `label` declared by the mounted Pi extension tool definition; native clients use that label for presentation and never derive extension titles from snake_case names. Project Resources exposes the same label beside the canonical name. Live tool projections may also carry an optional extension provenance record derived from the public Pi tool `sourceInfo` and the loaded extension inventory. The Gateway emits that record only when exactly one extension owns the tool and the source path agrees; unknown or ambiguous ownership omits provenance and fails open to the ordinary tool projection. This metadata is disposable presentation state and never modifies Pi JSONL.
 
 Every canonical `custom_message` is context-bearing input under Pi semantics. Producer-visible messages project as right-aligned inbound context; producer-hidden messages remain absent from ordinary chat. At the exact Pi message boundary, Gateway captures available owner identity from the wrapped extension callback and whether the message was stored for a later turn or delivered during active work. Callback and tool/command owner lookups resolve finalized package SourceInfo at admission, not the provisional local source present during extension loading (`owner-attribution.test.ts`). Sender attribution is incomplete in the pinned SDK: custom-message queues do not retain sender async context, and extension-initialization timers are outside the callback wrapper. Ownerless receipts therefore remain unknown, including after reopen; complete attribution requires trusted sender evidence carried through the SDK's exact message object, not a custom-type or run-ID lookup. Pi exposes stored custom messages after their canonical append and turn-triggering messages immediately before it; the Gateway binds the exact canonical tail identity at those respective lifecycle boundaries and appends a bounded `tron.context-delivery.v4` receipt targeting that entry. It never scans forward for an unowned payload candidate. Receipts may follow later branch entries, so projection validates exact target identity and target-before-receipt branch order rather than current-leaf adjacency. Text, title, custom type, timestamps, details, and renderer registration never infer producer identity or delivery. Canonical `custom`/`appendEntry` state remains available to extensions but is omitted from chat and tree projection unless it is a validated Gateway invocation-start receipt; validated extension-notification receipts are promoted only into the chat timeline and never become navigation nodes. When an extension-owned tool returns the public structured delegated-run convention (`details.runId`/`asyncId` plus bounded `results[].progress`), the Gateway additionally projects `ExtensionRunActivity` with stable child identities, active time, tool/turn counts, current tool/path, and a bounded output tail. It is carried on the live tool projection and retained as a bounded recent `extensionActivities` snapshot; native clients must not infer it from rendered widget text or open a child JSONL concurrently. The runtime also admits the explicit `pi-subagents` lifecycle-artifact contract: allowlisted `status.json` files are matched to the canonical session file, read with a hard byte bound, and projected as one workflow activity with bounded child progress so detached async runs remain visible after the launching tool returns. Everything provider-specific about that integration — the provider tool name, the run-directory shape, the accepted lifecycle file names, and the exact installed-owner identity used to authorize controls — lives in one `sessions/delegated-provider.ts` boundary rather than in the session runtime, so the runtime depends on a narrow contract instead of embedding package conventions. That boundary grants no authority by itself: the runtime still proves canonical tool/run ownership before projecting or controlling work, and a same-named tool from another package never becomes the provider. Provider recognition requires the finalized `npm:pi-subagents` package identity as well as matching path evidence, so a project or local extension living in a directory named `pi-subagents` cannot impersonate the installed provider. Temporary runtime roots and the project-local `.pi/subagents/async-subagent-runs` layout are scanned under one hard work budget; exact live `asyncDir` bindings refresh before bounded ambient enumeration, and terminal ambient evidence outranks decorative live enrichment. A bounded Gateway-owned `runId` binding maps lifecycle events and artifacts to one real tool-call identity; a synthetic `subagent:<runId>` identity is used only for an initially unmatched, session-owned artifact and is re-keyed when the real tool call arrives. Terminal lifecycle status is authoritative, while later artifacts only enrich retained details and cannot resurrect a completed run; terminal recency uses the producer's completion time rather than the later discovery time. Current artifacts are admitted by their exact schema version; historical versioned or unversioned artifacts can supply terminal evidence only after an exact canonical tool-call/`asyncDir` binding proves ownership, so a Gateway reload cannot strand already-finished delegated work in restart drain. Watchers stop on terminal state, disposal, and retention eviction.
@@ -1173,12 +1190,13 @@ not permission to create a checkout, and creation revalidates current Git state.
 `existingBranchWorktree` creates a managed worktree from
 an existing local branch. Git arguments are passed without a shell, branch/ref inputs are
 validated, implicit-`HEAD` creation refuses dirty checkouts, and a worktree is removed again
-if session creation fails. A failed new-branch creation also compares and deletes only the exact branch this
-operation created at its own base commit, so a session commit or a same-named branch owned by another actor is
-never destroyed, and an uncertain or timed-out `worktree add` reconciles administrative state and reports
-unresolved state instead of claiming cleanup. Git commands run as a bounded detached process group, so a
-timeout terminates helpers or hooks that outlive the direct child, and an unsettled termination window is
-reported as an unknown outcome. Managed worktree roots and repository directories are created and
+if session creation fails. Only a proven successful add may clean up its exact managed worktree and
+compare-delete its branch at the recorded base commit. A failed or uncertain add grants no branch
+cleanup authority; ambiguous residue is preserved rather than deleting a concurrent winner's branch.
+Cleanup verifies the current worktree association and preserves moved branches. Git output retention is
+byte-bounded. Success and failure both check descendant process-group retirement; a timeout requests
+termination and returns a non-retryable unknown outcome at its hard deadline if retirement cannot be
+proven. No destructive rollback races an unresolved Git command. Managed worktree roots and repository directories are created and
 checked with non-following directory metadata, then realpath containment is proven before Git
 runs, so pre-existing symlinks cannot redirect a target. Pi itself receives only the resulting
 canonical `cwd`; its SDK has no Git/worktree creation option. Persisted worktrees remain available
@@ -1547,10 +1565,11 @@ projection includes display-safe extension, prompt, skill, context-file, and too
 metadata while canonical resource files and runtime loaders remain authoritative.
 Extension entries also expose the public loader handler event names and bounded
 registration counts, plus scope/source/origin and separate load errors; callback
-functions are never serialized. One aggregate encoded-byte envelope admits the
-whole projection — identity rows and their tools, commands, handlers, paths, and
-load errors together — so a path-heavy installed set cannot overrun the transport
-while every omission is counted. The hook inventory reports retained/omitted
+functions are never serialized. One aggregate encoded-byte envelope reserves
+extension identity rows before optional tools, commands, handlers, and load errors.
+An impossible identity is omitted without hiding later rows. Incremental exact
+item-byte accounting avoids repeatedly serializing the growing envelope; retained
+and omitted row/handler/error counts describe the returned projection. The hook inventory reports retained/omitted
 extension, handler-event, load-error, and long-metadata counts that exactly
 describe the returned rows rather than a separately budgeted addition.
 This is a current runtime registration view, not execution history or health.
@@ -1669,6 +1688,12 @@ of waiting forever, allowing supervised shutdown/replacement to recover. Direct 
 idle compaction persist interruption markers before canonical SDK work, and reliable
 bounded-frequency marker/terminal-receipt retries keep the same owner live until durability
 succeeds.
+Package mutation admission fences SDK install/remove/update failures as unknown
+outcomes, including partial update batches. Definite preflight failures remain
+retryable; source interpretation (tilde paths, file URLs and Git shorthand)
+remains with the SDK rather than a second package parser. Advisory completion
+publication cannot erase an uncertain mutation's receipt fence.
+
 Package inventory/update discovery and provider login remain exact administrative owners
 until their underlying asynchronous operation settles; retiring mobile UI does not infer
 provider settlement. Registry tokens are the normal drain authority. Exact-owned

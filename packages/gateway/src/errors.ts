@@ -26,8 +26,8 @@ export class GatewayError extends Error {
  * An operation whose effect may already have been applied. Owners raise this
  * when they cannot prove whether a durable or external effect landed, so the
  * idempotency receipt keeps its uncertainty fence instead of permitting the
- * identical command to be replayed. Callers must refresh authoritative state
- * and reissue with a new commandId.
+ * identical command to be replayed. Reconcile authoritative state before a new
+ * decision; a different commandId is not proof that repeating the effect is safe.
  */
 export function uncertainOutcome(message: string): GatewayError {
   return new GatewayError("conflict", message, false, { outcomeUnknown: true });
@@ -52,7 +52,7 @@ export function asUncertainOutcome(error: unknown, message: string): GatewayErro
     const details = error.details && typeof error.details === "object" && !Array.isArray(error.details)
       ? { ...(error.details as Record<string, unknown>), outcomeUnknown: true }
       : { outcomeUnknown: true, ...(error.details === undefined ? {} : { reported: error.details }) };
-    return new GatewayError(error.code, error.message, error.retryable, details);
+    return new GatewayError(error.code, error.message, false, details);
   }
   const cause = error instanceof Error ? error.message : String(error);
   return new GatewayError("conflict", `${message} (${cause})`, false, { outcomeUnknown: true });

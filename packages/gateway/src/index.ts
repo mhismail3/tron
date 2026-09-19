@@ -177,7 +177,7 @@ const knowledge = new KnowledgeService(
     workRegistry,
     ({ code, dropped, queued }) => logger.log(
       "warning",
-      `Prospective knowledge observation work was shed (${dropped} cut(s); ${queued} queued)`,
+      `Prospective knowledge observation cuts were not retained (${dropped} cut(s); ${queued} queued); no durable coverage is claimed`,
       { event: code, source: "knowledge" },
     ),
   ),

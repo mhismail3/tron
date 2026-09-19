@@ -101,7 +101,7 @@ export class AutomationScheduler {
   private readonly onDiagnostic: NonNullable<AutomationSchedulerOptions["onDiagnostic"]>;
   private readonly onBlocked: NonNullable<AutomationSchedulerOptions["onBlocked"]>;
   private readonly active = new Map<string, ActiveExecution>();
-  private readonly dispatchReservations = new Map<string, { sessionId: string; controller: AbortController }>();
+  private readonly dispatchReservations = new Map<string, { sessionId: string; controller: AbortController; blocked?: true }>();
   private readonly pendingDispatches = new Set<Promise<void>>();
   private readonly cancellationRequests = new Map<string, "user-cancelled" | "gateway-shutdown">();
   private readonly settlementWaiters = new Map<string, { promise: Promise<void>; resolve: () => void }>();
@@ -218,8 +218,10 @@ export class AutomationScheduler {
       ...this.pendingDispatches,
       ...[...this.active.values()].map(active => active.settled),
     ]));
-    if (!retired.settled) throw uncertainOutcome("Automation shutdown remains blocked by an unsettled admission, execution, or terminal acknowledgement");
-    if (retired.error !== undefined) throw retired.error;
+    if (!retired.settled || [...this.dispatchReservations.values()].some(reservation => reservation.blocked)) {
+      throw uncertainOutcome("Automation shutdown remains blocked by an unsettled admission, execution, or terminal acknowledgement");
+    }
+    if (!retired.result.ok) throw retired.result.error;
   }
 
   async scan(): Promise<void> {
@@ -264,6 +266,13 @@ export class AutomationScheduler {
   }
 
   async cancel(automationId: string, runId: string): Promise<AutomationRun> {
+    const outcome = await this.settleWithinGrace(this.cancelOwned(automationId, runId));
+    if (!outcome.settled) throw uncertainOutcome("Automation cancellation is still owned; inspect the exact run before resolving or replaying it");
+    if (!outcome.result.ok) throw outcome.result.error;
+    return outcome.result.value;
+  }
+
+  private async cancelOwned(automationId: string, runId: string): Promise<AutomationRun> {
     const record = this.store.get(automationId);
     const run = record.currentRun;
     if (!run || run.runId !== runId) throw new GatewayError("conflict", "Automation run is no longer active", true);
@@ -281,8 +290,7 @@ export class AutomationScheduler {
         if (current.currentRun?.runId !== runId) return current;
         return { ...current, currentRun: { ...current.currentRun, state: "cancelling", reason: "user-cancelled" } };
       });
-      const retired = await this.settleWithinGrace(settlement.promise);
-      if (!retired.settled) throw uncertainOutcome("Automation admission cancellation is still pending; the owner remains retained");
+      await settlement.promise;
       const settled = this.store.get(automationId);
       if (settled.lastRun?.runId !== runId) {
         throw new GatewayError("conflict", "Automation cancellation did not reach durable terminal state", true, { outcomeUnknown: true });
@@ -334,7 +342,10 @@ export class AutomationScheduler {
       task = this.dispatch(record).catch((error) => {
         this.onDiagnostic(error instanceof Error ? error.message : String(error), record.id, record.currentRun?.runId);
       }).finally(() => {
-        this.dispatchReservations.delete(runId);
+        if (!this.dispatchReservations.get(runId)?.blocked) {
+          this.dispatchReservations.delete(runId);
+          this.cancellationRequests.delete(runId);
+        }
         this.pendingDispatches.delete(task);
         this.wake();
       });
@@ -431,6 +442,10 @@ export class AutomationScheduler {
       const cancellation = this.cancellationRequests.get(run.runId);
       this.cancellationRequests.delete(run.runId);
       if (isUncertainOutcome(error) || error instanceof AutomationAdmissionError && error.outcomeUnknown) {
+        // The executor still owns a lease/work token when canonical admission
+        // could not be proven. Keep the same reservation visible to resolution
+        // and disposal instead of losing that owner when start() rejects.
+        admission.blocked = true;
         await this.commitTerminal(claimed.id, run.runId, { state: "outcomeUnknown", reason: "admission-outcome-unknown" });
       } else if (cancellation) {
         await this.commitTerminal(claimed.id, run.runId, { state: "cancelled", reason: cancellation });
@@ -662,13 +677,13 @@ export class AutomationScheduler {
       });
       return;
     }
-    if (cancelled.error !== undefined) {
+    if (!cancelled.result.ok) {
       await this.commitTerminal(active.automationId, active.runId, {
         state: "outcomeUnknown",
         reason: `${reason}-cancellation-failed`,
         error: {
           code: "cancellation-failed",
-          message: cancelled.error instanceof Error ? cancelled.error.message.slice(0, 1_024) : "Automation cancellation failed",
+          message: cancelled.result.error instanceof Error ? cancelled.result.error.message.slice(0, 1_024) : "Automation cancellation failed",
           retryable: false,
         },
       });
@@ -691,15 +706,15 @@ export class AutomationScheduler {
   /** Bounds one settlement step against the shared cancellation grace. A
    * non-settling promise is never reported as settled, and the caller keeps its
    * own durable outcome-unknown record. */
-  private async settleWithinGrace(promise: Promise<unknown>): Promise<{ settled: true; error?: unknown } | { settled: false }> {
+  private async settleWithinGrace<T>(promise: Promise<T>): Promise<{ settled: true; result: { ok: true; value: T } | { ok: false; error: unknown } } | { settled: false }> {
     let timer: NodeJS.Timeout | undefined;
     const graceExpired = new Promise<{ settled: false }>((resolve) => {
       timer = this.setTimer(() => resolve({ settled: false }), CANCELLATION_SETTLEMENT_GRACE_MS);
       timer.unref?.();
     });
     const outcome = promise.then(
-      () => ({ settled: true as const }),
-      (error: unknown) => ({ settled: true as const, error }),
+      value => ({ settled: true as const, result: { ok: true as const, value } }),
+      (error: unknown) => ({ settled: true as const, result: { ok: false as const, error } }),
     );
     const settled = await Promise.race([outcome, graceExpired]);
     if (timer) this.clearTimer(timer);

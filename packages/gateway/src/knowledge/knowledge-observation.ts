@@ -20,11 +20,40 @@ const OBSERVER_SYSTEM_PROMPT = [
 const MAX_SOURCE_ENTRIES = 10_000;
 const MAX_SOURCE_TEXT = 48_000;
 const MAX_OUTPUT_TEXT = 50_000;
-/** Prospective admission is process-local convenience, not coverage authority.
- * These bounds keep a slow or unavailable store from growing the queue without
- * limit; an overflow sheds the oldest cuts and reports the count. */
+/** Prospective admission is process-local, not coverage authority. These bounds
+ * reject excess new cuts instead of evicting prior admissions or spawning an
+ * unbounded secondary persistence queue. */
 const MAX_QUEUED_SETTLEMENTS = 64;
 const MAX_QUEUED_SOURCE_ENTRIES = 100_000;
+const MAX_RETAINED_SOURCE_BYTES = 32 * 1_024 * 1_024;
+
+/** Conservative accounting of plain canonical data without serializing it.
+ * Count repeated references as repeated JSON and reject cycles/deep graphs;
+ * bounded traversal prevents the admission check itself becoming unbounded. */
+function retainedSourceBytes(value: unknown): number | undefined {
+  let bytes = 0, nodes = 0;
+  const ancestors = new WeakSet<object>();
+  const visit = (item: unknown, depth: number): boolean => {
+    if (++nodes > 100_000 || depth > 32 || typeof item === "bigint" || typeof item === "function" || typeof item === "symbol") return false;
+    bytes += typeof item === "string" ? 32 + item.length * 6 : 64;
+    if (bytes > MAX_RETAINED_SOURCE_BYTES) return false;
+    if (!item || typeof item !== "object") return true;
+    if (ancestors.has(item)) return false;
+    ancestors.add(item);
+    if (Array.isArray(item)) {
+      for (let index = 0; index < item.length; index += 1) if (!visit(item[index], depth + 1)) return false;
+    } else {
+      for (const key in item) {
+        if (!Object.prototype.hasOwnProperty.call(item, key)) continue;
+        bytes += 32 + key.length * 6;
+        if (bytes > MAX_RETAINED_SOURCE_BYTES || !visit((item as Record<string, unknown>)[key], depth + 1)) return false;
+      }
+    }
+    ancestors.delete(item);
+    return true;
+  };
+  return visit(value, 0) ? bytes : undefined;
+}
 
 type TerminalOutcome = "completed" | "failed" | "interrupted" | "outcomeUnknown";
 
@@ -242,14 +271,13 @@ function parseModelOutput(raw: string, range: ObservationRange, fallbackAt: stri
   });
 }
 
-/** Owns prospective observation admission. Queueing is process-local; coverage
- * and immutable records are the recovery authority, so a restart never replays
- * an already committed range. A cut that reached durable `pending` coverage is
- * recovered by the store's pending-coverage pass; a cut still only in this queue
- * is deliberately disposable (shutdown or an overflow drops it with a bounded
- * diagnostic), which is the same boundary as a restart. */
+/** Owns bounded prospective observation admission. Durable coverage is recovery
+ * authority, not the process-local queue. Reject new work when capacity is full
+ * rather than evicting already-admitted cuts or spawning unbounded gap writes.
+ * Shutdown reports queued, not-yet-durable cuts honestly as unadmitted. */
 export class KnowledgeObservationService {
-  private readonly queued = new Map<string, ObservationSettlement>();
+  private readonly queued = new Map<string, { settlement: ObservationSettlement; bytes: number }>();
+  private activeReservation: { key: string; bytes: number; entries: number } | undefined;
   private queueSequence = 0;
   private admissionRetryTimer: NodeJS.Timeout | undefined;
   private admissionRetryDelayMs = 0;
@@ -262,84 +290,38 @@ export class KnowledgeObservationService {
     // invocation may coalesce; anonymous admissions receive a unique key.
     return `${settlement.sessionId}\u0000${settlement.branchId ?? ""}\u0000${settlement.projectId ?? ""}\u0000${envelope ?? `admission-${++this.queueSequence}`}`;
   }
-  private enqueue(settlement: ObservationSettlement, key = this.queueKey(settlement)): void {
+  private enqueue(settlement: ObservationSettlement, key = this.queueKey(settlement), fromActive = false): boolean {
+    if (this.cancelled.signal.aborted) return false;
+    const reject = () => { this.droppedSinceLastReport += 1; this.reportDropped(); return false; };
+    if (settlement.entries.length > MAX_SOURCE_ENTRIES || retainedSourceBytes(settlement.entries) === undefined) return reject();
     const prior = this.queued.get(key);
-    if (!prior) { this.queued.set(key, { ...settlement, entries: [...settlement.entries] }); }
-    else {
-      // Keep the newest exact snapshot, but never discard a suffix admitted by a
-      // bounded prior chunk. IDs are merged in arrival order, with the incoming
-      // canonical prefix taking precedence when it is newer.
-      const incoming = [...settlement.entries];
-      const priorEntries = [...prior.entries];
-      const merged = incoming.length >= priorEntries.length && priorEntries.every((entry, index) => JSON.stringify(entry) === JSON.stringify(incoming[index]))
-        ? incoming
-        : [...priorEntries, ...incoming.filter(entry => !priorEntries.some(existing => JSON.stringify(existing) === JSON.stringify(entry)))];
-      this.queued.set(key, { ...settlement, entries: merged });
+    // Canonical entry IDs are immutable within this exact session/branch/turn.
+    // Preserve order and replace repeated snapshots by identity, without the
+    // quadratic repeated JSON serialization of whole canonical payloads.
+    const merged = new Map<unknown, unknown>();
+    for (const entry of [...(prior?.settlement.entries ?? []), ...settlement.entries]) {
+      const id = entry && typeof entry === "object" && "id" in entry ? entry.id : entry;
+      merged.set(id, entry);
     }
-    this.enforceQueueBound(key);
-  }
-
-  /** Prospective admission is convenience, not coverage authority, so an
-   * overflow evicts the oldest cuts with one bounded diagnostic rather than
-   * growing without limit. The newest cut is always retained. */
-  private enforceQueueBound(preserveKey: string): void {
-    let entries = 0;
-    for (const settlement of this.queued.values()) entries += settlement.entries.length;
-    if (this.queued.size <= MAX_QUEUED_SETTLEMENTS && entries <= MAX_QUEUED_SOURCE_ENTRIES) return;
-    let dropped = 0;
-    for (const key of [...this.queued.keys()]) {
-      if (this.queued.size <= MAX_QUEUED_SETTLEMENTS && entries <= MAX_QUEUED_SOURCE_ENTRIES) break;
-      if (key === preserveKey) continue;
-      const settlement = this.queued.get(key);
-      if (!settlement) continue;
-      entries -= settlement.entries.length;
-      this.queued.delete(key);
-      dropped += 1;
-      // Queue shedding is not a silent loss: the exact canonical cut is made a
-      // durable unavailable gap. It therefore cannot later be mistaken for a
-      // recoverable pending cut or silently skipped by prefix recovery.
-      void this.recordQueueBlock(settlement);
+    const entries = [...merged.values()];
+    const bytes = retainedSourceBytes(entries);
+    if (entries.length > MAX_SOURCE_ENTRIES || bytes === undefined) return reject();
+    // The completed cut hands its reservation to its suffix; unrelated new cuts
+    // still count the active inference's retained source until it unwinds.
+    if (fromActive && this.activeReservation?.key === key) this.activeReservation = undefined;
+    let usedBytes = this.activeReservation?.bytes ?? 0;
+    let usedEntries = this.activeReservation?.entries ?? 0;
+    let count = this.activeReservation ? 1 : 0;
+    for (const [candidate, queued] of this.queued) {
+      if (candidate === key) continue;
+      usedBytes += queued.bytes;
+      usedEntries += queued.settlement.entries.length;
+      count += 1;
     }
-    this.droppedSinceLastReport += dropped;
-    if (dropped > 0) this.reportDropped();
-  }
-
-  private async recordQueueBlock(settlement: ObservationSettlement): Promise<void> {
-    if (this.cancelled.signal.aborted) return;
-    const projected = settlement.entries.map(projectObservationEntry).filter((entry): entry is ObservationSourceEntry => entry !== undefined);
-    if (projected.length === 0 || projected.length > 10_000) return;
-    try {
-      const config = await this.store.config();
-      if (this.cancelled.signal.aborted || !config.observation.enabled) return;
-      const excluded = !knowledgeScopeEligible(config.eligibility, settlement) || await this.store.scopeExcluded({
-        sessionId: settlement.sessionId,
-        ...(settlement.branchId ? { branchId: settlement.branchId } : {}),
-        ...(settlement.projectId ? { projectId: settlement.projectId } : {}),
-      });
-      if (this.cancelled.signal.aborted) return;
-      const range: ObservationRange = {
-        sessionId: settlement.sessionId,
-        ...(settlement.branchId ? { branchId: settlement.branchId } : {}),
-        fromEntryId: projected[0]!.id,
-        toEntryId: projected.at(-1)!.id,
-        entryIds: projected.map(entry => entry.id),
-        entryDigest: sourceDigest(projected),
-        ...(settlement.projectId ? { projectId: settlement.projectId } : {}),
-        ...((settlement.invocationIds?.length ?? 0) > 0 ? { invocationIds: [...new Set(settlement.invocationIds)] } : settlement.invocationId ? { invocationIds: [settlement.invocationId] } : {}),
-      };
-      const id = rangeID(range);
-      const existing = await this.store.coverage(id);
-      if (this.cancelled.signal.aborted || ["observed", "empty", "excluded", "unavailable"].includes(existing?.disposition ?? "")) return;
-      await this.store.setCoverage({
-        commandId: commandID(excluded ? "knowledge-excluded" : "knowledge-unavailable", range, existing?.revisionId),
-        expectedConfigRevision: config.revision,
-        ...(existing?.revisionId ? { expectedRevision: existing.revisionId } : {}),
-        coverage: { id, range, disposition: excluded ? "excluded" : "unavailable", groupRevisionIds: [], reason: excluded ? "scope-excluded" : "observation-queue-capacity" },
-      }, this.cancelled.signal);
-    } catch {
-      // A store outage cannot be converted into a false recoverable claim. The
-      // bounded diagnostic remains the only honest admission result.
-    }
+    if (count + 1 > MAX_QUEUED_SETTLEMENTS || usedBytes + bytes > MAX_RETAINED_SOURCE_BYTES
+      || usedEntries + entries.length > MAX_QUEUED_SOURCE_ENTRIES) return reject();
+    this.queued.set(key, { settlement: { ...settlement, entries }, bytes });
+    return true;
   }
 
   /** One bounded accounting fact per overflow event, never entry content. */
@@ -347,7 +329,8 @@ export class KnowledgeObservationService {
     if (this.droppedSinceLastReport === 0) return;
     const dropped = this.droppedSinceLastReport;
     this.droppedSinceLastReport = 0;
-    this.onDiagnostic?.({ code: "knowledge-observation-queue-shed", dropped, queued: this.queued.size });
+    try { this.onDiagnostic?.({ code: "knowledge-observation-admission-rejected", dropped, queued: this.queued.size }); }
+    catch { /* Diagnostics cannot change admission or persistence authority. */ }
   }
 
   private running = false;
@@ -372,11 +355,11 @@ export class KnowledgeObservationService {
     this.reportDropped();
   }
 
-  admit(settlement: ObservationSettlement): void {
-    if (this.cancelled.signal.aborted) return;
-    if (!settlement.sessionId || settlement.entries.length > MAX_SOURCE_ENTRIES) return;
-    this.enqueue(settlement);
+  admit(settlement: ObservationSettlement): boolean {
+    if (this.cancelled.signal.aborted || !settlement.sessionId) return false;
+    if (!this.enqueue(settlement)) return false;
     void this.drain();
+    return true;
   }
 
   /** Retries durable admission after an operational store failure, with bounded
@@ -394,24 +377,29 @@ export class KnowledgeObservationService {
   }
 
   private async drain(): Promise<void> {
-    if (this.running || this.cancelled.signal.aborted) return;
+    if (this.running || this.cancelled.signal.aborted || this.admissionRetryTimer) return;
     this.running = true;
     try {
       while (!this.cancelled.signal.aborted && this.queued.size > 0) {
-        const next = this.queued.entries().next().value as [string, ObservationSettlement] | undefined;
+        const next = this.queued.entries().next().value;
         if (!next) break;
         this.queued.delete(next[0]);
-        if (!await this.process(next[1], next[0])) {
+        const settlement = next[1].settlement;
+        this.activeReservation = { key: next[0], bytes: next[1].bytes, entries: settlement.entries.length };
+        const admitted = await this.process(settlement, next[0]);
+        this.activeReservation = undefined;
+        if (!admitted) {
           // Durable admission failed for operational reasons. Retain the exact
           // cut and stop draining so a broken store cannot spin this loop. A
           // disposal wins over requeue; no late completion may revive work.
           if (this.cancelled.signal.aborted) break;
-          this.enqueue(next[1], next[0]);
+          this.enqueue(settlement, next[0]);
           this.scheduleAdmissionRetry();
           break;
         }
       }
     } finally {
+      this.activeReservation = undefined;
       this.running = false;
       if (this.queued.size === 0) {
         this.admissionRetryDelayMs = 0;
@@ -420,9 +408,30 @@ export class KnowledgeObservationService {
     }
   }
 
-  /** Returns false only when durable admission could not be recorded, in which
-   * case the caller retains the exact cut and retries with backoff. */
+  /** The complete admission/publication path is owned, not just inference. A
+   * store transaction that already accepted a cut must finish its receipt even
+   * when shutdown disposes the observer during the write. */
   private async process(settlement: ObservationSettlement, envelopeKey: string): Promise<boolean> {
+    if (this.cancelled.signal.aborted) return true;
+    let work: GatewayWorkHandle | undefined;
+    const retirements: Promise<void>[] = [];
+    try {
+      work = this.workRegistry?.begin({ kind: "knowledge-observation", sessionId: settlement.sessionId,
+        hostEpoch: this.workRegistry.runtimeEpoch, cancellation: () => this.dispose() });
+      return await this.processCut(settlement, envelopeKey, retirements);
+    } catch {
+      return this.cancelled.signal.aborted || this.workRegistry?.isAdmissionOpen === false;
+    } finally {
+      // Read this list after the task unwinds: adapters register retirement only
+      // after their asynchronous admission reads. A timed-out waiter is not a
+      // settled provider and must not release its drain token.
+      if (retirements.length === 0) work?.settle();
+      else void Promise.all(retirements).then(() => work?.settle());
+    }
+  }
+
+  /** False retains the exact cut for a bounded-backoff admission retry. */
+  private async processCut(settlement: ObservationSettlement, envelopeKey: string, retirements: Promise<void>[]): Promise<boolean> {
     let config: KnowledgeConfig;
     // An unreadable store is operational: retain the cut rather than losing a
     // terminal snapshot that has no coverage authority yet.
@@ -512,7 +521,7 @@ export class KnowledgeObservationService {
         : settlement.invocationId ? { invocationIds: [settlement.invocationId] } : {}),
     };
     const admitRemaining = (entries: readonly ObservationSourceEntry[] = remaining) => {
-      if (entries.length > 0) this.enqueue({ ...settlement, entries: entries.map(entry => entry.canonical) }, envelopeKey);
+      if (entries.length > 0) this.enqueue({ ...settlement, entries: entries.map(entry => entry.canonical) }, envelopeKey, true);
     };
     const id = rangeID(range);
     let existing: Awaited<ReturnType<KnowledgeStore["coverage"]>>;
@@ -570,12 +579,8 @@ export class KnowledgeObservationService {
     // terminal snapshot. Failed admission must never leak the cut to the model.
     if (!pending) return false;
     const expectedRevision = pending.coverage.revisionId;
-    let work: GatewayWorkHandle | undefined;
-    const retirements: Promise<void>[] = [];
-    const operationAbort = new AbortController();
-    const operationSignal = AbortSignal.any([this.cancelled.signal, operationAbort.signal]);
+    const operationSignal = this.cancelled.signal;
     try {
-      work = this.workRegistry?.begin({ kind: "knowledge-observation", sessionId: settlement.sessionId, hostEpoch: this.workRegistry.runtimeEpoch, cancellation: () => operationAbort.abort() });
       const model = typeof this.model === "function" ? this.model(config) : this.model;
       if (!model) throw new Error("No explicitly configured observation model");
       // Model implementations are not required to honor AbortSignal. Fence
@@ -621,12 +626,6 @@ export class KnowledgeObservationService {
       if (operationSignal.aborted) return true;
       await this.store.setCoverage({ commandId: commandID("knowledge-failed", range, expectedRevision), expectedConfigRevision: config.revision, ...(expectedRevision ? { expectedRevision } : {}), coverage: { id, range, disposition: "failed", groupRevisionIds: [], reason: error instanceof Error ? bounded(error.message, 500) : "observer-failed" } }, operationSignal).catch(() => {});
       return true;
-    } finally {
-      // The bounded waiter may reject before an adapter settles. Keep the
-      // Gateway token until every provider promise has actually retired, but do
-      // not block the serialized admission queue on an uncooperative provider.
-      if (retirements.length === 0) work?.settle();
-      else void Promise.all(retirements).then(() => work?.settle());
     }
     return true;
   }

@@ -1,7 +1,8 @@
-import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { TrustService } from "./trust-service.js";
 import {
   PackageService,
@@ -65,6 +66,23 @@ describe("PackageService", () => {
     await expect(service.mutate("install", packageDir, workspace, false)).rejects.toMatchObject({ code: "busy" });
     await expect(service.list(workspace)).rejects.toMatchObject({ code: "busy" });
     await expect(service.checkUpdates(workspace)).rejects.toMatchObject({ code: "busy" });
+  });
+
+  it.each(["tilde", "file-url"])("preserves SDK-supported %s local source resolution", async (kind) => {
+    const root = await mkdtemp(join(tmpdir(), "tron-package-path-"));
+    const workspace = join(root, "workspace"), agentDir = join(root, "agent"), packageDir = join(root, "local-package");
+    await Promise.all([mkdir(workspace), mkdir(agentDir), mkdir(packageDir)]);
+    await writeFile(join(packageDir, "package.json"), JSON.stringify({ name: "fixture", pi: { prompts: [] } }));
+    vi.stubEnv("HOME", root);
+    try {
+      const service = new PackageService(agentDir, new TrustService(agentDir), () => {});
+      const source = kind === "tilde" ? "~/local-package" : pathToFileURL(packageDir).href;
+      await expect(service.mutate("install", source, workspace, false)).resolves.toMatchObject({ operationId: expect.any(String) });
+      expect(JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8")).packages).toHaveLength(1);
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("fails closed on malformed canonical settings before package inspection", async () => {

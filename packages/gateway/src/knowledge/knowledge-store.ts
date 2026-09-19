@@ -584,20 +584,22 @@ export class KnowledgeStore {
   private async mutate<T>(operation: string, commandId: string, request: unknown, action: (state: KnowledgeState, paths: StorePaths) => Promise<T>, afterCommit?: (state: KnowledgeState, paths: StorePaths, result: T) => Promise<void>, signal?: AbortSignal): Promise<T> {
     if (!/^[A-Za-z0-9._:-]{8,160}$/.test(commandId)) throw invalid("Mutating requests require a stable commandId");
     return this.mutex.run(async () => {
+      if (signal?.aborted) throw new GatewayError("busy", "Knowledge mutation was cancelled", true);
       const paths = await this.paths(true); const { state } = await this.load(paths, true);
       try {
         const key = `${operation}\0${commandId}`; const hash = requestHash(operation, request); const prior = state.receipts.get(key);
         if (prior) { if (prior.operation !== operation || prior.requestHash !== hash) throw conflict("Command ID was already used for a different knowledge mutation"); if (prior.invalidated) throw conflict("Knowledge mutation result was forgotten"); return await this.receiptResult(paths, state, prior.result) as T; }
         if (signal?.aborted) throw new GatewayError("busy", "Knowledge mutation was cancelled", true);
+        // This is mutation admission. Once action starts it can durably write
+        // record bodies: cancellation must not abandon their catalog/receipt
+        // transaction and strand inaccessible private data. Join the commit.
         state.catalog!.begin();
         const result = await action(state, paths);
-        if (signal?.aborted) throw new GatewayError("busy", "Knowledge mutation was cancelled", true);
         state.stateRevision += 1;
         const stored = this.receipt(result, state.stateRevision);
         state.receipts.set(key, { operation, requestHash: hash, result: stored.stored, recordIds: stored.recordIds, createdAt: now(), invalidated: false });
         const entries = [...state.receipts.entries()].sort(([, a], [, b]) => a.createdAt.localeCompare(b.createdAt));
         for (const [receiptKey] of entries.slice(0, Math.max(0, entries.length - RECEIPT_LIMIT))) state.receipts.delete(receiptKey);
-        if (signal?.aborted) throw new GatewayError("busy", "Knowledge mutation was cancelled", true);
         await this.save(paths, state);
         // Publish only after the authoritative commit, across RPC, agent tools,
         // connectors and autonomous observations. Receipt replays bypass this.

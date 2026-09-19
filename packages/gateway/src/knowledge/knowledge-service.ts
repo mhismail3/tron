@@ -191,6 +191,7 @@ export class KnowledgeService {
     try {
       work = this.workRegistry?.begin({ kind: "knowledge-observation", hostEpoch: this.workRegistry.runtimeEpoch, cancellation: () => controller.abort(new Error("Knowledge operation cancelled")) });
       const taskRetirements: Promise<void>[] = [];
+      if (controller.signal.aborted) throw new GatewayError("busy", `Knowledge ${operation} was cancelled before admission`, true);
       const task$ = task(controller.signal, taskRetirements);
       const abortable = awaitAbortableWithSettlement(task$, controller.signal, () => {
         // A model or store owner is not required to honor AbortSignal. Bound the
@@ -203,10 +204,11 @@ export class KnowledgeService {
             `Knowledge ${operation} did not settle before its deadline; refresh state before retrying`,
           );
         }
-        const reason = controller.signal.reason;
-        return reason instanceof GatewayError ? reason : new GatewayError("busy", `Knowledge ${operation} was cancelled`, true);
+        return asUncertainOutcome(controller.signal.reason, `Knowledge ${operation} was cancelled after admission; reconcile its receipt before retrying`);
       });
-      retirement = Promise.all([abortable.settled, ...taskRetirements]).then(() => undefined);
+      // Provider retirements are registered after asynchronous store reads. Read
+      // the final list only once task has unwound, not when it first starts.
+      retirement = abortable.settled.then(() => Promise.all(taskRetirements)).then(() => undefined);
       return await abortable.wait;
     } finally {
       clearTimeout(timeout); parentSignal?.removeEventListener("abort", relay);

@@ -20,6 +20,16 @@ function extension(index: number, handlers: ReadonlyMap<string, readonly unknown
 }
 
 describe("hook registration projection", () => {
+  it("skips an impossible identity without hiding later identities or mixing their inventories", () => {
+    const huge = "€".repeat(16_384);
+    const first = { ...extension(1, new Map()), name: huge, path: huge, resolvedPath: huge, scope: huge, source: huge, origin: huge };
+    const second = { ...extension(2, new Map([["session_start", [() => {}]]])), tools: ["second-tool"] };
+    const result = projectHookRegistrations([first, second], []);
+    expect(result.extensions).toHaveLength(1);
+    expect(result.extensions[0]).toMatchObject({ name: second.name, tools: ["second-tool"], handlers: [{ event: "session_start", count: 1 }] });
+    expect(result.hookInventory.extensions).toEqual({ total: 2, retained: 1, omitted: 1 });
+    expect(result.hookInventory.encodedBytes).toBe(Buffer.byteLength(JSON.stringify({ extensions: result.extensions, extensionLoadErrors: result.extensionLoadErrors })));
+  });
   it("retains every existing extension row and exact identity while bounding additions", () => {
     const registrations = projectHookRegistrations([
       extension(1, new Map([["session_start", [() => undefined]]])),

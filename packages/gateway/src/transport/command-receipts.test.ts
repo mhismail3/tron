@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GatewayError } from "../errors.js";
+import { GatewayError, asUncertainOutcome } from "../errors.js";
 import { atomicWriteJson } from "../util/json.js";
 import { CommandReceiptStore } from "./command-receipts.js";
 
@@ -150,6 +150,15 @@ describe("CommandReceiptStore", () => {
     await expect(store.execute("device", "session.bash", "uncertain-effect-retry", recovered))
       .resolves.toEqual({ accepted: true });
     expect(recovered).toHaveBeenCalledTimes(1);
+  });
+
+  it("never advertises replayability after a retryable owner error becomes uncertain", async () => {
+    const root = await temporaryRoot("tron-receipts-uncertain-classification-");
+    const store = new CommandReceiptStore(root);
+    await expect(store.execute("device", "packages.update", "partial-owner-error", async () => {
+      throw asUncertainOutcome(new GatewayError("busy", "post-effect cleanup failed", true), "Package update may have applied");
+    })).rejects.toMatchObject({ retryable: false, details: { outcomeUnknown: true } });
+    expect(await store.status("device", "packages.update", "partial-owner-error")).toEqual({ status: "pending" });
   });
 
   it("rejects new mutations before execution when entry capacity is full", async () => {

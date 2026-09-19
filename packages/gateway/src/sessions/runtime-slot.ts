@@ -1479,7 +1479,9 @@ export class RuntimeSlot {
       uiContext: this.extensionHost.context(),
       mode: "rpc",
       commandContextActions: this.commandActions(),
-      abortHandler: () => void this.abort(),
+      abortHandler: () => { void this.abort().catch(error => this.emit("session.diagnostic", safeJson({
+        code: "foreground-abort-unsettled", message: error instanceof Error ? error.message : String(error),
+      }))); },
       shutdownHandler: () => this.requestExtensionShutdown(),
       onError: (error) => {
         const context = currentInvocationContext();
@@ -2461,6 +2463,17 @@ export class RuntimeSlot {
       // A timeout cannot certify rejection, and late completion cannot certify
       // that the abandoned caller finished its dependent canonical transitions.
       owner.blocked = true;
+      this.lifecycle.beginDrain();
+      // Stop further foreground effects through their SDK owners, without
+      // claiming they have settled or disposing the potentially staged branch.
+      const session = this.runtime?.session;
+      if (session) {
+        for (const cancel of [() => session.abortCompaction(), () => session.abortRetry(), () => session.abortBranchSummary(), () => session.abortBash()]) {
+          try { cancel(); } catch { /* Continue requesting each independent stop. */ }
+        }
+        void session.abort().catch(() => {});
+        void this.directBashProcesses?.abortAll().catch(() => {});
+      }
       this.emit("session.diagnostic", {
         code: "canonical-ownership-persistence-blocked",
         message: "Canonical ownership persistence is unresolved; the session remains a drain and eviction blocker",
@@ -6360,7 +6373,10 @@ export class RuntimeSlot {
     kind: "agent" | "compaction" | "retry" | "branchSummary" | "bash" = "agent",
     expectedOperationId?: string,
   ): Promise<void> {
-    this.assertUsable();
+    // A persistence blocker must not disable the owner's Stop route. Stop still
+    // proves exact operation identity and reports any unresolved receipt after
+    // cancellation instead of clearing the persistence fence.
+    this.assertAvailable();
     if (expectedOperationId !== undefined && this.operation?.id !== expectedOperationId) {
       throw new GatewayError("conflict", "The active operation changed before it could be stopped", true);
     }
@@ -7584,7 +7600,11 @@ export class RuntimeSlot {
   }
 
   private assertUsable(allowTrustReload = false): void {
+    this.assertAvailable(allowTrustReload);
     this.assertOwnershipPersistence();
+  }
+
+  private assertAvailable(allowTrustReload = false): void {
     if (this.disposed) throw new GatewayError("conflict", "Session runtime was disposed", true);
     if (this.shuttingDown) throw new GatewayError("conflict", "Session runtime is shutting down", true);
     if (!allowTrustReload) this.assertNoTrustReload();

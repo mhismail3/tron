@@ -282,14 +282,14 @@ export class DeviceStore {
       // Consume first: once pairing has been accepted, a persistence failure
       // must not leave the invitation reusable. Regenerate explicitly while
       // still holding the mutex if the device write fails.
-      await durableRemove(this.enrollmentPath);
       try {
+        await durableRemove(this.enrollmentPath);
         await durableAtomicWriteJson(this.devicePath, document);
       } catch (error) {
         await this.ensureEnrollmentLocked(new Date()).catch(() => {});
         throw error;
       }
-      queueMicrotask(() => void this.ensureEnrollment());
+      queueMicrotask(() => { void this.ensureEnrollment().catch(() => { /* The next owned enrollment request retries storage failure. */ }); });
       return { deviceId: record.id, token };
     });
   }
@@ -346,15 +346,11 @@ export class DeviceStore {
       try {
         await durableAtomicWriteJson(this.devicePath, { version: 1, devices: next });
       } catch (error) {
-        // A directory-sync failure happens after rename may have made the
-        // removal visible. Re-read under this mutex before retiring transport
-        // authority; the original error remains observable to the caller.
-        if (isDurablePublicationUncertain(error)) {
-          const published = await this.readDevices().then(document =>
-            !document.devices.some(device => device.id === deviceId),
-          ).catch(() => false);
-          if (published) onRevoked();
-        }
+        // The writer positively observed our replacement rename. Under this
+        // mutex no competing credential mutation can restore the removed device.
+        // Retire transport even if further storage reads are unavailable; a
+        // failed fsync is not permission to keep revoked connections alive.
+        if (isDurablePublicationUncertain(error)) onRevoked();
         throw error;
       }
       // The replacement above is the authority cut. Publication is deliberately

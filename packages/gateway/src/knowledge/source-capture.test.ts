@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { captureSource, isPrivateAddress } from "./source-capture.js";
@@ -23,6 +23,33 @@ describe("safe source capture", () => {
     expect(isPrivateAddress("::ffff:c0a8:101")).toBe(true);
     expect(isPrivateAddress("2001:db8::1")).toBe(false);
   });
+  it.each([-1, 0, 1.5, Infinity, 2_000_001])("rejects invalid readable input limit %s before fetching", async (maxReadableChars) => {
+    const { store } = await fixture();
+    const fetcher = vi.fn(async () => new Response("not reached"));
+    await expect(captureSource(store, { commandId: command("invalid-readable-bound"), url: "https://example.com/bound", scope: "research" }, {
+      fetcher, resolveHost: publicResolver, limits: { maxReadableChars },
+    })).rejects.toThrow(/Invalid source capture limits/);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("fences the primary source write when cancellation wins before store admission", async () => {
+    const { store } = await fixture();
+    const controller = new AbortController();
+    const capture = store.captureSource.bind(store);
+    const write = vi.spyOn(store, "captureSource").mockImplementationOnce(request => {
+      controller.abort(new Error("cancel before source publication"));
+      return capture(request);
+    });
+    try {
+      await expect(captureSource(store, { commandId: command("cancel-primary"), url: "https://example.com/primary", scope: "research" }, {
+        signal: controller.signal,
+        fetcher: async () => new Response("complete source", { headers: { "content-type": "text/plain" } }),
+        resolveHost: publicResolver,
+      })).rejects.toThrow(/cancel/i);
+      expect((await store.list({ kind: "source" })).records).toEqual([]);
+    } finally { write.mockRestore(); }
+  });
+
   it("rejects credential-bearing query parameters before persistence or fetch", async () => {
     const { store } = await fixture();
     let fetched = false;

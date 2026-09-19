@@ -288,7 +288,7 @@ export class CommandReceiptStore {
               // a permanent replay fence by design. Name that distinction so an
               // operator can act on a genuinely exhausted store instead of waiting
               // for an expiry that never comes.
-              throw new GatewayError("busy", "Command receipt capacity is full; retry after completed receipts expire, and resolve any command whose status remains pending before capacity returns", true);
+              throw new GatewayError("busy", "Command receipt capacity is full; completed receipts expire, but unresolved outcomes retain replay protection and require operator reconciliation", true);
             }
           }
           this.reservedCompletionBytes += COMMAND_RECEIPT_MAX_BYTES;
@@ -312,8 +312,8 @@ export class CommandReceiptStore {
         } catch (error) {
           // An owner that reports an uncertain outcome may already have applied its
           // effect (post-effect persistence or cleanup failure). Retain the pending
-          // receipt so the identical command can never be replayed: callers must
-          // refresh authoritative state and reissue with a new commandId. An observed
+          // receipt so the identical command cannot replay: callers must
+          // reconcile authoritative state before deciding on a new command. An observed
           // application rejection is definitive and remains retryable.
           const uncertain = isUncertainOutcome(error);
           await this.inventoryMutex.run(async () => {

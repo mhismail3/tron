@@ -3530,13 +3530,18 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const fixture = await coldFixture("canonical-receipt-staged-only");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const internal = slot as unknown as {
-      runtime: { session: { sessionManager: SessionManager } };
+      runtime: { session: { sessionManager: SessionManager; abort: () => Promise<void> } };
       persistCanonicalCustomEntry: (customType: string, data: unknown, identity: string) => Promise<void>;
       durableWrites: Map<string, unknown>;
     };
     const manager = internal.runtime.session.sessionManager;
     const sessionFile = manager.getSessionFile()!;
-    const receipt = { receiptId: "staged-only-receipt", version: 1 };
+    const receipt = makeInvocationReceipt({
+      version: 1, receiptId: "staged-only-receipt", receiptKind: "start",
+      invocationId: "staged-invocation", operationId: "staged-operation", sessionId: slot.id,
+      source: "plain", lifecycle: "staged", origin: { kind: "user", confidence: "boundary" },
+      sequence: 1, createdAt: "2026-01-01T00:00:00.000Z",
+    });
     const staged = (): boolean => manager.getBranch().some((entry) =>
       entry.type === "custom" && (entry.data as { receiptId?: unknown })?.receiptId === "staged-only-receipt");
 
@@ -3565,6 +3570,11 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       expect(slot.administrativeDrainBlockers()).toContainEqual(expect.objectContaining({ category: "terminal-receipt-persistence", state: "suspect" }));
       await expect(slot.prompt("must not execute")).rejects.toMatchObject({ details: { outcomeUnknown: true } });
       await expect(slot.dispose()).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+      const stop = vi.spyOn(internal.runtime.session, "abort");
+      await slot.abort();
+      expect(stop).toHaveBeenCalledOnce();
+      expect(slot.isDrainBusy).toBe(true);
+      stop.mockRestore();
       await expect(internal.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, { receiptId: "healthy-receipt", version: 1 }, "healthy-receipt"))
         .rejects.toMatchObject({ details: { outcomeUnknown: true } });
       expect(await readFile(sessionFile, "utf8")).not.toContain("healthy-receipt");

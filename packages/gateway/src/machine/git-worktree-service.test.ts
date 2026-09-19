@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { GitWorktreeService } from "./git-worktree-service.js";
 
 const execFileAsync = promisify(execFile);
@@ -111,6 +111,31 @@ describe("GitWorktreeService", () => {
       await winners[0].value.cleanup();
       await expect(git(root, "show-ref", "--verify", "--quiet", "refs/heads/feature/concurrent")).rejects.toThrow();
     } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(tronHome, { recursive: true, force: true });
+    }
+  });
+
+  it("treats a nonzero Git exit with a live hook descendant as uncertain and terminates the owned group", async () => {
+    const { root, tronHome } = await repository();
+    const pidFile = join(tronHome, "hook-descendant.pid");
+    let pid: number | undefined;
+    try {
+      const hook = join(root, ".git", "hooks", "post-checkout");
+      await writeFile(hook, `#!/bin/sh\n/bin/sleep 60 >/dev/null 2>&1 &\nprintf '%s' "$!" > ${JSON.stringify(pidFile)}\nexit 1\n`);
+      await chmod(hook, 0o755);
+      const service = new GitWorktreeService(tronHome);
+      await expect(service.prepare(root, { mode: "newBranchWorktree", branch: "feature/hook-failure" }))
+        .rejects.toMatchObject({ details: { outcomeUnknown: true }, retryable: false });
+      pid = Number(await readFile(pidFile, "utf8"));
+      await vi.waitFor(() => {
+        expect(() => process.kill(pid!, 0)).toThrow();
+      }, { timeout: 2_000 });
+      // The command's uncertain outcome does not grant cleanup authority.
+      expect(await git(root, "branch", "--list", "feature/hook-failure")).toContain("feature/hook-failure");
+    } finally {
+      if (pid === undefined) pid = Number(await readFile(pidFile, "utf8").catch(() => "NaN"));
+      if (Number.isSafeInteger(pid) && pid! > 1) { try { process.kill(pid!, "SIGKILL"); } catch { /* exact test descendant already exited */ } }
       await rm(root, { recursive: true, force: true });
       await rm(tronHome, { recursive: true, force: true });
     }

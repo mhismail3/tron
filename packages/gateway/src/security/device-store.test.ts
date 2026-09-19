@@ -266,6 +266,33 @@ describe("DeviceStore", () => {
     }
   });
 
+  it("regenerates an invitation when consumption unlinks it but directory synchronization fails", async () => {
+    const { root, store } = await fixture();
+    const invitation = await store.ensureEnrollment();
+    const realRemove = durableJson.durableRemove;
+    const gatewayPath = join(root, "gateway");
+    const failedSync = Object.assign(new Error("removed invitation was not synchronized"), { code: "EIO" });
+    const io = {
+      rm,
+      open: (async (path: string, ...args: unknown[]) => {
+        const handle = await open(path, ...(args as [never]));
+        if (path === gatewayPath) Object.defineProperty(handle, "sync", { value: async () => { throw failedSync; } });
+        return handle;
+      }) as DurableJsonFileSystem["open"],
+    };
+    vi.spyOn(durableJson, "durableRemove").mockImplementationOnce(path => realRemove(path, io));
+    try {
+      await expect(store.pair(invitation.code, "Phone")).rejects.toBe(failedSync);
+      // Read bytes directly: calling ensureEnrollment here would hide the bug.
+      const replacement = JSON.parse(await readFile(join(gatewayPath, "enrollment.json"), "utf8"));
+      expect(replacement.code).not.toBe(invitation.code);
+      expect(await store.listDevices()).toEqual([]);
+    } finally {
+      vi.restoreAllMocks();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("retains the paired device when its publication is visible but durability is uncertain", async () => {
     const { root, store } = await fixture();
     const first = await store.ensureEnrollment();

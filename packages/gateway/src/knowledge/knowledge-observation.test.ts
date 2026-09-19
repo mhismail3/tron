@@ -281,7 +281,7 @@ describe("KnowledgeObservationService", () => {
     expect(text).toContain("https://example.test/tmp/public");
   });
 
-  it("bounds prospective admission and reports shed cuts instead of growing without limit", async () => {
+  it("bounds prospective admission and rejects new cuts rather than evicting admitted cuts", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-observer-shed-")); roots.push(root);
     const workspace = new TronWorkspace(join(root, "home")); workspaces.push(workspace);
     const store = new KnowledgeStore(workspace);
@@ -294,19 +294,60 @@ describe("KnowledgeObservationService", () => {
     const infer = vi.fn(async () => new Promise<string>((resolve) => { release = () => resolve(output); }));
     const shed: number[] = [];
     const observer = new KnowledgeObservationService(store, { infer }, undefined, (fact) => shed.push(fact.dropped));
+    const admissions: boolean[] = [];
     for (let index = 0; index < 70; index += 1) {
-      observer.admit({
+      admissions.push(observer.admit({
         sessionId: "session-1",
         entries: [{ type: "message", id: `shed-entry-${index}`, timestamp: "2026-01-01T00:00:01Z", message: { role: "user", content: `turn ${index}` } }],
         outcome: "completed",
         invocationId: `shed-invocation-${index}`,
-      });
+      }));
     }
-    // One cut is being processed while the rest queue; the bound sheds the oldest.
-    expect(shed.length).toBeGreaterThan(0);
-    expect(shed.reduce((total, dropped) => total + dropped, 0)).toBeGreaterThan(0);
+    // The active cut consumes its reservation too. Only the new excess cuts are
+    // rejected; no asynchronous gap-write backlog can bypass the queue limit.
+    expect(admissions.slice(0, 64)).toEqual(Array(64).fill(true));
+    expect(admissions.slice(64)).toEqual(Array(6).fill(false));
+    expect(shed.reduce((total, dropped) => total + dropped, 0)).toBe(6);
     observer.dispose();
     release?.();
+  });
+
+  it("rejects an oversized retained payload before copying or serializing it into the observation queue", async () => {
+    const infer = vi.fn(async () => output);
+    const diagnostics: number[] = [];
+    const { store, observer: unused } = await fixture({ infer });
+    unused.dispose();
+    const observer = new KnowledgeObservationService(store, { infer }, undefined, fact => diagnostics.push(fact.dropped));
+    const accepted = observer.admit({ sessionId: "session-1", outcome: "completed", entries: [{
+      type: "message", id: "oversized-retained-entry", timestamp: "2026-01-01T00:00:01Z",
+      message: { role: "user", content: "x".repeat(6 * 1_024 * 1_024) },
+    }] });
+    expect(accepted).toBe(false);
+    expect(diagnostics).toEqual([1]);
+    expect(infer).not.toHaveBeenCalled();
+    expect((await store.status()).coverageCount).toBe(0);
+    observer.dispose();
+  });
+
+  it("owns pre-inference store reads until they settle after disposal", async () => {
+    const work = new GatewayWorkRegistry();
+    const infer = vi.fn(async () => output);
+    const { store, observer } = await fixture({ infer }, work);
+    const config = await store.config();
+    let release!: () => void;
+    const waiting = new Promise<void>(resolve => { release = resolve; });
+    const read = vi.spyOn(store, "config").mockImplementationOnce(async () => { await waiting; return config; });
+    try {
+      observer.admit({ sessionId: "session-1", entries: [...entries], outcome: "completed" });
+      expect(work.size).toBe(1);
+      observer.dispose();
+      expect(work.size).toBe(1);
+      release();
+      await work.waitUntilSettled();
+      expect(work.size).toBe(0);
+      expect((await store.status()).coverageCount).toBe(0);
+      expect(infer).not.toHaveBeenCalled();
+    } finally { release(); read.mockRestore(); observer.dispose(); }
   });
 
   it("coalesces and durably deduplicates canonical no-tool turns without forwarding thinking", async () => {

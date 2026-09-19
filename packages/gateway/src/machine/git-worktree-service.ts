@@ -62,98 +62,69 @@ function validateBranch(value: string | undefined, field: string): string {
 function runGit(cwd: string, args: string[], timeout = COMMAND_TIMEOUT_MS): Promise<GitCommandResult> {
   return new Promise((resolve, reject) => {
     const maximumOutput = 256 * 1_024;
-    let timedOut = false;
+    const stdout: Buffer[] = [], stderr: Buffer[] = [];
+    let stdoutBytes = 0, stderrBytes = 0;
     let settled = false;
-    let outputOverflow = false;
-    let terminationRequested = false;
-    let groupTerminationFailed = false;
-    let killTimer: NodeJS.Timeout | undefined;
-    let deadlineTimer: NodeJS.Timeout | undefined;
-    let hardDeadlineTimer: NodeJS.Timeout | undefined;
-    const stdout: Buffer[] = [];
-    const stderr: Buffer[] = [];
-    let stdoutBytes = 0;
-    let stderrBytes = 0;
+    let terminationReason: string | undefined;
+    let killTimer: NodeJS.Timeout | undefined, retirementTimer: NodeJS.Timeout | undefined;
     const child = spawn(GIT, ["-C", cwd, ...args], { cwd, detached: true, windowsHide: true });
     const terminateGroup = (signal: NodeJS.Signals): void => {
       if (!child.pid) return;
       try { process.kill(-child.pid, signal); }
-      catch { try { child.kill(signal); } catch { /* process already exited */ } }
-    };
-    const append = (target: Buffer[], chunk: Buffer | string, currentBytes: number): number => {
-      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      const remaining = Math.max(0, maximumOutput - currentBytes);
-      if (remaining > 0) target.push(buffer.subarray(0, remaining));
-      const retainedBytes = currentBytes + Math.min(buffer.byteLength, remaining);
-      if (buffer.byteLength > remaining) {
-        outputOverflow = true;
-        terminationRequested = true;
-        terminateGroup("SIGTERM");
-      }
-      return retainedBytes;
+      catch { try { child.kill(signal); } catch { /* retained as uncertain below */ } }
     };
     const groupGone = (): boolean => {
       if (!child.pid) return true;
-      try {
-        process.kill(-child.pid, 0);
-        return false;
-      } catch (error) {
-        return (error as NodeJS.ErrnoException).code === "ESRCH";
-      }
+      try { process.kill(-child.pid, 0); return false; }
+      catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
     };
-    const finish = (error?: Error | null, code?: number | null, signal?: NodeJS.Signals | null): void => {
+    const finish = (error?: Error, code?: number | null, signal?: NodeJS.Signals | null, deadlineExpired = false): void => {
       if (settled) return;
-      if (!terminationRequested && !error && code === 0 && !groupGone()) {
-        // Git itself exited successfully, but a helper retained the process
-        // group. Terminate and fence the result rather than reporting success
-        // while that helper may still be changing the repository.
-        terminationRequested = true;
-        groupTerminationFailed = true;
-        terminateGroup("SIGTERM");
-        killTimer = setTimeout(() => terminateGroup("SIGKILL"), 1_000);
+      // A nonzero direct-child exit is no more proof of descendant retirement
+      // than a successful one. Never permit destructive rollback on that basis.
+      if (!deadlineExpired && !groupGone()) {
+        requestTermination("process group outlived Git");
         return;
       }
-      if (terminationRequested && !groupGone()) return;
       settled = true;
+      clearTimeout(deadlineTimer);
       if (killTimer) clearTimeout(killTimer);
-      if (deadlineTimer) clearTimeout(deadlineTimer);
-      if (hardDeadlineTimer) clearTimeout(hardDeadlineTimer);
-      if (!error && !timedOut && !outputOverflow && !groupTerminationFailed && code === 0) {
+      if (retirementTimer) clearTimeout(retirementTimer);
+      if (!error && !terminationReason && code === 0) {
         resolve({ stdout: Buffer.concat(stdout).toString(), stderr: Buffer.concat(stderr).toString() });
-        return;
+      } else {
+        reject(new GatewayError("conflict", `Git operation failed: ${terminationReason ?? error?.message ?? `exited with ${signal ?? code}`}`,
+          terminationReason === undefined,
+          terminationReason ? { outcomeUnknown: true } : { exitCode: code ?? undefined }));
       }
-      const detail = error?.message ?? (timedOut ? "timed out" : outputOverflow ? "output exceeded bounds"
-        : groupTerminationFailed ? "process group did not terminate cleanly" : `exited with ${signal ?? code}`);
-      reject(new GatewayError("conflict", `Git operation failed: ${detail}`, true,
-        timedOut || outputOverflow || groupTerminationFailed ? { outcomeUnknown: true } : { exitCode: code ?? undefined }));
+      // Late callbacks are observed but never accumulate more output or publish
+      // a second result. Deadline expiry is uncertainty, not proof of group exit.
+      if (deadlineExpired) { child.stdout.destroy(); child.stderr.destroy(); }
     };
-    child.stdout.on("data", (chunk: Buffer | string) => { stdoutBytes = append(stdout, chunk, stdoutBytes); });
-    child.stderr.on("data", (chunk: Buffer | string) => { stderrBytes = append(stderr, chunk, stderrBytes); });
-    child.on("error", (error) => finish(error));
-    child.on("close", (code, signal) => finish(null, code, signal));
-    deadlineTimer = setTimeout(() => {
-      timedOut = true;
-      terminationRequested = true;
+    const requestTermination = (reason: string): void => {
+      if (settled || terminationReason) return;
+      terminationReason = reason;
+      clearTimeout(deadlineTimer);
       terminateGroup("SIGTERM");
       killTimer = setTimeout(() => terminateGroup("SIGKILL"), 1_000);
-    }, timeout);
-    // Do not settle merely because the child stopped reporting streams: a
-    // descendant may still be mutating the repository. The hard bound records
-    // uncertainty only after the process group is observed gone.
-    hardDeadlineTimer = setTimeout(() => {
-      if (settled) return;
-      terminateGroup("SIGKILL");
-      if (groupGone()) {
-        finish(null, null, "SIGKILL");
-      } else {
-        hardDeadlineTimer = setTimeout(() => {
-          if (!settled) {
-            terminateGroup("SIGKILL");
-            if (groupGone()) finish(null, null, "SIGKILL");
-          }
-        }, 1_000);
-      }
-    }, timeout + 2_000);
+      retirementTimer = setTimeout(() => {
+        terminateGroup("SIGKILL");
+        finish(undefined, null, "SIGKILL", true);
+      }, 2_000);
+    };
+    const append = (target: Buffer[], chunk: Buffer | string, size: number): number => {
+      if (settled || terminationReason) return size;
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      const remaining = Math.max(0, maximumOutput - size);
+      if (remaining > 0) target.push(bytes.subarray(0, remaining));
+      if (bytes.length > remaining) requestTermination("output exceeded bounds");
+      return size + Math.min(bytes.length, remaining);
+    };
+    const deadlineTimer = setTimeout(() => requestTermination("timed out"), timeout);
+    child.stdout.on("data", (chunk: Buffer | string) => { stdoutBytes = append(stdout, chunk, stdoutBytes); });
+    child.stderr.on("data", (chunk: Buffer | string) => { stderrBytes = append(stderr, chunk, stderrBytes); });
+    child.on("error", error => finish(error));
+    child.on("close", (code, signal) => finish(undefined, code, signal));
   });
 }
 
@@ -213,15 +184,21 @@ export class GitWorktreeService {
             try {
               await this.removeCreatedBranch(repositoryRoot, branch, baseCommit);
             } catch (error) {
+              // A timed-out ref operation may still be running. Preserve the
+              // exact worktree as well; no destructive cleanup may race it.
+              if (isUncertainOutcome(error)) throw error;
+              const current = await runGit(repositoryRoot, ["rev-parse", "--verify", `refs/heads/${branch}`])
+                .catch(failure => { throw asUncertainOutcome(failure, "Git branch cleanup could not be reconciled"); });
+              if (current.stdout.trim() === baseCommit) {
+                throw asUncertainOutcome(error, "Git branch cleanup failed without a confirmed branch move");
+              }
               // The worktree is still ours, so it is safe to release it even
               // when a session commit or external actor moved the branch. The
               // compare-and-delete has already preserved that branch.
               await this.removeWorktree(repositoryRoot, canonical);
               worktreeRemoved = true;
-              // A compare-and-delete mismatch proves the branch moved and
-              // therefore remained intact. Only an uncertain Git termination
-              // must remain fenced for authoritative reconciliation.
-              if (isUncertainOutcome(error)) throw error;
+              // The failed compare-and-delete has not granted permission to
+              // alter the surviving branch.
             }
           }
           if (!worktreeRemoved) await this.removeWorktree(repositoryRoot, canonical);

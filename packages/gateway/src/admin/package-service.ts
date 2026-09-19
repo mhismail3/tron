@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import {
   DefaultPackageManager,
   SettingsManager,
@@ -129,16 +129,16 @@ export class PackageService {
   private async validateInstallSource(source: string, cwd: string): Promise<void> {
     const trimmed = source.trim();
     if (!trimmed) throw new GatewayError("invalid_request", "Package source is required");
-    // Pi treats bare names and file: URLs as local paths. Reject a missing
-    // path before admitting the SDK mutation; unlike an admitted npm/git
-    // command, this is a definite no-effect validation failure.
-    const remote = /^(?:npm|git|github|http|https|ssh):/u.test(trimmed);
-    if (!remote) {
-      const path = trimmed.startsWith("file:") ? trimmed.slice("file:".length) : trimmed;
-      try {
-        await access(resolve(cwd, path));
-      } catch {
-        throw new GatewayError("not_found", `Package source path does not exist: ${path}`);
+    // Preflight only unambiguous filesystem spellings. Pi owns source parsing,
+    // including tilde paths, file URLs and Git shorthand; do not reinterpret
+    // those inputs with a second resolver. Any SDK-admitted failure is fenced.
+    if (isAbsolute(source) || source.startsWith("./") || source.startsWith("../")) {
+      try { await access(resolve(cwd, source)); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT" || (error as NodeJS.ErrnoException).code === "ENOTDIR") {
+          throw new GatewayError("not_found", "Package source path does not exist");
+        }
+        throw error;
       }
     }
     if (trimmed.startsWith("npm:") && trimmed.slice("npm:".length).trim() === "") {
@@ -185,7 +185,7 @@ export class PackageService {
       // no atomicity receipt: install/remove/update can apply an earlier item
       // and then throw. Once admitted, every failure is therefore fenced as
       // unknown rather than permitting a replay that duplicates side effects.
-      let effectApplied = false;
+      let mutationAdmitted = false;
       try {
         const managed = await this.manager(cwd, local);
         manager = managed.manager;
@@ -197,19 +197,17 @@ export class PackageService {
         if (action === "install") {
           if (source === undefined) throw new GatewayError("invalid_request", "Package source is required");
           await this.validateInstallSource(source, cwd);
-          effectApplied = true;
-          await manager.install(source, { local });
-          manager.addSourceToSettings(source, { local });
+          mutationAdmitted = true;
+          await manager.installAndPersist(source, { local });
           await this.flushSettings(settings);
         } else if (action === "remove") {
           if (source === undefined) throw new GatewayError("invalid_request", "Package source is required");
-          effectApplied = true;
-          await manager.remove(source, { local });
-          manager.removeSourceFromSettings(source, { local });
+          mutationAdmitted = true;
+          await manager.removeAndPersist(source, { local });
           await this.flushSettings(settings);
         } else if (source === undefined) {
           // An omitted source retains Pi's existing "update all" command.
-          effectApplied = true;
+          mutationAdmitted = true;
           await manager.update();
         } else {
           // Pi's public update(source) intentionally updates every matching
@@ -217,18 +215,20 @@ export class PackageService {
           // seam to refresh only that row's user/project installation while
           // leaving its existing settings entry untouched.
           this.ensureConfiguredSource(manager, source, local);
-          effectApplied = true;
+          mutationAdmitted = true;
           await manager.install(source, { local });
         }
         this.broadcast("packages.completed", { operationId, success: true });
       } catch (error) {
-        this.broadcast("packages.completed", {
-          operationId,
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        throw effectApplied
-          ? asUncertainOutcome(error, "The package change was applied but its settings could not be persisted; refresh package state before retrying")
+        try {
+          this.broadcast("packages.completed", {
+            operationId,
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        } catch { /* An advisory observer cannot erase mutation uncertainty. */ }
+        throw mutationAdmitted
+          ? asUncertainOutcome(error, "The admitted package operation has an unproven outcome; reconcile package state before issuing another command")
           : error;
       } finally {
         manager?.setProgressCallback(undefined);
