@@ -808,7 +808,18 @@ dashboard immediately without broadcasting full transcripts or changing the stru
 to `session.snapshot`, progress, tool, queue, and extension events only for chats
 they actually open. Streaming progress republishes the cumulative live message, so
 updates are coalesced to one frame per short window (the first update stays
-immediate) and each frame is bounded by exact encoded bytes to a marked live tail.
+immediate) and each live message is bounded to 24,000 exact encoded bytes, including
+inside reconnect snapshots. Under pressure, tool arguments yield first to response
+text and invocation identity through the existing `{ truncated: true, preview? }`
+JSON representation. Only remaining content pressure trims the live tail; an
+oversized write argument alone must never replace useful response text with an
+ellipsis. Source ordinals, call IDs and complete finalized groups survive argument
+compaction. Groups whose structure itself cannot fit are omitted atomically rather
+than falsely advertised as complete. Snapshot-wide pressure can still shed the
+live overlay after other disposable content; canonical history remains independently
+bounded and unchanged. `projection.test.ts` covers byte bounds, mixed prose/argument
+pressure and snapshot equivalence; the large-write runtime regression checks actual
+file bytes, declaration-before-execution ordering and canonical identity handoff.
 At assistant-message start the runtime captures one opaque presentation ID, fixed
 canonical parent anchor, and fixed timestamp. A snapshot takes one synchronous
 canonical branch cut and derives both the bounded transcript page and paged-out

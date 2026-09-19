@@ -1560,6 +1560,13 @@ readable output lines. Each row vertically centers status with its title, places
 primary command/path below its label at full width, fades an overflowing primary value
 at the bottom, and fades a bounded result tail at the top to disclose earlier output
 without a separate warning line. Single-tool detail retains its wrapping metadata flow.
+Gateway-bounded argument objects (`truncated: true`, optional `preview`) show an
+**Arguments abbreviated** metadata chip; preview JSON is never interpreted as an
+executable request or given an invented default directory. Canonical arguments
+replace the preview under the same call identity. Argument abbreviation does not
+change Invocation into Running. `ToolDetailPresentationTests` and
+`ChatTranscriptProjectionKernelTests.boundedArgumentsCanonicalHandoff` protect this
+presentation and the overlap with canonical settlement.
 The flow caches one bounded measurement per layout pass and uses the exact same width
 and height proposal for placement, so a dynamically updating status chip cannot
 under-report its row height or overlap the following section. Pulling to large selects

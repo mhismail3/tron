@@ -517,6 +517,41 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(candidate.isValid)
     }
 
+    @Test("bounded argument previews preserve invocation identity through canonical handoff")
+    func boundedArgumentsCanonicalHandoff() throws {
+        var snapshot = try fixture(transcript: "[]")
+        snapshot.phase = .running
+        snapshot.streaming = try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
+        {"id":"streaming","parentId":null,"presentationId":"stream:write","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"summary","ordinal":0,"type":"text","text":"Report summary"},{"id":"call-part","ordinal":1,"type":"toolCall","toolCallId":"call","name":"write","arguments":{"truncated":true,"preview":"File content preview…"},"groupId":"group","groupIndex":0,"groupCount":1,"groupFinalized":true}]}
+        """.utf8))
+        let live = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        let liveRuns = live.timeline.items.compactMap { item -> ChatToolRunPresentation? in
+            guard case .toolRun(let run) = item else { return nil }
+            return run
+        }
+        let liveTool = try #require(liveRuns.first?.tools.first)
+        #expect(liveTool.id == "call")
+        #expect(liveTool.subtitle == "Invocation")
+        #expect(!liveTool.isActivelyExecuting)
+        #expect(live.toolPayloads.payload(for: "call")?.request?.objectValue?["truncated"]?.boolValue == true)
+
+        snapshot.transcript = [try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
+        {"id":"canonical","parentId":null,"presentationId":"stream:write","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"summary","ordinal":0,"type":"text","text":"Report summary"},{"id":"call-part","ordinal":1,"type":"toolCall","toolCallId":"call","name":"write","arguments":{"path":"report.md","content":"Complete report"},"groupId":"group","groupIndex":0,"groupCount":1,"groupFinalized":true}]}
+        """.utf8))]
+        snapshot.transcriptTotal = 1
+        // The live preview can overlap its canonical owner for one snapshot.
+        let settled = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        #expect(settled.timeline.ids == live.timeline.ids)
+        let settledRuns = settled.timeline.items.compactMap { item -> ChatToolRunPresentation? in
+            guard case .toolRun(let run) = item else { return nil }
+            return run
+        }
+        #expect(settledRuns.count == 1)
+        #expect(settledRuns.first?.tools.map(\.id) == ["call"])
+        #expect(settled.toolPayloads.payload(for: "call")?.request?.objectValue?["content"]?.stringValue == "Complete report")
+        #expect(live.isValid && settled.isValid)
+    }
+
     @Test("exact canonical tool membership owns stale streaming identity during settlement")
     func canonicalToolMembershipOwnsRotatedStreamingOverlap() throws {
         var snapshot = try fixture(transcript: """

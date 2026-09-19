@@ -335,8 +335,9 @@ export function projectJson(value: unknown, maximumBytes = MAX_PROJECTED_JSON_BY
 
 /**
  * Bounds one live streaming progress item for the wire without touching Pi's
- * canonical state. Trailing parts survive whole; only the oldest kept text or
- * thinking part is tail-trimmed with an explicit ellipsis marker. Clients
+ * canonical state. Tool arguments yield to message content and invocation
+ * identity first; only then are trailing parts selected and the oldest kept
+ * text/thinking part tail-trimmed. Clients
  * replace their transient streaming bubble with each event, so a bounded tail
  * is always superseded by the canonical settled message.
  */
@@ -347,6 +348,36 @@ export function boundStreamingProgressItem(
   if (definitelyFitsStreamingFrame(item, maximumBytes)) return item;
   if (frameBytes(item) <= maximumBytes) return item;
   if (item.kind !== "message") return item;
+  const toolCount = item.content.filter(part => part.type === "toolCall").length;
+  if (toolCount > 0) {
+    // Reserve all visible content and invocation structure before spending
+    // bytes on arguments. An oversized trailing write must not erase the
+    // response preceding it (or split a finalized declaration group).
+    const omitted = { truncated: true };
+    const structure = {
+      ...item,
+      content: item.content.map(part => part.type === "toolCall" ? { ...part, arguments: omitted } : part),
+    };
+    const argumentBudget = frameBytes(omitted)
+      + Math.floor(Math.max(0, maximumBytes - frameBytes(structure)) / toolCount);
+    item = {
+      ...item,
+      content: item.content.map(part => {
+        if (part.type !== "toolCall") return part;
+        const encoded = JSON.stringify(part.arguments);
+        if (Buffer.byteLength(encoded) <= argumentBudget) return part;
+        // Reuse the existing truncated/preview JSON contract. A source byte can
+        // expand to at most six escaped bytes; reserve the preview envelope so
+        // quotes/control characters cannot overrun the argument allocation.
+        const prefixBytes = Math.floor((argumentBudget - frameBytes({ truncated: true, preview: "…" })) / 6);
+        const argumentsPreview = prefixBytes > 0
+          ? { truncated: true, preview: `${utf8Prefix(encoded, prefixBytes)}…` }
+          : omitted;
+        return { ...part, arguments: argumentsPreview };
+      }),
+    };
+    if (frameBytes(item) <= maximumBytes) return item;
+  }
   const envelopeBytes = frameBytes({ ...item, content: [] });
   const kept: ContentPart[] = [];
   let bytes = envelopeBytes;
@@ -488,6 +519,10 @@ export function fitSessionSnapshot(
   snapshot: SessionSnapshot,
   maximumBytes = SESSION_SNAPSHOT_BYTES,
 ): SessionSnapshot {
+  // Reconnect must not restore arguments that the next progress frame drops.
+  // Canonical history is deliberately not subject to this live-message budget.
+  const streaming = snapshot.streaming && boundStreamingProgressItem(snapshot.streaming);
+  if (streaming && streaming !== snapshot.streaming) snapshot = { ...snapshot, streaming };
   const transcriptOverflow = Math.max(0, snapshot.transcript.length - TRANSCRIPT_PAGE_ITEMS);
   const transcript = fitTranscriptStructure(transcriptOverflow === 0
     ? snapshot.transcript : snapshot.transcript.slice(transcriptOverflow));

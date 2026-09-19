@@ -680,7 +680,10 @@ struct ToolDetailPresentation: Hashable, Sendable {
         kind: ToolDetailKind,
         request: [String: JSONValue]?
     ) -> (label: String, value: String)? {
-        switch kind {
+        // A bounded JSON preview is not an executable request. In particular,
+        // missing paths must not become the built-in default directory ".".
+        if request?["truncated"]?.boolValue == true { return nil }
+        return switch kind {
         case .read, .write, .edit:
             firstString(in: request, keys: ["path", "filePath"]).map { ("File", $0) }
         case .bash:
@@ -769,6 +772,9 @@ struct ToolDetailPresentation: Hashable, Sendable {
         request: [String: JSONValue]?
     ) -> [ToolDetailMetadata] {
         guard let request else { return [] }
+        if request["truncated"]?.boolValue == true {
+            return [ToolDetailMetadata(label: "Arguments", value: "Abbreviated", chipText: "Arguments abbreviated", icon: "text.alignleft")]
+        }
         var values: [ToolDetailMetadata] = []
         func append(_ label: String, _ value: String?, chipText: String? = nil, icon: String = "info.circle") {
             guard let value, !value.isEmpty else { return }

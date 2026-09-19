@@ -5266,6 +5266,73 @@ export default function (pi) {
     expect(snapshots.every((event) => event.payload.sessionId === slot.id)).toBe(true);
   });
 
+  it("keeps a large streamed write visible through snapshot recovery and canonical handoff", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-large-streamed-write-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    const content = "Report line 🦌\\n".repeat(3_000);
+    const path = join(cwd, "report.txt");
+    const faux = fauxProvider({ provider: "tron-large-streamed-write", tokensPerSecond: 100_000 });
+    faux.setResponses([
+      fauxAssistantMessage([
+        { type: "text", text: "Here is the summary before the report." },
+        fauxToolCall("write", { path, content }, { id: "call-large-write" }),
+      ], { stopReason: "toolUse" }),
+      fauxAssistantMessage("Report saved."),
+    ]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const events: Array<{ topic: string; payload: any }> = [];
+    const liveSnapshots: Array<{ progress: any; streaming: any }> = [];
+    let currentSlot: Awaited<ReturnType<RuntimeRegistry["create"]>> | undefined;
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime, trust: new TrustService(agentDir),
+      broadcast: (_id, topic, payload) => {
+        events.push({ topic, payload });
+        if (topic === "session.progress" && currentSlot) {
+          liveSnapshots.push({ progress: (payload as any).data?.message, streaming: currentSlot.snapshot().streaming });
+        }
+      },
+      sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    currentSlot = slot;
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await slot.prompt("Write a report");
+    await waitUntil(() => !slot.isBusy);
+
+    const declarations = liveSnapshots.filter(({ progress }) => progress?.content?.some(
+      (part: any) => part.toolCallId === "call-large-write" && part.arguments?.truncated === true,
+    ));
+    expect(declarations.length).toBeGreaterThan(0);
+    for (const { progress, streaming } of declarations) {
+      expect(Buffer.byteLength(JSON.stringify(progress))).toBeLessThanOrEqual(24_000);
+      expect(progress.content).toContainEqual(expect.objectContaining({ type: "text", text: "Here is the summary before the report." }));
+      expect(streaming).toEqual(progress);
+    }
+    const finalized = events.findIndex(event => event.topic === "session.progress"
+      && event.payload.data?.message?.content?.some((part: any) => part.toolCallId === "call-large-write" && part.groupFinalized));
+    const running = events.findIndex(event => event.topic === "session.toolProgress"
+      && event.payload.data?.toolCallId === "call-large-write" && event.payload.data?.status === "running");
+    expect(finalized).toBeGreaterThanOrEqual(0);
+    expect(running).toBeGreaterThan(finalized);
+    expect(await readFile(path, "utf8")).toBe(content);
+    const settled = slot.snapshot();
+    expect(settled.streaming).toBeUndefined();
+    const calls = settled.transcript.flatMap(item => item.kind === "message" ? item.content : [])
+      .filter(part => part.type === "toolCall" && part.toolCallId === "call-large-write");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ arguments: { path, content }, groupFinalized: true });
+    const declaration = declarations.at(-1)!.progress;
+    expect(settled.transcript.some(item => item.presentationId === declaration.presentationId)).toBe(true);
+  });
+
   it("coalesces streaming progress frames while keeping the event stream contiguous and complete", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-streaming-coalesce-"));
     const agentDir = join(root, "agent");

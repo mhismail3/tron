@@ -42,6 +42,20 @@ struct ToolDetailPresentationTests {
         #expect(ToolTechnicalPayloadSummary.summary(for: .string("value")) == "Scalar protocol value")
     }
 
+    @Test("bounded arguments are labeled without inventing request values", arguments: ["write", "edit", "bash", "ls", "grep", "find", "custom"])
+    func boundedArguments(name: String) {
+        for request: JSONValue in [
+            .object(["truncated": .bool(true)]),
+            .object(["truncated": .bool(true), "preview": .string("Incomplete JSON…")])
+        ] {
+            let presentation = ToolDetailPresentation(tool: tool(name, request: request))
+            #expect(presentation.primaryValue == nil)
+            #expect(presentation.metadata.map(\.chipText) == ["Arguments abbreviated"])
+        }
+        let complete = ToolDetailPresentation(tool: tool(name, request: .object(["path": .string("report.md")])))
+        #expect(!complete.metadata.contains { $0.chipText == "Arguments abbreviated" })
+    }
+
     @Test("built-in tools foreground their task-critical request values")
     func builtInSummaries() {
         let fixtures: [(String, JSONValue, ToolDetailKind, String, String)] = [

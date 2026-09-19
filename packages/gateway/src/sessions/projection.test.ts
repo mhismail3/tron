@@ -1457,6 +1457,94 @@ describe("streaming progress bounds", () => {
     expect(frameBytes(bounded)).toBeLessThanOrEqual(STREAMING_PROGRESS_BYTES);
   });
 
+  it.each(["write", "edit", "bash"])("preserves response and %s identity as arguments cross the live budget", (name) => {
+    for (const length of [20_000, 24_000, 45_000, 96_000]) {
+      const item = streamingItem([
+        { type: "thinking", text: "Preparing report" },
+        { type: "text", text: "Here is the research summary." },
+        { type: "toolCall", toolCallId: "call", name, arguments: { content: "x".repeat(length) } },
+      ]);
+      const original = structuredClone(item);
+      const bounded = boundStreamingProgressItem(item);
+      expect(frameBytes(bounded)).toBeLessThanOrEqual(STREAMING_PROGRESS_BYTES);
+      if (bounded.kind !== "message") throw new Error("expected message");
+      expect(bounded.content.slice(0, 2)).toEqual(item.kind === "message" ? item.content.slice(0, 2) : []);
+      expect(bounded.content.at(-1)).toMatchObject({ id: "streaming:2", ordinal: 2, type: "toolCall", toolCallId: "call", name });
+      if (length >= 24_000) expect(bounded.content.at(-1)).toMatchObject({ arguments: { truncated: true } });
+      expect(item).toEqual(original);
+      expect(boundStreamingProgressItem(bounded)).toBe(bounded);
+    }
+  });
+
+  it("preserves a complete finalized group with escaped and multibyte arguments", () => {
+    const item = streamingItem([
+      { type: "text", text: "Preparing files" },
+      ...Array.from({ length: 6 }, (_, index) => ({
+        type: "toolCall" as const, toolCallId: `call-${index}`, name: "write",
+        arguments: { content: '\"\\n\\u0000🦌'.repeat(12_000) },
+        toolSegmentId: "segment", groupId: "group", groupIndex: index, groupCount: 6, groupFinalized: true,
+      })),
+    ]);
+    const bounded = boundStreamingProgressItem(item);
+    expect(frameBytes(bounded)).toBeLessThanOrEqual(STREAMING_PROGRESS_BYTES);
+    if (bounded.kind !== "message" || item.kind !== "message") throw new Error("expected message");
+    expect(bounded.content[0]).toEqual(item.content[0]);
+    expect(bounded.content).toHaveLength(7);
+    for (let index = 0; index < 6; index++) {
+      expect(bounded.content[index + 1]).toMatchObject({
+        type: "toolCall", toolCallId: `call-${index}`, ordinal: index + 1,
+        toolSegmentId: "segment", groupId: "group", groupIndex: index, groupCount: 6, groupFinalized: true,
+        arguments: { truncated: true },
+      });
+    }
+  });
+
+  it("retains a text tail and complete call group when both prose and arguments exceed the budget", () => {
+    const item = streamingItem([
+      { type: "thinking", text: "thinking".repeat(10_000) },
+      { type: "text", text: "response".repeat(10_000) + " useful ending" },
+      ...Array.from({ length: 6 }, (_, index) => ({
+        type: "toolCall" as const, toolCallId: `call-${index}`, name: "write",
+        arguments: { content: "x".repeat(45_000) },
+        groupId: "group", groupIndex: index, groupCount: 6, groupFinalized: true,
+      })),
+    ]);
+    const bounded = boundStreamingProgressItem(item);
+    expect(frameBytes(bounded)).toBeLessThanOrEqual(STREAMING_PROGRESS_BYTES);
+    if (bounded.kind !== "message") throw new Error("expected message");
+    expect(bounded.content.filter(part => part.type === "toolCall")).toHaveLength(6);
+    const text = bounded.content.find(part => part.type === "text");
+    expect(text).toMatchObject({ ordinal: 1 });
+    expect(text?.type === "text" && text.text.endsWith(" useful ending")).toBe(true);
+  });
+
+  it("does not claim completeness when invocation structure itself cannot fit", () => {
+    const item = streamingItem(Array.from({ length: 200 }, (_, index) => ({
+      type: "toolCall" as const, toolCallId: `call-${index}`, name: "write",
+      arguments: { content: "x".repeat(1_000) },
+      groupId: "group", groupIndex: index, groupCount: 200, groupFinalized: true,
+    })));
+    const bounded = boundStreamingProgressItem(item);
+    expect(frameBytes(bounded)).toBeLessThanOrEqual(STREAMING_PROGRESS_BYTES);
+    if (bounded.kind !== "message") throw new Error("expected message");
+    expect(bounded.content.some(part => part.type === "toolCall")).toBe(false);
+    expect(bounded.content).not.toHaveLength(0);
+  });
+
+  it("uses the same bounded live projection in reconnect snapshots, without altering canonical history", () => {
+    const template = JSON.parse(readFileSync(new URL("../../../protocol-fixtures/session-snapshot-v4.json", import.meta.url), "utf8"));
+    const streaming = streamingItem([
+      { type: "text", text: "Summary before write" },
+      { type: "toolCall", toolCallId: "call", name: "write", arguments: { content: "x".repeat(45_000) } },
+    ]);
+    const snapshot: SessionSnapshot = { ...template, streaming, transcript: [streaming], transcriptStart: 0, transcriptTotal: 1 };
+    const fitted = fitSessionSnapshot(snapshot);
+    expect(fitted.streaming).toEqual(boundStreamingProgressItem(streaming));
+    expect(fitted.transcript).toEqual([streaming]);
+    expect(snapshot.streaming).toBe(streaming);
+    expect(fitSessionSnapshot(fitted)).toBe(fitted);
+  });
+
   it("never emits an empty live frame", () => {
     const item: TranscriptItem = {
       id: "streaming",
@@ -1469,7 +1557,8 @@ describe("streaming progress bounds", () => {
     };
     const bounded = boundStreamingProgressItem(item);
     if (bounded.kind !== "message") throw new Error("expected message");
-    expect(bounded.content.length).toBeGreaterThan(0);
+    expect(bounded.content).toHaveLength(1);
+    expect(bounded.content[0]).toMatchObject({ type: "toolCall", toolCallId: "call", name: "bash", arguments: { truncated: true } });
     expect(frameBytes(bounded)).toBeLessThanOrEqual(STREAMING_PROGRESS_BYTES);
   });
 
