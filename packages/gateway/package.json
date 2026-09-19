@@ -18,7 +18,8 @@
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "test:resilience-fixtures": "node --test ../../scripts/ios-gateway-fault-proxy.test.mjs",
-    "test": "npm run test:pi-sdk-scripts && npm run test:resilience-fixtures && vitest run",
+    "test:device-binding": "node --test ../../scripts/tron-ios-device-bind.test.mjs",
+    "test": "npm run test:pi-sdk-scripts && npm run test:resilience-fixtures && npm run test:device-binding && vitest run",
     "test:watch": "vitest",
     "start": "node dist/index.js",
     "chat": "node dist/client/terminal-chat.js"

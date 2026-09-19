@@ -413,6 +413,22 @@ export class GatewayService {
         const config = await this.iosDeviceInstallService.configStatus(deviceId);
         return safeJson(config === null ? null : projectIosDeviceInstallConfig(config));
       }
+      case "device.install.target.bind":
+        if (!client.isLocal) throw new GatewayError("auth_required", "Physical iOS target binding is Mac-local only");
+        return this.mutation(client, method, params, async () => {
+          if (Object.keys(params).some((key) => !["commandId", "deviceId", "targetIdentifier"].includes(key))) {
+            throw new GatewayError("invalid_request", "iOS target binding contains unknown fields");
+          }
+          const deviceId = string(params.deviceId, "deviceId", { max: 100 });
+          const targetIdentifier = string(params.targetIdentifier, "targetIdentifier", { max: 64 });
+          return this.withMobileIdentityLane(deviceId, async () => {
+            await this.requirePairedDevice(deviceId);
+            await this.requireNoActiveGatewayUpdate();
+            return safeJson(projectIosDeviceInstallConfig(
+              await this.iosDeviceInstallService.bindTarget(deviceId, targetIdentifier),
+            ));
+          });
+        });
       case "device.install.config":
         return this.mutation(client, method, params, async () => {
           if (Object.keys(params).some((key) => !["commandId", "deviceId", "sourceRoot"].includes(key))) {

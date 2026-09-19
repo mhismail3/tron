@@ -88,36 +88,53 @@ describe("IosDeviceInstallService", () => {
       .toEqual(["/trusted/tron/scripts/tron-ios-device", "install", "--device-id", target.identifier, "--fast-debug"]);
   });
 
-  it("keeps CoreDevice identity owner-only while auto-binding the sole eligible device", async () => {
+  it("keeps CoreDevice identity owner-only while requiring an explicit Mac-local binding", async () => {
     const { source, service } = await fixture();
     const configured = await service.configure({ deviceId: "device-alpha", sourceRoot: source });
     expect(configured.target).toBeUndefined();
+    await expect(service.install("device-alpha", "command-install-1", "optimized"))
+      .rejects.toMatchObject({ code: "conflict", retryable: true });
 
+    const bound = await service.bindTarget("device-alpha", target.identifier);
+    expect(bound.target?.identifier).toBe(target.identifier);
     await service.install("device-alpha", "command-install-1", "optimized");
-    const bound = await service.configStatus("device-alpha");
-    expect(bound?.target?.identifier).toBe(target.identifier);
-    const projection = projectIosDeviceInstallConfig(bound!);
+    const projection = projectIosDeviceInstallConfig(bound);
     expect(projection.target).toEqual(expect.objectContaining({ name: target.name }));
     expect(JSON.stringify(projection)).not.toContain(target.identifier);
   });
 
-  it("fails closed instead of guessing when multiple eligible physical devices exist", async () => {
-    const { source, tronHome } = await fixture();
-    const other = { ...target, identifier: "11111111-2222-3333-4444-555555555555", name: "Other iPhone" };
-    const ambiguous = new IosDeviceInstallService({
+  it("rejects an explicit binding when the requested device is unavailable", async () => {
+    const { source, service, tronHome } = await fixture();
+    await service.configure({ deviceId: "device-alpha", sourceRoot: source });
+    const disconnected = { ...target, connectionState: "disconnected" };
+    const unavailable = new IosDeviceInstallService({
       tronHome,
-      discoverer: async () => [target, other],
+      discoverer: async () => [disconnected],
       launcher: async () => {},
     });
-    await ambiguous.configure({ deviceId: "device-alpha", sourceRoot: source });
-    await expect(ambiguous.install("device-alpha", "command-install-1", "optimized"))
-      .rejects.toMatchObject({ code: "conflict", retryable: true });
+    await expect(unavailable.bindTarget("device-alpha", target.identifier))
+      .rejects.toMatchObject({ code: "not_found", retryable: true });
+  });
+
+  it("never substitutes a newly discovered device for a missing binding", async () => {
+    const { source, service, tronHome } = await fixture();
+    await service.configure({ deviceId: "device-alpha", sourceRoot: source });
+    await service.bindTarget("device-alpha", target.identifier);
+    const replacement = { ...target, identifier: "11111111-2222-3333-4444-555555555555", name: "Replacement iPhone" };
+    const unavailable = new IosDeviceInstallService({
+      tronHome,
+      discoverer: async () => [replacement],
+      launcher: async () => {},
+    });
+    await expect(unavailable.install("device-alpha", "command-install-1", "optimized"))
+      .rejects.toMatchObject({ code: "not_found", retryable: true });
   });
 
   it("admits one detached fixed install and exposes durable requested status", async () => {
     const { source, service, launched, tronHome } = await fixture();
     await service.configure({ deviceId: "device-alpha", sourceRoot: source });
 
+    await service.bindTarget("device-alpha", target.identifier);
     await expect(service.install("device-alpha", "command-install-1", "optimized")).resolves.toEqual({
       accepted: true,
       commandId: "command-install-1",
@@ -134,10 +151,45 @@ describe("IosDeviceInstallService", () => {
       .rejects.toMatchObject({ code: "busy", retryable: true });
   });
 
+  it("selects the explicit target among multiple devices and preserves it across source configuration", async () => {
+    const { source, tronHome } = await fixture();
+    const other = { ...target, identifier: "11111111-2222-3333-4444-555555555555" };
+    const launched = vi.fn(async () => {});
+    const service = new IosDeviceInstallService({ tronHome, discoverer: async () => [other, target], launcher: launched });
+    await service.configure({ deviceId: "device-alpha", sourceRoot: source });
+    await service.bindTarget("device-alpha", target.identifier);
+    const configured = await service.configure({ deviceId: "device-alpha", sourceRoot: source });
+    expect(configured.target?.identifier).toBe(target.identifier);
+    await service.install("device-alpha", "command-install-1", "optimized");
+    expect(launched).toHaveBeenCalledOnce();
+    await expect(service.bindTarget("device-alpha", other.identifier)).rejects.toMatchObject({ code: "busy" });
+    expect((await service.configStatus("device-alpha"))?.target?.identifier).toBe(target.identifier);
+    await service.removeDevice("device-alpha");
+    expect(await service.configStatus("device-alpha")).toBeNull();
+  });
+
+  it.each([
+    { connectionState: "disconnected", developerModeEnabled: true },
+    { connectionState: "connected", developerModeEnabled: false },
+  ])("rejects unavailable bound targets without launching: %j", async (state) => {
+    const { source, tronHome, service } = await fixture();
+    await service.configure({ deviceId: "device-alpha", sourceRoot: source });
+    await service.bindTarget("device-alpha", target.identifier);
+    const launched = vi.fn(async () => {});
+    const unavailable = new IosDeviceInstallService({
+      tronHome, discoverer: async () => [{ ...target, ...state }], launcher: launched,
+    });
+    await expect(unavailable.install("device-alpha", "command-install-1", "optimized"))
+      .rejects.toMatchObject({ code: "not_found" });
+    expect(launched).not.toHaveBeenCalled();
+    expect((await unavailable.configStatus("device-alpha"))?.target?.identifier).toBe(target.identifier);
+  });
+
   it("round-trips each build mode through requested status and active ownership", async () => {
     for (const buildMode of ["fast-debug", "optimized"] as const) {
       const { source, service } = await fixture();
       await service.configure({ deviceId: "device-alpha", sourceRoot: source });
+      await service.bindTarget("device-alpha", target.identifier);
       await service.install("device-alpha", `command-${buildMode}`, buildMode);
       await expect(service.status("device-alpha")).resolves.toEqual(expect.objectContaining({
         schema: 2,
@@ -180,6 +232,7 @@ describe("IosDeviceInstallService", () => {
   it("persists detached helper failures in the status projection's own admission language", async () => {
     const { source, tronHome, service } = await fixture();
     await service.configure({ deviceId: "device-alpha", sourceRoot: source });
+    await service.bindTarget("device-alpha", target.identifier);
     await service.install("device-alpha", "command-install-1", "optimized");
 
     await recordIosDeviceInstallHelperFailure(
@@ -246,6 +299,14 @@ describe("IosDeviceInstallService", () => {
       commandId: "command-config-1", deviceId: "device-alpha", sourceRoot: source,
     });
     expect(JSON.stringify(configured)).not.toContain(target.identifier);
+    await expect(gateway.invoke(client, "device.install.target.bind", {
+      commandId: "command-bind-1", deviceId: "device-alpha", targetIdentifier: target.identifier,
+    })).rejects.toMatchObject({ code: "auth_required" });
+    const localClient = { ...client, id: "local", identity: "local-wrapper", isLocal: true };
+    const bound = await gateway.invoke(localClient, "device.install.target.bind", {
+      commandId: "command-bind-1", deviceId: "device-alpha", targetIdentifier: target.identifier,
+    });
+    expect(JSON.stringify(bound)).not.toContain(target.identifier);
     await expect(gateway.invoke(client, "device.install", {
       commandId: "command-install-1", deviceId: "device-alpha", buildMode: "optimized",
     })).resolves.toMatchObject({ accepted: true, state: "install-requested", buildMode: "optimized" });

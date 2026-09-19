@@ -402,7 +402,7 @@ export function validateLocalCredentialDocument(document) {
     && Buffer.byteLength(document.bearerToken) <= 256 && gatewayTimestamp(document.lastUpdated);
 }
 
-async function readLocalCredential(path) {
+export async function readLocalCredential(path) {
   // lstat followed by readFile leaves a replacement race. Keep the descriptor
   // open while checking ownership/mode and reading the bounded bytes.
   const handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW).catch(() => { throw new Error("local Gateway credential is missing or unsafe"); });
@@ -1238,7 +1238,7 @@ export async function stagePayload({ home, channel, source, version, sourceRevis
   });
 }
 
-async function authenticatedRequest({ host, port, token, timeoutMs, method, params = {} }) {
+export async function authenticatedRequest({ host, port, token, timeoutMs, method, params = {} }) {
   const ws = new WebSocket(`ws://${host.includes(":") ? `[${host}]` : host}:${port}/v1/socket`, {
     headers: { authorization: `Bearer ${token}` }, perMessageDeflate: false,
   });

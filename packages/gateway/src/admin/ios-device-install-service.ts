@@ -485,6 +485,39 @@ export class IosDeviceInstallService {
     return status;
   }
 
+  async bindTarget(deviceIdValue: unknown, targetIdentifierValue: unknown): Promise<IosDeviceInstallConfig> {
+    this.requireUsable();
+    const deviceId = admitDeviceId(deviceIdValue);
+    const targetIdentifier = boundedText(targetIdentifierValue, "target identifier", 64);
+    if (!IDENTIFIER.test(targetIdentifier)) {
+      throw new GatewayError("invalid_request", "iOS install target identifier is invalid");
+    }
+    return this.mutex.run(async () => {
+      const config = await this.configStatus(deviceId);
+      if (!config) throw new GatewayError("not_found", "Configure the iOS source repository before binding a device", true);
+      const activeValue = await readDocument(activePath(this.options.tronHome));
+      if (activeValue !== undefined) {
+        const active = activeDocument(activeValue);
+        const activeStatus = await this.status(active.deviceId).catch(() => null);
+        if (activeStatus?.state === "requested" || activeStatus?.state === "running") {
+          throw new GatewayError("busy", `An iOS build/install is already running for ${activeStatus.targetName}`, true);
+        }
+      }
+      const targets = await this.discoverTargets();
+      const target = targets.find((candidate) => candidate.identifier === targetIdentifier);
+      if (!target || !target.developerModeEnabled || target.connectionState !== "connected") {
+        throw new GatewayError("not_found", "The requested iOS device is not connected with Developer Mode enabled", true);
+      }
+      const replacement: IosDeviceInstallConfig = {
+        ...config,
+        target,
+        updatedAt: new Date().toISOString(),
+      };
+      await atomicWriteJson(configPath(this.options.tronHome, deviceId), replacement);
+      return replacement;
+    });
+  }
+
   async install(
     deviceIdValue: unknown,
     commandIdValue: unknown,
@@ -498,34 +531,26 @@ export class IosDeviceInstallService {
     }
     const buildMode = buildModeValue as IosDeviceInstallBuildMode;
     return this.mutex.run(async () => {
-      let config = await this.configStatus(deviceId);
+      const config = await this.configStatus(deviceId);
       if (!config?.sourceRoot) {
         throw new GatewayError("conflict", "Configure the source repository before installing");
       }
+      if (!config.target) {
+        throw new GatewayError(
+          "conflict",
+          "Bind the connected Developer Mode iOS device from the Mac before installing",
+          true,
+        );
+      }
+      // A missing binding is not permission to choose another connected phone.
       const targets = await this.discoverTargets();
-      let currentTarget = config.target === undefined
-        ? undefined
-        : targets.find((candidate) => candidate.identifier === config?.target?.identifier
-          && candidate.developerModeEnabled);
-      if (!currentTarget) {
-        const eligible = targets.filter((candidate) => candidate.developerModeEnabled);
-        if (eligible.length === 0) {
-          throw new GatewayError(
-            "not_found",
-            "Connect and unlock this iOS device on the Mac, trust the Mac, and enable Developer Mode before installing",
-            true,
-          );
-        }
-        if (eligible.length > 1) {
-          throw new GatewayError(
-            "conflict",
-            "Tron cannot safely identify this device while multiple Developer Mode iOS devices are available; disconnect the others and retry",
-            true,
-          );
-        }
-        currentTarget = eligible[0]!;
-        config = { ...config, target: currentTarget, updatedAt: new Date().toISOString() };
-        await atomicWriteJson(configPath(this.options.tronHome, deviceId), config);
+      const currentTarget = targets.find((candidate) => candidate.identifier === config.target?.identifier);
+      if (!currentTarget || !currentTarget.developerModeEnabled || currentTarget.connectionState !== "connected") {
+        throw new GatewayError(
+          "not_found",
+          "Connect and unlock the bound iOS device and enable Developer Mode; changing phones requires an explicit Mac-side binding",
+          true,
+        );
       }
       const activeValue = await readDocument(activePath(this.options.tronHome));
       if (activeValue !== undefined) {
