@@ -463,6 +463,8 @@ export class NotificationService {
     message: string;
     title?: string;
     route?: { sessionId: string; machineId: string };
+    /** Internal admission fence for semantic ask notifications. */
+    requireAskPolicy?: boolean;
   }): Promise<NotificationAdmissionStatus> {
     const message = boundedText(input.message, 512, "message");
     const title = input.title === undefined ? undefined : boundedText(input.title, 256, "title");
@@ -474,6 +476,14 @@ export class NotificationService {
     let result: NotificationAdmissionStatus = "queued";
     await this.store.update((document) => {
       retainRevocationAuthority(prune(document, now), now);
+      // The outer policy read is only an early suppression optimization. The
+      // admission transaction must recheck the canonical policy immediately
+      // before appending an intent, otherwise a concurrent disable can still
+      // deliver an ask notification.
+      if (input.requireAskPolicy && input.kind === "ask" && !document.policy.notifyWhenAskPresented) {
+        result = "suppressed";
+        return document;
+      }
       if (document.receipts.some((receipt) => receipt.dedupeKey === dedupeKey) || document.pending.some((intent) => intent.dedupeKey === dedupeKey)) {
         result = "suppressed";
         return document;
@@ -564,6 +574,7 @@ export class NotificationService {
       title: "Input needed",
       message: "Tron needs your input. Open Tron to respond.",
       ...(input.machineId ? { route: { sessionId: input.sessionId, machineId: input.machineId } } : {}),
+      requireAskPolicy: true,
     });
   }
 

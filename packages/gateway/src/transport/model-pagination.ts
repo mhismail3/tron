@@ -43,13 +43,18 @@ export class ModelCatalogPager {
     let catalog: PreparedCatalog<T>;
     if (rawCursor === undefined) {
       catalog = prepareCatalog(await build());
+      // The build yields to other owners. An empty owner map may have been
+      // pruned while it was suspended, so never publish into the detached map
+      // captured before the await: reacquire the live owner lease and apply
+      // capacity/expiry accounting to that authoritative map.
+      const live = this.liveCatalogs(owner, Date.now());
       this.access += 1;
-      stored.set(catalog.fingerprint, {
+      live.set(catalog.fingerprint, {
         catalog: catalog as PreparedCatalog<unknown>,
-        expiresAt: now + MODEL_CATALOG_LEASE_TTL_MS,
+        expiresAt: Date.now() + MODEL_CATALOG_LEASE_TTL_MS,
         access: this.access,
       });
-      this.evictOwnerOverflow(stored);
+      this.evictOwnerOverflow(live);
       this.evictGlobalOverflow();
     } else {
       const fingerprint = cursorFingerprint(rawCursor);

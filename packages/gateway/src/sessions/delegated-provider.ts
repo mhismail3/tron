@@ -96,6 +96,10 @@ export function delegatedArtifactPathAllowed(asyncPath: string, cwd: string): bo
  */
 export function delegatedProviderOrigin(extensions: readonly Extension[]): ExtensionToolOrigin {
   const extension = extensions.find((candidate) => {
+    // Path evidence narrows the candidate, but only the finalized package
+    // identity can authorize provider projection. A project extension under a
+    // directory named pi-subagents must not impersonate the installed package.
+    if (candidate.sourceInfo.source !== "npm:pi-subagents") return false;
     const paths = [candidate.path, candidate.resolvedPath, candidate.sourceInfo.path, candidate.sourceInfo.baseDir]
       .filter((value): value is string => typeof value === "string");
     return paths.some((value) => PROVIDER_PATH_SEGMENT.test(value));
