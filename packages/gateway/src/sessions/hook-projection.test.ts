@@ -32,17 +32,28 @@ describe("hook registration projection", () => {
     expect(registrations.hookInventory.extensions).toEqual({ total: 2, retained: 2, omitted: 0 });
   });
 
-  it("accounts for the inherited wire array bound without dropping source rows early", () => {
+  it("applies one aggregate byte envelope across identity rows and load errors", () => {
     const registrations = projectHookRegistrations(
       Array.from({ length: 1_001 }, (_, index) => extension(index, new Map())),
       Array.from({ length: 1_001 }, (_, index) => ({ path: `/broken/${index}.ts`, error: "failed" })),
     );
 
-    expect(registrations.extensions).toHaveLength(1_001);
-    expect(registrations.hookInventory.extensions).toEqual({ total: 1_001, retained: 1_000, omitted: 1 });
+    expect(registrations.extensions.length).toBeLessThan(1_001);
+    expect(registrations.hookInventory.extensions).toEqual({
+      total: 1_001,
+      retained: registrations.extensions.length,
+      omitted: 1_001 - registrations.extensions.length,
+    });
     expect(registrations.hookInventory.handlerEvents).toEqual({ total: 0, retained: 0, omitted: 0 });
-    expect(registrations.hookInventory.loadErrors.retained).toBeLessThanOrEqual(1_000);
-    expect(registrations.hookInventory.loadErrors.omitted).toBeGreaterThan(0);
+    expect(registrations.hookInventory.loadErrors.retained).toBe(registrations.extensionLoadErrors.length);
+    expect(registrations.hookInventory.loadErrors.omitted).toBe(1_001 - registrations.extensionLoadErrors.length);
+    expect(registrations.hookInventory.encodedBytes).toBe(
+      Buffer.byteLength(JSON.stringify({
+        extensions: registrations.extensions,
+        extensionLoadErrors: registrations.extensionLoadErrors,
+      })),
+    );
+    expect(registrations.hookInventory.encodedBytes).toBeLessThanOrEqual(MAX_HOOK_PROJECTION_BYTES);
   });
 
   it("reports handler and error omissions when the additive byte budget is full", () => {

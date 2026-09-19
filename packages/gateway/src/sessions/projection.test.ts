@@ -1042,6 +1042,27 @@ describe("transcript projection", () => {
     expect(projected).toMatchObject({ truncated: true });
   });
 
+  it("bounds object keys before projecting a large extension-owned object", () => {
+    const key = "k".repeat(8 * 1024 * 1024);
+    const projected = safeJson({ [key]: "value" });
+    const projectedKey = Object.keys(projected as Record<string, unknown>)[0]!;
+    expect(Buffer.byteLength(projectedKey)).toBeLessThanOrEqual(100_001);
+    expect((projected as Record<string, unknown>)[projectedKey]).toBe("value");
+  });
+
+  it("stops reverse tool traversal once a newest oversized block fills the tail", () => {
+    const source = new Proxy(new Array(1_000_000), {
+      get(target, property) {
+        if (property === "length") return 1_000_000;
+        if (property === "999999") return { type: "text", text: "newest-" + "x".repeat(512) };
+        throw new Error(`unbounded traversal touched ${String(property)}`);
+      },
+    });
+    const projected = projectToolOutput(source, 128);
+    expect(projected.outputTruncated).toBe(true);
+    expect(projected.output).toMatch(/x+$/);
+  });
+
   it("projects display-safe cumulative tool output and retains the newest tail", () => {
     expect(projectToolOutput({ content: [{ type: "text", text: "building\nstep two" }] })).toEqual({
       output: "building\nstep two",
