@@ -242,6 +242,9 @@ final class AppModel {
     /// profile metadata changes observable to SwiftUI without duplicating it.
     private(set) var profileRevision = 0
     private(set) var dashboardPresentationRevision = 0
+    /// Gateway-broadcast knowledge mutations invalidate dashboard reads without
+    /// introducing a dashboard-owned polling loop.
+    private(set) var knowledgeInvalidationRevision = 0
     var workspace: WorkspaceListing?
     var defaultWorkspace: String?
     var authPrompt: AuthPromptState? { providerAuth.prompt }
@@ -3911,7 +3914,14 @@ final class AppModel {
         case "transport.resyncRequired":
             sessionPresentation.scheduleResynchronization(sessionID: event.sessionId)
         case "session.summary":
-            if case .sessionSummary(let update) = event.preparation { apply(update) }
+            guard case .sessionSummary(let update) = event.preparation else {
+                // A malformed or newer summary must not silently leave a row's
+                // icon stale. The authoritative catalog is the recovery path;
+                // it is bounded and admission-fenced like every other refresh.
+                scheduleSessionListRefresh()
+                return
+            }
+            apply(update)
         case "session.listChanged":
             scheduleSessionListRefresh()
         case "auth.prompt":
@@ -3935,6 +3945,8 @@ final class AppModel {
         case "automation.changed":
             guard case .automationChanged = event.preparation else { return }
             automationCatalog.invalidate()
+        case "knowledge.changed":
+            knowledgeInvalidationRevision &+= 1
         case "packages.progress", "packages.completed":
             let completed = event.topic == "packages.completed"
             let succeeded = event.payload.objectValue?["success"]?.boolValue == true

@@ -76,8 +76,9 @@ coder instances are forbidden across concurrent frame preparation. Inbound bytes
 the Gateway's 1 MiB protocol ceiling before JSON parsing. Dynamic `JSONValue` admission
 is capped at depth 64, 32,768 nodes, 8,192 members per collection, 1 MiB per UTF-8 string, and
 4 MiB of aggregate strings including object keys. Non-finite numbers fail coding, and integer
-projection uses exact range-safe conversion. Malformed known event data preserves its former live-reducer
-no-op semantics rather than becoming a transport failure, while a non-consumable
+projection uses exact range-safe conversion. Malformed known event data preserves its former live-reducer no-op semantics rather than becoming a transport failure; malformed
+session summaries additionally request bounded authoritative catalog recovery rather than silently discarding the update,
+while a non-consumable
 quarantined suffix forces another authoritative attempt before its baseline can publish.
 Gateway connection and disposable cache intervals use the shared typed
 performance-signpost boundary. Signpost metadata is structurally limited to result
@@ -116,8 +117,8 @@ Automation mutations use command IDs and the focused profile's `ConfirmedMutatio
 profile remains read-only until the explicit **Use This Gateway** action gives the existing lifecycle and
 receipt owner authority. Timeline refresh admission is keyed to each endpoint's profile, connection,
 capabilities, and catalog revision; retained failure text does not restart an equivalent read, while
-explicit refresh and changed revisions still force fresh canonical occurrence reads. No second
-mutation-reconciliation algorithm or Automation event journal exists.
+changed revisions still force fresh canonical occurrence reads. The dashboard has no pull-to-refresh surface and relies on
+`automation.changed`. No second mutation-reconciliation algorithm or Automation event journal exists.
 `SessionCatalogCoordinator` owns the focused profile's summaries, while the dashboard pool owns
 profile-qualified shallow catalogs for non-focused profiles. `SessionSummary` carries dashboard-only
 profile ownership and the dashboard aggregates by `(profileID, sessionID)`; equal bare session IDs from
@@ -468,7 +469,10 @@ composes the existing settings layout, controls, and large-sheet toolbar contrac
 or mutations. Coverage shares the dashboard scroll owner, and floating controls have explicit content clearance.
 Connector status reads refresh after their managed editor uncovers the parent; accepted connector runs do
 not retire with presentation reads. Accepted Knowledge mutations remain owned by the confirmed executor
-and are fenced by the originating presentation identity.
+and are fenced by the originating presentation identity. Committed Knowledge store mutations—including agent tools and
+background observations—broadcast `knowledge.changed` invalidations, coalesced by the client. The dashboard's managed
+read task includes that revision in its identity, cancelling superseded reads while preserving publication fences.
+It re-reads authoritative status and records without polling or a pull-to-refresh surface.
 
 Gateway restart uses a supervised drain contract. The request freezes new mutations,
 waits for accepted agent runs to settle in canonical JSONL, then replaces the Gateway
@@ -1444,9 +1448,8 @@ inside each NavigationStack (or its non-scrolling content surface), so toolbar
 titles and controls always render above the effect. Each backdrop stays outside
 scroll content so scrolling geometry and tail following remain authoritative. Provider authentication is presented only by
 the currently visible Providers or Onboarding surface, preventing an underlying
-sheet from deferring the login prompt until the user navigates back. Sheets never use pull-to-refresh;
-session history, packages, and providers expose reload as an explicit toolbar
-action while non-sheet dashboard refresh remains available.
+sheet from deferring the login prompt until the user navigates back. Sheets never use pull-to-refresh; session history, packages, and providers expose reload as an explicit toolbar
+action, while Sessions, Automations, and Knowledge dashboards converge through their live Gateway invalidations without a manual refresh gesture.
 
 Chat has one spatial role model: user prompts are right anchored, agent prose and tools are left
 anchored, and presentation-only system events are centered. A width-aware TextKit owner lets short
@@ -1804,7 +1807,7 @@ Instruction files such as `AGENTS.md`
 have no duplicate row or Context Files section there: their assembled guidance belongs in
 Agent Instructions, which opens the complete document directly. Canonical resource discovery
 is unchanged. Project Resources, Session History, and Subagent History use the originating Manage Session teal titles and
-toolbar actions to match their originating Session rows. Resource detail chrome instead
+toolbar actions to match their originating Session rows. Project Hooks keeps one native scroll owner across loading and By Event/By Extension changes, so lazy content starts at the platform top anchor without imperative scroll resets. Hook event technical info opens the Event Details JSON reader directly rather than an intermediate technical-details card. Resource detail chrome instead
 matches its own category accent. Project Resource titles prefer authored labels, otherwise
 humanize tool/skill/prompt names using the shared composer formatter. Extension titles derive
 from npm/Git package names, meaningful local entrypoints, or named inline extensions rather
@@ -1843,7 +1846,7 @@ this revalidation never retries or replays accepted mutations. The iOS
 projection validates bounded structure and paths while tolerating additive resource
 categories and future metadata scope/origin values; its rejection copy identifies
 whether the response exceeded the 768 KiB bound or failed structural admission.
-Session History uses one prominent teal Liquid Glass summary (20-point vertical/trailing padding, 12-point leading inset, 16-point corners, a compact teal history icon with an 8-point text gap and bold body-size statistics), with 12 points of additional separation above flat, scroll-efficient event rows in one tagged feed, newest **recorded** entry first.
+Session History uses one prominent teal Liquid Glass summary (20-point vertical/trailing padding, 12-point leading inset, 16-point corners, a compact teal history icon with an 8-point text gap and bold body-size statistics), with 4 points of additional summary separation above flat, scroll-efficient event rows in one tagged feed, newest **recorded** entry first. The top Older/Newer control adds only 2 points of lower padding to the feed's standard row spacing; the bottom control retains the regular feed spacing.
 Canonical append order, not device timestamps, resolves ties and clock skew. Messages, tool-only/thinking
 responses, custom logs, compactions, branch summaries, model/thinking changes and bookmark receipts share
 icon-free rows with semantic color and actual content previews. There is no separate Timeline/Branches/Log

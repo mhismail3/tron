@@ -65,7 +65,11 @@ continue through complete canonical record sections (including source text,
 fields, retention, origins, representations, and assessments); `details` is
 not the only route to evidence. Registered recall text includes bounded dated,
 attributed, qualified evidence and points to a pinned record/revision read
-continuation when needed. Retained source objects are available only through
+continuation when needed. `KnowledgeStore` emits the global `knowledge.changed`
+invalidation hint after committed mutations, including agent tools, connectors,
+and autonomous observations; receipt replays and rejected writes do not emit it.
+Clients re-read authoritative pages rather than treating the event as a data mirror.
+`knowledge-store.test.ts` covers this commit boundary and notification failure isolation. Retained source objects are available only through
 `knowledge.object.read` with the exact owning record ID and committed revision;
 the store rechecks current privacy/exclusion fences after byte I/O and never
 uses a hash-only corpus scan. Excluded/forgotten records cannot authorize

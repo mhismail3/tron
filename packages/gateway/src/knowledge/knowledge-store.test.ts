@@ -34,6 +34,38 @@ const observation = (sessionId: string, fromEntryId: string): KnowledgeRecordDra
 function command(suffix: string): string { return `knowledge-test-${suffix}`; }
 
 describe("KnowledgeStore", () => {
+  it("invalidates committed writes from every caller, not reads, rejected writes or receipt replays", async () => {
+    const { workspace } = await fixture();
+    const changed = vi.fn();
+    const store = new KnowledgeStore(workspace, changed);
+    await store.status();
+    expect(changed).not.toHaveBeenCalled();
+    const request = { commandId: command("live-source"), record: source("Live source") };
+    const saved = await store.captureSource(request);
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect((await store.read(saved.record.id))?.revisionId).toBe(saved.record.revisionId);
+    await store.captureSource(request);
+    await expect(store.captureSource({ ...request, record: source("Conflicting source") })).rejects.toThrow();
+    expect(changed).toHaveBeenCalledTimes(1);
+    await store.createNote({ commandId: command("live-agent-note"), record: {
+      kind: "note", scope: "personal", provenance: { actor: "agent", evidence: [] }, relations: [],
+      content: { title: "Agent note", role: "fact", confirmed: false },
+    } });
+    expect(changed).toHaveBeenCalledTimes(2);
+    const initial = await store.config();
+    const config = await store.configure(command("live-eligibility"), {
+      ...initial, eligibility: { ...initial.eligibility, sessionIds: ["live-session"] },
+    });
+    expect(changed).toHaveBeenCalledTimes(3);
+    const draft = observation("live-session", "live-entry");
+    await store.publishObservationGroup({ commandId: command("live-observer"), expectedConfigRevision: config.revision,
+      coverage: { id: "live-cut", range: draft.content.range, disposition: "observed" }, records: [draft] });
+    expect(changed).toHaveBeenCalledTimes(4);
+    changed.mockImplementation(() => { throw new Error("Notification unavailable"); });
+    const committed = await store.captureSource({ commandId: command("live-notify-failure"), record: source("Still committed") });
+    expect((await store.read(committed.record.id))?.revisionId).toBe(committed.record.revisionId);
+  });
+
   it("is lazy, durable across reopen, and returns lexical canonical results", async () => {
     const { store, home, workspace } = await fixture();
     expect((await store.status()).state).toBe("uninitialized");

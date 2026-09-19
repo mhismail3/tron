@@ -340,7 +340,7 @@ async function readSecureBytes(path: string, maximumBytes: number): Promise<Uint
 export class KnowledgeStore {
   private static readonly workspaceLocks = new WeakMap<TronWorkspace, AsyncMutex>();
   private readonly mutex: AsyncMutex;
-  constructor(private readonly workspace: TronWorkspace) {
+  constructor(private readonly workspace: TronWorkspace, private readonly onChanged?: () => void) {
     this.mutex = KnowledgeStore.workspaceLocks.get(workspace) ?? new AsyncMutex(); KnowledgeStore.workspaceLocks.set(workspace, this.mutex);
   }
 
@@ -595,6 +595,10 @@ export class KnowledgeStore {
         const entries = [...state.receipts.entries()].sort(([, a], [, b]) => a.createdAt.localeCompare(b.createdAt));
         for (const [receiptKey] of entries.slice(0, Math.max(0, entries.length - RECEIPT_LIMIT))) state.receipts.delete(receiptKey);
         await this.save(paths, state);
+        // Publish only after the authoritative commit, across RPC, agent tools,
+        // connectors and autonomous observations. Receipt replays bypass this.
+        // A disposable notification must never turn a committed write into failure.
+        try { this.onChanged?.(); } catch { /* Reconnect reads canonical state. */ }
         // The tombstone/head transaction commits before physical cleanup. A
         // failed cleanup is durable pending work, never a resurrected record.
         if (afterCommit) {

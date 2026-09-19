@@ -161,7 +161,7 @@ const sessions = new RuntimeRegistry({
     );
   },
 });
-const knowledgeStore = new KnowledgeStore(sessions.knowledgeWorkspace());
+const knowledgeStore = new KnowledgeStore(sessions.knowledgeWorkspace(), () => transport?.broadcast("knowledge.changed", {}));
 const knowledgeConnector = createKnowledgeConnectorExtension(knowledgeStore, {
   credentials: new MacKeychainConnectorCredentialStore(),
   ...(xPricing ? { xPricing } : {}),

@@ -6,6 +6,13 @@ enum SessionForkChoicePolicy {
     static func supportsBefore(_ role: TranscriptItem.Role?) -> Bool { role == .user }
 }
 
+enum SessionHistoryLayout {
+    static let summaryBottomPadding: CGFloat = 4
+    static let topPagingBottomPadding: CGFloat = 2
+    static let pagingTopPadding: CGFloat = 4
+    static let regularPagingBottomPadding: CGFloat = 8
+}
+
 enum SessionHistoryPolicy {
     static func canNavigate(node: SessionTreeNode, leafID: String?) -> Bool { node.role == .user || node.id != leafID }
     static func leavesLaterWork(node: SessionTreeNode, leafID: String?) -> Bool { node.id != leafID }
@@ -145,7 +152,7 @@ struct SessionTreeSheet: View {
             ZStack {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: TronSpacing.md) {
-                        summary.padding(.bottom, 12).id("history-top")
+                        summary.padding(.bottom, SessionHistoryLayout.summaryBottomPadding).id("history-top")
                         if !supported {
                             TronSettingsNotice(message: "Update the Mac Gateway to browse complete paged history.", accent: .tronSessionTeal)
                         } else {
@@ -397,7 +404,8 @@ struct SessionHistoryPagingControls: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .padding(.vertical, 8)
+        .padding(.top, SessionHistoryLayout.pagingTopPadding)
+        .padding(.bottom, location == "top" ? SessionHistoryLayout.topPagingBottomPadding : SessionHistoryLayout.regularPagingBottomPadding)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: page.rangeDescription)
     }
 }

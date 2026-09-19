@@ -310,7 +310,6 @@ struct AutomationsDashboardView: View {
             )
             .padding(.horizontal, 20).padding(.vertical, 16).padding(.bottom, 80)
         }
-        .refreshable { model.automationCatalog.reload() }
         .tronScrollEdgeChrome()
     }
 
@@ -367,10 +366,6 @@ struct AutomationsDashboardView: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, AutomationTimelinePresentationPolicy.agendaVerticalPadding)
                 .padding(.bottom, AutomationTimelinePresentationPolicy.bottomControlClearance)
-            }
-            .refreshable {
-                model.automationCatalog.reload()
-                timeline?.load(start: selectedDate)
             }
             .tronScrollEdgeChrome()
         }

@@ -7,6 +7,13 @@ import WebKit
 
 @MainActor
 final class SessionSheetPresentationTests: XCTestCase {
+    func testSessionHistoryUsesTighterSummaryAndTopPagingGaps() {
+        XCTAssertEqual(SessionHistoryLayout.summaryBottomPadding, 4)
+        XCTAssertEqual(SessionHistoryLayout.pagingTopPadding, 4)
+        XCTAssertEqual(SessionHistoryLayout.topPagingBottomPadding, 2)
+        XCTAssertLessThan(SessionHistoryLayout.topPagingBottomPadding, SessionHistoryLayout.regularPagingBottomPadding)
+    }
+
     func testAutomationTimeEditorUsesTimeOnlyPickerAndPreservesDate() async throws {
         for field in [AutomationDateField.once, .intervalAnchor, .localTime] {
             let route = AutomationDateSelection(field: field, component: .time)
@@ -1165,6 +1172,8 @@ final class SessionSheetPresentationTests: XCTestCase {
                 XCTAssertEqual(HookInventoryPresentation.extensions(from: model.sessionResources(for: snapshot.sessionId)).first, record)
                 XCTAssertEqual(HookInventoryPresentation.issues(from: model.sessionResources(for: snapshot.sessionId)).first?.message, "SyntaxError: expected handler export")
                 XCTAssertEqual(model.sessionPresentationIdentity(for: snapshot.sessionId)?.sessionID, snapshot.sessionId)
+                let initialScroll = try XCTUnwrap(self.views(of: UIScrollView.self, in: controller.view).first)
+                XCTAssertEqual(initialScroll.contentOffset.y, -initialScroll.adjustedContentInset.top, accuracy: 1.0)
                 self.capture(controller, name: "hooks-project-success-dark")
             }
             try await projectResponse.value
@@ -1172,6 +1181,8 @@ final class SessionSheetPresentationTests: XCTestCase {
                 .preferredColorScheme(.light)) { controller in
                 try await Task.sleep(for: .milliseconds(300))
                 controller.view.layoutIfNeeded()
+                let eventScroll = try XCTUnwrap(self.views(of: UIScrollView.self, in: controller.view).first)
+                XCTAssertEqual(eventScroll.contentOffset.y, -eventScroll.adjustedContentInset.top, accuracy: 1.0)
                 self.capture(controller, name: "hooks-project-by-event-light")
             }
             for _ in 0..<20 where model.isReconcilingForeground {
@@ -1203,6 +1214,18 @@ final class SessionSheetPresentationTests: XCTestCase {
                     self.capture(technical, name: "hooks-project-info-light")
                 }
             }
+        }
+
+        try await withSheet(TechnicalJSONSheet(
+            value: .object([
+                "event": .string("session_start"),
+                "title": .string("Session starts"),
+                "supportedByPinnedSDK": .bool(true),
+                "providers": .array([.object(["name": .string("review-hook"), "count": .number(2)])]),
+            ]), title: "Event Details", accent: .tronSessionTeal,
+            detent: .constant(.medium), onEdit: nil
+        ).preferredColorScheme(.light)) { controller in
+            self.capture(controller, name: "hooks-event-details-direct-light")
         }
 
         try await withSheet(TechnicalJSONSheet(

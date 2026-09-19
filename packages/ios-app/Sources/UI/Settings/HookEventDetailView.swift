@@ -5,9 +5,26 @@ struct HookEventDetailView: View {
     let accent: Color
     @Environment(\.dismiss) private var dismiss
     @State private var showsInfo = false
+    @State private var infoDetent: PresentationDetent = .medium
 
     private var providerLabels: [String: String] {
         HookInventoryPresentation.extensionLabels(for: event.providers.map(\.extension))
+    }
+
+    private var technicalValue: JSONValue {
+        .object([
+            "event": .string(event.descriptor.identifier),
+            "title": .string(event.descriptor.title),
+            "supportedByPinnedSDK": .bool(event.descriptor.isSupported),
+            "providers": .array(event.providers.map { .object([
+                "name": .string($0.extension.name),
+                "displayName": .string(providerLabels[$0.extension.id] ?? $0.extension.friendlyName),
+                "count": .number(Double($0.count)),
+                "path": $0.extension.path.map(JSONValue.string) ?? .null,
+                "source": $0.extension.source.map(JSONValue.string) ?? .null,
+                "scope": $0.extension.scope.map(JSONValue.string) ?? .null,
+            ]) }),
+        ])
     }
 
     var body: some View {
@@ -59,20 +76,13 @@ struct HookEventDetailView: View {
             .tint(accent)
         }
         .tronManagedSheet(isPresented: $showsInfo, identity: "hook-event-info.\(event.id)") {
-            TronTechnicalJSONRow(value: .object([
-                "event": .string(event.descriptor.identifier),
-                "title": .string(event.descriptor.title),
-                "supportedByPinnedSDK": .bool(event.descriptor.isSupported),
-                "providers": .array(event.providers.map { .object([
-                    "name": .string($0.extension.name),
-                    "displayName": .string(providerLabels[$0.extension.id] ?? $0.extension.friendlyName),
-                    "count": .number(Double($0.count)),
-                    "path": $0.extension.path.map(JSONValue.string) ?? .null,
-                    "source": $0.extension.source.map(JSONValue.string) ?? .null,
-                    "scope": $0.extension.scope.map(JSONValue.string) ?? .null,
-                ]) }),
-            ]), title: "Event Technical Details", subtitle: "Selected-runtime registration metadata", sheetTitle: "Event Details", accent: accent)
-            .padding(18)
+            TechnicalJSONSheet(
+                value: technicalValue,
+                title: "Event Details",
+                accent: accent,
+                detent: $infoDetent,
+                onEdit: nil
+            )
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])

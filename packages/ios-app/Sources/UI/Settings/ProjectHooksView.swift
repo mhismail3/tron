@@ -43,10 +43,8 @@ struct ProjectHooksView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView(.vertical, showsIndicators: true) {
-                    LazyVStack(alignment: .leading, spacing: 18) {
-                        Color.clear.frame(height: 0).id("project-hooks-top")
+            ScrollView(.vertical, showsIndicators: true) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     if let resourceError = model.sessionResourcesError(for: sessionID),
                        currentIdentity != nil {
                         TronSettingsNotice(
@@ -114,20 +112,13 @@ struct ProjectHooksView: View {
                     } else if model.sessionResourcesError(for: sessionID) == nil {
                         TronPlaceholderState(title: "Hooks Unavailable", detail: "The selected runtime has not provided its registration inventory.", icon: "bolt.horizontal.circle", accent: .tronSessionTeal)
                     }
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 18)
                 }
-                .tronScrollEdgeChrome()
-                .navigationBarTitleDisplayMode(.inline)
-                .defaultScrollAnchor(.top)
-                .onChange(of: mode) { _, _ in
-                    proxy.scrollTo("project-hooks-top", anchor: .top)
-                }
-                .onChange(of: HookInventoryPresentation.hasInventory(resources)) { _, _ in
-                    proxy.scrollTo("project-hooks-top", anchor: .top)
-                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 18)
             }
+            .tronScrollEdgeChrome()
+            .navigationBarTitleDisplayMode(.inline)
+            .defaultScrollAnchor(.top)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { loadGeneration &+= 1 } label: {

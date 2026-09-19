@@ -180,13 +180,9 @@ struct SessionShellView: View {
                 }
                 if activity.allowsPresentationPublication { scheduleDashboardReconciliation() }
             }
-            .background {
-                if activity.allowsPresentationPublication {
-                    Color.clear
-                        .onChange(of: model.dashboardPresentationRevision, initial: true) { _, _ in
-                            scheduleDashboardReconciliation()
-                        }
-                }
+            .onChange(of: model.dashboardPresentationRevision, initial: true) { _, _ in
+                guard activity.allowsPresentationPublication else { return }
+                scheduleDashboardReconciliation()
             }
             .onChange(of: model.profileRevision) { _, _ in
                 guard activity.allowsPresentationPublication else { return }
@@ -680,7 +676,6 @@ struct SessionShellView: View {
             sessionSections(filtered)
         }
         .listStyle(.plain)
-        .refreshable { _ = await model.retrySessionCatalog() }
         .environment(\.defaultMinListRowHeight, 38)
         .contentMargins(.top, 6)
         .contentMargins(.bottom, 92)

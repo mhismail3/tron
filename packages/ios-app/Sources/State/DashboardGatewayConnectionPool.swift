@@ -411,8 +411,14 @@ final class DashboardGatewayConnectionPool {
         let event = delivery.event
         switch event.topic {
         case "session.summary":
-            guard case .sessionSummary(let update) = event.preparation,
-                  var current = entries[profileID] else { return }
+            guard case .sessionSummary(let update) = event.preparation else {
+                // Do not leave a background dashboard row stale when a Gateway
+                // sends a summary shape this client cannot decode. Its bounded
+                // catalog read is the authoritative recovery path.
+                scheduleRefresh(profileID: profileID, generation: generation)
+                return
+            }
+            guard var current = entries[profileID] else { return }
             switch current.catalog.apply(update) {
             case .stale:
                 return

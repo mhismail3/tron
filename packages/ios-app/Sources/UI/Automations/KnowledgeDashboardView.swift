@@ -88,7 +88,6 @@ struct KnowledgeDashboardView: View {
                     .padding(.bottom, 80)
                 }
                 .tronScrollEdgeChrome()
-                .refreshable { await reload() }
             }
             .ignoresSafeArea(.keyboard, edges: .bottom)
             TronTopBlurOverlay(style: .dashboard)
@@ -187,7 +186,7 @@ struct KnowledgeDashboardView: View {
         .tronManagedSheet(isPresented: $noteSheet, identity: "knowledge.note") {
             KnowledgeNoteCreateView { noteSheet = false; await reload() }.environment(model)
         }
-        .task(id: "\(kind?.rawValue ?? "all")/\(scope?.rawValue ?? "all")/\(search)/\(activity.allowsPresentationPublication)/\(model.knowledgePresentationIdentity.profileID ?? "none")/\(model.knowledgePresentationIdentity.lifecycleGeneration ?? -1)/\(model.knowledgePresentationIdentity.connectionID ?? -1)") {
+        .task(id: "\(kind?.rawValue ?? "all")/\(scope?.rawValue ?? "all")/\(search)/\(activity.allowsPresentationPublication)/\(model.knowledgePresentationIdentity.profileID ?? "none")/\(model.knowledgePresentationIdentity.lifecycleGeneration ?? -1)/\(model.knowledgePresentationIdentity.connectionID ?? -1)/\(model.knowledgeInvalidationRevision)") {
             guard activity.allowsPresentationPublication else { return }
             await reload()
         }

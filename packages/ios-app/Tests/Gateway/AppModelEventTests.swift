@@ -689,6 +689,17 @@ struct AppModelEventTests {
         #expect(model.sessions.first?.firstMessage == "Original")
     }
 
+    @Test("knowledge invalidations advance the live dashboard revision")
+    func knowledgeInvalidation() async {
+        let model = AppModel()
+        let before = model.knowledgeInvalidationRevision
+        await model.handle(GatewayEvent(
+            type: "event", topic: "knowledge.changed", sessionId: nil,
+            payload: .object([:])
+        ))
+        #expect(model.knowledgeInvalidationRevision == before + 1)
+    }
+
     @Test("alternating active summaries update rows without changing their order")
     func activeDashboardOrderIsStable() async {
         let model = AppModel()
