@@ -93,6 +93,17 @@ describe("safe source capture", () => {
     expect((await store.list({ kind: "source" })).records).toHaveLength(1);
   });
 
+  it("uses the configured readable-character bound rather than the global maximum", async () => {
+    const { store } = await fixture();
+    const result = await captureSource(store, { commandId: command("readable-bound"), url: "https://example.com/readable-bound", scope: "research" }, {
+      fetcher: async () => new Response("a".repeat(100), { headers: { "content-type": "text/plain" } }),
+      resolveHost: publicResolver,
+      limits: { maxReadableChars: 10 },
+    });
+    expect(result.record.content.text).toHaveLength(10);
+    expect(result.record.content.captureDisposition).toBe("partial");
+  });
+
   it("bounds response extraction and keeps capture successful when assessment fails", async () => {
     const { store } = await fixture();
     const result = await captureSource(store, { commandId: command("bounded"), url: "https://example.com/large", scope: "research", interests: ["testing"] }, {

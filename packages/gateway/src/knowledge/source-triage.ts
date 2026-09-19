@@ -1,6 +1,6 @@
 import type { KnowledgeRecord, SourceAssessment, SourceContent } from "./knowledge-contract.js";
 import { KnowledgeStore, type KnowledgeMutationResult } from "./knowledge-store.js";
-import { awaitAbortable } from "./model-await.js";
+import { awaitAbortableWithSettlement } from "./model-await.js";
 import type { SourceAssessmentModel } from "./source-capture.js";
 
 export interface SourceTriageInput {
@@ -10,6 +10,8 @@ export interface SourceTriageInput {
   /** Omit to use the persisted currentInterests config. */
   interests?: string[];
   signal?: AbortSignal;
+  /** Internal owner handoff for provider promises that may outlive the bounded wait. */
+  retirements?: Promise<void>[];
 }
 
 export interface SourceTriageResult {
@@ -23,6 +25,7 @@ export interface SourceTriageResult {
  */
 export async function triageSource(store: KnowledgeStore, input: SourceTriageInput, model: SourceAssessmentModel, now: () => string = () => new Date().toISOString()): Promise<SourceTriageResult> {
   const config = await store.config();
+  if (input.signal?.aborted) throw new Error("Source triage was cancelled");
   const source = await store.read(input.sourceId, input.expectedRevision);
   if (input.signal?.aborted) throw new Error("Source triage was cancelled");
   const interests = input.interests ?? config.currentInterests ?? [];
@@ -32,21 +35,28 @@ export async function triageSource(store: KnowledgeStore, input: SourceTriageInp
   // Bound the await: the adapter may ignore its signal, and a stalled triage must
   // not hold the caller open. A late assessment stays fenced by the signal check
   // and revision revalidation below.
-  const assessment = await awaitAbortable(model.assess({
+  const assessmentOperation = awaitAbortableWithSettlement(model.assess({
     title: source.content.title,
     text: source.content.text,
     interests: interests.slice(0, 50).map(value => value.slice(0, 500)),
     source: { ...(source.content.uri ? { uri: source.content.uri } : {}), ...(source.content.mediaType ? { mediaType: source.content.mediaType } : {}), capturedAt: source.content.capturedAt },
   }, signal), signal, () => new Error("Source triage deadline exceeded or was cancelled"));
+  input.retirements?.push(assessmentOperation.settled);
+  const assessment = await assessmentOperation.wait;
   if (input.signal?.aborted) throw new Error("Source triage was cancelled");
   const latestConfig = await store.config();
+  if (signal.aborted) throw new Error("Source triage was cancelled");
   const latest = await store.read(input.sourceId, input.expectedRevision);
-  if (latestConfig.revision !== config.revision || !latest || latest.kind !== "source" || await store.scopeExcluded({ ...(latest.provenance.sessionId ? { sessionId: latest.provenance.sessionId } : {}), ...(latest.provenance.branchId ? { branchId: latest.provenance.branchId } : {}) })) throw new Error("Source changed or became unavailable during triage");
+  if (signal.aborted) throw new Error("Source triage was cancelled");
+  const excluded = latest?.kind === "source" ? await store.scopeExcluded({ ...(latest.provenance.sessionId ? { sessionId: latest.provenance.sessionId } : {}), ...(latest.provenance.branchId ? { branchId: latest.provenance.branchId } : {}) }) : false;
+  if (signal.aborted) throw new Error("Source triage was cancelled");
+  if (latestConfig.revision !== config.revision || !latest || latest.kind !== "source" || excluded) throw new Error("Source changed or became unavailable during triage");
   const complete: SourceAssessment = { ...assessment, generatedAt: assessment.generatedAt ?? now() };
   const content: SourceContent = { ...latest.content, assessment: complete };
   const result: KnowledgeMutationResult = await store.captureSource({
     commandId: input.commandId,
     expectedRevision: source.revisionId,
+    signal,
     record: { kind: "source", id: source.id, createdAt: source.createdAt, scope: source.scope, provenance: source.provenance, relations: source.relations, ...(source.temporal ? { temporal: source.temporal } : {}), content },
   });
   if (result.record.kind !== "source") throw new Error("Source triage returned a non-source record");

@@ -180,7 +180,7 @@ allowed attribution/certainty values, and empty-result shape required by the
 parser; the configured model is never expected to guess that contract. Admission
 occurs only after the runtime's terminal receipt and canonical attention barrier;
 bounded model chunks name only their exact entry
-IDs and digest, and any remaining suffix is admitted as a separate chunk. Connector calls fail as unsupported until their named extension seam is installed;
+IDs and digest, and any remaining suffix is admitted as a separate chunk. The bounded process-local queue does not claim silently dropped cuts are recoverable: capacity overflow records an exact `unavailable` coverage gap (or `excluded` when privacy denies it) when the store is available; a blocker diagnostic is emitted if that authority cannot be written, while operational store/read failures retain the cut for backoff retry. Durable pending/failed retries derive command IDs from the current coverage revision, so each legitimate transition has its own receipt. Connector calls fail as unsupported until their named extension seam is installed;
 legacy import is installed only when explicitly named checkout roots are configured.
 `knowledge-observation.test.ts` covers global admission, exclusion-before-inference,
 and narrowing scope during inference. `runtime-knowledge-observation.integration.test.ts`
@@ -196,7 +196,7 @@ Capture quality is explicit (`complete`, `partial`, `metadata-only`,
 Connector captures may include opaque provider/account/item identity and
 multiple `origins`; these fields contain no credentials. Source capture uses
 manual redirects, public-DNS destination checks, owner-bounded response bytes,
-and script/style-free extraction. The URL-shaped `knowledge.source.capture`
+and script/style-free extraction. The readable extraction limit is applied from the capture request within the global safety ceiling; raw objects remain separately bounded. The URL-shaped `knowledge.source.capture`
 operation enters this owner; callers do not publish fetched text directly.
 URL diagnostics are redacted.
 

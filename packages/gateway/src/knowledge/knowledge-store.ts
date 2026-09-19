@@ -56,7 +56,7 @@ type RecordHead = LegacyRecordHead & {
 type Suppression = { excluded: boolean; forgotten: boolean; reason?: string; updatedAt: string };
 type ScopeExclusion = { sessionId?: string; branchId?: string; projectId?: string; excluded: boolean; reason?: string; updatedAt: string };
 type PendingRecordCleanup = { recordId: string; revisionId: string };
-type SourceRecordWriteRequest = { commandId: string; expectedRevision?: string; record: KnowledgeRecordDraft & { kind: "source" } };
+type SourceRecordWriteRequest = { commandId: string; expectedRevision?: string; record: KnowledgeRecordDraft & { kind: "source" }; signal?: AbortSignal };
 export interface KnowledgeImportCheckpoint {
   planHash: string;
   plannedRecordIds: string[];
@@ -581,19 +581,23 @@ export class KnowledgeStore {
     }
     return { stored: { kind: "value", value: result }, recordIds: [] };
   }
-  private async mutate<T>(operation: string, commandId: string, request: unknown, action: (state: KnowledgeState, paths: StorePaths) => Promise<T>, afterCommit?: (state: KnowledgeState, paths: StorePaths, result: T) => Promise<void>): Promise<T> {
+  private async mutate<T>(operation: string, commandId: string, request: unknown, action: (state: KnowledgeState, paths: StorePaths) => Promise<T>, afterCommit?: (state: KnowledgeState, paths: StorePaths, result: T) => Promise<void>, signal?: AbortSignal): Promise<T> {
     if (!/^[A-Za-z0-9._:-]{8,160}$/.test(commandId)) throw invalid("Mutating requests require a stable commandId");
     return this.mutex.run(async () => {
       const paths = await this.paths(true); const { state } = await this.load(paths, true);
       try {
         const key = `${operation}\0${commandId}`; const hash = requestHash(operation, request); const prior = state.receipts.get(key);
         if (prior) { if (prior.operation !== operation || prior.requestHash !== hash) throw conflict("Command ID was already used for a different knowledge mutation"); if (prior.invalidated) throw conflict("Knowledge mutation result was forgotten"); return await this.receiptResult(paths, state, prior.result) as T; }
+        if (signal?.aborted) throw new GatewayError("busy", "Knowledge mutation was cancelled", true);
         state.catalog!.begin();
-        const result = await action(state, paths); state.stateRevision += 1;
+        const result = await action(state, paths);
+        if (signal?.aborted) throw new GatewayError("busy", "Knowledge mutation was cancelled", true);
+        state.stateRevision += 1;
         const stored = this.receipt(result, state.stateRevision);
         state.receipts.set(key, { operation, requestHash: hash, result: stored.stored, recordIds: stored.recordIds, createdAt: now(), invalidated: false });
         const entries = [...state.receipts.entries()].sort(([, a], [, b]) => a.createdAt.localeCompare(b.createdAt));
         for (const [receiptKey] of entries.slice(0, Math.max(0, entries.length - RECEIPT_LIMIT))) state.receipts.delete(receiptKey);
+        if (signal?.aborted) throw new GatewayError("busy", "Knowledge mutation was cancelled", true);
         await this.save(paths, state);
         // Publish only after the authoritative commit, across RPC, agent tools,
         // connectors and autonomous observations. Receipt replays bypass this.
@@ -791,7 +795,8 @@ export class KnowledgeStore {
 
   /** Internal source/import owner write. The transport action accepts URLs only. */
   async captureSource(request: SourceRecordWriteRequest): Promise<KnowledgeMutationResult> {
-    return this.mutate("knowledge.source.record-write", request.commandId, request, async (state, paths) => this.putRecord(state, paths, request.record as KnowledgeRecordDraft, request.expectedRevision));
+    const { signal, ...receiptRequest } = request;
+    return this.mutate("knowledge.source.record-write", request.commandId, receiptRequest, async (state, paths) => this.putRecord(state, paths, request.record as KnowledgeRecordDraft, request.expectedRevision), undefined, signal);
   }
   async createNote(request: KnowledgeNoteMutationRequest & { recordId?: never }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.create", request.commandId, request, async (state, paths) => this.putRecord(state, paths, request.record)); }
   async updateNote(request: KnowledgeNoteMutationRequest & { recordId: string }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.update", request.commandId, request, async (state, paths) => { const current = await this.currentRecord(state, paths, request.recordId); if (!current || current.kind !== "note") throw conflict("Knowledge note does not exist"); if (request.expectedRevision !== current.revisionId) throw conflict("Knowledge note revision is stale"); return this.putRecord(state, paths, { ...request.record, id: request.recordId, createdAt: current.createdAt }, request.expectedRevision); }); }
@@ -862,7 +867,7 @@ export class KnowledgeStore {
       return { coverage, stateRevision: state.stateRevision + 1 };
     });
   }
-  async setCoverage(input: CoverageUpdateInput): Promise<{ coverage: ObservationCoverage; stateRevision: number }> {
+  async setCoverage(input: CoverageUpdateInput, signal?: AbortSignal): Promise<{ coverage: ObservationCoverage; stateRevision: number }> {
     return this.mutate("knowledge.observation.coverage", input.commandId, input, async (state, paths) => {
       if (input.expectedConfigRevision !== undefined && state.config.revision !== input.expectedConfigRevision) throw conflict("Observation configuration changed while inference was running");
       if (this.excludedRange(state, input.coverage.range) && input.coverage.disposition !== "excluded") throw conflict("Observation range is excluded"); const current = state.coverage.get(input.coverage.id);
@@ -882,7 +887,7 @@ export class KnowledgeStore {
         }
       }
       const coverage: ObservationCoverage = { ...input.coverage, schemaVersion: KNOWLEDGE_SCHEMA_VERSION, revisionId: revisionId(), recordedAt: now() }; validateCoverage(coverage); state.coverage.set(coverage.id, coverage); return { coverage, stateRevision: state.stateRevision + 1 };
-    });
+    }, undefined, signal);
   }
   /** Publish a bounded SOURCE/NOTE/OBSERVATION synthesis as an unconfirmed
    * derived note. The expected configuration and exact revision set are

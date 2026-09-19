@@ -1,22 +1,19 @@
 /**
- * Bounds one Gateway-owned await against an abort signal at the knowledge model
- * boundary.
- *
- * Model adapters are not required to honor `AbortSignal`, so an uncooperative
- * implementation must not hold a caller, an RPC, or a work token open after its
- * deadline. The returned promise rejects as soon as the signal aborts; the
- * caller's own fence (an aborted-attempt check plus a revision/scope
- * revalidation before publication) keeps the late result from becoming durable
- * evidence. This bounds the *wait*, never the underlying operation's ownership.
+ * A bounded caller wait paired with the underlying operation's settlement.
+ * Abort only rejects `wait`; `settled` remains owned by the adapter boundary so
+ * callers can retire lifecycle tokens after the provider really finishes.
  */
-export function awaitAbortable<T>(promise: Promise<T>, signal: AbortSignal, failure: () => Error): Promise<T> {
+export interface AbortableOperation<T> {
+  wait: Promise<T>;
+  settled: Promise<void>;
+}
+
+export function awaitAbortableWithSettlement<T>(promise: Promise<T>, signal: AbortSignal, failure: () => Error): AbortableOperation<T> {
+  const settled = promise.then(() => undefined, () => undefined);
   if (signal.aborted) {
-    // The abandoned operation still owns its own settlement; observe it so it
-    // cannot surface as an unhandled rejection without admitting its result.
-    void promise.catch(() => {});
-    return Promise.reject(failure());
+    return { wait: Promise.reject(failure()), settled };
   }
-  return new Promise<T>((resolve, reject) => {
+  const wait = new Promise<T>((resolve, reject) => {
     const onAbort = () => reject(failure());
     signal.addEventListener("abort", onAbort, { once: true });
     promise.then(
@@ -24,4 +21,14 @@ export function awaitAbortable<T>(promise: Promise<T>, signal: AbortSignal, fail
       (error) => { signal.removeEventListener("abort", onAbort); reject(error); },
     );
   });
+  return { wait, settled };
+}
+
+/**
+ * Bounds the caller's wait without claiming that an uncooperative model has
+ * stopped. Use `awaitAbortableWithSettlement` when the caller owns lifecycle
+ * state that must remain active until the adapter promise settles.
+ */
+export function awaitAbortable<T>(promise: Promise<T>, signal: AbortSignal, failure: () => Error): Promise<T> {
+  return awaitAbortableWithSettlement(promise, signal, failure).wait;
 }

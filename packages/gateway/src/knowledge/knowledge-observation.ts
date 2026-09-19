@@ -4,7 +4,7 @@ import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { knowledgeScopeEligible, type KnowledgeConfig, type KnowledgeRecordDraft, type ObservationRange } from "./knowledge-contract.js";
 import type { KnowledgeStore } from "./knowledge-store.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
-import { awaitAbortable } from "./model-await.js";
+import { awaitAbortableWithSettlement } from "./model-await.js";
 
 const OBSERVER_PROMPT_VERSION = "tron-observer-v2";
 const OBSERVER_SYSTEM_PROMPT = [
@@ -181,9 +181,15 @@ function sourceDigest(entries: readonly ObservationSourceEntry[]): string {
 }
 
 function rangeID(range: ObservationRange): string { return `coverage-${hash(JSON.stringify(range))}`; }
-function commandID(prefix: string, range: ObservationRange): string { return `${prefix}-${hash(JSON.stringify(range)).slice(0, 48)}`; }
+function commandID(prefix: string, range: ObservationRange, expectedRevision?: string): string {
+  // A coverage retry changes the serialized request when it advances a durable
+  // pending/failed row. Include that row revision in the command identity so a
+  // receipt for the first attempt cannot reject the legitimate next attempt as
+  // a request-hash conflict.
+  return `${prefix}-${hash(JSON.stringify({ range, expectedRevision: expectedRevision ?? null })).slice(0, 48)}`;
+}
 
-async function inferBounded(model: ObservationModel, input: Omit<ObservationModelInput, "signal">, signal: AbortSignal, timeoutMs: number, maxAttempts: number): Promise<string> {
+async function inferBounded(model: ObservationModel, input: Omit<ObservationModelInput, "signal">, signal: AbortSignal, timeoutMs: number, maxAttempts: number, retirements: Promise<void>[]): Promise<string> {
   let lastError: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const controller = new AbortController();
@@ -193,11 +199,13 @@ async function inferBounded(model: ObservationModel, input: Omit<ObservationMode
     const timer = setTimeout(() => controller.abort(new Error("Observer model timeout")), timeoutMs);
     timer.unref?.();
     try {
-      const result = await awaitAbortable(
+      const operation = awaitAbortableWithSettlement(
         model.infer({ ...input, signal: controller.signal }),
         controller.signal,
         () => controller.signal.reason instanceof Error ? controller.signal.reason : new Error("Observer model timeout"),
       );
+      retirements.push(operation.settled);
+      const result = await operation.wait;
       // A model is allowed to ignore cancellation and resolve late. The timed
       // attempt is not admitted after its own deadline even when the outer
       // operation is still alive for a retry.
@@ -287,10 +295,50 @@ export class KnowledgeObservationService {
       entries -= settlement.entries.length;
       this.queued.delete(key);
       dropped += 1;
+      // Queue shedding is not a silent loss: the exact canonical cut is made a
+      // durable unavailable gap. It therefore cannot later be mistaken for a
+      // recoverable pending cut or silently skipped by prefix recovery.
+      void this.recordQueueBlock(settlement);
     }
     this.droppedSinceLastReport += dropped;
-    if (dropped > 0) {
-      this.reportDropped();
+    if (dropped > 0) this.reportDropped();
+  }
+
+  private async recordQueueBlock(settlement: ObservationSettlement): Promise<void> {
+    if (this.cancelled.signal.aborted) return;
+    const projected = settlement.entries.map(projectObservationEntry).filter((entry): entry is ObservationSourceEntry => entry !== undefined);
+    if (projected.length === 0 || projected.length > 10_000) return;
+    try {
+      const config = await this.store.config();
+      if (this.cancelled.signal.aborted || !config.observation.enabled) return;
+      const excluded = !knowledgeScopeEligible(config.eligibility, settlement) || await this.store.scopeExcluded({
+        sessionId: settlement.sessionId,
+        ...(settlement.branchId ? { branchId: settlement.branchId } : {}),
+        ...(settlement.projectId ? { projectId: settlement.projectId } : {}),
+      });
+      if (this.cancelled.signal.aborted) return;
+      const range: ObservationRange = {
+        sessionId: settlement.sessionId,
+        ...(settlement.branchId ? { branchId: settlement.branchId } : {}),
+        fromEntryId: projected[0]!.id,
+        toEntryId: projected.at(-1)!.id,
+        entryIds: projected.map(entry => entry.id),
+        entryDigest: sourceDigest(projected),
+        ...(settlement.projectId ? { projectId: settlement.projectId } : {}),
+        ...((settlement.invocationIds?.length ?? 0) > 0 ? { invocationIds: [...new Set(settlement.invocationIds)] } : settlement.invocationId ? { invocationIds: [settlement.invocationId] } : {}),
+      };
+      const id = rangeID(range);
+      const existing = await this.store.coverage(id);
+      if (this.cancelled.signal.aborted || ["observed", "empty", "excluded", "unavailable"].includes(existing?.disposition ?? "")) return;
+      await this.store.setCoverage({
+        commandId: commandID(excluded ? "knowledge-excluded" : "knowledge-unavailable", range, existing?.revisionId),
+        expectedConfigRevision: config.revision,
+        ...(existing?.revisionId ? { expectedRevision: existing.revisionId } : {}),
+        coverage: { id, range, disposition: excluded ? "excluded" : "unavailable", groupRevisionIds: [], reason: excluded ? "scope-excluded" : "observation-queue-capacity" },
+      }, this.cancelled.signal);
+    } catch {
+      // A store outage cannot be converted into a false recoverable claim. The
+      // bounded diagnostic remains the only honest admission result.
     }
   }
 
@@ -355,7 +403,9 @@ export class KnowledgeObservationService {
         this.queued.delete(next[0]);
         if (!await this.process(next[1], next[0])) {
           // Durable admission failed for operational reasons. Retain the exact
-          // cut and stop draining so a broken store cannot spin this loop.
+          // cut and stop draining so a broken store cannot spin this loop. A
+          // disposal wins over requeue; no late completion may revive work.
+          if (this.cancelled.signal.aborted) break;
           this.enqueue(next[1], next[0]);
           this.scheduleAdmissionRetry();
           break;
@@ -377,12 +427,19 @@ export class KnowledgeObservationService {
     // An unreadable store is operational: retain the cut rather than losing a
     // terminal snapshot that has no coverage authority yet.
     try { config = await this.store.config(); } catch { return false; }
+    if (this.cancelled.signal.aborted) return true;
     // Ordinary settlements must not create the knowledge namespace while the
     // feature is still at its untouched default configuration.
     if (!config.observation.enabled) return true;
     const projected = settlement.entries.map(projectObservationEntry).filter((entry): entry is ObservationSourceEntry => entry !== undefined);
     if (projected.length === 0) return true;
-    const committed = await this.store.observationCoverageForScope(settlement.sessionId, settlement.branchId, settlement.projectId, projected.map(entry => entry.id)).catch(() => []);
+    let committed: Awaited<ReturnType<KnowledgeStore["observationCoverageForScope"]>>;
+    try {
+      committed = await this.store.observationCoverageForScope(settlement.sessionId, settlement.branchId, settlement.projectId, projected.map(entry => entry.id));
+    } catch {
+      return false;
+    }
+    if (this.cancelled.signal.aborted) return true;
     // Recover the longest exact committed prefix. This keeps a later full
     // canonical snapshot from replaying old entries when chunking changes or
     // the process restarts with an empty in-memory cursor.
@@ -458,19 +515,37 @@ export class KnowledgeObservationService {
       if (entries.length > 0) this.enqueue({ ...settlement, entries: entries.map(entry => entry.canonical) }, envelopeKey);
     };
     const id = rangeID(range);
-    const existing = await this.store.coverage(id).catch(() => null);
+    let existing: Awaited<ReturnType<KnowledgeStore["coverage"]>>;
+    try {
+      existing = await this.store.coverage(id);
+    } catch {
+      return false;
+    }
+    if (this.cancelled.signal.aborted) return true;
     if (existing?.disposition === "observed" || existing?.disposition === "empty" || existing?.disposition === "excluded" || existing?.disposition === "unavailable") return true;
-    if (!knowledgeScopeEligible(config.eligibility, settlement)
-      || await this.store.scopeExcluded(range).catch(() => true)) {
+    let scopeExcluded: boolean;
+    try {
+      scopeExcluded = await this.store.scopeExcluded(range);
+    } catch {
+      // An unavailable privacy read is not proof of exclusion. Keep the exact
+      // cut queued and retry instead of writing a permanent excluded row.
+      return false;
+    }
+    if (this.cancelled.signal.aborted) return true;
+    if (!knowledgeScopeEligible(config.eligibility, settlement) || scopeExcluded) {
       // An exclusion read failure fails closed toward privacy, but the cut still
       // has no coverage authority until the excluded disposition is durable.
       // Retain the exact cut and retry rather than dropping an unrecorded range.
-      if (!await this.store.setCoverage({ commandId: commandID("knowledge-excluded", range), expectedConfigRevision: config.revision, ...(existing?.revisionId ? { expectedRevision: existing.revisionId } : {}), coverage: { id, range, disposition: "excluded", groupRevisionIds: [], reason: "scope-excluded" } }).then(() => true).catch(() => false)) return false;
+      if (this.cancelled.signal.aborted) return true;
+      if (!await this.store.setCoverage({ commandId: commandID("knowledge-excluded", range, existing?.revisionId), expectedConfigRevision: config.revision, ...(existing?.revisionId ? { expectedRevision: existing.revisionId } : {}), coverage: { id, range, disposition: "excluded", groupRevisionIds: [], reason: "scope-excluded" } }, this.cancelled.signal).then(() => true).catch(() => false)) return false;
+      if (this.cancelled.signal.aborted) return true;
       admitRemaining();
       return true;
     }
     if (oversized) {
-      if (!await this.store.setCoverage({ commandId: commandID("knowledge-unavailable", range), expectedConfigRevision: config.revision, ...(existing?.revisionId ? { expectedRevision: existing.revisionId } : {}), coverage: { id, range, disposition: "unavailable", groupRevisionIds: [], reason: "entry-exceeds-model-input-bound" } }).then(() => true).catch(() => false)) return false;
+      if (this.cancelled.signal.aborted) return true;
+      if (!await this.store.setCoverage({ commandId: commandID("knowledge-unavailable", range, existing?.revisionId), expectedConfigRevision: config.revision, ...(existing?.revisionId ? { expectedRevision: existing.revisionId } : {}), coverage: { id, range, disposition: "unavailable", groupRevisionIds: [], reason: "entry-exceeds-model-input-bound" } }, this.cancelled.signal).then(() => true).catch(() => false)) return false;
+      if (this.cancelled.signal.aborted) return true;
       admitRemaining();
       return true;
     }
@@ -479,12 +554,16 @@ export class KnowledgeObservationService {
     if (boundedSourceText.length > inputLimit) {
       // This should only be reachable for an unusually long prefix or suffix;
       // do not silently publish a shortened model input as observed evidence.
-      if (!await this.store.setCoverage({ commandId: commandID("knowledge-unavailable", range), expectedConfigRevision: config.revision, ...(existing?.revisionId ? { expectedRevision: existing.revisionId } : {}), coverage: { id, range, disposition: "unavailable", groupRevisionIds: [], reason: "terminal-outcome-exceeds-model-input-bound" } }).then(() => true).catch(() => false)) return false;
+      if (this.cancelled.signal.aborted) return true;
+      if (!await this.store.setCoverage({ commandId: commandID("knowledge-unavailable", range, existing?.revisionId), expectedConfigRevision: config.revision, ...(existing?.revisionId ? { expectedRevision: existing.revisionId } : {}), coverage: { id, range, disposition: "unavailable", groupRevisionIds: [], reason: "terminal-outcome-exceeds-model-input-bound" } }, this.cancelled.signal).then(() => true).catch(() => false)) return false;
+      if (this.cancelled.signal.aborted) return true;
       admitRemaining();
       return true;
     }
     const fallbackAt = chunk.at(-1)!.timestamp;
-    const pending = await this.store.setCoverage({ commandId: commandID("knowledge-pending", range), expectedConfigRevision: config.revision, ...(existing?.revisionId ? { expectedRevision: existing.revisionId } : {}), coverage: { id, range, disposition: "pending", groupRevisionIds: [], reason: "observer-admitted" } }).catch(() => undefined);
+    if (this.cancelled.signal.aborted) return true;
+    const pending = await this.store.setCoverage({ commandId: commandID("knowledge-pending", range, existing?.revisionId), expectedConfigRevision: config.revision, ...(existing?.revisionId ? { expectedRevision: existing.revisionId } : {}), coverage: { id, range, disposition: "pending", groupRevisionIds: [], reason: "observer-admitted" } }, this.cancelled.signal).catch(() => undefined);
+    if (this.cancelled.signal.aborted) return true;
     // A scope/config change may win the serialized admission after the reads
     // above, or the store may be temporarily unavailable. Either way the cut has
     // no coverage authority yet: retain it and retry instead of dropping the
@@ -492,6 +571,7 @@ export class KnowledgeObservationService {
     if (!pending) return false;
     const expectedRevision = pending.coverage.revisionId;
     let work: GatewayWorkHandle | undefined;
+    const retirements: Promise<void>[] = [];
     const operationAbort = new AbortController();
     const operationSignal = AbortSignal.any([this.cancelled.signal, operationAbort.signal]);
     try {
@@ -501,10 +581,17 @@ export class KnowledgeObservationService {
       // Model implementations are not required to honor AbortSignal. Fence
       // immediately after the await and again before parsing/publication so a
       // late completion cannot become durable evidence.
-      const raw = await inferBounded(model, { sessionId: settlement.sessionId, range, sourceText: boundedSourceText, outcome: settlement.outcome, maxOutputChars: config.observation.maxOutputChars }, operationSignal, config.observation.timeoutMs, config.observation.maxAttempts);
+      const raw = await inferBounded(model, { sessionId: settlement.sessionId, range, sourceText: boundedSourceText, outcome: settlement.outcome, maxOutputChars: config.observation.maxOutputChars }, operationSignal, config.observation.timeoutMs, config.observation.maxAttempts, retirements);
       if (operationSignal.aborted) return true;
-      const afterModelConfig = await this.store.config();
-      const scopeExcluded = await this.store.scopeExcluded({ sessionId: settlement.sessionId, ...(settlement.branchId ? { branchId: settlement.branchId } : {}), ...(settlement.projectId ? { projectId: settlement.projectId } : {}) });
+      let afterModelConfig: KnowledgeConfig;
+      let scopeExcluded: boolean;
+      try {
+        afterModelConfig = await this.store.config();
+        if (operationSignal.aborted) return true;
+        scopeExcluded = await this.store.scopeExcluded({ sessionId: settlement.sessionId, ...(settlement.branchId ? { branchId: settlement.branchId } : {}), ...(settlement.projectId ? { projectId: settlement.projectId } : {}) });
+      } catch {
+        return false;
+      }
       if (operationSignal.aborted) return true;
       if (afterModelConfig.revision !== config.revision || scopeExcluded) {
         // Re-admit the complete exact cut under current authority. Keeping only
@@ -514,7 +601,9 @@ export class KnowledgeObservationService {
       }
       const items = parseModelOutput(raw, range, fallbackAt);
       if (items.length === 0) {
-        await this.store.setCoverage({ commandId: commandID("knowledge-empty", range), expectedConfigRevision: config.revision, ...(expectedRevision ? { expectedRevision } : {}), coverage: { id, range, disposition: "empty", groupRevisionIds: [], reason: "no-substantive-observation" } });
+        if (operationSignal.aborted) return true;
+        await this.store.setCoverage({ commandId: commandID("knowledge-empty", range, expectedRevision), expectedConfigRevision: config.revision, ...(expectedRevision ? { expectedRevision } : {}), coverage: { id, range, disposition: "empty", groupRevisionIds: [], reason: "no-substantive-observation" } }, operationSignal);
+        if (operationSignal.aborted) return true;
         admitRemaining();
         return true;
       }
@@ -522,15 +611,23 @@ export class KnowledgeObservationService {
         kind: "observation", scope: "personal", provenance: { actor: "agent", sessionId: settlement.sessionId, ...(settlement.branchId ? { branchId: settlement.branchId } : {}), ...(settlement.invocationId ? { invocationId: settlement.invocationId } : {}), evidence: range.entryIds.map(entryId => ({ sessionEntry: { sessionId: settlement.sessionId, ...(settlement.branchId ? { branchId: settlement.branchId } : {}), entryId, digest: range.entryDigest } })) },
         relations: [], content: { range, items: [item], observer: { promptVersion: OBSERVER_PROMPT_VERSION, ...(config.observation.model ? { model: config.observation.model } : {}) } },
       }));
-      await this.store.publishObservationGroup({ commandId: commandID("knowledge-publish", range), expectedConfigRevision: config.revision, ...(expectedRevision ? { expectedCoverageRevision: expectedRevision } : {}), coverage: { id, range, disposition: "observed", reason: `terminal:${settlement.outcome}` }, records }, operationSignal);
+      if (operationSignal.aborted) return true;
+      await this.store.publishObservationGroup({ commandId: commandID("knowledge-publish", range, expectedRevision), expectedConfigRevision: config.revision, ...(expectedRevision ? { expectedCoverageRevision: expectedRevision } : {}), coverage: { id, range, disposition: "observed", reason: `terminal:${settlement.outcome}` }, records }, operationSignal);
+      if (operationSignal.aborted) return true;
       admitRemaining();
     } catch (error) {
       // The composite signal has only observer/work-owner cancellation sources.
       // Leave pending coverage for recovery; cancellation must not requeue work.
       if (operationSignal.aborted) return true;
-      await this.store.setCoverage({ commandId: commandID("knowledge-failed", range), expectedConfigRevision: config.revision, ...(expectedRevision ? { expectedRevision } : {}), coverage: { id, range, disposition: "failed", groupRevisionIds: [], reason: error instanceof Error ? bounded(error.message, 500) : "observer-failed" } }).catch(() => {});
+      await this.store.setCoverage({ commandId: commandID("knowledge-failed", range, expectedRevision), expectedConfigRevision: config.revision, ...(expectedRevision ? { expectedRevision } : {}), coverage: { id, range, disposition: "failed", groupRevisionIds: [], reason: error instanceof Error ? bounded(error.message, 500) : "observer-failed" } }, operationSignal).catch(() => {});
       return true;
-    } finally { work?.settle(); }
+    } finally {
+      // The bounded waiter may reject before an adapter settles. Keep the
+      // Gateway token until every provider promise has actually retired, but do
+      // not block the serialized admission queue on an uncooperative provider.
+      if (retirements.length === 0) work?.settle();
+      else void Promise.all(retirements).then(() => work?.settle());
+    }
     return true;
   }
 }

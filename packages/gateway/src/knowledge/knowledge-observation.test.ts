@@ -184,6 +184,36 @@ describe("KnowledgeObservationService", () => {
     observer.dispose();
   });
 
+  it("does not persist exclusion when the privacy read fails, then retries the exact cut", async () => {
+    const infer = vi.fn(async () => output);
+    const { store, observer } = await fixture({ infer });
+    const scopeRead = vi.spyOn(store, "scopeExcluded").mockRejectedValueOnce(new Error("privacy store unavailable"));
+    observer.admit({ sessionId: "session-1", entries: [...entries], outcome: "completed", invocationId: "scope-read-retry" });
+    await waitFor(() => scopeRead.mock.calls.length >= 1);
+    expect(infer).not.toHaveBeenCalled();
+    await waitFor(async () => (await store.status()).coverage.observedCount === 1);
+    expect((await store.status()).coverage.excludedCount).toBe(0);
+    expect(infer).toHaveBeenCalledTimes(1);
+    observer.dispose();
+  });
+
+  it("does not requeue or write after disposal wins an in-flight privacy read", async () => {
+    let release!: (value: boolean) => void;
+    const blocked = new Promise<boolean>(resolve => { release = resolve; });
+    const infer = vi.fn(async () => output);
+    const { store, observer } = await fixture({ infer });
+    const scopeRead = vi.spyOn(store, "scopeExcluded").mockReturnValueOnce(blocked);
+    observer.admit({ sessionId: "session-1", entries: [...entries], outcome: "completed", invocationId: "dispose-scope-read" });
+    await waitFor(() => scopeRead.mock.calls.length === 1);
+    const coverageWrites = vi.spyOn(store, "setCoverage");
+    observer.dispose();
+    release(false);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(coverageWrites).not.toHaveBeenCalled();
+    expect(infer).not.toHaveBeenCalled();
+  });
+
   it("retains the exact cut when an excluded coverage record cannot be written, then records it once", async () => {
     const infer = vi.fn(async () => output);
     const { store, observer } = await fixture({ infer });
@@ -426,6 +456,51 @@ describe("KnowledgeObservationService", () => {
       expect((await store.list()).records).toHaveLength(0);
       expect(infer).toHaveBeenCalledTimes(1);
     } finally { release(output); observer.dispose(); }
+  });
+
+  it("retries a durable failed cut with a new expected coverage revision", async () => {
+    let attempts = 0;
+    const infer = vi.fn(async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("temporary provider failure");
+      return output;
+    });
+    const { store, observer } = await fixture({ infer });
+    observer.admit({ sessionId: "session-1", entries, outcome: "failed", invocationId: "failed-retry-invocation" });
+    await waitFor(async () => (await store.pendingObservationCoverage()).some(coverage => coverage.disposition === "failed"));
+    observer.admit({ sessionId: "session-1", entries, outcome: "failed", invocationId: "failed-retry-invocation" });
+    await waitFor(async () => (await store.status()).coverage.observedCount === 1);
+    expect(infer).toHaveBeenCalledTimes(2);
+    observer.dispose();
+  });
+
+  it("recovers a durable pending cut after the original admission is disposed", async () => {
+    let releaseFirst!: () => void;
+    const first = new Promise<void>(resolve => { releaseFirst = resolve; });
+    const initial = vi.fn(async (input: { signal: AbortSignal }) => {
+      await new Promise<void>(resolve => input.signal.addEventListener("abort", () => resolve(), { once: true }));
+      await first;
+      throw new Error("disposed provider");
+    });
+    const root = await mkdtemp(join(tmpdir(), "tron-observer-pending-recovery-")); roots.push(root);
+    const workspace = new TronWorkspace(join(root, "home")); workspaces.push(workspace);
+    const store = new KnowledgeStore(workspace);
+    await store.configure("pending-recovery-config", {
+      ...DEFAULT_KNOWLEDGE_CONFIG,
+      eligibility: { ...DEFAULT_KNOWLEDGE_CONFIG.eligibility, sessionIds: ["session-1"] },
+      observation: { ...DEFAULT_KNOWLEDGE_CONFIG.observation, enabled: true },
+    });
+    const pendingObserver = new KnowledgeObservationService(store, { infer: initial });
+    pendingObserver.admit({ sessionId: "session-1", entries, outcome: "completed", invocationId: "pending-recovery-invocation" });
+    await waitFor(async () => (await store.pendingObservationCoverage()).some(coverage => coverage.disposition === "pending"));
+    pendingObserver.dispose();
+    releaseFirst();
+    const recovered = vi.fn(async () => output);
+    const recoveryObserver = new KnowledgeObservationService(store, { infer: recovered });
+    recoveryObserver.admit({ sessionId: "session-1", entries, outcome: "completed", invocationId: "pending-recovery-invocation" });
+    await waitFor(async () => (await store.status()).coverage.observedCount === 1);
+    expect(recovered).toHaveBeenCalledTimes(1);
+    recoveryObserver.dispose();
   });
 
   it("records failed model inference as a non-success coverage disposition", async () => {
