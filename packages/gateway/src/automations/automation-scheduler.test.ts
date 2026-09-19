@@ -115,6 +115,57 @@ describe("AutomationScheduler", () => {
     await expect(disposal).resolves.toBeUndefined();
   });
 
+  it("records an unknown outcome when a cooperative cancel itself never settles during shutdown", async () => {
+    let now = Date.parse("2026-01-01T00:00:01Z");
+    const root = await mkdtemp(join(tmpdir(), "tron-automation-shutdown-cancel-grace-"));
+    const store = new AutomationStore(root, { now: () => now });
+    await store.initialize();
+    const record = await store.create({
+      name: "ShutdownCancel", activation: "enabled", target: { kind: "existingSession", sessionId: "session-one" },
+      trigger: { kind: "interval", everySeconds: 300, anchorAt: "2026-01-01T00:00:00.000Z" },
+      misfirePolicy: "latest", overlapPolicy: "skip", executionDeadlineSeconds: 3_600,
+      action: { kind: "sessionPrompt", text: "Review" }, provenance: { kind: "local" },
+    });
+    const timers = new Map<number, Array<() => void>>();
+    const fireGrace = (): void => {
+      const pending = timers.get(5_000) ?? [];
+      timers.delete(5_000);
+      for (const callback of pending) callback();
+    };
+    const executor: AutomationExecutor = {
+      start: vi.fn(async (_definition, run) => ({
+        operationId: run.operationId,
+        completion: new Promise<never>(() => {}),
+        // A cancel that never resolves must not hold shutdown open.
+        cancel: vi.fn(() => new Promise<void>(() => {})),
+      })),
+    };
+    const scheduler = new AutomationScheduler(store, executor, {
+      now: () => now,
+      hostEpoch: "epoch-one",
+      setTimer: ((callback: () => void, delay: number) => {
+        const pending = timers.get(delay) ?? [];
+        pending.push(callback);
+        timers.set(delay, pending);
+        return { unref() {} } as unknown as NodeJS.Timeout;
+      }) as never,
+      clearTimer: ((timer: NodeJS.Timeout) => { void timer; }) as never,
+    });
+
+    scheduler.start();
+    now = Date.parse("2026-01-01T00:10:30Z");
+    await scheduler.scan();
+    await eventually(() => expect(store.get(record.id).currentRun?.state).toBe("running"));
+
+    const cancellation = scheduler.cancelActiveForShutdown();
+    await eventually(() => expect(timers.has(5_000)).toBe(true));
+    fireGrace();
+    await cancellation;
+    await eventually(() => expect(store.get(record.id).lastRun?.state).toBe("outcomeUnknown"));
+    expect(store.get(record.id).lastRun?.reason).toBe("gateway-shutdown-cancellation-timeout");
+    expect(store.get(record.id).activation).toBe("blocked");
+  });
+
   it("keeps a draft one-time definition draft after a successful manual run", async () => {
     const now = Date.parse("2026-01-01T00:00:00Z");
     const root = await mkdtemp(join(tmpdir(), "tron-automation-manual-draft-"));

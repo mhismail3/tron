@@ -462,12 +462,15 @@ export class KnowledgeObservationService {
     if (existing?.disposition === "observed" || existing?.disposition === "empty" || existing?.disposition === "excluded" || existing?.disposition === "unavailable") return true;
     if (!knowledgeScopeEligible(config.eligibility, settlement)
       || await this.store.scopeExcluded(range).catch(() => true)) {
-      await this.store.setCoverage({ commandId: commandID("knowledge-excluded", range), expectedConfigRevision: config.revision, ...(existing?.revisionId ? { expectedRevision: existing.revisionId } : {}), coverage: { id, range, disposition: "excluded", groupRevisionIds: [], reason: "scope-excluded" } }).catch(() => {});
+      // An exclusion read failure fails closed toward privacy, but the cut still
+      // has no coverage authority until the excluded disposition is durable.
+      // Retain the exact cut and retry rather than dropping an unrecorded range.
+      if (!await this.store.setCoverage({ commandId: commandID("knowledge-excluded", range), expectedConfigRevision: config.revision, ...(existing?.revisionId ? { expectedRevision: existing.revisionId } : {}), coverage: { id, range, disposition: "excluded", groupRevisionIds: [], reason: "scope-excluded" } }).then(() => true).catch(() => false)) return false;
       admitRemaining();
       return true;
     }
     if (oversized) {
-      await this.store.setCoverage({ commandId: commandID("knowledge-unavailable", range), expectedConfigRevision: config.revision, ...(existing?.revisionId ? { expectedRevision: existing.revisionId } : {}), coverage: { id, range, disposition: "unavailable", groupRevisionIds: [], reason: "entry-exceeds-model-input-bound" } }).catch(() => {});
+      if (!await this.store.setCoverage({ commandId: commandID("knowledge-unavailable", range), expectedConfigRevision: config.revision, ...(existing?.revisionId ? { expectedRevision: existing.revisionId } : {}), coverage: { id, range, disposition: "unavailable", groupRevisionIds: [], reason: "entry-exceeds-model-input-bound" } }).then(() => true).catch(() => false)) return false;
       admitRemaining();
       return true;
     }
@@ -476,7 +479,7 @@ export class KnowledgeObservationService {
     if (boundedSourceText.length > inputLimit) {
       // This should only be reachable for an unusually long prefix or suffix;
       // do not silently publish a shortened model input as observed evidence.
-      await this.store.setCoverage({ commandId: commandID("knowledge-unavailable", range), expectedConfigRevision: config.revision, ...(existing?.revisionId ? { expectedRevision: existing.revisionId } : {}), coverage: { id, range, disposition: "unavailable", groupRevisionIds: [], reason: "terminal-outcome-exceeds-model-input-bound" } }).catch(() => {});
+      if (!await this.store.setCoverage({ commandId: commandID("knowledge-unavailable", range), expectedConfigRevision: config.revision, ...(existing?.revisionId ? { expectedRevision: existing.revisionId } : {}), coverage: { id, range, disposition: "unavailable", groupRevisionIds: [], reason: "terminal-outcome-exceeds-model-input-bound" } }).then(() => true).catch(() => false)) return false;
       admitRemaining();
       return true;
     }

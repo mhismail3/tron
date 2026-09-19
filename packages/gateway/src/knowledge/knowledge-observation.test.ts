@@ -184,6 +184,22 @@ describe("KnowledgeObservationService", () => {
     observer.dispose();
   });
 
+  it("retains the exact cut when an excluded coverage record cannot be written, then records it once", async () => {
+    const infer = vi.fn(async () => output);
+    const { store, observer } = await fixture({ infer });
+    // A scope-excluded range is never sent to the model, but its disposition is
+    // still coverage authority: a failed write must be retried, not dropped.
+    await store.setScopeExclusion("observer-exclusion-fence", { sessionId: "session-1" }, true, "privacy");
+    const failure = vi.spyOn(store, "setCoverage").mockRejectedValueOnce(new Error("observer store unavailable"));
+    observer.admit({ sessionId: "session-1", entries: [...entries], outcome: "completed", invocationId: "excluded-retry-invocation" });
+    await waitFor(() => failure.mock.calls.length >= 1);
+    expect(infer).not.toHaveBeenCalled();
+    await waitFor(async () => (await store.observationCoverageForScope("session-1"))
+      .some((coverage) => coverage.disposition === "excluded"));
+    expect(infer).not.toHaveBeenCalled();
+    observer.dispose();
+  });
+
   it("admits a cut that exactly fills the model input including its terminal newline", async () => {
     const maxInputChars = 1_000;
     const infer = vi.fn(async (input) => {

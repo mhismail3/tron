@@ -20,12 +20,22 @@ function boundedCallback<T>(
       settled = true;
       reject(new Error(`Native capture ${operation} did not settle before its bounded deadline`));
     }, timeout);
-    invoke((error, value) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (error) reject(error); else resolve(value);
-    });
+    try {
+      invoke((error, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (error) reject(error); else resolve(value);
+      });
+    } catch (error) {
+      // A synchronous native failure must not leave the deadline timer armed for
+      // a callback that no longer exists.
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    }
   });
 }
 

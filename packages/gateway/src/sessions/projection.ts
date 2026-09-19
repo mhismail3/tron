@@ -314,9 +314,13 @@ export function projectToolOutput(value: unknown, maximumBytes = MAX_LIVE_TOOL_O
   if (retainedNewestFirst.length === 0) return {};
   const output = retainedNewestFirst.reverse().join("\n");
   if (!truncated) return { output };
+  // The requested byte budget stays authoritative even when it is smaller than
+  // the marker itself; a tiny limit yields only the marker rather than a result
+  // that exceeds its own parameter.
   const marker = "… earlier live output truncated by gateway …\n";
+  const available = Math.max(0, maximumBytes - Buffer.byteLength(marker));
   return {
-    output: marker + utf8Suffix(output, Math.max(256, maximumBytes - Buffer.byteLength(marker))),
+    output: marker + (available === 0 ? "" : utf8Suffix(output, available)),
     outputTruncated: true,
   };
 }

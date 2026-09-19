@@ -2449,9 +2449,12 @@ export class RuntimeSlot {
               message: "Canonical ownership persistence did not settle within its bounded retry window",
             }));
             const timeout = new DurableWriteTimeoutError(key, attempt);
-            throw timeoutIsUncertain
-              ? asUncertainOutcome(timeout, `Canonical ownership write ${key} did not settle and its effect outcome is unknown`)
-              : timeout;
+            if (timeoutIsUncertain) {
+              throw asUncertainOutcome(timeout, `Canonical ownership write ${key} did not settle and its effect outcome is unknown`);
+            }
+            // Nothing was dispatched, so the bounded exhaustion is a retryable
+            // rejection rather than an unknown outcome.
+            throw new GatewayError("busy", timeout.message, true);
           }
           await new Promise((resolve) => {
             const timer = setTimeout(resolve, Math.min(1_000, 25 * attempt));

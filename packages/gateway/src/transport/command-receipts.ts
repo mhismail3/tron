@@ -284,7 +284,11 @@ export class CommandReceiptStore {
             usage = await this.inventoryUsage();
             if (usage.entries >= this.maximumEntries
               || usage.bytes + this.reservedCompletionBytes + COMMAND_RECEIPT_MAX_BYTES > this.maximumAggregateBytes) {
-              throw new GatewayError("busy", "Command receipt capacity is full; retry after completed receipts expire", true);
+              // Completed receipts expire on their own, but an uncertain outcome is
+              // a permanent replay fence by design. Name that distinction so an
+              // operator can act on a genuinely exhausted store instead of waiting
+              // for an expiry that never comes.
+              throw new GatewayError("busy", "Command receipt capacity is full; retry after completed receipts expire, and resolve any command whose status remains pending before capacity returns", true);
             }
           }
           this.reservedCompletionBytes += COMMAND_RECEIPT_MAX_BYTES;
