@@ -170,6 +170,99 @@ describe("KnowledgeObservationService", () => {
     observer.dispose();
   });
 
+  it("retains the exact terminal cut when durable admission fails, then admits it once", async () => {
+    const infer = vi.fn(async () => output);
+    const { store, observer } = await fixture({ infer });
+    const failure = vi.spyOn(store, "setCoverage").mockRejectedValueOnce(new Error("observer store unavailable"));
+    observer.admit({ sessionId: "session-1", entries: [...entries], outcome: "completed", invocationId: "admission-retry-invocation" });
+    await waitFor(() => failure.mock.calls.length >= 1);
+    // The failed admission must not leak the cut to the model...
+    expect(infer).not.toHaveBeenCalled();
+    // ...and must not be dropped: the retained cut is admitted after the store recovers.
+    await waitFor(async () => (await store.list({ kind: "observation" })).records.length === 1);
+    expect(infer).toHaveBeenCalledTimes(1);
+    observer.dispose();
+  });
+
+  it("admits a cut that exactly fills the model input including its terminal newline", async () => {
+    const maxInputChars = 1_000;
+    const infer = vi.fn(async (input) => {
+      expect(input.sourceText.length).toBeLessThanOrEqual(maxInputChars);
+      return output;
+    });
+    const { store, observer } = await fixture({ infer });
+    const prefix = "[2026-01-01T00:00:01Z] user: ";
+    const terminal = "[terminal outcome: completed]";
+    // Exactly the remaining budget once the unconditional terminal newline and
+    // outcome suffix are reserved.
+    const exactLength = maxInputChars - prefix.length - 1 - terminal.length;
+    const config = await store.config();
+    await store.configure("observer-exact-bound", { ...config, observation: { ...config.observation, maxInputChars } });
+    observer.admit({ sessionId: "session-1", entries: [{ type: "message", id: "boundary-entry", timestamp: "2026-01-01T00:00:01Z", message: { role: "user", content: "x".repeat(exactLength) } }], outcome: "completed", invocationId: "boundary-invocation" });
+    await waitFor(() => infer.mock.calls.length === 1);
+    expect(infer.mock.calls[0]![0].sourceText.length).toBe(maxInputChars);
+
+    // One character more cannot hold the complete cut, so it is recorded as
+    // explicitly unavailable instead of publishing a truncated prompt.
+    observer.admit({ sessionId: "session-1", entries: [{ type: "message", id: "boundary-overflow-entry", timestamp: "2026-01-01T00:00:02Z", message: { role: "user", content: "x".repeat(exactLength + 1) } }], outcome: "completed", invocationId: "boundary-overflow-invocation" });
+    await waitFor(async () => (await store.observationCoverageForScope("session-1")).some(coverage => coverage.disposition === "unavailable"));
+    expect(infer).toHaveBeenCalledTimes(1);
+    observer.dispose();
+  });
+
+  it("redacts machine-local paths at the model boundary without rewriting URLs", () => {
+    const projected = projectObservationEntry({
+      type: "message",
+      id: "machine-path-entry",
+      timestamp: "2026-01-01T00:00:01Z",
+      message: {
+        role: "bashExecution",
+        command: "cat /tmp/secret/notes.txt",
+        output: [
+          "/Volumes/Work/private/report.md",
+          "~/Documents/keys.pem",
+          "C:\\Users\\me\\secret.txt",
+          "see https://example.test/tmp/public for docs",
+        ].join("\n"),
+      },
+    });
+    const text = projected!.text;
+    expect(text).not.toContain("/tmp/secret");
+    expect(text).not.toContain("/Volumes/Work");
+    expect(text).not.toContain("~/Documents");
+    expect(text).not.toContain("secret.txt");
+    // A URL authority keeps its path: the root is not preceded by a path boundary.
+    expect(text).toContain("https://example.test/tmp/public");
+  });
+
+  it("bounds prospective admission and reports shed cuts instead of growing without limit", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-observer-shed-")); roots.push(root);
+    const workspace = new TronWorkspace(join(root, "home")); workspaces.push(workspace);
+    const store = new KnowledgeStore(workspace);
+    await store.configure("observer-shed-config", {
+      ...DEFAULT_KNOWLEDGE_CONFIG,
+      eligibility: { ...DEFAULT_KNOWLEDGE_CONFIG.eligibility, sessionIds: ["session-1"] },
+      observation: { ...DEFAULT_KNOWLEDGE_CONFIG.observation, enabled: true },
+    });
+    let release: (() => void) | undefined;
+    const infer = vi.fn(async () => new Promise<string>((resolve) => { release = () => resolve(output); }));
+    const shed: number[] = [];
+    const observer = new KnowledgeObservationService(store, { infer }, undefined, (fact) => shed.push(fact.dropped));
+    for (let index = 0; index < 70; index += 1) {
+      observer.admit({
+        sessionId: "session-1",
+        entries: [{ type: "message", id: `shed-entry-${index}`, timestamp: "2026-01-01T00:00:01Z", message: { role: "user", content: `turn ${index}` } }],
+        outcome: "completed",
+        invocationId: `shed-invocation-${index}`,
+      });
+    }
+    // One cut is being processed while the rest queue; the bound sheds the oldest.
+    expect(shed.length).toBeGreaterThan(0);
+    expect(shed.reduce((total, dropped) => total + dropped, 0)).toBeGreaterThan(0);
+    observer.dispose();
+    release?.();
+  });
+
   it("coalesces and durably deduplicates canonical no-tool turns without forwarding thinking", async () => {
     const infer = vi.fn(async (input) => {
       expect(input.sourceText).not.toContain("private reasoning omitted");

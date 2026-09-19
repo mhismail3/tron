@@ -4,7 +4,7 @@ import {
   SettingsManager,
   type ResolvedPaths,
 } from "@earendil-works/pi-coding-agent";
-import { GatewayError } from "../errors.js";
+import { GatewayError, asUncertainOutcome } from "../errors.js";
 import type { JsonValue } from "../protocol/types.js";
 import type { TrustService } from "./trust-service.js";
 import { AsyncMutex } from "../util/async-mutex.js";
@@ -159,6 +159,13 @@ export class PackageService {
     return this.trackAdministrative((work) => this.mutex.run(async () => {
       const operationId = randomUUID();
       let manager: DefaultPackageManager | undefined;
+      // Set once the package owner's own operation returned. Its filesystem
+      // effect (an installed/removed package or a refreshed installation) has
+      // already landed, so any later failure -- settings flush or progress
+      // publication -- must not be reported as a clean rejection that permits a
+      // replay. A failure inside the package owner's call keeps its own
+      // classification; that operation owns whether it applied anything.
+      let effectApplied = false;
       try {
         const managed = await this.manager(cwd, local);
         manager = managed.manager;
@@ -169,13 +176,16 @@ export class PackageService {
         const { settings } = managed;
         if (action === "install") {
           await manager.installAndPersist(source!, { local });
+          effectApplied = true;
           await this.flushSettings(settings);
         } else if (action === "remove") {
           await manager.removeAndPersist(source!, { local });
+          effectApplied = true;
           await this.flushSettings(settings);
         } else if (source === undefined) {
           // An omitted source retains Pi's existing "update all" command.
           await manager.update();
+          effectApplied = true;
         } else {
           // Pi's public update(source) intentionally updates every matching
           // scope. The RPC identifies one row, so use the public scoped install
@@ -183,6 +193,7 @@ export class PackageService {
           // leaving its existing settings entry untouched.
           this.ensureConfiguredSource(manager, source, local);
           await manager.install(source, { local });
+          effectApplied = true;
         }
         this.broadcast("packages.completed", { operationId, success: true });
       } catch (error) {
@@ -191,7 +202,9 @@ export class PackageService {
           success: false,
           error: error instanceof Error ? error.message : String(error),
         });
-        throw error;
+        throw effectApplied
+          ? asUncertainOutcome(error, "The package change was applied but its settings could not be persisted; refresh package state before retrying")
+          : error;
       } finally {
         manager?.setProgressCallback(undefined);
       }

@@ -50,6 +50,71 @@ describe("AutomationScheduler", () => {
     expect(executor.start).toHaveBeenCalledTimes(1);
   });
 
+  it("bounds gateway-shutdown cancellation and records an unknown outcome when completion never settles", async () => {
+    let now = Date.parse("2026-01-01T00:00:01Z");
+    const root = await mkdtemp(join(tmpdir(), "tron-automation-shutdown-grace-"));
+    const store = new AutomationStore(root, { now: () => now });
+    await store.initialize();
+    const record = await store.create({
+      name: "Shutdown", activation: "enabled", target: { kind: "existingSession", sessionId: "session-one" },
+      trigger: { kind: "interval", everySeconds: 300, anchorAt: "2026-01-01T00:00:00.000Z" },
+      misfirePolicy: "latest", overlapPolicy: "skip", executionDeadlineSeconds: 3_600,
+      action: { kind: "sessionPrompt", text: "Review" }, provenance: { kind: "local" },
+    });
+    // Only the bounded grace timers may release shutdown: the executor's cancel
+    // resolves, but its completion promise never does.
+    // Every bounded settle step arms its own grace; keep them all so the test can
+    // release the exact windows the scheduler is waiting on.
+    const timers = new Map<number, Array<() => void>>();
+    const fireGrace = (): void => {
+      const pending = timers.get(5_000) ?? [];
+      timers.delete(5_000);
+      for (const callback of pending) callback();
+    };
+    let cancelCalls = 0;
+    const executor: AutomationExecutor = {
+      start: vi.fn(async (_definition, run) => ({
+        operationId: run.operationId,
+        completion: new Promise<never>(() => {}),
+        cancel: vi.fn(async () => { cancelCalls += 1; }),
+      })),
+    };
+    const scheduler = new AutomationScheduler(store, executor, {
+      now: () => now,
+      hostEpoch: "epoch-one",
+      setTimer: ((callback: () => void, delay: number) => {
+        const pending = timers.get(delay) ?? [];
+        pending.push(callback);
+        timers.set(delay, pending);
+        return { unref() {} } as unknown as NodeJS.Timeout;
+      }) as never,
+      clearTimer: ((timer: NodeJS.Timeout) => { void timer; }) as never,
+    });
+
+    scheduler.start();
+    now = Date.parse("2026-01-01T00:10:30Z");
+    await scheduler.scan();
+    await eventually(() => expect(store.get(record.id).currentRun?.state).toBe("running"));
+
+    const cancellation = scheduler.cancelActiveForShutdown();
+    // Let the cooperative cancel settle first so the only remaining bound is the
+    // completion grace for a completion that never arrives.
+    await eventually(() => expect(cancelCalls).toBe(1));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await eventually(() => expect(timers.has(5_000)).toBe(true));
+    fireGrace();
+    await cancellation;
+    await eventually(() => expect(store.get(record.id).lastRun?.state).toBe("outcomeUnknown"));
+    expect(store.get(record.id).lastRun?.reason).toBe("gateway-shutdown-settlement-timeout");
+
+    // Disposal is bounded by the same grace rather than awaiting the completion forever.
+    timers.delete(5_000);
+    const disposal = scheduler.dispose();
+    await eventually(() => expect(timers.has(5_000)).toBe(true));
+    fireGrace();
+    await expect(disposal).resolves.toBeUndefined();
+  });
+
   it("keeps a draft one-time definition draft after a successful manual run", async () => {
     const now = Date.parse("2026-01-01T00:00:00Z");
     const root = await mkdtemp(join(tmpdir(), "tron-automation-manual-draft-"));

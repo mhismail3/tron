@@ -28,7 +28,7 @@ import {
   SessionManager,
   type FileEntry,
 } from "@earendil-works/pi-coding-agent";
-import { GatewayError } from "../errors.js";
+import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome } from "../errors.js";
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
 import { compactionPolicyExtension, CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import { contextWindowExtension, SessionContextWindowPolicy } from "../providers/context-window-policy.js";
@@ -229,6 +229,11 @@ const MAXIMUM_QUEUED_TOTAL_BYTES = 256 * 1_024;
  */
 const STREAMING_PROGRESS_FLUSH_MS = 150;
 const DEFAULT_RUNTIME_DISPOSAL_GRACE_MS = 5_000;
+/** Default bound on one durable ownership write's transient-failure retries.
+ * Long enough to ride out a brief disk/permission outage, short enough that a
+ * permanently broken canonical path cannot hold a session lane, a command
+ * response, or the drain indefinitely. */
+const DEFAULT_OWNERSHIP_WRITE_RETRY_WINDOW_MS = 20_000;
 const FOREGROUND_ABORT_SETTLEMENT_GRACE_MS = 5_000;
 const MAX_PRESENTATION_IDENTITY_BINDINGS = 512;
 const MAX_COMPLETION_DISPOSITIONS = 16;
@@ -343,11 +348,30 @@ export interface RuntimeSlotDependencies {
   /** Extension cleanup is advisory once runtime disposal begins. A handler that
    * never settles must not strand the canonical session behind idle eviction. */
   runtimeDisposalTimedOut?: (graceMs: number) => void;
+  /** How long one durable ownership write retries transient storage failures
+   * before its owner reports the exhausted window. Deployments on a slow or
+   * unreliable canonical filesystem may raise it; the default is tuned so a
+   * permanently broken path cannot hold a session lane indefinitely. */
+  ownershipWriteRetryWindowMs?: number;
   /** Resolves inherited history once at canonical bind/rebind, never per snapshot. */
   resolveForkBoundary?: (manager: SessionManager) => Promise<ForkBoundaryAnchor | undefined>;
 }
 
 class CanonicalCustomEntryConflictError extends Error {}
+
+/**
+ * A durable ownership write retries transient storage failures, but must not
+ * hold a session lane, a command response, or the drain forever. After this
+ * bounded window the owning caller reports an explicit outcome-unknown failure
+ * (or a definitive pre-effect rejection); the underlying evidence is never
+ * silently treated as settled.
+ */
+class DurableWriteTimeoutError extends Error {
+  constructor(readonly key: string, readonly attempts: number) {
+    super(`Durable ownership write ${key} did not settle within its bounded retry window`);
+    this.name = "DurableWriteTimeoutError";
+  }
+}
 
 type CompletionOwnershipItem = {
   completion: CanonicalAssistantCompletion;
@@ -534,6 +558,11 @@ export class RuntimeSlot {
    * this bounded barrier rather than disposing the Pi manager underneath it. */
   private readonly pendingReceiptWrites = new Set<Promise<void>>();
   private readonly durableWrites = new Map<string, Promise<void>>();
+  /** Canonical custom-entry identities whose append this runtime observed fail.
+   * The pinned SDK inserts the entry into its live branch before the physical
+   * append, so such an identity can be present in memory while absent from disk;
+   * in-memory presence is not durability evidence for these identities. */
+  private readonly unprovenCanonicalEntries = new Set<string>();
   private readonly extensionReceiptWrites = new Map<string, Promise<void>>();
   private readonly extensionReceiptOwners = new Map<string, GatewayWorkHandle>();
   private extensionShutdownWork: GatewayWorkHandle | undefined;
@@ -2381,10 +2410,15 @@ export class RuntimeSlot {
     return write;
   }
 
-  private retryDurableWrite(key: string, operation: () => Promise<void>): Promise<void> {
+  private get ownershipWriteRetryWindowMs(): number {
+    return this.dependencies.ownershipWriteRetryWindowMs ?? DEFAULT_OWNERSHIP_WRITE_RETRY_WINDOW_MS;
+  }
+
+  private retryDurableWrite(key: string, operation: () => Promise<void>, timeoutIsUncertain = false): Promise<void> {
     const existing = this.durableWrites.get(key);
     if (existing) return existing;
     const write = (async () => {
+      const deadline = performance.now() + this.ownershipWriteRetryWindowMs;
       let attempt = 0;
       for (;;) {
         try {
@@ -2393,15 +2427,31 @@ export class RuntimeSlot {
         } catch (error) {
           // One operation can never own two canonical completions. Retrying
           // that conflict would hold session.open behind an impossible claim;
-          // ordinary storage failures retain the existing durable retry.
+          // an explicitly uncertain failure cannot be repaired by blind retry
+          // and retrying it risks duplicating an unproven effect.
           if (error instanceof RunMarkerCompletionConflictError
-            || error instanceof CanonicalCustomEntryConflictError) throw error;
+            || error instanceof CanonicalCustomEntryConflictError
+            || isUncertainOutcome(error)) throw error;
           attempt += 1;
           if (attempt === 1 || attempt % 60 === 0) {
             this.emit("session.diagnostic", safeJson({
               code: "canonical-ownership-persistence-retrying",
               message: "Canonical ownership persistence is retrying",
             }));
+          }
+          // A permanently broken canonical path must not hold a session lane, a
+          // command response, or the drain forever. The owner decides whether an
+          // exhausted retry is a definitive rejection (nothing was dispatched) or
+          // an outcome-unknown failure (the effect may already have landed).
+          if (performance.now() >= deadline) {
+            this.emit("session.diagnostic", safeJson({
+              code: "canonical-ownership-persistence-unsettled",
+              message: "Canonical ownership persistence did not settle within its bounded retry window",
+            }));
+            const timeout = new DurableWriteTimeoutError(key, attempt);
+            throw timeoutIsUncertain
+              ? asUncertainOutcome(timeout, `Canonical ownership write ${key} did not settle and its effect outcome is unknown`)
+              : timeout;
           }
           await new Promise((resolve) => {
             const timer = setTimeout(resolve, Math.min(1_000, 25 * attempt));
@@ -2424,6 +2474,49 @@ export class RuntimeSlot {
   // or add a second receipt journal. Once Pi exposes an owner-safe eager flush,
   // require it here before provider or extension execution and add a crash/reopen
   // integration test for the first invocation in a new session.
+  /**
+   * Persist one idempotent canonical custom entry with honest durability.
+   *
+   * The pinned SDK's `_appendEntry` inserts the entry into its live branch
+   * before `_persist` writes the JSONL, so an entry can exist in memory while
+   * being absent from disk after a failed append. Re-entering the retry then
+   * finds that in-memory entry. In-memory presence is therefore never accepted
+   * as durability evidence for an identity this runtime observed failing to
+   * append; only such identities are reported as uncertain, so canonical
+   * records that already survived a reopen stay idempotent. A later retry
+   * cannot repair the state either: re-appending would create a contradictory
+   * duplicate canonical record. Fail closed and let the caller refresh.
+   */
+  private persistVerifiedCustomEntry(options: {
+    durableKey: string;
+    describe: string;
+    existing: () => "absent" | "matching" | "contradictory";
+    append: () => void;
+  }): void {
+    const state = options.existing();
+    if (state === "contradictory") {
+      throw new CanonicalCustomEntryConflictError("Canonical custom entry identity is contradictory");
+    }
+    if (state === "matching") {
+      if (this.unprovenCanonicalEntries.has(options.durableKey)) {
+        throw uncertainOutcome(`The ${options.describe} exists only in the live runtime and its persistence could not be verified; refresh session state before retrying`);
+      }
+      return;
+    }
+    try {
+      options.append();
+    } catch (error) {
+      // A failure before Pi staged the entry (nothing in the live branch) leaves
+      // the canonical record absent, so rethrow and let the bounded retry try
+      // again. A failure after staging means the SDK mutated its in-memory branch
+      // without persisting; retrying would append a contradictory duplicate
+      // canonical record, so fail closed and report an unknown outcome.
+      if (options.existing() !== "matching") throw error;
+      this.unprovenCanonicalEntries.add(options.durableKey);
+      throw asUncertainOutcome(error, `The ${options.describe} could not be persisted after Pi admitted it; refresh session state before retrying`);
+    }
+  }
+
   private persistCanonicalCustomEntry(
     customType: string,
     data: JsonValue,
@@ -2432,19 +2525,23 @@ export class RuntimeSlot {
   ): Promise<void> {
     return this.trackOwnershipWrite(
       () => this.retryDurableWrite(`canonical:${customType}:${identity}`, async () => {
-        const existing = this.sessionManager.getBranch().find((entry) => {
-          if (entry.type !== "custom" || entry.customType !== customType) return false;
-          const value = entry.data as { receiptId?: unknown; targetEntryId?: unknown };
-          return value?.receiptId === identity || value?.targetEntryId === identity;
+        this.persistVerifiedCustomEntry({
+          durableKey: `${customType}\u0000${identity}`,
+          describe: "canonical receipt",
+          existing: () => {
+            const entry = this.sessionManager.getBranch().find((candidate) => {
+              if (candidate.type !== "custom" || candidate.customType !== customType) return false;
+              const value = candidate.data as { receiptId?: unknown; targetEntryId?: unknown };
+              return value?.receiptId === identity || value?.targetEntryId === identity;
+            });
+            if (!entry) return "absent";
+            return entry.type === "custom" && JSON.stringify(entry.data) === JSON.stringify(data)
+              ? "matching"
+              : "contradictory";
+          },
+          append: () => { this.sessionManager.appendCustomEntry(customType, data); },
         });
-        if (existing) {
-          if (existing.type !== "custom" || JSON.stringify(existing.data) !== JSON.stringify(data)) {
-            throw new CanonicalCustomEntryConflictError("Canonical custom entry identity is contradictory");
-          }
-          return;
-        }
-        this.sessionManager.appendCustomEntry(customType, data);
-      }),
+      }, true),
       owner,
     );
   }
@@ -2528,7 +2625,7 @@ export class RuntimeSlot {
   private clearMarkerOwnership(operationId?: string, existingOwner?: GatewayWorkHandle): Promise<void> {
     const key = operationId ?? "all";
     return this.trackOwnershipWrite(
-      () => this.retryDurableWrite(`marker:clear:${key}`, () => this.dependencies.markers.clear(this.id, operationId)),
+      () => this.retryDurableWrite(`marker:clear:${key}`, () => this.dependencies.markers.clear(this.id, operationId), true),
       existingOwner ?? (operationId ? this.operationWork.get(operationId) : undefined),
     );
   }
@@ -2545,6 +2642,7 @@ export class RuntimeSlot {
         completion.id,
         completion.completedAt,
       ),
+      true,
     ), this.operationWork.get(completion.operationId) ?? item.fallbackWork);
     item.stamp = stamp;
     void stamp.catch(() => {
@@ -4523,18 +4621,25 @@ export class RuntimeSlot {
     const existingWrite = this.extensionReceiptWrites.get(receipt.activityId);
     if (existingWrite) return existingWrite;
     if (!owner) return Promise.reject(new GatewayError("busy", "Extension receipt ownership is unavailable", true));
+    const durableKey = `${EXTENSION_ACTIVITY_RECEIPT_TYPE}\u0000${receipt.activityId}`;
     const write = this.trackOwnershipWrite(() => this.retryDurableWrite(
       `extension-receipt:${receipt.activityId}`,
       async () => {
         await this.lane.run(async () => {
-          const existing = extensionActivityReceipts(this.runtime.session.sessionManager.getEntries(), this.id)
-            .some((entry) => entry.receipt.activityId === receipt.activityId);
-          if (existing) return;
-          this.runtime.session.sessionManager.appendCustomEntry(EXTENSION_ACTIVITY_RECEIPT_TYPE, receipt);
-          this.revision += 1;
-          this.scheduleSnapshot();
+          this.persistVerifiedCustomEntry({
+            durableKey,
+            describe: "extension activity receipt",
+            existing: () => extensionActivityReceipts(this.runtime.session.sessionManager.getEntries(), this.id)
+              .some((record) => record.receipt.activityId === receipt.activityId) ? "matching" : "absent",
+            append: () => {
+              this.runtime.session.sessionManager.appendCustomEntry(EXTENSION_ACTIVITY_RECEIPT_TYPE, receipt);
+              this.revision += 1;
+              this.scheduleSnapshot();
+            },
+          });
         });
       },
+      true,
     ), owner);
     this.extensionReceiptWrites.set(receipt.activityId, write);
     void write.finally(() => {
@@ -5944,7 +6049,13 @@ export class RuntimeSlot {
         this.invocations.delete(invocationId);
         this.settleOperationWork(operationId);
         if (!startPersisted) this.automationTerminalObservers.delete(operationId);
-        throw error;
+        // Once the canonical start receipt is durable the prompt may already
+        // have reached extension hooks or the provider. Report its failure as an
+        // unknown outcome so the idempotency receipt cannot be replayed, matching
+        // the outcome-unknown terminal receipt recorded above.
+        throw startPersisted
+          ? asUncertainOutcome(error, "Prompt admission failed after its canonical start receipt was accepted; refresh session state instead of replaying")
+          : error;
       }
       let runSettled = false;
       let commandSettled = false;
@@ -6731,18 +6842,20 @@ export class RuntimeSlot {
           hostEpoch: this.ui.hostEpoch,
         });
         const operationId = randomUUID();
+        // The marker is written before dispatch: a failure here is definitive
+        // (the shell command never started) and stays retryable.
         await this.trackOwnershipWrite(
           () => this.retryDurableWrite(`marker:mark:${operationId}`, () => this.dependencies.markers.mark(this.id, operationId)),
           work,
         );
-        const startedAt = new Date().toISOString();
-        this.phase = "running";
-        this.operation = { id: operationId, kind: "bash", startedAt };
-        this.noteDashboardActivity(startedAt);
-        if (!this.activityHeartbeat) this.startActivityHeartbeat();
-        this.revision += 1;
-        this.publishSnapshot();
         try {
+          const startedAt = new Date().toISOString();
+          this.phase = "running";
+          this.operation = { id: operationId, kind: "bash", startedAt };
+          this.noteDashboardActivity(startedAt);
+          if (!this.activityHeartbeat) this.startActivityHeartbeat();
+          this.revision += 1;
+          this.publishSnapshot();
           const previousEntryIDs = new Set(this.sessionManager.getBranch().map((entry) => entry.id));
           const startedMonotonicMs = performance.now();
           const result = await this.runtime.session.executeBash(command, undefined, { excludeFromContext, id: operationId });
@@ -6764,14 +6877,27 @@ export class RuntimeSlot {
             });
           }
           return safeJson(result);
+        } catch (error) {
+          // The shell command may already have run: a duplicate replay is worse
+          // than an explicit uncertainty, so the idempotency receipt must keep
+          // its fence instead of reporting a definitive rejection.
+          throw asUncertainOutcome(error, "Bash execution was dispatched but its outcome could not be confirmed; refresh session state instead of replaying");
         } finally {
-          await this.clearMarkerOwnership(operationId, work);
+          let cleanupFailure: unknown;
+          try {
+            await this.clearMarkerOwnership(operationId, work);
+          } catch (error) {
+            cleanupFailure = error;
+          }
           this.phase = "idle";
           this.operation = undefined;
           this.noteDashboardActivity();
           if (!this.hasCurrentDashboardWork()) this.stopActivityHeartbeat();
           this.revision += 1;
           this.publishSnapshot();
+          if (cleanupFailure !== undefined) {
+            throw asUncertainOutcome(cleanupFailure, "Bash completed but its ownership marker could not be cleared; refresh session state instead of replaying");
+          }
         }
       });
     } finally {
@@ -7209,9 +7335,37 @@ export class RuntimeSlot {
     }
   }
 
+  /** Joins pending canonical ownership writes within a bounded window. Every
+   * write already bounds its own retry, so an exhausted wait means a permanent
+   * storage fault: report a blocker instead of hanging disposal, and leave the
+   * outstanding writes admitted so a later attempt can still settle them. */
   private async waitForReceiptWrites(): Promise<void> {
+    // Every write bounds its own retry, so an exhausted wait means a backstop
+    // promise that cannot settle or a continuous stream of new writes. Race each
+    // join against the remaining grace instead of awaiting without a clock, then
+    // report a bounded blocker and leave the outstanding writes admitted so a
+    // later attempt can still settle them.
+    const deadline = performance.now() + Math.ceil(this.ownershipWriteRetryWindowMs * 1.5);
     while (this.pendingReceiptWrites.size > 0) {
-      await Promise.allSettled([...this.pendingReceiptWrites]);
+      const remaining = deadline - performance.now();
+      if (remaining <= 0) break;
+      let timer: NodeJS.Timeout | undefined;
+      const expiry = new Promise<"expired">((resolve) => { timer = setTimeout(() => resolve("expired"), remaining); });
+      let settled: "joined" | "expired";
+      try {
+        settled = await Promise.race([
+          Promise.allSettled([...this.pendingReceiptWrites]).then(() => "joined" as const),
+          expiry,
+        ]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+      if (settled === "expired") break;
+    }
+    if (this.pendingReceiptWrites.size > 0) {
+      throw uncertainOutcome(
+        `Canonical ownership persistence did not settle within its bounded disposal window (${this.pendingReceiptWrites.size} pending write(s))`,
+      );
     }
   }
 

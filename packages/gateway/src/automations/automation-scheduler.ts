@@ -187,14 +187,21 @@ export class AutomationScheduler {
 
   async cancelActiveForShutdown(): Promise<void> {
     this.beginDrain();
-    await Promise.allSettled([...this.active.values()].map((active) => this.requestCancellation(active, "gateway-shutdown")));
+    // Shutdown uses the same bounded settlement as user/deadline cancellation.
+    // A cooperative cancel that never resolves, or a completion that never
+    // arrives, must not hold Gateway shutdown open indefinitely.
+    await Promise.allSettled([...this.active.values()].map((active) => this.requestCancellationWithGrace(active, "gateway-shutdown")));
   }
 
   async dispose(): Promise<void> {
     this.beginDrain();
+    // Both an in-flight dispatch and an active completion can be waiting on a
+    // provider that never settles. Bound each wait by the shared grace: the run's
+    // durable outcome is already recorded as unknown, and a late settlement
+    // cannot overwrite it because commitTerminal matches the exact current run.
     await Promise.allSettled([
-      ...this.pendingDispatches,
-      ...[...this.active.values()].map((active) => active.handle.completion),
+      ...[...this.pendingDispatches].map((pending) => this.settleWithinGrace(pending)),
+      ...[...this.active.values()].map((active) => this.settleWithinGrace(active.handle.completion)),
     ]);
   }
 
@@ -609,29 +616,36 @@ export class AutomationScheduler {
     active: ActiveExecution,
     reason: "user-cancelled" | "deadline-exceeded" | "gateway-shutdown",
   ): Promise<void> {
-    try {
-      await this.requestCancellation(active, reason);
-    } catch (error) {
+    const cancelled = await this.settleWithinGrace(this.requestCancellation(active, reason));
+    if (!cancelled.settled) {
+      // The cancellation call itself never resolved. The run may already be
+      // stopping, so record an unknown outcome rather than claiming it was
+      // cleanly rejected.
       await this.commitTerminal(active.automationId, active.runId, {
         state: "outcomeUnknown",
-        reason: `${reason}-cancellation-failed`,
+        reason: `${reason}-cancellation-timeout`,
         error: {
-          code: "cancellation-failed",
-          message: error instanceof Error ? error.message.slice(0, 1_024) : "Automation cancellation failed",
+          code: "cancellation-timeout",
+          message: "Automation cancellation did not settle within its bounded grace period",
           retryable: false,
         },
       });
       return;
     }
-    let timer: NodeJS.Timeout | undefined;
-    const graceExpired = new Promise<false>((resolve) => {
-      timer = this.setTimer(() => resolve(false), CANCELLATION_SETTLEMENT_GRACE_MS);
-      timer.unref?.();
-    });
-    const completionSettled = active.handle.completion.then(() => true as const, () => true as const);
-    const settled = await Promise.race([completionSettled, graceExpired]);
-    if (timer) this.clearTimer(timer);
-    if (!settled) {
+    if (cancelled.error !== undefined) {
+      await this.commitTerminal(active.automationId, active.runId, {
+        state: "outcomeUnknown",
+        reason: `${reason}-cancellation-failed`,
+        error: {
+          code: "cancellation-failed",
+          message: cancelled.error instanceof Error ? cancelled.error.message.slice(0, 1_024) : "Automation cancellation failed",
+          retryable: false,
+        },
+      });
+      return;
+    }
+    const completion = await this.settleWithinGrace(active.handle.completion);
+    if (!completion.settled) {
       await this.commitTerminal(active.automationId, active.runId, {
         state: "outcomeUnknown",
         reason: `${reason}-settlement-timeout`,
@@ -642,6 +656,24 @@ export class AutomationScheduler {
         },
       });
     }
+  }
+
+  /** Bounds one settlement step against the shared cancellation grace. A
+   * non-settling promise is never reported as settled, and the caller keeps its
+   * own durable outcome-unknown record. */
+  private async settleWithinGrace(promise: Promise<unknown>): Promise<{ settled: true; error?: unknown } | { settled: false }> {
+    let timer: NodeJS.Timeout | undefined;
+    const graceExpired = new Promise<{ settled: false }>((resolve) => {
+      timer = this.setTimer(() => resolve({ settled: false }), CANCELLATION_SETTLEMENT_GRACE_MS);
+      timer.unref?.();
+    });
+    const outcome = promise.then(
+      () => ({ settled: true as const }),
+      (error: unknown) => ({ settled: true as const, error }),
+    );
+    const settled = await Promise.race([outcome, graceExpired]);
+    if (timer) this.clearTimer(timer);
+    return settled;
   }
 
   private requestCancellation(

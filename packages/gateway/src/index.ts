@@ -175,6 +175,11 @@ const knowledge = new KnowledgeService(
       return model ? new ModelRuntimeObservationModel(modelRuntime, model) : undefined;
     },
     workRegistry,
+    ({ code, dropped, queued }) => logger.log(
+      "warning",
+      `Prospective knowledge observation work was shed (${dropped} cut(s); ${queued} queued)`,
+      { event: code, source: "knowledge" },
+    ),
   ),
   {
     connector: (action) => knowledgeConnector.invoke(action),

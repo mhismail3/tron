@@ -52,6 +52,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     name?: string;
     maximumLiveRuntimes?: number;
     workRegistry?: GatewayWorkRegistry;
+    ownershipWriteRetryWindowMs?: number;
     phaseObserver?: (phase: "catalog-warming" | "attention-recovery") => void;
     sessionListChanged?: () => void;
     stageTiming?: (
@@ -80,6 +81,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
       maximumLiveRuntimes: options.maximumLiveRuntimes,
+      ownershipWriteRetryWindowMs: options.ownershipWriteRetryWindowMs,
       workRegistry: options.workRegistry,
       modelRuntimeFactory: runtimeFactory,
       trust: new TrustService(agentDir),
@@ -3519,6 +3521,85 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       removedProcessIds: ["process-old"],
       overview: { visibility: "active", activeCount: 1 },
     });
+  });
+
+  it("never reports a canonical receipt as durable when Pi only staged it in memory", async () => {
+    // Reproduces the pinned SDK ordering: `_appendEntry` inserts the entry into
+    // the live branch and then `_persist` fails, so the receipt exists in memory
+    // while the JSONL lacks it. Gateway must report an unknown outcome for that
+    // exact identity instead of announcing durable success from memory.
+    const fixture = await coldFixture("canonical-receipt-staged-only");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const internal = slot as unknown as {
+      runtime: { session: { sessionManager: SessionManager } };
+      persistCanonicalCustomEntry: (customType: string, data: unknown, identity: string) => Promise<void>;
+    };
+    const manager = internal.runtime.session.sessionManager;
+    const sessionFile = manager.getSessionFile()!;
+    const receipt = { receiptId: "staged-only-receipt", version: 1 };
+    const staged = (): boolean => manager.getBranch().some((entry) =>
+      entry.type === "custom" && (entry.data as { receiptId?: unknown })?.receiptId === "staged-only-receipt");
+
+    // Make the owned JSONL append fail without disturbing the live branch.
+    const aside = `${sessionFile}.aside`;
+    await rename(sessionFile, aside);
+    await mkdir(sessionFile);
+    try {
+      await expect(internal.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receipt, "staged-only-receipt"))
+        .rejects.toMatchObject({ details: { outcomeUnknown: true } });
+      expect(staged()).toBe(true);
+      // The staged entry is not durability evidence: a repeat attempt must not
+      // report success from the live branch alone.
+      await expect(internal.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receipt, "staged-only-receipt"))
+        .rejects.toMatchObject({ details: { outcomeUnknown: true } });
+    } finally {
+      await rm(sessionFile, { recursive: true, force: true });
+      await rename(aside, sessionFile);
+    }
+    expect(await readFile(sessionFile, "utf8")).not.toContain("staged-only-receipt");
+
+    // Control: an identity that was never staged still persists normally.
+    await internal.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, { receiptId: "healthy-receipt", version: 1 }, "healthy-receipt");
+    expect(await readFile(sessionFile, "utf8")).toContain("healthy-receipt");
+  });
+
+  it("bounds durable ownership retries so a permanent storage fault cannot hold a lane forever", async () => {
+    const fixture = await coldFixture("ownership-write-retry-window", { ownershipWriteRetryWindowMs: 40 });
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const internal = slot as unknown as {
+      retryDurableWrite: (key: string, operation: () => Promise<void>, timeoutIsUncertain?: boolean) => Promise<void>;
+      pendingReceiptWrites: Set<Promise<void>>;
+    };
+
+    // A pre-effect caller keeps its definitive classification: nothing was
+    // dispatched, so the exhausted window is not misreported as uncertainty.
+    let attempts = 0;
+    await expect(internal.retryDurableWrite("test:permanent-storage-fault", async () => {
+      attempts += 1;
+      throw new Error("permanent storage failure");
+    })).rejects.toThrow(/did not settle within its bounded retry window/);
+    expect(attempts).toBeGreaterThan(1);
+
+    // A post-effect caller reports an unknown outcome for the same failure: the
+    // effect may already have landed, so the idempotency receipt must not allow
+    // a replay.
+    await expect(internal.retryDurableWrite("test:post-effect-storage-fault", async () => {
+      throw new Error("permanent storage failure");
+    }, true)).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+
+    // Disposal never waits unboundedly on a write that cannot settle; it reports
+    // a bounded blocker and leaves the outstanding write admitted.
+    const stuck = new Promise<void>(() => {});
+    internal.pendingReceiptWrites.add(stuck);
+    try {
+      await expect(slot.dispose()).rejects.toMatchObject({
+        details: { outcomeUnknown: true },
+        message: expect.stringContaining("bounded disposal window") as unknown as string,
+      });
+    } finally {
+      // Remove only this test's injected blocker so shared fixture disposal can settle.
+      internal.pendingReceiptWrites.delete(stuck);
+    }
   });
 
   it("claims receipt ownership before watcher-driven terminal projection", async () => {

@@ -1,5 +1,6 @@
 import type { KnowledgeRecord, SourceAssessment, SourceContent } from "./knowledge-contract.js";
 import { KnowledgeStore, type KnowledgeMutationResult } from "./knowledge-store.js";
+import { awaitAbortable } from "./model-await.js";
 import type { SourceAssessmentModel } from "./source-capture.js";
 
 export interface SourceTriageInput {
@@ -27,12 +28,16 @@ export async function triageSource(store: KnowledgeStore, input: SourceTriageInp
   const interests = input.interests ?? config.currentInterests ?? [];
   if (!source || source.kind !== "source") throw new Error("Source revision does not exist");
   if (!source.content.text) throw new Error("Source has no readable evidence to assess");
-  const assessment = await model.assess({
+  const signal = input.signal ?? new AbortController().signal;
+  // Bound the await: the adapter may ignore its signal, and a stalled triage must
+  // not hold the caller open. A late assessment stays fenced by the signal check
+  // and revision revalidation below.
+  const assessment = await awaitAbortable(model.assess({
     title: source.content.title,
     text: source.content.text,
     interests: interests.slice(0, 50).map(value => value.slice(0, 500)),
     source: { ...(source.content.uri ? { uri: source.content.uri } : {}), ...(source.content.mediaType ? { mediaType: source.content.mediaType } : {}), capturedAt: source.content.capturedAt },
-  }, input.signal ?? new AbortController().signal);
+  }, signal), signal, () => new Error("Source triage deadline exceeded or was cancelled"));
   if (input.signal?.aborted) throw new Error("Source triage was cancelled");
   const latestConfig = await store.config();
   const latest = await store.read(input.sourceId, input.expectedRevision);

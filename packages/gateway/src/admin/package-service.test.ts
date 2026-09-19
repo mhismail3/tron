@@ -101,6 +101,30 @@ describe("PackageService", () => {
     expect(JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8"))).not.toHaveProperty("packages");
   });
 
+  it("reports an unknown outcome when the package applied but its settings could not be persisted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-package-uncertain-"));
+    const agentDir = join(root, "agent");
+    const workspace = join(root, "workspace");
+    const packageDir = join(root, "sample-package");
+    await Promise.all([mkdir(agentDir), mkdir(workspace), mkdir(packageDir)]);
+    await writeFile(join(packageDir, "package.json"), `${JSON.stringify({ name: "sample" })}\n`);
+    const settingsPath = join(agentDir, "settings.json");
+    await writeFile(settingsPath, "{}\n");
+    const service = new PackageService(agentDir, new TrustService(agentDir), () => {});
+    // The local install itself succeeds; only the canonical settings write is
+    // blocked, so the package change has landed without a durable record.
+    await chmod(settingsPath, 0o444);
+    try {
+      await expect(service.mutate("install", packageDir, workspace, false)).rejects.toMatchObject({
+        code: "conflict",
+        details: { outcomeUnknown: true },
+      });
+    } finally {
+      await chmod(settingsPath, 0o644);
+    }
+    expect(JSON.parse(await readFile(settingsPath, "utf8"))).not.toHaveProperty("packages");
+  });
+
   it("updates only the requested package scope", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-package-scope-"));
     const agentDir = join(root, "agent");

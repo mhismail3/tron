@@ -62,6 +62,27 @@ describe("safe source capture", () => {
     expect(Date.now() - started).toBeLessThan(2_000);
   });
 
+  it("returns the retained source with an explicit assessment error when the assessor ignores cancellation", async () => {
+    const { store } = await fixture();
+    // The adapter never settles and ignores its AbortSignal. The bounded await
+    // must release the accepted capture instead of holding it open forever.
+    let assessmentStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => { assessmentStarted = resolve; });
+    const controller = new AbortController();
+    const capture = captureSource(store, { commandId: command("stalled-assessment"), url: "https://example.com/assess", scope: "research" }, {
+      signal: controller.signal,
+      fetcher: async () => new Response("<html><title>Assessed</title><body>Evidence</body></html>", { headers: { "content-type": "text/html" } }),
+      resolveHost: publicResolver,
+      model: { assess: () => { assessmentStarted?.(); return new Promise<never>(() => {}); } },
+    });
+    await started;
+    controller.abort(new Error("caller cancelled"));
+    const captured = await capture;
+    expect(captured.assessmentError).toMatch(/deadline|cancel/i);
+    expect(captured.record.content.captureDisposition).toBe("complete");
+    expect(captured.record.content.assessment).toBeUndefined();
+  });
+
   it("upgrades an incomplete URL capture in place on retry", async () => {
     const { store } = await fixture();
     const partial = await captureSource(store, { commandId: command("partial-first"), url: "https://example.com/retry", scope: "research" }, { fetcher: async () => new Response("x".repeat(20), { headers: { "content-type": "text/plain" } }), resolveHost: publicResolver, limits: { maxBytes: 5 } });

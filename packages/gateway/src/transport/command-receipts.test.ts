@@ -1,10 +1,24 @@
-import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { GatewayError } from "../errors.js";
 import { atomicWriteJson } from "../util/json.js";
 import { CommandReceiptStore } from "./command-receipts.js";
+
+// Every case owns one temporary tron home; release them all so a long-lived
+// suite cannot accumulate receipt evidence in the shared temporary root.
+const temporaryRoots: string[] = [];
+
+async function temporaryRoot(prefix: string): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), prefix));
+  temporaryRoots.push(root);
+  return root;
+}
+
+afterEach(async () => {
+  await Promise.all(temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
 
 async function receiptFiles(root: string): Promise<string[]> {
   const directory = join(root, "gateway", "command-receipts");
@@ -13,7 +27,7 @@ async function receiptFiles(root: string): Promise<string[]> {
 
 describe("CommandReceiptStore", () => {
   it("allows distinct commands to execute concurrently", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-receipts-"));
+    const root = await temporaryRoot("tron-receipts-");
     const store = new CommandReceiptStore(root);
     let running = 0;
     let maximum = 0;
@@ -42,7 +56,7 @@ describe("CommandReceiptStore", () => {
   });
 
   it("serializes concurrent duplicates of the same command", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-receipts-"));
+    const root = await temporaryRoot("tron-receipts-");
     const store = new CommandReceiptStore(root);
     const operation = vi.fn(async () => {
       await new Promise((resolve) => setTimeout(resolve, 25));
@@ -57,7 +71,7 @@ describe("CommandReceiptStore", () => {
   });
 
   it("does not prune a completed receipt while its duplicate lane is active", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-receipts-active-lane-"));
+    const root = await temporaryRoot("tron-receipts-active-lane-");
     const store = new CommandReceiptStore(root, atomicWriteJson, { maximumAgeMs: 0 });
     let releaseOperation: (() => void) | undefined;
     let signalStarted: (() => void) | undefined;
@@ -90,7 +104,7 @@ describe("CommandReceiptStore", () => {
   });
 
   it("removes pending state after a definitive application rejection", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-receipts-"));
+    const root = await temporaryRoot("tron-receipts-");
     const store = new CommandReceiptStore(root);
     await expect(store.execute(
       "device",
@@ -107,8 +121,39 @@ describe("CommandReceiptStore", () => {
     expect(retry).toHaveBeenCalledTimes(1);
   });
 
+  it("retains pending uncertainty after an operation reports an unknown outcome", async () => {
+    const root = await temporaryRoot("tron-receipts-uncertain-");
+    const store = new CommandReceiptStore(root);
+    let effects = 0;
+    const performed = async () => {
+      effects += 1;
+      throw new GatewayError("conflict", "Effect applied but its receipt could not be persisted", false, { outcomeUnknown: true });
+    };
+
+    await expect(store.execute("device", "session.bash", "uncertain-effect", performed)).rejects.toMatchObject({
+      code: "conflict",
+      details: { outcomeUnknown: true },
+    });
+    // The pending receipt is the durable fence: status stays uncertain and the
+    // identical command can never be replayed into a second effect.
+    await expect(store.status("device", "session.bash", "uncertain-effect")).resolves.toEqual({ status: "pending" });
+    await expect(store.execute("device", "session.bash", "uncertain-effect", performed)).rejects.toMatchObject({
+      code: "conflict",
+      details: { outcomeUnknown: true },
+    });
+    await store.prune(0);
+    await expect(store.status("device", "session.bash", "uncertain-effect")).resolves.toEqual({ status: "pending" });
+    expect(effects).toBe(1);
+
+    // A new commandId is the supported recovery path and must still execute.
+    const recovered = vi.fn(async () => ({ accepted: true }));
+    await expect(store.execute("device", "session.bash", "uncertain-effect-retry", recovered))
+      .resolves.toEqual({ accepted: true });
+    expect(recovered).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects new mutations before execution when entry capacity is full", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-receipts-entry-capacity-"));
+    const root = await temporaryRoot("tron-receipts-entry-capacity-");
     const store = new CommandReceiptStore(root, atomicWriteJson, {
       maximumEntries: 1,
       maximumAggregateBytes: 2 * 1_048_576,
@@ -123,7 +168,7 @@ describe("CommandReceiptStore", () => {
   });
 
   it("removes only owned interrupted receipt writes before capacity admission", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-receipts-temporary-"));
+    const root = await temporaryRoot("tron-receipts-temporary-");
     const directory = join(root, "gateway", "command-receipts");
     await mkdir(directory, { recursive: true });
     await writeFile(join(directory, `${"a".repeat(43)}.json.123.123456789abc.tmp`), "interrupted write");
@@ -138,7 +183,7 @@ describe("CommandReceiptStore", () => {
   });
 
   it("expires completed editor updates quickly without shortening other receipt retention", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-receipts-editor-expiry-"));
+    const root = await temporaryRoot("tron-receipts-editor-expiry-");
     const store = new CommandReceiptStore(root, atomicWriteJson, {
       maximumEntries: 2,
       maximumAggregateBytes: 2 * 1_048_576,
@@ -164,7 +209,7 @@ describe("CommandReceiptStore", () => {
   });
 
   it("reserves aggregate completion capacity before executing a mutation", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-receipts-byte-capacity-"));
+    const root = await temporaryRoot("tron-receipts-byte-capacity-");
     const store = new CommandReceiptStore(root, atomicWriteJson, {
       maximumEntries: 10,
       maximumAggregateBytes: 1_048_576 + 4 * 1_024 + 1,
@@ -178,7 +223,7 @@ describe("CommandReceiptStore", () => {
   });
 
   it("retains pending state when successful completion cannot be persisted", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-receipts-"));
+    const root = await temporaryRoot("tron-receipts-");
     let writes = 0;
     const store = new CommandReceiptStore(root, async (path, value, mode) => {
       writes += 1;
@@ -203,7 +248,7 @@ describe("CommandReceiptStore", () => {
     ["malformed", "{not-json"],
     ["oversized", "x".repeat(1_048_576 + 4 * 1_024 + 1)],
   ])("treats %s receipt evidence as outcome-unknown and never replays", async (_label, content) => {
-    const root = await mkdtemp(join(tmpdir(), "tron-receipts-corrupt-"));
+    const root = await temporaryRoot("tron-receipts-corrupt-");
     const store = new CommandReceiptStore(root);
     await store.execute("device", "session.prompt", "uncertain-command", async () => ({ accepted: true }));
     const [path] = await receiptFiles(root);
@@ -223,7 +268,7 @@ describe("CommandReceiptStore", () => {
   });
 
   it("prunes expired valid neighbors without deleting uncertain receipt evidence", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-receipts-prune-"));
+    const root = await temporaryRoot("tron-receipts-prune-");
     const store = new CommandReceiptStore(root);
     await store.execute("device", "session.prompt", "corrupt-command", async () => ({ accepted: true }));
     const [corruptPath] = await receiptFiles(root);
@@ -246,7 +291,7 @@ describe("CommandReceiptStore", () => {
   });
 
   it("rejects noncanonical receipt timestamps without pruning the evidence", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-receipts-timestamp-"));
+    const root = await temporaryRoot("tron-receipts-timestamp-");
     const store = new CommandReceiptStore(root);
     await store.execute("device", "session.prompt", "timestamp-command", async () => ({ accepted: true }));
     const [path] = await receiptFiles(root);
@@ -262,7 +307,7 @@ describe("CommandReceiptStore", () => {
   });
 
   it("admits the exact persisted-byte boundary and rejects one byte beyond it", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-receipts-exact-boundary-"));
+    const root = await temporaryRoot("tron-receipts-exact-boundary-");
     const store = new CommandReceiptStore(root);
     await store.execute("device", "session.prompt", "boundary-command", async () => ({ accepted: true }));
     const [path] = await receiptFiles(root);
@@ -284,7 +329,7 @@ describe("CommandReceiptStore", () => {
   });
 
   it("retains pending uncertainty when a successful result exceeds receipt capacity", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-receipts-result-bound-"));
+    const root = await temporaryRoot("tron-receipts-result-bound-");
     const store = new CommandReceiptStore(root);
     const operation = vi.fn(async () => ({ value: "x".repeat(1_100_000) }));
 
@@ -305,7 +350,7 @@ describe("CommandReceiptStore", () => {
   });
 
   it("returns the recorded response without repeating a mutation", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-receipts-"));
+    const root = await temporaryRoot("tron-receipts-");
     const store = new CommandReceiptStore(root);
     const operation = vi.fn(async () => ({ accepted: true }));
     const first = await store.execute("device", "session.prompt", "command-123", operation);

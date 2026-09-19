@@ -9,6 +9,7 @@ import type {
   SourceIdentity, SourceOriginKind,
 } from "./knowledge-contract.js";
 import { KnowledgeStore } from "./knowledge-store.js";
+import { awaitAbortable } from "./model-await.js";
 
 export const SOURCE_CAPTURE_LIMITS = {
   maxBytes: 8_000_000,
@@ -337,7 +338,15 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
   if (options.model && readable && disposition !== "inaccessible" && disposition !== "failed" && !operationController.signal.aborted) {
     try {
       const interests = input.interests ?? (await store.config()).currentInterests ?? [];
-      const assessment = await options.model.assess({ title: sourceRecord.content.title, text: readable.text, interests: interests.slice(0, 50).map(item => item.slice(0, 500)), source: { ...(sourceRecord.content.uri ? { uri: sourceRecord.content.uri } : {}), ...(mediaType ? { mediaType } : {}), capturedAt } }, operationController.signal);
+      // Bound the assessment await: the adapter may ignore its abort signal, and
+      // the deadline must not leave this capture pending after the source record
+      // was already retained. A late assessment stays fenced by the signal and the
+      // revision revalidation below.
+      const assessment = await awaitAbortable(
+        options.model.assess({ title: sourceRecord.content.title, text: readable.text, interests: interests.slice(0, 50).map(item => item.slice(0, 500)), source: { ...(sourceRecord.content.uri ? { uri: sourceRecord.content.uri } : {}), ...(mediaType ? { mediaType } : {}), capturedAt } }, operationController.signal),
+        operationController.signal,
+        () => new Error("Source assessment deadline exceeded or was cancelled"),
+      );
       if (operationController.signal.aborted) throw new SourceNetworkError("Source assessment cancelled");
       const latestConfig = await store.config();
       const latest = await store.read(sourceRecord.id, sourceRecord.revisionId);
