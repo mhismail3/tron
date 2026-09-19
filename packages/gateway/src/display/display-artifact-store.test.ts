@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, mkdir, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -179,6 +179,36 @@ describe("DisplayArtifactStore", () => {
     });
     await restarted.initialize(new Set(["session-a"]));
     await expect(restarted.acquire(artifact.id, "session-a")).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("preserves artifacts after operational startup validation failure but cleans confirmed corruption", async () => {
+    const value = await fixture();
+    await writeFile(join(value.workspace, "operational.txt"), "operational");
+    await writeFile(join(value.workspace, "corrupt.txt"), "corrupt");
+    const operational = await value.store.ingest(value.workspace, "operational.txt", "session-a");
+    const corrupt = await value.store.ingest(value.workspace, "corrupt.txt", "session-a");
+    const artifactRoot = join(value.home, "gateway", "display-artifacts", "artifacts");
+    const objectRoot = join(value.home, "gateway", "display-artifacts", "objects");
+    const operationalFolder = join(artifactRoot, operational.id);
+    const corruptFolder = join(artifactRoot, corrupt.id);
+    const operationalObject = JSON.parse(await readFile(join(operationalFolder, "metadata.json"), "utf8")).digest;
+    const objectPath = join(objectRoot, operationalObject.slice(0, 2), operationalObject.slice(2));
+    await chmod(operationalFolder, 0);
+    try {
+      const restarted = new DisplayArtifactStore(value.home, { maximumItemBytes: 1_024, maximumLogicalBytes: 4_096, maximumItems: 8, minimumFreeBytes: 0 });
+      await restarted.initialize(new Set(["session-a"]));
+      expect(await readdir(artifactRoot)).toContain(operational.id);
+      await expect(restarted.acquire(operational.id, "session-a")).rejects.toMatchObject({ code: "conflict" });
+      expect(await readFile(objectPath, "utf8")).toBe("operational");
+
+      await writeFile(join(corruptFolder, "metadata.json"), "not-json");
+      const cleaned = new DisplayArtifactStore(value.home, { maximumItemBytes: 1_024, maximumLogicalBytes: 4_096, maximumItems: 8, minimumFreeBytes: 0 });
+      await cleaned.initialize(new Set(["session-a"]));
+      expect(await readdir(artifactRoot)).not.toContain(corrupt.id);
+    } finally {
+      await chmod(operationalFolder, 0o700).catch(() => {});
+      await rm(value.home, { recursive: true, force: true });
+    }
   });
 
   it("rebuilds its durable index and prunes owners absent from canonical catalog evidence", async () => {

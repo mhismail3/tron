@@ -499,6 +499,22 @@ describe("UploadStore", () => {
     });
   });
 
+  it("preserves indexed upload state after an operational ownership-check failure", async () => {
+    const home = await root();
+    const store = new UploadStore(home, 16);
+    const upload = await store.save("value", "text/plain", Buffer.from("value"));
+    const folder = join(home, "gateway", "uploads", upload.id);
+    await chmod(folder, 0);
+    try {
+      await expect(store.materialize([upload.id], "session")).rejects.toMatchObject({ code: "EACCES" });
+      expect(await readdir(join(home, "gateway", "uploads"))).toContain(upload.id);
+      await chmod(folder, 0o700);
+      expect(await readFile(join(folder, "content"), "utf8")).toBe("value");
+    } finally {
+      await chmod(folder, 0o700).catch(() => {});
+    }
+  });
+
   it("removes oversized metadata on direct lookup and returns not found", async () => {
     const home = await root();
     const store = new UploadStore(home, 16);

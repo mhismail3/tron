@@ -9,6 +9,11 @@ const COMMAND_TIMEOUT_MS = 5_000;
 const FRAME_INTERVAL_MS = 200;
 const MAXIMUM_TARGETS = 8;
 
+/** Frame credit pacing must use the same monotonic clock as lifetime fences. */
+export function browserFrameDelay(now: number, lastCreditAt: number): number {
+  return Math.max(0, FRAME_INTERVAL_MS - (now - lastCreditAt));
+}
+
 export interface CapturedBrowserFrame {
   data: Buffer;
   mimeType: "image/jpeg";
@@ -69,7 +74,8 @@ export function observeBrowserCDP(input: {
   let activeSession: string | undefined;
   let stopped = false;
   let frameTimer: NodeJS.Timeout | undefined;
-  let lastCreditAt = 0;
+  // Start with one available credit; subsequent pacing uses only monotonic time.
+  let lastCreditAt = performance.now() - FRAME_INTERVAL_MS;
   let latestEncoded: string | undefined;
   let firstFrameDeadline: number | undefined;
   const acknowledgements: number[] = [];
@@ -153,7 +159,7 @@ export function observeBrowserCDP(input: {
     }
     const frameID = acknowledgements.shift();
     if (frameID !== undefined) {
-      lastCreditAt = Date.now();
+      lastCreditAt = performance.now();
       void targetRequest(activeSession, "Page.screencastFrameAck", { sessionId: frameID }).catch(stop);
     }
     if (acknowledgements.length > 0) frameTimer = setTimeout(drainFrames, FRAME_INTERVAL_MS);
@@ -200,7 +206,7 @@ export function observeBrowserCDP(input: {
     // every incoming frame; replace encoded frames before allocating JPEG bytes.
     acknowledgements.push(params.sessionId as number);
     latestEncoded = params.data;
-    if (!frameTimer) frameTimer = setTimeout(drainFrames, Math.max(0, FRAME_INTERVAL_MS - (Date.now() - lastCreditAt)));
+    if (!frameTimer) frameTimer = setTimeout(drainFrames, browserFrameDelay(performance.now(), lastCreditAt));
   });
 
   async function targetExists(targetId: string): Promise<boolean> {
@@ -256,7 +262,7 @@ export function observeBrowserCDP(input: {
 
   void (async () => {
     await ready;
-    let lastVisibleAt = Date.now();
+    let lastVisibleAt = performance.now();
     while (!stopped) {
       // Successful setup is not frame delivery. Bound only the first frame of
       // each selected target; an already painted static page needs no heartbeat.
@@ -265,8 +271,8 @@ export function observeBrowserCDP(input: {
       }
       const candidate = await selectVisiblePage();
       const selected = candidate && attached(candidate) ? candidate : undefined;
-      if (selected) lastVisibleAt = Date.now();
-      else if (Date.now() - lastVisibleAt >= COMMAND_TIMEOUT_MS) throw new Error("No visible browser page");
+      if (selected) lastVisibleAt = performance.now();
+      else if (performance.now() - lastVisibleAt >= COMMAND_TIMEOUT_MS) throw new Error("No visible browser page");
       if (selected !== activeSession) {
         const previous = activeSession;
         activeSession = undefined;

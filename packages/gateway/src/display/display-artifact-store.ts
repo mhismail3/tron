@@ -63,6 +63,13 @@ function validIdentity(value: unknown): value is string {
     && !/[\u0000-\u001f\u007f]/.test(value);
 }
 
+function isConfirmedArtifactCorruption(error: unknown): boolean {
+  if (error instanceof GatewayError) return error.code === "conflict" || error.code === "not_found";
+  const code = (error as NodeJS.ErrnoException)?.code;
+  return error instanceof SyntaxError || error instanceof RangeError
+    || code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP";
+}
+
 function isMetadata(value: unknown, expectedID: string, maximumItemBytes: number): value is DisplayArtifactMetadata {
   if (!value || typeof value !== "object") return false;
   const item = value as Record<string, unknown>;
@@ -154,6 +161,11 @@ export class DisplayArtifactStore {
   private readonly index = new Map<string, DisplayArtifactMetadata>();
   private readonly activeReaderCounts = new Map<string, number>();
   private readonly verifiedDigests = new Set<string>();
+  /** Artifact ids whose durable bytes remain present but could not be validated
+   * because storage returned an operational error during startup. Keep them out
+   * of the rebuilt index and orphan sweep rather than turning uncertainty into
+   * destructive cleanup. */
+  private readonly unavailableArtifacts = new Set<string>();
   private readonly verificationFlights = new Map<string, Promise<void>>();
   private activeReaders = 0;
   private activeIngests = 0;
@@ -188,6 +200,7 @@ export class DisplayArtifactStore {
       await mkdir(this.stagingDirectory, { recursive: true, mode: 0o700 });
       this.index.clear();
       this.verifiedDigests.clear();
+      this.unavailableArtifacts.clear();
       this.logicalBytes = 0;
       const entries = await readdir(this.artifactDirectory, { withFileTypes: true });
       for (const entry of entries) {
@@ -202,7 +215,9 @@ export class DisplayArtifactStore {
             continue;
           }
           const metadata = await readJson<unknown>(join(folder, "metadata.json"), undefined, METADATA_MAX_BYTES);
-          if (!isMetadata(metadata, entry.name, this.maximumItemBytes)) throw new Error("invalid metadata");
+          if (!isMetadata(metadata, entry.name, this.maximumItemBytes)) {
+            throw new GatewayError("conflict", "Display artifact metadata is invalid");
+          }
           const owners = liveSessionIDs ? metadata.owners.filter((id) => liveSessionIDs.has(id)) : metadata.owners;
           if (owners.length === 0) {
             await rm(folder, { recursive: true, force: true });
@@ -217,14 +232,23 @@ export class DisplayArtifactStore {
           const objectInfo = await stat(object);
           if (!inside(ownedFolder, content) || !info.isFile() || info.size !== metadata.size
             || !inside(ownedObjectDirectory, object) || !objectInfo.isFile()
-            || info.dev !== objectInfo.dev || info.ino !== objectInfo.ino) throw new Error("invalid object");
+            || info.dev !== objectInfo.dev || info.ino !== objectInfo.ino) {
+            throw new GatewayError("conflict", "Display artifact object is invalid");
+          }
           await chmod(object, 0o400);
           const admitted = owners.length === metadata.owners.length ? metadata : { ...metadata, owners };
           if (admitted !== metadata) await this.writeMetadata(join(folder, "metadata.json"), admitted);
           this.index.set(admitted.id, admitted);
           this.logicalBytes += admitted.size;
-        } catch {
-          await rm(folder, { recursive: true, force: true });
+        } catch (error) {
+          if (isConfirmedArtifactCorruption(error)) {
+            await rm(folder, { recursive: true, force: true });
+          } else {
+            // Operational I/O failure is not evidence of corruption. Preserve
+            // the canonical artifact and its immutable object, but keep the id
+            // unavailable until a later initialization can validate it.
+            this.unavailableArtifacts.add(entry.name);
+          }
         }
       }
       this.initialized = true;
@@ -432,7 +456,12 @@ export class DisplayArtifactStore {
   async acquire(id: string, sessionID: string, requestedRange?: BlobByteRange): Promise<BlobLease> {
     this.validateID(id);
     const metadata = this.index.get(id);
-    if (!metadata || !metadata.owners.includes(sessionID)) throw new GatewayError("not_found", "Display artifact is unavailable");
+    if (this.unavailableArtifacts.has(id)) {
+      throw new GatewayError("conflict", "Display artifact is unavailable while storage validation is incomplete", true);
+    }
+    if (!metadata || !metadata.owners.includes(sessionID)) {
+      throw new GatewayError("not_found", "Display artifact is unavailable");
+    }
     if (this.activeReaders >= this.maximumReaders) {
       throw new GatewayError("busy", "Concurrent display artifact reads reached their bounded capacity", true);
     }
@@ -599,6 +628,9 @@ export class DisplayArtifactStore {
   }
 
   private async removeOrphanObjects(): Promise<void> {
+    // An unavailable artifact may still own an object whose metadata could not
+    // be read. Defer the sweep rather than risk deleting canonical bytes.
+    if (this.unavailableArtifacts.size > 0) return;
     const referenced = new Set([...this.index.values()].map((value) => value.digest));
     const shards = await readdir(this.objectDirectory, { withFileTypes: true });
     for (const shard of shards) {

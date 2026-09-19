@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BrowserSocket, jpeg, registration } from "../../test-fixtures/browser-live.js";
 import { BrowserLiveViewRegistry } from "./browser-live-view.js";
-import { admitBrowserJPEG } from "./browser-live-cdp.js";
+import { admitBrowserJPEG, browserFrameDelay } from "./browser-live-cdp.js";
 import { observeTrustedAgentBrowserResult } from "./browser-live-view-adapter.js";
 
 const registries: BrowserLiveViewRegistry[] = [];
@@ -23,6 +23,13 @@ function fixture() {
 }
 
 describe("browser live observation", () => {
+  it("paces screencast credits from monotonic elapsed time", () => {
+    expect(browserFrameDelay(10_200, 10_000)).toBe(0);
+    expect(browserFrameDelay(10_050, 10_000)).toBe(150);
+    // Wall-clock changes do not enter this monotonic pacing calculation.
+    vi.setSystemTime(new Date("2035-01-01T00:00:00Z"));
+    expect(browserFrameDelay(10_050, 10_000)).toBe(150);
+  });
   it("expires viewer demand by elapsed time even when wall time moves backward", async () => {
     const f = fixture(), lease = f.open(), socket = f.sockets[0]!;
     socket.open(); await vi.advanceTimersByTimeAsync(1);
