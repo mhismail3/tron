@@ -25,6 +25,28 @@ final class DashboardChromeTests: XCTestCase {
         XCTAssertEqual(state.progress, 0)
     }
 
+    func testHeaderMotionIsSmallBoundedReversibleAndRespectsReduceMotion() {
+        let state = DashboardHeaderState()
+        let samples: [(CGFloat, CGFloat, CGFloat)] = [
+            (0, 10, 1), (40, 5, 33 / 34), (80, 0, 32 / 34), (800, 0, 32 / 34),
+            (40, 5, 33 / 34), (0, 10, 1), (-60, 10, 1.02), (-120, 10, 1.04),
+            (-800, 10, 1.04), (0, 10, 1),
+        ]
+        for (offset, y, scale) in samples {
+            state.update(offset: offset)
+            XCTAssertEqual(state.verticalOffset(reduceMotion: false), y, accuracy: 0.0001)
+            XCTAssertEqual(state.titleScale(reduceMotion: false), scale, accuracy: 0.0001)
+            XCTAssertEqual(state.verticalOffset(reduceMotion: true), 0)
+            XCTAssertEqual(state.titleScale(reduceMotion: true), 1)
+        }
+        state.update(offset: -60)
+        state.update(offset: DashboardHeaderState.boundedOffset(.nan))
+        state.update(offset: DashboardHeaderState.boundedOffset(-.infinity))
+        state.update(offset: DashboardHeaderState.boundedOffset(.infinity))
+        XCTAssertEqual(state.offset, -60, "Invalid geometry cannot reset a live gesture")
+        XCTAssertEqual(state.progress, 0, "Pull-down never reveals the blur")
+    }
+
     func testMenuSectionsAndActionsRetainTheirOwners() async throws {
         var selected: DashboardMode?
         var invoked: [String] = []
@@ -78,12 +100,44 @@ final class DashboardChromeTests: XCTestCase {
 
             let scroll = try XCTUnwrap(self.views(UIScrollView.self, in: host.view).first { $0.contentSize.height > $0.bounds.height })
             let original = scroll.contentOffset
+            let contentTop = scroll.convert(scroll.bounds, to: host.view).minY
+            let insets = scroll.adjustedContentInset
             scroll.setContentOffset(CGPoint(x: original.x, y: original.y + 120), animated: false)
             try await self.waitUntil { scroll.contentOffset.y > original.y + 100 }
             try await self.attach(host.view, name: "dashboard-scrolled-dark")
-            XCTAssertEqual(self.elements(in: host.view).first(where: { $0.accessibilityLabel == "Tron" })?.accessibilityFrame,
-                           titleFrame, "The heading keeps its size and position after scrolling")
+            let compact = try XCTUnwrap(self.elements(in: host.view).first { $0.accessibilityLabel == "Tron" }).accessibilityFrame
+            XCTAssertEqual(compact.minY, titleFrame.minY - 10, accuracy: 1)
+            XCTAssertEqual(compact.minX, titleFrame.minX, accuracy: 1)
+            XCTAssertEqual(compact.height / titleFrame.height, 32 / 34, accuracy: 0.015)
+            XCTAssertEqual(scroll.convert(scroll.bounds, to: host.view).minY, contentTop, accuracy: 1,
+                           "The scroll viewport must stay stationary; its initial content margin scrolls away natively")
+            XCTAssertEqual(scroll.adjustedContentInset, insets)
+            XCTAssertEqual(scroll.contentOffset.y, original.y + 120, accuracy: 1,
+                           "The visual transform must not feed back into the native scroll offset")
             XCTAssertEqual(menu.convert(menu.bounds, to: host.view), frame, "Scrolling never moves the menu hit target")
+
+            scroll.setContentOffset(CGPoint(x: original.x, y: original.y - 120), animated: false)
+            try await self.attach(host.view, name: "dashboard-pulled-dark")
+            let stretched = try XCTUnwrap(self.elements(in: host.view).first { $0.accessibilityLabel == "Tron" }).accessibilityFrame
+            XCTAssertEqual(stretched.minY, titleFrame.minY, accuracy: 1)
+            XCTAssertEqual(stretched.minX, titleFrame.minX, accuracy: 1)
+            XCTAssertEqual(stretched.height / titleFrame.height, 1.04, accuracy: 0.015)
+            XCTAssertEqual(menu.convert(menu.bounds, to: host.view), frame)
+            scroll.setContentOffset(original, animated: true)
+            try await self.waitUntil {
+                guard let restored = self.elements(in: host.view).first(where: { $0.accessibilityLabel == "Tron" })?.accessibilityFrame else { return false }
+                return abs(scroll.contentOffset.y - original.y) < 0.5 && abs(restored.height - titleFrame.height) < 0.5
+            }
+            XCTAssertEqual(scroll.contentOffset.y, original.y, accuracy: 0.5, "Native animated return must settle at the requested origin")
+            XCTAssertEqual(self.elements(in: host.view).first(where: { $0.accessibilityLabel == "Tron" })?.accessibilityFrame.height ?? 0,
+                           titleFrame.height, accuracy: 0.5, "Heading must return to its initial scale")
+            XCTAssertTrue(self.views(UIScrollView.self, in: host.view).contains { $0 === scroll }, "Motion must not replace the scroll owner")
+            XCTAssertEqual(scroll.convert(scroll.bounds, to: host.view).minY, contentTop, accuracy: 1)
+
+            scroll.setContentOffset(CGPoint(x: original.x, y: original.y + 120), animated: false)
+            try await self.waitUntil {
+                (self.elements(in: host.view).first(where: { $0.accessibilityLabel == "Tron" })?.accessibilityFrame.height ?? titleFrame.height) < titleFrame.height * 0.96
+            }
             self.invoke(try self.action("Automations", in: menu))
             try await self.waitUntil { self.views(UIButton.self, in: host.view).contains { $0.accessibilityValue == "Automations" } }
             menu = try await self.menuButton(in: host.view)
@@ -127,8 +181,10 @@ final class DashboardChromeTests: XCTestCase {
             scroll.setContentOffset(CGPoint(x: original.x, y: original.y + 40), animated: false)
             try await self.waitUntil { scroll.contentOffset.y > original.y + 30 }
             try await self.attach(host.view, name: "dashboard-mid-scroll-light-accessibility")
-            XCTAssertEqual(self.elements(in: host.view).first(where: { $0.accessibilityLabel == "Tron" })?.accessibilityFrame,
-                           titleFrame, "Accessibility sizing stays stable during the blur fade")
+            let midway = try XCTUnwrap(self.elements(in: host.view).first { $0.accessibilityLabel == "Tron" }).accessibilityFrame
+            XCTAssertEqual(midway.minY, titleFrame.minY - 5, accuracy: 1)
+            XCTAssertEqual(midway.height / titleFrame.height, 33 / 34, accuracy: 0.015)
+            XCTAssertEqual(midway.minX, titleFrame.minX, accuracy: 1)
         }
     }
 

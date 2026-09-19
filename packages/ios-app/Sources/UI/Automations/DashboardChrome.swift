@@ -1,16 +1,46 @@
 import SwiftUI
 
-/// Only the backdrop observes scroll progress. Keeping this reference out of
-/// catalogue inputs avoids re-filtering or rebuilding rows on every frame.
+/// Only the title and backdrop observe scroll geometry. Catalogue inputs and
+/// row identity never depend on this per-frame presentation state.
 @MainActor @Observable
 final class DashboardHeaderState {
     static let blurFadeDistance: CGFloat = 80
-    private(set) var progress: CGFloat = 0
+    static let stretchDistance: CGFloat = 120
+    static let initialDrop: CGFloat = 10
+    static let titleSize: CGFloat = 34
+    private(set) var offset: CGFloat = 0
+
+    var progress: CGFloat { max(0, offset / Self.blurFadeDistance) }
+
+    static func boundedOffset(_ offset: CGFloat) -> CGFloat {
+        guard offset.isFinite else { return offset }
+        return min(blurFadeDistance, max(-stretchDistance, offset))
+    }
+
+    func verticalOffset(reduceMotion: Bool) -> CGFloat {
+        reduceMotion ? 0 : Self.initialDrop * (1 - Self.ease(progress))
+    }
+
+    // Two base font points of shrink, or at most four percent of pull stretch.
+    func titleScale(reduceMotion: Bool) -> CGFloat {
+        guard !reduceMotion else { return 1 }
+        let pull = max(0, -offset / Self.stretchDistance)
+        return 1 - (2 / Self.titleSize) * Self.ease(progress) + 0.04 * Self.ease(pull)
+    }
+
+    private static func ease(_ value: CGFloat) -> CGFloat {
+        // Continuous slope at rest and at both caps, with no delayed animation
+        // competing against the scroll view's own deceleration/rubber band.
+        value * value * (3 - 2 * value)
+    }
 
     func update(offset: CGFloat) {
         guard offset.isFinite else { return }
-        let next = min(1, max(0, offset / Self.blurFadeDistance))
-        if next != progress { progress = next }
+        let next = Self.boundedOffset(offset)
+        guard next != self.offset else { return }
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { self.offset = next }
     }
 }
 
@@ -72,7 +102,7 @@ struct DashboardChrome<Content: View, SearchContent: View>: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .top, spacing: 0) {
-            DashboardTitle(mode: mode, isRefreshing: isRefreshing)
+            DashboardTitle(mode: mode, state: header, isRefreshing: isRefreshing)
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .padding(.horizontal, 20)
         }
@@ -81,17 +111,19 @@ struct DashboardChrome<Content: View, SearchContent: View>: View {
 
 struct DashboardTitle: View {
     let mode: DashboardMode
+    let state: DashboardHeaderState
     var isRefreshing = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 10) {
             Text(mode.title)
-                .font(TronTypography.sans(size: 34, weight: .bold))
+                .font(TronTypography.sans(size: DashboardHeaderState.titleSize, weight: .bold))
                 .foregroundStyle(mode.accent)
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
-                // A real, fixed-size heading avoids toolbar button semantics.
-                // Long names fit narrow/accessibility layouts, never scroll-scale.
+                // Fit long names before applying the small visual transform;
+                // motion never changes the header's measured layout footprint.
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier("dashboard.title")
             if isRefreshing {
@@ -101,6 +133,8 @@ struct DashboardTitle: View {
                     .transition(.opacity)
             }
         }
+        .scaleEffect(state.titleScale(reduceMotion: reduceMotion), anchor: .topLeading)
+        .offset(y: state.verticalOffset(reduceMotion: reduceMotion))
     }
 }
 
@@ -113,14 +147,41 @@ private struct DashboardBackdrop: View {
     }
 }
 
+private struct DashboardScrollModifier: ViewModifier {
+    let header: DashboardHeaderState
+    let topMargin: CGFloat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            // A constant content margin scrolls away naturally. Translating the
+            // UIScrollView itself changes UIKit's safe-area insets mid-gesture.
+            .contentMargins(.top, topMargin + (reduceMotion ? 0 : DashboardHeaderState.initialDrop), for: .scrollContent)
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                DashboardHeaderState.boundedOffset(geometry.contentOffset.y + geometry.contentInsets.top)
+            } action: { _, offset in
+                header.update(offset: offset)
+            }
+    }
+}
+
+private struct DashboardInitialOffset: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        // Loading placeholders have no scroll content margin yet.
+        content.offset(y: reduceMotion ? 0 : DashboardHeaderState.initialDrop)
+    }
+}
+
 extension View {
     /// Attach to the concrete List/ScrollView, not a parent containing several
     /// scroll owners. Normalize the resting offset by its real safe-area inset.
-    func tronDashboardScroll(_ header: DashboardHeaderState) -> some View {
-        onScrollGeometryChange(for: CGFloat.self) { geometry in
-            min(DashboardHeaderState.blurFadeDistance, max(0, geometry.contentOffset.y + geometry.contentInsets.top))
-        } action: { _, offset in
-            header.update(offset: offset)
-        }
+    func tronDashboardScroll(_ header: DashboardHeaderState, topMargin: CGFloat = 0) -> some View {
+        modifier(DashboardScrollModifier(header: header, topMargin: topMargin))
+    }
+
+    func tronDashboardInitialOffset() -> some View {
+        modifier(DashboardInitialOffset())
     }
 }

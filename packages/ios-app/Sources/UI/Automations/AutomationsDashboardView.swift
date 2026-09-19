@@ -269,6 +269,7 @@ struct AutomationsDashboardView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Loading Automations")
+                .tronDashboardInitialOffset()
                 .transition(TronDashboardContentMotion.transition(reduceMotion: reduceMotion))
             } else if mode == .all {
                 inventoryList

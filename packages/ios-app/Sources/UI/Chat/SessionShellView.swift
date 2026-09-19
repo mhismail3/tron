@@ -599,6 +599,7 @@ struct SessionShellView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Loading sessions")
+                .tronDashboardInitialOffset()
                 .transition(TronDashboardContentMotion.transition(reduceMotion: reduceMotion))
             } else {
                 sessionList
@@ -622,11 +623,10 @@ struct SessionShellView: View {
         }
         .listStyle(.plain)
         .environment(\.defaultMinListRowHeight, 38)
-        .contentMargins(.top, 6)
         .contentMargins(.bottom, 92)
         .tronCollectionSurface()
         .tronScrollEdgeChrome()
-        .tronDashboardScroll(dashboardHeader)
+        .tronDashboardScroll(dashboardHeader, topMargin: 6)
         .animation(
             TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
             value: dashboardPresentation
