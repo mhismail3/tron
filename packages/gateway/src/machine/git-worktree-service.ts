@@ -1,11 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { lstat, mkdir, realpath, rm } from "node:fs/promises";
-import { promisify } from "node:util";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { GatewayError } from "../errors.js";
 
-const execFileAsync = promisify(execFile);
 const GIT = process.env.TRON_GIT_PATH ?? "/usr/bin/git";
 const COMMAND_TIMEOUT_MS = 10_000;
 const MAX_BRANCH_BYTES = 255;
@@ -61,18 +59,64 @@ function validateBranch(value: string | undefined, field: string): string {
   return branch;
 }
 
-async function runGit(cwd: string, args: string[], timeout = COMMAND_TIMEOUT_MS): Promise<GitCommandResult> {
-  try {
-    return await execFileAsync(GIT, ["-C", cwd, ...args], {
-      cwd,
-      timeout,
-      maxBuffer: 256 * 1_024,
-      windowsHide: true,
-    });
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    throw new GatewayError("conflict", `Git operation failed: ${detail}`, true);
-  }
+function runGit(cwd: string, args: string[], timeout = COMMAND_TIMEOUT_MS): Promise<GitCommandResult> {
+  return new Promise((resolve, reject) => {
+    const maximumOutput = 256 * 1_024;
+    let timedOut = false;
+    let settled = false;
+    let outputOverflow = false;
+    let killTimer: NodeJS.Timeout | undefined;
+    let deadlineTimer: NodeJS.Timeout | undefined;
+    let hardDeadlineTimer: NodeJS.Timeout | undefined;
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const child = spawn(GIT, ["-C", cwd, ...args], { cwd, detached: true, windowsHide: true });
+    const terminateGroup = (signal: NodeJS.Signals): void => {
+      if (!child.pid) return;
+      try { process.kill(-child.pid, signal); }
+      catch { try { child.kill(signal); } catch { /* process already exited */ } }
+    };
+    const append = (target: string[], chunk: Buffer | string): void => {
+      target.push(chunk.toString());
+      if (Buffer.byteLength(target.join("")) > maximumOutput) {
+        outputOverflow = true;
+        terminateGroup("SIGTERM");
+      }
+    };
+    const finish = (error?: Error | null, code?: number | null, signal?: NodeJS.Signals | null): void => {
+      if (settled) return;
+      settled = true;
+      if (killTimer) clearTimeout(killTimer);
+      if (deadlineTimer) clearTimeout(deadlineTimer);
+      if (hardDeadlineTimer) clearTimeout(hardDeadlineTimer);
+      if (!error && !timedOut && !outputOverflow && code === 0) {
+        resolve({ stdout: stdout.join(""), stderr: stderr.join("") });
+        return;
+      }
+      const detail = error?.message ?? (timedOut ? "timed out" : outputOverflow ? "output exceeded bounds" : `exited with ${signal ?? code}`);
+      reject(new GatewayError("conflict", `Git operation failed: ${detail}`, true,
+        timedOut ? { outcomeUnknown: true } : { exitCode: code ?? undefined }));
+    };
+    child.stdout.on("data", (chunk: Buffer | string) => append(stdout, chunk));
+    child.stderr.on("data", (chunk: Buffer | string) => append(stderr, chunk));
+    child.on("error", (error) => finish(error));
+    child.on("close", (code, signal) => finish(null, code, signal));
+    deadlineTimer = setTimeout(() => {
+      timedOut = true;
+      terminateGroup("SIGTERM");
+      killTimer = setTimeout(() => terminateGroup("SIGKILL"), 1_000);
+    }, timeout);
+    // A descendant that keeps stdio open must not make a timed-out command
+    // retain the Gateway forever. The group remains killed and the result is
+    // explicitly uncertain if this hard bound is reached.
+    hardDeadlineTimer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      if (killTimer) clearTimeout(killTimer);
+      reject(new GatewayError("conflict", "Git operation did not settle after its bounded termination window", true,
+        { outcomeUnknown: true }));
+    }, timeout + 2_000);
+  });
 }
 
 export class GitWorktreeService {
@@ -106,9 +150,26 @@ export class GitWorktreeService {
     }
 
     const target = await this.allocateTarget(repositoryRoot, branch);
+    const createdBranch = request.mode === "newBranchWorktree";
+    const baseRef = base ?? "HEAD";
+    const baseCommit = createdBranch
+      ? (await runGit(repositoryRoot, ["rev-parse", `${baseRef}^{commit}`])).stdout.trim()
+      : undefined;
+    let branchExisted = false;
+    if (createdBranch) {
+      try {
+        await runGit(repositoryRoot, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`]);
+        branchExisted = true;
+      } catch (error) {
+        // Exit 1 is show-ref's definitive "not present" result. Any other
+        // failure is an uncertain lookup and must never authorize destructive
+        // cleanup of a same-named branch owned by another operation.
+        branchExisted = !(error instanceof GatewayError && (error.details as { exitCode?: number } | undefined)?.exitCode === 1);
+      }
+    }
     try {
-      if (request.mode === "newBranchWorktree") {
-        await runGit(repositoryRoot, ["worktree", "add", "-b", branch, target, base ?? "HEAD"]);
+      if (createdBranch) {
+        await runGit(repositoryRoot, ["worktree", "add", "-b", branch, target, baseRef]);
       } else {
         await runGit(repositoryRoot, ["worktree", "add", target, branch]);
       }
@@ -116,11 +177,23 @@ export class GitWorktreeService {
       return {
         cwd: canonical,
         cleanup: async () => {
-          await this.removeWorktree(repositoryRoot, canonical);
+          try {
+            await this.removeWorktree(repositoryRoot, canonical);
+          } finally {
+            if (createdBranch && !branchExisted && baseCommit) {
+              await this.removeCreatedBranch(repositoryRoot, branch, baseCommit);
+            }
+          }
         },
       };
     } catch (error) {
+      // Reconcile the exact administrative records after a failed or uncertain
+      // add before attempting the compare-and-delete branch cleanup.
       await rm(target, { recursive: true, force: true }).catch(() => {});
+      await runGit(repositoryRoot, ["worktree", "prune"]).catch(() => {});
+      if (createdBranch && !branchExisted && baseCommit) {
+        await this.removeCreatedBranch(repositoryRoot, branch, baseCommit).catch(() => {});
+      }
       throw error;
     }
   }
@@ -208,10 +281,17 @@ export class GitWorktreeService {
     return target;
   }
 
+  private async removeCreatedBranch(repositoryRoot: string, branch: string, expectedCommit: string): Promise<void> {
+    // update-ref's expected-old argument makes this a compare-and-delete: a
+    // session commit or another actor moving the branch leaves it intact.
+    await runGit(repositoryRoot, ["update-ref", "-d", `refs/heads/${branch}`, expectedCommit]);
+  }
+
   private async removeWorktree(repositoryRoot: string, target: string): Promise<void> {
-    await runGit(repositoryRoot, ["worktree", "remove", "--force", target]).catch(async () => {
+    await runGit(repositoryRoot, ["worktree", "remove", "--force", target]).catch(async (error) => {
       await rm(target, { recursive: true, force: true });
       await runGit(repositoryRoot, ["worktree", "prune"]);
+      throw error;
     });
   }
 }

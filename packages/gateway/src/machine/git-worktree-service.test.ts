@@ -39,6 +39,7 @@ describe("GitWorktreeService", () => {
       expect(await readFile(join(prepared.cwd, "README.md"), "utf8")).toBe("base\n");
       await prepared.cleanup();
       await expect(readFile(prepared.cwd, "README.md")).rejects.toThrow();
+      await expect(git(root, "show-ref", "--verify", "--quiet", "refs/heads/feature/tron-session")).rejects.toThrow();
     } finally {
       await rm(root, { recursive: true, force: true });
       await rm(tronHome, { recursive: true, force: true });
@@ -79,6 +80,19 @@ describe("GitWorktreeService", () => {
     }
   });
 
+  it("never deletes a pre-existing branch when new worktree creation is rejected", async () => {
+    const { root, tronHome } = await repository();
+    try {
+      await git(root, "branch", "feature/existing");
+      const service = new GitWorktreeService(tronHome);
+      await expect(service.prepare(root, { mode: "newBranchWorktree", branch: "feature/existing" })).rejects.toThrow();
+      expect(await git(root, "branch", "--list", "feature/existing")).toContain("feature/existing");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(tronHome, { recursive: true, force: true });
+    }
+  });
+
   it("creates a worktree from an existing local branch without changing the source checkout", async () => {
     const { root, tronHome } = await repository();
     try {
@@ -95,6 +109,7 @@ describe("GitWorktreeService", () => {
       } finally {
         await prepared.cleanup();
       }
+      expect(await git(root, "branch", "--list", "release")).toContain("release");
     } finally {
       await rm(root, { recursive: true, force: true });
       await rm(tronHome, { recursive: true, force: true });

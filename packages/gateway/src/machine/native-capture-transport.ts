@@ -6,6 +6,29 @@ export interface NativeCaptureTransport {
   closeLocal(): Promise<void>;
 }
 
+export const NATIVE_CAPTURE_OPERATION_TIMEOUT_MS = 10_000;
+
+function boundedCallback<T>(
+  operation: string,
+  invoke: (done: (error: Error | null, value: T) => void) => void,
+  timeout = NATIVE_CAPTURE_OPERATION_TIMEOUT_MS,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(`Native capture ${operation} did not settle before its bounded deadline`));
+    }, timeout);
+    invoke((error, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error); else resolve(value);
+    });
+  });
+}
+
 /** Import is inert; only this explicit operation loads/opens the fixed addon. */
 export function openNativeCaptureTransport(): NativeCaptureTransport {
   if (process.platform !== "darwin" || !["arm64", "x64"].includes(process.arch)) {
@@ -35,11 +58,7 @@ export function openNativeCaptureTransport(): NativeCaptureTransport {
   // V8 owns these Promises. Native code retains only disposable callback refs,
   // not opaque napi_deferred handles that cannot be freed during forced exit.
   return {
-    request: (control) => new Promise((resolve, reject) => {
-      native.request(control, (error, value) => error ? reject(error) : resolve(value));
-    }),
-    closeLocal: () => closing ??= new Promise<void>((resolve, reject) => {
-      native.closeLocal((error) => error ? reject(error) : resolve());
-    }),
+    request: (control) => boundedCallback("request", (done) => native.request(control, done)),
+    closeLocal: () => closing ??= boundedCallback<void>("local retirement", (done) => native.closeLocal((error) => done(error, undefined))),
   };
 }

@@ -3,7 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { abortableRead } from "../util/abortable-read.js";
-import { atomicWriteJson, removeIfExists } from "../util/json.js";
+import { durableAtomicWriteJson, durableRemove } from "../util/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import { GatewayError } from "../errors.js";
@@ -217,7 +217,7 @@ export class DeviceStore {
         purpose: "local-wrapper-health",
         lastUpdated: new Date().toISOString(),
       };
-      await atomicWriteJson(this.authPath, document);
+      await durableAtomicWriteJson(this.authPath, document);
     }
     await this.ensureEnrollment();
   }
@@ -241,7 +241,7 @@ export class DeviceStore {
       expiresAt: new Date(now.getTime() + 10 * 60_000).toISOString(),
       machineId: this.machineId,
     };
-    await atomicWriteJson(this.enrollmentPath, enrollment);
+    await durableAtomicWriteJson(this.enrollmentPath, enrollment);
     return enrollment;
   }
 
@@ -257,7 +257,7 @@ export class DeviceStore {
         "Pairing invitation storage",
       )).value ?? null;
       if (!isEnrollmentDocument(enrollment, this.machineId) || Date.parse(enrollment.expiresAt) <= Date.now()) {
-        await removeIfExists(this.enrollmentPath);
+        await durableRemove(this.enrollmentPath);
         throw new GatewayError("unauthenticated", "Pairing code expired");
       }
       const actual = Buffer.from(code.toUpperCase(), "utf8");
@@ -282,9 +282,9 @@ export class DeviceStore {
       // Consume first: once pairing has been accepted, a persistence failure
       // must not leave the invitation reusable. Regenerate explicitly while
       // still holding the mutex if the device write fails.
-      await removeIfExists(this.enrollmentPath);
+      await durableRemove(this.enrollmentPath);
       try {
-        await atomicWriteJson(this.devicePath, document);
+        await durableAtomicWriteJson(this.devicePath, document);
       } catch (error) {
         await this.ensureEnrollmentLocked(new Date()).catch(() => {});
         throw error;
@@ -343,7 +343,7 @@ export class DeviceStore {
       const document = await this.readDevices();
       const next = document.devices.filter((device) => device.id !== deviceId);
       if (next.length === document.devices.length) return false;
-      await atomicWriteJson(this.devicePath, { version: 1, devices: next });
+      await durableAtomicWriteJson(this.devicePath, { version: 1, devices: next });
       // The replacement above is the authority cut. Publication is deliberately
       // synchronous and precedes install cleanup or any other long effect.
       onRevoked();
