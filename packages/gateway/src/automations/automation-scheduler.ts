@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { GatewayError } from "../errors.js";
+import { GatewayError, isUncertainOutcome, uncertainOutcome } from "../errors.js";
 import { automationOperationId } from "./automation-contract.js";
 import { AutomationStore, settleAutomationRun } from "./automation-store.js";
 import { advanceAfterOccurrence, automationOccurrenceId, classifyDueOccurrence } from "./schedule.js";
@@ -31,7 +31,7 @@ export interface AutomationExecutionHandle {
 export type AutomationRecoveryResult = AutomationExecutionResult | { state: "requeue"; reason: string };
 
 export interface AutomationExecutor {
-  start(record: AutomationRecord, run: AutomationRun): Promise<AutomationExecutionHandle>;
+  start(record: AutomationRecord, run: AutomationRun, signal?: AbortSignal): Promise<AutomationExecutionHandle>;
   recover?(record: AutomationRecord, run: AutomationRun): Promise<AutomationRecoveryResult>;
   acknowledgeRecovery?(record: AutomationRecord, run: AutomationRun): Promise<void>;
   reconcileStoredTerminals?(records: readonly AutomationRecord[]): Promise<void>;
@@ -43,6 +43,7 @@ export class AutomationAdmissionError extends Error {
     readonly retryable: boolean,
     readonly reason: string,
     readonly busy = false,
+    readonly outcomeUnknown = false,
   ) {
     super(message);
     this.name = "AutomationAdmissionError";
@@ -62,6 +63,7 @@ export interface AutomationSchedulerOptions {
 
 interface ActiveExecution {
   automationId: string;
+  sessionId: string;
   runId: string;
   handle: AutomationExecutionHandle;
   deadline?: NodeJS.Timeout;
@@ -99,7 +101,7 @@ export class AutomationScheduler {
   private readonly onDiagnostic: NonNullable<AutomationSchedulerOptions["onDiagnostic"]>;
   private readonly onBlocked: NonNullable<AutomationSchedulerOptions["onBlocked"]>;
   private readonly active = new Map<string, ActiveExecution>();
-  private readonly dispatchReservations = new Map<string, string>();
+  private readonly dispatchReservations = new Map<string, { sessionId: string; controller: AbortController }>();
   private readonly pendingDispatches = new Set<Promise<void>>();
   private readonly cancellationRequests = new Map<string, "user-cancelled" | "gateway-shutdown">();
   private readonly settlementWaiters = new Map<string, { promise: Promise<void>; resolve: () => void }>();
@@ -185,24 +187,39 @@ export class AutomationScheduler {
     this.timer = undefined;
   }
 
+  private cancelPendingAdmissions(): void {
+    for (const [runId, pending] of this.dispatchReservations) {
+      this.cancellationRequests.set(runId, "gateway-shutdown");
+      pending.controller.abort(new GatewayError("cancelled", "Automation admission stopped for Gateway shutdown"));
+    }
+  }
+
   async cancelActiveForShutdown(): Promise<void> {
     this.beginDrain();
-    // Shutdown uses the same bounded settlement as user/deadline cancellation.
-    // A cooperative cancel that never resolves, or a completion that never
-    // arrives, must not hold Gateway shutdown open indefinitely.
-    await Promise.allSettled([...this.active.values()].map((active) => this.requestCancellationWithGrace(active, "gateway-shutdown")));
+    this.cancelPendingAdmissions();
+    await Promise.all([...this.active.values()].map(active => this.requestCancellationWithGrace(active, "gateway-shutdown")));
+  }
+
+  /** Resolving a durable unknown outcome cannot retire an executing owner. */
+  assertRunRetired(runId: string): void {
+    if (this.active.has(runId) || this.dispatchReservations.has(runId)) {
+      throw uncertainOutcome("Automation execution or its terminal acknowledgement is still owned; wait for retirement before resolving the run");
+    }
   }
 
   async dispose(): Promise<void> {
     this.beginDrain();
-    // Both an in-flight dispatch and an active completion can be waiting on a
-    // provider that never settles. Bound each wait by the shared grace: the run's
-    // durable outcome is already recorded as unknown, and a late settlement
-    // cannot overwrite it because commitTerminal matches the exact current run.
-    await Promise.allSettled([
-      ...[...this.pendingDispatches].map((pending) => this.settleWithinGrace(pending)),
-      ...[...this.active.values()].map((active) => this.settleWithinGrace(active.handle.completion)),
-    ]);
+    this.cancelPendingAdmissions();
+    // Completion is not retirement: dispatch includes durable terminal evidence
+    // and the executor's exact marker/lease acknowledgement. On expiry retain
+    // all owners and report a blocker, never a successful disposal.
+    const retired = await this.settleWithinGrace(Promise.all([
+      ...(this.scanPromise ? [this.scanPromise] : []),
+      ...this.pendingDispatches,
+      ...[...this.active.values()].map(active => active.settled),
+    ]));
+    if (!retired.settled) throw uncertainOutcome("Automation shutdown remains blocked by an unsettled admission, execution, or terminal acknowledgement");
+    if (retired.error !== undefined) throw retired.error;
   }
 
   async scan(): Promise<void> {
@@ -258,12 +275,14 @@ export class AutomationScheduler {
     }
     if (!active) {
       this.cancellationRequests.set(runId, "user-cancelled");
+      this.dispatchReservations.get(runId)?.controller.abort(new GatewayError("cancelled", "Automation admission cancelled"));
       const settlement = this.settlementFor(runId);
       await this.store.mutateState(record.id, (current) => {
         if (current.currentRun?.runId !== runId) return current;
         return { ...current, currentRun: { ...current.currentRun, state: "cancelling", reason: "user-cancelled" } };
       });
-      await settlement.promise;
+      const retired = await this.settleWithinGrace(settlement.promise);
+      if (!retired.settled) throw uncertainOutcome("Automation admission cancellation is still pending; the owner remains retained");
       const settled = this.store.get(automationId);
       if (settled.lastRun?.runId !== runId) {
         throw new GatewayError("conflict", "Automation cancellation did not reach durable terminal state", true, { outcomeUnknown: true });
@@ -293,8 +312,8 @@ export class AutomationScheduler {
         && (record.currentRun.retryAt === undefined || Date.parse(record.currentRun.retryAt) <= this.now()))
       .sort((left, right) => left.currentRun!.scheduledFor.localeCompare(right.currentRun!.scheduledFor) || left.id.localeCompare(right.id));
     const activeSessions = new Set([
-      ...[...this.active.values()].map((entry) => this.store.get(entry.automationId).currentRun?.executionSessionId ?? entry.runId),
-      ...this.dispatchReservations.keys(),
+      ...[...this.active.values()].map(entry => entry.sessionId),
+      ...[...this.dispatchReservations.values()].map(entry => entry.sessionId),
     ]);
     let dispatched = 0;
     for (const record of candidates) {
@@ -309,7 +328,7 @@ export class AutomationScheduler {
       const sessionKey = run.executionSessionId;
       if (activeSessions.has(sessionKey)) continue;
       activeSessions.add(sessionKey);
-      this.dispatchReservations.set(runId, sessionKey);
+      this.dispatchReservations.set(runId, { sessionId: sessionKey, controller: new AbortController() });
       dispatched += 1;
       let task!: Promise<void>;
       task = this.dispatch(record).catch((error) => {
@@ -402,13 +421,19 @@ export class AutomationScheduler {
       return next;
     });
     if (claimed.currentRun?.claimId !== claimId) return;
+    const admission = this.dispatchReservations.get(run.runId)!;
 
     let handle: AutomationExecutionHandle;
     try {
-      handle = await this.executor.start(claimed, claimed.currentRun);
+      admission.controller.signal.throwIfAborted();
+      handle = await this.executor.start(claimed, claimed.currentRun, admission.controller.signal);
     } catch (error) {
-      if (this.cancellationRequests.delete(run.runId)) {
-        await this.commitTerminal(claimed.id, run.runId, { state: "cancelled", reason: "user-cancelled" });
+      const cancellation = this.cancellationRequests.get(run.runId);
+      this.cancellationRequests.delete(run.runId);
+      if (isUncertainOutcome(error) || error instanceof AutomationAdmissionError && error.outcomeUnknown) {
+        await this.commitTerminal(claimed.id, run.runId, { state: "outcomeUnknown", reason: "admission-outcome-unknown" });
+      } else if (cancellation) {
+        await this.commitTerminal(claimed.id, run.runId, { state: "cancelled", reason: cancellation });
       } else {
         await this.handleAdmissionFailure(claimed.id, claimed.currentRun, error);
       }
@@ -417,7 +442,7 @@ export class AutomationScheduler {
     }
 
     const running = await this.store.mutateState(claimed.id, (current) => {
-      if (current.currentRun?.runId !== run.runId || current.currentRun.claimId !== claimId) return current;
+      if (admission.controller.signal.aborted || current.currentRun?.runId !== run.runId || current.currentRun.claimId !== claimId) return current;
       const cancellation = this.cancellationRequests.get(run.runId);
       return {
         ...current,
@@ -430,16 +455,19 @@ export class AutomationScheduler {
         },
       };
     });
-    if (running.currentRun?.runId !== run.runId) {
-      // A durable state owner retired this run while admission was suspended.
-      // Keep the reservation until the exact runtime owner settles; only then
-      // may its marker/lease/work token be acknowledged and released.
-      await handle.cancel("gateway-shutdown").catch((error) => {
+    if (admission.controller.signal.aborted || running.currentRun?.runId !== run.runId) {
+      // Admission was cancelled or a durable state owner retired this run while
+      // start() was suspended. Keep the reservation until the returned owner
+      // actually settles; never publish running or infer retirement from abort.
+      await handle.cancel(this.cancellationRequests.get(run.runId) ?? "gateway-shutdown").catch((error) => {
         this.onDiagnostic(error instanceof Error ? error.message : String(error), claimed.id, run.runId);
       });
-      await handle.completion.catch((error) => {
-        this.onDiagnostic(error instanceof Error ? error.message : String(error), claimed.id, run.runId);
-      });
+      const result = await handle.completion.catch((error): AutomationExecutionResult => ({
+        state: "outcomeUnknown",
+        reason: "retired-admission-completion-failed",
+        error: { code: "completion-failed", message: String(error).slice(0, 1_024), retryable: false },
+      }));
+      await this.retryTerminalSettlement(() => this.commitTerminal(claimed.id, run.runId, result), claimed.id, run.runId, "retired admission terminal record");
       if (handle.acknowledgeTerminal) {
         await this.retryTerminalSettlement(handle.acknowledgeTerminal, claimed.id, run.runId, "retired admission acknowledgement");
       }
@@ -453,16 +481,18 @@ export class AutomationScheduler {
 
     let resolveSettled!: () => void;
     const settled = new Promise<void>((resolve) => { resolveSettled = resolve; });
-    const active: ActiveExecution = { automationId: claimed.id, runId: run.runId, handle, settled, resolveSettled };
+    const active: ActiveExecution = { automationId: claimed.id, sessionId: run.executionSessionId, runId: run.runId, handle, settled, resolveSettled };
     const deadlineMs = running.executionDeadlineSeconds * 1_000;
     active.deadline = this.setTimer(() => {
-      void this.markCancellingAndCancel(active, "deadline-exceeded");
+      void this.markCancellingAndCancel(active, "deadline-exceeded")
+        .catch(error => this.onDiagnostic(String(error), active.automationId, active.runId));
     }, deadlineMs);
     active.deadline.unref?.();
     this.active.set(run.runId, active);
     this.dispatchReservations.delete(run.runId);
     const pendingCancellation = this.cancellationRequests.get(run.runId);
-    if (pendingCancellation) void this.requestCancellationWithGrace(active, pendingCancellation);
+    if (pendingCancellation) void this.requestCancellationWithGrace(active, pendingCancellation)
+      .catch(error => this.onDiagnostic(String(error), active.automationId, active.runId));
 
     let result: AutomationExecutionResult;
     try {

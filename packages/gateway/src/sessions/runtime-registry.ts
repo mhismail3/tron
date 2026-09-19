@@ -488,8 +488,6 @@ export class RuntimeRegistry {
       agentDir: string;
       tronHome: string;
       idleRuntimeMs: number;
-      /** Optional bound on durable ownership write retries; see RuntimeSlotDependencies. */
-      ownershipWriteRetryWindowMs?: number;
       maximumLiveRuntimes?: number;
       modelRuntimeFactory?: () => Promise<ModelRuntime>;
       trust: TrustService;
@@ -1040,9 +1038,6 @@ export class RuntimeRegistry {
       ...(this.options.stageTiming ? {
         runtimeDisposalTimedOut: (graceMs: number) => this.options.stageTiming!("runtime.dispose-timeout", graceMs, "failure"),
       } : {}),
-      ...(this.options.ownershipWriteRetryWindowMs === undefined
-        ? {}
-        : { ownershipWriteRetryWindowMs: this.options.ownershipWriteRetryWindowMs }),
     };
   }
 

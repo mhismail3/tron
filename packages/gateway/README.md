@@ -425,12 +425,13 @@ available.
 Each occurrence and run is durable before dispatch. Pre-admission transient
 failures may retry with bounded backoff; accepted agent failures do not. A crash
 before any canonical invocation/marker evidence permits the same run to requeue.
-Gateway shutdown and disposal use the same bounded cancellation grace as user or
-deadline cancellation: a cooperative cancel that never resolves, a pending
-dispatch, or a completion that never arrives records an `outcomeUnknown` terminal
-run and releases shutdown instead of holding the drain open indefinitely, and a
-late settlement cannot overwrite that terminal record because it matches the
-exact current run.
+Gateway shutdown cancels pending admissions through the executor and exact prompt
+preflight as well as already-active executions. Disposal joins dispatch through
+its terminal acknowledgement, not merely the provider completion. An expired
+wait returns an explicit blocker while the execution, marker, and lease remain
+owned; it never reports successful retirement. Resolving an unknown run is refused
+until its process-local owner retires. A handle returned after admission was
+cancelled is cancelled and acknowledged without publishing a new running state.
 Accepted work without exact terminal evidence becomes `outcomeUnknown`, blocks
 future occurrences, and requires an explicit receipt-backed user resolution.
 Successful canonical completion remains marked until the automation terminal
@@ -812,12 +813,16 @@ After an uncertain disconnect, clients reconnect and poll `command.status`, reus
 a completed result, retry only a confirmed-missing command with the same ID, and
 never blindly replay a pending command. A mutation whose owner reports an unknown
 outcome keeps its pending receipt even though the operation threw, so the
-identical command ID can never execute twice; recovery is to refresh
-authoritative state and reissue under a new command ID. A durable ownership write
-retries transient storage failures within a bounded window, then reports an
-explicit outcome-unknown failure (or a definitive rejection when nothing was
-dispatched) instead of holding a session lane, a command response, or the drain
-forever. An observed application rejection removes
+identical command ID cannot execute twice. Refresh authoritative state before
+making a new decision; a new command ID is not proof that replay is safe.
+Canonical ownership writes bound the caller's wait, including a write that never
+settles. A timeout or unproven append retains the exact runtime as a visible drain
+and eviction blocker and rejects further mutations and reload. Even a pre-provider
+marker may already have been renamed before an fsync failure. Late physical
+completion does not resume abandoned dependent transitions. This deliberately
+fails closed: the pinned SDK has no supported repair/flush acknowledgement for a
+memory-only canonical entry, so refreshing or resending a command cannot clear
+that blocker. Confirmed identity conflicts remain definitive pre-write rejections. An observed application rejection removes
 its pending receipt so the definitive error remains definitive; process loss or failure
 to persist a successful completion leaves pending state and therefore cannot enable a
 blind duplicate. Each receipt is capped at one response frame plus 4 KiB of

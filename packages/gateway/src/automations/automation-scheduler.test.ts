@@ -1,8 +1,8 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { AutomationScheduler, type AutomationExecutor } from "./automation-scheduler.js";
+import { AutomationScheduler, type AutomationExecutor, type AutomationExecutionHandle, type AutomationExecutionResult } from "./automation-scheduler.js";
 import { AutomationStore } from "./automation-store.js";
 
 async function eventually(assertion: () => void): Promise<void> {
@@ -112,7 +112,8 @@ describe("AutomationScheduler", () => {
     const disposal = scheduler.dispose();
     await eventually(() => expect(timers.has(5_000)).toBe(true));
     fireGrace();
-    await expect(disposal).resolves.toBeUndefined();
+    await expect(disposal).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+    expect(() => scheduler.assertRunRetired(store.get(record.id).lastRun!.runId)).toThrow(/still owned/);
   });
 
   it("records an unknown outcome when a cooperative cancel itself never settles during shutdown", async () => {
@@ -164,6 +165,84 @@ describe("AutomationScheduler", () => {
     await eventually(() => expect(store.get(record.id).lastRun?.state).toBe("outcomeUnknown"));
     expect(store.get(record.id).lastRun?.reason).toBe("gateway-shutdown-cancellation-timeout");
     expect(store.get(record.id).activation).toBe("blocked");
+  });
+
+  it("fences late start and retains ownership through terminal acknowledgement after disposal expires", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-automation-late-start-"));
+    const store = new AutomationStore(root);
+    await store.initialize();
+    const record = await store.create({
+      name: "Late start", activation: "draft", target: { kind: "existingSession", sessionId: "session-one" },
+      trigger: { kind: "once", at: "2026-01-02T00:00:00.000Z" },
+      action: { kind: "sessionPrompt", text: "Review" }, provenance: { kind: "local" },
+    });
+    function deferred<T>() {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>(settle => { resolve = settle; });
+      return { promise, resolve };
+    }
+    const entered = deferred<void>();
+    const start = deferred<AutomationExecutionHandle>();
+    const completion = deferred<AutomationExecutionResult>();
+    const cancelled = deferred<void>();
+    const acknowledging = deferred<void>();
+    const acknowledged = deferred<void>();
+    let signal: AbortSignal | undefined;
+    const timers = new Map<NodeJS.Timeout, { callback: () => void; delay: number }>();
+    const scheduler = new AutomationScheduler(store, {
+      start: async (_record, _run, admittedSignal) => {
+        signal = admittedSignal;
+        entered.resolve();
+        return start.promise;
+      },
+    }, {
+      hostEpoch: "epoch-late-start",
+      setTimer: (callback, delay) => {
+        const token = { unref() {} } as NodeJS.Timeout;
+        timers.set(token, { callback, delay });
+        return token;
+      },
+      clearTimer: token => { timers.delete(token); },
+    });
+    const expireGrace = () => {
+      const grace = [...timers].filter(([, value]) => value.delay === 5_000);
+      expect(grace.length).toBeGreaterThan(0);
+      for (const [token, value] of grace) { timers.delete(token); value.callback(); }
+    };
+    try {
+      scheduler.start();
+      const run = await scheduler.runNow(record.id, record.revision);
+      await entered.promise;
+      const disposal = scheduler.dispose();
+      const rejected = expect(disposal).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+      expireGrace();
+      await rejected;
+      expect(signal?.aborted).toBe(true);
+      expect(() => scheduler.assertRunRetired(run.runId)).toThrow(/still owned/);
+      const cancel = vi.fn(async () => { cancelled.resolve(); });
+      start.resolve({
+        completion: completion.promise,
+        cancel,
+        acknowledgeTerminal: async () => { acknowledging.resolve(); await acknowledged.promise; },
+      });
+      await cancelled.promise;
+      expect(cancel).toHaveBeenCalledWith("gateway-shutdown");
+      expect(store.get(record.id).currentRun?.state).not.toBe("running");
+      completion.resolve({ state: "cancelled" });
+      await acknowledging.promise;
+      expect(store.get(record.id).lastRun?.state).toBe("cancelled");
+      expect(() => scheduler.assertRunRetired(run.runId)).toThrow(/still owned/);
+      const waitingForAck = scheduler.dispose();
+      const ackBlocked = expect(waitingForAck).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+      expireGrace();
+      await ackBlocked;
+      acknowledged.resolve();
+      await scheduler.dispose();
+      expect(() => scheduler.assertRunRetired(run.runId)).not.toThrow();
+    } finally {
+      acknowledged.resolve();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("keeps a draft one-time definition draft after a successful manual run", async () => {

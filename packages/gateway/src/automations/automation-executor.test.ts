@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { GatewayAutomationExecutor } from "./automation-executor.js";
 import { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
+import { uncertainOutcome } from "../errors.js";
+import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import type { AutomationRecord, AutomationRun } from "./types.js";
 
 function fixture() {
@@ -58,6 +60,44 @@ describe("GatewayAutomationExecutor", () => {
     expect(sessions.clearAutomationMarker).toHaveBeenCalledWith(run.executionSessionId, run.operationId);
     expect(release).toHaveBeenCalledOnce();
     expect(work.size).toBe(0);
+  });
+
+  it("does not dispatch a prompt after cancellation during lease acquisition", async () => {
+    const { record, run } = fixture();
+    const controller = new AbortController();
+    const release = vi.fn();
+    const prompt = vi.fn();
+    let acquired!: () => void;
+    const lease = new Promise<void>(resolve => { acquired = resolve; });
+    const sessions = {
+      acquireAutomationLease: async () => { await lease; return { slot: { prompt }, release }; },
+    };
+    const work = new GatewayWorkRegistry();
+    const executor = new GatewayAutomationExecutor(sessions as unknown as RuntimeRegistry, work, undefined, undefined);
+    const started = executor.start(record, run, controller.signal);
+    const rejected = expect(started).rejects.toThrow();
+    expect(work.size).toBe(1);
+    controller.abort(new Error("shutdown"));
+    acquired();
+    await rejected;
+    expect(prompt).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledOnce();
+    expect(work.size).toBe(0);
+  });
+
+  it("retains the execution lease and work when admission reports unproven canonical ownership", async () => {
+    const { record, run } = fixture();
+    const release = vi.fn();
+    const sessions = {
+      acquireAutomationLease: async () => ({
+        slot: { commands: () => [], prompt: async () => { throw uncertainOutcome("staged receipt append failed"); } }, release,
+      }),
+    };
+    const work = new GatewayWorkRegistry();
+    const executor = new GatewayAutomationExecutor(sessions as unknown as RuntimeRegistry, work, undefined, undefined);
+    await expect(executor.start(record, run)).rejects.toMatchObject({ outcomeUnknown: true });
+    expect(release).not.toHaveBeenCalled();
+    expect(work.facts()).toMatchObject([{ kind: "automation-terminal-persistence", sessionId: run.executionSessionId }]);
   });
 
   it("creates and leases the predetermined workspace session exactly once", async () => {

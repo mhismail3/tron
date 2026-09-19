@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { performance as nodePerformance } from "node:perf_hooks";
 import { sealBrowserToolReference } from "../display/browser-tool-reference.js";
 import { existsSync } from "node:fs";
 import { appendFile, copyFile, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
@@ -16,7 +17,7 @@ import type { AutomationExecutionHandle } from "../automations/automation-schedu
 import type { AutomationRecord, AutomationRun } from "../automations/types.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import type { ExtensionRunActivity, ExtensionToolOrigin, SessionProcessActivity, SessionSummaryUpdate } from "../protocol/types.js";
-import { GatewayWorkRegistry } from "./gateway-work-registry.js";
+import { GatewayWorkRegistry, type GatewayWorkHandle } from "./gateway-work-registry.js";
 import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, type ExtensionActivityReceipt } from "./extension-activity-history.js";
@@ -52,7 +53,6 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     name?: string;
     maximumLiveRuntimes?: number;
     workRegistry?: GatewayWorkRegistry;
-    ownershipWriteRetryWindowMs?: number;
     phaseObserver?: (phase: "catalog-warming" | "attention-recovery") => void;
     sessionListChanged?: () => void;
     stageTiming?: (
@@ -81,7 +81,6 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
       maximumLiveRuntimes: options.maximumLiveRuntimes,
-      ownershipWriteRetryWindowMs: options.ownershipWriteRetryWindowMs,
       workRegistry: options.workRegistry,
       modelRuntimeFactory: runtimeFactory,
       trust: new TrustService(agentDir),
@@ -3533,6 +3532,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const internal = slot as unknown as {
       runtime: { session: { sessionManager: SessionManager } };
       persistCanonicalCustomEntry: (customType: string, data: unknown, identity: string) => Promise<void>;
+      durableWrites: Map<string, unknown>;
     };
     const manager = internal.runtime.session.sessionManager;
     const sessionFile = manager.getSessionFile()!;
@@ -3558,47 +3558,100 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
     expect(await readFile(sessionFile, "utf8")).not.toContain("staged-only-receipt");
 
-    // Control: an identity that was never staged still persists normally.
-    await internal.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, { receiptId: "healthy-receipt", version: 1 }, "healthy-receipt");
-    expect(await readFile(sessionFile, "utf8")).toContain("healthy-receipt");
+    try {
+      expect(slot.isBusy).toBe(true);
+      expect(slot.isEvictionProtected).toBe(true);
+      expect(slot.isDrainBusy).toBe(true);
+      expect(slot.administrativeDrainBlockers()).toContainEqual(expect.objectContaining({ category: "terminal-receipt-persistence", state: "suspect" }));
+      await expect(slot.prompt("must not execute")).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+      await expect(slot.dispose()).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+      await expect(internal.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, { receiptId: "healthy-receipt", version: 1 }, "healthy-receipt"))
+        .rejects.toMatchObject({ details: { outcomeUnknown: true } });
+      expect(await readFile(sessionFile, "utf8")).not.toContain("healthy-receipt");
+    } finally {
+      // Test-only release of the deliberately poisoned fixture for teardown.
+      // Production has no bypass: the SDK must supply verified recovery first.
+      internal.durableWrites.clear();
+    }
   });
 
-  it("bounds durable ownership retries so a permanent storage fault cannot hold a lane forever", async () => {
-    const fixture = await coldFixture("ownership-write-retry-window", { ownershipWriteRetryWindowMs: 40 });
+  it("retains the exact extension receipt owner when Pi stages its terminal receipt but disk append fails", async () => {
+    const workRegistry = new GatewayWorkRegistry();
+    const fixture = await coldFixture("extension-staged-receipt", { workRegistry });
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const internal = slot as unknown as {
-      retryDurableWrite: (key: string, operation: () => Promise<void>, timeoutIsUncertain?: boolean) => Promise<void>;
-      pendingReceiptWrites: Set<Promise<void>>;
+      runtime: { session: { sessionManager: SessionManager } };
+      claimExtensionReceiptOwnership: (id: string) => GatewayWorkHandle;
+      releaseExtensionReceiptOwnership: (id: string, owner: GatewayWorkHandle) => void;
+      appendExtensionActivityReceipt: (activity: ExtensionRunActivity) => Promise<void>;
+      durableWrites: Map<string, unknown>;
     };
-
-    // A pre-effect caller keeps its definitive classification: nothing was
-    // dispatched, so the exhausted window is not misreported as uncertainty.
-    let attempts = 0;
-    await expect(internal.retryDurableWrite("test:permanent-storage-fault", async () => {
-      attempts += 1;
-      throw new Error("permanent storage failure");
-    })).rejects.toThrow(/did not settle within its bounded retry window/);
-    expect(attempts).toBeGreaterThan(1);
-
-    // A post-effect caller reports an unknown outcome for the same failure: the
-    // effect may already have landed, so the idempotency receipt must not allow
-    // a replay.
-    await expect(internal.retryDurableWrite("test:post-effect-storage-fault", async () => {
-      throw new Error("permanent storage failure");
-    }, true)).rejects.toMatchObject({ details: { outcomeUnknown: true } });
-
-    // Disposal never waits unboundedly on a write that cannot settle; it reports
-    // a bounded blocker and leaves the outstanding write admitted.
-    const stuck = new Promise<void>(() => {});
-    internal.pendingReceiptWrites.add(stuck);
+    const activity: ExtensionRunActivity = {
+      id: "staged-extension", activityId: "staged-extension", toolCallId: "tool-staged-extension",
+      source: { source: "pi-subagents" }, title: "Fixture", status: "completed", children: [],
+      startedAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:01.000Z",
+      lifecycle: { version: 1, state: "completed", attention: "none", sequence: 1, observedAt: "2026-01-01T00:00:01.000Z" },
+    };
+    const owner = internal.claimExtensionReceiptOwnership(activity.id);
+    const file = internal.runtime.session.sessionManager.getSessionFile()!;
+    const aside = `${file}.aside`;
+    await rename(file, aside);
+    await mkdir(file);
     try {
-      await expect(slot.dispose()).rejects.toMatchObject({
-        details: { outcomeUnknown: true },
-        message: expect.stringContaining("bounded disposal window") as unknown as string,
-      });
+      await expect(internal.appendExtensionActivityReceipt(activity)).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+      expect(workRegistry.facts().some(fact => fact.token === owner.token)).toBe(true);
+      expect(slot.isEvictionProtected).toBe(true);
+      expect(slot.isDrainBusy).toBe(true);
+      await expect(slot.disposeIf(() => true)).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+      await expect(internal.appendExtensionActivityReceipt(activity)).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+      expect(await readFile(aside, "utf8")).not.toContain("staged-extension");
     } finally {
-      // Remove only this test's injected blocker so shared fixture disposal can settle.
-      internal.pendingReceiptWrites.delete(stuck);
+      await rm(file, { recursive: true, force: true });
+      await rename(aside, file);
+      internal.durableWrites.clear(); // test-only disposal of the faulted runtime
+      internal.releaseExtensionReceiptOwnership(activity.id, owner);
+    }
+  });
+
+  it.each(["rejecting", "stalled"])("bounds the %s persistence waiter without releasing its unresolved owner", async (failure) => {
+    const fixture = await coldFixture(`ownership-write-${failure}`);
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const internal = slot as unknown as {
+      retryDurableWrite: (key: string, operation: () => Promise<void>) => Promise<void>;
+      durableWrites: Map<string, unknown>;
+    };
+    let finish!: () => void;
+    const stalled = new Promise<void>(resolve => { finish = resolve; });
+    let attempts = 0;
+    vi.useFakeTimers();
+    const clock = vi.spyOn(nodePerformance, "now").mockImplementation(() => Date.now());
+    try {
+      const operation = async () => {
+        attempts += 1;
+        if (failure === "stalled") return stalled;
+        throw new Error("synthetic storage failure");
+      };
+      const pending = internal.retryDurableWrite("test:storage-fault", operation);
+      const rejected = expect(pending).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+      await vi.advanceTimersByTimeAsync(20_000);
+      await rejected;
+      if (failure === "stalled") expect(attempts).toBe(1);
+      else expect(attempts).toBeGreaterThan(1);
+      expect(slot.isEvictionProtected).toBe(true);
+      expect(slot.isDrainBusy).toBe(true);
+      await expect(slot.prompt("must remain fenced")).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+      await expect(slot.dispose()).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+      finish();
+      await stalled;
+      await vi.advanceTimersByTimeAsync(1_000);
+      // A late physical completion cannot resume the abandoned dependent work.
+      expect(slot.isDrainBusy).toBe(true);
+      await expect(internal.retryDurableWrite("test:storage-fault", operation)).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+    } finally {
+      finish();
+      clock.mockRestore();
+      vi.useRealTimers();
+      internal.durableWrites.clear(); // test-only teardown of synthetic blocked owner
     }
   });
 
