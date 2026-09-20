@@ -423,6 +423,8 @@ export interface KnowledgeSourceURLCaptureRequest {
   url: string;
   scope: KnowledgeScope;
   title?: string;
+  /** Disclose this public X post ID to the free public lookup providers. */
+  publicPostLookup?: boolean;
   annotations?: SourceContent["annotations"];
   identity?: SourceIdentity;
   origin?: SourceOriginKind;

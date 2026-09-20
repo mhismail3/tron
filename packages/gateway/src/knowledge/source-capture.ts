@@ -10,6 +10,7 @@ import type {
 } from "./knowledge-contract.js";
 import { KnowledgeStore, type KnowledgeMutationResult } from "./knowledge-store.js";
 import { awaitAbortableWithSettlement } from "./model-await.js";
+import { isPublicXEmbedUrl, lookupPublicXPost, xPostIdentity, type XPublicPost } from "./x-public-post.js";
 
 export const SOURCE_CAPTURE_LIMITS = {
   maxBytes: 8_000_000,
@@ -17,6 +18,7 @@ export const SOURCE_CAPTURE_LIMITS = {
   timeoutMs: 15_000,
   maxRedirects: 3,
 } as const;
+type SourceCaptureLimits = { [K in keyof typeof SOURCE_CAPTURE_LIMITS]: number };
 
 type ResolveHost = (hostname: string, signal?: AbortSignal) => Promise<string[]>;
 type SourceFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
@@ -26,6 +28,8 @@ export interface SourceCaptureInput {
   url: string;
   scope: KnowledgeScope;
   title?: string;
+  /** Explicit permission to disclose this public post ID to FxTwitter. */
+  publicPostLookup?: boolean;
   sourcePublishedAt?: string;
   collectionId?: string;
   annotations?: SourceContent["annotations"];
@@ -54,7 +58,7 @@ export interface SourceCaptureOptions {
   resolveHost?: ResolveHost;
   model?: SourceAssessmentModel;
   now?: () => string;
-  limits?: Partial<typeof SOURCE_CAPTURE_LIMITS>;
+  limits?: Partial<SourceCaptureLimits>;
   signal?: AbortSignal;
   /** Internal owner handoff for provider promises that may outlive the bounded wait. */
   retirements?: Promise<void>[];
@@ -109,7 +113,10 @@ function assertSafeUrl(value: string): URL {
   if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password || parsed.hostname.length === 0) throw invalid("Source URL must be an http(s) URL without credentials");
   // Query credentials are credentials too. Reject them before the URL can be
   // persisted, logged, fetched, or passed to an assessment model.
-  for (const key of parsed.searchParams.keys()) if (/^(?:token|api[_-]?key|key|secret|password|passwd|auth|signature|sig|access[_-]?token|credential|session)$/i.test(key)) throw invalid("Source URL contains a credential-bearing query parameter");
+  for (const key of parsed.searchParams.keys()) {
+    if (key === "token" && isPublicXEmbedUrl(parsed)) continue; // Public deterministic embed ID, never an account token.
+    if (/^(?:token|api[_-]?key|key|secret|password|passwd|auth|signature|sig|access[_-]?token|credential|session)$/i.test(key)) throw invalid("Source URL contains a credential-bearing query parameter");
+  }
   return parsed;
 }
 
@@ -216,7 +223,7 @@ function titleFrom(bytes: Uint8Array, mediaType: string | undefined): string | u
   return text.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/<[^>]+>/g, " ").trim().slice(0, 512) || undefined;
 }
 
-async function fetchSafe(inputUrl: string, options: { fetcher?: SourceFetch; resolveHost: ResolveHost; signal?: AbortSignal; limits: typeof SOURCE_CAPTURE_LIMITS }): Promise<{ response?: Response; bytes?: Uint8Array; truncated: boolean; finalUrl: string; disposition?: SourceContent["captureDisposition"]; mediaType?: string; quality?: "partial" }> {
+async function fetchSafe(inputUrl: string, options: { fetcher?: SourceFetch; resolveHost: ResolveHost; signal?: AbortSignal; limits: SourceCaptureLimits }): Promise<{ response?: Response; bytes?: Uint8Array; truncated: boolean; finalUrl: string; disposition?: SourceContent["captureDisposition"]; mediaType?: string; quality?: "partial" }> {
   let current = assertSafeUrl(inputUrl); let requestAttempted = false;
   for (let hop = 0; hop <= options.limits.maxRedirects; hop += 1) {
     try {
@@ -248,6 +255,19 @@ async function fetchSafe(inputUrl: string, options: { fetcher?: SourceFetch; res
     }
   }
   throw invalid("Source redirect limit exceeded");
+}
+
+/** Read-only X hydration shares capture's DNS-pinned, bounded transport. No
+ * credentials, paid API, browser actions, or persistence are implicit. */
+export async function readPublicXPost(url: string, options: Pick<SourceCaptureOptions, "fetcher" | "resolveHost" | "signal"> = {}): Promise<XPublicPost> {
+  const signal = AbortSignal.any([AbortSignal.timeout(15_000), ...(options.signal ? [options.signal] : [])]);
+  return lookupPublicXPost(url, async (endpoint, parentSignal) => {
+    const attemptSignal = AbortSignal.any([parentSignal, AbortSignal.timeout(5_000)]);
+    const fetched = await fetchSafe(endpoint, { ...(options.fetcher ? { fetcher: options.fetcher } : {}), resolveHost: options.resolveHost ?? defaultResolveHost, signal: attemptSignal, limits: { ...SOURCE_CAPTURE_LIMITS, maxBytes: 2_000_000, maxRedirects: 0 } });
+    const retryAfter = fetched.response?.headers.get("retry-after");
+    const rateLimitReset = fetched.response?.headers.get("x-rate-limit-reset");
+    return { status: fetched.response?.status ?? 0, ...(fetched.bytes ? { body: new TextDecoder().decode(fetched.bytes) } : {}), truncated: fetched.truncated, ...(retryAfter ? { retryAfter } : {}), ...(rateLimitReset ? { rateLimitReset } : {}) };
+  }, signal);
 }
 
 async function allSourceRecords(store: KnowledgeStore): Promise<Array<KnowledgeRecord & { kind: "source" }>> {
@@ -285,7 +305,8 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
     || !Number.isSafeInteger(limits.maxReadableChars) || limits.maxReadableChars < 1 || limits.maxReadableChars > SOURCE_CAPTURE_LIMITS.maxReadableChars) {
     throw invalid("Invalid source capture limits");
   }
-  const sourceUrl = assertSafeUrl(input.url);
+  if (input.publicPostLookup !== undefined && typeof input.publicPostLookup !== "boolean") throw invalid("publicPostLookup must be a boolean");
+  const sourceUrl = assertSafeUrl(input.publicPostLookup ? xPostIdentity(input.url).url : input.url);
   const initialConfig = await store.config();
   if (options.signal?.aborted) throw invalid("Source capture was cancelled");
   const existing = await allSourceRecords(store);
@@ -314,8 +335,15 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
   const deadlineTimer = setTimeout(() => operationController.abort(new Error("Source operation deadline exceeded")), limits.timeoutMs); deadlineTimer.unref?.();
   const cleanup = () => { clearTimeout(deadlineTimer); options.signal?.removeEventListener("abort", relayAbort); };
   let fetched: Awaited<ReturnType<typeof fetchSafe>>;
+  let publicPost: XPublicPost | undefined;
   try {
-    fetched = await fetchSafe(sourceUrl.toString(), { ...(fetcher ? { fetcher } : {}), resolveHost, signal: operationController.signal, limits });
+    if (input.publicPostLookup) {
+      publicPost = await readPublicXPost(sourceUrl.toString(), { ...(fetcher ? { fetcher } : {}), resolveHost, signal: operationController.signal });
+      const raw = publicPost.raw ? new TextEncoder().encode(publicPost.raw) : undefined;
+      fetched = { finalUrl: sourceUrl.toString(), truncated: Boolean(raw && raw.byteLength > limits.maxBytes), ...(raw ? { bytes: raw.slice(0, limits.maxBytes), mediaType: "application/json" } : {}), disposition: publicPost.disposition };
+    } else {
+      fetched = await fetchSafe(sourceUrl.toString(), { ...(fetcher ? { fetcher } : {}), resolveHost, signal: operationController.signal, limits });
+    }
   } catch (error) {
     if (!(error instanceof SourceNetworkError) && !(error instanceof SourceSafetyError)) { cleanup(); throw error; }
     if (operationController.signal.aborted) { clearTimeout(deadlineTimer); options.signal?.removeEventListener("abort", relayAbort); throw invalid("Source fetch timed out or was cancelled"); }
@@ -344,8 +372,8 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
   const capturedAt = timestamp(now);
   const bytes = fetched.bytes;
   const mediaType = fetched.mediaType;
-  const readable = bytes && bytes.byteLength ? extractReadable(bytes, mediaType, limits.maxReadableChars) : undefined;
-  const disposition: SourceContent["captureDisposition"] = fetched.disposition ?? (bytes && bytes.byteLength > 0 ? (readable === undefined ? "metadata-only" : fetched.quality === "partial" || fetched.truncated || readable.truncated ? "partial" : "complete") : "metadata-only");
+  const readable = publicPost ? (publicPost.text ? { text: publicPost.text.slice(0, limits.maxReadableChars), truncated: publicPost.text.length > limits.maxReadableChars } : undefined) : bytes && bytes.byteLength ? extractReadable(bytes, mediaType, limits.maxReadableChars) : undefined;
+  const disposition: SourceContent["captureDisposition"] = publicPost && (fetched.truncated || readable?.truncated) ? "partial" : fetched.disposition ?? (bytes && bytes.byteLength > 0 ? (readable === undefined ? "metadata-only" : fetched.quality === "partial" || fetched.truncated || readable.truncated ? "partial" : "complete") : "metadata-only");
   let object: KnowledgeObjectRef | undefined;
   if (operationController.signal.aborted) throw invalid("Source capture was cancelled");
   if (bytes && bytes.byteLength > 0) {
@@ -368,8 +396,9 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
   }
   const kind = input.origin ?? "manual";
   const content: SourceContent = {
-    title: input.title?.trim() || titleFrom(bytes ?? new Uint8Array(), mediaType) || sourceUrl.hostname,
+    title: input.title?.trim() || publicPost?.title || titleFrom(bytes ?? new Uint8Array(), mediaType) || sourceUrl.hostname,
     uri: fetched.finalUrl,
+    ...(publicPost ? { captureReason: `${publicPost.endpoint ? `Public provider: ${redactSourceUrl(publicPost.endpoint)}. ` : ""}${publicPost.limitations.join(" ")} Attempts: ${publicPost.attempts.map(attempt => `${attempt.provider}:${attempt.outcome}${attempt.retryAt ? ` (retry after ${attempt.retryAt})` : ""}`).join(", ")}` } : {}),
     ...(readable ? { text: readable.text } : {}), ...(object ? { object } : {}), ...(mediaType ? { mediaType } : {}),
     captureDisposition: disposition, ...(input.annotations ? { annotations: input.annotations } : {}), capturedAt,
     origin: kind, origins: [...(retryTarget?.content.origins ?? []), ...sourceOrigin(kind, capturedAt, { uri: fetched.finalUrl, ...(input.identity ? { identity: input.identity } : {}) }), ...(fetched.finalUrl !== sourceUrl.toString() ? [{ kind, capturedAt, uri: sourceUrl.toString(), ...(input.identity ? { identity: input.identity } : {}) }] : [])], ...(input.identity ? { identity: input.identity } : {}), ...(input.collectionId ? { collectionId: input.collectionId } : {}), ...(input.sourcePublishedAt ? { sourcePublishedAt: input.sourcePublishedAt } : {}),
