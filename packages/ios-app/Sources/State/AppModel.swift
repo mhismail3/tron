@@ -206,6 +206,8 @@ final class AppModel {
     let automationCatalog: AutomationCatalogCoordinator
     /// Typed access to Gateway-owned Knowledge; no records are persisted here.
     let knowledge: KnowledgeRPCClient
+    /// Read-side projections and owner-routed connection-instance mutations.
+    let integrations: IntegrationsRPCClient
     private var dashboardSessionsByProfile: [String: [SessionSummary]] = [:]
     private var dashboardStatesByProfile: [String: DashboardServerConnectionState] = [:]
     private var dashboardCacheLoadGeneration = 0
@@ -574,6 +576,13 @@ final class AppModel {
             mutationExecutor: mutationExecutor,
             uuidSource: uuidSource
         )
+        let integrations = IntegrationsRPCClient(
+            request: { method, params, timeout in
+                try await client.requestValue(method, params, timeout: timeout)
+            },
+            mutationExecutor: mutationExecutor,
+            uuidSource: uuidSource
+        )
         let chatMedia = ChatMediaLoader(
             fetch: { identity in
                 let value = try await client.blob(
@@ -606,6 +615,7 @@ final class AppModel {
         self.dashboardConnections = dashboardConnections
         self.automationCatalog = automationCatalog
         self.knowledge = knowledge
+        self.integrations = integrations
         self.mutationExecutor = mutationExecutor
         self.sessionMutations = sessionMutations
         self.sessionImports = SessionImportCoordinator(

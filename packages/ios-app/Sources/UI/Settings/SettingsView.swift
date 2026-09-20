@@ -54,6 +54,13 @@ struct SettingsView: View {
                             icon: "desktopcomputer",
                             accent: .tronEmerald
                         ) { ConnectionsSettingsView() }
+                        settingsDivider(accent: .tronEmerald)
+                        settingsLink(
+                            "Integrations",
+                            summary: "Manage provider accounts and trusted tools",
+                            icon: "puzzlepiece.extension",
+                            accent: .tronEmerald
+                        ) { IntegrationsSettingsView() }
                     }
 
                     TronSettingsGroup("Agent", accent: .tronPurple) {

@@ -2103,6 +2103,14 @@ uncover plus retained native draft text/selection and tail geometry.
 These hosted scene inputs do not certify physical lock/unlock behavior.
 The stack is never persisted and is not a second state authority.
 
+## Integration management projection
+
+`IntegrationsRPCClient` and `IntegrationsSettingsView` expose the Gateway connection-owner contract as a native management surface. Definitions, account instances, capability status, and setup operations are redacted projections: the instance ID is the identity used by every action, never a provider name or account key. Same-provider accounts therefore retain independent policy, health, and disconnect state. Reads are fenced by the selected Gateway profile, lifecycle generation, connection epoch, presentation activity, and a latest-load ticket; a failed or unavailable child is not rendered as an empty success.
+
+Setup is owner-typed (`token`, `endpoint`, or `local-command`) and uses the Gateway's confirmed mutation receipt executor. The iOS form accepts only an opaque Mac Keychain credential reference, never token values or generic agent-readable secret fields. Endpoint and local-command configuration remain explicit; local commands are presented as trusted local code and are not shell-interpolated by the client. Policy controls (enabled, writes, paid, and recurring) are independent and instance-scoped. Dismissing a sheet retires only presentation reads; an accepted setup, policy, or disconnect mutation continues with its owner, and reconnect never replays it. Capability rows distinguish setup-required, disabled, unavailable, unsupported, and available states and surface owner-provided error detail.
+
+`KnowledgeDashboardView` continues to use Knowledge's domain owner for provider evidence, checkpoints, and source operations. It does not maintain a provider-key integration mirror or substitute a provider name for the connection instance ID. Package/resource installation, trust, provider-model authentication, and Gateway pairing remain their existing owner routes rather than generic integration actions.
+
 ## Knowledge projection
 
 `KnowledgeRPCClient` is the typed iOS consumer of the Gateway Knowledge contract. It

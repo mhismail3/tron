@@ -340,6 +340,7 @@ enum AdministrativeDrainPresentation {
         case .administrativeProviderPackageOperation: singular = "administrative operation"
         case .automationDispatch: singular = "automation dispatch"
         case .automationTerminalPersistence: singular = "automation completion"
+        case .mcpToolCall: singular = "MCP tool call"
         }
         return "\(count) \(singular)\(count == 1 ? "" : "s")"
     }
