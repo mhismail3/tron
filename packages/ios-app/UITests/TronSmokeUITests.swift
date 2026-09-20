@@ -5,6 +5,31 @@ import XCTest
 
 final class TronSmokeUITests: XCTestCase {
     @MainActor
+    func testKnowledgeSettingsSubmenuStaysOpenDuringParentUpdates() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-dashboard-menu-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        app.buttons["Begin updates"].tap()
+        app.buttons["dashboard.menu"].tap()
+        app.buttons["Knowledge settings"].tap()
+        let configuration = app.buttons["Observation configuration"]
+        XCTAssertTrue(configuration.waitForExistence(timeout: 3))
+        // The fixture performs thirty controlled parent updates. Wait for its
+        // completion while the actual tapped submenu remains presented.
+        let finished = NSPredicate(format: "label == %@", "Revision 30")
+        let updates = expectation(for: finished, evaluatedWith: app.staticTexts["menu-fixture-revision"])
+        wait(for: [updates], timeout: 10)
+        XCTAssertTrue(configuration.isHittable, "Parent updates must not dismiss the native submenu")
+        XCTAssertTrue(app.buttons["Connectors"].exists)
+        XCTAssertTrue(app.buttons["Import legacy records"].exists)
+        keepScreenshot(named: "knowledge-settings-submenu-after-updates")
+        configuration.tap()
+        XCTAssertTrue(app.staticTexts["menu-fixture-selection"].waitForExistence(timeout: 3))
+    }
+
+    @MainActor
     func testOnboardingPreservesPagedSheetAndPairingJourney() {
         let app = launchResetApp()
         let title = app.staticTexts["Welcome to Tron"]

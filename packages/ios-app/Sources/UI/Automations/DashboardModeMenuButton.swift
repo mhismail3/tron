@@ -65,27 +65,43 @@ struct DashboardModeMenuButton: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
     func makeUIView(context: Context) -> DashboardLogoButton {
-        let button = DashboardLogoButton(type: .custom)
-        button.showsMenuAsPrimaryAction = true
-        // Preserve section order even when the floating button opens upward.
-        button.preferredMenuElementOrder = .fixed
-        button.accessibilityIdentifier = "dashboard.menu"
-        button.accessibilityLabel = "Dashboard menu"
-        button.setImage(UIImage(named: "TronLogoVector")?.withRenderingMode(.alwaysTemplate), for: .normal)
-        button.imageView?.contentMode = .scaleAspectFit
-        return button
+        context.coordinator.makeButton()
     }
     func updateUIView(_ button: DashboardLogoButton, context: Context) {
-        context.coordinator.parent = self
-        button.menu = context.coordinator.makeMenu()
-        button.tintColor = UIColor(mode.accent)
-        button.accessibilityValue = mode.rawValue
+        context.coordinator.update(button, parent: self)
     }
 
     @MainActor
     final class Coordinator: NSObject {
         var parent: DashboardModeMenuButton
         init(parent: DashboardModeMenuButton) { self.parent = parent }
+
+        func makeButton() -> DashboardLogoButton {
+            let button = DashboardLogoButton(type: .custom)
+            button.showsMenuAsPrimaryAction = true
+            // Preserve section order even when the floating button opens upward.
+            button.preferredMenuElementOrder = .fixed
+            button.accessibilityIdentifier = "dashboard.menu"
+            button.accessibilityLabel = "Dashboard menu"
+            button.setImage(UIImage(named: "TronLogoVector")?.withRenderingMode(.alwaysTemplate), for: .normal)
+            button.imageView?.contentMode = .scaleAspectFit
+            button.menu = makeMenu()
+            button.addAction(UIAction { [weak button, weak self] _ in
+                // UIKit owns the tree throughout submenu navigation. Refresh
+                // only at the next native opening boundary, never mid-menu.
+                button?.menu = self?.makeMenu()
+            }, for: .menuActionTriggered)
+            return button
+        }
+
+        func update(_ button: DashboardLogoButton, parent: DashboardModeMenuButton) {
+            // Assigning UIButton.menu during a SwiftUI refresh collapses native
+            // submenu navigation. Update inputs, not UIKit's presented tree.
+            self.parent = parent
+            button.tintColor = UIColor(parent.mode.accent)
+            button.accessibilityValue = parent.mode.rawValue
+        }
+
         func makeMenu() -> UIMenu {
             let dashboards = DashboardMode.allCases.map { mode in
                 let image = UIImage(systemName: mode.systemImage)?.withTintColor(

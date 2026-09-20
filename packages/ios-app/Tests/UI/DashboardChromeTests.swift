@@ -208,6 +208,36 @@ final class DashboardChromeTests: XCTestCase {
         }
     }
 
+    func testPresentedMenuKeepsItsGraphAndRefreshesOnNextOpening() async throws {
+        var invocations: [Int] = []
+        @MainActor func parent(_ revision: Int) -> DashboardModeMenuButton {
+            DashboardModeMenuButton(mode: .knowledge, onSelect: { _ in }, actions: .init(
+                search: {}, filter: {}, settings: {},
+                settingsMenu: .init(title: "Knowledge settings", symbol: "slider.horizontal.3", actions: [
+                    .init(title: "Observation configuration", symbol: "eye", perform: { invocations.append(revision) }),
+                ]),
+                creation: [.init(title: "New note \(revision)", symbol: "note.text.badge.plus", perform: {})]
+            ))
+        }
+        let coordinator = parent(0).makeCoordinator()
+        let button = coordinator.makeButton()
+        button.sendActions(for: .menuActionTriggered)
+        let presentedMenu = try XCTUnwrap(button.menu)
+        for revision in 1...3 {
+            coordinator.update(button, parent: parent(revision))
+            XCTAssertTrue(button.menu === presentedMenu, "SwiftUI refreshes must leave UIKit's menu graph intact")
+        }
+        invoke(try action("Observation configuration", in: button))
+        try await waitUntil { invocations == [0] }
+
+        coordinator.update(button, parent: parent(4))
+        button.sendActions(for: .menuActionTriggered)
+        XCTAssertFalse(button.menu === presentedMenu, "Every opening gets the current controls and callbacks")
+        XCTAssertEqual(try action("New note 4", in: button).title, "New note 4")
+        invoke(try action("Observation configuration", in: button))
+        try await waitUntil { invocations == [0, 4] }
+    }
+
     func testOtherDashboardsUseTheSameChromeAndNativeMenu() async throws {
         for mode in [DashboardMode.automations, .knowledge] {
             try await withDashboard { host in
@@ -292,6 +322,9 @@ final class DashboardChromeTests: XCTestCase {
                 if mode == .automations {
                     XCTAssertEqual(AutomationDashboardPreferences.load().mode, .all,
                                    "Searching the agenda explicitly selects the inventory through its preference owner")
+                    // Closed menus are presentation snapshots. UIKit requests
+                    // current controls at the next opening, not during updates.
+                    menu.sendActions(for: .menuActionTriggered)
                     XCTAssertFalse(try XCTUnwrap(menu.menu).children.compactMap { $0 as? UIMenu }.flatMap(\.children).contains { $0.title == "Choose agenda date" })
                 }
                 host.view.endEditing(true)

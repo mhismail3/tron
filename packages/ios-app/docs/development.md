@@ -33,7 +33,18 @@ Row identity, search state, and managed-sheet/mutation owners remain dashboard-o
 The native `UIButton`/`UIMenu` keeps four inline sections in fixed top-to-bottom order:
 Settings and configuration actions; Filter/Search and view-specific controls;
 Sessions/Automations/Knowledge; creation actions. Knowledge settings sits directly below
-Settings in the first section. Filter has no subtext. Settings always opens
+Settings in the first section. UIKit owns the presented menu tree through all submenu
+navigation. `DashboardModeMenuButton` refreshes its coordinator on SwiftUI updates,
+but builds a fresh menu only at creation and the native `menuActionTriggered` opening
+boundary—not in `updateUIView`. Assigning `UIButton.menu` during presentation can
+collapse a submenu. Each new opening uses the latest action closures and view-specific
+controls without an extra timer, menu cache, or dismissal/reopening workaround.
+`DashboardChromeTests` checks menu identity during parent updates and fresh callbacks
+on reopening. The `HOSTED_TEST`-only `HostedDashboardMenuFixtureView` and
+`TronSmokeUITests.testKnowledgeSettingsSubmenuStaysOpenDuringParentUpdates` tap the
+actual Knowledge submenu, then apply thirty updates while it remains visible and
+select Configuration; updates are gated on rendered submenu content so XCTest's
+idle waiting cannot run the test entirely after the updates. Filter has no subtext. Settings always opens
 the shell's existing app settings sheet. Sessions ends with New Session; Automations
 ends with Create Automation and retains Choose agenda date in Upcoming; Knowledge
 groups Observation configuration, Connectors, and Import legacy records under
@@ -1012,13 +1023,13 @@ are in [performance-baseline.md](performance-baseline.md).
 The checked-in `UIValidation.xctestplan` keeps routine UI diagnostics disabled.
 UI journeys run the `HOSTED_TEST` app through the `Tron UI Validation` scheme's
 Test configuration, only on the exact owned test simulator; they never use the
-persistent Development simulator. `TronSmokeUITests` includes the focused
-rendered Ask User journey; run it with:
-
-```bash
-scripts/tron-ios-test build # builds the reusable hosted products
-scripts/tron-ios-test run --only-testing TronMobileUITests/TronSmokeUITests
-```
+persistent Development simulator. `TronSmokeUITests` includes the rendered Ask User
+journey and the Knowledge submenu regression. The unit helper selects `UnitTests`,
+not UI tests. Run these selectors with `xcodebuild test`, scheme `Tron UI Validation`,
+configuration `Test`, and plan `UIValidation`, under `scripts/ios-test-lock.py` and
+`scripts/ios-test-process.py`; resolve the exact owned destination through
+`scripts/ios-test-simulator.py validate`. Use `-only-testing:TronMobileUITests/TronSmokeUITests/<test>`
+for focused interaction checks rather than running every journey during diagnosis.
 
 The fixture's socket is test-only and records the real `extension.respond` RPC;
 no Gateway or provider is contacted. The test taps the rendered form controls,
