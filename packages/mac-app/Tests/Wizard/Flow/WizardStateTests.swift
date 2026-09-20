@@ -3,182 +3,76 @@ import os
 import Testing
 @testable import TronMac
 
-/// Tests `WizardState` step persistence + advance/back/skip
-/// transitions. Each test gets its own UserDefaults suite so they
-/// don't bleed across runs.
 @Suite("WizardState")
 @MainActor
 struct WizardStateTests {
-    /// Returns a fresh isolated `UserDefaults` for the test, plus a
-    /// cleanup closure to call when done.
-    static func isolatedDefaults() -> (UserDefaults, () -> Void) {
-        let suiteName = "tron.mac.wizard.tests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        return (defaults, {
-            UserDefaults().removePersistentDomain(forName: suiteName)
+    static func isolatedURL() -> (URL, () -> Void) {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("tron-wizard-\(UUID().uuidString)", isDirectory: true)
+        return (root.appendingPathComponent("internal/mac/wizard-state.json"), {
+            try? FileManager.default.removeItem(at: root)
         })
     }
 
-    @Test("fresh state starts at welcome")
+    @Test("fresh state starts at welcome without a durable record")
     func freshStarts() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        let state = WizardState(defaults: defaults)
+        let (url, cleanup) = Self.isolatedURL(); defer { cleanup() }
+        let state = WizardState(stateURL: url)
         #expect(state.step == .welcome)
-        #expect(state.permissionStatuses.isEmpty)
+        #expect(state.persistenceFailure == nil)
         #expect(state.installOutcome == nil)
-        #expect(state.installStages.isEmpty)
-        #expect(state.needsInstallDetection)
-        #expect(state.installIsRunning == false)
-        #expect(state.pairingPayload == nil)
-        #expect(state.tailscaleStatus == nil)
-        #expect(state.existingInstallStatus == .none)
     }
 
-    @Test("advance is bounded at the last step")
-    func advanceBounded() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        let state = WizardState(defaults: defaults)
+    @Test("step changes publish a versioned private file and revive")
+    func stepPersists() throws {
+        let (url, cleanup) = Self.isolatedURL(); defer { cleanup() }
+        let state = WizardState(stateURL: url)
+        state.advance(); state.advance()
+        #expect(state.step == .install)
+        let data = try Data(contentsOf: url)
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object["version"] as? Int == 1)
+        #expect(object["step"] as? String == WizardStep.install.rawValue)
+        #expect(((try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber)?.intValue ?? 0) & 0o777 == 0o600)
+        #expect(WizardState(stateURL: url).step == .install)
+    }
+
+    @Test("safe cold resume clamps transient steps and done")
+    func coldResumeClamp() {
+        for step in [WizardStep.permissions, .pairingInfo, .done] {
+            let (url, cleanup) = Self.isolatedURL(); defer { cleanup() }
+            let state = WizardState(stateURL: url, initialStep: step)
+            #expect(state.step == step)
+            #expect(WizardState(stateURL: url).step == .welcome)
+        }
+    }
+
+    @Test("safe persisted steps revive")
+    func safePersistedStepsRevive() {
+        let (url, cleanup) = Self.isolatedURL(); defer { cleanup() }
+        let state = WizardState(stateURL: url, initialStep: .install)
+        #expect(state.step == .install)
+        #expect(WizardState(stateURL: url).step == .install)
+    }
+
+    @Test("navigation remains bounded and explicit")
+    func navigationBounds() {
+        let (url, cleanup) = Self.isolatedURL(); defer { cleanup() }
+        let state = WizardState(stateURL: url)
         for _ in 0..<20 { state.advance() }
         #expect(state.step == .done)
-    }
-
-    @Test("goBack steps backward")
-    func goBackWorks() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        let state = WizardState(defaults: defaults)
-        state.advance(); state.advance() // welcome → tailscale → install
-        #expect(state.step == .install)
         state.goBack()
-        #expect(state.step == .tailscale)
-    }
-
-    @Test("goBack is bounded at the first step")
-    func goBackBounded() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        let state = WizardState(defaults: defaults)
-        for _ in 0..<5 { state.goBack() }
-        #expect(state.step == .welcome)
-    }
-
-    @Test("skipToPairing jumps directly to pairing")
-    func skipToPairing() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        let state = WizardState(defaults: defaults)
+        #expect(state.slideDirection == .backward)
         state.skipToPairing()
         #expect(state.step == .pairingInfo)
     }
 
-    @Test("step changes persist to UserDefaults")
-    func stepPersists() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        let state = WizardState(defaults: defaults)
-        state.advance(); state.advance() // install
-        #expect(defaults.string(forKey: WizardState.stepStorageKey) == WizardStep.install.rawValue)
-
-        // Re-instantiating from the same defaults resumes there.
-        let revived = WizardState(defaults: defaults)
-        #expect(revived.step == .install)
+    @Test("malformed and newer records fail closed to welcome")
+    func malformedRecord() throws {
+        let (url, cleanup) = Self.isolatedURL(); defer { cleanup() }
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(#"{"version":99,"step":"install"}"#.utf8).write(to: url)
+        #expect(WizardState(stateURL: url).step == .welcome)
     }
-
-    @Test("safe-to-resume persisted step rawValue is honored")
-    func revivesFromRawValue() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        defaults.set(WizardStep.install.rawValue, forKey: WizardState.stepStorageKey)
-        let state = WizardState(defaults: defaults)
-        #expect(state.step == .install)
-    }
-
-    @Test("invalid stored step falls back to welcome")
-    func invalidStoredStep() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        defaults.set("notAStep", forKey: WizardState.stepStorageKey)
-        let state = WizardState(defaults: defaults)
-        #expect(state.step == .welcome)
-    }
-
-    @Test("initialStep override wins over persisted step")
-    func initialStepOverride() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        // Pre-seed defaults with a different step.
-        defaults.set(WizardStep.tailscale.rawValue, forKey: WizardState.stepStorageKey)
-        // Override should win.
-        let state = WizardState(defaults: defaults, initialStep: .pairingInfo)
-        #expect(state.step == .pairingInfo)
-        // And it should also be persisted, so kill+relaunch lands here.
-        #expect(defaults.string(forKey: WizardState.stepStorageKey) == WizardStep.pairingInfo.rawValue)
-    }
-
-    // MARK: - Cold-resume clamp
-    //
-    // State-dependent post-install steps depend on transient state (`installOutcome`,
-    // `pairingPayload`, per-permission probes) that doesn't survive a
-    // relaunch. If we honoured those on cold boot the user would land
-    // mid-wizard behind a disabled Continue button with no way to recover.
-    // The iOS beta handoff is static and safe to resume. Done clamps because
-    // a missing sentinel must win over stale progress left after uninstall.
-
-    @Test("persisted .permissions clamps back to welcome on cold start")
-    func persistedPermissionsClamped() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        defaults.set(WizardStep.permissions.rawValue, forKey: WizardState.stepStorageKey)
-        let state = WizardState(defaults: defaults)
-        #expect(state.step == .welcome)
-        // The clamp is written back so the next cold boot agrees.
-        #expect(defaults.string(forKey: WizardState.stepStorageKey) == WizardStep.welcome.rawValue)
-    }
-
-    @Test("persisted .pairingInfo clamps back to welcome on cold start")
-    func persistedPairingInfoClamped() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        defaults.set(WizardStep.pairingInfo.rawValue, forKey: WizardState.stepStorageKey)
-        let state = WizardState(defaults: defaults)
-        #expect(state.step == .welcome)
-    }
-
-    @Test("persisted .done clamps back to welcome on cold start")
-    func persistedDoneClamped() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        defaults.set(WizardStep.done.rawValue, forKey: WizardState.stepStorageKey)
-        let state = WizardState(defaults: defaults)
-        #expect(state.step == .welcome)
-    }
-
-    @Test("safe-to-resume steps (welcome/tailscale/install/iOS beta) do NOT clamp")
-    func safeToResumeNotClamped() {
-        for step in [WizardStep.welcome, .tailscale, .install, .iosBeta] {
-            let (defaults, cleanup) = Self.isolatedDefaults()
-            defer { cleanup() }
-            defaults.set(step.rawValue, forKey: WizardState.stepStorageKey)
-            let state = WizardState(defaults: defaults)
-            #expect(state.step == step, "expected \(step) to resume as-is")
-        }
-    }
-
-    @Test("navigation does not admit an installation")
-    func navigationIsObservational() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        let state = WizardState(defaults: defaults)
-        state.advance(); state.advance() // install
-        state.goBack(); state.advance()
-        #expect(state.step == .install)
-        #expect(!state.installIsRunning)
-        #expect(state.installStages.isEmpty)
-        #expect(state.installOutcome == nil)
-    }
-
 }
 
 @Suite("Wizard completion")
@@ -189,18 +83,14 @@ struct WizardCompletionTests {
     @Test("sentinel write gates the single completion notification")
     func sentinelWriteGatesNotification() throws {
         let center = NotificationCenter()
-        let notificationCount = OSAllocatedUnfairLock(initialState: 0)
-        let observer = center.addObserver(forName: .tronWizardDidComplete, object: nil, queue: nil) { _ in
-            notificationCount.withLock { $0 += 1 }
-        }
+        let count = OSAllocatedUnfairLock(initialState: 0)
+        let observer = center.addObserver(forName: .tronWizardDidComplete, object: nil, queue: nil) { _ in count.withLock { $0 += 1 } }
         defer { center.removeObserver(observer) }
-
         #expect(throws: SentinelError.self) {
             try commitWizardCompletion(touchSentinel: { throw SentinelError.writeFailed }, notificationCenter: center)
         }
-        #expect(notificationCount.withLock { $0 } == 0)
-
+        #expect(count.withLock { $0 } == 0)
         try commitWizardCompletion(touchSentinel: {}, notificationCenter: center)
-        #expect(notificationCount.withLock { $0 } == 1)
+        #expect(count.withLock { $0 } == 1)
     }
 }

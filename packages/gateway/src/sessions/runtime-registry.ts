@@ -488,6 +488,8 @@ export class RuntimeRegistry {
     private readonly options: {
       agentDir: string;
       tronHome: string;
+      /** Exact provider-owned root under the resolved Tron home. */
+      delegatedArtifactRoot?: string;
       idleRuntimeMs: number;
       maximumLiveRuntimes?: number;
       modelRuntimeFactory?: () => Promise<ModelRuntime>;
@@ -1013,6 +1015,7 @@ export class RuntimeRegistry {
   private dependencies() {
     return {
       agentDir: this.options.agentDir,
+      ...(this.options.delegatedArtifactRoot ? { delegatedArtifactRoot: this.options.delegatedArtifactRoot } : {}),
       createModelRuntime: async () => installKimiK3Policy(await (this.options.modelRuntimeFactory ?? (() => ModelRuntime.create({
         authPath: join(this.options.agentDir, "auth.json"),
         modelsPath: join(this.options.agentDir, "models.json"),
@@ -3427,13 +3430,23 @@ export class RuntimeRegistry {
       }
 
       const roots = new Set<string>();
-      for (const slot of slots) {
+      if (this.options.delegatedArtifactRoot) {
+        const providerRunsRoot = join(this.options.delegatedArtifactRoot, "async-subagent-runs");
+        try { if ((await stat(providerRunsRoot)).isDirectory()) roots.add(providerRunsRoot); } catch { /* provider root is created on first admitted run */ }
+      } else for (const slot of slots) {
         if (roots.size >= MAX_EXTENSION_DISCOVERY_ROOTS) break;
-        const root = join(resolve(slot.cwd), ".pi", "subagents", "async-subagent-runs");
-        try { if ((await stat(root)).isDirectory()) roots.add(root); } catch { /* no project artifacts */ }
+        const projectRoot = join(resolve(slot.cwd), ".pi", "subagents", "async-subagent-runs");
+        try { if ((await stat(projectRoot)).isDirectory()) roots.add(projectRoot); } catch { /* isolated pre-cutover fixture */ }
       }
       try {
         let examined = 0;
+        // A configured provider root is the sole ambient source after the
+        // cutover. Temporary/project roots are only scanned by test fixtures
+        // that omit the explicit production root.
+        if (this.options.delegatedArtifactRoot) {
+          // The exact root was admitted above; do not inspect unrelated temp
+          // trees that could become a second delegated authority.
+        } else {
         const entries = await opendir(tmpdir());
         for await (const entry of entries) {
           examined += 1;
@@ -3442,7 +3455,8 @@ export class RuntimeRegistry {
           const root = join(tmpdir(), entry.name, "async-subagent-runs");
           try { if ((await stat(root)).isDirectory()) roots.add(root); } catch { /* disappearing runtime root */ }
         }
-      } catch { /* an unavailable temp directory leaves exact bindings authoritative */ }
+        }
+      } catch { /* an unavailable artifact root leaves exact bindings authoritative */ }
 
       const rootList = [...roots];
       let ambientStructuralEntries = 0;

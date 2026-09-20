@@ -4,8 +4,11 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { attributeExtensions } from "../extensions/owner-attribution.js";
 import {
+  DELEGATED_PROVIDER_ROOT_ENV,
   DELEGATED_PROVIDER_TOOL_NAME,
   delegatedArtifactPathAllowed,
+  delegatedArtifactRoot,
+  delegatedProviderEnvironment,
   delegatedProviderOrigin,
   isInstalledDelegatedTool,
   trustedDelegatedController,
@@ -80,6 +83,30 @@ describe("delegated provider origin", () => {
     expect(trustedDelegatedController({
       toolName: "subagent", origin: { source: "npm:pi-subagents", owner: FOREIGN_OWNER }, installedOwnerId: OWNER.id, definitionFor,
     })).toBeUndefined();
+  });
+});
+
+describe("delegated artifact root contract", () => {
+  it("derives one home-owned root and propagates it before child launch", () => {
+    const root = delegatedArtifactRoot("/fixture/.tron");
+    expect(root).toBe("/fixture/.tron/internal/subagents");
+    const environment: NodeJS.ProcessEnv = {};
+    delegatedProviderEnvironment(root, environment);
+    expect(environment[DELEGATED_PROVIDER_ROOT_ENV]).toBe(root);
+  });
+
+  it("admits only the exact controlled subtree when a root is configured", () => {
+    const root = mkdtempSync(join(tmpdir(), "tron-delegated-root-"));
+    const run = join(root, "async-subagent-runs", "run-1");
+    mkdirSync(run, { recursive: true, mode: 0o700 });
+    writeFileSync(join(run, "status.json"), "{}", { mode: 0o600 });
+    try {
+      expect(delegatedArtifactPathAllowed(run, "/unrelated", root)).toBe(true);
+      expect(delegatedArtifactPathAllowed(join(run, "status.json"), "/unrelated", root)).toBe(true);
+      expect(delegatedArtifactPathAllowed(join(root, "nested", "status.json"), "/unrelated", root)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

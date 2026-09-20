@@ -1,5 +1,6 @@
-import { realpathSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { mkdir } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Extension, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { ExtensionToolOrigin } from "../protocol/types.js";
@@ -37,6 +38,36 @@ export const DELEGATED_ARTIFACT_FILES = [
 
 export type DelegatedArtifactFileName = (typeof DELEGATED_ARTIFACT_FILES)[number];
 
+/** One Gateway-admitted provider root per resolved Tron home. */
+/** pi-subagents 0.59.0 reads this before deriving async/results/chain roots. */
+export const DELEGATED_PROVIDER_ROOT_ENV = "PI_SUBAGENTS_TEMP_ROOT";
+
+export function delegatedArtifactRoot(tronHome: string): string {
+  return join(resolve(tronHome), "internal", "subagents");
+}
+
+/**
+ * Propagates the provider's supported root contract to every child launch.
+ * The installed extension remains provider-owned; this is intentionally an
+ * environment contract rather than a settings or source rewrite.
+ */
+export function delegatedProviderEnvironment(root: string, environment: NodeJS.ProcessEnv = process.env): void {
+  const canonicalRoot = resolve(root);
+  if (!isAbsolute(canonicalRoot) || canonicalRoot === sep) throw new Error("delegated artifact root must be absolute");
+  environment[DELEGATED_PROVIDER_ROOT_ENV] = canonicalRoot;
+}
+
+/** Prepare the admission root before the provider can publish a run. */
+export async function ensureDelegatedArtifactRoot(root: string): Promise<void> {
+  const canonicalRoot = resolve(root);
+  await mkdir(canonicalRoot, { recursive: true, mode: 0o700 });
+  const owner = process.getuid?.();
+  const metadata = statSync(canonicalRoot);
+  if (!metadata.isDirectory() || owner !== undefined && metadata.uid !== owner || (metadata.mode & 0o077) !== 0) {
+    throw new Error("delegated artifact root is not a private owner directory");
+  }
+}
+
 const DELEGATED_ARTIFACT_FILE_SET: ReadonlySet<string> = new Set(DELEGATED_ARTIFACT_FILES);
 
 /** Provider package directory marker used only to recognize an installed owner. */
@@ -52,17 +83,31 @@ function canonical(value: string): string {
 
 /**
  * Accepts only the provider's own run directory or one of its direct lifecycle
- * files, under either the provider's temporary root or the project-local
- * `.pi/subagents/async-subagent-runs` root. Lexical traversal is rejected before
- * canonicalization, and the canonical shape rejects symlinked escapes.
+ * files under the explicitly admitted Tron-home root. The optional legacy roots
+ * are retained only for isolated pre-cutover callers; production passes the
+ * resolved root and therefore has no dual writable authority. Lexical traversal
+ * is rejected before canonicalization, and the canonical shape rejects symlinked
+ * escapes.
  */
-export function delegatedArtifactPathAllowed(asyncPath: string, cwd: string): boolean {
+export function delegatedArtifactPathAllowed(asyncPath: string, cwd: string, admittedRoot?: string): boolean {
   if (!isAbsolute(asyncPath)) return false;
   const lexicalParts = asyncPath.split(/[\\/]/u).filter(Boolean);
   if (lexicalParts.some((part) => part === "." || part === "..")) return false;
   const temporaryRoot = canonical(tmpdir());
   const projectRoot = join(canonical(cwd), ".pi", "subagents", "async-subagent-runs");
+  const ownedRoot = admittedRoot === undefined ? undefined : canonical(admittedRoot);
   const isAllowedShape = (value: string): boolean => {
+    if (ownedRoot !== undefined) {
+      const runsRoot = join(ownedRoot, "async-subagent-runs");
+      const relativeToRuns = relative(runsRoot, value);
+      if (relativeToRuns !== "" && !isAbsolute(relativeToRuns)
+        && relativeToRuns !== ".." && !relativeToRuns.startsWith(`..${sep}`)) {
+        const parts = relativeToRuns.split(/[\\/]/u).filter(Boolean);
+        if (parts.length >= 1 && parts.length <= 2 && parts[0] !== ""
+          && (parts.length === 1 || DELEGATED_ARTIFACT_FILE_SET.has(parts[1]!))) return true;
+      }
+      return false;
+    }
     const temporaryParts = relative(temporaryRoot, value).split(/[\\/]/u).filter(Boolean);
     const temporaryRun = temporaryParts[0]?.startsWith("pi-subagents-")
       && temporaryParts[1] === "async-subagent-runs"
@@ -83,7 +128,13 @@ export function delegatedArtifactPathAllowed(asyncPath: string, cwd: string): bo
   };
   const candidate = resolve(asyncPath);
   try {
-    return isAllowedShape(realpathSync(candidate));
+    const physical = realpathSync(candidate);
+    if (ownedRoot !== undefined) {
+      const rootStat = statSync(ownedRoot);
+      const owner = process.getuid?.();
+      if (!rootStat.isDirectory() || owner !== undefined && rootStat.uid !== owner || (rootStat.mode & 0o077) !== 0) return false;
+    }
+    return isAllowedShape(physical);
   } catch {
     return false;
   }

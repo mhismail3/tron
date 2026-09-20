@@ -36,9 +36,11 @@ interface order; IPv6-only tailnets remain supported. Deployment health and
 restart traffic resolve the same name; an explicit host always overrides it.
 Developer CLI operation
 is loopback unless `--tailscale` is explicit. Debug pairing appends `(Dev)` to
-the Mac's friendly name so the `9848` profile is distinct from the stable connection. The two homes share only the random physical-machine group hint at
-`~/.tron-machine-group-id`; their gateway machine IDs, agent directories, JSONL
-sessions, credentials, and runtime markers remain separate.
+the Mac's friendly name so the `9848` profile is distinct from the stable connection. Stable and Debug share the single machine-group identity at
+`~/.tron/internal/machine-group-id`; all other Gateway state remains profile-owned.
+The retired `~/.tron-machine-group-id` source is never read as startup fallback:
+an operator migration must preserve its exact bytes and retire it before either
+profile starts.
 
 ## Source owners
 
@@ -59,10 +61,12 @@ worker host.
 
 ## Internal workspace preservation
 
-The Gateway resolves Tron's durable internal home as `<tronHome>/workspace`
-(Stable `~/.tron/workspace`, Debug `~/.tron-dev/workspace`). It is independent of
-session cwd, filesystem browsing, project trust, pairing identity and local
-recent-directory preferences. Ordinary retained documents belong in `files/`;
+The Gateway resolves Tron's durable internal workspace as `<tronHome>/workspace`
+(Stable `~/.tron/workspace`, Debug `~/.tron-dev/workspace`). Implementation-owned
+operational files live under `<tronHome>/internal/`; delegated provider artifacts
+use `<tronHome>/internal/subagents/`, and the Mac wizard uses
+`<tronHome>/internal/mac/wizard-state.json`. These are separate owners, not a
+shared generic state store. Ordinary retained documents belong in `files/`;
 `state/<owner>/` is reserved for real capability-owned data. Canonical JSONL and
 runtime stores remain under the separate Pi `agentDir`.
 
@@ -170,8 +174,11 @@ Back/forward navigation, step remounts and cancelled view waiters neither cancel
 nor replay it. `InstallStep` renders that shared progress and owns only disposable
 status presentation. Its status ping carries an exact latest-request fence through
 cancellation, including late success and failure, so a remounted step cannot
-publish an older result. This is an in-process lifetime, not a durable installation
-queue across wrapper termination. Failures stop later stages; retry remains an
+publish an older result. Progress is durably published as a versioned owner-only
+record at `internal/mac/wizard-state.json`; malformed/newer records restart at
+Welcome and visible write failures never silently reset or mirror progress in
+`UserDefaults`. Completion remains authoritative only after `.onboarded` is
+written. This is not a durable installation queue across wrapper termination. Failures stop later stages; retry remains an
 explicit user action against fresh validation and ServiceManagement state.
 
 Entry discovery is asynchronous presentation, not installation authority. It is

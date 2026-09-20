@@ -18,6 +18,8 @@ Commands:
                                     Read-only assessment of an agent-home move
   agent-home-migrate <stage|verify|cleanup> ...
                                     Explicit, bounded offline staging operations
+  internal-migrate <preflight|stage|verify|publish|recover|cleanup> ...
+                                    Explicit machine-identity/internal-root migration
   agent-home-cutover --app <Release.app> [--confirm-offline|--verify|--status]
                                     One-time offline cutover; manual app activation
                                     See --help for reviewed pre-helper bootstrap
@@ -64,6 +66,14 @@ case "$cmd" in
       exit 66
     fi
     exec node "$GATEWAY/dist/agent-home-migration.js" "$@"
+    ;;
+  internal-migrate)
+    if [[ ! -f "$GATEWAY/dist/internal-layout-migration.js" ]]; then
+      echo "missing prepared migration artifact: $GATEWAY/dist/internal-layout-migration.js" >&2
+      echo "prepare it explicitly with: (cd packages/gateway && npm run build)" >&2
+      exit 66
+    fi
+    exec node "$GATEWAY/dist/internal-layout-migration.js" "$@"
     ;;
   agent-home-cutover)
     exec python3 "$ROOT/scripts/tron_agent_home_cutover.py" "$@"

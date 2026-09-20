@@ -39,8 +39,14 @@ import { JevSourceAssessmentModel } from "./knowledge/jev-assessment.js";
 import { JevDecisionClient } from "./knowledge/jev-client.js";
 import { createKnowledgeConnectorExtension } from "./knowledge/connectors.js";
 import { createKnowledgeImporter } from "./knowledge/legacy-import.js";
+import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./sessions/delegated-provider.js";
 
 const config = await loadConfig();
+const delegatedRoot = delegatedArtifactRoot(config.tronHome);
+await ensureDelegatedArtifactRoot(delegatedRoot);
+// The installed provider receives its supported root before Pi loads any
+// extensions. No source or installed package is rewritten at startup.
+delegatedProviderEnvironment(delegatedRoot);
 // Paid X access is only qualified when the host explicitly supplies the
 // provider/account price and retry ceiling. Missing or malformed values keep
 // the connector unavailable; no default price is inferred in production.
@@ -130,6 +136,7 @@ let automationToolOperations!: GatewayScheduleToolOperations;
 const sessions = new RuntimeRegistry({
   agentDir: config.agentDir,
   tronHome: config.tronHome,
+  delegatedArtifactRoot: delegatedRoot,
   idleRuntimeMs: config.idleRuntimeMs,
   maximumLiveRuntimes: config.maxLiveRuntimes,
   trust,

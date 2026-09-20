@@ -2,7 +2,7 @@ import { chmod, lstat, mkdtemp as createTemp, readFile, rm, symlink, writeFile }
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { isTailscaleAddress, loadConfig as loadGatewayConfig, resolveBindHost, resolveTronHome } from "./config.js";
+import { isTailscaleAddress, loadConfig as loadGatewayConfig, machineGroupIdentityPaths, resolveBindHost, resolveTronHome } from "./config.js";
 import * as durableJson from "./util/durable-json.js";
 
 const roots: string[] = [];
@@ -37,6 +37,11 @@ describe("gateway configuration", () => {
     expect(resolveBindHost("tailscale", interfaces)).toBe("100.80.0.3");
     expect(resolveBindHost("127.0.0.1", interfaces)).toBe("127.0.0.1");
     expect(resolveTronHome({ TRON_DATA_DIR: "/tmp/tron-home" })).toBe("/tmp/tron-home");
+    expect(machineGroupIdentityPaths({}, "/Users/example")).toEqual({
+      canonical: "/Users/example/.tron/internal/machine-group-id",
+      legacy: "/Users/example/.tron-machine-group-id",
+    });
+    expect(machineGroupIdentityPaths({ TRON_MACHINE_GROUP_PATH: "/tmp/shared-group" }, "/Users/example").canonical).toBe("/tmp/shared-group");
     expect(() => resolveTronHome({ TRON_DATA_DIR: "relative" })).toThrow(/absolute/);
     expect(() => resolveBindHost("tailscale", {})).toThrow(/Tailscale is not connected/);
   });

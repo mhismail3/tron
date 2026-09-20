@@ -486,7 +486,10 @@ class Reinstall:
     def sources(self):
         sources = {'agent': self.source_agent(), 'old-app': self.platform.installed,
                    'browser-config': self.home / '.pi/config/pi-agent-browser-native/config.json',
-                   'machine-group': self.home / '.tron-machine-group-id'}
+                   # Stable and Debug share this exact machine identity. It is
+                   # backed up as its own component so a cutover cannot create
+                   # or retire a second authority by accident.
+                   'machine-group': self.home / '.tron/internal/machine-group-id'}
         for path in sorted((self.home / '.tron').iterdir()):
             if path.name not in self.excluded_state_entries():
                 name = 'tron-' + hashlib.sha256(os.fsencode(path.name)).hexdigest()[:16]

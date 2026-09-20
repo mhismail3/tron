@@ -34,7 +34,8 @@ export interface GatewayConfig {
 
 const GATEWAY_CONFIG_MAX_BYTES = 16 * 1_024;
 const MACHINE_GROUP_MAX_BYTES = 256;
-const MACHINE_GROUP_FILE = ".tron-machine-group-id";
+const LEGACY_MACHINE_GROUP_FILE = ".tron-machine-group-id";
+const MACHINE_GROUP_RELATIVE_PATH = ["internal", "machine-group-id"] as const;
 
 interface StoredGatewayConfig {
   version: 1;
@@ -233,6 +234,28 @@ async function loadOrCreateStoredGatewayConfig(path: string): Promise<StoredGate
   }
 }
 
+export function machineGroupIdentityPaths(
+  environment: NodeJS.ProcessEnv = process.env,
+  userHome = homedir(),
+): { readonly canonical: string; readonly legacy: string } {
+  const override = environment.TRON_MACHINE_GROUP_PATH?.trim();
+  if (override && !isAbsolute(override)) {
+    throw new GatewayError("invalid_request", "TRON_MACHINE_GROUP_PATH must be absolute");
+  }
+  const canonical = override ?? join(userHome, ".tron", ...MACHINE_GROUP_RELATIVE_PATH);
+  return { canonical, legacy: join(userHome, LEGACY_MACHINE_GROUP_FILE) };
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
 async function loadMachineGroupID(environment: NodeJS.ProcessEnv): Promise<string> {
   const injected = environment.TRON_MACHINE_GROUP_ID?.trim();
   if (injected) {
@@ -241,8 +264,23 @@ async function loadMachineGroupID(environment: NodeJS.ProcessEnv): Promise<strin
     }
     return injected;
   }
-  const path = environment.TRON_MACHINE_GROUP_PATH?.trim() || join(homedir(), MACHINE_GROUP_FILE);
-  if (!isAbsolute(path)) throw new GatewayError("invalid_request", "TRON_MACHINE_GROUP_PATH must be absolute");
+  const paths = machineGroupIdentityPaths(environment);
+  // The old file is intentionally not read as a startup fallback. A missing
+  // canonical file with a legacy source requires the explicit operator
+  // migration, otherwise startup would silently create a second identity.
+  if (!environment.TRON_MACHINE_GROUP_PATH?.trim()) {
+    const canonicalPresent = await pathExists(paths.canonical);
+    const legacyPresent = await pathExists(paths.legacy);
+    if (legacyPresent) {
+      throw new GatewayError(
+        "conflict",
+        canonicalPresent
+          ? "Machine group identity migration required: retire ~/.tron-machine-group-id before starting Tron"
+          : "Machine group identity migration required: stage ~/.tron-machine-group-id at ~/.tron/internal/machine-group-id",
+      );
+    }
+  }
+  const path = paths.canonical;
   try {
     await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     const value = await updateJsonLocked<unknown>(

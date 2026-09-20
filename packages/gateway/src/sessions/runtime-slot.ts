@@ -329,6 +329,8 @@ export interface PromptOwnership {
 
 export interface RuntimeSlotDependencies {
   agentDir: string;
+  /** Provider-owned delegated artifacts are admitted only beneath this root. */
+  delegatedArtifactRoot?: string;
   createModelRuntime: () => Promise<ModelRuntime>;
   trust: TrustService;
   blobs: BlobStore;
@@ -3690,7 +3692,7 @@ export class RuntimeSlot {
 
   /** Provider artifact shape policy lives in the delegated-provider module. */
   private extensionArtifactPathAllowed(asyncPath: string): boolean {
-    return delegatedArtifactPathAllowed(asyncPath, this.cwd);
+    return delegatedArtifactPathAllowed(asyncPath, this.cwd, this.dependencies.delegatedArtifactRoot);
   }
 
   private subagentExtensionOrigin(): ExtensionToolOrigin {

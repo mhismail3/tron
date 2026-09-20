@@ -14,6 +14,16 @@ inferred from pairing identity, browser preferences, or the current project.
   immutable content objects, coverage, suppression and cleanup evidence must be
   accessed through that owner, not arbitrary edits. Other namespaces have no
   generic state API. Use the capability's owning interface when one exists.
+- `internal/machine-group-id`: one shared Stable/Debug physical-machine
+  identity. The retired `~/.tron-machine-group-id` is never read on startup;
+  missing or conflicting legacy/canonical files require the explicit operator
+  migration command. The value is opaque identity bytes, not a credential.
+- `internal/subagents/`: the installed delegated provider's existing
+  `PI_SUBAGENTS_TEMP_ROOT` root; its `async-subagent-runs/` child is the only
+  lifecycle subtree admitted by Gateway. Provider project/session artifacts,
+  retention, cancellation and cleanup remain provider-owned.
+- `internal/mac/wizard-state.json`: the Mac wrapper's versioned owner-only wizard
+  progress record. `.onboarded` remains the only completion authority.
 - Pi's `agentDir` remains authoritative for canonical JSONL, settings,
   credentials, installed packages/resources, retries, and compaction. Gateway
   state remains under `<tronHome>/gateway`; existing extension stores stay with
@@ -123,3 +133,17 @@ not create real namespace state.
 
 These are requirements for future owning adapters, not guarantees supplied by an
 unimplemented namespace API or by arbitrary filesystem tools today.
+
+## Explicit internal-layout migration
+
+`src/internal-layout-migration.ts` is an operator-run, fail-closed fixture for
+retiring the machine-group source and other explicitly selected internal files.
+Run `scripts/tron internal-migrate preflight|stage|verify|publish|recover|cleanup`
+only against synthetic or a user-quiesced maintenance fixture. It requires
+absolute paths, owner-only regular files, exact bytes/permissions, protected
+backup and quiescence acknowledgements, and never merges an existing destination.
+Staging leaves a durable marker on interruption. Publication retires the old
+source before exposing the destination; recovery reports ambiguity rather than
+choosing an authority. Gateway startup never invokes this tool or silently
+regenerates identity. The command prepares state only; app replacement, Gateway
+activation and retirement of live paths remain manual operator actions.
