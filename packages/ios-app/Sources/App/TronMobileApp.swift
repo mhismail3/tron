@@ -71,6 +71,10 @@ struct TronMobileApp: App {
         WindowGroup {
             if ProcessInfo.processInfo.arguments.contains("-tron-ask-user-fixture") {
                 HostedAskUserFixtureView()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-session-pagination-fixture") {
+                HostedSessionPaginationFixture()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-automation-fixture") {
+                HostedAutomationFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-dashboard-menu-fixture") {
                 HostedDashboardMenuFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-extension-widgets-fixture") {

@@ -26,6 +26,53 @@ final class SessionSheetPresentationTests: XCTestCase {
         XCTAssertLessThan(SessionHistoryLayout.topPagingBottomPadding, SessionHistoryLayout.regularPagingBottomPadding)
     }
 
+    func testSessionPaginationControlsFitSingleAndPairedActionsAtAccessibilitySizes() {
+        for (more, less) in [(true, false), (true, true), (false, true)] {
+            for size in [DynamicTypeSize.large, .accessibility3] {
+                let content = SessionListExpansionControls(workspaceName: "Example workspace",
+                    canShowLess: less, canShowMore: more, isEnabled: true,
+                    onShowLess: {}, onShowMore: {})
+                    .environment(\.dynamicTypeSize, size)
+                let fitted = UIHostingController(rootView: content)
+                    .sizeThatFits(in: CGSize(width: 280, height: CGFloat.greatestFiniteMagnitude))
+                XCTAssertLessThanOrEqual(fitted.width, 280)
+                XCTAssertEqual(fitted.height, more && less && size.isAccessibilitySize ? 96 : 44, accuracy: 1)
+            }
+        }
+    }
+
+    func testAutomationSummaryCardsFitStandardAndAccessibilitySizes() async throws {
+        let record = try AutomationPresentationFixture.record()
+        let presentation = AutomationSummaryPresentation(record: record, server: "Studio server")
+        for expanded in [false, true] {
+            for largeType in [false, true] {
+                try await withSheet(NavigationStack {
+                    ScrollView {
+                        AutomationSummaryCard(presentation: presentation, expanded: expanded)
+                            .tronGlassSurface(accent: .tronAutomation, tintOpacity: 0.14)
+                            .padding(20)
+                    }
+                    .tronNavigationTitle(expanded ? "Automation" : "Inventory card", accent: .tronAutomation)
+                }
+                .tronPresentation()
+                .environment(\.dynamicTypeSize, largeType ? .accessibility2 : .large)
+                .preferredColorScheme(largeType ? .dark : .light)
+                .presentationDetents([.large])) { controller in
+                    let content = AutomationSummaryCard(presentation: presentation, expanded: expanded)
+                    let proposal = CGSize(width: 320, height: CGFloat.greatestFiniteMagnitude)
+                    let standardHeight = UIHostingController(rootView: content).sizeThatFits(in: proposal).height
+                    let largeHeight = UIHostingController(rootView: content.environment(\.dynamicTypeSize, .accessibility2)).sizeThatFits(in: proposal).height
+                    XCTAssertGreaterThan(standardHeight, expanded ? 120 : 70)
+                    if !expanded { XCTAssertLessThan(standardHeight, 130, "Inventory metadata must remain compact") }
+                    XCTAssertGreaterThan(largeHeight, standardHeight, "Accessibility metrics must stack rather than squeeze horizontally")
+                    let scroll = try XCTUnwrap(self.views(of: UIScrollView.self, in: controller.view).first)
+                    XCTAssertLessThanOrEqual(scroll.contentSize.width, scroll.bounds.width + 1)
+                    self.capture(controller, name: "automation-summary-\(expanded ? "expanded" : "inventory")-\(largeType ? "accessibility-dark" : "light")")
+                }
+            }
+        }
+    }
+
     func testAutomationTimeEditorUsesTimeOnlyPickerAndPreservesDate() async throws {
         for field in [AutomationDateField.once, .intervalAnchor, .localTime] {
             let route = AutomationDateSelection(field: field, component: .time)

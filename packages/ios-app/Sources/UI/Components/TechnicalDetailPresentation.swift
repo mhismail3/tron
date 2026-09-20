@@ -80,9 +80,9 @@ struct TronMetadataTable: View {
     }
 
     private func rowLayout(_ row: TronMetadataTableRow) -> some View {
-        // A qualified title plus a value needs its own line at accessibility
-        // sizes; an icon-led table keeps the standard single row.
-        let stacks = dynamicTypeSize.isAccessibilitySize && row.type != nil
+        // Text-led tables need a separate value line at accessibility sizes,
+        // with or without a JSON type qualifier. Icon-led facts retain their row.
+        let stacks = dynamicTypeSize.isAccessibilitySize && row.icon == nil
         let layout = stacks
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: TronSpacing.md))
             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: TronSpacing.sm))
@@ -117,7 +117,7 @@ struct TronMetadataTable: View {
             Text(row.value)
                 .font(TronTypography.code(size: TronTypography.sizeBody3))
                 .foregroundStyle(Color.tronTextSecondary)
-                .multilineTextAlignment(.trailing)
+                .multilineTextAlignment(stacks ? .leading : .trailing)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         case .preview:

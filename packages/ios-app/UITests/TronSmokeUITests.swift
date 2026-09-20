@@ -215,6 +215,77 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
+    func testSessionPaginationKeepsShowLessBesideShowMoreAndClearOfLogo() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-pagination-fixture"]
+        app.launch()
+        let more = app.buttons["Show more sessions in Example workspace"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5), app.debugDescription)
+        more.tap()
+        let less = app.buttons["Show less sessions in Example workspace"]
+        for _ in 0..<8 where !less.isHittable { app.swipeUp() }
+        XCTAssertTrue(more.isHittable)
+        XCTAssertTrue(less.isHittable)
+        XCTAssertEqual(less.frame.minX - more.frame.maxX, 24, accuracy: 2)
+        XCTAssertEqual(less.frame.minY, more.frame.minY, accuracy: 2)
+        let logo = app.buttons["dashboard.menu"]
+        XCTAssertFalse(less.frame.intersects(logo.frame))
+        keepScreenshot(named: "session-pagination-grouped-at-scroll-end")
+        more.tap()
+        for _ in 0..<8 where !less.isHittable { app.swipeUp() }
+        XCTAssertTrue(less.isHittable)
+        XCTAssertFalse(more.exists)
+        XCTAssertLessThan(less.frame.maxX, logo.frame.minX)
+        less.tap()
+        XCTAssertFalse(less.exists)
+        XCTAssertTrue(more.exists)
+    }
+
+    @MainActor
+    func testAutomationInventorySummaryAndDetailTables() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-automation-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        let card = app.buttons["automation-card.automation-0"]
+        XCTAssertTrue(card.waitForExistence(timeout: 8), app.debugDescription)
+        for fact in ["Daily workspace review", "Draft", "Every 1 day", "Server, Studio server", "Last run", "Updated", "Sep 1, 2026"] {
+            XCTAssertTrue(card.label.contains(fact), "Missing \(fact): \(card.label)")
+        }
+        XCTAssertTrue(app.buttons["automation-card.automation-1"].label.contains("No runs yet"))
+        let status = card.staticTexts["Draft"]
+        let title = card.staticTexts["Daily workspace review"]
+        XCTAssertTrue(status.exists)
+        XCTAssertLessThanOrEqual(status.frame.minY, title.frame.minY + 8, "Status belongs in the top corner, not below the title")
+        XCTAssertEqual(status.frame.maxX, card.frame.maxX - 14, accuracy: 2)
+        XCTAssertLessThan(card.frame.height, 130, "Inline metadata should not recreate the tall divided card")
+        keepScreenshot(named: "automation-inventory-summary-cards")
+        card.tap()
+        let summary = app.otherElements["automation-detail-summary"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(summary.staticTexts["Daily workspace review"].exists, app.debugDescription)
+        let detail = app.scrollViews.containing(.other, identifier: "automation-detail-summary").firstMatch
+        let updated = summary.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Updated")).firstMatch
+        XCTAssertTrue(updated.exists, app.debugDescription)
+        XCTAssertTrue(updated.label.contains("Sep 20, 2026"), "Detail must use the newer record, not the selected catalog summary: \(updated.label)")
+        XCTAssertEqual(detail.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Server,")).count, 1)
+        let promptLabel = "Prompt, Review the workspace and summarize changes since the previous run. Do not modify files."
+        XCTAssertTrue(app.staticTexts[promptLabel].exists, app.debugDescription)
+        XCTAssertFalse(app.buttons[promptLabel].exists)
+        keepScreenshot(named: "automation-detail-expanded-summary-and-tables")
+        let recent = app.staticTexts["RECENT RUNS"]
+        for _ in 0..<6 where !recent.isHittable { app.swipeUp() }
+        XCTAssertTrue(recent.isHittable, app.debugDescription)
+        let delete = app.buttons["Delete"]
+        XCTAssertTrue(delete.isHittable)
+        XCTAssertLessThan(delete.frame.maxY, recent.frame.minY)
+        keepScreenshot(named: "automation-detail-controls-before-history")
+        let run = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Succeeded")).firstMatch
+        XCTAssertTrue(run.isHittable, app.debugDescription)
+        run.tap()
+        XCTAssertTrue(app.staticTexts["Run Details"].waitForExistence(timeout: 5), app.debugDescription)
+    }
+
+    @MainActor
     func testAskUserOtherEditorExpandsMediumSheetAndOpensKeyboard() {
         let app = launchAskUser()
         waitForAskUserForm(in: app)

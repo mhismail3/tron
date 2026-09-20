@@ -28,7 +28,6 @@ struct AutomationDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var record: GatewayAutomationRecord?
     @State private var runs: [GatewayAutomationRunSummary] = []
     @State private var selectedRun: GatewayAutomationRun?
@@ -85,7 +84,7 @@ struct AutomationDetailView: View {
                 .padding(.bottom, 32)
             }
             .tronScrollEdgeChrome()
-            .tronNavigationTitle(selection.summary.name, accent: .tronAutomation)
+            .tronNavigationTitle("Automation", accent: .tronAutomation)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
@@ -145,16 +144,22 @@ struct AutomationDetailView: View {
     }
 
     @ViewBuilder private func detail(_ record: GatewayAutomationRecord) -> some View {
+        let summary = AutomationSummaryPresentation(
+            record: record,
+            server: model.profiles.profiles.first(where: { $0.id == selection.profileID })?.label ?? "Unavailable server"
+        )
+        AutomationSummaryCard(presentation: summary, expanded: true)
+            .tronGlassSurface(accent: summary.needsAttention ? .tronError : .tronAutomation, tintOpacity: 0.14)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("automation-detail-summary")
         if let highlightedOccurrence = selection.highlightedOccurrence {
-            TronInfoCard(
-                icon: "calendar.badge.clock",
-                text: "Selected occurrence: \(AutomationDateFormatting.date(highlightedOccurrence))",
-                accent: .tronAutomation,
-                usesSemanticAccent: true
-            )
+            TronMetadataTable(title: "Occurrence", accent: .tronAutomation, rows: [
+                TronMetadataTableRow(id: "selected", title: "Selected",
+                                     value: AutomationDateFormatting.date(highlightedOccurrence)),
+            ])
         }
-        if let description = record.description {
-            TronInfoCard(icon: "text.alignleft", text: description, accent: .tronSlate)
+        ForEach(AutomationDetailMetadata.sections(record: record, targetLabel: targetLabel(record.target))) { section in
+            TronMetadataTable(title: section.title, accent: .tronAutomation, rows: section.rows)
         }
         if !ownsMutationGateway {
             Button {
@@ -166,51 +171,18 @@ struct AutomationDetailView: View {
             .buttonStyle(TronActionButtonStyle(role: .standard))
             .accessibilityHint("Selects this Gateway before allowing changes")
         }
-        section("Action", icon: record.action.typedKind?.icon ?? "bolt") {
-            VStack(alignment: .leading, spacing: TronSpacing.md) {
-                Text(record.action.content.isEmpty ? "No action content returned." : record.action.content)
-                    .font(TronTypography.body)
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let invocation = record.action.resourceInvocation {
-                    Label("\(invocation.source.rawValue.capitalized): \(invocation.name)", systemImage: "sparkles")
-                        .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(Color.tronAutomation)
-                }
-            }
-            .padding(14)
-        }
-        section("Schedule", icon: "calendar") {
-            info("Status", record.currentRun?.state.label ?? record.activation.label)
-            info("Runs", record.trigger.summary)
-            info("Series", record.trigger.kind == "once" ? "One time" : "Repeating")
-            info("Timezone", record.trigger.timezone ?? TimeZone.current.identifier)
-            info("After downtime", record.misfirePolicy == "latest" ? "Run latest missed occurrence" : "Skip missed occurrences")
-            info("While running", record.overlapPolicy == "queueLatest" ? "Queue latest occurrence" : "Skip overlapping occurrences")
-            info("Deadline", "\(record.executionDeadlineSeconds / 60) minutes")
-            if let next = record.nextOccurrenceAt { info("Next", AutomationDateFormatting.date(next)) }
-        }
-        section("Target", icon: "bubble.left") {
-            info("Session", targetLabel(record.target))
-            if let gateway = model.profiles.profiles.first(where: { $0.id == selection.profileID })?.label {
-                info("Gateway", gateway)
-            }
-            if record.activation == .blocked, let reason = record.blockedReason {
-                Text(reason).font(TronTypography.bodySM).foregroundStyle(Color.tronError).padding(14)
-            }
-        }
-        if let run = record.currentRun { currentRun(run, record: record) }
-        section("Recent Runs", icon: "clock.arrow.circlepath") {
-            if runs.isEmpty {
-                TronSettingsRow(
-                    icon: "clock.arrow.circlepath",
-                    title: "No runs yet",
-                    subtitle: "Scheduled and manual runs will appear here.",
-                    accent: .tronAutomation
-                )
-            } else {
-                VStack(spacing: 0) {
+        actions(record)
+        VStack(alignment: .leading, spacing: TronSpacing.sm) {
+            TronTechnicalSectionLabel("Recent Runs")
+            VStack(spacing: 0) {
+                if runs.isEmpty {
+                    TronSettingsRow(
+                        icon: "clock.arrow.circlepath",
+                        title: "No runs yet",
+                        subtitle: "Scheduled and manual runs will appear here.",
+                        accent: .tronAutomation
+                    )
+                } else {
                     ForEach(Array(runs.enumerated()), id: \.element.id) { index, run in
                         Button { selectRun(run) } label: { runSummary(run) }
                             .buttonStyle(.plain)
@@ -218,42 +190,16 @@ struct AutomationDetailView: View {
                     }
                 }
             }
-        }
-        section("About", icon: "info.circle") {
-            info("Created", AutomationDateFormatting.date(record.createdAt))
-            info("Updated", AutomationDateFormatting.date(record.updatedAt))
-            info("Created by", provenanceLabel(record.provenance))
-            info("Revision", "\(record.revision)")
-        }
-        actions(record)
-    }
-
-    private func provenanceLabel(_ provenance: GatewayAutomationProvenance) -> String {
-        switch provenance.kind {
-        case "mobile": return "iPhone"
-        case "local": return "Mac"
-        case "assistant": return "Tron assistant"
-        default: return provenance.kind
-        }
-    }
-
-    private func currentRun(_ run: GatewayAutomationRun, record: GatewayAutomationRecord) -> some View {
-        section("Current run", icon: "play.circle") {
-            info("State", run.state.label)
-            info("Scheduled", AutomationDateFormatting.date(run.scheduledFor))
-            if let started = run.startedAt { info("Started", AutomationDateFormatting.date(started)) }
-            Button("Cancel run") { confirmation = .cancel(record, run) }
-                .buttonStyle(TronActionButtonStyle(role: .standard))
-                .disabled(!canPerformAction)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 14)
+            .tronGlassSurface(accent: .tronAutomation, tintOpacity: 0.08)
         }
     }
     private func actions(_ record: GatewayAutomationRecord) -> some View {
         VStack(alignment: .leading, spacing: TronSpacing.md) {
-            Text("Controls")
-                .font(TronTypography.sheetSectionHeader)
-                .foregroundStyle(Color.tronTextPrimary)
+            TronTechnicalSectionLabel("Controls")
+            if let run = record.currentRun {
+                Button("Cancel run") { confirmation = .cancel(record, run) }
+                    .buttonStyle(TronActionButtonStyle(role: .standard))
+            }
             HStack(spacing: TronSpacing.md) {
                 Button("Run Now") { confirmation = .run(record) }
                     .buttonStyle(TronActionButtonStyle(role: .standard))
@@ -277,41 +223,6 @@ struct AutomationDetailView: View {
             }
         }
         .disabled(!canPerformAction)
-    }
-    private func section(_ title: String, icon: String, @ViewBuilder content: () -> some View) -> some View { TronSettingsGroup(title, accent: .tronAutomation) { content() } }
-    @ViewBuilder
-    private func info(_ label: String, _ value: String) -> some View {
-        let stacks = dynamicTypeSize.isAccessibilitySize || value.count > 48
-        Group {
-            if stacks {
-                VStack(alignment: .leading, spacing: TronSpacing.xs) {
-                    infoLabel(label)
-                    infoValue(value, alignment: .leading)
-                }
-            } else {
-                HStack(alignment: .firstTextBaseline, spacing: TronSpacing.md) {
-                    infoLabel(label)
-                    Spacer(minLength: TronSpacing.md)
-                    infoValue(value, alignment: .trailing)
-                }
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-    }
-
-    private func infoLabel(_ value: String) -> some View {
-        Text(value)
-            .font(TronTypography.bodySM)
-            .foregroundStyle(Color.tronTextSecondary)
-    }
-
-    private func infoValue(_ value: String, alignment: TextAlignment) -> some View {
-        Text(value)
-            .font(TronTypography.bodySM)
-            .foregroundStyle(Color.tronTextPrimary)
-            .multilineTextAlignment(alignment)
-            .fixedSize(horizontal: false, vertical: true)
     }
     private func runSummary(_ run: GatewayAutomationRunSummary) -> some View {
         HStack(spacing: TronSpacing.xl) {
