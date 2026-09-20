@@ -9,6 +9,8 @@ import type { KnowledgeStore } from "./knowledge-store.js";
 import { isConnectorCredentialReference, type ConnectorCredentialStore } from "./connector-credentials.js";
 import { currentInvocationContext } from "../extensions/owner-attribution.js";
 import { jevInputDigest, jevProfileVersion, JEV_MODEL } from "./jev-assessment.js";
+import type { ConnectionOwner } from "../integrations/connection-owner.js";
+import type { ConnectionInstance } from "../integrations/connection-contract.js";
 
 const MAX_PAGE = 50;
 const MAX_ITEMS = 200;
@@ -34,6 +36,8 @@ export interface KnowledgeConnectorOptions {
   xPricing?: { accountId: string; costCentsPerAttempt: number; maxAttempts: number };
   /** Optional bounded Jev decision adapter; absence fails intake closed. */
   assessment?: SourceAssessmentModel;
+  /** Generic account owner. When present, connector configuration requires a connectionId. */
+  connections?: ConnectionOwner;
 }
 
 interface PendingItem { id: string; title: string; url: string; excerpt?: string; annotation?: string; publishedAt?: string; collectionId?: string; apiPayload?: string }
@@ -125,7 +129,7 @@ function stateStatus(state: KnowledgeConnectorState | undefined, connector: Conn
   // current authority so an old unconfigured marker cannot contradict a valid
   // enabled configuration. Disabled or incomplete connectors remain honest.
   const health = !configured || !value.enabled ? "unconfigured" : (value.health === "unconfigured" ? "ready" : value.health);
-  return { connector, configured, enabled: value.enabled, health, ...(value.accountId ? { accountId: value.accountId } : {}), ...(value.scope ? { scope: value.scope } : {}), ...(value.lastRunAt ? { lastRunAt: value.lastRunAt } : {}), ...(value.lastError ? { lastError: value.lastError } : {}), remaining: value.remaining, pending: value.pending.length, paidBudgetCents: value.paidBudgetCents, allowWrites: value.allowWrites, recurringApproved: value.recurringApproved, paidAccessApproved: value.paidAccessApproved, ...(value.assessmentPilot ? { assessmentPilot: value.assessmentPilot } : {}), ...(value.assessmentApprovals ? { assessmentApprovals: value.assessmentApprovals } : {}) };
+  return { connector, ...(value.connectionId ? { connectionId: value.connectionId } : {}), configured, enabled: value.enabled, health, ...(value.accountId ? { accountId: value.accountId } : {}), ...(value.scope ? { scope: value.scope } : {}), ...(value.lastRunAt ? { lastRunAt: value.lastRunAt } : {}), ...(value.lastError ? { lastError: value.lastError } : {}), remaining: value.remaining, pending: value.pending.length, paidBudgetCents: value.paidBudgetCents, allowWrites: value.allowWrites, recurringApproved: value.recurringApproved, paidAccessApproved: value.paidAccessApproved, ...(value.assessmentPilot ? { assessmentPilot: value.assessmentPilot } : {}), ...(value.assessmentApprovals ? { assessmentApprovals: value.assessmentApprovals } : {}) };
 }
 function parseCollection(item: RaindropItemDTO): string | undefined {
   if (!item.collection || typeof item.collection !== "object") return undefined;
@@ -180,11 +184,11 @@ export class KnowledgeConnectorExtension {
   private readonly http: ConnectorHTTP;
   private readonly sleep: (milliseconds: number) => Promise<void>;
   private readonly now: () => string;
-  private readonly lanes = new Map<Connector, AsyncMutex>();
+  private readonly lanes = new Map<string, AsyncMutex>();
   constructor(private readonly store: KnowledgeStore, private readonly options: KnowledgeConnectorOptions) {
     this.http = options.http ?? defaultHTTP; this.sleep = options.sleep ?? (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))); this.now = options.now ?? (() => new Date().toISOString());
   }
-  private lane(connector: Connector): AsyncMutex { const existing = this.lanes.get(connector); if (existing) return existing; const created = new AsyncMutex(); this.lanes.set(connector, created); return created; }
+  private lane(connector: Connector, connectionId?: string): AsyncMutex { const key = connectionId ? `${connector}:${connectionId}` : connector; const existing = this.lanes.get(key); if (existing) return existing; const created = new AsyncMutex(); this.lanes.set(key, created); return created; }
 
   private assertCredentialNamespace(connector: Connector, credentialRef: string | undefined): void {
     if (credentialRef !== undefined && !isConnectorCredentialReference(credentialRef, connector)) {
@@ -211,13 +215,28 @@ export class KnowledgeConnectorExtension {
     });
   }
 
+  private async connectionFor(connectionId: string | undefined, connector: Connector, required: boolean): Promise<ConnectionInstance | undefined> {
+    if (!this.options.connections) return undefined;
+    if (!connectionId) { if (required) throw new GatewayError("invalid_request", "Connector operations require a connectionId"); return undefined; }
+    const instance = await this.options.connections.resolveInstance(connectionId);
+    if (instance.definitionId !== `knowledge.${connector}` || instance.health === "disconnected") throw new GatewayError("conflict", "Connection instance is unavailable for this connector");
+    return instance;
+  }
+
+  private async withConnection<T>(connector: Connector, connectionId: string | undefined, task: () => Promise<T>): Promise<T> {
+    await this.connectionFor(connectionId, connector, Boolean(this.options.connections));
+    return this.store.withConnectorContext(connectionId, task);
+  }
+
   async invoke(action: KnowledgeAction, signal?: AbortSignal): Promise<unknown> {
-    if (action.operation === "knowledge.raindrop.read") return this.lane("raindrop").run(() => this.readRaindrop(action.request, signal));
-    if (action.operation === "knowledge.connector.configure") return this.lane(action.request.connector).run(() => this.configure(action.request));
-    if (action.operation === "knowledge.connector.assessment.approve") return this.lane("raindrop").run(() => this.approveAssessment(action.request));
-    if (action.operation === "knowledge.connector.status") return stateStatus(await this.store.connectorState(action.request.connector), action.request.connector);
-    if (action.operation === "knowledge.connector.run") return this.lane(action.request.connector).run(() => this.run(action.request, signal));
-    if (action.operation === "knowledge.raindrop.intake") return this.lane("raindrop").run(() => this.intake(action.request, signal));
+    const request = action.request as { connectionId?: string; connector?: Connector };
+    const connector = request.connector ?? "raindrop";
+    if (action.operation === "knowledge.raindrop.read") return this.lane("raindrop", request.connectionId).run(() => this.withConnection("raindrop", request.connectionId, () => this.readRaindrop(action.request, signal)));
+    if (action.operation === "knowledge.connector.configure") return this.lane(action.request.connector, request.connectionId).run(() => this.withConnection(action.request.connector, request.connectionId, () => this.configure(action.request)));
+    if (action.operation === "knowledge.connector.assessment.approve") return this.lane("raindrop", request.connectionId).run(() => this.withConnection("raindrop", request.connectionId, () => this.approveAssessment(action.request)));
+    if (action.operation === "knowledge.connector.status") return this.withConnection(action.request.connector, request.connectionId, async () => stateStatus(await this.store.connectorState(action.request.connector), action.request.connector));
+    if (action.operation === "knowledge.connector.run") return this.lane(action.request.connector, request.connectionId).run(() => this.withConnection(action.request.connector, request.connectionId, () => this.run(action.request, signal)));
+    if (action.operation === "knowledge.raindrop.intake") return this.lane("raindrop", request.connectionId).run(() => this.withConnection("raindrop", request.connectionId, () => this.intake(action.request, signal)));
     throw bad("Unsupported knowledge connector operation");
   }
 
@@ -327,6 +346,8 @@ export class KnowledgeConnectorExtension {
   }
 
   private async configure(request: KnowledgeConnectorConfigurationRequest): Promise<KnowledgeConnectorStatus> {
+    const authority = await this.connectionFor(request.connectionId, request.connector, Boolean(this.options.connections));
+    if (this.options.connections && (request.accountId !== undefined || request.scope !== undefined || request.credentialRef !== undefined)) throw bad("Account, scope, and credentials are owned by ConnectionOwner; complete setup before connector configuration");
     if (request.accountId !== undefined && (request.accountId.length < 1 || request.accountId.length > 256 || /[\r\n]/.test(request.accountId))) throw bad("Connector account is invalid");
     if (request.scope !== undefined && (request.scope.length < 1 || request.scope.length > 256 || /[\r\n]/.test(request.scope))) throw bad("Connector scope is invalid");
     if (request.destination !== undefined && (request.destination.length < 1 || request.destination.length > 256 || /[\r\n]/.test(request.destination))) throw bad("Connector destination is invalid");
@@ -334,7 +355,7 @@ export class KnowledgeConnectorExtension {
     if (request.paidBudgetCents !== undefined && (!Number.isSafeInteger(request.paidBudgetCents) || request.paidBudgetCents < 0 || request.paidBudgetCents > 1_000_000)) throw bad("Connector paid budget is invalid");
     const current = await this.store.connectorState(request.connector);
     if (request.credentialRef === undefined) this.assertCredentialNamespace(request.connector, current?.credentialRef);
-    const base = current ?? initial(request.connector);
+    const base = current ?? (authority ? { ...initial(request.connector), enabled: authority.policy.enabled, accountId: authority.providerAccountId, ...(authority.scope ? { scope: authority.scope } : {}), credentialRef: authority.credentialRef, allowWrites: authority.policy.allowWrites, paidAccessApproved: authority.policy.paidAccessApproved, paidBudgetCents: authority.policy.paidBudgetCents, recurringApproved: authority.policy.recurringApproved } : initial(request.connector));
     const identityChanged = Boolean(current && ((request.accountId !== undefined && request.accountId !== current.accountId) || (request.scope !== undefined && request.scope !== current.scope) || (request.credentialRef !== undefined && request.credentialRef !== current.credentialRef)));
     if (identityChanged && (current?.pendingRemote || current?.assessmentPilot || (current?.assessmentApprovals?.length ?? 0) > 0 || Object.keys(current?.assessmentAttempts ?? {}).length > 0)) throw new GatewayError("conflict", "Connector identity cannot change while an approved pilot or remote effect is active");
     const nextAccountId = request.accountId ?? current?.accountId;
@@ -352,6 +373,10 @@ export class KnowledgeConnectorExtension {
       health: request.enabled && Boolean(nextCredentialRef && nextAccountId && nextScope) ? "ready" : "unconfigured",
     } : { ...base, enabled: request.enabled, ...(request.accountId !== undefined ? { accountId: request.accountId } : {}), ...(request.scope !== undefined ? { scope: request.scope } : {}), ...(request.destination !== undefined ? { destination: request.destination } : {}), ...(request.credentialRef !== undefined ? { credentialRef: request.credentialRef } : {}), allowWrites: request.allowWrites ?? current?.allowWrites ?? false, paidAccessApproved: request.paidAccessApproved ?? current?.paidAccessApproved ?? false, paidBudgetCents: request.paidBudgetCents ?? current?.paidBudgetCents ?? 0, recurringApproved: request.recurringApproved ?? current?.recurringApproved ?? false, health: request.enabled && (request.credentialRef ?? current?.credentialRef) && (request.accountId ?? current?.accountId) && (request.scope ?? current?.scope) ? "ready" : "unconfigured" };
     delete next.lastError;
+    if (this.options.connections) {
+      const policy = authority!.policy;
+      await this.options.connections.execute({ kind: "policy.update", commandId: command(request.commandId, "connection-policy"), instanceId: authority!.id, policy: { enabled: request.enabled, allowWrites: request.allowWrites ?? policy.allowWrites, paidAccessApproved: request.paidAccessApproved ?? policy.paidAccessApproved, paidBudgetCents: request.paidBudgetCents ?? policy.paidBudgetCents, recurringApproved: request.recurringApproved ?? policy.recurringApproved } });
+    }
     const saved = await this.store.updateConnectorState(request.commandId, request.connector, () => next);
     return stateStatus(saved, request.connector);
   }

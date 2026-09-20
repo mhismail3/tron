@@ -59,6 +59,8 @@ import { ProviderUsageOwner, providerUsageSupported, PROVIDER_USAGE_CAPABILITY }
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStoreError } from "../knowledge/knowledge-store.js";
 import type { KnowledgeAction } from "../knowledge/knowledge-contract.js";
+import type { ConnectionOwner } from "../integrations/connection-owner.js";
+import type { ConnectionAction } from "../integrations/connection-contract.js";
 
 const KNOWLEDGE_OBJECT_CHUNK_BYTES = 512_000;
 const KNOWLEDGE_OBJECT_TOTAL_BYTES = 8_000_000;
@@ -158,6 +160,7 @@ const restartDrainMethods = new Set([
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
   "automation.status", "automation.list", "automation.get", "automation.schedule.preview", "automation.timeline.list", "automation.run.list", "automation.run.get", "automation.run.cancel", "automation.run.resolve",
   "knowledge.status", "knowledge.observation.coverage", "knowledge.list", "knowledge.read", "knowledge.object.read", "knowledge.search", "knowledge.recall",
+  "connections.list",
 ]);
 
 export interface ClientContext {
@@ -216,6 +219,8 @@ export interface GatewayServiceDependencies {
   workRegistry?: GatewayWorkRegistry;
   automations?: AutomationService;
   knowledge?: KnowledgeService;
+  /** Generic account-envelope owner. Provider progress/evidence remains with its adapter. */
+  connections?: ConnectionOwner;
   /** Bounded account-usage owner; injectable for fixture transport tests. */
   providerUsage?: ProviderUsageOwner;
 }
@@ -331,6 +336,7 @@ export class GatewayService {
         ...(this.dependencies.notifications ? ["push-notifications.v1", "notification-inbox.v1"] : []),
         ...(this.dependencies.automations?.status().ready ? [AUTOMATIONS_CAPABILITY, AUTOMATIONS_TIMELINE_CAPABILITY] : []),
         ...(this.dependencies.knowledge ? ["knowledge.v1", "knowledge-global-observation.v1", "knowledge-coverage-dismiss.v1", "knowledge-coverage-filter.v1"] : []),
+        ...(this.dependencies.connections ? ["connections.v1"] : []),
       ],
     };
   }
@@ -352,9 +358,15 @@ export class GatewayService {
       case "knowledge.recall":
       case "knowledge.connector.status":
       case "knowledge.raindrop.read": {
+
         const knowledge = this.requireKnowledge();
         const result = await knowledge.invoke({ operation: method, request: params } as KnowledgeAction);
         return method === "knowledge.object.read" ? projectKnowledgeObjectChunk(result) : safeJson(result);
+      }
+      case "connections.list": {
+        if (!this.dependencies.connections) throw new GatewayError("unsupported", "Connection management is unavailable");
+        if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "connections.list accepts no parameters");
+        return safeJson(await this.dependencies.connections.invoke({ operation: method, request: {} } as ConnectionAction));
       }
       case "knowledge.config":
       case "knowledge.observation.dismiss":
@@ -375,6 +387,15 @@ export class GatewayService {
       case "knowledge.import.run": {
         const knowledge = this.requireKnowledge();
         return this.mutation(client, method, params, async () => safeJson(await knowledge.invoke({ operation: method, request: params } as KnowledgeAction)));
+      }
+      case "connections.setup.begin":
+      case "connections.setup.complete":
+      case "connections.setup.cancel":
+      case "connections.policy.update":
+      case "connections.disconnect": {
+        const connections = this.dependencies.connections;
+        if (!connections) throw new GatewayError("unsupported", "Connection management is unavailable");
+        return this.mutation(client, method, params, async () => safeJson(await connections.invoke({ operation: method, request: params } as ConnectionAction)));
       }
       case "system.logs":
         return safeJson({ records: this.dependencies.logger.recent(integer(params.limit ?? 200, "limit", 1, 1_000)) });

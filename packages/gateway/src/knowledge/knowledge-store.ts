@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { constants } from "node:fs";
 import { lstat, mkdir, open, rename } from "node:fs/promises";
 import { join, dirname } from "node:path";
@@ -21,6 +22,7 @@ import { isGatewayTimestamp } from "../util/timestamp.js";
 import { KnowledgeCatalog, type KnowledgeTable } from "./knowledge-catalog.js";
 import type { SQLInputValue } from "node:sqlite";
 import { jsonNodeCount } from "../protocol/json-budget.js";
+import type { ConnectionInstance } from "../integrations/connection-contract.js";
 
 const STATE_MAX_BYTES = 4 * 1_048_576;
 // One-time rescue also admits legacy states that outgrew their old read ceiling.
@@ -83,7 +85,7 @@ interface LegacyKnowledgeState {
   receipts: Record<string, StoredReceipt>;
   config: KnowledgeConfig;
   /** Connector checkpoints and pending IDs are canonical operational state; secrets are never stored here. */
-  connectors?: Partial<Record<"raindrop" | "x", KnowledgeConnectorState>>;
+  connectors?: Record<string, KnowledgeConnectorState>;
 }
 
 interface KnowledgeState {
@@ -101,7 +103,7 @@ interface KnowledgeState {
   imports: KnowledgeTable<KnowledgeImportCheckpoint>;
   receipts: KnowledgeTable<StoredReceipt>;
   config: KnowledgeConfig;
-  connectors?: Partial<Record<"raindrop" | "x", KnowledgeConnectorState>>;
+  connectors?: Record<string, KnowledgeConnectorState>;
 }
 type CatalogControl = Pick<KnowledgeState, "schemaVersion" | "stateRevision" | "catalogID" | "config" | "connectors">;
 
@@ -215,7 +217,10 @@ function validateCoverage(value: unknown): asserts value is ObservationCoverage 
 function validateConnectorState(value: unknown, connector: "raindrop" | "x"): asserts value is KnowledgeConnectorState {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new KnowledgeStoreError("invalid", "Invalid connector state");
   const state = value as Record<string, unknown>;
-  if (state.connector !== connector || typeof state.enabled !== "boolean" || typeof state.allowWrites !== "boolean" || typeof state.paidAccessApproved !== "boolean" || !Number.isSafeInteger(state.paidBudgetCents) || (state.paidBudgetCents as number) < 0 || (state.paidBudgetCents as number) > 1_000_000 || typeof state.recurringApproved !== "boolean" || !Array.isArray(state.pending) || !Array.isArray(state.capturedIds) || !["unconfigured", "ready", "running", "partial", "rate-limited", "auth-error", "error"].includes(state.health as string) || !Number.isSafeInteger(state.remaining) || (state.remaining as number) < 0 || state.pending.length > 500 || state.capturedIds.length > 2_000) throw new KnowledgeStoreError("invalid", "Invalid connector state");
+  if (state.connectionId !== undefined && (typeof state.connectionId !== "string" || !/^[A-Za-z0-9._:-]{1,160}$/.test(state.connectionId))) throw new KnowledgeStoreError("invalid", "Invalid connector connection ID");
+  const genericEnvelopePresent = ["enabled", "allowWrites", "paidAccessApproved", "paidBudgetCents", "recurringApproved"].every(key => state[key] !== undefined);
+  if (!genericEnvelopePresent && state.connectionId === undefined) throw new KnowledgeStoreError("invalid", "Connector state is missing its connection envelope");
+  if (state.connector !== connector || !Array.isArray(state.pending) || !Array.isArray(state.capturedIds) || !["unconfigured", "ready", "running", "partial", "rate-limited", "auth-error", "error"].includes(state.health as string) || !Number.isSafeInteger(state.remaining) || (state.remaining as number) < 0 || state.pending.length > 500 || state.capturedIds.length > 2_000 || (genericEnvelopePresent && (typeof state.enabled !== "boolean" || typeof state.allowWrites !== "boolean" || typeof state.paidAccessApproved !== "boolean" || !Number.isSafeInteger(state.paidBudgetCents) || (state.paidBudgetCents as number) < 0 || (state.paidBudgetCents as number) > 1_000_000 || typeof state.recurringApproved !== "boolean"))) throw new KnowledgeStoreError("invalid", "Invalid connector state");
   for (const item of state.pending) {
     if (!item || typeof item !== "object" || typeof (item as Record<string, unknown>).id !== "string" || typeof (item as Record<string, unknown>).title !== "string" || typeof (item as Record<string, unknown>).url !== "string" || ((item as Record<string, unknown>).apiPayload !== undefined && (typeof (item as Record<string, unknown>).apiPayload !== "string" || ((item as Record<string, unknown>).apiPayload as string).length > 100_000)) || ((item as Record<string, unknown>).metadataComplete !== undefined && typeof (item as Record<string, unknown>).metadataComplete !== "boolean")) throw new KnowledgeStoreError("invalid", "Invalid connector pending item");
   }
@@ -286,8 +291,12 @@ function validateState(value: unknown): LegacyKnowledgeState {
   try { validateKnowledgeConfig(state.config); } catch (error) { throw new KnowledgeStoreError("invalid", error instanceof Error ? error.message : "Invalid knowledge config"); }
   if (state.connectors !== undefined) {
     if (!state.connectors || typeof state.connectors !== "object" || Array.isArray(state.connectors)) throw new KnowledgeStoreError("invalid", "Invalid connector map");
-    const connectors = state.connectors as Partial<Record<"raindrop" | "x", unknown>>;
-    for (const connector of ["raindrop", "x"] as const) if (connectors[connector] !== undefined) validateConnectorState(connectors[connector], connector);
+    const connectors = state.connectors as Record<string, unknown>;
+    for (const [key, value] of Object.entries(connectors)) {
+      if (!/^[A-Za-z0-9._:-]{1,160}$/.test(key)) throw new KnowledgeStoreError("invalid", "Invalid connector state key");
+      if (value !== undefined) validateConnectorState(value, (value as Record<string, unknown>)?.connector as "raindrop" | "x");
+      if ((value as unknown as Record<string, unknown>)?.connectionId !== undefined && (value as unknown as Record<string, unknown>).connectionId !== key) throw new KnowledgeStoreError("invalid", "Connector state connection ID does not match its key");
+    }
   }
   return value as LegacyKnowledgeState;
 }
@@ -368,10 +377,13 @@ async function readSecureBytes(path: string, maximumBytes: number): Promise<Uint
 
 /** Canonical owner: immutable record/object files are data; the catalog is the
  * transactional authority for heads, coverage, suppression and receipts. */
+export type KnowledgeConnectorEnvelopeResolver = (connectionId: string) => Promise<Pick<ConnectionInstance, "providerAccountId" | "scope" | "credentialRef" | "policy"> | undefined>;
+
 export class KnowledgeStore {
   private static readonly workspaceLocks = new WeakMap<TronWorkspace, AsyncMutex>();
   private readonly mutex: AsyncMutex;
-  constructor(private readonly workspace: TronWorkspace, private readonly onChanged?: () => void) {
+  private readonly connectorContext = new AsyncLocalStorage<string | undefined>();
+  constructor(private readonly workspace: TronWorkspace, private readonly onChanged?: () => void, private readonly connectorEnvelope?: KnowledgeConnectorEnvelopeResolver) {
     this.mutex = KnowledgeStore.workspaceLocks.get(workspace) ?? new AsyncMutex(); KnowledgeStore.workspaceLocks.set(workspace, this.mutex);
   }
 
@@ -440,7 +452,7 @@ export class KnowledgeStore {
       const control = catalog.control<CatalogControl>();
       if (control.catalogID !== manifest.catalogID || control.schemaVersion !== KNOWLEDGE_SCHEMA_VERSION || !Number.isSafeInteger(control.stateRevision) || control.stateRevision < 0) throw new KnowledgeStoreError("invalid", "Invalid Knowledge catalog control");
       validateKnowledgeConfig(control.config);
-      for (const connector of ["raindrop", "x"] as const) if (control.connectors?.[connector]) validateConnectorState(control.connectors[connector], connector);
+      for (const [key, value] of Object.entries(control.connectors ?? {})) { if (!/^[A-Za-z0-9._:-]{1,160}$/.test(key)) throw new KnowledgeStoreError("invalid", "Invalid connector state key"); if (value) validateConnectorState(value, value.connector); }
       return { state: catalogState(control, catalog), present: true };
     } catch (error) {
       catalog?.close();
@@ -679,10 +691,23 @@ export class KnowledgeStore {
     return this.mutate("knowledge.config", commandId, config, async state => { if (config.revision !== state.config.revision) throw conflict("Knowledge configuration revision is stale"); const next = structuredClone(config); next.revision += 1; state.config = next; return next; });
   }
 
-  async connectorState(connector: "raindrop" | "x"): Promise<KnowledgeConnectorState | undefined> {
+  async withConnectorContext<T>(connectionId: string | undefined, task: () => Promise<T>): Promise<T> {
+    return this.connectorContext.run(connectionId, task);
+  }
+
+  async connectorState(connector: "raindrop" | "x", connectionId?: string): Promise<KnowledgeConnectorState | undefined> {
     return this.inspect(async state => {
-      const value = state.connectors?.[connector];
-      return value ? structuredClone(value) : undefined;
+      const contextConnectionId = this.connectorContext.getStore();
+      const key = connectionId ?? contextConnectionId;
+      if (this.connectorEnvelope && !key) throw conflict("Connector state requires an admitted connection instance");
+      const stateKey = key ?? connector;
+      const value = state.connectors?.[stateKey];
+      if (!value) return undefined;
+      const next = structuredClone(value);
+      const envelope = this.connectorEnvelope && key ? await this.connectorEnvelope(key) : undefined;
+      if (this.connectorEnvelope && !envelope) throw conflict("Connector connection authority is unavailable");
+      if (envelope) Object.assign(next, { enabled: envelope.policy.enabled, accountId: envelope.providerAccountId, ...(envelope.scope ? { scope: envelope.scope } : {}), credentialRef: envelope.credentialRef, allowWrites: envelope.policy.allowWrites, paidAccessApproved: envelope.policy.paidAccessApproved, paidBudgetCents: envelope.policy.paidBudgetCents, recurringApproved: envelope.policy.recurringApproved });
+      return next;
     });
   }
 
@@ -705,11 +730,27 @@ export class KnowledgeStore {
 
   /** Connector operational state shares the knowledge owner’s serialized state;
    * this update never accepts or persists a credential value. */
-  async updateConnectorState(commandId: string, connector: "raindrop" | "x", update: (current: KnowledgeConnectorState | undefined) => KnowledgeConnectorState, payload: unknown = { connector }): Promise<KnowledgeConnectorState> {
-    return this.mutate("knowledge.connector.state", commandId, payload, async state => {
-      const next = update(state.connectors?.[connector] ? structuredClone(state.connectors[connector]) : undefined);
+  async updateConnectorState(commandId: string, connector: "raindrop" | "x", update: (current: KnowledgeConnectorState | undefined) => KnowledgeConnectorState, payload: unknown = { connector }, connectionId?: string): Promise<KnowledgeConnectorState> {
+    const contextConnectionId = this.connectorContext.getStore();
+    const key = connectionId ?? contextConnectionId;
+    if (this.connectorEnvelope && !key) throw conflict("Connector state requires an admitted connection instance");
+    const stateKey = key ?? connector;
+    // Command receipts are scoped to the connection instance. Reusing a
+    // command ID for another account must never replay this account's progress
+    // or paid reservation.
+    const receiptOperation = `knowledge.connector.state:${stateKey}`;
+    const receiptPayload = { ...(payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : { payload }), connectionId: stateKey };
+    return this.mutate(receiptOperation, commandId, receiptPayload, async state => {
+      const current = state.connectors?.[stateKey] ? structuredClone(state.connectors[stateKey]) : undefined;
+      const envelope = this.connectorEnvelope && key ? await this.connectorEnvelope(key) : undefined;
+      if (this.connectorEnvelope && !envelope) throw conflict("Connector connection authority is unavailable");
+      if (current && envelope) Object.assign(current, { enabled: envelope.policy.enabled, accountId: envelope.providerAccountId, ...(envelope.scope ? { scope: envelope.scope } : {}), credentialRef: envelope.credentialRef, allowWrites: envelope.policy.allowWrites, paidAccessApproved: envelope.policy.paidAccessApproved, paidBudgetCents: envelope.policy.paidBudgetCents, recurringApproved: envelope.policy.recurringApproved });
+      const next = update(current);
+      if (key) next.connectionId = key;
       validateConnectorState(next, connector);
-      state.connectors = { ...(state.connectors ?? {}), [connector]: next };
+      const persisted = structuredClone(next);
+      if (envelope) for (const field of ["enabled", "accountId", "scope", "credentialRef", "allowWrites", "paidAccessApproved", "paidBudgetCents", "recurringApproved"]) delete (persisted as unknown as Record<string, unknown>)[field];
+      state.connectors = { ...(state.connectors ?? {}), [stateKey]: persisted };
       return next;
     });
   }

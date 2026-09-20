@@ -39,6 +39,15 @@ app. It embeds the pinned Pi SDK through supported SDK exports. User-facing copy
 calls the product and agent **Tron**; source may use Pi-specific names only where
 it identifies the backing SDK contract.
 
+## Connection boundaries
+
+`ConnectionOwner` owns the generic account envelope for multi-account
+integration instances under `state/integrations/connections.json`; it does not
+mirror Knowledge evidence, provider checkpoints, cohorts, usage, or remote
+receipts. Setup, policy, and disconnect use exact owner-typed commands and
+bounded receipts. Runtime bindings are session/generation-scoped admission
+projections, not persisted child authority. See [Connection management](docs/connections.md).
+
 ## Knowledge boundaries
 
 Knowledge state is owned by the Gateway under `state/knowledge`; iOS consumes

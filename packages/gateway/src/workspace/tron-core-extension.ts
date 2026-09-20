@@ -1,8 +1,12 @@
+import { Type } from "typebox";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { TronWorkspace, TronWorkspaceDescriptor } from "./tron-workspace.js";
 import { KNOWLEDGE_TOOL_PARAMETERS, type KnowledgeService, type KnowledgeToolParameters } from "../knowledge/knowledge-service.js";
 import type { JevDecisionClient } from "../knowledge/jev-client.js";
 import { createJevExtension } from "../knowledge/jev-extension.js";
+import type { ConnectionOwner } from "../integrations/connection-owner.js";
+
+const CONNECTIONS_TOOL_PARAMETERS = Type.Object({ action: Type.Literal("list") }, { additionalProperties: false });
 
 export function tronContext(workspace: TronWorkspaceDescriptor, cwd: string, tools: readonly string[]): string {
   const lines = [
@@ -41,7 +45,7 @@ export function withWorkspaceHandoff(task: string, workspace: TronWorkspaceDescr
 
 /** The SDK rebuilds the base prompt for each run. Never append a canonical
  * message, load workspace documents, change cwd, or replace project context. */
-export function createTronCoreExtension(workspace: Pick<TronWorkspace, "describe">, knowledge?: KnowledgeService, jev?: JevDecisionClient): ExtensionFactory {
+export function createTronCoreExtension(workspace: Pick<TronWorkspace, "describe">, knowledge?: KnowledgeService, jev?: JevDecisionClient, connections?: ConnectionOwner): ExtensionFactory {
   return (pi) => {
     if (jev) createJevExtension(jev)(pi);
     if (knowledge) {
@@ -61,6 +65,20 @@ export function createTronCoreExtension(workspace: Pick<TronWorkspace, "describe
           if (signal?.aborted) throw new Error("Knowledge retrieval aborted");
           const result = await knowledge.tool(parameters, signal);
           return { content: [{ type: "text", text: result.text }], details: result.details };
+        },
+      });
+    }
+    if (connections) {
+      pi.registerTool({
+        name: "connections",
+        label: "Connections",
+        description: "Inspect Tron's configured integration definitions, account instances, capability availability, and setup status. This read-only projection contains no credential values or references; setup and policy changes remain exact owner-typed Gateway commands.",
+        promptSnippet: "Inspect connection status before using a provider capability. A configured account is not automatically admitted into this session.",
+        parameters: CONNECTIONS_TOOL_PARAMETERS,
+        executionMode: "sequential",
+        execute: async () => {
+          const snapshot = await connections.snapshot();
+          return { content: [{ type: "text", text: JSON.stringify(snapshot) }], details: snapshot };
         },
       });
     }

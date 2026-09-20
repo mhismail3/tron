@@ -16,6 +16,7 @@ const toolParameters = Type.Object({
   query: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   commandId: Type.Optional(Type.String({ minLength: 8, maxLength: 160 })),
   connector: Type.Optional(Type.Union([Type.Literal("raindrop"), Type.Literal("x")])),
+  connectionId: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
   raindropOperation: Type.Optional(Type.Union([Type.Literal("user"), Type.Literal("collections"), Type.Literal("collection"), Type.Literal("bookmarks"), Type.Literal("item"), Type.Literal("highlights"), Type.Literal("tags")])),
   collectionId: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
   itemId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
@@ -494,7 +495,7 @@ export class KnowledgeService {
       case "raindrop": {
         if (!this.extensions.connector || !parameters.commandId || !parameters.raindropOperation) throw new GatewayError("invalid_request", "Raindrop reads require commandId and raindropOperation");
         const read = raindropRead(parameters);
-        const result = await this.invoke({ operation: "knowledge.raindrop.read", request: { commandId: parameters.commandId, read } } as KnowledgeAction, signal);
+        const result = await this.invoke({ operation: "knowledge.raindrop.read", request: { commandId: parameters.commandId, ...(parameters.connectionId ? { connectionId: parameters.connectionId } : {}), read } } as KnowledgeAction, signal);
         const serialized = JSON.stringify(result);
         // Tool details are not model-visible on every client. Never report a
         // successful metadata read while withholding its content from the agent.
@@ -503,7 +504,7 @@ export class KnowledgeService {
       }
       case "raindropIntake": {
         if (!this.extensions.connector || !parameters.commandId) throw new GatewayError("invalid_request", "Raindrop intake requires commandId");
-        const request = { commandId: parameters.commandId, dryRun: parameters.dryRun ?? true, ...(parameters.limit ? { limit: Math.min(10, parameters.limit) } : {}), ...(parameters.sourceCollectionId ? { sourceCollection: parameters.sourceCollectionId } : {}), ...(parameters.pilotId ? { pilot: { id: parameters.pilotId, maxItems: parameters.pilotMaxItems ?? 10, budgetCents: parameters.pilotBudgetCents ?? 100 } } : {}) };
+        const request = { commandId: parameters.commandId, ...(parameters.connectionId ? { connectionId: parameters.connectionId } : {}), dryRun: parameters.dryRun ?? true, ...(parameters.limit ? { limit: Math.min(10, parameters.limit) } : {}), ...(parameters.sourceCollectionId ? { sourceCollection: parameters.sourceCollectionId } : {}), ...(parameters.pilotId ? { pilot: { id: parameters.pilotId, maxItems: parameters.pilotMaxItems ?? 10, budgetCents: parameters.pilotBudgetCents ?? 100 } } : {}) };
         const result = await this.invoke({ operation: "knowledge.raindrop.intake", request } as KnowledgeAction, signal);
         return { text: `Raindrop intake completed: ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
       }
@@ -513,10 +514,10 @@ export class KnowledgeService {
         if (signal?.aborted) throw new GatewayError("busy", "Knowledge connector sweep was cancelled", true);
         const invocation = currentInvocationContext();
         if (invocation?.operationId?.startsWith("automation:")) {
-          const connectorState = await this.store.connectorState(parameters.connector);
+          const connectorState = await this.store.connectorState(parameters.connector, parameters.connectionId);
           if (!connectorState?.recurringApproved) throw new GatewayError("unsupported", "Connector recurrence is not approved");
         }
-        const result = await this.runOwned("connector sweep", ownedSignal => this.extensions.connector!({ operation: "knowledge.connector.run", request: { commandId: parameters.commandId!, connector: parameters.connector!, dryRun: parameters.dryRun ?? false, ...(parameters.limit ? { limit: parameters.limit } : {}) } }, ownedSignal), signal);
+        const result = await this.runOwned("connector sweep", ownedSignal => this.extensions.connector!({ operation: "knowledge.connector.run", request: { commandId: parameters.commandId!, connector: parameters.connector!, ...(parameters.connectionId ? { connectionId: parameters.connectionId } : {}), dryRun: parameters.dryRun ?? false, ...(parameters.limit ? { limit: parameters.limit } : {}) } }, ownedSignal), signal);
         if (signal?.aborted) throw new GatewayError("busy", "Knowledge connector sweep was cancelled", true);
         return { text: `${parameters.connector} connector sweep completed: ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
       }

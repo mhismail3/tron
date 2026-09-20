@@ -162,10 +162,12 @@ qualified evidence and a pinned `knowledge.read` continuation (`id`,
 `revisionId`, and `offset`) whenever the evidence section is incomplete; the
 complete record is never available only through tool details. Observation
 defaults to disabled and the store never chooses a provider or model silently. Connector/import DTOs are operation shapes implemented by the installed connector
-extension. Connector configuration supplies a selected account/collection scope and
-opaque `credentialRef` (`connector:<provider>:<account>`); only the Mac Keychain adapter
-resolves it. Tokens never enter knowledge state, receipts, logs, prompts, iOS models, or
-process arguments. `allowWrites`, `paidAccessApproved`, and `recurringApproved` remain
+extension. Connection setup owns the selected account/scope and opaque `credentialRef`
+(`connector:<provider>:<account>`); only the Mac Keychain adapter resolves it.
+Once `ConnectionOwner` is active, connector actions require an exact
+`connectionId` and Knowledge persists provider progress under that instance
+key, without copying the generic account envelope. Tokens never enter
+knowledge state, receipts, logs, prompts, iOS models, or process arguments. `allowWrites`, `paidAccessApproved`, and `recurringApproved` remain
 independent controls and default to false. The Gateway registers `knowledge.v1` typed RPC
 handlers and a bounded first-party `knowledge` retrieval tool. The tool performs explicit
 search/recall/read/list plus typed `connectorSweep` and `synthesis` actions for existing

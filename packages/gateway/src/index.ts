@@ -39,6 +39,7 @@ import { JevSourceAssessmentModel } from "./knowledge/jev-assessment.js";
 import { JevDecisionClient } from "./knowledge/jev-client.js";
 import { createKnowledgeConnectorExtension } from "./knowledge/connectors.js";
 import { createKnowledgeImporter } from "./knowledge/legacy-import.js";
+import { ConnectionOwner } from "./integrations/connection-owner.js";
 import { delegatedArtifactRoot, delegatedProviderEnvironment, ensureDelegatedArtifactRoot } from "./sessions/delegated-provider.js";
 
 const config = await loadConfig();
@@ -129,6 +130,7 @@ const receipts = new CommandReceiptStore(config.tronHome);
 await receipts.prune();
 
 const workRegistry = new GatewayWorkRegistry();
+const connections = new ConnectionOwner(config.tronHome);
 const knowledgeCredentials = new MacKeychainConnectorCredentialStore();
 const jevClient = new JevDecisionClient(knowledgeCredentials);
 let automations!: AutomationService;
@@ -151,6 +153,7 @@ const sessions = new RuntimeRegistry({
   notifications,
   browserLiveViews,
   workRegistry,
+  connections,
   jev: jevClient,
   scheduleToolOperations: {
     execute: (sessionId, toolCallId, request) => automationToolOperations.execute(sessionId, toolCallId, request),
@@ -173,11 +176,19 @@ const sessions = new RuntimeRegistry({
     );
   },
 });
-const knowledgeStore = new KnowledgeStore(sessions.knowledgeWorkspace(), () => transport?.broadcast("knowledge.changed", {}));
+const knowledgeStore = new KnowledgeStore(
+  sessions.knowledgeWorkspace(),
+  () => transport?.broadcast("knowledge.changed", {}),
+  async (connectionId) => {
+    const instance = await connections.resolveInstance(connectionId).catch(() => undefined);
+    return instance;
+  },
+);
 const knowledgeConnector = createKnowledgeConnectorExtension(knowledgeStore, {
   credentials: knowledgeCredentials,
   assessment: new JevSourceAssessmentModel(knowledgeCredentials),
   ...(xPricing ? { xPricing } : {}),
+  connections,
 });
 const knowledge = new KnowledgeService(
   knowledgeStore,
@@ -372,6 +383,7 @@ const service = new GatewayService({
   workRegistry,
   automations,
   knowledge,
+  connections,
 });
 transport = new GatewayServer({
   host: config.host,

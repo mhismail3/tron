@@ -495,6 +495,7 @@ export interface KnowledgeSourceAdmissionRequest {
 
 export interface KnowledgeRaindropIntakeRequest {
   commandId: string;
+  connectionId?: string;
   dryRun: boolean;
   limit?: number;
   /** Explicit provider collection for this bounded intake; never persisted as a source default. */
@@ -507,6 +508,7 @@ export interface KnowledgeRaindropIntakeRequest {
  * changes an earlier cohort or its paid-attempt receipts. */
 export interface KnowledgeAssessmentApprovalRequest {
   commandId: string;
+  connectionId?: string;
   connector: "raindrop";
   id: string;
   maxItems: number;
@@ -518,6 +520,8 @@ export interface KnowledgeAssessmentApprovalRequest {
 export interface KnowledgeConnectorConfigurationRequest {
   commandId: string;
   connector: "raindrop" | "x";
+  /** Required once ConnectionOwner is active; identifies one account instance. */
+  connectionId?: string;
   enabled: boolean;
   /** Stable provider account identifier; never a token. */
   accountId?: string;
@@ -534,8 +538,8 @@ export interface KnowledgeConnectorConfigurationRequest {
   recurringApproved?: boolean;
 }
 
-export interface KnowledgeConnectorStatusRequest { connector: "raindrop" | "x"; }
-export interface KnowledgeConnectorRunRequest { commandId: string; connector: "raindrop" | "x"; dryRun: boolean; limit?: number; }
+export interface KnowledgeConnectorStatusRequest { connector: "raindrop" | "x"; connectionId?: string; }
+export interface KnowledgeConnectorRunRequest { commandId: string; connector: "raindrop" | "x"; connectionId?: string; dryRun: boolean; limit?: number; }
 
 /** Read-only Raindrop API access. Every request revalidates the authenticated
  * user against the configured accountId; returned provider objects are raw
@@ -551,11 +555,14 @@ export type KnowledgeRaindropReadRequest =
 
 export interface KnowledgeRaindropRequest {
   commandId: string;
+  connectionId?: string;
   read: KnowledgeRaindropReadRequest;
 }
 
 export interface KnowledgeConnectorState {
   connector: "raindrop" | "x";
+  /** Adapter state key. Generic account authority remains ConnectionOwner. */
+  connectionId?: string;
   enabled: boolean;
   accountId?: string;
   scope?: string;
@@ -594,6 +601,7 @@ export interface KnowledgeConnectorState {
 
 export interface KnowledgeConnectorStatus {
   connector: "raindrop" | "x";
+  connectionId?: string;
   configured: boolean;
   enabled: boolean;
   health: KnowledgeConnectorState["health"];

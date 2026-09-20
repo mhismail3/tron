@@ -126,6 +126,7 @@ import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import type { JevDecisionClient } from "../knowledge/jev-client.js";
+import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import { projectHookRegistrations } from "./hook-projection.js";
 
 // A lifecycle header is trusted only after RuntimeSlot has parsed and schema-
@@ -341,6 +342,7 @@ export interface RuntimeSlotDependencies {
   /** Optional bounded observational memory owner. */
   knowledge?: KnowledgeService;
   jev?: JevDecisionClient;
+  connections?: ConnectionOwner;
   workspace: TronWorkspace;
   markers: RunMarkerStore;
   extensionActivityRecency: ExtensionActivityRecency;
@@ -1316,7 +1318,7 @@ export class RuntimeSlot {
                 || (event.reason !== "manual" && this.activeOperationId !== undefined && this.abortedOperations.has(this.activeOperationId)),
               () => { this.revision += 1; this.publishSnapshot(); },
             ) },
-            { name: "tron-core", factory: createTronCoreExtension(this.dependencies.workspace, this.dependencies.knowledge, this.dependencies.jev) },
+            { name: "tron-core", factory: createTronCoreExtension(this.dependencies.workspace, this.dependencies.knowledge, this.dependencies.jev, this.dependencies.connections) },
             { name: "tron-ask-user", factory: createTronAskUserExtension() },
             {
               name: "tron-display",

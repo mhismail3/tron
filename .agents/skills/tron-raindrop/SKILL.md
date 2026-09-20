@@ -23,10 +23,13 @@ must add the item manually in Keychain Access with:
   `connector:raindrop:personal`
 - password: the Raindrop test token or OAuth access token
 
-The existing Knowledge connector must be enabled and configured through its
-own UI/RPC owner with `connector: "raindrop"`, a `connector:raindrop:...`
-credential reference, and `accountId` equal to the numeric Raindrop `/user`
-response `_id`. A reference from another provider namespace is rejected and
+Connection setup must first create a distinct `knowledge.raindrop`
+instance through `connections.setup.begin`/`connections.setup.complete` with
+its opaque credential reference and numeric Raindrop `/user` account ID. The
+Knowledge connector then receives that exact `connectionId`; it must not
+accept account, scope, or credential fields as an alternate generic setup
+path. `accountId` equal to the numeric Raindrop `/user` response `_id` remains
+an authority fence. A reference from another provider namespace is rejected and
 must be repaired explicitly; it is never read as a Raindrop token. The tool
 fails closed when the credential is missing, the account ID is non-numeric, or
 `/user` does not match it. Configure the intended numeric source collection in the connector scope and
