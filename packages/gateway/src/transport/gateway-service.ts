@@ -60,6 +60,36 @@ import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import { KnowledgeStoreError } from "../knowledge/knowledge-store.js";
 import type { KnowledgeAction } from "../knowledge/knowledge-contract.js";
 
+const KNOWLEDGE_OBJECT_CHUNK_BYTES = 512_000;
+const KNOWLEDGE_OBJECT_TOTAL_BYTES = 8_000_000;
+
+/** Object reads are an exact byte protocol, not a presentation projection.
+ * safeJson intentionally clips ordinary strings; applying it here would make
+ * base64 and its advertised byte offsets disagree. Keep this boundary typed and
+ * bounded so the native/frame limits still govern the enclosing response. */
+function projectKnowledgeObjectChunk(value: unknown): JsonValue {
+  if (value === null) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new GatewayError("internal", "Knowledge object response is invalid");
+  const item = value as Record<string, unknown>;
+  if (typeof item.hash !== "string" || !/^[a-f0-9]{64}$/.test(item.hash)
+    || typeof item.mediaType !== "string" || item.mediaType.length < 1 || item.mediaType.length > 160
+    || !Number.isSafeInteger(item.bytes) || (item.bytes as number) < 0 || (item.bytes as number) > KNOWLEDGE_OBJECT_CHUNK_BYTES
+    || !Number.isSafeInteger(item.totalBytes) || (item.totalBytes as number) < 0 || (item.totalBytes as number) > KNOWLEDGE_OBJECT_TOTAL_BYTES
+    || !Number.isSafeInteger(item.offset) || (item.offset as number) < 0 || (item.offset as number) > (item.totalBytes as number)
+    || typeof item.base64 !== "string" || item.base64.length > 4 * Math.ceil(KNOWLEDGE_OBJECT_CHUNK_BYTES / 3) || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(item.base64)
+    || Buffer.from(item.base64, "base64").byteLength !== item.bytes
+    || Buffer.from(item.base64, "base64").toString("base64") !== item.base64) {
+    throw new GatewayError("internal", "Knowledge object response is invalid");
+  }
+  const totalBytes = item.totalBytes as number;
+  if ((item.offset as number) + (item.bytes as number) > totalBytes) throw new GatewayError("internal", "Knowledge object response exceeds its declared extent");
+  const bytes = item.bytes as number;
+  const offset = item.offset as number;
+  const end = offset + bytes;
+  if (end < totalBytes ? bytes === 0 || item.nextOffset !== end : item.nextOffset !== undefined) throw new GatewayError("internal", "Knowledge object continuation is invalid");
+  return { hash: item.hash, mediaType: item.mediaType, bytes, totalBytes, offset, base64: item.base64, ...(end < totalBytes ? { nextOffset: end } : {}) };
+}
+
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const PROVIDER_CATALOG_MAX_ITEMS = 1_000;
 const PROVIDER_CATALOG_MAX_STRING_BYTES = 4 * 1_048_576;
@@ -323,12 +353,14 @@ export class GatewayService {
       case "knowledge.connector.status":
       case "knowledge.raindrop.read": {
         const knowledge = this.requireKnowledge();
-        return safeJson(await knowledge.invoke({ operation: method, request: params } as KnowledgeAction));
+        const result = await knowledge.invoke({ operation: method, request: params } as KnowledgeAction);
+        return method === "knowledge.object.read" ? projectKnowledgeObjectChunk(result) : safeJson(result);
       }
       case "knowledge.config":
       case "knowledge.observation.dismiss":
       case "knowledge.source.capture":
       case "knowledge.source.triage":
+      case "knowledge.source.admission":
       case "knowledge.note.create":
       case "knowledge.note.update":
       case "knowledge.reflect":
@@ -336,7 +368,9 @@ export class GatewayService {
       case "knowledge.forget":
       case "knowledge.exclusion":
       case "knowledge.connector.configure":
+      case "knowledge.connector.assessment.approve":
       case "knowledge.connector.run":
+      case "knowledge.raindrop.intake":
       case "knowledge.import.dry-run":
       case "knowledge.import.run": {
         const knowledge = this.requireKnowledge();

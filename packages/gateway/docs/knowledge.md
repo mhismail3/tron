@@ -231,7 +231,11 @@ by the existing model boundary. The `knowledge.source.triage` action names an
 exact source revision; it does not accept an unpersisted interest list. Capture
 is durable even when that adapter fails. Exact source-object reads resolve a
 source record and revision before reading its object; orphan and suppressed
-object hashes are not an object browsing API.
+object hashes are not an object browsing API. Object reads return typed,
+512,000-byte base64 chunks directly through the Gateway boundary rather than
+the ordinary 100,000-character presentation sanitizer; callers must use the
+advertised offsets and verify the final hash. The enclosing frame/native limits
+still apply, and invalid chunk metadata fails closed.
 
 ## Connector boundaries
 
@@ -257,7 +261,9 @@ Each possible X API attempt, including pagination and safe GET retries, debits
 that budget immediately before the request. A new operation uses a distinct
 attempt receipt, so replay cannot reuse an old reservation. Uncertain remote
 PUTs are not retried; the persisted receipt is reconciled before another
-connector effect.
+connector effect. Connector status derives configured/disabled state from its
+current credential, account, scope, and enabled authority; stale health markers
+cannot report an enabled complete connector as unconfigured.
 
 ## Read-only Raindrop access
 
@@ -266,14 +272,101 @@ The `knowledge.raindrop.read` action and the agent `knowledge` tool action
 credential store. They verify `/rest/v1/user` against the configured numeric
 user `_id` before each read, then expose raw bounded metadata for root and child
 collections, collection detail, paged bookmark listing/search/sort/nested
-queries, individual items, tags, and highlights. `perpage` is limited to 50 and a
-full page yields an explicit `nextPage`; pages are not an atomic snapshot.
+queries, individual items, tags, and highlights. Collection detail accepts the
+official `{ result: true, item: { _id, ... } }` envelope and verifies the
+requested ID; safe GETs retry transient provider failures with bounded delay,
+while malformed success shapes remain redacted errors. `perpage` is limited to
+50 and a full page yields an explicit `nextPage`; pages are not an atomic snapshot.
 Provider JSON is preserved; HTTP/metadata responses over 2,000,000 bytes and
 agent text over 128,000 bytes fail rather than truncating fields. Narrow pages
 or fetch individual items; a single item over the agent bound is unsupported. Retries honor `Retry-After` and both common rate-limit
 header spellings. Redirects are not followed, and provider failures are
 redacted. This is metadata access, not full article capture, and the existing
-connector sweep remains a bounded ingestion helper rather than a complete sync.
+`connectorSweep` remains a lower-level capture helper rather than an assessed
+intake or complete sync. Its connector sources remain pending and inspectable
+through `includePending`; it cannot acknowledge or move a Raindrop item without
+an explicit retained/archived admission from `raindropIntake`.
+
+## Bounded Raindrop intake
+
+`knowledge.raindrop.intake` is the explicit manual source-owner operation for a
+bounded pilot. `dryRun` only discovers and persists pending provider identities;
+it does not call Jev or mutate Raindrop. A run requires an explicit pilot ID,
+maximum item count (at most 10), and budget (at most 100 cents), which are
+persisted in connector state so a new command cannot reset usage. The numeric
+source collection must match the connector's configured scope; it cannot bypass
+that authority fence. Discovery retains no more than the approved limit per
+intake call, so shifted provider pages are revisited rather than silently skipped.
+Destination remains the separately configured collection.
+
+Each item keeps its bounded complete Raindrop JSON as a `provider-api` source
+representation, the fetched linked evidence separately, and the source
+collection ID as provenance. X/Twitter links are reference-only and generic
+GitHub UI links are partial unless a later capture establishes better evidence;
+neither is silently assessed as a complete article. Knowledge's Jev adapter owns
+its rubric, bounded text, relevant source metadata, and persisted interests.
+It consumes the shared typed `JevDecisionClient`, also exposed as the first-party
+`jev` tool for caller-supplied `choice`, `noul`, and `score` questions. This is not
+chat completion. Credentials remain in the Keychain-backed
+`connector:jev:personal` reference and are read only on explicit calls; core
+Knowledge capture/retrieval does not require Jev. Each workflow separately owns
+its disclosure, budget, and admission authority; the generic tool cannot inherit
+the Resources pilot allowance.
+
+The tool requires `maxChargeCents`, checked before credential lookup or HTTP
+against a conservative per-call ceiling of 0.2688 cents: the supported model's
+64k input ceiling at its published $0.042/M input rate (output free). Responses
+include actual token usage and fractional-cent estimated cost, not rounded-up
+workflow reservations. New Knowledge assessments persist that usage and
+published-price estimate on the immutable assessment derivative and attempt
+receipt. Intake reports the approved ceiling, conservative reserved allowance,
+selected cohort cap, settled count, known estimated usage cost, and unknown
+legacy usage separately. Cost totals and unknown/uncertain attempt counts derive
+from durable cohort receipts, so they survive moved items, reruns, and restart;
+known costs are a subtotal when other attempts remain unknown. Pending identities
+outside the selected cohort are reported separately, not labeled as assessed or
+necessarily metadata-only. An old assessment without usage remains unknown and is
+never backfilled as zero or claimed as provider billing. This is a local estimate guard, not a provider billing
+cap or a durable workflow allowance. The client snapshots validated input before
+awaits, rejects unsupported models, bounds total input and state plus each
+question separately, rechecks cancellation after admission, redacts transport
+failures, and never retries a paid POST. The adapter sends the pinned
+`jev-1.13.0` typed contract to TypeSafe, validates the real choice/score
+probability maps, score legend and expectation, and records fixed local labels
+plus interest-bound profile/rubric versions and an exact input digest; it does
+not persist Jev prose as source truth. Novelty is intentionally omitted because
+this bounded item request has no corpus evidence. The intake supplies its
+reservation through the model adapter's `beforeDispatch` seam, after Jev
+preflight and credential lookup; validation or missing-key failures therefore
+consume no paid attempt. Once admitted, a failed/malformed/timeout POST remains
+an uncertain dispatched receipt and is never retried automatically. Complete
+source capture remains durable and pending when Jev is unavailable. The first
+pilot is frozen; `knowledge.connector.assessment.approve` appends an explicit
+new <=10-item/$1 cohort for later work without resetting prior receipts or
+binding fields. By default, later cohorts select only identities not already
+assigned to a cohort. An explicitly supplied `itemIds` list freezes pending
+identities for renewed assessment attempts; previous uncertain charges remain
+reserved, and the new cohort has its own additional allowance. This is renewed
+paid authority, never an automatic retry or refund. Approvals cannot proceed
+while a remote move is unresolved. Intake must match the approved bounds,
+account, collection, and interest profile.
+
+Capture quality, source admission, and remote delivery are separate. Incomplete
+or failed capture remains `pending`. A completed item receives a durable
+`retained` or recoverable `archived` source-admission state; archived sources
+are absent from normal retrieval but can be explicitly listed/read/restored
+without using privacy suppression. Connector captures awaiting admission are
+also absent from normal retrieval; inspection requires the separate
+`includePending` audit/intake flag. Generic `connectorSweep` cannot move a
+pending source. Only after the local revision commits and the exact source head,
+admission, identity, retained object, and provider collection are revalidated
+does the existing Raindrop preflight/receipt/PUT/read-back path attempt the
+configured Agent Sorted move. Uncertain provider effects remain pending for
+reconciliation. Offset pages are not treated as an atomic snapshot: each
+bounded run revisits page zero and uses durable IDs, so moved items shrinking
+earlier pages cannot silently skip later entries.
+The operation is manual only; no recurring approval, scheduler, X integration,
+or collection creation is implied.
 
 ## Legacy import
 

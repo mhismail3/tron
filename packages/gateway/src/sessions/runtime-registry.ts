@@ -77,6 +77,7 @@ import {
 import { branchFromParsedSession } from "./session-branch.js";
 import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-boundary.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
+import type { JevDecisionClient } from "../knowledge/jev-client.js";
 import { observationEntriesDigest } from "../knowledge/knowledge-observation.js";
 
 const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
@@ -511,6 +512,7 @@ export class RuntimeRegistry {
       workRegistry?: GatewayWorkRegistry;
       extensionArtifactWarning?: (warning: { reason: import("./extension-run-projection.js").ExtensionArtifactRejectionReason; owner: string }) => void;
       scheduleToolOperations?: ScheduleToolOperations;
+      jev?: JevDecisionClient;
     },
   ) {
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
@@ -1034,6 +1036,7 @@ export class RuntimeRegistry {
       ...(this.options.extensionArtifactWarning ? { extensionArtifactWarning: this.options.extensionArtifactWarning } : {}),
       ...(this.options.scheduleToolOperations ? { scheduleToolOperations: this.options.scheduleToolOperations } : {}),
       ...(this.knowledgeService ? { knowledge: this.knowledgeService } : {}),
+      ...(this.options.jev ? { jev: this.options.jev } : {}),
       resolveForkBoundary: (manager: SessionManager) => this.resolveForkBoundary(manager),
       ...(this.options.stageTiming ? {
         runtimeDisposalTimedOut: (graceMs: number) => this.options.stageTiming!("runtime.dispose-timeout", graceMs, "failure"),

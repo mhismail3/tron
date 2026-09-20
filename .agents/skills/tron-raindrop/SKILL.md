@@ -5,9 +5,11 @@ description: Use Tron's read-only Raindrop API tool for bounded bookmark, collec
 
 # Raindrop access
 
-Use the first-party `knowledge` tool with `action: "raindrop"`. This is
-read-only provider metadata access; it does not fetch article text, create a
-knowledge mirror, or authorize Raindrop writes.
+Use the first-party `knowledge` tool with `action: "raindrop"` for read-only
+provider metadata. The separate `action: "raindropIntake"` operation is a
+manual, explicitly approved bounded source intake; it may capture, classify,
+archive locally, and move only after local durability and exact remote
+verification. It never creates collections or schedules recurring work.
 
 ## Setup and authority
 
@@ -25,8 +27,10 @@ The existing Knowledge connector must be enabled and configured through its
 own UI/RPC owner with `connector: "raindrop"`, the credential reference, and
 `accountId` equal to the numeric Raindrop `/user` response `_id`. The tool
 fails closed when the credential is missing, the account ID is non-numeric, or
-`/user` does not match it. Use scope `0` for the library excluding Trash (`-1`
-is Unsorted, `-99` is Trash); leave remote writes disabled. After saving the
+`/user` does not match it. Configure the intended numeric source collection in the connector scope and
+pass that same value for each bounded backfill; intake rejects a request that
+tries to bypass the configured scope. Leave remote writes disabled until the
+user separately approves the configured destination. After saving the
 token, a maintainer can obtain the numeric ID locally with this identity-only
 check (adjust the non-secret account reference if necessary):
 
@@ -49,7 +53,12 @@ try {
 JS
 ```
 
-Never print the token or full identity response during setup. Raindrop documents
+For intake, approve a pilot of at most 10 selected pending item identities and
+100 cents. The approval, per-item paid-attempt fence, and monotonic spend are
+stored in connector state; uncertain provider responses are reconciled rather
+than blindly retried. Incomplete linked captures remain pending and are never
+sent to Jev or normal Knowledge retrieval; inspect them only through the
+explicit pending intake/audit projection. Never print the token or full identity response during setup. Raindrop documents
 personal test tokens as exempt from normal two-week OAuth access-token expiry;
 this integration does not automatically refresh OAuth tokens. Create tokens in
 [Raindrop app settings](https://app.raindrop.io/settings/integrations), not in
@@ -72,7 +81,9 @@ run a Gateway lifecycle command after setup.
 
 Responses preserve provider JSON and include rate-limit headers when supplied.
 HTTP/metadata is bounded at 2,000,000 bytes; model-visible tool output is bounded
-at 128,000 bytes. Oversized responses fail explicitly, never silently omit
+at 128,000 bytes. Intake preserves each bounded Raindrop object as canonical
+`provider-api` evidence and keeps the source collection ID; linked content
+quality remains independent of provider metadata. Oversized responses fail explicitly, never silently omit
 fields. Narrow `perpage`, use a collection/search filter, or request an individual
 item. A single item beyond the tool bound cannot be returned through this tool.
 Use a unique `commandId` (8–160 characters) for each request, for example:

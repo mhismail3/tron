@@ -1,6 +1,8 @@
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { TronWorkspace, TronWorkspaceDescriptor } from "./tron-workspace.js";
 import { KNOWLEDGE_TOOL_PARAMETERS, type KnowledgeService, type KnowledgeToolParameters } from "../knowledge/knowledge-service.js";
+import type { JevDecisionClient } from "../knowledge/jev-client.js";
+import { createJevExtension } from "../knowledge/jev-extension.js";
 
 export function tronContext(workspace: TronWorkspaceDescriptor, cwd: string, tools: readonly string[]): string {
   const lines = [
@@ -39,8 +41,9 @@ export function withWorkspaceHandoff(task: string, workspace: TronWorkspaceDescr
 
 /** The SDK rebuilds the base prompt for each run. Never append a canonical
  * message, load workspace documents, change cwd, or replace project context. */
-export function createTronCoreExtension(workspace: Pick<TronWorkspace, "describe">, knowledge?: KnowledgeService): ExtensionFactory {
+export function createTronCoreExtension(workspace: Pick<TronWorkspace, "describe">, knowledge?: KnowledgeService, jev?: JevDecisionClient): ExtensionFactory {
   return (pi) => {
+    if (jev) createJevExtension(jev)(pi);
     if (knowledge) {
       pi.registerTool({
         name: "knowledge",

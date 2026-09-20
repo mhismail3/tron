@@ -88,15 +88,42 @@ export interface SourceOrigin {
 }
 
 /** Generated material is deliberately separate from retained source evidence. */
+export type SourceAdmission = "pending" | "retained" | "archived";
+
+export interface SourceAssessmentUsage {
+  inputTokens: number;
+  outputTokens: number;
+  estimatedCostCents: number;
+  pricing: "typesafe-jev-1.13.0-input-0.042-usd-per-million-output-free";
+}
+
 export interface SourceAssessment {
   summary: string;
   contribution?: string;
   whyItMatters?: string;
-  evidenceQuality: "high" | "medium" | "low" | "none";
+  evidenceQuality: "high" | "medium" | "low" | "none" | "unknown";
   freshness: "current" | "aging" | "stale" | "unknown";
   possibleUse?: string;
   generatedAt: string;
   model?: string;
+  recommendation?: SourceAdmission;
+  confidence?: number;
+  profileVersion?: string;
+  rubricVersion?: string;
+  /** Digest of the exact captured evidence and interests assessed by the model. */
+  inputDigest?: string;
+  /** Bounded useful-category classification; not an evidence-quality claim. */
+  classification?: string;
+  /** Provider-reported usage and a local published-price estimate. Absent on legacy assessments. */
+  usage?: SourceAssessmentUsage;
+}
+
+export interface SourceAdmissionState {
+  status: SourceAdmission;
+  reason?: string;
+  decidedAt: string;
+  profileVersion?: string;
+  rubricVersion?: string;
 }
 
 export interface SourceRepresentation {
@@ -108,6 +135,8 @@ export interface SourceRepresentation {
 export interface SourceContent {
   title: string;
   uri?: string;
+  /** Provider collection at capture time; provenance, not an admission authority. */
+  collectionId?: string;
   /** Readable extraction, not a substitute for the original object. */
   text?: string;
   /** Immutable original bytes, when captured. */
@@ -124,6 +153,8 @@ export interface SourceContent {
   identity?: SourceIdentity;
   /** Retention and sensitivity are distinct from capture completeness. */
   retention?: { sensitivity: "public" | "restricted" | "private"; usageConstraint?: string; evidenceAvailable: boolean; originalHash?: string };
+  /** Intake lifecycle is separate from privacy/suppression and remains recoverable. */
+  admission?: SourceAdmissionState;
   assessment?: SourceAssessment;
 }
 
@@ -319,6 +350,9 @@ export interface KnowledgeListRequest {
   kind?: KnowledgeRecordKind;
   scope?: KnowledgeScope;
   includeSuppressed?: boolean;
+  includeArchived?: boolean;
+  /** Explicit intake/audit visibility for connector sources awaiting admission. */
+  includePending?: boolean;
   cursor?: string;
   limit?: number;
 }
@@ -334,6 +368,8 @@ export interface KnowledgeSearchRequest {
   query: string;
   kind?: KnowledgeRecordKind;
   scope?: KnowledgeScope;
+  includeArchived?: boolean;
+  includePending?: boolean;
   limit?: number;
 }
 
@@ -355,6 +391,8 @@ export interface KnowledgeRecallRequest {
   sessionId?: string;
   entryId?: string;
   scope?: KnowledgeScope;
+  includeArchived?: boolean;
+  includePending?: boolean;
   limit?: number;
 }
 
@@ -439,6 +477,36 @@ export interface KnowledgeTriageRequest {
   expectedRevision: string;
 }
 
+export interface KnowledgeSourceAdmissionRequest {
+  commandId: string;
+  recordId: string;
+  expectedRevision: string;
+  status: SourceAdmission;
+  reason?: string;
+}
+
+export interface KnowledgeRaindropIntakeRequest {
+  commandId: string;
+  dryRun: boolean;
+  limit?: number;
+  /** Explicit provider collection for this bounded intake; never persisted as a source default. */
+  sourceCollection?: string;
+  /** Existing approval identity. The first pilot is bounded to 10 items/$1. */
+  pilot?: { id: string; maxItems: number; budgetCents: number };
+}
+
+/** Owner operation for a later, explicitly renewed assessment cohort. It never
+ * changes an earlier cohort or its paid-attempt receipts. */
+export interface KnowledgeAssessmentApprovalRequest {
+  commandId: string;
+  connector: "raindrop";
+  id: string;
+  maxItems: number;
+  budgetCents: number;
+  /** Explicit pending identities for renewed attempts; omitted selects only new work. */
+  itemIds?: string[];
+}
+
 export interface KnowledgeConnectorConfigurationRequest {
   commandId: string;
   connector: "raindrop" | "x";
@@ -489,9 +557,15 @@ export interface KnowledgeConnectorState {
   paidAccessApproved: boolean;
   paidBudgetCents: number;
   recurringApproved: boolean;
-  checkpoint?: string;
-  pending: Array<{ id: string; title: string; url: string; excerpt?: string; annotation?: string; publishedAt?: string; collectionId?: string; apiPayload?: string }>;
+  /** Per-provider-collection pagination checkpoints; never a complete remote snapshot. */
+  checkpoints?: Record<string, string>;
+  pending: Array<{ id: string; title: string; url: string; excerpt?: string; annotation?: string; publishedAt?: string; collectionId?: string; apiPayload?: string; metadataComplete?: boolean }>;
   capturedIds: string[];
+  assessmentPilot?: { id: string; maxItems: number; budgetCents: number; usedItems: number; reservedCents: number; accountId: string; sourceCollection: string; profileVersion: string; itemIds: string[] };
+  /** Append-only later cohorts. The first pilot remains frozen in assessmentPilot. */
+  assessmentApprovals?: Array<{ id: string; maxItems: number; budgetCents: number; usedItems: number; reservedCents: number; accountId: string; sourceCollection: string; profileVersion: string; itemIds: string[] }>;
+  /** Durable per-cohort/item paid-attempt fence; legacy item-only keys remain valid. */
+  assessmentAttempts?: Record<string, { itemId?: string; cohortId?: string; status: "dispatched" | "settled"; chargeCents: number; inputTokens?: number; outputTokens?: number; estimatedCostCents?: number }>;
   health: "unconfigured" | "ready" | "running" | "partial" | "rate-limited" | "auth-error" | "error";
   lastRunAt?: string;
   lastError?: string;
@@ -525,6 +599,8 @@ export interface KnowledgeConnectorStatus {
   allowWrites: boolean;
   recurringApproved: boolean;
   paidAccessApproved: boolean;
+  assessmentPilot?: { id: string; maxItems: number; budgetCents: number; usedItems: number; reservedCents: number; accountId: string; sourceCollection: string; profileVersion: string; itemIds: string[] };
+  assessmentApprovals?: Array<{ id: string; maxItems: number; budgetCents: number; reservedCents: number; usedItems: number; accountId: string; sourceCollection: string; profileVersion: string; itemIds: string[] }>;
 }
 export interface KnowledgeImportScope {
   /** Explicitly limits which legacy record families may be admitted. */
@@ -544,6 +620,7 @@ export interface KnowledgeObjectReadRequest {
   hash: string;
   bytes: number;
   mediaType: string;
+  includeArchived?: boolean;
   offset?: number;
 }
 export interface KnowledgeCoverageDismissRequest { commandId: string; coverageId: string; expectedRevision: string; }
@@ -555,7 +632,7 @@ export type KnowledgeAction =
   | { operation: "knowledge.object.read"; request: KnowledgeObjectReadRequest }
   | { operation: "knowledge.config"; request: { commandId: string; config: KnowledgeConfig } }
   | { operation: "knowledge.list"; request: KnowledgeListRequest }
-  | { operation: "knowledge.read"; request: { id: string; revisionId?: string; includeSuppressed?: boolean; offset?: number } }
+  | { operation: "knowledge.read"; request: { id: string; revisionId?: string; includeSuppressed?: boolean; includeArchived?: boolean; includePending?: boolean; offset?: number } }
   | { operation: "knowledge.search"; request: KnowledgeSearchRequest }
   | { operation: "knowledge.recall"; request: KnowledgeRecallRequest }
   | { operation: "knowledge.source.capture"; request: KnowledgeSourceCaptureRequest }
@@ -563,12 +640,15 @@ export type KnowledgeAction =
   | { operation: "knowledge.note.update"; request: KnowledgeNoteMutationRequest & { recordId: string } }
   | { operation: "knowledge.reflect"; request: KnowledgeReflectRequest }
   | { operation: "knowledge.source.triage"; request: KnowledgeTriageRequest }
+  | { operation: "knowledge.source.admission"; request: KnowledgeSourceAdmissionRequest }
   | { operation: "knowledge.correction"; request: KnowledgeCorrectionRequest }
   | { operation: "knowledge.forget"; request: KnowledgeForgetRequest }
   | { operation: "knowledge.exclusion"; request: KnowledgeExclusionRequest }
   | { operation: "knowledge.connector.configure"; request: KnowledgeConnectorConfigurationRequest }
+  | { operation: "knowledge.connector.assessment.approve"; request: KnowledgeAssessmentApprovalRequest }
   | { operation: "knowledge.connector.status"; request: KnowledgeConnectorStatusRequest }
   | { operation: "knowledge.connector.run"; request: KnowledgeConnectorRunRequest }
+  | { operation: "knowledge.raindrop.intake"; request: KnowledgeRaindropIntakeRequest }
   | { operation: "knowledge.raindrop.read"; request: KnowledgeRaindropRequest }
   | { operation: "knowledge.import.dry-run"; request: KnowledgeImportDryRunRequest }
   | { operation: "knowledge.import.run"; request: KnowledgeImportRunRequest };
@@ -677,6 +757,7 @@ function validateKindContent(kind: KnowledgeRecordKind, value: unknown): void {
       boundedString(content.uri, "source uri", 4_096);
       try { const uri = new URL(content.uri); if (!["http:", "https:"].includes(uri.protocol) || uri.username || uri.password) throw new Error(); } catch { throw new Error("Source URI must be an http(s) URL without credentials"); }
     }
+    if (content.collectionId !== undefined) boundedString(content.collectionId, "source collection id", 256);
     if (!["complete", "partial", "metadata-only", "inaccessible", "failed", "reference-only"].includes(content.captureDisposition as string)) throw new Error("Invalid capture disposition");
     if (content.origin !== undefined && !["manual", "connector", "import", "conversation"].includes(content.origin as string)) throw new Error("Invalid source origin");
     assertTimestamp(content.capturedAt, "capturedAt");
@@ -705,9 +786,17 @@ function validateKindContent(kind: KnowledgeRecordKind, value: unknown): void {
       if (!assessment || typeof assessment !== "object" || Array.isArray(assessment)) throw new Error("Invalid source assessment");
       boundedString(assessment.summary, "source assessment summary", 20_000);
       for (const key of ["contribution", "whyItMatters", "possibleUse"]) if (assessment[key] !== undefined) boundedString(assessment[key], `source assessment ${key}`, 10_000);
-      if (!["high", "medium", "low", "none"].includes(assessment.evidenceQuality as string) || !["current", "aging", "stale", "unknown"].includes(assessment.freshness as string)) throw new Error("Invalid source assessment quality");
+      if (!["high", "medium", "low", "none", "unknown"].includes(assessment.evidenceQuality as string) || !["current", "aging", "stale", "unknown"].includes(assessment.freshness as string)) throw new Error("Invalid source assessment quality");
       assertTimestamp(assessment.generatedAt, "source assessment generatedAt");
       if (assessment.model !== undefined) boundedString(assessment.model, "source assessment model", 200);
+      if (assessment.usage !== undefined) {
+        const usage = assessment.usage as Record<string, unknown>;
+        if (!usage || typeof usage !== "object" || Array.isArray(usage) || !Number.isSafeInteger(usage.inputTokens) || (usage.inputTokens as number) < 0 || !Number.isSafeInteger(usage.outputTokens) || (usage.outputTokens as number) < 0 || typeof usage.estimatedCostCents !== "number" || !Number.isFinite(usage.estimatedCostCents) || usage.estimatedCostCents < 0) throw new Error("Invalid source assessment usage");
+        boundedString(usage.pricing, "source assessment pricing", 200);
+      }
+      if (assessment.recommendation !== undefined && !["pending", "retained", "archived"].includes(assessment.recommendation as string)) throw new Error("Invalid source assessment recommendation");
+      if (assessment.confidence !== undefined && (typeof assessment.confidence !== "number" || !Number.isFinite(assessment.confidence) || assessment.confidence < 0 || assessment.confidence > 1)) throw new Error("Invalid source assessment confidence");
+      for (const key of ["profileVersion", "rubricVersion"] as const) if (assessment[key] !== undefined) boundedString(assessment[key], `source assessment ${key}`, 200);
     }
     if (content.annotations !== undefined) {
       if (!Array.isArray(content.annotations) || content.annotations.length > 200) throw new Error("Invalid source annotations");
@@ -722,6 +811,13 @@ function validateKindContent(kind: KnowledgeRecordKind, value: unknown): void {
         validateObjectRef(item.object);
         if (item.mediaType !== undefined) boundedString(item.mediaType, "source representation media type", 160);
       }
+    }
+    if (content.admission !== undefined) {
+      const admission = content.admission as Record<string, unknown>;
+      if (!admission || typeof admission !== "object" || Array.isArray(admission) || !["pending", "retained", "archived"].includes(admission.status as string)) throw new Error("Invalid source admission");
+      assertTimestamp(admission.decidedAt, "source admission decidedAt");
+      if (admission.reason !== undefined) boundedString(admission.reason, "source admission reason", 2_000);
+      for (const key of ["profileVersion", "rubricVersion"] as const) if (admission[key] !== undefined) boundedString(admission[key], `source admission ${key}`, 200);
     }
     if (content.retention !== undefined) {
       const retention = content.retention as Record<string, unknown>;

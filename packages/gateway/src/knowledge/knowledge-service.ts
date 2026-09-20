@@ -12,7 +12,7 @@ import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway
 import { currentInvocationContext } from "../extensions/owner-attribution.js";
 
 const toolParameters = Type.Object({
-  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("triageSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorSweep"), Type.Literal("raindrop"), Type.Literal("synthesis")]),
+  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("triageSource"), Type.Literal("restoreSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorSweep"), Type.Literal("raindrop"), Type.Literal("raindropIntake"), Type.Literal("synthesis")]),
   query: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   commandId: Type.Optional(Type.String({ minLength: 8, maxLength: 160 })),
   connector: Type.Optional(Type.Union([Type.Literal("raindrop"), Type.Literal("x")])),
@@ -26,6 +26,12 @@ const toolParameters = Type.Object({
   nested: Type.Optional(Type.Boolean()),
   children: Type.Optional(Type.Boolean()),
   dryRun: Type.Optional(Type.Boolean()),
+  pilotId: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
+  pilotMaxItems: Type.Optional(Type.Integer({ minimum: 1, maximum: 10 })),
+  pilotBudgetCents: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+  sourceCollectionId: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+  includeArchived: Type.Optional(Type.Boolean()),
+  includePending: Type.Optional(Type.Boolean()),
   sourceRevisionIds: Type.Optional(Type.Array(Type.String({ minLength: 16, maxLength: 80 }), { minItems: 1, maxItems: 32 })),
   sessionId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
   entryId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
@@ -171,12 +177,12 @@ export class ModelRuntimeKnowledgeModel implements KnowledgeGenerationModel {
     return value;
   }
   async assess(input: Parameters<SourceAssessmentModel["assess"]>[0], signal: AbortSignal): Promise<Omit<SourceAssessment, "generatedAt"> & { generatedAt?: string }> {
-    const raw = await this.complete("You are Tron's bounded source assessor. Return strict JSON with summary, contribution, whyItMatters, possibleUse, evidenceQuality (high|medium|low|none), and freshness (current|aging|stale|unknown).", JSON.stringify(input), signal, 2_000);
+    const raw = await this.complete("You are Tron's bounded source assessor. Return strict JSON with summary, contribution, whyItMatters, possibleUse, evidenceQuality (high|medium|low|none|unknown), and freshness (current|aging|stale|unknown).", JSON.stringify(input), signal, 2_000);
     let value: unknown; try { value = JSON.parse(raw); } catch { throw new Error("Source assessor returned non-JSON output"); }
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Source assessment is invalid");
     const result = value as Record<string, unknown>;
     for (const key of ["summary", "evidenceQuality", "freshness"]) if (typeof result[key] !== "string" || !result[key]) throw new Error("Source assessment is incomplete");
-    if (!["high", "medium", "low", "none"].includes(result.evidenceQuality as string) || !["current", "aging", "stale", "unknown"].includes(result.freshness as string)) throw new Error("Source assessment has invalid quality");
+    if (!["high", "medium", "low", "none", "unknown"].includes(result.evidenceQuality as string) || !["current", "aging", "stale", "unknown"].includes(result.freshness as string)) throw new Error("Source assessment has invalid quality");
     return { summary: result.summary as string, ...(typeof result.contribution === "string" ? { contribution: result.contribution } : {}), ...(typeof result.whyItMatters === "string" ? { whyItMatters: result.whyItMatters } : {}), ...(typeof result.possibleUse === "string" ? { possibleUse: result.possibleUse } : {}), evidenceQuality: result.evidenceQuality as SourceAssessment["evidenceQuality"], freshness: result.freshness as SourceAssessment["freshness"] };
   }
 }
@@ -272,7 +278,7 @@ export class KnowledgeService {
       case "knowledge.observation.coverage": return this.store.observationCoveragePage(action.request.limit ?? 100, action.request.cursor, action.request.dispositions);
       case "knowledge.observation.dismiss": return this.store.dismissCoverage(action.request);
       case "knowledge.object.read": {
-        const bytes = await this.store.readObject({ hash: action.request.hash, mediaType: action.request.mediaType, bytes: action.request.bytes }, { recordId: action.request.recordId, revisionId: action.request.revisionId });
+        const bytes = await this.store.readObject({ hash: action.request.hash, mediaType: action.request.mediaType, bytes: action.request.bytes }, { recordId: action.request.recordId, revisionId: action.request.revisionId, includeArchived: action.request.includeArchived === true });
         if (!bytes) return null;
         const offset = action.request.offset ?? 0;
         if (!Number.isSafeInteger(offset) || offset < 0 || offset > bytes.byteLength) throw new GatewayError("invalid_request", "Knowledge object offset is invalid");
@@ -281,7 +287,7 @@ export class KnowledgeService {
       }
       case "knowledge.config": return this.store.configure(action.request.commandId, action.request.config);
       case "knowledge.list": return this.store.list(action.request);
-      case "knowledge.read": return this.store.read(action.request.id, action.request.revisionId, action.request.includeSuppressed);
+      case "knowledge.read": return this.store.read(action.request.id, action.request.revisionId, action.request.includeSuppressed, action.request.includeArchived, action.request.includePending);
       case "knowledge.search": return this.store.search(action.request);
       case "knowledge.recall": return this.store.recall(action.request);
       case "knowledge.source.capture": {
@@ -301,6 +307,9 @@ export class KnowledgeService {
         const request = action.request;
         const record = { ...request.record, content: { ...request.record.content, confirmed: request.confirmedByUser === true && request.record.content.confirmed } };
         return this.store.updateNote({ ...request, record });
+      }
+      case "knowledge.source.admission": {
+        return this.store.setSourceAdmission(action.request);
       }
       case "knowledge.source.triage": {
         const config = await this.store.config();
@@ -348,11 +357,15 @@ export class KnowledgeService {
         if (action.request.recordId) return this.store.setExclusion(action.request.commandId, action.request.recordId, action.request.excluded, action.request.expectedRevision, action.request.reason);
         return this.store.setScopeExclusion(action.request.commandId, { ...(action.request.sessionId ? { sessionId: action.request.sessionId } : {}), ...(action.request.branchId ? { branchId: action.request.branchId } : {}), ...(action.request.projectId ? { projectId: action.request.projectId } : {}) }, action.request.excluded, action.request.reason);
       case "knowledge.connector.configure":
-      case "knowledge.connector.run":
+      case "knowledge.connector.assessment.approve":
       case "knowledge.connector.status":
       case "knowledge.raindrop.read":
         if (!this.extensions.connector) throw new GatewayError("unsupported", "Knowledge connector support is not configured");
         return this.extensions.connector(action, signal);
+      case "knowledge.connector.run":
+      case "knowledge.raindrop.intake":
+        if (!this.extensions.connector) throw new GatewayError("unsupported", "Knowledge connector support is not configured");
+        return this.runOwned(action.operation === "knowledge.raindrop.intake" ? "Raindrop intake" : "knowledge connector run", (ownedSignal) => this.extensions.connector!(action, ownedSignal), signal);
       case "knowledge.import.dry-run":
       case "knowledge.import.run":
         if (!this.extensions.importer) throw new GatewayError("unsupported", "Knowledge importer support is not configured");
@@ -364,7 +377,7 @@ export class KnowledgeService {
     }
   }
 
-  private async readObjectToolChunk(request: { recordId: string; revisionId: string; hash: string; mediaType: string; bytes: number; offset?: number }): Promise<KnowledgeObjectChunk | null> {
+  private async readObjectToolChunk(request: { recordId: string; revisionId: string; hash: string; mediaType: string; bytes: number; includeArchived?: boolean; offset?: number }): Promise<KnowledgeObjectChunk | null> {
     const first = await this.invoke({ operation: "knowledge.object.read", request } as KnowledgeAction) as KnowledgeObjectChunk | null;
     if (!first) return null;
     const mediaType = first.mediaType.toLocaleLowerCase();
@@ -395,11 +408,11 @@ export class KnowledgeService {
     switch (parameters.action) {
       case "search": {
         if (!parameters.query) throw new GatewayError("invalid_request", "Knowledge search requires a query");
-        const result = await this.store.search({ query: parameters.query, ...(parameters.kind ? { kind: parameters.kind } : {}), limit });
+        const result = await this.store.search({ query: parameters.query, ...(parameters.kind ? { kind: parameters.kind } : {}), ...(parameters.includeArchived ? { includeArchived: true } : {}), ...(parameters.includePending ? { includePending: true } : {}), limit });
         return { text: result.hits.map(hit => `${hit.record.id} (${hit.record.kind}): ${recordLabel(hit.record).slice(0, 1_000)}`).join("\n") || "No knowledge match.", details: { stateRevision: result.stateRevision, indexState: result.indexState, hits: result.hits.map(hit => ({ ...recordSummary(hit.record), score: hit.score, matchedFields: hit.matchedFields })) } };
       }
       case "recall": {
-        const request: KnowledgeRecallRequest = { ...(parameters.query ? { query: parameters.query } : {}), ...(parameters.sessionId ? { sessionId: parameters.sessionId } : {}), ...(parameters.entryId ? { entryId: parameters.entryId } : {}), limit };
+        const request: KnowledgeRecallRequest = { ...(parameters.query ? { query: parameters.query } : {}), ...(parameters.sessionId ? { sessionId: parameters.sessionId } : {}), ...(parameters.entryId ? { entryId: parameters.entryId } : {}), ...(parameters.includeArchived ? { includeArchived: true } : {}), ...(parameters.includePending ? { includePending: true } : {}), limit };
         const result = await this.store.recall(request);
         const text = result.records.map(record => {
           const label = recallEvidenceLabel(record);
@@ -413,7 +426,7 @@ export class KnowledgeService {
       }
       case "read": {
         if (!parameters.id) throw new GatewayError("invalid_request", "Knowledge read requires an id");
-        const result = await this.store.read(parameters.id, parameters.revisionId);
+        const result = await this.store.read(parameters.id, parameters.revisionId, false, parameters.includeArchived === true, parameters.includePending === true);
         if (!result) return { text: "No knowledge record found.", details: null };
         const label = recordLabel(result);
         const offset = parameters.offset ?? 0;
@@ -432,11 +445,11 @@ export class KnowledgeService {
         const mediaType = parameters.mediaType;
         const bytes = parameters.bytes;
         if (!recordId || !revisionId || !hash || !mediaType || typeof bytes !== "number" || !Number.isSafeInteger(bytes) || bytes < 0) throw new GatewayError("invalid_request", "Knowledge object read requires id, revisionId, hash, mediaType, and bytes");
-        const result = await this.readObjectToolChunk({ recordId, revisionId, hash, mediaType, bytes, ...(parameters.offset === undefined ? {} : { offset: parameters.offset }) });
+        const result = await this.readObjectToolChunk({ recordId, revisionId, hash, mediaType, bytes, ...(parameters.includeArchived ? { includeArchived: true } : {}), ...(parameters.offset === undefined ? {} : { offset: parameters.offset }) });
         return { text: result ? objectToolText(result) : "Retained object is unavailable.", details: result };
       }
       case "list": {
-        const request: KnowledgeListRequest = { ...(parameters.kind ? { kind: parameters.kind } : {}), ...(parameters.cursor ? { cursor: parameters.cursor } : {}), limit };
+        const request: KnowledgeListRequest = { ...(parameters.kind ? { kind: parameters.kind } : {}), ...(parameters.cursor ? { cursor: parameters.cursor } : {}), ...(parameters.includeArchived ? { includeArchived: true } : {}), ...(parameters.includePending ? { includePending: true } : {}), limit };
         const result = await this.store.list(request);
         return { text: `${result.records.map(record => `${record.id} (${record.kind}): ${recordLabel(record).slice(0, 1_000)}`).join("\n") || "No knowledge records."}${result.nextCursor ? `\nContinue with cursor=${result.nextCursor}.` : ""}${result.incomplete ? "\nThe bounded canonical scan is incomplete; results are not exhaustive." : ""}`, details: { stateRevision: result.stateRevision, records: result.records.map(recordSummary), ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}), ...(result.incomplete ? { incomplete: true } : {}) } };
       }
@@ -450,6 +463,11 @@ export class KnowledgeService {
         if (!parameters.commandId || !parameters.sourceId || !parameters.revisionId) throw new GatewayError("invalid_request", "Source triage requires commandId, sourceId, and revisionId");
         const result = await this.invoke({ operation: "knowledge.source.triage", request: { commandId: parameters.commandId, sourceId: parameters.sourceId, expectedRevision: parameters.revisionId } }, signal);
         return { text: `Source triage completed: ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
+      }
+      case "restoreSource": {
+        if (!parameters.commandId || !parameters.id || !parameters.revisionId) throw new GatewayError("invalid_request", "Source restore requires commandId, id, and revisionId");
+        const result = await this.invoke({ operation: "knowledge.source.admission", request: { commandId: parameters.commandId, recordId: parameters.id, expectedRevision: parameters.revisionId, status: "retained", reason: "explicit source restore requested" } }, signal);
+        return { text: `Source restored: ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
       }
       case "createNote": {
         if (!parameters.commandId || !parameters.title || !parameters.scope) throw new GatewayError("invalid_request", "Note creation requires commandId, title, and scope");
@@ -472,6 +490,12 @@ export class KnowledgeService {
         // successful metadata read while withholding its content from the agent.
         if (Buffer.byteLength(serialized, "utf8") > 128_000) throw new GatewayError("invalid_request", "Raindrop metadata exceeds the 128 KB agent response limit; reduce perpage or narrow the collection/search. A single oversized item cannot be returned through this tool.");
         return { text: serialized, details: result };
+      }
+      case "raindropIntake": {
+        if (!this.extensions.connector || !parameters.commandId) throw new GatewayError("invalid_request", "Raindrop intake requires commandId");
+        const request = { commandId: parameters.commandId, dryRun: parameters.dryRun ?? true, ...(parameters.limit ? { limit: Math.min(10, parameters.limit) } : {}), ...(parameters.sourceCollectionId ? { sourceCollection: parameters.sourceCollectionId } : {}), ...(parameters.pilotId ? { pilot: { id: parameters.pilotId, maxItems: parameters.pilotMaxItems ?? 10, budgetCents: parameters.pilotBudgetCents ?? 100 } } : {}) };
+        const result = await this.invoke({ operation: "knowledge.raindrop.intake", request } as KnowledgeAction, signal);
+        return { text: `Raindrop intake completed: ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
       }
       case "connectorSweep": {
         if (!this.extensions.connector) throw new GatewayError("unsupported", "Knowledge connector support is not configured");

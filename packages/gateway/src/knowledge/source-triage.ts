@@ -12,6 +12,8 @@ export interface SourceTriageInput {
   signal?: AbortSignal;
   /** Internal owner handoff for provider promises that may outlive the bounded wait. */
   retirements?: Promise<void>[];
+  /** Paid workflow authority is admitted by the model transport, not here. */
+  beforeDispatch?: () => Promise<void>;
 }
 
 export interface SourceTriageResult {
@@ -26,7 +28,7 @@ export interface SourceTriageResult {
 export async function triageSource(store: KnowledgeStore, input: SourceTriageInput, model: SourceAssessmentModel, now: () => string = () => new Date().toISOString()): Promise<SourceTriageResult> {
   const config = await store.config();
   if (input.signal?.aborted) throw new Error("Source triage was cancelled");
-  const source = await store.read(input.sourceId, input.expectedRevision);
+  const source = await store.read(input.sourceId, input.expectedRevision, false, true, true);
   if (input.signal?.aborted) throw new Error("Source triage was cancelled");
   const interests = input.interests ?? config.currentInterests ?? [];
   if (!source || source.kind !== "source") throw new Error("Source revision does not exist");
@@ -39,14 +41,14 @@ export async function triageSource(store: KnowledgeStore, input: SourceTriageInp
     title: source.content.title,
     text: source.content.text,
     interests: interests.slice(0, 50).map(value => value.slice(0, 500)),
-    source: { ...(source.content.uri ? { uri: source.content.uri } : {}), ...(source.content.mediaType ? { mediaType: source.content.mediaType } : {}), capturedAt: source.content.capturedAt },
-  }, signal), signal, () => new Error("Source triage deadline exceeded or was cancelled"));
+    source: { ...(source.content.uri ? { uri: source.content.uri } : {}), ...(source.content.mediaType ? { mediaType: source.content.mediaType } : {}), ...(source.content.collectionId ? { collectionId: source.content.collectionId } : {}), captureDisposition: source.content.captureDisposition, capturedAt: source.content.capturedAt },
+  }, signal, ...(input.beforeDispatch ? [{ beforeDispatch: input.beforeDispatch }] : [])), signal, () => new Error("Source triage deadline exceeded or was cancelled"));
   input.retirements?.push(assessmentOperation.settled);
   const assessment = await assessmentOperation.wait;
   if (input.signal?.aborted) throw new Error("Source triage was cancelled");
   const latestConfig = await store.config();
   if (signal.aborted) throw new Error("Source triage was cancelled");
-  const latest = await store.read(input.sourceId, input.expectedRevision);
+  const latest = await store.read(input.sourceId, input.expectedRevision, false, true, true);
   if (signal.aborted) throw new Error("Source triage was cancelled");
   const excluded = latest?.kind === "source" ? await store.scopeExcluded({ ...(latest.provenance.sessionId ? { sessionId: latest.provenance.sessionId } : {}), ...(latest.provenance.branchId ? { branchId: latest.provenance.branchId } : {}) }) : false;
   if (signal.aborted) throw new Error("Source triage was cancelled");

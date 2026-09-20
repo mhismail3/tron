@@ -35,6 +35,8 @@ import { KnowledgeStore } from "./knowledge/knowledge-store.js";
 import { KnowledgeService, ModelRuntimeKnowledgeModel } from "./knowledge/knowledge-service.js";
 import { KnowledgeObservationService, ModelRuntimeObservationModel, modelForConfig } from "./knowledge/knowledge-observation.js";
 import { MacKeychainConnectorCredentialStore } from "./knowledge/connector-credentials.js";
+import { JevSourceAssessmentModel } from "./knowledge/jev-assessment.js";
+import { JevDecisionClient } from "./knowledge/jev-client.js";
 import { createKnowledgeConnectorExtension } from "./knowledge/connectors.js";
 import { createKnowledgeImporter } from "./knowledge/legacy-import.js";
 
@@ -121,6 +123,8 @@ const receipts = new CommandReceiptStore(config.tronHome);
 await receipts.prune();
 
 const workRegistry = new GatewayWorkRegistry();
+const knowledgeCredentials = new MacKeychainConnectorCredentialStore();
+const jevClient = new JevDecisionClient(knowledgeCredentials);
 let automations!: AutomationService;
 let automationToolOperations!: GatewayScheduleToolOperations;
 const sessions = new RuntimeRegistry({
@@ -140,6 +144,7 @@ const sessions = new RuntimeRegistry({
   notifications,
   browserLiveViews,
   workRegistry,
+  jev: jevClient,
   scheduleToolOperations: {
     execute: (sessionId, toolCallId, request) => automationToolOperations.execute(sessionId, toolCallId, request),
   },
@@ -163,7 +168,8 @@ const sessions = new RuntimeRegistry({
 });
 const knowledgeStore = new KnowledgeStore(sessions.knowledgeWorkspace(), () => transport?.broadcast("knowledge.changed", {}));
 const knowledgeConnector = createKnowledgeConnectorExtension(knowledgeStore, {
-  credentials: new MacKeychainConnectorCredentialStore(),
+  credentials: knowledgeCredentials,
+  assessment: new JevSourceAssessmentModel(knowledgeCredentials),
   ...(xPricing ? { xPricing } : {}),
 });
 const knowledge = new KnowledgeService(

@@ -26,6 +26,8 @@ export interface SourceCaptureInput {
   url: string;
   scope: KnowledgeScope;
   title?: string;
+  sourcePublishedAt?: string;
+  collectionId?: string;
   annotations?: SourceContent["annotations"];
   identity?: SourceIdentity;
   origin?: SourceOriginKind;
@@ -37,11 +39,14 @@ export interface SourceAssessmentModelInput {
   title: string;
   text: string;
   interests: string[];
-  source: { uri?: string; mediaType?: string; capturedAt: string };
+  source: { uri?: string; mediaType?: string; capturedAt: string; collectionId?: string; captureDisposition?: SourceContent["captureDisposition"] };
 }
 
+/** The paid adapter must invoke beforeDispatch only after its own request
+ * validation and credential lookup, immediately before its one POST. */
+export interface SourceAssessmentDispatchContext { beforeDispatch?: () => Promise<void>; }
 export interface SourceAssessmentModel {
-  assess(input: SourceAssessmentModelInput, signal: AbortSignal): Promise<Omit<SourceAssessment, "generatedAt"> & { generatedAt?: string }>;
+  assess(input: SourceAssessmentModelInput, signal: AbortSignal, context?: SourceAssessmentDispatchContext): Promise<Omit<SourceAssessment, "generatedAt"> & { generatedAt?: string }>;
 }
 
 export interface SourceCaptureOptions {
@@ -241,7 +246,7 @@ async function allSourceRecords(store: KnowledgeStore): Promise<Array<KnowledgeR
   const result: Array<KnowledgeRecord & { kind: "source" }> = [];
   let cursor: string | undefined;
   do {
-    const page = await store.list({ kind: "source", includeSuppressed: false, limit: 100, ...(cursor ? { cursor } : {}) });
+    const page = await store.list({ kind: "source", includeSuppressed: false, includeArchived: true, includePending: true, limit: 100, ...(cursor ? { cursor } : {}) });
     result.push(...page.records.filter((record): record is KnowledgeRecord & { kind: "source" } => record.kind === "source"));
     if (page.incomplete) throw new Error("Source deduplication scan is incomplete; retry after reducing the canonical corpus");
     cursor = page.nextCursor;
@@ -256,7 +261,10 @@ function normalizedUrl(value: string): string {
 }
 
 function sourceDraft(input: SourceCaptureInput, content: SourceContent, evidence: KnowledgeEvidenceRef[] = []): KnowledgeRecordDraft & { kind: "source" } {
-  return { kind: "source", scope: input.scope, provenance: { actor: input.origin === "connector" ? "connector" : input.origin === "import" ? "import" : "user", ...(input.identity ? { source: `${input.identity.provider}:${input.identity.accountId}:${input.identity.itemId}` } : {}), evidence }, relations: [], content };
+  const admittedContent = input.origin === "connector" && !content.admission
+    ? { ...content, admission: { status: "pending" as const, reason: "Connector capture awaits local admission", decidedAt: content.capturedAt } }
+    : content;
+  return { kind: "source", scope: input.scope, provenance: { actor: input.origin === "connector" ? "connector" : input.origin === "import" ? "import" : "user", ...(input.identity ? { source: `${input.identity.provider}:${input.identity.accountId}:${input.identity.itemId}` } : {}), evidence }, relations: [], content: admittedContent };
 }
 
 /** Capture is durable before optional assessment. Assessment errors are returned, not promoted to capture failures. */
@@ -303,7 +311,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
     if (!(error instanceof SourceNetworkError)) { clearTimeout(deadlineTimer); options.signal?.removeEventListener("abort", relayAbort); throw error; }
     if (operationController.signal.aborted) { clearTimeout(deadlineTimer); options.signal?.removeEventListener("abort", relayAbort); throw invalid("Source fetch timed out or was cancelled"); }
     const capturedAt = timestamp(now);
-    const failedContent: SourceContent = { title: input.title?.trim() || sourceUrl.hostname, uri: sourceUrl.toString(), captureDisposition: "failed", capturedAt, origin: input.origin ?? "manual", origins: sourceOrigin(input.origin ?? "manual", capturedAt, { uri: sourceUrl.toString(), ...(input.identity ? { identity: input.identity } : {}) }), ...(input.annotations ? { annotations: input.annotations } : {}), ...(input.identity ? { identity: input.identity } : {}) };
+    const failedContent: SourceContent = { title: input.title?.trim() || sourceUrl.hostname, uri: sourceUrl.toString(), captureDisposition: "failed", capturedAt, origin: input.origin ?? "manual", origins: sourceOrigin(input.origin ?? "manual", capturedAt, { uri: sourceUrl.toString(), ...(input.identity ? { identity: input.identity } : {}) }), ...(input.annotations ? { annotations: input.annotations } : {}), ...(input.identity ? { identity: input.identity } : {}), ...(input.collectionId ? { collectionId: input.collectionId } : {}), ...(input.sourcePublishedAt ? { sourcePublishedAt: input.sourcePublishedAt } : {}) };
     const failed = await store.captureSource({ commandId: input.commandId, ...(input.expectedRevision ? { expectedRevision: input.expectedRevision } : {}), signal: operationController.signal, record: sourceDraft(input, failedContent) });
     if (failed.record.kind !== "source") throw new Error("Source capture returned a non-source record");
     clearTimeout(deadlineTimer); options.signal?.removeEventListener("abort", relayAbort);
@@ -338,7 +346,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
     uri: fetched.finalUrl,
     ...(readable ? { text: readable.text } : {}), ...(object ? { object } : {}), ...(mediaType ? { mediaType } : {}),
     captureDisposition: disposition, ...(input.annotations ? { annotations: input.annotations } : {}), capturedAt,
-    origin: kind, origins: [...(retryTarget?.content.origins ?? []), ...sourceOrigin(kind, capturedAt, { uri: fetched.finalUrl, ...(input.identity ? { identity: input.identity } : {}) }), ...(fetched.finalUrl !== sourceUrl.toString() ? [{ kind, capturedAt, uri: sourceUrl.toString(), ...(input.identity ? { identity: input.identity } : {}) }] : [])], ...(input.identity ? { identity: input.identity } : {}),
+    origin: kind, origins: [...(retryTarget?.content.origins ?? []), ...sourceOrigin(kind, capturedAt, { uri: fetched.finalUrl, ...(input.identity ? { identity: input.identity } : {}) }), ...(fetched.finalUrl !== sourceUrl.toString() ? [{ kind, capturedAt, uri: sourceUrl.toString(), ...(input.identity ? { identity: input.identity } : {}) }] : [])], ...(input.identity ? { identity: input.identity } : {}), ...(input.collectionId ? { collectionId: input.collectionId } : {}), ...(input.sourcePublishedAt ? { sourcePublishedAt: input.sourcePublishedAt } : {}),
   };
   const request = { commandId: input.commandId, ...(input.expectedRevision ? { expectedRevision: input.expectedRevision } : retryTarget ? { expectedRevision: retryTarget.revisionId } : {}), record: { ...sourceDraft(input, content), ...(retryTarget ? { id: retryTarget.id, createdAt: retryTarget.createdAt } : {}) } };
   let result = await store.captureSource({ ...request, signal: operationController.signal });
@@ -354,7 +362,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
       // was already retained. A late assessment stays fenced by the signal and the
       // revision revalidation below.
       const assessmentOperation = awaitAbortableWithSettlement(
-        options.model.assess({ title: sourceRecord.content.title, text: readable.text, interests: interests.slice(0, 50).map(item => item.slice(0, 500)), source: { ...(sourceRecord.content.uri ? { uri: sourceRecord.content.uri } : {}), ...(mediaType ? { mediaType } : {}), capturedAt } }, operationController.signal),
+        options.model.assess({ title: sourceRecord.content.title, text: readable.text, interests: interests.slice(0, 50).map(item => item.slice(0, 500)), source: { ...(sourceRecord.content.uri ? { uri: sourceRecord.content.uri } : {}), ...(mediaType ? { mediaType } : {}), ...(sourceRecord.content.collectionId ? { collectionId: sourceRecord.content.collectionId } : {}), captureDisposition: sourceRecord.content.captureDisposition, capturedAt } }, operationController.signal),
         operationController.signal,
         () => new Error("Source assessment deadline exceeded or was cancelled"),
       );
@@ -363,7 +371,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
       if (operationController.signal.aborted) throw new SourceNetworkError("Source assessment cancelled");
       const latestConfig = await store.config();
       if (operationController.signal.aborted) throw new SourceNetworkError("Source assessment cancelled");
-      const latest = await store.read(sourceRecord.id, sourceRecord.revisionId);
+      const latest = await store.read(sourceRecord.id, sourceRecord.revisionId, false, true, true);
       if (operationController.signal.aborted) throw new SourceNetworkError("Source assessment cancelled");
       const excluded = latest?.kind === "source" ? await store.scopeExcluded({ ...(latest.provenance.sessionId ? { sessionId: latest.provenance.sessionId } : {}), ...(latest.provenance.branchId ? { branchId: latest.provenance.branchId } : {}) }) : false;
       if (operationController.signal.aborted) throw new SourceNetworkError("Source assessment cancelled");

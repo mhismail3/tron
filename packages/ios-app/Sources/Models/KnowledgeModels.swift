@@ -254,14 +254,16 @@ struct KnowledgeRelation: Codable, Hashable, Sendable {
 struct KnowledgeSourceAnnotation: Codable, Hashable, Sendable { let text: String; let locator: String?; let createdAt: String? }
 struct KnowledgeSourceIdentity: Codable, Hashable, Sendable { let provider: String; let accountId: String; let itemId: String }
 struct KnowledgeSourceOrigin: Codable, Hashable, Sendable { let kind: KnowledgeSourceOriginKind; let capturedAt: String; let annotation: String?; let uri: String?; let identity: KnowledgeSourceIdentity? }
-enum KnowledgeEvidenceQuality: String, Codable, Sendable { case high, medium, low, none }
+enum KnowledgeEvidenceQuality: String, Codable, Sendable { case high, medium, low, none, unknown }
 enum KnowledgeFreshness: String, Codable, Sendable { case current, aging, stale, unknown }
-struct KnowledgeSourceAssessment: Codable, Hashable, Sendable { let summary: String; let contribution: String?; let whyItMatters: String?; let evidenceQuality: KnowledgeEvidenceQuality; let freshness: KnowledgeFreshness; let possibleUse: String?; let generatedAt: String; let model: String? }
+enum KnowledgeSourceAdmission: String, Codable, Hashable, Sendable { case pending, retained, archived }
+struct KnowledgeSourceAssessment: Codable, Hashable, Sendable { let summary: String; let contribution: String?; let whyItMatters: String?; let evidenceQuality: KnowledgeEvidenceQuality; let freshness: KnowledgeFreshness; let possibleUse: String?; let generatedAt: String; let model: String?; let recommendation: KnowledgeSourceAdmission? = nil; let confidence: Double? = nil; let profileVersion: String? = nil; let rubricVersion: String? = nil }
+struct KnowledgeSourceAdmissionState: Codable, Hashable, Sendable { let status: KnowledgeSourceAdmission; let reason: String?; let decidedAt: String; let profileVersion: String?; let rubricVersion: String? }
 struct KnowledgeSourceRetention: Codable, Hashable, Sendable { let sensitivity: String; let usageConstraint: String?; let evidenceAvailable: Bool; let originalHash: String? }
 struct KnowledgeSourceContent: Codable, Hashable, Sendable {
-    let title: String; let uri: String?; let text: String?; let object: KnowledgeObjectRef?; var representations: [KnowledgeSourceRepresentation]? = nil; let mediaType: String?
+    let title: String; let uri: String?; var collectionId: String? = nil; let text: String?; let object: KnowledgeObjectRef?; var representations: [KnowledgeSourceRepresentation]? = nil; let mediaType: String?
     let captureDisposition: KnowledgeCaptureDisposition; let annotations: [KnowledgeSourceAnnotation]?; let sourcePublishedAt: String?; let capturedAt: String; let origin: String?
-    let origins: [KnowledgeSourceOrigin]?; let identity: KnowledgeSourceIdentity?; var retention: KnowledgeSourceRetention? = nil; let assessment: KnowledgeSourceAssessment?
+    let origins: [KnowledgeSourceOrigin]?; let identity: KnowledgeSourceIdentity?; var retention: KnowledgeSourceRetention? = nil; let assessment: KnowledgeSourceAssessment?; var admission: KnowledgeSourceAdmissionState? = nil
 }
 struct KnowledgeObservationRange: Codable, Hashable, Sendable {
     let sessionId: String; let branchId: String?; let fromEntryId: String; let toEntryId: String; let entryIds: [String]; let entryDigest: String; let projectId: String?; let invocationIds: [String]?
@@ -400,7 +402,7 @@ enum KnowledgeCorrectionPolicy {
         case .source(let value):
             var annotations = value.annotations ?? []
             annotations.append(KnowledgeSourceAnnotation(text: "User correction: \(replacementText)", locator: "user-correction", createdAt: nil))
-            return .source(KnowledgeSourceContent(title: value.title, uri: value.uri, text: value.text, object: value.object, representations: value.representations, mediaType: value.mediaType, captureDisposition: value.captureDisposition, annotations: annotations, sourcePublishedAt: value.sourcePublishedAt, capturedAt: value.capturedAt, origin: value.origin, origins: value.origins, identity: value.identity, retention: value.retention, assessment: value.assessment))
+            return .source(KnowledgeSourceContent(title: value.title, uri: value.uri, collectionId: value.collectionId, text: value.text, object: value.object, representations: value.representations, mediaType: value.mediaType, captureDisposition: value.captureDisposition, annotations: annotations, sourcePublishedAt: value.sourcePublishedAt, capturedAt: value.capturedAt, origin: value.origin, origins: value.origins, identity: value.identity, retention: value.retention, assessment: value.assessment, admission: value.admission))
         case .observation(let value):
             return .observation(KnowledgeObservationContent(range: value.range, items: [KnowledgeObservationItem(text: replacementText, attribution: .user, observedAt: value.items.first?.observedAt ?? record.updatedAt, certainty: .qualified, evidence: value.items.first?.evidence, field: nil)], observer: value.observer))
         case .note(let value):

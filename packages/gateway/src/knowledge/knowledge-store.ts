@@ -206,10 +206,30 @@ function validateConnectorState(value: unknown, connector: "raindrop" | "x"): as
   const state = value as Record<string, unknown>;
   if (state.connector !== connector || typeof state.enabled !== "boolean" || typeof state.allowWrites !== "boolean" || typeof state.paidAccessApproved !== "boolean" || !Number.isSafeInteger(state.paidBudgetCents) || (state.paidBudgetCents as number) < 0 || (state.paidBudgetCents as number) > 1_000_000 || typeof state.recurringApproved !== "boolean" || !Array.isArray(state.pending) || !Array.isArray(state.capturedIds) || !["unconfigured", "ready", "running", "partial", "rate-limited", "auth-error", "error"].includes(state.health as string) || !Number.isSafeInteger(state.remaining) || (state.remaining as number) < 0 || state.pending.length > 500 || state.capturedIds.length > 2_000) throw new KnowledgeStoreError("invalid", "Invalid connector state");
   for (const item of state.pending) {
-    if (!item || typeof item !== "object" || typeof (item as Record<string, unknown>).id !== "string" || typeof (item as Record<string, unknown>).title !== "string" || typeof (item as Record<string, unknown>).url !== "string" || ((item as Record<string, unknown>).apiPayload !== undefined && (typeof (item as Record<string, unknown>).apiPayload !== "string" || ((item as Record<string, unknown>).apiPayload as string).length > 100_000))) throw new KnowledgeStoreError("invalid", "Invalid connector pending item");
+    if (!item || typeof item !== "object" || typeof (item as Record<string, unknown>).id !== "string" || typeof (item as Record<string, unknown>).title !== "string" || typeof (item as Record<string, unknown>).url !== "string" || ((item as Record<string, unknown>).apiPayload !== undefined && (typeof (item as Record<string, unknown>).apiPayload !== "string" || ((item as Record<string, unknown>).apiPayload as string).length > 100_000)) || ((item as Record<string, unknown>).metadataComplete !== undefined && typeof (item as Record<string, unknown>).metadataComplete !== "boolean")) throw new KnowledgeStoreError("invalid", "Invalid connector pending item");
+  }
+  const validateAssessmentAuthority = (value: unknown, label: string): void => {
+    const authority = value as Record<string, unknown>;
+    const maxItems = typeof authority?.maxItems === "number" ? authority.maxItems : Number.NaN; const budgetCents = typeof authority?.budgetCents === "number" ? authority.budgetCents : Number.NaN; const usedItems = typeof authority?.usedItems === "number" ? authority.usedItems : Number.NaN; const reservedCents = typeof authority?.reservedCents === "number" ? authority.reservedCents : Number.NaN;
+    if (!authority || typeof authority !== "object" || typeof authority.id !== "string" || authority.id.length < 1 || authority.id.length > 160 || typeof authority.accountId !== "string" || !/^\d+$/.test(authority.accountId) || typeof authority.sourceCollection !== "string" || !/^-?\d{1,18}$/.test(authority.sourceCollection) || typeof authority.profileVersion !== "string" || authority.profileVersion.length < 1 || authority.profileVersion.length > 256 || !Array.isArray(authority.itemIds) || authority.itemIds.length > 10 || authority.itemIds.some(itemId => typeof itemId !== "string" || itemId.length < 1 || itemId.length > 512) || !Number.isSafeInteger(maxItems) || maxItems < 1 || maxItems > 10 || !Number.isSafeInteger(budgetCents) || budgetCents < 1 || budgetCents > 100 || !Number.isSafeInteger(usedItems) || usedItems < 0 || usedItems > maxItems || !Number.isSafeInteger(reservedCents) || reservedCents < 0 || reservedCents > budgetCents) throw new KnowledgeStoreError("invalid", `Invalid connector ${label}`);
+  };
+  if (state.assessmentPilot !== undefined) validateAssessmentAuthority(state.assessmentPilot, "assessment pilot");
+  if (state.assessmentApprovals !== undefined) {
+    if (!Array.isArray(state.assessmentApprovals) || state.assessmentApprovals.length > 32 || new Set(state.assessmentApprovals.map(item => (item as Record<string, unknown>)?.id)).size !== state.assessmentApprovals.length) throw new KnowledgeStoreError("invalid", "Invalid connector assessment approvals");
+    state.assessmentApprovals.forEach(item => validateAssessmentAuthority(item, "assessment approval"));
   }
   for (const id of state.capturedIds) if (typeof id !== "string" || id.length > 512) throw new KnowledgeStoreError("invalid", "Invalid connector captured ID");
-  for (const key of ["accountId", "scope", "destination", "credentialRef", "checkpoint", "lastRunAt", "lastError"]) if (state[key] !== undefined && (typeof state[key] !== "string" || (state[key] as string).length > 4_096)) throw new KnowledgeStoreError("invalid", "Invalid connector state field");
+  if (state.assessmentAttempts !== undefined) {
+    if (!state.assessmentAttempts || typeof state.assessmentAttempts !== "object" || Array.isArray(state.assessmentAttempts) || Object.keys(state.assessmentAttempts).length > 500) throw new KnowledgeStoreError("invalid", "Invalid connector assessment attempts");
+    for (const [itemId, attempt] of Object.entries(state.assessmentAttempts as Record<string, unknown>)) {
+      if (!itemId || !attempt || typeof attempt !== "object" || ((attempt as Record<string, unknown>).itemId !== undefined && (typeof (attempt as Record<string, unknown>).itemId !== "string" || !(attempt as Record<string, unknown>).itemId)) || ((attempt as Record<string, unknown>).cohortId !== undefined && (typeof (attempt as Record<string, unknown>).cohortId !== "string" || !(attempt as Record<string, unknown>).cohortId)) || !["dispatched", "settled"].includes((attempt as Record<string, unknown>).status as string) || !Number.isSafeInteger((attempt as Record<string, unknown>).chargeCents) || ((attempt as Record<string, unknown>).chargeCents as number) < 1 || ((attempt as Record<string, unknown>).inputTokens !== undefined && (!Number.isSafeInteger((attempt as Record<string, unknown>).inputTokens) || (attempt as Record<string, unknown>).inputTokens as number < 0)) || ((attempt as Record<string, unknown>).outputTokens !== undefined && (!Number.isSafeInteger((attempt as Record<string, unknown>).outputTokens) || (attempt as Record<string, unknown>).outputTokens as number < 0)) || ((attempt as Record<string, unknown>).estimatedCostCents !== undefined && (typeof (attempt as Record<string, unknown>).estimatedCostCents !== "number" || !Number.isFinite((attempt as Record<string, unknown>).estimatedCostCents) || (attempt as Record<string, unknown>).estimatedCostCents as number < 0))) throw new KnowledgeStoreError("invalid", "Invalid connector assessment attempt");
+    }
+  }
+  for (const key of ["accountId", "scope", "destination", "credentialRef", "lastRunAt", "lastError"]) if (state[key] !== undefined && (typeof state[key] !== "string" || (state[key] as string).length > 4_096)) throw new KnowledgeStoreError("invalid", "Invalid connector state field");
+  if (state.checkpoints !== undefined) {
+    if (!state.checkpoints || typeof state.checkpoints !== "object" || Array.isArray(state.checkpoints) || Object.keys(state.checkpoints).length > 32) throw new KnowledgeStoreError("invalid", "Invalid connector checkpoints");
+    for (const [key, value] of Object.entries(state.checkpoints as Record<string, unknown>)) if (key.length < 1 || key.length > 256 || typeof value !== "string" || value.length > 4_096) throw new KnowledgeStoreError("invalid", "Invalid connector checkpoint");
+  }
   if (state.pendingRemote !== undefined) {
     const pending = state.pendingRemote as Record<string, unknown>;
     if (!pending || pending.action !== "move" || typeof pending.operationId !== "string" || typeof pending.itemId !== "string" || typeof pending.basisRecordId !== "string" || typeof pending.basisRevisionId !== "string" || typeof pending.provider !== "string" || typeof pending.accountId !== "string" || typeof pending.originalCollectionId !== "string" || typeof pending.destination !== "string" || typeof pending.createdAt !== "string") throw new KnowledgeStoreError("invalid", "Invalid connector remote receipt");
@@ -543,6 +563,12 @@ export class KnowledgeStore {
     return false;
   }
 
+  private recordArchived(record: KnowledgeRecord): boolean {
+    return record.kind === "source" && record.content.admission?.status === "archived";
+  }
+  private recordPending(record: KnowledgeRecord): boolean {
+    return record.kind === "source" && record.content.admission?.status === "pending";
+  }
   private recordExcluded(state: KnowledgeState, record: KnowledgeRecord): boolean {
     const suppression = state.suppressions.get(record.id);
     if (suppression?.excluded || suppression?.forgotten) return true;
@@ -649,8 +675,8 @@ export class KnowledgeStore {
 
   /** Connector operational state shares the knowledge owner’s serialized state;
    * this update never accepts or persists a credential value. */
-  async updateConnectorState(commandId: string, connector: "raindrop" | "x", update: (current: KnowledgeConnectorState | undefined) => KnowledgeConnectorState): Promise<KnowledgeConnectorState> {
-    return this.mutate("knowledge.connector.state", commandId, { connector }, async state => {
+  async updateConnectorState(commandId: string, connector: "raindrop" | "x", update: (current: KnowledgeConnectorState | undefined) => KnowledgeConnectorState, payload: unknown = { connector }): Promise<KnowledgeConnectorState> {
+    return this.mutate("knowledge.connector.state", commandId, payload, async state => {
       const next = update(state.connectors?.[connector] ? structuredClone(state.connectors[connector]) : undefined);
       validateConnectorState(next, connector);
       state.connectors = { ...(state.connectors ?? {}), [connector]: next };
@@ -661,7 +687,7 @@ export class KnowledgeStore {
   async list(request: KnowledgeListRequest = {}): Promise<KnowledgeListResponse> {
     return this.inspect(async (state, paths) => {
       const limit = this.pageLimit(state, request.limit ?? 50);
-      const scope = JSON.stringify([request.kind ?? null, request.scope ?? null, request.includeSuppressed === true]);
+      const scope = JSON.stringify([request.kind ?? null, request.scope ?? null, request.includeSuppressed === true, request.includeArchived === true]);
       const filter = this.catalogFilter(request);
       if (request.cursor) {
         const cursor = readListCursor(request.cursor, scope);
@@ -672,7 +698,7 @@ export class KnowledgeStore {
       let last: { id: string; sortAt: number } | undefined;
       for (const { key: id, value: head } of state.catalog?.scan<RecordHead>("records", filter.clauses.join(" AND "), filter.parameters, "json_extract(value, '$.sortAt') DESC, key") ?? []) {
         const record = await this.readRecord(paths, id, head.latestRevisionId);
-        if (this.recordHardErased(state, record) || (!request.includeSuppressed && this.recordExcluded(state, record))) continue;
+        if (this.recordHardErased(state, record) || (!request.includeSuppressed && this.recordExcluded(state, record)) || (!request.includeArchived && this.recordArchived(record)) || (!request.includePending && this.recordPending(record))) continue;
         if (records.length >= limit || !budget.admit(record)) { nextCursor = listCursor(scope, last!); break; }
         records.push(record); last = { id, sortAt: head.sortAt };
       }
@@ -690,7 +716,7 @@ export class KnowledgeStore {
     if (request.scope) { clauses.push("json_extract(value, '$.scope') = ?"); parameters.push(request.scope); }
     return { clauses, parameters };
   }
-  async read(id: string, revision?: string, includeSuppressed = false): Promise<KnowledgeRecord | null> {
+  async read(id: string, revision?: string, includeSuppressed = false, includeArchived = false, includePending = false): Promise<KnowledgeRecord | null> {
     safeId(id, "record id"); if (revision !== undefined) safeId(revision, "knowledge revision");
     return this.inspect(async (state, paths) => {
       const head = state.records.get(id);
@@ -698,9 +724,13 @@ export class KnowledgeStore {
       const selected = revision ?? head.latestRevisionId;
       if (!head.revisionIds.includes(selected)) throw new KnowledgeStoreError("invalid", "Requested revision is not committed for this record");
       const record = await this.readRecord(paths, id, selected);
-      // includeSuppressed is an audit visibility option, not an erasure bypass.
-      if (this.recordHardErased(state, record)) return null;
-      if (!includeSuppressed && this.recordExcluded(state, record)) return null;
+      const latest = await this.readRecord(paths, id, head.latestRevisionId);
+      // Visibility is governed by the current head even when an audit caller
+      // asks for an older immutable revision.
+      if (this.recordHardErased(state, record) || this.recordHardErased(state, latest)) return null;
+      if (!includeSuppressed && (this.recordExcluded(state, record) || this.recordExcluded(state, latest))) return null;
+      if (!includeArchived && (this.recordArchived(record) || this.recordArchived(latest))) return null;
+      if (!includePending && (this.recordPending(record) || this.recordPending(latest))) return null;
       return record;
     });
   }
@@ -717,7 +747,7 @@ export class KnowledgeStore {
       filter.clauses.push(`${scoreSQL} > 0`); filter.parameters.push(...terms, ...terms);
       for (const { key: id } of state.catalog?.scan<RecordHead>("records", filter.clauses.join(" AND "), filter.parameters, `${scoreSQL} DESC, json_extract(value, '$.sortAt') DESC, key`) ?? []) {
         const record = await this.currentRecord(state, paths, id);
-        if (!record || this.recordExcluded(state, record)) continue;
+        if (!record || this.recordExcluded(state, record) || (!request.includeArchived && this.recordArchived(record)) || (!request.includePending && this.recordPending(record))) continue;
         if (hits.length >= limit) break;
         const matchedFields: string[] = []; let score = 0;
         for (const [field, value] of searchableFields(record)) {
@@ -743,7 +773,7 @@ export class KnowledgeStore {
       const records: KnowledgeRecord[] = []; const budget = new KnowledgePageBudget();
       for (const { key: id } of state.catalog?.scan<RecordHead>("records", filter.clauses.join(" AND "), filter.parameters, "json_extract(value, '$.sortAt') DESC, key") ?? []) {
         const record = await this.currentRecord(state, paths, id);
-        if (!record || this.recordExcluded(state, record)) continue;
+        if (!record || this.recordExcluded(state, record) || (!request.includeArchived && this.recordArchived(record)) || (!request.includePending && this.recordPending(record))) continue;
         if (record.kind === "observation" && request.sessionId && record.content.range.sessionId !== request.sessionId) continue;
         if (record.kind === "observation" && request.entryId && !record.content.range.entryIds.includes(request.entryId)) continue;
         const citations = [...record.provenance.evidence, ...(record.kind === "observation" ? record.content.items.flatMap(item => item.evidence ?? []) : [])];
@@ -769,7 +799,7 @@ export class KnowledgeStore {
         const record = await this.readRecord(paths, id, revision);
         if (record.kind === "observation" && record.content.range.sessionId !== sessionId) throw conflict("Synthesis observation is outside the requested session");
         if (record.kind !== "observation" && record.provenance.sessionId !== undefined && record.provenance.sessionId !== sessionId) throw conflict("Synthesis record is outside the requested session");
-        if (this.recordExcluded(state, record)) throw conflict("Synthesis source is unavailable or excluded");
+        if (this.recordExcluded(state, record) || this.recordArchived(record) || this.recordPending(record)) throw conflict("Synthesis source is unavailable or excluded");
         records.push(record);
       }
       return records;
@@ -796,6 +826,16 @@ export class KnowledgeStore {
   }
 
   /** Internal source/import owner write. The transport action accepts URLs only. */
+  async setSourceAdmission(request: { commandId: string; recordId: string; expectedRevision: string; status: import("./knowledge-contract.js").SourceAdmission; reason?: string; profileVersion?: string; rubricVersion?: string }): Promise<KnowledgeMutationResult> {
+    return this.mutate("knowledge.source.admission", request.commandId, request, async (state, paths) => {
+      const head = state.records.get(request.recordId);
+      if (!head || head.latestRevisionId !== request.expectedRevision) throw conflict("Source revision is stale or unavailable");
+      const current = await this.readRecord(paths, request.recordId, head.latestRevisionId);
+      if (current.kind !== "source") throw conflict("Source revision is unavailable");
+      const admission = { status: request.status, ...(request.reason ? { reason: request.reason } : {}), decidedAt: now(), ...(request.profileVersion ? { profileVersion: request.profileVersion } : {}), ...(request.rubricVersion ? { rubricVersion: request.rubricVersion } : {}) };
+      return this.putRecord(state, paths, { kind: "source", id: current.id, createdAt: current.createdAt, scope: current.scope, provenance: current.provenance, relations: current.relations, ...(current.temporal ? { temporal: current.temporal } : {}), content: { ...current.content, admission } }, request.expectedRevision);
+    });
+  }
   async captureSource(request: SourceRecordWriteRequest): Promise<KnowledgeMutationResult> {
     const { signal, ...receiptRequest } = request;
     return this.mutate("knowledge.source.record-write", request.commandId, receiptRequest, async (state, paths) => this.putRecord(state, paths, request.record as KnowledgeRecordDraft, request.expectedRevision), undefined, signal);
@@ -1061,11 +1101,12 @@ export class KnowledgeStore {
     });
   }
   private async assertObject(paths: StorePaths, ref: KnowledgeObjectRef): Promise<void> { validateObjectRef(ref); const bytes = await readSecureBytes(join(paths.objects, ref.hash), OBJECT_MAX_BYTES); if (!bytes || bytes.byteLength !== ref.bytes || createHash("sha256").update(bytes).digest("hex") !== ref.hash) throw conflict("Referenced knowledge object bytes are not durably captured"); }
-  private async exactObjectAuthority(paths: StorePaths, state: KnowledgeState, ref: KnowledgeObjectRef, recordId: string, revisionId: string): Promise<boolean> {
+  private async exactObjectAuthority(paths: StorePaths, state: KnowledgeState, ref: KnowledgeObjectRef, recordId: string, revisionId: string, includeArchived = false): Promise<boolean> {
     const head = state.records.get(recordId);
     if (!head || !head.revisionIds.includes(revisionId)) return false;
     const record = await this.readRecord(paths, recordId, revisionId);
-    if (this.recordExcluded(state, record)) return false;
+    const latest = await this.readRecord(paths, recordId, head.latestRevisionId);
+    if (this.recordExcluded(state, latest) || (!includeArchived && this.recordArchived(latest)) || this.recordPending(latest)) return false;
     // The caller's exact revision is the authority. Do not fall back to a
     // corpus scan or an evidence hash, since either can authorize an object
     // after its source has been excluded or replaced.
@@ -1073,12 +1114,12 @@ export class KnowledgeStore {
       && candidate.bytes === ref.bytes && candidate.mediaType === ref.mediaType);
   }
 
-  async readObject(ref: KnowledgeObjectRef, authority: { recordId: string; revisionId: string }): Promise<Uint8Array | null> {
+  async readObject(ref: KnowledgeObjectRef, authority: { recordId: string; revisionId: string; includeArchived?: boolean }): Promise<Uint8Array | null> {
     validateObjectRef(ref);
     assertKnowledgeId(authority.recordId, "object authority record id");
     assertKnowledgeId(authority.revisionId, "object authority revision");
     const admittedPath = await this.inspect(async (state, paths, present) =>
-      present && await this.exactObjectAuthority(paths, state, ref, authority.recordId, authority.revisionId) ? join(paths.objects, ref.hash) : null);
+      present && await this.exactObjectAuthority(paths, state, ref, authority.recordId, authority.revisionId, authority.includeArchived === true) ? join(paths.objects, ref.hash) : null);
     if (!admittedPath) return null;
     // Release the catalog while reading bytes, then recheck exact authority.
     // A concurrent forget/exclusion must win over the initial admission.
@@ -1086,7 +1127,7 @@ export class KnowledgeStore {
     if (!bytes) return null;
     if (bytes.byteLength !== ref.bytes || createHash("sha256").update(bytes).digest("hex") !== ref.hash) throw new KnowledgeStoreError("invalid", "Knowledge object failed hash or size verification");
     return this.inspect(async (state, paths, present) =>
-      present && await this.exactObjectAuthority(paths, state, ref, authority.recordId, authority.revisionId) ? bytes : null);
+      present && await this.exactObjectAuthority(paths, state, ref, authority.recordId, authority.revisionId, authority.includeArchived === true) ? bytes : null);
   }
   async reconcile(): Promise<KnowledgeReconcileResult> {
     return this.mutex.run(async () => {
