@@ -87,6 +87,15 @@ describe("KnowledgeStore", () => {
     expect((await store.read(committed.record.id))?.revisionId).toBe(committed.record.revisionId);
   });
 
+  it("resolves connector source identity through the canonical index across revisions", async () => {
+    const { store } = await fixture();
+    const first = await store.captureSource({ commandId: command("identity-first"), record: { ...source("Indexed source"), content: { ...source("Indexed source").content, identity: { provider: "raindrop", accountId: "42", itemId: "item-1" } } } });
+    await expect(store.sourceByIdentity({ provider: "raindrop", accountId: "42", itemId: "item-1" })).resolves.toMatchObject({ id: first.record.id, revisionId: first.record.revisionId });
+    const updated = await store.captureSource({ commandId: command("identity-update"), expectedRevision: first.record.revisionId, record: { ...first.record, content: { ...first.record.content, title: "Updated indexed source", identity: { provider: "raindrop", accountId: "42", itemId: "item-2" } } } });
+    await expect(store.sourceByIdentity({ provider: "raindrop", accountId: "42", itemId: "item-1" })).resolves.toBeUndefined();
+    await expect(store.sourceByIdentity({ provider: "raindrop", accountId: "42", itemId: "item-2" })).resolves.toMatchObject({ id: updated.record.id, revisionId: updated.record.revisionId });
+  });
+
   it("is lazy, durable across reopen, and returns lexical canonical results", async () => {
     const { store, home, workspace } = await fixture();
     expect((await store.status()).state).toBe("uninitialized");

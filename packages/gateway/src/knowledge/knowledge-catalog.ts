@@ -10,13 +10,20 @@ export interface KnowledgeTable<T> {
   keys(): IterableIterator<string>;
 }
 
-export type CatalogCollection = "records" | "coverage" | "suppressions" | "scopeExclusions" | "receipts" | "imports" | "cleanup" | "recordCleanup";
+export type CatalogCollection = "records" | "coverage" | "suppressions" | "scopeExclusions" | "receipts" | "imports" | "cleanup" | "recordCleanup" | "sourceIdentities";
 
 // Validate rows at their read/write boundary, without materializing the corpus.
 function catalogValue<T>(collection: CatalogCollection, raw: unknown): T {
-  const decoded: unknown = typeof raw === "string" ? JSON.parse(raw) : raw;
+  let decoded: unknown;
+  if (collection === "sourceIdentities" && typeof raw === "string") {
+    try { decoded = JSON.parse(raw); } catch { decoded = raw; }
+  } else decoded = typeof raw === "string" ? JSON.parse(raw) : raw;
   if (collection === "cleanup") {
     if (decoded !== true) throw new Error("Invalid Knowledge object cleanup row");
+    return decoded as T;
+  }
+  if (collection === "sourceIdentities") {
+    if (typeof decoded !== "string") throw new Error("Invalid Knowledge source identity row");
     return decoded as T;
   }
   if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) throw new Error(`Invalid Knowledge ${collection} row`);
@@ -27,6 +34,7 @@ function catalogValue<T>(collection: CatalogCollection, raw: unknown): T {
       if (typeof value.latestRevisionId !== "string" || !strings(value.revisionIds) || !value.revisionIds.includes(value.latestRevisionId)
         || !["observation", "source", "note"].includes(value.kind as string) || !["personal", "research"].includes(value.scope as string)
         || typeof value.sortAt !== "number" || !Number.isFinite(value.sortAt) || !strings(value.recordRefs) || !strings(value.objectHashes)
+        || (value.sourceIdentities !== undefined && !strings(value.sourceIdentities))
         || !Array.isArray(value.searchFields) || !value.searchFields.every(field => strings(field) && field.length === 2)) throw new Error("Invalid Knowledge record head");
       break;
     case "suppressions":

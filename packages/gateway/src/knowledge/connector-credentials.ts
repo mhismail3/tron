@@ -10,6 +10,14 @@ export interface ConnectorCredentialStore {
   read(reference: string): Promise<string | undefined>;
 }
 
+/** Configuration admission must bind an opaque credential reference to the
+ * connector that will consume it. The generic syntax remains useful to the
+ * Mac Keychain adapter (including Jev), but it is not a provider admission
+ * check by itself. */
+export function isConnectorCredentialReference(reference: string, connector: "raindrop" | "x"): boolean {
+  return new RegExp(`^connector:${connector}:[A-Za-z0-9._:-]{1,160}$`).test(reference);
+}
+
 export class MacKeychainConnectorCredentialStore implements ConnectorCredentialStore {
   constructor(private readonly service = "Tron Connector Credentials") {}
 

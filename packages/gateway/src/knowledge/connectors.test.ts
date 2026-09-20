@@ -47,6 +47,46 @@ describe("knowledge connectors", () => {
     await expect(extension.invoke({ operation: "knowledge.raindrop.read", request: { commandId: command("malformed-extra"), read: { operation: "user", extra: true } } } as any)).rejects.toMatchObject({ code: "invalid_request" });
     expect(credentialReads).toBe(0); expect(httpCalls).toBe(0);
   });
+  it.each([
+    ["raindrop", "connector:x:wrong-account"],
+    ["x", "connector:raindrop:wrong-account"],
+  ] as const)("rejects a credential reference from another provider namespace (%s)", async (connector, credentialRef) => {
+    const root = await mkdtemp(join(tmpdir(), `tron-credential-namespace-${connector}-`)); roots.push(root);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const extension = new KnowledgeConnectorExtension(store, { credentials: { read: async () => "must-not-read" }, http: async () => { throw new Error("must-not-request"); } });
+    await expect(extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command(`namespace-${connector}`), connector, enabled: true, accountId: "42", scope: "7", credentialRef } })).rejects.toMatchObject({ code: "invalid_request" });
+    expect(await store.connectorState(connector)).toBeUndefined();
+  });
+
+  it("does not debit or contact X when its credential is unavailable", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-missing-x-credential-")); roots.push(root);
+    let calls = 0;
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const extension = new KnowledgeConnectorExtension(store, { credentials: { read: async () => undefined }, http: async () => { calls += 1; return response({ data: [] }); }, sleep: async () => {} });
+    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("missing-x-config"), connector: "x", enabled: true, accountId: "account-1", scope: "123", credentialRef: "connector:x:missing", paidAccessApproved: true, paidBudgetCents: 1 } });
+    await expect(extension.invoke({ operation: "knowledge.connector.run", request: { commandId: command("missing-x-run"), connector: "x", dryRun: false, limit: 1 } })).rejects.toMatchObject({ code: "unsupported" });
+    expect(calls).toBe(0);
+    expect((await store.connectorState("x"))?.paidBudgetCents).toBe(1);
+  });
+
+  it("does not advance discovery state for a malformed successful envelope", async () => {
+    const { store, extension } = await fixture(async url => url.endsWith("/user") ? response({ user: { _id: 42 } }) : response({ unexpected: true }));
+    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("malformed-discovery-config"), connector: "raindrop", enabled: true, accountId: "42", scope: "7", credentialRef: "connector:raindrop:test-account" } });
+    await expect(extension.invoke({ operation: "knowledge.connector.run", request: { commandId: command("malformed-discovery-run"), connector: "raindrop", dryRun: true, limit: 1 } })).rejects.toMatchObject({ code: "internal" });
+    const state = await store.connectorState("raindrop");
+    expect(state?.pending).toEqual([]);
+    expect(state?.checkpoints).toBeUndefined();
+  });
+
+  it("rejects malformed X discovery success without advancing its checkpoint", async () => {
+    const { store, extension } = await fixture(async () => response({ meta: { next_token: "next" } }), { accountId: "account-1", costCentsPerAttempt: 1, maxAttempts: 1 });
+    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("malformed-x-config"), connector: "x", enabled: true, accountId: "account-1", scope: "123", credentialRef: "connector:x:test-account", paidAccessApproved: true, paidBudgetCents: 1 } });
+    await expect(extension.invoke({ operation: "knowledge.connector.run", request: { commandId: command("malformed-x-run"), connector: "x", dryRun: true, limit: 1 } })).rejects.toMatchObject({ code: "internal" });
+    const state = await store.connectorState("x");
+    expect(state?.pending).toEqual([]);
+    expect(state?.checkpoints).toBeUndefined();
+  });
+
   it("persists a destination-safety outcome without fetching a forbidden bookmark URL", async () => {
     let linkedFetches = 0;
     const { store, extension } = await fixture(async url => {
@@ -67,15 +107,16 @@ describe("knowledge connectors", () => {
     const first = Array.from({ length: 50 }, (_, index) => ({ _id: index + 1, title: `Bookmark ${index}`, link: `https://example.com/${index}`, excerpt: `Excerpt ${index}` }));
     const { store, extension } = await fixture(async (url) => {
       calls += 1;
+      if (url.endsWith("/user")) return response({ user: { _id: 42 } });
       if (url.includes("/raindrops/123?page=0")) return response({ items: first });
       if (url.includes("/raindrops/123?page=1")) return response({ items: [{ _id: 50, title: "Duplicate", link: "https://example.com/49" }, { _id: 51, title: "Bookmark 51", link: "https://example.com/51" }] });
       throw new Error(`unexpected endpoint ${url}`);
     });
-    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("configure"), connector: "raindrop", enabled: true, accountId: "account-1", scope: "123", credentialRef: "connector:raindrop:test-account" } });
+    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("configure"), connector: "raindrop", enabled: true, accountId: "42", scope: "123", credentialRef: "connector:raindrop:test-account" } });
     const dryRun = await extension.invoke({ operation: "knowledge.connector.run", request: { commandId: command("discover"), connector: "raindrop", dryRun: true, limit: 51 } }) as { discovered: number; pending: number };
     expect(dryRun.discovered).toBe(51);
     expect(dryRun.pending).toBe(51);
-    expect(calls).toBe(2);
+    expect(calls).toBe(3);
     const state = await store.connectorState("raindrop");
     expect(state?.checkpoint).toBeUndefined();
     expect(state?.pending.map(item => item.id)).toHaveLength(51);
@@ -229,8 +270,8 @@ describe("knowledge connectors", () => {
     let release!: () => void;
     let requests = 0;
     const blocked = new Promise<void>(resolve => { release = resolve; });
-    const { extension } = await fixture(async () => { requests += 1; await blocked; return response({ items: [] }); });
-    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("lane-configure"), connector: "raindrop", enabled: true, accountId: "account-1", scope: "123", credentialRef: "connector:raindrop:test-account" } });
+    const { extension } = await fixture(async url => { requests += 1; await blocked; return url.endsWith("/user") ? response({ user: { _id: 42 } }) : response({ items: [] }); });
+    await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("lane-configure"), connector: "raindrop", enabled: true, accountId: "42", scope: "123", credentialRef: "connector:raindrop:test-account" } });
     const run = extension.invoke({ operation: "knowledge.connector.run", request: { commandId: command("lane-run"), connector: "raindrop", dryRun: true, limit: 1 } });
     await new Promise(resolve => setTimeout(resolve, 20));
     const reconfigure = extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("lane-reconfigure"), connector: "raindrop", enabled: true, accountId: "account-2", scope: "456", credentialRef: "connector:raindrop:test-account" } });

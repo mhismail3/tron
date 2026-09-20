@@ -309,18 +309,30 @@ X exposes no folder moves, browser fallback, automatic unbookmarking, purchases,
 recharge. A complete label alone is never sufficient for remote acknowledgment. Connector
 runs are serialized per provider; pending discovery is advanced only after the complete
 bounded page is durably retained, and incomplete/partial captures remain pending for
-retry. Paid budgets are rejected until a provider operation has an explicit maintained
+retry. Successful provider envelopes with a missing or non-array item collection
+are shape failures, never empty pages. Credential references are admitted only in
+the exact `connector:<provider>:...` namespace; a legacy mismatch requires
+explicit reconfiguration and is never read as a different provider token.
+Paid budgets are rejected until a provider operation has an explicit maintained
 price; approval flags never imply unknown spend. X is not contacted unless both explicit paid-access approval and a positive
 bounded budget are present. Paid qualification is host-owned and requires
 `TRON_X_ACCOUNT_ID`, `TRON_X_COST_CENTS_PER_ATTEMPT`, and
 `TRON_X_MAX_ATTEMPTS` (1–3); missing or malformed values leave X unsupported.
 Each possible X API attempt, including pagination and safe GET retries, debits
-that budget immediately before the request. A new operation uses a distinct
-attempt receipt, so replay cannot reuse an old reservation. Uncertain remote
+that budget immediately before the request, after resolving the current
+credential. A missing or rotated credential therefore cannot debit a request.
+A new operation uses a distinct attempt receipt, so replay cannot reuse an old
+reservation. Discovery page receipts derive from the top-level command,
+connector, scope, cursor, and page, making crash/replay of one page exact while
+distinct commands remain distinct. Uncertain remote
 PUTs are not retried; the persisted receipt is reconciled before another
 connector effect. Connector status derives configured/disabled state from its
 current credential, account, scope, and enabled authority; stale health markers
-cannot report an enabled complete connector as unconfigured.
+cannot report an enabled complete connector as unconfigured. Raindrop discovery,
+intake, remote moves, and receipt reconciliation verify the configured numeric
+account fence before relying on provider data or clearing an uncertain effect.
+Reconciliation accepts the owning operation signal; cancellation leaves
+`pendingRemote` durable and never retries an uncertain PUT.
 
 ## Read-only Raindrop access
 
@@ -342,7 +354,11 @@ redacted. This is metadata access, not full article capture, and the existing
 `connectorSweep` remains a lower-level capture helper rather than an assessed
 intake or complete sync. Its connector sources remain pending and inspectable
 through `includePending`; it cannot acknowledge or move a Raindrop item without
-an explicit retained/archived admission from `raindropIntake`.
+an explicit retained/archived admission from `raindropIntake`. Agent sweeps use
+the same accepted-work owner as RPC runs, so disconnecting a presentation waiter
+does not replay or abandon admitted provider work. Connector identity reuse
+resolves through a canonical Knowledge catalog index keyed by
+provider/account/item rather than scanning source pages.
 
 ## Bounded Raindrop intake
 
@@ -402,7 +418,9 @@ provider fallback. It does not persist Jev prose as source truth. Novelty is int
 this bounded item request has no corpus evidence. The intake supplies its
 reservation through the model adapter's `beforeDispatch` seam, after Jev
 preflight and credential lookup; validation or missing-key failures therefore
-consume no paid attempt. Once admitted, a failed/malformed/timeout POST remains
+consume no paid attempt. Fixed-host connector requests keep their own bounded,
+no-redirect transport contract; the arbitrary-URL DNS-pinned source fetcher and
+provider-specific disclosure/cost policy remain separate. Once admitted, a failed/malformed/timeout POST remains
 an uncertain dispatched receipt and is never retried automatically. Complete
 source capture remains durable and pending when Jev is unavailable. The first
 pilot is frozen; `knowledge.connector.assessment.approve` appends an explicit

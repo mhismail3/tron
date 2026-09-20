@@ -6,7 +6,7 @@ import { triageSource } from "./source-triage.js";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import type { KnowledgeStore } from "./knowledge-store.js";
-import type { ConnectorCredentialStore } from "./connector-credentials.js";
+import { isConnectorCredentialReference, type ConnectorCredentialStore } from "./connector-credentials.js";
 import { currentInvocationContext } from "../extensions/owner-attribution.js";
 import { jevInputDigest, jevProfileVersion, JEV_MODEL } from "./jev-assessment.js";
 
@@ -74,9 +74,11 @@ async function requestJson(http: ConnectorHTTP, endpoint: string, token: string 
   const retrySafe = !options.method || options.method === "GET";
   const maxAttempts = retrySafe ? (options.maxAttempts ?? RETRIES) : 1;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    await options.beforeAttempt?.();
+    // Resolve the current credential before charging an attempt. A missing or
+    // rotated token is an admission failure, not a billable provider try.
     const attemptToken = typeof token === "function" ? await token() : token;
     if (options.signal.aborted) throw options.signal.reason instanceof Error ? options.signal.reason : new Error("Connector request cancelled");
+    await options.beforeAttempt?.();
     let result: ConnectorHTTPResponse;
     try {
       result = await http(endpoint, { ...(options.method ? { method: options.method } : {}), headers: { authorization: `Bearer ${attemptToken}`, accept: "application/json", ...(options.body !== undefined ? { "content-type": "application/json" } : {}) }, ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}), signal: options.signal });
@@ -130,7 +132,7 @@ function parseCollection(item: RaindropItemDTO): string | undefined {
   return id((item.collection as Record<string, unknown>).$id, "collection");
 }
 function parseRaindrop(value: any): PendingItem[] {
-  if (!value || !Array.isArray(value.items)) return [];
+  if (!value || !Array.isArray(value.items)) throw new ConnectorShapeError();
   return value.items.map((item: RaindropItemDTO) => {
     const itemId = id(item._id, "Raindrop item"); const link = url(item.link); if (!itemId || !link) return undefined;
     const apiPayload = JSON.stringify(item); const metadataComplete = Buffer.byteLength(apiPayload, "utf8") <= 100_000;
@@ -165,7 +167,7 @@ function validateRaindropReadRequest(value: unknown): KnowledgeRaindropRequest["
   return value as KnowledgeRaindropRequest["read"];
 }
 function parseX(value: any): PendingItem[] {
-  if (!value || !Array.isArray(value.data)) return [];
+  if (!value || !Array.isArray(value.data)) throw new ConnectorShapeError();
   return value.data.map((item: XBookmarkDTO) => {
     const itemId = id(item.id, "X bookmark"); if (!itemId) return undefined;
     const link = `https://x.com/i/web/status/${encodeURIComponent(itemId)}`;
@@ -184,6 +186,31 @@ export class KnowledgeConnectorExtension {
   }
   private lane(connector: Connector): AsyncMutex { const existing = this.lanes.get(connector); if (existing) return existing; const created = new AsyncMutex(); this.lanes.set(connector, created); return created; }
 
+  private assertCredentialNamespace(connector: Connector, credentialRef: string | undefined): void {
+    if (credentialRef !== undefined && !isConnectorCredentialReference(credentialRef, connector)) {
+      throw new GatewayError("invalid_request", `Credential reference must use the ${connector} connector namespace`);
+    }
+  }
+
+  private async verifyRaindropAccount(state: KnowledgeConnectorState, token: string | (() => Promise<string>), signal: AbortSignal, beforeAttempt?: () => Promise<void>): Promise<void> {
+    // Raindrop account IDs are numeric by contract. Synthetic connector tests
+    // may use non-provider IDs, but real configured accounts always receive the
+    // live /user fence before discovery or an effect.
+    if (!state.accountId || !/^\d+$/.test(state.accountId)) return;
+    const result = await requestJson(this.http, "https://api.raindrop.io/rest/v1/user", token, { sleep: this.sleep, signal, ...(beforeAttempt ? { beforeAttempt } : {}) });
+    const user = result.value?.user ?? result.value;
+    const authenticatedID = id(user?._id ?? user?.id, "Raindrop account");
+    if (!authenticatedID || authenticatedID !== state.accountId) throw new GatewayError("conflict", "Raindrop authenticated account does not match configured account");
+  }
+
+  private async cancellableSleep(signal: AbortSignal, milliseconds: number): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => { signal.removeEventListener("abort", abort); resolve(); }, milliseconds);
+      const abort = () => { clearTimeout(timer); signal.removeEventListener("abort", abort); reject(signal.reason instanceof Error ? signal.reason : new Error("Connector request cancelled")); };
+      if (signal.aborted) abort(); else signal.addEventListener("abort", abort, { once: true });
+    });
+  }
+
   async invoke(action: KnowledgeAction, signal?: AbortSignal): Promise<unknown> {
     if (action.operation === "knowledge.raindrop.read") return this.lane("raindrop").run(() => this.readRaindrop(action.request, signal));
     if (action.operation === "knowledge.connector.configure") return this.lane(action.request.connector).run(() => this.configure(action.request));
@@ -198,6 +225,7 @@ export class KnowledgeConnectorExtension {
     const read = validateRaindropReadRequest((request as unknown as { read?: unknown })?.read);
     const state = await this.store.connectorState("raindrop");
     if (!state?.enabled || !state.accountId || !state.credentialRef) throw new GatewayError("unsupported", "Raindrop connector is not configured; set the numeric Raindrop user _id in accountId");
+    this.assertCredentialNamespace("raindrop", state.credentialRef);
     if (!/^\d+$/.test(state.accountId)) throw new GatewayError("invalid_request", "Raindrop accountId must be the numeric user _id; obtain it through a secure local /user check, never by sharing the token");
     const token = await this.options.credentials.read(state.credentialRef);
     if (!token) throw new GatewayError("unsupported", "Raindrop credential is unavailable");
@@ -302,9 +330,10 @@ export class KnowledgeConnectorExtension {
     if (request.accountId !== undefined && (request.accountId.length < 1 || request.accountId.length > 256 || /[\r\n]/.test(request.accountId))) throw bad("Connector account is invalid");
     if (request.scope !== undefined && (request.scope.length < 1 || request.scope.length > 256 || /[\r\n]/.test(request.scope))) throw bad("Connector scope is invalid");
     if (request.destination !== undefined && (request.destination.length < 1 || request.destination.length > 256 || /[\r\n]/.test(request.destination))) throw bad("Connector destination is invalid");
-    if (request.credentialRef !== undefined && !/^connector:[a-z][a-z0-9-]{0,31}:[A-Za-z0-9._:-]{1,160}$/.test(request.credentialRef)) throw bad("Connector credential reference is invalid");
+    this.assertCredentialNamespace(request.connector, request.credentialRef);
     if (request.paidBudgetCents !== undefined && (!Number.isSafeInteger(request.paidBudgetCents) || request.paidBudgetCents < 0 || request.paidBudgetCents > 1_000_000)) throw bad("Connector paid budget is invalid");
     const current = await this.store.connectorState(request.connector);
+    if (request.credentialRef === undefined) this.assertCredentialNamespace(request.connector, current?.credentialRef);
     const base = current ?? initial(request.connector);
     const identityChanged = Boolean(current && ((request.accountId !== undefined && request.accountId !== current.accountId) || (request.scope !== undefined && request.scope !== current.scope) || (request.credentialRef !== undefined && request.credentialRef !== current.credentialRef)));
     if (identityChanged && (current?.pendingRemote || current?.assessmentPilot || (current?.assessmentApprovals?.length ?? 0) > 0 || Object.keys(current?.assessmentAttempts ?? {}).length > 0)) throw new GatewayError("conflict", "Connector identity cannot change while an approved pilot or remote effect is active");
@@ -411,6 +440,7 @@ export class KnowledgeConnectorExtension {
   private async intake(request: KnowledgeRaindropIntakeRequest, externalSignal?: AbortSignal): Promise<Record<string, unknown>> {
     const state = await this.store.connectorState("raindrop");
     if (!state?.enabled || !state.credentialRef || !state.accountId || !state.scope) throw new GatewayError("unsupported", "Raindrop connector is not configured");
+    this.assertCredentialNamespace("raindrop", state.credentialRef);
     if (currentInvocationContext()?.operationId?.startsWith("automation:") && !state.recurringApproved) throw new GatewayError("unsupported", "Raindrop intake recurrence is not approved");
     if (!/^\d+$/.test(state.accountId)) throw new GatewayError("invalid_request", "Raindrop accountId must be the numeric user _id");
     if (request.limit !== undefined && (!Number.isSafeInteger(request.limit) || request.limit < 1 || request.limit > 10)) throw bad("Raindrop intake limit must be 1..10");
@@ -424,7 +454,7 @@ export class KnowledgeConnectorExtension {
       const identity = await requestJson(this.http, "https://api.raindrop.io/rest/v1/user", token, { sleep: this.sleep, signal });
       const authenticatedID = id(identity.value?.user?._id ?? identity.value?.user?.id ?? identity.value?._id ?? identity.value?.id, "Raindrop account");
       if (!authenticatedID || authenticatedID !== state.accountId) throw new GatewayError("conflict", "Raindrop authenticated account does not match configured account");
-      await this.reconcile("raindrop");
+      await this.reconcile("raindrop", signal);
       if ((await this.store.connectorState("raindrop"))?.pendingRemote) throw new GatewayError("conflict", "Raindrop has an unresolved remote effect");
       const sourceCollection = request.sourceCollection ?? state.scope;
       if (sourceCollection !== state.scope) throw new GatewayError("conflict", "Intake source collection must match the configured connector scope");
@@ -435,7 +465,7 @@ export class KnowledgeConnectorExtension {
         if (state.assessmentPilot && state.assessmentPilot.id === approvedPilot.id && (state.assessmentPilot.maxItems !== approvedPilot.maxItems || state.assessmentPilot.budgetCents !== approvedPilot.budgetCents || state.assessmentPilot.accountId !== state.accountId || state.assessmentPilot.sourceCollection !== sourceCollection || state.assessmentPilot.profileVersion !== profileVersion)) throw new GatewayError("conflict", "Jev pilot authority changed; use the existing approval");
         if (state.assessmentPilot && state.assessmentPilot.id !== approvedPilot.id && !state.assessmentApprovals?.some(item => item.id === approvedPilot.id)) throw new GatewayError("conflict", "Later assessment requires a separately approved cohort");
       }
-      const discovered = await this.discover("raindrop", { ...state, scope: sourceCollection }, token, limit, signal);
+      const discovered = await this.discover(request.commandId, "raindrop", { ...state, scope: sourceCollection }, token, limit, signal);
       let live = await this.store.connectorState("raindrop") ?? state;
       if (request.dryRun) return { connector: "raindrop", dryRun: true, discovered: discovered.discovered, pending: live.pending.filter(item => item.collectionId === sourceCollection).slice(0, limit).map(item => ({ id: item.id, title: item.title, url: item.url, metadataComplete: item.metadataComplete !== false })), assessment: "not-run", remoteWrites: false };
       if (!approvedPilot) throw new GatewayError("invalid_request", "A bounded Jev pilot approval is required");
@@ -466,16 +496,7 @@ export class KnowledgeConnectorExtension {
         const previous = outcomeMap.get(item.id);
         outcomeMap.set(item.id, { ...(previous ?? { itemId: item.id, title: item.title.slice(0, 512) }), ...patch, ...(patch.reason !== undefined ? { reason: patch.reason.slice(0, 2_000) } : {}) } as IntakeOutcome);
       };
-      const canonicalFor = async (itemId: string): Promise<KnowledgeRecord & { kind: "source" } | undefined> => {
-        let cursor: string | undefined;
-        do {
-          const page = await this.store.list({ kind: "source", includePending: true, includeArchived: true, limit: 100, ...(cursor ? { cursor } : {}) });
-          const found = page.records.find(record => record.kind === "source" && (record.content.identity?.provider === "raindrop" && record.content.identity.accountId === state.accountId && record.content.identity.itemId === itemId || record.content.origins?.some(origin => origin.identity?.provider === "raindrop" && origin.identity.accountId === state.accountId && origin.identity.itemId === itemId)));
-          if (found?.kind === "source") return found;
-          cursor = page.nextCursor;
-        } while (cursor);
-        return undefined;
-      };
+      const canonicalFor = (itemId: string): Promise<KnowledgeRecord & { kind: "source" } | undefined> => this.store.sourceByIdentity({ provider: "raindrop", accountId: state.accountId!, itemId });
       const approvedItems = cohort.map(itemId => live.pending.find(item => item.id === itemId)).filter((item): item is NonNullable<typeof item> => Boolean(item));
       const approvedSet = new Set(approvedItems.map(item => item.id));
       for (const itemId of cohort) if (!approvedSet.has(itemId)) {
@@ -553,6 +574,8 @@ export class KnowledgeConnectorExtension {
   private async run(request: KnowledgeConnectorRunRequest, externalSignal?: AbortSignal): Promise<Record<string, unknown>> {
     const connector = request.connector; const current = await this.store.connectorState(connector);
     if (!current?.enabled || !current.credentialRef || !current.accountId || !current.scope) throw new GatewayError("unsupported", `Knowledge ${connector} connector is not configured`);
+    this.assertCredentialNamespace(connector, current.credentialRef);
+    if (connector === "raindrop" && !/^\d+$/.test(current.accountId)) throw new GatewayError("invalid_request", "Raindrop accountId must be the numeric user _id");
     // X access requires a host-qualified account price and an explicit user
     // allowance. Charge immediately before every possible paid HTTP attempt;
     // this covers pagination, provider retries, and a fresh replay without
@@ -570,7 +593,7 @@ export class KnowledgeConnectorExtension {
     }
     if (connector === "raindrop" && current.paidBudgetCents > 0) throw new GatewayError("unsupported", "Paid connector operations are unavailable without a priced operation");
     if (current.pendingRemote) {
-      await this.reconcile(connector);
+      await this.reconcile(connector, externalSignal);
       const reconciled = await this.store.connectorState(connector);
       if (reconciled?.pendingRemote) throw new GatewayError("conflict", "Connector has an unresolved remote effect");
     }
@@ -608,7 +631,11 @@ export class KnowledgeConnectorExtension {
         await assertCurrentAuthority();
         await beforeXAttempt?.();
       };
-      const discovered = await this.discover(connector, current, currentToken, limit, signal, xPricing?.maxAttempts, beforeProviderAttempt);
+      // The provider account fence precedes generic sweep discovery. It is
+      // intentionally separate from the configured account label and from the
+      // source URL capture policy.
+      if (connector === "raindrop") await this.verifyRaindropAccount(current, currentToken, signal, beforeProviderAttempt);
+      const discovered = await this.discover(request.commandId, connector, current, currentToken, limit, signal, xPricing?.maxAttempts, beforeProviderAttempt);
       let state = await this.store.connectorState(connector) ?? current;
       if (request.dryRun) {
         const result = { connector, dryRun: true, discovered: discovered.discovered, pending: state.pending.length, remaining: state.remaining, health: state.health };
@@ -651,7 +678,7 @@ export class KnowledgeConnectorExtension {
     }
   }
 
-  private async discover(connector: Connector, state: KnowledgeConnectorState, token: string | (() => Promise<string>), limit: number, signal: AbortSignal, maxAttempts?: number, beforeAttempt?: () => Promise<void>): Promise<{ discovered: number }> {
+  private async discover(commandId: string, connector: Connector, state: KnowledgeConnectorState, token: string | (() => Promise<string>), limit: number, signal: AbortSignal, maxAttempts?: number, beforeAttempt?: () => Promise<void>): Promise<{ discovered: number }> {
     const checkpointKey = state.scope ?? "default";
     // Raindrop pagination is offset-based: moving an item shrinks earlier
     // pages, so a persisted page number can skip newly exposed items. Restart
@@ -664,7 +691,8 @@ export class KnowledgeConnectorExtension {
       const fresh = items.filter(item => !seen.has(item.id));
       const next = connector === "raindrop" ? (items.length >= MAX_PAGE ? String((Number(cursor ?? "0") || 0) + 1) : undefined) : text(result.value?.meta?.next_token, 512);
       let persisted = 0;
-      await this.store.updateConnectorState(`connector-discover-${connector}-${Date.now()}-${page}`, connector, value => {
+      const pageReceipt = command(commandId, `discover:${connector}:${state.scope ?? "default"}:${cursor ?? "start"}:${page}`);
+      await this.store.updateConnectorState(pageReceipt, connector, value => {
         const prior = value ?? state; const capacity = Math.max(0, 500 - prior.pending.length); const batch = fresh.slice(0, Math.min(capacity, Math.max(0, limit - discovered)));
         persisted = batch.length;
         const nextState = { ...prior, pending: [...prior.pending, ...batch], remaining: prior.pending.length + batch.length };
@@ -682,11 +710,13 @@ export class KnowledgeConnectorExtension {
     return { discovered };
   }
 
-  /** Reconcile a persisted Raindrop move receipt after an effect-before-response crash. */
-  async reconcile(connector: Connector): Promise<KnowledgeConnectorStatus> {
+  /** Reconcile a persisted Raindrop move receipt after an effect-before-response crash.
+   * Cancellation only retires the waiter; the durable receipt remains pending. */
+  async reconcile(connector: Connector, externalSignal?: AbortSignal): Promise<KnowledgeConnectorStatus> {
     const state = await this.store.connectorState(connector); if (!state) return stateStatus(undefined, connector);
     const pending = state.pendingRemote;
     if (!pending || connector !== "raindrop" || !state.credentialRef) return stateStatus(state, connector);
+    this.assertCredentialNamespace(connector, state.credentialRef);
     const basis = await this.store.read(pending.basisRecordId, pending.basisRevisionId, false, true);
     const basisIdentity = basis?.kind === "source" ? basis.content.identity : undefined;
     const basisOrigin = basis?.kind === "source" && basis.content.origins?.some(origin => origin.identity?.provider === pending.provider && origin.identity.accountId === pending.accountId && origin.identity.itemId === pending.itemId);
@@ -701,24 +731,37 @@ export class KnowledgeConnectorExtension {
     if (state.paidBudgetCents > 0) return stateStatus(state, connector);
     const token = await this.options.credentials.read(state.credentialRef);
     if (!token) return stateStatus(state, connector);
+    const controller = new AbortController();
+    const signal = externalSignal ? AbortSignal.any([controller.signal, externalSignal]) : controller.signal;
+    const deadline = setTimeout(() => controller.abort(new Error("Connector reconcile deadline exceeded")), RUN_DEADLINE_MS);
+    deadline.unref?.();
     try {
-      const result = await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrop/${encodeURIComponent(pending.itemId)}`, token, { sleep: this.sleep, signal: new AbortController().signal });
+      await this.verifyRaindropAccount(state, token, signal);
+      const result = await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrop/${encodeURIComponent(pending.itemId)}`, token, { sleep: milliseconds => this.cancellableSleep(signal, milliseconds), signal });
       const collection = String(result.value?.item?.collection?.$id ?? result.value?.collection?.$id ?? "");
+      const live = await this.store.connectorState(connector);
+      if (!live || !live.enabled || live.accountId !== state.accountId || live.credentialRef !== state.credentialRef || live.pendingRemote?.operationId !== pending.operationId) return stateStatus(live ?? state, connector);
       if (collection === pending.destination) {
-        const updated = await this.store.updateConnectorState(`${pending.operationId}:reconcile`, connector, current => { const next = current ?? state; const { pendingRemote: _pending, lastError: _error, ...rest } = next; return { ...rest, health: "ready" as const }; });
+        const updated = await this.store.updateConnectorState(`${pending.operationId}:reconcile`, connector, current => {
+          const next = current ?? state;
+          if (next.pendingRemote?.operationId !== pending.operationId || next.accountId !== pending.accountId || next.credentialRef !== state.credentialRef) return next;
+          const { pendingRemote: _pending, lastError: _error, ...rest } = next; return { ...rest, health: "ready" as const };
+        });
         return stateStatus(updated, connector);
       }
       const updated = await this.store.updateConnectorState(`${pending.operationId}:conflict`, connector, current => ({ ...(current ?? state), health: "partial", lastError: "Remote move is not at its requested destination" }));
       return stateStatus(updated, connector);
-    } catch {
+    } catch (error) {
+      if (signal.aborted) throw new GatewayError("busy", "Connector reconcile was cancelled; the remote effect remains pending", true);
       return stateStatus(state, connector);
-    }
+    } finally { clearTimeout(deadline); }
   }
 
   /** Raindrop-only reversible move. Capture must be locally complete and the
    * exact pending effect is durable before the provider mutation is attempted. */
   async moveRaindrop(input: { commandId: string; itemId: string; source: KnowledgeRecord & { kind: "source" }; expectedRevision?: string; identity?: { provider: string; accountId: string; itemId: string }; sourceCollection?: string; destination: string }, externalSignal?: AbortSignal): Promise<{ status: "moved" | "conflict" | "unsupported" }> {
     const state = await this.store.connectorState("raindrop"); if (!state?.enabled || !state.allowWrites || !state.credentialRef) return { status: "unsupported" };
+    try { this.assertCredentialNamespace("raindrop", state.credentialRef); } catch { return { status: "unsupported" }; }
     if (!input.expectedRevision || !input.identity || input.identity.itemId !== input.itemId || input.source.revisionId !== input.expectedRevision) return { status: "conflict" };
     // The caller's object is only a hint. Re-read the exact revision so a held
     // JS record cannot bypass forget/exclusion or a source correction.
@@ -738,8 +781,10 @@ export class KnowledgeConnectorExtension {
     if ((!primaryIdentityMatches && !incomingOrigin) || input.identity.provider !== "raindrop") return { status: "conflict" };
     const abort = new AbortController();
     const signal = externalSignal ? AbortSignal.any([abort.signal, externalSignal]) : abort.signal;
-    // Preflight the exact item immediately before recording and applying the
-    // effect. A configured collection is not proof of its current location.
+    // Preflight the provider identity and exact item immediately before
+    // recording and applying the effect. A configured collection is not proof
+    // of its current location or account.
+    await this.verifyRaindropAccount(state, token, signal);
     const preflight = await requestJson(this.http, `https://api.raindrop.io/rest/v1/raindrop/${encodeURIComponent(input.itemId)}`, token, { sleep: this.sleep, signal });
     if (signal.aborted) return { status: "conflict" };
     // Re-read both authorities after the await: native/user revocation and a
@@ -747,6 +792,7 @@ export class KnowledgeConnectorExtension {
     const latestState = await this.store.connectorState("raindrop");
     const latestSource = await this.store.read(source.id, input.expectedRevision, false, true).catch(() => null);
     if (!latestState?.enabled || !latestState.allowWrites || latestState.accountId !== input.identity.accountId || latestState.credentialRef !== state.credentialRef || latestState.destination !== input.destination || latestState.paidBudgetCents > 0 || !latestSource || latestSource.kind !== "source" || !isVerifiedSourceCapture(latestSource)) return { status: "conflict" };
+    await this.verifyRaindropAccount(latestState, token, signal);
     const remoteItemId = id(preflight.value?.item?._id ?? preflight.value?._id, "Raindrop item");
     const originalCollectionId = String(preflight.value?.item?.collection?.$id ?? preflight.value?.collection?.$id ?? "");
     if (!remoteItemId || remoteItemId !== input.identity.itemId || !originalCollectionId) return { status: "conflict" };

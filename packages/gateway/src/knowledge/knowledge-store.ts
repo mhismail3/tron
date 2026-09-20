@@ -51,7 +51,7 @@ type LegacyRecordHead = { latestRevisionId: string; revisionIds: string[] };
 type RecordHead = LegacyRecordHead & {
   kind: KnowledgeRecord["kind"]; scope: KnowledgeRecord["scope"];
   sortAt: number; searchFields: Array<[string, string]>;
-  recordRefs: string[]; objectHashes: string[];
+  recordRefs: string[]; objectHashes: string[]; sourceIdentities?: string[];
 };
 type Suppression = { excluded: boolean; forgotten: boolean; reason?: string; updatedAt: string };
 type ScopeExclusion = { sessionId?: string; branchId?: string; projectId?: string; excluded: boolean; reason?: string; updatedAt: string };
@@ -97,6 +97,7 @@ interface KnowledgeState {
   scopeExclusions: KnowledgeTable<ScopeExclusion>;
   cleanup: KnowledgeTable<true>;
   recordCleanup: KnowledgeTable<PendingRecordCleanup>;
+  sourceIdentities: KnowledgeTable<string>;
   imports: KnowledgeTable<KnowledgeImportCheckpoint>;
   receipts: KnowledgeTable<StoredReceipt>;
   config: KnowledgeConfig;
@@ -161,6 +162,7 @@ function catalogState(control: CatalogControl, catalog?: KnowledgeCatalog): Know
     imports: catalog?.table<KnowledgeImportCheckpoint>("imports") ?? new Map(),
     cleanup: catalog?.table<true>("cleanup") ?? new Map(),
     recordCleanup: catalog?.table<PendingRecordCleanup>("recordCleanup") ?? new Map(),
+    sourceIdentities: catalog?.table<string>("sourceIdentities") ?? new Map(),
   };
 }
 function headFor(record: KnowledgeRecord, revisions: string[], retainedObjects: string[] = []): RecordHead {
@@ -173,9 +175,18 @@ function headFor(record: KnowledgeRecord, revisions: string[], retainedObjects: 
     sortAt: Date.parse(date), searchFields: searchableFields(record).map(([field, value]) => [field, value.toLocaleLowerCase()]),
     recordRefs: [...new Set([...record.relations.map(relation => relation.recordId), ...evidence.flatMap(ref => ref.recordId ? [ref.recordId] : [])])],
     objectHashes: [...new Set([...retainedObjects, ...recordObjectHashes(record)])],
+    ...(recordSourceIdentityKeys(record).length > 0 ? { sourceIdentities: recordSourceIdentityKeys(record) } : {}),
   };
 }
 function cleanupKey(item: PendingRecordCleanup): string { return JSON.stringify([item.recordId, item.revisionId]); }
+function sourceIdentityKey(identity: { provider: string; accountId: string; itemId: string }): string {
+  return JSON.stringify([identity.provider, identity.accountId, identity.itemId]);
+}
+function recordSourceIdentityKeys(record: KnowledgeRecord): string[] {
+  if (record.kind !== "source") return [];
+  const identities = [record.content.identity, ...(record.content.origins ?? []).map(origin => origin.identity)].filter((identity): identity is NonNullable<typeof identity> => Boolean(identity));
+  return [...new Set(identities.map(sourceIdentityKey))];
+}
 function listCursor(scope: string, position: { sortAt: number; id: string }): string {
   return Buffer.from(JSON.stringify({ v: 1, scope, ...position })).toString("base64url");
 }
@@ -503,7 +514,9 @@ export class KnowledgeStore {
           if (revision === head.latestRevisionId) latest = record;
         }
         if (!latest) throw new KnowledgeStoreError("invalid", "Migration is missing a committed record head");
-        state.records.set(id, headFor(latest, head.revisionIds, [...objects]));
+        const migratedHead = headFor(latest, head.revisionIds, [...objects]);
+        state.records.set(id, migratedHead);
+        for (const identity of migratedHead.sourceIdentities ?? []) state.sourceIdentities.set(identity, id);
         catalog.setRevisions(id, head.revisionIds);
       }
       for (const [id, value] of Object.entries(legacy.coverage)) state.coverage.set(id, value);
@@ -670,6 +683,23 @@ export class KnowledgeStore {
     return this.inspect(async state => {
       const value = state.connectors?.[connector];
       return value ? structuredClone(value) : undefined;
+    });
+  }
+
+  /** Resolve a provider identity through the canonical catalog index. The index
+   * stores only opaque identity tuples and record IDs; source bodies remain
+   * owner-only files and no corpus scan is needed for connector deduplication. */
+  async sourceByIdentity(identity: { provider: string; accountId: string; itemId: string }): Promise<(KnowledgeRecord & { kind: "source" }) | undefined> {
+    for (const [value, label] of [[identity.provider, "provider"], [identity.accountId, "accountId"], [identity.itemId, "itemId"]] as const) {
+      if (typeof value !== "string" || value.length < 1 || value.length > 512) throw invalid(`Source ${label} identity is invalid`);
+    }
+    return this.inspect(async (state, paths) => {
+      const recordId = state.sourceIdentities.get(sourceIdentityKey(identity));
+      if (!recordId) return undefined;
+      const record = await this.currentRecord(state, paths, recordId);
+      if (!record || record.kind !== "source") return undefined;
+      const matches = recordSourceIdentityKeys(record).includes(sourceIdentityKey(identity));
+      return matches ? record : undefined;
     });
   }
 
@@ -854,7 +884,10 @@ export class KnowledgeStore {
     await safeDirectory(join(paths.records, id), true);
     await durableAtomicWriteJson(this.recordPath(paths, id, record.revisionId), record, 0o600);
     const revisions = [...(existing?.revisionIds ?? []), record.revisionId];
-    state.records.set(id, headFor(record, revisions, existing?.objectHashes));
+    const nextHead = headFor(record, revisions, existing?.objectHashes);
+    for (const identity of existing?.sourceIdentities ?? []) if (nextHead.sourceIdentities?.includes(identity) !== true) state.sourceIdentities.delete(identity);
+    for (const identity of nextHead.sourceIdentities ?? []) state.sourceIdentities.set(identity, id);
+    state.records.set(id, nextHead);
     state.catalog!.setRevisions(id, revisions);
     return { record, stateRevision: state.stateRevision + 1 };
   }
@@ -1019,6 +1052,7 @@ export class KnowledgeStore {
       for (const revision of history!.revisionIds) {
         const item = { recordId, revisionId: revision }; state.recordCleanup.set(cleanupKey(item), item);
         const record = await this.readRecord(paths, recordId, revision);
+        for (const identity of recordSourceIdentityKeys(record)) state.sourceIdentities.delete(identity);
         for (const hash of recordObjectHashes(record)) state.cleanup.set(hash, true);
       }
       state.records.delete(recordId); state.catalog!.setRevisions(recordId, []);

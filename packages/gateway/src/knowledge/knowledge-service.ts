@@ -516,7 +516,7 @@ export class KnowledgeService {
           const connectorState = await this.store.connectorState(parameters.connector);
           if (!connectorState?.recurringApproved) throw new GatewayError("unsupported", "Connector recurrence is not approved");
         }
-        const result = await this.extensions.connector({ operation: "knowledge.connector.run", request: { commandId: parameters.commandId, connector: parameters.connector, dryRun: parameters.dryRun ?? false, ...(parameters.limit ? { limit: parameters.limit } : {}) } }, signal);
+        const result = await this.runOwned("connector sweep", ownedSignal => this.extensions.connector!({ operation: "knowledge.connector.run", request: { commandId: parameters.commandId!, connector: parameters.connector!, dryRun: parameters.dryRun ?? false, ...(parameters.limit ? { limit: parameters.limit } : {}) } }, ownedSignal), signal);
         if (signal?.aborted) throw new GatewayError("busy", "Knowledge connector sweep was cancelled", true);
         return { text: `${parameters.connector} connector sweep completed: ${JSON.stringify(result).slice(0, 4_000)}`, details: result };
       }
