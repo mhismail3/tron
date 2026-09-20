@@ -71,10 +71,15 @@ object without extracted text is identified as an object, not as readable text. 
 shows only captured text that exists, exact capture limitations, origin/provenance, and
 any user-approved admission reason. Secondary assessment metadata includes provider
 classification/coverage and version/usage fields without conflating them with capture
-coverage or epistemic confidence. The existing Gateway list contract has no synthesis-role
-filter, so the Syntheses view filters the bounded canonical note page and states that
-limitation rather than inventing a synthesis endpoint. Filtered pages retain their Gateway
-cursor and keep **Load more** available even when a page contributes no visible rows.
+coverage or epistemic confidence. Source detail keeps the original title, domain, and safe link
+above the capture-coverage warning and the one captured-content body; origin/provenance and
+technical revision/object/assessment metadata remain secondary. The existing Gateway list
+contract has no synthesis-role filter, so the Syntheses view filters the bounded canonical note
+page and states that limitation rather than inventing a synthesis endpoint. Filtered pages retain
+their Gateway cursor and keep **Load more** available even when a page contributes no visible rows.
+The `HOSTED_TEST` Knowledge layout fixture captures Chronicle/Library, source disposition
+examples, and an empty Syntheses page with continuation; captures are synthetic rendering
+evidence, not live Gateway or VoiceOver validation.
 
 Knowledge is styled as its own adaptive identity rather than inheriting the Sessions emerald or
 Automations cyan palette: use `Color.tronKnowledge` for deep violet in light appearance and lavender

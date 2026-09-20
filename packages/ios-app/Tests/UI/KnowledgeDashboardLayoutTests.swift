@@ -49,14 +49,31 @@ final class KnowledgeDashboardLayoutTests: XCTestCase {
         .tronPresentation()
         try await withHost(composition, size: CGSize(width: 402, height: 874)) { host in
             Self.attach(host.view, named: "knowledge-catalogue-density", to: self)
-            let rows = Self.accessibilityElements(in: host.view).filter { $0.label.contains("Personal") }
-            guard !rows.isEmpty else { throw XCTSkip("Hosted SwiftUI accessibility tree unavailable in this simulator runtime") }
-            XCTAssertEqual(rows.count, Self.previewStatements.count)
+            let elements = Self.accessibilityElements(in: host.view)
+            guard !elements.isEmpty else { throw XCTSkip("Hosted SwiftUI accessibility tree unavailable in this simulator runtime") }
+            let rows = elements.filter { $0.label.contains("Personal") }
+            XCTAssertEqual(rows.count, Self.previewStatements.count, "The hosted accessibility tree exists but catalogue row labels are missing")
             for (previous, next) in zip(rows, rows.dropFirst()) {
                 XCTAssertEqual(next.frame.minY - previous.frame.maxY, KnowledgeDashboardLayout.recordSpacing, accuracy: 1,
                                "Catalogue rows pack tighter than the dashboard's section rhythm")
             }
             XCTAssertLessThan(KnowledgeDashboardLayout.recordSpacing, TronSpacing.section)
+        }
+    }
+
+    func testFullDashboardFixtureShowsLibrarySourcesAndSynthesesContinuation() async throws {
+        let sources = [
+            Self.sourceRecord(title: "Partial fixture source", disposition: .partial),
+            Self.sourceRecord(title: "Reference fixture source", disposition: .referenceOnly),
+            Self.sourceRecord(title: "Provisional fixture source", disposition: .metadataOnly, admission: KnowledgeSourceAdmissionState(status: .pending, reason: "Synthetic provisional admission", decidedAt: "2026-01-01T00:00:00Z", profileVersion: nil, rubricVersion: nil))
+        ]
+        for (scheme, label) in [(ColorScheme.light, "light"), (ColorScheme.dark, "dark")] {
+            try await withHost(Self.hosted(HostedKnowledgeDashboardFixture(section: .sources, records: sources)), size: CGSize(width: 390, height: 844), scheme: scheme) { host in
+                Self.attach(host.view, named: "knowledge-dashboard-library-sources-\(label)-narrow", to: self)
+            }
+        }
+        try await withHost(Self.hosted(HostedKnowledgeDashboardFixture(section: .syntheses, records: [])), size: CGSize(width: 390, height: 844), scheme: .light) { host in
+            Self.attach(host.view, named: "knowledge-dashboard-library-syntheses-empty-load-more", to: self)
         }
     }
 
@@ -290,12 +307,13 @@ final class KnowledgeDashboardLayoutTests: XCTestCase {
     /// The Gateway returns only cuts needing attention, so a settled cut is not a
     /// fixture input here; the client boundary rejects one that ignores the
     /// disposition filter.
-    private static func sourceRecord() -> KnowledgeRecord {
+    fileprivate static func sourceRecord(title: String = "Fixture retained article", disposition: KnowledgeCaptureDisposition = .complete, admission: KnowledgeSourceAdmissionState? = nil) -> KnowledgeRecord {
         let hash = String(repeating: "d", count: 64)
-        return KnowledgeRecord(schemaVersion: 1, id: "fixture-source", revisionId: "fixture-source-revision", kind: .source, scope: .research,
+        let fixtureID = title.lowercased().replacingOccurrences(of: " ", with: "-")
+        return KnowledgeRecord(schemaVersion: 1, id: "fixture-source-\(fixtureID)", revisionId: "fixture-source-revision", kind: .source, scope: .research,
                                createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
                                provenance: KnowledgeProvenance(actor: .connector, source: "fixture-provider", sessionId: nil, branchId: nil, invocationId: nil, evidence: []), temporal: nil, relations: [],
-                               content: .source(KnowledgeSourceContent(title: "Fixture retained article", uri: "https://example.test/article", text: "Captured fixture text only; this is not a live source.", object: KnowledgeObjectRef(hash: hash, mediaType: "text/plain", bytes: 50), mediaType: "text/plain", captureDisposition: .complete, annotations: nil, sourcePublishedAt: nil, capturedAt: "2026-01-01T00:00:00Z", origin: "connector", origins: [KnowledgeSourceOrigin(kind: .connector, capturedAt: "2026-01-01T00:00:00Z", annotation: "Synthetic hosted UI fixture", uri: "https://example.test/article", identity: nil)], identity: nil, assessment: KnowledgeSourceAssessment(summary: "Fixture assessment", contribution: "Fixture contribution", whyItMatters: "Fixture only", evidenceQuality: .unknown, freshness: .unknown, possibleUse: "Fixture", generatedAt: "2026-01-01T00:00:00Z", model: "fixture/model", coverage: "full", classification: "fixture"))))
+                               content: .source(KnowledgeSourceContent(title: title, uri: "https://example.test/article", text: disposition == .referenceOnly || disposition == .metadataOnly ? nil : "Captured fixture text only; this is not a live source.", object: KnowledgeObjectRef(hash: hash, mediaType: "text/plain", bytes: 50), mediaType: "text/plain", captureDisposition: disposition, captureReason: disposition == .partial ? "Synthetic partial capture" : nil, annotations: nil, sourcePublishedAt: nil, capturedAt: "2026-01-01T00:00:00Z", origin: "connector", origins: [KnowledgeSourceOrigin(kind: .connector, capturedAt: "2026-01-01T00:00:00Z", annotation: "Synthetic hosted UI fixture", uri: "https://example.test/article", identity: nil)], identity: nil, assessment: KnowledgeSourceAssessment(summary: "Fixture assessment", contribution: "Fixture contribution", whyItMatters: "Fixture only", evidenceQuality: .unknown, freshness: .unknown, possibleUse: "Fixture", generatedAt: "2026-01-01T00:00:00Z", model: "fixture/model", coverage: "full", classification: "fixture"), admission: admission)))
     }
 
     private static func cuts() -> [KnowledgeObservationCoverage] {
@@ -324,6 +342,60 @@ final class KnowledgeDashboardLayoutTests: XCTestCase {
         )
     }
 }
+
+#if HOSTED_TEST
+private struct HostedKnowledgeDashboardFixture: View {
+    enum Section { case sources, syntheses }
+    let section: Section
+    let records: [KnowledgeRecord]
+    @State private var header = DashboardHeaderState()
+
+    var body: some View {
+        DashboardChrome(
+            mode: .knowledge,
+            header: header,
+            onSelect: { _ in },
+            actions: DashboardMenuActions(search: {}, filter: {}, settings: {}, settingsMenu: nil, creation: []),
+            showingSearch: false
+        ) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: TronSpacing.section) {
+                    Text("Synthetic hosted fixture · not live Gateway data")
+                        .font(TronTypography.caption)
+                        .foregroundStyle(Color.tronTextMuted)
+                    Picker("Knowledge area", selection: .constant("library")) {
+                        Text("Chronicle").tag("chronicle")
+                        Text("Library").tag("library")
+                    }
+                    .pickerStyle(.segmented)
+                    .tint(Color.tronKnowledge)
+                    Picker("Library section", selection: .constant(section == .sources ? "sources" : "syntheses")) {
+                        Text("Sources").tag("sources")
+                        Text("Syntheses").tag("syntheses")
+                    }
+                    .pickerStyle(.segmented)
+                    .tint(Color.tronKnowledge)
+                    if section == .sources {
+                        Text("Sources").font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronKnowledge)
+                        ForEach(records) { record in KnowledgeRecordRow(record: record) }
+                    } else {
+                        TronPlaceholderState(title: "No matching Syntheses", detail: "This bounded note page has no synthesis-role notes.", icon: "square.stack.3d.up", accent: .tronKnowledge)
+                        Button("Load more") {}
+                            .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
+                .padding(.bottom, 80)
+            }
+            .tronScrollEdgeChrome()
+            .tronDashboardScroll(header)
+        } search: { EmptyView() }
+        .tronSettingsVisualTheme(accent: .tronKnowledge)
+    }
+}
+#endif
 
 @MainActor
 private final class KnowledgeLayoutHostingController<Content: View>: UIHostingController<Content> {

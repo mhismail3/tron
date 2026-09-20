@@ -684,6 +684,11 @@ struct KnowledgeDetailView: View {
                     KnowledgeObservationStatement(presentation: observation)
                         .textSelection(.enabled)
                     observationEvidence(observation)
+                } else if case .source(let source) = currentRecord.content {
+                    sourceDetailHeader(source)
+                    sourceLink
+                    recordMetadata
+                    evidence
                 } else {
                     TronSettingsGroup("Record", accent: .tronKnowledge) {
                         VStack(alignment: .leading, spacing: TronSpacing.md) {
@@ -703,7 +708,6 @@ struct KnowledgeDetailView: View {
                         .padding(14)
                     }
                     recordMetadata
-                    sourceLink
                     noteMetadata
                     evidence
                 }
@@ -846,8 +850,40 @@ struct KnowledgeDetailView: View {
             .padding(14)
         }
     }
+    private func sourceDetailHeader(_ source: KnowledgeSourceContent) -> some View {
+        TronSettingsGroup("Source", accent: .tronKnowledge) {
+            VStack(alignment: .leading, spacing: TronSpacing.md) {
+                Text(source.title)
+                    .font(TronTypography.largeTitle)
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let domain = KnowledgeSourcePresentationPolicy.domain(source.uri) {
+                    Label(domain, systemImage: "globe")
+                        .font(TronTypography.secondaryDescription)
+                        .foregroundStyle(Color.tronKnowledgeText)
+                }
+                Label("\(currentRecord.scope.label) source", systemImage: currentRecord.kind.icon)
+                    .font(TronTypography.caption)
+                    .foregroundStyle(Color.tronTextSecondary)
+            }
+            .padding(14)
+        }
+    }
+
     @ViewBuilder private var sourceLink: some View {
         if case .source(let source) = currentRecord.content {
+            if let uri = source.uri, let url = KnowledgeSourcePresentationPolicy.safeURL(uri) {
+                Link(destination: url) {
+                    Label("Open original link · \(url.host ?? url.absoluteString)", systemImage: "safari")
+                }
+                .font(TronTypography.bodySM)
+                .foregroundStyle(Color.tronKnowledgeText)
+                .accessibilityHint("Opens the original HTTP or HTTPS source")
+            } else if source.uri != nil {
+                Text("Original link unavailable: only safe HTTP(S) links can be opened.")
+                    .font(TronTypography.secondaryDescription)
+                    .foregroundStyle(Color.tronAmber)
+            }
             TronSettingsGroup("Source coverage", accent: .tronKnowledge) {
                 VStack(alignment: .leading, spacing: TronSpacing.sm) {
                     Label(KnowledgeSourcePresentationPolicy.coverageTitle(source), systemImage: source.captureDisposition == .complete ? "checkmark.circle" : "exclamationmark.triangle")
@@ -873,18 +909,6 @@ struct KnowledgeDetailView: View {
                     }
                 }
                 .padding(14)
-            }
-            if let uri = source.uri, let url = KnowledgeSourcePresentationPolicy.safeURL(uri) {
-                Link(destination: url) {
-                    Label("Open original link · \(url.host ?? url.absoluteString)", systemImage: "safari")
-                }
-                .font(TronTypography.bodySM)
-                .foregroundStyle(Color.tronKnowledgeText)
-                .accessibilityHint("Opens the original HTTP or HTTPS source")
-            } else if source.uri != nil {
-                Text("Original link unavailable: only safe HTTP(S) links can be opened.")
-                    .font(TronTypography.secondaryDescription)
-                    .foregroundStyle(Color.tronAmber)
             }
             if let origin = source.origins?.last ?? source.origin.flatMap({ value in KnowledgeSourceOriginKind(rawValue: value).map { KnowledgeSourceOrigin(kind: $0, capturedAt: source.capturedAt, annotation: nil, uri: source.uri, identity: source.identity) } }) {
                 Text("Origin: \(origin.kind.rawValue.capitalized) · captured \(origin.capturedAt)")
