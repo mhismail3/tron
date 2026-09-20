@@ -237,8 +237,9 @@ object hashes are not an object browsing API.
 
 Raindrop reads the official `/rest/v1/raindrops/{collectionId}` endpoint in bounded pages; X reads
 `/2/users/{userId}/bookmarks` with the provider pagination token. Discovered provider IDs
-and pending metadata are persisted before checkpoint advancement, so pagination shifts do
-not silently skip work. Items use shared URL capture/store with explicit partial or
+and pending metadata are persisted before checkpoint advancement, preventing loss of
+an already-fetched page. Offset pagination can still shift under concurrent remote edits;
+this ingestion helper does not guarantee a complete snapshot or ongoing synchronization. Items use shared URL capture/store with explicit partial or
 metadata-only quality, annotations, stable identity, finite retries, and visible auth,
 rate-limit, remaining, and last-error health. Remote Raindrop moves are disabled by
 default and require a locally verified raw object plus readable extraction, explicit write
@@ -257,6 +258,22 @@ that budget immediately before the request. A new operation uses a distinct
 attempt receipt, so replay cannot reuse an old reservation. Uncertain remote
 PUTs are not retried; the persisted receipt is reconciled before another
 connector effect.
+
+## Read-only Raindrop access
+
+The `knowledge.raindrop.read` action and the agent `knowledge` tool action
+`raindrop` use the existing enabled Raindrop connector and Mac Keychain
+credential store. They verify `/rest/v1/user` against the configured numeric
+user `_id` before each read, then expose raw bounded metadata for root and child
+collections, collection detail, paged bookmark listing/search/sort/nested
+queries, individual items, tags, and highlights. `perpage` is limited to 50 and a
+full page yields an explicit `nextPage`; pages are not an atomic snapshot.
+Provider JSON is preserved; HTTP/metadata responses over 2,000,000 bytes and
+agent text over 128,000 bytes fail rather than truncating fields. Narrow pages
+or fetch individual items; a single item over the agent bound is unsupported. Retries honor `Retry-After` and both common rate-limit
+header spellings. Redirects are not followed, and provider failures are
+redacted. This is metadata access, not full article capture, and the existing
+connector sweep remains a bounded ingestion helper rather than a complete sync.
 
 ## Legacy import
 

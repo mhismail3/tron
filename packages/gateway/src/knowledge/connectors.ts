@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { KnowledgeConnectorConfigurationRequest, KnowledgeConnectorRunRequest, KnowledgeConnectorState, KnowledgeConnectorStatus, KnowledgeAction, KnowledgeRecord } from "./knowledge-contract.js";
+import type { KnowledgeConnectorConfigurationRequest, KnowledgeConnectorRunRequest, KnowledgeConnectorState, KnowledgeConnectorStatus, KnowledgeAction, KnowledgeRecord, KnowledgeRaindropRequest } from "./knowledge-contract.js";
 import { captureSource, isVerifiedSourceCapture } from "./source-capture.js";
 import { GatewayError } from "../errors.js";
 import { AsyncMutex } from "../util/async-mutex.js";
@@ -44,11 +44,13 @@ function url(value: unknown): string | undefined { if (typeof value !== "string"
 function retryable(status: number): boolean { return status === 408 || status === 425 || status === 429 || status >= 500; }
 function authFailure(status: number): boolean { return status === 401 || status === 403; }
 
+class ConnectorBodyTooLarge extends Error { constructor() { super("Connector response exceeded its bounded body limit"); } }
+
 async function boundedResponseText(response: Response): Promise<string> {
   if (!response.body) return "";
   const reader = response.body.getReader(); const chunks: Uint8Array[] = []; let total = 0;
   try {
-    for (;;) { const next = await reader.read(); if (next.done) break; if (!next.value) continue; const remaining = BODY_LIMIT - total; if (next.value.byteLength > remaining) { if (remaining > 0) chunks.push(next.value.slice(0, remaining)); await reader.cancel(); total = BODY_LIMIT; break; } chunks.push(next.value); total += next.value.byteLength; if (total === BODY_LIMIT) { await reader.cancel(); break; } }
+    for (;;) { const next = await reader.read(); if (next.done) break; if (!next.value) continue; const remaining = BODY_LIMIT - total; if (next.value.byteLength > remaining) { await reader.cancel(); throw new ConnectorBodyTooLarge(); } chunks.push(next.value); total += next.value.byteLength; if (total === BODY_LIMIT) { const extra = await reader.read(); if (!extra.done) { await reader.cancel(); throw new ConnectorBodyTooLarge(); } break; } }
   } finally { reader.releaseLock(); }
   const bytes = new Uint8Array(total); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
   return new TextDecoder().decode(bytes);
@@ -65,18 +67,42 @@ async function requestJson(http: ConnectorHTTP, endpoint: string, token: string 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     await options.beforeAttempt?.();
     const attemptToken = typeof token === "function" ? await token() : token;
-    const result = await http(endpoint, { ...(options.method ? { method: options.method } : {}), headers: { authorization: `Bearer ${attemptToken}`, accept: "application/json", ...(options.body !== undefined ? { "content-type": "application/json" } : {}) }, ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}), signal: options.signal });
+    if (options.signal.aborted) throw options.signal.reason instanceof Error ? options.signal.reason : new Error("Connector request cancelled");
+    let result: ConnectorHTTPResponse;
+    try {
+      result = await http(endpoint, { ...(options.method ? { method: options.method } : {}), headers: { authorization: `Bearer ${attemptToken}`, accept: "application/json", ...(options.body !== undefined ? { "content-type": "application/json" } : {}) }, ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}), signal: options.signal });
+    } catch (error) {
+      if (options.signal.aborted || error instanceof ConnectorBodyTooLarge) throw error;
+      if (!retrySafe || attempt === maxAttempts) throw new ConnectorNetworkError(error);
+      await options.sleep(Math.max(50, 100 * 2 ** (attempt - 1)));
+      continue;
+    }
     let value: unknown = undefined;
     if (result.body) { try { value = JSON.parse(result.body); } catch { value = undefined; } }
-    if (result.status >= 200 && result.status < 300) return { status: result.status, value, headers: result.headers };
-    if (!retryable(result.status) || attempt === maxAttempts) throw new ConnectorHTTPError(result.status, result.headers.get("retry-after"));
-    const retryAfter = Number(result.headers.get("retry-after") ?? "0");
-    await options.sleep(Math.min(2_000, Math.max(50, Number.isFinite(retryAfter) ? retryAfter * 1_000 : 100 * 2 ** (attempt - 1))));
+    if (result.status >= 200 && result.status < 300) {
+      if (value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).result === false) throw new ConnectorAPIError();
+      return { status: result.status, value, headers: result.headers };
+    }
+    if (!retryable(result.status) || attempt === maxAttempts) throw new ConnectorHTTPError(result.status, result.headers.get("retry-after"), result.headers.get("x-ratelimit-reset") ?? result.headers.get("ratelimit-reset"));
+    if (options.signal.aborted) throw options.signal.reason instanceof Error ? options.signal.reason : new Error("Connector request cancelled");
+    const retryAfterValue = result.headers.get("retry-after");
+    const retryAfterSeconds = retryAfterValue && /^\d+(?:\.\d+)?$/.test(retryAfterValue) ? Number(retryAfterValue) : Number.NaN;
+    const retryAfterDate = retryAfterValue && !Number.isNaN(Date.parse(retryAfterValue)) ? Math.max(0, (Date.parse(retryAfterValue) - Date.now()) / 1_000) : 0;
+    const resetSeconds = Number(result.headers.get("x-ratelimit-reset") ?? result.headers.get("ratelimit-reset") ?? "0");
+    const resetDelay = Number.isFinite(resetSeconds) && resetSeconds > 0 ? Math.max(0, resetSeconds - Date.now() / 1_000) : 0;
+    const delay = Math.max(50, (Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : retryAfterDate) * 1_000, resetDelay * 1_000, 100 * 2 ** (attempt - 1));
+    // Never shorten a provider cooldown to fit our bounded operation.
+    if (!Number.isFinite(delay) || delay >= RUN_DEADLINE_MS) throw new ConnectorHTTPError(result.status, result.headers.get("retry-after"), result.headers.get("x-ratelimit-reset") ?? result.headers.get("ratelimit-reset"));
+    await options.sleep(delay);
+    if (options.signal.aborted) throw options.signal.reason instanceof Error ? options.signal.reason : new Error("Connector request cancelled");
   }
   throw new ConnectorHTTPError(599);
 }
 
-class ConnectorHTTPError extends Error { constructor(readonly status: number, readonly retryAfter?: string | null) { super(`Connector HTTP ${status}`); } }
+class ConnectorHTTPError extends Error { constructor(readonly status: number, readonly retryAfter?: string | null, readonly reset?: string | null) { super(`Connector HTTP ${status}`); } }
+class ConnectorAPIError extends Error { constructor() { super("Connector returned result=false"); } }
+class ConnectorNetworkError extends Error { constructor(readonly underlying: unknown) { super("Connector network request failed"); } }
+class ConnectorShapeError extends Error { constructor() { super("Connector returned an unexpected success shape"); } }
 
 function initial(connector: Connector): KnowledgeConnectorState {
   return { connector, enabled: false, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false, pending: [], capturedIds: [], health: "unconfigured", remaining: 0 };
@@ -114,10 +140,115 @@ export class KnowledgeConnectorExtension {
   private lane(connector: Connector): AsyncMutex { const existing = this.lanes.get(connector); if (existing) return existing; const created = new AsyncMutex(); this.lanes.set(connector, created); return created; }
 
   async invoke(action: KnowledgeAction, signal?: AbortSignal): Promise<unknown> {
+    if (action.operation === "knowledge.raindrop.read") return this.lane("raindrop").run(() => this.readRaindrop(action.request, signal));
     if (action.operation === "knowledge.connector.configure") return this.lane(action.request.connector).run(() => this.configure(action.request));
     if (action.operation === "knowledge.connector.status") return stateStatus(await this.store.connectorState(action.request.connector), action.request.connector);
     if (action.operation === "knowledge.connector.run") return this.lane(action.request.connector).run(() => this.run(action.request, signal));
     throw bad("Unsupported knowledge connector operation");
+  }
+
+  private async readRaindrop(request: KnowledgeRaindropRequest, externalSignal?: AbortSignal): Promise<Record<string, unknown>> {
+    const state = await this.store.connectorState("raindrop");
+    if (!state?.enabled || !state.accountId || !state.credentialRef) throw new GatewayError("unsupported", "Raindrop connector is not configured; set the numeric Raindrop user _id in accountId");
+    if (!/^\d+$/.test(state.accountId)) throw new GatewayError("invalid_request", "Raindrop accountId must be the numeric user _id; obtain it through a secure local /user check, never by sharing the token");
+    const token = await this.options.credentials.read(state.credentialRef);
+    if (!token) throw new GatewayError("unsupported", "Raindrop credential is unavailable");
+    const controller = new AbortController();
+    const signal = externalSignal ? AbortSignal.any([controller.signal, externalSignal]) : controller.signal;
+    const deadline = setTimeout(() => controller.abort(new Error("Raindrop read deadline exceeded")), RUN_DEADLINE_MS);
+    deadline.unref?.();
+    const sleep = async (milliseconds: number) => {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => { signal.removeEventListener("abort", abort); resolve(); }, milliseconds);
+        const abort = () => { clearTimeout(timer); signal.removeEventListener("abort", abort); reject(signal.reason instanceof Error ? signal.reason : new Error("Raindrop read cancelled")); };
+        if (signal.aborted) abort(); else signal.addEventListener("abort", abort, { once: true });
+      });
+      if (signal.aborted) throw signal.reason instanceof Error ? signal.reason : new Error("Raindrop read cancelled");
+    };
+    const requestEndpoint = async (endpoint: string): Promise<{ value: any; headers: Headers }> => requestJson(this.http, endpoint, token, { sleep, signal });
+    const safeID = (value: string, label: string): string => {
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(value)) throw bad(`${label} is invalid`);
+      return encodeURIComponent(value);
+    };
+    const rate = (headers: Headers): Record<string, unknown> => {
+      const limit = headers.get("x-ratelimit-limit") ?? headers.get("ratelimit-limit");
+      const remaining = headers.get("x-ratelimit-remaining") ?? headers.get("ratelimit-remaining");
+      const reset = headers.get("x-ratelimit-reset") ?? headers.get("ratelimit-reset");
+      return { ...(limit ? { limit } : {}), ...(remaining ? { remaining } : {}), ...(reset ? { reset } : {}) };
+    };
+    try {
+      // The configured account ID is an authority fence, not a display label.
+      // Verify it on every read so a stale token cannot expose another account.
+      const identity = await requestEndpoint("https://api.raindrop.io/rest/v1/user");
+      const user = identity.value?.user ?? identity.value;
+      const authenticatedID = id(user?._id ?? user?.id, "Raindrop account");
+      if (!authenticatedID || authenticatedID !== state.accountId) throw new GatewayError("conflict", "Raindrop authenticated account does not match configured account");
+      let endpoint: string;
+      let value: unknown;
+      let headers = identity.headers;
+      const read = request.read;
+      if (read.operation === "user") {
+        const raw = JSON.stringify(identity.value);
+        if (Buffer.byteLength(raw, "utf8") > BODY_LIMIT) throw new GatewayError("invalid_request", "Raindrop metadata exceeded 2 MB; reduce the requested metadata");
+        return { operation: read.operation, data: identity.value, rateLimit: rate(identity.headers) };
+      }
+      const live = await this.store.connectorState("raindrop");
+      if (!live?.enabled || live.accountId !== state.accountId || live.credentialRef !== state.credentialRef) throw new GatewayError("conflict", "Raindrop configuration changed during read");
+      if ((read.operation === "bookmarks" || read.operation === "highlights") && (!Number.isSafeInteger(read.page ?? 0) || (read.page ?? 0) < 0 || (read.page ?? 0) > 1_000_000 || !Number.isSafeInteger(read.perpage ?? 50) || (read.perpage ?? 50) < 1 || (read.perpage ?? 50) > 50)) throw bad("Raindrop page must be 0..1000000 and perpage must be 1..50");
+      if (read.operation === "collections") {
+        const root = await requestEndpoint("https://api.raindrop.io/rest/v1/collections");
+        headers = root.headers; value = root.value;
+        if (read.children) {
+          const children = await requestEndpoint("https://api.raindrop.io/rest/v1/collections/childrens");
+          headers = children.headers; value = { root: root.value, children: children.value };
+        }
+      } else {
+        if (read.operation === "collection") endpoint = `https://api.raindrop.io/rest/v1/collection/${safeID(read.collectionId, "Collection ID")}`;
+        else if (read.operation === "item") endpoint = `https://api.raindrop.io/rest/v1/raindrop/${safeID(read.itemId, "Item ID")}`;
+        else if (read.operation === "bookmarks") {
+          const collection = read.collectionId ?? state.scope ?? "0";
+          if (!/^-?\d{1,18}$/.test(collection)) throw bad("Collection ID is invalid");
+          const params = new URLSearchParams({ page: String(read.page ?? 0), perpage: String(read.perpage ?? 50) });
+          if (read.search !== undefined && (typeof read.search !== "string" || read.search.length > 512)) throw bad("Raindrop search exceeds its limit");
+          if (read.sort !== undefined && (typeof read.sort !== "string" || read.sort.length > 64)) throw bad("Raindrop sort exceeds its limit");
+          if (read.search) params.set("search", read.search);
+          if (read.sort) params.set("sort", read.sort);
+          if (read.nested !== undefined) params.set("nested", String(read.nested));
+          endpoint = `https://api.raindrop.io/rest/v1/raindrops/${encodeURIComponent(collection)}?${params}`;
+        } else if (read.operation === "tags") {
+          endpoint = "https://api.raindrop.io/rest/v1/tags";
+        } else if (read.operation === "highlights") {
+          const params = new URLSearchParams({ page: String(read.page ?? 0), perpage: String(read.perpage ?? 50) });
+          if (read.collectionId) {
+            if (!/^-?\d{1,18}$/.test(read.collectionId)) throw bad("Collection ID is invalid");
+            endpoint = `https://api.raindrop.io/rest/v1/highlights/${encodeURIComponent(read.collectionId)}?${params}`;
+          } else endpoint = `https://api.raindrop.io/rest/v1/highlights?${params}`;
+        } else throw bad("Unsupported Raindrop read operation");
+        const result = await requestEndpoint(endpoint); headers = result.headers; value = result.value;
+      }
+      const objectWithItems = (candidate: unknown): candidate is { items: unknown[] } => Boolean(candidate && typeof candidate === "object" && !Array.isArray(candidate) && Array.isArray((candidate as Record<string, unknown>).items));
+      if (read.operation === "collections" && (read.children ? (!objectWithItems((value as any)?.root) || !objectWithItems((value as any)?.children)) : !objectWithItems(value))) throw new ConnectorShapeError();
+      if (["bookmarks", "highlights", "tags"].includes(read.operation) && !objectWithItems(value)) throw new ConnectorShapeError();
+      if (read.operation === "collection" && id((value as any)?.item?._id, "collection") !== read.collectionId) throw new ConnectorShapeError();
+      if (read.operation === "item" && id((value as any)?.item?._id, "item") !== read.itemId) throw new ConnectorShapeError();
+      const raw = JSON.stringify(value);
+      if (Buffer.byteLength(raw, "utf8") > BODY_LIMIT) throw new GatewayError("invalid_request", "Raindrop metadata exceeded 2 MB; reduce perpage or request narrower pages");
+      const result: Record<string, unknown> = { operation: read.operation, data: value, rateLimit: rate(headers) };
+      if (read.operation === "bookmarks" || read.operation === "highlights") {
+        const page = read.page ?? 0; const perpage = read.perpage ?? 50;
+        if (Array.isArray((value as any)?.items) && (value as any).items.length >= perpage) result.nextPage = page + 1;
+        result.snapshot = "not-atomic; provider pagination can shift between requests";
+      }
+      return result;
+    } catch (error) {
+      if (error instanceof GatewayError) throw error;
+      if (error instanceof ConnectorBodyTooLarge) throw new GatewayError("invalid_request", "Raindrop metadata exceeded 2 MB; reduce perpage or request narrower pages");
+      if (error instanceof ConnectorAPIError || error instanceof ConnectorShapeError) throw new GatewayError("internal", "Raindrop returned an unusable response", true);
+      if (error instanceof ConnectorHTTPError && authFailure(error.status)) throw new GatewayError("unsupported", "Raindrop authentication failed");
+      if (error instanceof ConnectorHTTPError && error.status === 429) throw new GatewayError("internal", "Raindrop rate limit reached; retry after the provider reset", true);
+      if (signal.aborted) throw new GatewayError("busy", "Raindrop read was cancelled", true);
+      throw new GatewayError("internal", "Raindrop provider request failed", true);
+    } finally { clearTimeout(deadline); }
   }
 
   private async configure(request: KnowledgeConnectorConfigurationRequest): Promise<KnowledgeConnectorStatus> {

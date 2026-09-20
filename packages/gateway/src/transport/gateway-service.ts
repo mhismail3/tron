@@ -320,7 +320,8 @@ export class GatewayService {
       case "knowledge.object.read":
       case "knowledge.search":
       case "knowledge.recall":
-      case "knowledge.connector.status": {
+      case "knowledge.connector.status":
+      case "knowledge.raindrop.read": {
         const knowledge = this.requireKnowledge();
         return safeJson(await knowledge.invoke({ operation: method, request: params } as KnowledgeAction));
       }

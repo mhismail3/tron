@@ -93,7 +93,15 @@ covering the complete admitted plan; page completion is distinct from whole-plan
 completion. They compute excluded-source/dependent assertion closure before
 page slicing. Connector X runs require a host-qualified account price, explicit paid
 access, and a one-attempt allowance reservation/debit; unknown pricing or a
-positive budget alone never permits an API call. Remote Raindrop moves
+positive budget alone never permits an API call. The read-only `knowledge.raindrop.read` surface verifies the configured numeric
+Raindrop user ID against `/user` on every request, then returns bounded raw
+metadata for root/child collections, collection detail, paged bookmark search,
+individual items, tags, and highlights. It uses the Mac Keychain credential owner,
+never follows redirects, preserves provider fields in `details`, and exposes
+explicit page continuation without claiming an atomic snapshot. Oversized
+metadata fails closed rather than truncating. The agent-facing `raindrop` skill
+covers secure manual Keychain setup, the numeric account-ID prerequisite, and
+metadata-versus-article-content limits. Remote Raindrop moves
 re-read the exact current source revision and connector account/write policy
 after preflight before persisting or applying the effect. Legacy exclusions are withheld rather than copied; if a re-import changes an
 already-readable canonical record to excluded, the run fails closed and asks

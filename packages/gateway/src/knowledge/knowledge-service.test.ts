@@ -312,6 +312,32 @@ describe("KnowledgeService integration", () => {
     expect(result.details).toEqual({ operation: "knowledge.connector.run", accepted: true });
   });
 
+  it("exposes bounded Raindrop reads through the agent knowledge tool", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    let received: unknown;
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {
+      connector: async action => { received = action; return { operation: "bookmarks", data: { items: [{ _id: 1 }] }, nextPage: 1 }; },
+    });
+    const result = await service.tool({ action: "raindrop", commandId: "service-raindrop-read", raindropOperation: "bookmarks", collectionId: "7", page: 0, perpage: 50 });
+    expect(result.details).toMatchObject({ nextPage: 1 });
+    expect(received).toMatchObject({ operation: "knowledge.raindrop.read", request: { read: { operation: "bookmarks", collectionId: "7", page: 0, perpage: 50 } } });
+  });
+
+  it("returns complete model-visible metadata above the old summary limit and rejects oversized output", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    let note = "x".repeat(9_000);
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {
+      connector: async () => ({ data: { item: { _id: 1, note } } }),
+    });
+    const parameters = { action: "raindrop" as const, commandId: "service-raindrop-output", raindropOperation: "item" as const, itemId: "1" };
+    const result = await service.tool(parameters);
+    expect(JSON.parse(result.text).data.item.note).toBe(note);
+    note = "x".repeat(128_000);
+    await expect(service.tool(parameters)).rejects.toMatchObject({ code: "invalid_request" });
+  });
+
   it("routes a disposition filter through the coverage request", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-knowledge-service-")); roots.push(root);
     const store = new KnowledgeStore(new TronWorkspace(root));

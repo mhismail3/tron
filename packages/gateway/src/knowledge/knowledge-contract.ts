@@ -461,6 +461,23 @@ export interface KnowledgeConnectorConfigurationRequest {
 export interface KnowledgeConnectorStatusRequest { connector: "raindrop" | "x"; }
 export interface KnowledgeConnectorRunRequest { commandId: string; connector: "raindrop" | "x"; dryRun: boolean; limit?: number; }
 
+/** Read-only Raindrop API access. Every request revalidates the authenticated
+ * user against the configured accountId; returned provider objects are raw
+ * metadata and are never treated as captured article content. */
+export type KnowledgeRaindropReadRequest =
+  | { operation: "user" }
+  | { operation: "collections"; children?: boolean }
+  | { operation: "collection"; collectionId: string }
+  | { operation: "bookmarks"; collectionId?: string; page?: number; perpage?: number; search?: string; sort?: string; nested?: boolean }
+  | { operation: "item"; itemId: string }
+  | { operation: "highlights"; page?: number; perpage?: number; collectionId?: string }
+  | { operation: "tags" };
+
+export interface KnowledgeRaindropRequest {
+  commandId: string;
+  read: KnowledgeRaindropReadRequest;
+}
+
 export interface KnowledgeConnectorState {
   connector: "raindrop" | "x";
   enabled: boolean;
@@ -552,6 +569,7 @@ export type KnowledgeAction =
   | { operation: "knowledge.connector.configure"; request: KnowledgeConnectorConfigurationRequest }
   | { operation: "knowledge.connector.status"; request: KnowledgeConnectorStatusRequest }
   | { operation: "knowledge.connector.run"; request: KnowledgeConnectorRunRequest }
+  | { operation: "knowledge.raindrop.read"; request: KnowledgeRaindropRequest }
   | { operation: "knowledge.import.dry-run"; request: KnowledgeImportDryRunRequest }
   | { operation: "knowledge.import.run"; request: KnowledgeImportRunRequest };
 

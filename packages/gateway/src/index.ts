@@ -182,7 +182,7 @@ const knowledge = new KnowledgeService(
     ),
   ),
   {
-    connector: (action) => knowledgeConnector.invoke(action),
+    connector: (action, signal) => knowledgeConnector.invoke(action, signal),
     importer: createKnowledgeImporter(knowledgeStore, { roots: {
       ...(process.env.TRON_PERSONAL_OS_ROOT ? { "personal-os": process.env.TRON_PERSONAL_OS_ROOT } : {}),
       ...(process.env.TRON_LLM_WIKI_ROOT ? { "llm-wiki": process.env.TRON_LLM_WIKI_ROOT } : {}),

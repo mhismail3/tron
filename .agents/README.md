@@ -14,6 +14,7 @@ facts in the owning source and package docs, not copied into skills.
 | [tron-performance](skills/tron-performance/SKILL.md) | Profiling a demonstrated bottleneck or comparing alternatives under a frozen experiment |
 | [tron-ios](skills/tron-ios/SKILL.md) | Required routing for iOS build, test, simulator, device, signing, archive, and artifact work |
 | [tron-workspace-housekeeping](skills/tron-workspace-housekeeping/SKILL.md) | Evidence-based post-merge cleanup of branches, inactive worktrees, and stale Git metadata; protect active agents and unmerged work |
+| [tron-raindrop](skills/tron-raindrop/SKILL.md) | Bounded, read-only Raindrop bookmark and collection API access through the Mac credential owner |
 
 For a broad investigation, start with code health and its coverage ledger. Use
 test confidence to evaluate the evidence, then performance only where a cost or

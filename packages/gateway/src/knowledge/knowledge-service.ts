@@ -1,7 +1,7 @@
 import { Type, type Static } from "typebox";
 import type { Api, AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import type { KnowledgeAction, KnowledgeConfig, KnowledgeListRequest, KnowledgeRecallRequest, KnowledgeSearchRequest, ObservationCoverageDisposition, SourceAssessment } from "./knowledge-contract.js";
+import type { KnowledgeAction, KnowledgeConfig, KnowledgeListRequest, KnowledgeRecallRequest, KnowledgeSearchRequest, KnowledgeRaindropReadRequest, ObservationCoverageDisposition, SourceAssessment } from "./knowledge-contract.js";
 import type { KnowledgeStore } from "./knowledge-store.js";
 import { KnowledgeObservationService, type ObservationSettlement } from "./knowledge-observation.js";
 import { awaitAbortableWithSettlement } from "./model-await.js";
@@ -12,10 +12,19 @@ import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway
 import { currentInvocationContext } from "../extensions/owner-attribution.js";
 
 const toolParameters = Type.Object({
-  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("triageSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorSweep"), Type.Literal("synthesis")]),
+  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("triageSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorSweep"), Type.Literal("raindrop"), Type.Literal("synthesis")]),
   query: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   commandId: Type.Optional(Type.String({ minLength: 8, maxLength: 160 })),
   connector: Type.Optional(Type.Union([Type.Literal("raindrop"), Type.Literal("x")])),
+  raindropOperation: Type.Optional(Type.Union([Type.Literal("user"), Type.Literal("collections"), Type.Literal("collection"), Type.Literal("bookmarks"), Type.Literal("item"), Type.Literal("highlights"), Type.Literal("tags")])),
+  collectionId: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+  itemId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+  page: Type.Optional(Type.Integer({ minimum: 0, maximum: 1_000_000 })),
+  perpage: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
+  search: Type.Optional(Type.String({ maxLength: 512 })),
+  sort: Type.Optional(Type.String({ maxLength: 64 })),
+  nested: Type.Optional(Type.Boolean()),
+  children: Type.Optional(Type.Boolean()),
   dryRun: Type.Optional(Type.Boolean()),
   sourceRevisionIds: Type.Optional(Type.Array(Type.String({ minLength: 16, maxLength: 80 }), { minItems: 1, maxItems: 32 })),
   sessionId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
@@ -51,6 +60,18 @@ function recordLabel(record: import("./knowledge-contract.js").KnowledgeRecord):
 
 function recordSummary(record: import("./knowledge-contract.js").KnowledgeRecord): Record<string, unknown> {
   return { id: record.id, revisionId: record.revisionId, kind: record.kind, scope: record.scope, updatedAt: record.updatedAt, evidence: record.provenance.evidence.slice(0, 8) };
+}
+
+function raindropRead(parameters: KnowledgeToolParameters): KnowledgeRaindropReadRequest {
+  const operation = parameters.raindropOperation;
+  if (!operation) throw new GatewayError("invalid_request", "Raindrop reads require raindropOperation");
+  if (operation === "user") return { operation };
+  if (operation === "collections") return { operation, ...(parameters.children === undefined ? {} : { children: parameters.children }) };
+  if (operation === "collection") return { operation, collectionId: parameters.collectionId ?? "" };
+  if (operation === "item") return { operation, itemId: parameters.itemId ?? "" };
+  if (operation === "bookmarks") return { operation, ...(parameters.collectionId ? { collectionId: parameters.collectionId } : {}), ...(parameters.page === undefined ? {} : { page: parameters.page }), ...(parameters.perpage === undefined ? {} : { perpage: parameters.perpage }), ...(parameters.search === undefined ? {} : { search: parameters.search }), ...(parameters.sort === undefined ? {} : { sort: parameters.sort }), ...(parameters.nested === undefined ? {} : { nested: parameters.nested }) };
+  if (operation === "tags") return { operation };
+  return { operation, ...(parameters.page === undefined ? {} : { page: parameters.page }), ...(parameters.perpage === undefined ? {} : { perpage: parameters.perpage }), ...(parameters.collectionId ? { collectionId: parameters.collectionId } : {}) };
 }
 
 function recallEvidenceLabel(record: import("./knowledge-contract.js").KnowledgeRecord): string {
@@ -329,8 +350,9 @@ export class KnowledgeService {
       case "knowledge.connector.configure":
       case "knowledge.connector.run":
       case "knowledge.connector.status":
+      case "knowledge.raindrop.read":
         if (!this.extensions.connector) throw new GatewayError("unsupported", "Knowledge connector support is not configured");
-        return this.extensions.connector(action);
+        return this.extensions.connector(action, signal);
       case "knowledge.import.dry-run":
       case "knowledge.import.run":
         if (!this.extensions.importer) throw new GatewayError("unsupported", "Knowledge importer support is not configured");
@@ -440,6 +462,16 @@ export class KnowledgeService {
         if (!current || current.kind !== "note") throw new GatewayError("conflict", "The note revision is unavailable");
         const result = await this.store.updateNote({ commandId: parameters.commandId, recordId: current.id, expectedRevision: current.revisionId, record: { kind: "note", scope: parameters.scope ?? current.scope, provenance: { ...current.provenance, actor: "agent", source: current.provenance.source ?? "knowledge-tool" }, relations: current.relations, ...(current.temporal ? { temporal: current.temporal } : {}), ...(current.importOrigin ? { importOrigin: current.importOrigin } : {}), content: { ...current.content, title: parameters.title, confirmed: false, ...(parameters.noteBody === undefined ? {} : { body: parameters.noteBody }) } } });
         return { text: `Updated note ${result.record.id}.`, details: result };
+      }
+      case "raindrop": {
+        if (!this.extensions.connector || !parameters.commandId || !parameters.raindropOperation) throw new GatewayError("invalid_request", "Raindrop reads require commandId and raindropOperation");
+        const read = raindropRead(parameters);
+        const result = await this.invoke({ operation: "knowledge.raindrop.read", request: { commandId: parameters.commandId, read } } as KnowledgeAction, signal);
+        const serialized = JSON.stringify(result);
+        // Tool details are not model-visible on every client. Never report a
+        // successful metadata read while withholding its content from the agent.
+        if (Buffer.byteLength(serialized, "utf8") > 128_000) throw new GatewayError("invalid_request", "Raindrop metadata exceeds the 128 KB agent response limit; reduce perpage or narrow the collection/search. A single oversized item cannot be returned through this tool.");
+        return { text: serialized, details: result };
       }
       case "connectorSweep": {
         if (!this.extensions.connector) throw new GatewayError("unsupported", "Knowledge connector support is not configured");
