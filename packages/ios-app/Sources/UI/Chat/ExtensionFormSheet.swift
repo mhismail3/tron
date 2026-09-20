@@ -6,6 +6,7 @@ struct ExtensionFormSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.tronPresentationActivityCoordinator) private var presentationActivityCoordinator
     @Environment(\.tronPresentationSurfaceToken) private var presentationSurfaceToken
@@ -20,6 +21,7 @@ struct ExtensionFormSheet: View {
     @State private var submitting = false
     @State private var errorMessage: String?
     @State private var now = Date()
+    @State private var selectedDetent: PresentationDetent = .medium
     @FocusState private var focusedQuestionID: String?
 
     private var form: ExtensionFormDescriptor? { interaction.form }
@@ -110,12 +112,23 @@ struct ExtensionFormSheet: View {
             }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.medium, .large], selection: $selectedDetent)
         .presentationDragIndicator(.hidden)
         .interactiveDismissDisabled()
         .onAppear { reset() }
         .onChange(of: ExtensionInteractionScope(interaction)) { _, _ in reset() }
-        .onChange(of: currentQuestionIndex) { _, _ in persistDraft() }
+        .onChange(of: currentQuestionIndex) { _, _ in
+            focusedQuestionID = nil
+            persistDraft()
+        }
+        .onChange(of: focusedQuestionID) { _, questionID in
+            guard questionID != nil else { return }
+            // Give the paged form room before keyboard avoidance compresses
+            // its medium-height viewport. UIKit still owns editor focus.
+            withAnimation(reduceMotion ? nil : .smooth(duration: 0.24)) {
+                selectedDetent = .large
+            }
+        }
         .task(id: PresentationActivityTaskID(
             source: ExtensionInteractionScope(interaction),
             presentationActive: expiryClockRuns
@@ -281,7 +294,8 @@ struct ExtensionFormSheet: View {
                 } else {
                     activeOtherQuestionIDs.insert(question.id)
                     draft.activateOther(for: question)
-                    focusedQuestionID = question.id
+                    // Selecting Other reveals an editor; only tapping the
+                    // mounted editor requests the keyboard and larger detent.
                 }
                 errorMessage = nil
                 persistDraft()
@@ -301,11 +315,18 @@ struct ExtensionFormSheet: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .disabled(submitting || expired)
+            .accessibilityValue(selected ? "Selected" : "Not selected")
+            .accessibilityAddTraits(selected ? .isSelected : [])
 
             if selected {
-                TextField("Type your answer", text: Binding(
+                TextEditor(text: Binding(
                     get: { draft.value(for: question.id).other },
                     set: { text in
+                        // A fading-out editor may finish an IME/autocorrection
+                        // callback after deselection. It cannot restore Other.
+                        guard activeOtherQuestionIDs.contains(question.id)
+                            || !draft.value(for: question.id).other.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
                         if draft.setOther(text, for: question) {
                             errorMessage = nil
                             persistDraft()
@@ -313,20 +334,39 @@ struct ExtensionFormSheet: View {
                             errorMessage = "Other responses are limited to 32 KiB of UTF-8 text."
                         }
                     }
-                ), axis: .vertical)
-                    .font(TronTypography.bodySM)
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .lineLimit(2...6)
+                ))
+                    .frame(minHeight: 160)
                     .focused($focusedQuestionID, equals: question.id)
-                    .tronField()
+                    .overlay(alignment: .topLeading) {
+                        if draft.value(for: question.id).other.isEmpty {
+                            Text("Type your answer")
+                                .foregroundStyle(Color.tronTextMuted)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 8)
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    .tronTextEditor()
+                    .tronSettingsVisualTheme(accent: .tronAmber)
                     .padding(.horizontal, 14)
                     .padding(.bottom, 14)
                     .disabled(submitting || expired)
                     .accessibilityLabel("Other response for \(question.header ?? question.question)")
+                    .transition(.opacity)
             }
         }
-        .tronGlassSurface(accent: selected ? .tronAmber : .tronCyan, tintOpacity: selected ? 0.16 : 0.06)
-        .accessibilityValue(selected ? "Selected" : "Not selected")
+        .background {
+            // A composite card has two independent controls. Applying the
+            // glass content shape to their parent enlarges Other's tap target
+            // over the editor; selection accessibility belongs to the button.
+            Color.clear
+                .tronGlassSurface(accent: selected ? .tronAmber : .tronCyan, tintOpacity: selected ? 0.16 : 0.06)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+        .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: selected)
+        .accessibilityElement(children: .contain)
     }
 
     private func selectionIcon(selected: Bool, multiSelect: Bool) -> String {
@@ -366,6 +406,7 @@ struct ExtensionFormSheet: View {
         submitting = false
         errorMessage = nil
         focusedQuestionID = nil
+        selectedDetent = .medium
         now = Date()
     }
 

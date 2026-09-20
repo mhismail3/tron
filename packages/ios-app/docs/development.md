@@ -1363,6 +1363,17 @@ left of Send on the right, with separate native surfaces. Close retains the draf
 Cancel still resolves the request. The native Ask User cancellation UI test checks
 button frames and the single scoped cancellation receipt.
 
+Other answers use the queued/steering message editor's native `TextEditor` and
+shared `tronTextEditor` surface. Selecting Other smoothly reveals it without
+requesting focus before it is mounted; deselection fades it out and releases focus.
+Reduce Motion installs the size change without animation. Tapping the editor selects
+the large sheet detent as it takes focus, keeping the paged question viewport usable
+while the keyboard appears; changing question pages clears focus. The Other button
+and editor have separate hit targets and accessibility values, with glass drawn only
+as their decorative background. A retiring editor cannot write an answer back after
+Other was deselected. Native Ask User UI regressions exercise medium-to-large typing,
+multiline input, both kinds of deselection, close/reopen drafts, and exact submission.
+
 Historical onboarding references captured by executing commit `c3f12c17c` live
 under `docs/assets/parity/`. `TronSmokeUITests` keeps matching medium/pairing
 screenshots in its result bundle. Compare the medium sheet crop as well as the
