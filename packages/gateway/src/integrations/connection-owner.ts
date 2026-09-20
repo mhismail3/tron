@@ -26,6 +26,7 @@ import {
   validateConnectionInstance,
   validateConnectionPolicy,
   validateConnectionState,
+  validateMcpConnectionConfiguration,
   validateIntegrationDefinition,
   validateRuntimeBinding,
 } from "./connection-contract.js";
@@ -61,8 +62,8 @@ export const BUILTIN_INTEGRATION_DEFINITIONS: readonly IntegrationDefinition[] =
     id: "mcp.remote-http",
     implementation: "mcp",
     displayName: "MCP server",
-    setupMethods: ["endpoint", "oauth"],
-    capabilities: [{ id: "tools", displayName: "Remote tools", effects: ["read", "write", "disclosure"], supported: false }],
+    setupMethods: ["endpoint", "token", "local-command"],
+    capabilities: [{ id: "tools", displayName: "Tools", effects: ["read", "write", "disclosure"], supported: true }],
   },
 ];
 
@@ -81,7 +82,9 @@ function validateCommand(command: ConnectionCommand): void {
   if (command.kind === "setup.complete") {
     assertConnectionId(command.operationId, "setup operation id"); assertConnectionId(command.instanceId); if (typeof command.providerAccountId !== "string" || command.providerAccountId.length < 1 || command.providerAccountId.length > 256) throw invalid("Provider account is invalid");
     if (command.scope !== undefined && (typeof command.scope !== "string" || command.scope.length < 1 || command.scope.length > 512)) throw invalid("Connection scope is invalid");
-    assertCredentialReference(command.credentialRef); validateConnectionPolicy(command.policy); return;
+    assertCredentialReference(command.credentialRef); validateConnectionPolicy(command.policy);
+    if (command.configuration !== undefined) validateMcpConnectionConfiguration(command.configuration);
+    return;
   }
   if (command.kind === "setup.cancel") { assertConnectionId(command.operationId, "setup operation id"); assertConnectionId(command.instanceId); return; }
   assertConnectionId(command.instanceId); if (command.kind === "policy.update") validateConnectionPolicy(command.policy);
@@ -177,7 +180,7 @@ export class ConnectionOwner {
 
   private snapshotOf(state: ConnectionOwnerState): ConnectionOwnerSnapshot {
     const instances: ConnectionInstanceProjection[] = Object.values(state.instances).map(instance => {
-      const { credentialRef: _credentialRef, ...projection } = copy(instance);
+      const { credentialRef: _credentialRef, configuration: _configuration, ...projection } = copy(instance);
       return { ...projection, credentialConfigured: true };
     });
     const capabilities: ConnectionCapabilityStatus[] = [];
@@ -209,7 +212,11 @@ export class ConnectionOwner {
       const definition = this.definitions.find(item => item.id === operation.definitionId); if (!definition) throw unsupported("Integration definition is unavailable");
       if (definition.implementation === "knowledge-connector" && !command.credentialRef.startsWith(`connector:${definition.id.slice("knowledge.".length)}:`)) throw invalid("Credential reference does not belong to this integration");
       const existing = state.instances[command.instanceId]; if (existing && existing.health !== "disconnected") throw conflict("Connection instance already exists");
-      const instance: ConnectionInstance = { id: command.instanceId, definitionId: definition.id, implementation: definition.implementation, providerAccountId: command.providerAccountId, ...(command.scope ? { scope: command.scope } : {}), credentialRef: command.credentialRef, policy: copy(command.policy), health: command.policy.enabled ? "ready" : "disabled", createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp, setupRevision: (existing?.setupRevision ?? 0) + 1 };
+      if (definition.implementation === "mcp" && command.configuration === undefined) throw invalid("MCP setup requires transport configuration");
+      if (definition.implementation === "mcp" && operation.method === "endpoint" && command.configuration?.transport !== "http") throw invalid("Endpoint setup requires HTTP MCP configuration");
+      if (definition.implementation === "mcp" && operation.method === "local-command" && command.configuration?.transport !== "stdio") throw invalid("Local command setup requires stdio MCP configuration");
+      if (definition.implementation !== "mcp" && command.configuration !== undefined) throw invalid("Only MCP connections accept transport configuration");
+      const instance: ConnectionInstance = { id: command.instanceId, definitionId: definition.id, implementation: definition.implementation, providerAccountId: command.providerAccountId, ...(command.scope ? { scope: command.scope } : {}), credentialRef: command.credentialRef, ...(command.configuration ? { configuration: copy(command.configuration) } : {}), policy: copy(command.policy), health: command.policy.enabled ? "ready" : "disabled", createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp, setupRevision: (existing?.setupRevision ?? 0) + 1 };
       state.instances[instance.id] = instance; operation.status = "completed"; operation.updatedAt = timestamp;
       return resultForInstance(instance);
     }

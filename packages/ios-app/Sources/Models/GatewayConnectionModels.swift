@@ -268,6 +268,7 @@ enum AdministrativeDrainBlockerCategory: String, Codable, Hashable, Sendable, Ca
     case administrativeProviderPackageOperation = "administrative-provider-package-operation"
     case automationDispatch = "automation-dispatch"
     case automationTerminalPersistence = "automation-terminal-persistence"
+    case mcpToolCall = "mcp-tool-call"
 }
 
 struct AdministrativeDrainSnapshot: Codable, Hashable, Sendable {

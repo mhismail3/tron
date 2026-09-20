@@ -1869,8 +1869,13 @@ transport only places JSON in `PI_SUBAGENT_EXTENSION_BINDINGS`; it does not load
 an extension or append that value to the child's prompt. Its public request
 schema has no per-call `extensions`/`subagentOnlyExtensions` override. The
 `subagents.defaultExtensions` setting configures `extensions` only, and
-`runtimeSnapshotHost` snapshots runtime MCP servers only. Tron therefore does
-not mutate Pi settings, agent definitions, or workflow scripts to force-load
+`runtimeSnapshotHost` snapshots runtime MCP servers only. Tron’s Mac-owned MCP
+adapter is separate from that snapshot feature: it uses the pinned official
+MCP SDK, admits bounded tools from explicit ConnectionOwner instances, and
+keeps resources, prompts, OAuth refresh, elicitation, tasks, and Apps
+unsupported. See `docs/mcp.md` for endpoint, stdio, credential, and unknown
+outcome boundaries. Tron therefore does not mutate Pi settings, agent
+definitions, or workflow scripts to force-load
 `tron-core`, and must not claim automatic identity/workspace propagation to an
 arbitrary child. A public mutable `tool_call` hook prefixes direct model-facing
 `subagent` task/resume text with a bounded (2 KiB UTF-8) advisory handoff, preserving

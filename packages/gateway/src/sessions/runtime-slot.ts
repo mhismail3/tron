@@ -127,6 +127,7 @@ import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import type { JevDecisionClient } from "../knowledge/jev-client.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
+import type { McpAdapter } from "../integrations/mcp-adapter.js";
 import { projectHookRegistrations } from "./hook-projection.js";
 
 // A lifecycle header is trusted only after RuntimeSlot has parsed and schema-
@@ -343,6 +344,7 @@ export interface RuntimeSlotDependencies {
   knowledge?: KnowledgeService;
   jev?: JevDecisionClient;
   connections?: ConnectionOwner;
+  mcp?: McpAdapter;
   workspace: TronWorkspace;
   markers: RunMarkerStore;
   extensionActivityRecency: ExtensionActivityRecency;
@@ -1303,12 +1305,16 @@ export class RuntimeSlot {
         resolveProjectTrust: async () => (await this.dependencies.trust.inspect(trust.cwd)).effectiveDecision === true,
       };
       const notifications = this.dependencies.notifications;
+      const mcpFactories = this.dependencies.mcp
+        ? await this.dependencies.mcp.extensionFactories(this.id, this.runtimeGeneration)
+        : [];
       const services = await createAgentSessionServices({
         cwd: trust.cwd,
         agentDir: this.dependencies.agentDir,
         modelRuntime,
         resourceLoaderOptions: {
           extensionFactories: [
+            ...mcpFactories.map((factory, index) => ({ name: `tron-mcp-${index}`, factory })),
             { name: "tron-context-window", factory: contextWindowExtension(() => contextPolicy) },
             { name: "tron-compaction-policy", factory: compactionPolicyExtension(
               () => compactionPolicy,

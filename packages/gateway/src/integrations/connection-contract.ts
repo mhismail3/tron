@@ -39,6 +39,16 @@ export interface ConnectionPolicy {
 
 /** Generic account envelope only. Provider checkpoints, evidence, cohorts and
  * remote-effect receipts remain with the provider/Knowledge adapter. */
+export interface McpConnectionConfiguration {
+  transport: "http" | "stdio";
+  endpoint?: string;
+  command?: string;
+  args?: string[];
+  cwd?: string;
+  /** Environment names/values explicitly supplied for the trusted stdio child. */
+  env?: Record<string, string>;
+}
+
 export interface ConnectionInstance {
   id: string;
   definitionId: string;
@@ -46,6 +56,7 @@ export interface ConnectionInstance {
   providerAccountId: string;
   scope?: string;
   credentialRef: string;
+  configuration?: McpConnectionConfiguration;
   policy: ConnectionPolicy;
   health: ConnectionHealth;
   createdAt: string;
@@ -54,7 +65,7 @@ export interface ConnectionInstance {
   lastError?: string;
 }
 
-export type ConnectionInstanceProjection = Omit<ConnectionInstance, "credentialRef"> & { credentialConfigured: boolean };
+export type ConnectionInstanceProjection = Omit<ConnectionInstance, "credentialRef" | "configuration"> & { credentialConfigured: boolean };
 
 export interface ConnectionCapabilityStatus {
   id: string;
@@ -90,7 +101,7 @@ export interface ConnectionSetupOperation {
 
 export type ConnectionCommand =
   | { kind: "setup.begin"; commandId: string; instanceId: string; definitionId: string; method: ConnectionSetupMethod }
-  | { kind: "setup.complete"; commandId: string; operationId: string; instanceId: string; providerAccountId: string; scope?: string; credentialRef: string; policy: ConnectionPolicy }
+  | { kind: "setup.complete"; commandId: string; operationId: string; instanceId: string; providerAccountId: string; scope?: string; credentialRef: string; policy: ConnectionPolicy; configuration?: McpConnectionConfiguration }
   | { kind: "setup.cancel"; commandId: string; operationId: string; instanceId: string }
   | { kind: "policy.update"; commandId: string; instanceId: string; policy: ConnectionPolicy }
   | { kind: "disconnect"; commandId: string; instanceId: string };
@@ -178,10 +189,37 @@ export function validateConnectionInstance(value: unknown): asserts value is Con
   if (!["knowledge-connector", "mcp"].includes(item.implementation as string)) throw new Error("Connection implementation is invalid");
   bounded(item.providerAccountId, "Provider account", 256); if (item.scope !== undefined) bounded(item.scope, "Connection scope", 512);
   assertCredentialReference(item.credentialRef); validateConnectionPolicy(item.policy);
+  if (item.configuration !== undefined) {
+    if (item.implementation !== "mcp") throw new Error("Only MCP instances may contain transport configuration");
+    validateMcpConnectionConfiguration(item.configuration);
+  }
   if (!["unconfigured", "setup-required", "ready", "disabled", "auth-error", "error", "disconnected"].includes(item.health as string)) throw new Error("Connection health is invalid");
   for (const key of ["createdAt", "updatedAt"] as const) bounded(item[key], `Connection ${key}`, 64);
   if (!Number.isSafeInteger(item.setupRevision) || (item.setupRevision as number) < 0) throw new Error("Connection setup revision is invalid");
   if (item.lastError !== undefined) bounded(item.lastError, "Connection error", 4_096);
+}
+
+export function validateMcpConnectionConfiguration(value: unknown): asserts value is McpConnectionConfiguration {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("MCP connection configuration is invalid");
+  const config = value as Record<string, unknown>;
+  if (config.transport !== "http" && config.transport !== "stdio") throw new Error("MCP transport is invalid");
+  if (config.transport === "http") {
+    bounded(config.endpoint, "MCP endpoint", 2_048);
+    try { const url = new URL(config.endpoint as string); if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.hash) throw new Error("MCP endpoint is invalid"); }
+    catch (error) { throw new Error(error instanceof Error && error.message === "MCP endpoint is invalid" ? error.message : "MCP endpoint is invalid"); }
+    if (config.command !== undefined || config.args !== undefined || config.cwd !== undefined || config.env !== undefined) throw new Error("HTTP MCP configuration contains stdio fields");
+    return;
+  }
+  bounded(config.command, "MCP executable", 1_024);
+  if (config.endpoint !== undefined) throw new Error("stdio MCP configuration contains an endpoint");
+  if (config.args !== undefined && (!Array.isArray(config.args) || config.args.length > 64 || config.args.some(arg => typeof arg !== "string" || arg.length > 2_048 || /[\u0000-\u001f\u007f]/.test(arg)))) throw new Error("MCP arguments are invalid");
+  if (config.cwd !== undefined) bounded(config.cwd, "MCP working directory", 2_048);
+  if (config.env !== undefined) {
+    if (!config.env || typeof config.env !== "object" || Array.isArray(config.env) || Object.keys(config.env).length > 32) throw new Error("MCP environment is invalid");
+    for (const [key, value] of Object.entries(config.env)) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(key) || typeof value !== "string" || value.length > 8_192 || /[\u0000-\u001f\u007f]/.test(value)) throw new Error("MCP environment is invalid");
+    }
+  }
 }
 
 export function validateConnectionState(value: unknown): asserts value is ConnectionOwnerState {

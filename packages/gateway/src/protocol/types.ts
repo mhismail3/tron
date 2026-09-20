@@ -33,7 +33,8 @@ export type AdministrativeDrainBlockerCategory =
   | "administrative-provider-package-operation"
   | "automation-dispatch"
   | "automation-terminal-persistence"
-  | "knowledge-observation";
+  | "knowledge-observation"
+  | "mcp-tool-call";
 
 export interface AdministrativeDrainBlockerSummary {
   /** Per-drain opaque identity. It is not a session, run, path, or token ID. */

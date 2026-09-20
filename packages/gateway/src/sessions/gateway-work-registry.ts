@@ -14,6 +14,7 @@ export const gatewayWorkKinds = [
   "automation-dispatch",
   "automation-terminal-persistence",
   "knowledge-observation",
+  "mcp-tool-call",
 ] as const;
 
 export type GatewayWorkKind = typeof gatewayWorkKinds[number];
