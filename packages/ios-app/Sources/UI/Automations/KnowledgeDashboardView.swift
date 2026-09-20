@@ -1,5 +1,21 @@
 import SwiftUI
 
+enum KnowledgeDashboardSection: String, CaseIterable, Identifiable {
+    case chronicle
+    case sources
+    case syntheses
+    case intakeArchive
+
+    var id: String { rawValue }
+    var title: String {
+        switch self { case .chronicle: "Chronicle"; case .sources: "Sources"; case .syntheses: "Syntheses"; case .intakeArchive: "Intake & archive" }
+    }
+    var kind: KnowledgeRecordKind? {
+        switch self { case .chronicle: .observation; case .sources, .intakeArchive: .source; case .syntheses: .note }
+    }
+    var includesPendingOrArchived: Bool { self == .intakeArchive }
+}
+
 /// Catalogue pagination is available only for list responses. Search responses
 /// are intentionally bounded to one Gateway result page.
 enum KnowledgeCatalogPaginationPolicy {
@@ -44,6 +60,7 @@ struct KnowledgeDashboardView: View {
     let onOpenDraft: @MainActor (KnowledgeRecord) -> Void
     let onOpenSession: @MainActor (String, String) -> Void
     @State private var records: [KnowledgeRecord] = []
+    @State private var section: KnowledgeDashboardSection = .chronicle
     @State private var selected: KnowledgeRecord?
     @State private var selectedIdentity: KnowledgePresentationIdentity?
     @State private var pendingDetailAction: DetailAction?
@@ -71,9 +88,23 @@ struct KnowledgeDashboardView: View {
     @State private var showingSearch = false
     @State private var dashboardHeader = DashboardHeaderState()
 
+    private var requestKind: KnowledgeRecordKind? { kind ?? section.kind }
+
     private var filterSummary: String {
-        let summary = [kind?.label, scope?.label].compactMap { $0 }.joined(separator: " · ")
+        let summary = [section.title, scope?.label].compactMap { $0 }.joined(separator: " · ")
         return summary.isEmpty ? "All knowledge" : summary
+    }
+
+    private var librarySections: [KnowledgeDashboardSection] { [.chronicle, .sources, .syntheses] }
+
+    private func isVisibleInSection(_ record: KnowledgeRecord, section: KnowledgeDashboardSection) -> Bool {
+        switch section {
+        case .syntheses:
+            guard case .note(let note) = record.content else { return false }
+            return note.role == .synthesis
+        case .intakeArchive: return KnowledgeSourcePresentationPolicy.isIntakeOrArchive(record)
+        case .chronicle, .sources: return true
+        }
     }
 
     var body: some View {
@@ -87,8 +118,9 @@ struct KnowledgeDashboardView: View {
             GeometryReader { geometry in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: KnowledgeDashboardLayout.recordSpacing) {
+                        libraryPicker
                         if let status { coverageOverview(status) }
-                        dashboardContent(minimumHeight: max(280, geometry.size.height - (status == nil ? 0 : KnowledgeDashboardLayout.coverageSectionReservedHeight) - 100))
+                        dashboardContent(minimumHeight: max(280, geometry.size.height - (status == nil ? 0 : KnowledgeDashboardLayout.coverageSectionReservedHeight) - 150))
                     }
                     .padding(.horizontal, 20)
                     .padding(.vertical, 16)
@@ -115,6 +147,13 @@ struct KnowledgeDashboardView: View {
                                  onOpenSession: { stageDetailAction(.session($0, $1)) })
                 .environment(model)
         }
+        .onChange(of: section) { _, value in
+            invalidateCatalogueRequests()
+            if value != .intakeArchive { kind = nil }
+        }
+        .onChange(of: kind) { _, _ in invalidateCatalogueRequests() }
+        .onChange(of: scope) { _, _ in invalidateCatalogueRequests() }
+        .onChange(of: search) { _, _ in invalidateCatalogueRequests() }
         .onChange(of: model.knowledgePresentationIdentity) { _, _ in
             // Retire both the visible page and any manually spawned page task;
             // the next task must carry the new Gateway identity from its start.
@@ -146,7 +185,7 @@ struct KnowledgeDashboardView: View {
         .tronManagedSheet(isPresented: $noteSheet, identity: "knowledge.note") {
             KnowledgeNoteCreateView { noteSheet = false; await reload() }.environment(model)
         }
-        .task(id: "\(kind?.rawValue ?? "all")/\(scope?.rawValue ?? "all")/\(search)/\(activity.allowsPresentationPublication)/\(model.knowledgePresentationIdentity.profileID ?? "none")/\(model.knowledgePresentationIdentity.lifecycleGeneration ?? -1)/\(model.knowledgePresentationIdentity.connectionID ?? -1)/\(model.knowledgeInvalidationRevision)") {
+        .task(id: "\(section.rawValue)/\(kind?.rawValue ?? "all")/\(scope?.rawValue ?? "all")/\(search)/\(activity.allowsPresentationPublication)/\(model.knowledgePresentationIdentity.profileID ?? "none")/\(model.knowledgePresentationIdentity.lifecycleGeneration ?? -1)/\(model.knowledgePresentationIdentity.connectionID ?? -1)/\(model.knowledgeInvalidationRevision)") {
             guard activity.allowsPresentationPublication else { return }
             await reload()
         }
@@ -178,6 +217,33 @@ struct KnowledgeDashboardView: View {
         showingSearch = false
     }
 
+    private var libraryPicker: some View {
+        VStack(alignment: .leading, spacing: TronSpacing.sm) {
+            Picker("Knowledge library", selection: $section) {
+                ForEach(librarySections) { value in Text(value.title).tag(value) }
+            }
+            .pickerStyle(.segmented)
+            .tint(Color.tronKnowledge)
+            .accessibilityLabel("Knowledge library")
+            if section == .syntheses {
+                TronSettingsCaption("Syntheses are stored as notes. This view filters the current note page because the Gateway has no synthesis-list operation.")
+            }
+            Button {
+                kind = nil
+                section = section == .intakeArchive ? .chronicle : .intakeArchive
+            } label: {
+                HStack {
+                    Label("Intake & archive", systemImage: "archivebox")
+                    Spacer()
+                    if section == .intakeArchive { Image(systemName: "checkmark").accessibilityHidden(true) }
+                }
+            }
+            .buttonStyle(TronRowButtonStyle(accent: .tronKnowledge))
+            .accessibilityHint("Shows pending and archived sources separately from retained library content")
+        }
+        .padding(.top, TronSpacing.sm)
+    }
+
     @ViewBuilder
     private func dashboardContent(minimumHeight: CGFloat) -> some View {
         if loading && records.isEmpty {
@@ -189,7 +255,7 @@ struct KnowledgeDashboardView: View {
                                  actionTitle: "Retry", action: { Task { await reload() } })
                 .frame(minHeight: minimumHeight)
         } else if records.isEmpty {
-            let filtered = kind != nil || scope != nil || !search.isEmpty
+            let filtered = kind != nil || scope != nil || !search.isEmpty || section != .chronicle
             TronPlaceholderState(title: filtered ? "No matching Knowledge" : "No Knowledge yet",
                                  detail: filtered ? "Adjust your search or filters to see more records." : "Observations, links, and notes retained by this Gateway will appear here.",
                                  icon: filtered ? "line.3.horizontal.decrease.circle" : "book.closed", accent: .tronKnowledge)
@@ -221,11 +287,14 @@ struct KnowledgeDashboardView: View {
                                  detents: [.medium, .large], onDone: { showingFilters = false }) {
             TronDashboardFilterSectionTitle(title: "Type", detail: "Choose which retained records to browse.")
             TronDashboardFilterOption(title: "All types", selected: kind == nil, accent: .tronKnowledge,
-                                      inactiveAccent: .tronSlate) { kind = nil }
+                                      inactiveAccent: .tronSlate) { kind = nil; section = .chronicle }
             ForEach(KnowledgeRecordKind.allCases, id: \.self) { value in
                 TronDashboardFilterOption(title: value.label,
                                           selected: kind == value, accent: .tronKnowledge,
-                                          inactiveAccent: .tronSlate) { kind = value }
+                                          inactiveAccent: .tronSlate) {
+                    kind = value
+                    section = value == .observation ? .chronicle : (value == .source ? .sources : .syntheses)
+                }
             }
             TronDashboardFilterSectionTitle(title: "Scope", detail: "Narrow results without losing the current type selection.")
             TronDashboardFilterOption(title: "All scopes", selected: scope == nil, accent: .tronKnowledge,
@@ -305,18 +374,34 @@ struct KnowledgeDashboardView: View {
         }
     }
 
+    private func invalidateCatalogueRequests() {
+        loadGeneration &+= 1
+        loadingMore = false
+        nextCursor = nil
+    }
+
     private func reload() async {
         loadGeneration += 1; let generation = loadGeneration; let identity = model.knowledgePresentationIdentity
+        let requestedSection = section
+        let requestedKind = requestKind
+        let requestedScope = scope
+        let requestedSearch = search
         guard activity.allowsPresentationPublication, identity.profileID != nil, identity.lifecycleGeneration != nil else { return }
         loading = true; error = nil
         defer { if generation == loadGeneration { loading = false } }
         do {
             async let loadedStatus = model.knowledge.status()
-            let response: KnowledgeListResponse
-            if search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { response = try await model.knowledge.list(kind: kind, scope: scope, limit: 50) }
-            else { let found = try await model.knowledge.search(query: search, kind: kind, scope: scope, limit: 50); response = KnowledgeListResponse(records: found.hits.map { $0.record }, nextCursor: nil, stateRevision: found.stateRevision) }
+            var response: KnowledgeListResponse
+            if requestedSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                response = try await model.knowledge.list(kind: requestedKind, scope: requestedScope, includeArchived: requestedSection.includesPendingOrArchived, includePending: requestedSection.includesPendingOrArchived, limit: 50)
+            } else {
+                let found = try await model.knowledge.search(query: requestedSearch, kind: requestedKind, scope: requestedScope, includeArchived: requestedSection.includesPendingOrArchived, includePending: requestedSection.includesPendingOrArchived, limit: 50)
+                response = KnowledgeListResponse(records: found.hits.map { $0.record }, nextCursor: nil, stateRevision: found.stateRevision)
+            }
+            response = KnowledgeListResponse(records: response.records.filter { isVisibleInSection($0, section: requestedSection) }, nextCursor: response.nextCursor, stateRevision: response.stateRevision)
             let currentStatus = try await loadedStatus
-            guard generation == loadGeneration, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
+            guard generation == loadGeneration, requestedSection == section, requestedKind == requestKind, requestedScope == scope, requestedSearch == search,
+                  activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
             records = response.records; nextCursor = response.nextCursor; status = currentStatus
             // A Gateway that cannot filter coverage by disposition must not be
             // asked for a page whose settled rows this container never lists.
@@ -327,8 +412,9 @@ struct KnowledgeDashboardView: View {
             } else {
                 coverageStore.reset()
             }
-            guard generation == loadGeneration, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
-        } catch is CancellationError { return } catch { guard generation == loadGeneration, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }; self.error = error.localizedDescription }
+            guard generation == loadGeneration, requestedSection == section, requestedKind == requestKind, requestedScope == scope, requestedSearch == search,
+                  activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
+        } catch is CancellationError { return } catch { guard generation == loadGeneration, requestedSection == section, requestedKind == requestKind, requestedScope == scope, requestedSearch == search, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }; self.error = error.localizedDescription }
     }
     private func loadMore() {
         guard KnowledgeCatalogPaginationPolicy.admits(cursor: nextCursor, search: search, loadingMore: loadingMore), let cursor = nextCursor else { return }
@@ -337,19 +423,21 @@ struct KnowledgeDashboardView: View {
         let query = search
         let requestedKind = kind
         let requestedScope = scope
+        let requestedSection = section
         let identity = model.knowledgePresentationIdentity
         Task { @MainActor in
             defer { if generation == loadGeneration { loadingMore = false } }
-            guard generation == loadGeneration, query == search, requestedKind == kind, requestedScope == scope,
+            guard generation == loadGeneration, query == search, requestedKind == kind, requestedScope == scope, requestedSection == section,
                   activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
             do {
-                let page = try await model.knowledge.list(kind: requestedKind, scope: requestedScope, cursor: cursor, limit: 50)
-                guard generation == loadGeneration, query == search, requestedKind == kind, requestedScope == scope,
+                let page = try await model.knowledge.list(kind: requestedKind ?? requestedSection.kind, scope: requestedScope, includeArchived: requestedSection.includesPendingOrArchived, includePending: requestedSection.includesPendingOrArchived, cursor: cursor, limit: 50)
+                let visiblePage = KnowledgeListResponse(records: page.records.filter { isVisibleInSection($0, section: requestedSection) }, nextCursor: page.nextCursor, stateRevision: page.stateRevision)
+                guard generation == loadGeneration, query == search, requestedKind == kind, requestedScope == scope, requestedSection == section,
                       activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity,
-                      page.records.allSatisfy({ !records.contains($0) }) else { return }
-                records.append(contentsOf: page.records); nextCursor = page.nextCursor
+                      visiblePage.records.allSatisfy({ !records.contains($0) }) else { return }
+                records.append(contentsOf: visiblePage.records); nextCursor = visiblePage.nextCursor
             } catch is CancellationError { return }
-            catch { guard generation == loadGeneration, query == search, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }; self.error = error.localizedDescription }
+            catch { guard generation == loadGeneration, query == search, requestedKind == kind, requestedScope == scope, requestedSection == section, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }; self.error = error.localizedDescription }
         }
     }
     private func stageDetailAction(_ action: DetailAction) {
@@ -401,6 +489,9 @@ struct KnowledgeRecordRow: View {
             if let observation = KnowledgeObservationPresentation(record: record) {
                 KnowledgeObservationStatement(presentation: observation, preview: true)
                     .accessibilityElement(children: .combine)
+            } else if case .source(let source) = record.content {
+                KnowledgeSourceRow(source: source)
+                    .accessibilityElement(children: .combine)
             } else {
                 otherRecord
             }
@@ -435,6 +526,46 @@ struct KnowledgeRecordRow: View {
                     .foregroundStyle(Color.tronTextMuted)
                     .lineLimit(1)
                     .truncationMode(.middle)
+            }
+            .layoutPriority(1)
+            Spacer(minLength: TronSpacing.md)
+            Image(systemName: "chevron.right")
+                .font(TronTypography.caption)
+                .foregroundStyle(Color.tronKnowledge)
+                .accessibilityHidden(true)
+        }
+    }
+}
+
+struct KnowledgeSourceRow: View {
+    let source: KnowledgeSourceContent
+
+    var body: some View {
+        HStack(alignment: .top, spacing: TronSpacing.lg) {
+            Image(systemName: "link")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(Color.tronKnowledge)
+                .frame(width: TronSettingsLayoutPolicy.iconSize, height: TronSettingsLayoutPolicy.iconSize)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: TronSpacing.xs) {
+                Text(source.title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .lineLimit(2)
+                if let domain = KnowledgeSourcePresentationPolicy.domain(source.uri) {
+                    Text(domain)
+                        .font(TronTypography.secondaryDescription)
+                        .foregroundStyle(Color.tronKnowledgeText)
+                        .lineLimit(1)
+                }
+                Text(KnowledgeSourcePresentationPolicy.coverageTitle(source))
+                    .font(TronTypography.caption)
+                    .foregroundStyle(source.captureDisposition == .complete ? Color.tronTextSecondary : Color.tronAmber)
+                if let admission = KnowledgeSourcePresentationPolicy.admissionLabel(source.admission) {
+                    Text(admission)
+                        .font(TronTypography.caption)
+                        .foregroundStyle(source.admission?.status == .archived ? Color.tronTextMuted : Color.tronAmber)
+                }
             }
             .layoutPriority(1)
             Spacer(minLength: TronSpacing.md)
@@ -649,13 +780,79 @@ struct KnowledgeDetailView: View {
     }
     @ViewBuilder private var sourceLink: some View {
         if case .source(let source) = currentRecord.content {
-            if let uri = source.uri, let url = URL(string: uri) {
-                Link(uri, destination: url)
-                    .font(TronTypography.bodySM)
-                    .foregroundStyle(Color.tronKnowledgeText)
-                    .textSelection(.enabled)
+            TronSettingsGroup("Source coverage", accent: .tronKnowledge) {
+                VStack(alignment: .leading, spacing: TronSpacing.sm) {
+                    Label(KnowledgeSourcePresentationPolicy.coverageTitle(source), systemImage: source.captureDisposition == .complete ? "checkmark.circle" : "exclamationmark.triangle")
+                        .font(TronTypography.bodySM.bold())
+                        .foregroundStyle(source.captureDisposition == .complete ? Color.tronKnowledgeText : Color.tronAmber)
+                    Text(KnowledgeSourcePresentationPolicy.coverageDetail(source))
+                        .font(TronTypography.secondaryDescription)
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let text = source.text, !text.isEmpty {
+                        Text("Captured content")
+                            .font(TronTypography.sheetSectionHeader)
+                            .foregroundStyle(Color.tronKnowledge)
+                        Text(text)
+                            .font(TronTypography.body)
+                            .foregroundStyle(Color.tronTextPrimary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if source.captureDisposition != .complete {
+                        Text("No extracted text is available for this source.")
+                            .font(TronTypography.secondaryDescription)
+                            .foregroundStyle(Color.tronAmber)
+                    }
+                }
+                .padding(14)
             }
-            if let object = source.object { objectReader(object, label: "retained source") }
+            if let uri = source.uri, let url = KnowledgeSourcePresentationPolicy.safeURL(uri) {
+                Link(destination: url) {
+                    Label("Open original link · \(url.host ?? url.absoluteString)", systemImage: "safari")
+                }
+                .font(TronTypography.bodySM)
+                .foregroundStyle(Color.tronKnowledgeText)
+                .accessibilityHint("Opens the original HTTP or HTTPS source")
+            } else if source.uri != nil {
+                Text("Original link unavailable: only safe HTTP(S) links can be opened.")
+                    .font(TronTypography.secondaryDescription)
+                    .foregroundStyle(Color.tronAmber)
+            }
+            if let origin = source.origins?.last ?? source.origin.flatMap({ value in KnowledgeSourceOriginKind(rawValue: value).map { KnowledgeSourceOrigin(kind: $0, capturedAt: source.capturedAt, annotation: nil, uri: source.uri, identity: source.identity) } }) {
+                Text("Origin: \(origin.kind.rawValue.capitalized) · captured \(origin.capturedAt)")
+                    .font(TronTypography.secondaryCodeDescription)
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .textSelection(.enabled)
+                if let annotation = origin.annotation {
+                    Text("Provenance note: \(annotation)")
+                        .font(TronTypography.secondaryDescription)
+                        .foregroundStyle(Color.tronTextSecondary)
+                }
+            }
+            if let admission = source.admission {
+                TronSettingsGroup("Admission", accent: .tronKnowledge) {
+                    VStack(alignment: .leading, spacing: TronSpacing.sm) {
+                        Text(KnowledgeSourcePresentationPolicy.admissionLabel(admission) ?? admission.status.rawValue.capitalized)
+                            .font(TronTypography.bodySM.bold())
+                            .foregroundStyle(admission.status == .retained ? Color.tronKnowledgeText : Color.tronAmber)
+                        if let reason = admission.reason {
+                            Text("Reason: \(reason)")
+                                .font(TronTypography.secondaryDescription)
+                                .foregroundStyle(Color.tronTextSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Text("Decided \(admission.decidedAt)")
+                            .font(TronTypography.secondaryCodeDescription)
+                            .foregroundStyle(Color.tronTextMuted)
+                    }
+                    .padding(14)
+                }
+            }
+            if source.admission?.status == .pending {
+                TronSettingsNotice(message: "Pending intake content is not readable until the Gateway admits it; the retained reference remains available.", accent: .tronAmber)
+            } else if let object = source.object {
+                objectReader(object, label: "retained source")
+            }
             if let retention = source.retention {
                 Text("Retention: \(retention.sensitivity) · evidence \(retention.evidenceAvailable ? "available" : "unavailable")")
                     .font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
@@ -663,8 +860,12 @@ struct KnowledgeDetailView: View {
             if let representations = source.representations, !representations.isEmpty {
                 TronSettingsGroup("Retained representations", accent: .tronKnowledge) {
                     VStack(alignment: .leading, spacing: 12) {
-                        ForEach(Array(representations.enumerated()), id: \.offset) { _, representation in
-                            objectReader(representation.object, label: representation.kind == .providerAPI ? "provider API" : "linked article")
+                        if source.admission?.status == .pending {
+                            TronSettingsNotice(message: "Pending intake representations are not readable until admission.", accent: .tronAmber)
+                        } else {
+                            ForEach(Array(representations.enumerated()), id: \.offset) { _, representation in
+                                objectReader(representation.object, label: representation.kind == .providerAPI ? "provider API" : "linked article")
+                            }
                         }
                     }
                     .padding(14)
@@ -686,8 +887,25 @@ struct KnowledgeDetailView: View {
                     VStack(alignment: .leading, spacing: TronSpacing.sm) {
                         Text(assessment.summary).font(TronTypography.body).foregroundStyle(Color.tronTextPrimary).fixedSize(horizontal: false, vertical: true)
                         if let contribution = assessment.contribution { Text("Contribution: \(contribution)").font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary) }
+                        if let why = assessment.whyItMatters { Text("Why it matters: \(why)").font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary) }
                         if let use = assessment.possibleUse { Text("Possible use: \(use)").font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary) }
                         Text("Evidence \(assessment.evidenceQuality.rawValue) · Freshness \(assessment.freshness.rawValue)").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
+                        if assessment.recommendation != nil || assessment.confidence != nil || assessment.coverage != nil || assessment.classification != nil || assessment.model != nil || assessment.profileVersion != nil || assessment.rubricVersion != nil || assessment.usage != nil {
+                            VStack(alignment: .leading, spacing: TronSpacing.xs) {
+                                Text("Assessment metadata").font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronKnowledge)
+                                if let recommendation = assessment.recommendation { Text("Recommendation: \(recommendation.rawValue)") }
+                                if let confidence = assessment.confidence { Text("Assessment confidence (not capture coverage): \(confidence)") }
+                                if let coverage = assessment.coverage { Text("Evaluated coverage: \(coverage)") }
+                                if let classification = assessment.classification { Text("Classification: \(classification)") }
+                                if let model = assessment.model { Text("Model: \(model)") }
+                                if let profile = assessment.profileVersion { Text("Profile: \(profile)") }
+                                if let rubric = assessment.rubricVersion { Text("Rubric: \(rubric)") }
+                                if let usage = assessment.usage { Text("Usage: \(usage.inputTokens) input · \(usage.outputTokens) output · \(usage.estimatedCostCents) cents") }
+                            }
+                            .font(TronTypography.caption)
+                            .foregroundStyle(Color.tronTextSecondary)
+                            .textSelection(.enabled)
+                        }
                     }
                     .padding(14)
                 }
@@ -782,10 +1000,14 @@ struct KnowledgeDetailView: View {
         guard admitsOrigin else { evidenceMessage = "Gateway changed; reopen this entry."; return }
         let key = KnowledgeObjectSelectionKey(recordID: currentRecord.id, revisionID: currentRecord.revisionId, reference: reference)
         let requestIdentity = origin
+        let includeArchived: Bool = {
+            guard case .source(let source) = currentRecord.content else { return false }
+            return source.admission?.status == .archived
+        }()
         Task { @MainActor in
             await objectReaders.load(key, offset: offset,
                 request: { reference, offset in
-                    try await model.knowledge.readObject(reference, recordID: currentRecord.id, revisionID: currentRecord.revisionId, offset: offset)
+                    try await model.knowledge.readObject(reference, recordID: currentRecord.id, revisionID: currentRecord.revisionId, includeArchived: includeArchived, offset: offset)
                 },
                 isCurrent: { model.knowledgePresentationIdentity == requestIdentity && activity.allowsPresentationPublication })
         }

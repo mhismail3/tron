@@ -153,7 +153,13 @@ final class KnowledgeModelsTests: XCTestCase {
         let page = try await client.list(limit: 100)
         XCTAssertEqual(page.nextCursor, "page-2")
         XCTAssertEqual(requests.first?.0, "knowledge.list")
+        _ = try await client.list(kind: .source, includeArchived: true, includePending: true, limit: 50)
+        XCTAssertEqual(requests.last?.1.objectValue?["includeArchived"], .bool(true))
+        XCTAssertEqual(requests.last?.1.objectValue?["includePending"], .bool(true))
         let object = KnowledgeObjectRef(hash: hash, mediaType: "text/plain", bytes: 12)
+        let archivedResult = try await client.readObject(object, recordID: "source-1", revisionID: "revision-1", includeArchived: true, offset: 0)
+        XCTAssertNotNil(archivedResult)
+        XCTAssertEqual(requests.last?.1.objectValue?["includeArchived"], .bool(true))
         let firstResult = try await client.readObject(object, recordID: "source-1", revisionID: "revision-1", offset: 0)
         let first: KnowledgeObjectRead = try XCTUnwrap(firstResult)
         let nextOffset: Int = try XCTUnwrap(first.nextOffset)
@@ -161,9 +167,9 @@ final class KnowledgeModelsTests: XCTestCase {
         let second: KnowledgeObjectRead = try XCTUnwrap(secondResult)
         XCTAssertEqual(Data(base64Encoded: first.base64).flatMap { String(data: $0, encoding: .utf8) }, "first-")
         XCTAssertEqual(Data(base64Encoded: second.base64).flatMap { String(data: $0, encoding: .utf8) }, "second")
-        XCTAssertEqual(requests.compactMap { $0.1.objectValue?["offset"]?.intValue }, [0, 6])
-        XCTAssertEqual(requests.compactMap { $0.1.objectValue?["recordId"]?.stringValue }, ["source-1", "source-1"])
-        XCTAssertEqual(requests.compactMap { $0.1.objectValue?["revisionId"]?.stringValue }, ["revision-1", "revision-1"])
+        XCTAssertEqual(requests.compactMap { $0.1.objectValue?["offset"]?.intValue }, [0, 0, 6])
+        XCTAssertEqual(requests.compactMap { $0.1.objectValue?["recordId"]?.stringValue }, ["source-1", "source-1", "source-1"])
+        XCTAssertEqual(requests.compactMap { $0.1.objectValue?["revisionId"]?.stringValue }, ["revision-1", "revision-1", "revision-1"])
     }
 
     @MainActor
@@ -408,6 +414,14 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertEqual(KnowledgeCoveragePresentationPolicy.title(.unavailable), "Observation unavailable")
     }
 
+    func testKnowledgeLibrarySectionsKeepRetainedSourcesPrimaryAndArchiveOptIn() {
+        XCTAssertEqual(KnowledgeDashboardSection.allCases.map(\.title), ["Chronicle", "Sources", "Syntheses", "Intake & archive"])
+        XCTAssertFalse(KnowledgeDashboardSection.sources.includesPendingOrArchived)
+        XCTAssertFalse(KnowledgeDashboardSection.syntheses.includesPendingOrArchived)
+        XCTAssertTrue(KnowledgeDashboardSection.intakeArchive.includesPendingOrArchived)
+        XCTAssertEqual(KnowledgeDashboardSection.syntheses.kind, .note)
+    }
+
     func testCataloguePaginationAllowsListContinuationButNotSearchPages() {
         XCTAssertTrue(KnowledgeCatalogPaginationPolicy.admits(cursor: "page-2", search: "", loadingMore: false))
         XCTAssertTrue(KnowledgeCatalogPaginationPolicy.admits(cursor: "page-2", search: "  \n", loadingMore: false))
@@ -446,6 +460,36 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertTrue(KnowledgeImportPresentationPolicy.completionMessage(plan: widePlan, result: partial, offset: 0).contains("retry"))
         let resumed = KnowledgeImportResult(operation: "run", source: "personal-os", planHash: "wide-plan", planned: 53, selected: 53, imported: 4, resumed: 49, skipped: 0, failed: 0, completed: true, progress: KnowledgeImportProgress(completed: 53, remaining: 0, total: 53), mappings: [], warnings: [])
         XCTAssertEqual(KnowledgeImportPresentationPolicy.completionMessage(plan: widePlan, result: resumed, offset: 0), "Import complete (4 imported).")
+    }
+
+    func testSourcePresentationSeparatesSafeLinksCoverageAndAdmission() throws {
+        XCTAssertEqual(KnowledgeSourcePresentationPolicy.domain("https://Example.com/path"), "example.com")
+        XCTAssertNil(KnowledgeSourcePresentationPolicy.safeURL("file:///private/fixture"))
+        XCTAssertNil(KnowledgeSourcePresentationPolicy.safeURL("javascript:alert(1)"))
+        XCTAssertNil(KnowledgeSourcePresentationPolicy.safeURL("https://user:password@example.com/article"))
+        let objectOnly = KnowledgeSourceContent(title: "Binary", uri: "https://example.com/file", text: nil, object: KnowledgeObjectRef(hash: String(repeating: "a", count: 64), mediaType: "application/octet-stream", bytes: 2), mediaType: "application/octet-stream", captureDisposition: .complete, annotations: nil, sourcePublishedAt: nil, capturedAt: "2026-01-01T00:00:00Z", origin: "manual", origins: nil, identity: nil, assessment: nil)
+        XCTAssertEqual(KnowledgeSourcePresentationPolicy.coverageTitle(objectOnly), "Captured object retained; extracted text unavailable")
+        let source = KnowledgeSourceContent(title: "Partial source", uri: "https://example.com/article", text: nil, object: nil,
+                                            representations: nil, mediaType: "text/html", captureDisposition: .partial,
+                                            annotations: nil, sourcePublishedAt: nil, capturedAt: "2026-01-01T00:00:00Z", origin: "connector",
+                                            origins: nil, identity: nil, assessment: nil)
+        XCTAssertEqual(KnowledgeSourcePresentationPolicy.coverageTitle(source.captureDisposition), "Partial capture")
+        XCTAssertTrue(KnowledgeSourcePresentationPolicy.coverageDetail(source).contains("Only part"))
+        XCTAssertEqual(KnowledgeSourcePresentationPolicy.coverageSummary(source), "Partial capture · example.com")
+        let pending = KnowledgeSourceAdmissionState(status: .pending, reason: "Needs review", decidedAt: "2026-01-01T00:00:00Z", profileVersion: nil, rubricVersion: nil)
+        XCTAssertEqual(KnowledgeSourcePresentationPolicy.admissionLabel(pending), "Pending intake")
+    }
+
+    func testSourceWireShapeDecodesCaptureReasonAndAssessmentMetadataWithoutInventingConfidence() throws {
+        let data = Data(#"{"schemaVersion":1,"id":"source","revisionId":"r1","kind":"source","scope":"research","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","provenance":{"actor":"connector","evidence":[]},"relations":[],"content":{"title":"Metadata","uri":"https://example.com","captureDisposition":"metadata-only","captureReason":"Provider returned metadata without readable text","capturedAt":"2026-01-01T00:00:00Z","assessment":{"summary":"Bounded review","evidenceQuality":"unknown","freshness":"unknown","generatedAt":"2026-01-01T00:00:00Z","coverage":"sampled","classification":"reference","inputDigest":"digest","usage":{"inputTokens":12,"outputTokens":4,"estimatedCostCents":0,"pricing":"fixture"}}}}"#.utf8)
+        let record = try JSONDecoder().decode(KnowledgeRecord.self, from: data)
+        guard case .source(let source) = record.content else { return XCTFail("Expected source") }
+        XCTAssertEqual(source.captureDisposition, .metadataOnly)
+        XCTAssertEqual(source.captureReason, "Provider returned metadata without readable text")
+        XCTAssertEqual(source.assessment?.coverage, "sampled")
+        XCTAssertEqual(source.assessment?.classification, "reference")
+        XCTAssertEqual(source.assessment?.usage?.inputTokens, 12)
+        XCTAssertNil(source.assessment?.confidence, "Missing confidence must remain missing")
     }
 
     func testSourceAndNoteUseTheCommonDiscriminatedContentShape() throws {
