@@ -59,9 +59,10 @@ accents, accessibility sizing, and search routing.
 
 ## Knowledge dashboard
 
-The dashboard opens on **Chronicle**, the observation timeline. **Library** is split into
-**Sources** and **Syntheses**; notes are treated as syntheses only when their canonical
-role is `synthesis`, never relabeled from their source or manual-note identity. Pending
+The dashboard opens on **Chronicle**, the observation timeline. The top-level **Library**
+area contains **Sources** and **Syntheses** as nested sections; notes are treated as
+syntheses only when their canonical role is `synthesis`, never relabeled from their source
+or manual-note identity. Pending
 intake and archived sources live behind a separate **Intake & archive** control and are
 not mixed into the retained Sources page. Sources show a usable title, safe original
 HTTP(S) domain/link, and compact capture coverage; partial, metadata/media-only,
@@ -72,7 +73,8 @@ any user-approved admission reason. Secondary assessment metadata includes provi
 classification/coverage and version/usage fields without conflating them with capture
 coverage or epistemic confidence. The existing Gateway list contract has no synthesis-role
 filter, so the Syntheses view filters the bounded canonical note page and states that
-limitation rather than inventing a synthesis endpoint.
+limitation rather than inventing a synthesis endpoint. Filtered pages retain their Gateway
+cursor and keep **Load more** available even when a page contributes no visible rows.
 
 Knowledge is styled as its own adaptive identity rather than inheriting the Sessions emerald or
 Automations cyan palette: use `Color.tronKnowledge` for deep violet in light appearance and lavender

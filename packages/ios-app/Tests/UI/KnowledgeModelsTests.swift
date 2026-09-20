@@ -415,11 +415,30 @@ final class KnowledgeModelsTests: XCTestCase {
     }
 
     func testKnowledgeLibrarySectionsKeepRetainedSourcesPrimaryAndArchiveOptIn() {
+        XCTAssertEqual(KnowledgeDashboardArea.allCases.map(\.title), ["Chronicle", "Library"])
         XCTAssertEqual(KnowledgeDashboardSection.allCases.map(\.title), ["Chronicle", "Sources", "Syntheses", "Intake & archive"])
         XCTAssertFalse(KnowledgeDashboardSection.sources.includesPendingOrArchived)
         XCTAssertFalse(KnowledgeDashboardSection.syntheses.includesPendingOrArchived)
         XCTAssertTrue(KnowledgeDashboardSection.intakeArchive.includesPendingOrArchived)
         XCTAssertEqual(KnowledgeDashboardSection.syntheses.kind, .note)
+    }
+
+    func testFilteredPagesKeepLoadMoreReachableAndFindLaterSynthesis() {
+        let manual = Self.syntheticRecord(id: "manual", revision: "r-manual")
+        let synthesis = KnowledgeRecord(schemaVersion: manual.schemaVersion, id: "synthesis", revisionId: "r-synthesis", kind: .note, scope: .research,
+                                        createdAt: manual.createdAt, updatedAt: manual.updatedAt, provenance: manual.provenance, temporal: nil, relations: [],
+                                        content: .note(KnowledgeNoteContent(title: "Synthesis", body: "bounded", fields: nil, role: .synthesis, confirmed: false, contraryEvidence: nil, freshness: .unknown, privacyScope: nil, usageConstraint: nil)))
+        XCTAssertTrue(KnowledgeCatalogPagePolicy.visibleRecords([manual], in: .syntheses).isEmpty)
+        XCTAssertEqual(KnowledgeCatalogPagePolicy.visibleRecords([synthesis], in: .syntheses).map(\.id), ["synthesis"])
+        XCTAssertTrue(KnowledgeCatalogPagePolicy.offersContinuation(nextCursor: "page-2", loadingMore: false), "An empty filtered page must still expose continuation")
+        XCTAssertFalse(KnowledgeCatalogPagePolicy.offersContinuation(nextCursor: nil, loadingMore: false))
+    }
+
+    func testSectionPageFenceRejectsLateResponseAfterLibrarySwitch() {
+        let chronicle = KnowledgeCatalogRequestKey(section: .chronicle, kind: .observation, scope: nil, search: "")
+        let sources = KnowledgeCatalogRequestKey(section: .sources, kind: .source, scope: nil, search: "")
+        XCTAssertFalse(KnowledgeCatalogRequestFence.accepts(chronicle, current: sources))
+        XCTAssertTrue(KnowledgeCatalogRequestFence.accepts(sources, current: sources))
     }
 
     func testCataloguePaginationAllowsListContinuationButNotSearchPages() {
