@@ -32,6 +32,30 @@ describe("model catalog pagination", () => {
     expect(builds).toBe(1);
   });
 
+  it("reacquires an owner lease after a concurrent build is pruned", async () => {
+    const pager = new ModelCatalogPager();
+    const ownerA = {};
+    const ownerB = {};
+    let startedResolve!: () => void;
+    const started = new Promise<void>((resolve) => { startedResolve = resolve; });
+    let releaseBuild!: () => void;
+    const suspended = new Promise<void>((resolve) => { releaseBuild = resolve; });
+    const firstPagePromise = pager.page(ownerA, undefined, 1, async () => {
+      startedResolve();
+      await suspended;
+      return ["a", "b"];
+    });
+    await started;
+    // Owner B causes the empty owner-A map to be pruned while A is still
+    // building. A must publish into a newly reacquired live map.
+    await expect(pager.page(ownerB, undefined, 1, async () => ["b"])).resolves.toMatchObject({ items: ["b"] });
+    releaseBuild();
+    const first = await firstPagePromise;
+    expect(first.nextCursor).toBeDefined();
+    await expect(pager.page(ownerA, first.nextCursor, 1, async () => ["must-not-build"]))
+      .resolves.toMatchObject({ items: ["b"] });
+  });
+
   it("runtime pager globally evicts the least-recent traversal", async () => {
     const pager = new ModelCatalogPager();
     const traversals: Array<{ owner: object; cursor: string }> = [];

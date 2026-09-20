@@ -450,6 +450,31 @@ describe("NotificationGrantStore and NotificationService", () => {
     expect(relay.sent).toEqual([]);
   });
 
+  it("rechecks ask policy inside admission when it changes after the early read", async () => {
+    const { service, store, relay } = await fixture();
+    await service.upsertGrant({ ...grant, notifyWhenAskPresented: true });
+    const readCanonical = store.snapshot.bind(store);
+    const updateCanonical = store.update.bind(store);
+    const snapshot = vi.spyOn(store, "snapshot").mockImplementation(async () => {
+      const current = await readCanonical();
+      // Model a concurrent policy mutation after the early read but before the
+      // notification admission transaction.
+      await updateCanonical((document) => {
+        document.policy.notifyWhenAskPresented = false;
+        return document;
+      });
+      return current;
+    });
+
+    await service.userInputRequired({
+      sessionId: "session-race", interactionId: "interaction-race", observed: false,
+    });
+    expect(snapshot).toHaveBeenCalledOnce();
+    expect(relay.sent).toEqual([]);
+    expect((await readCanonical()).pending).toEqual([]);
+    expect((await service.inbox()).notifications).toEqual([]);
+  });
+
   it("does not notify for semantic input when its typed persistent policy is disabled", async () => {
     const { service, relay } = await fixture();
     await service.upsertGrant({ ...grant, notifyWhenAskPresented: false });

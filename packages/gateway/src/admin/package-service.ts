@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { access } from "node:fs/promises";
+import { isAbsolute, resolve } from "node:path";
 import {
   DefaultPackageManager,
   SettingsManager,
   type ResolvedPaths,
 } from "@earendil-works/pi-coding-agent";
-import { GatewayError } from "../errors.js";
+import { GatewayError, asUncertainOutcome } from "../errors.js";
 import type { JsonValue } from "../protocol/types.js";
 import type { TrustService } from "./trust-service.js";
 import { AsyncMutex } from "../util/async-mutex.js";
@@ -124,6 +126,26 @@ export class PackageService {
     }
   }
 
+  private async validateInstallSource(source: string, cwd: string): Promise<void> {
+    const trimmed = source.trim();
+    if (!trimmed) throw new GatewayError("invalid_request", "Package source is required");
+    // Preflight only unambiguous filesystem spellings. Pi owns source parsing,
+    // including tilde paths, file URLs and Git shorthand; do not reinterpret
+    // those inputs with a second resolver. Any SDK-admitted failure is fenced.
+    if (isAbsolute(source) || source.startsWith("./") || source.startsWith("../")) {
+      try { await access(resolve(cwd, source)); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT" || (error as NodeJS.ErrnoException).code === "ENOTDIR") {
+          throw new GatewayError("not_found", "Package source path does not exist");
+        }
+        throw error;
+      }
+    }
+    if (trimmed.startsWith("npm:") && trimmed.slice("npm:".length).trim() === "") {
+      throw new GatewayError("invalid_request", "Package source is required");
+    }
+  }
+
   private async trackAdministrative<T>(operation: (work: GatewayWorkHandle | undefined) => Promise<T>): Promise<T> {
     const work = this.workRegistry?.begin({
       kind: "administrative-provider-package-operation",
@@ -159,6 +181,11 @@ export class PackageService {
     return this.trackAdministrative((work) => this.mutex.run(async () => {
       const operationId = randomUUID();
       let manager: DefaultPackageManager | undefined;
+      // Set at mutation admission, before invoking the SDK. The pinned SDK has
+      // no atomicity receipt: install/remove/update can apply an earlier item
+      // and then throw. Once admitted, every failure is therefore fenced as
+      // unknown rather than permitting a replay that duplicates side effects.
+      let mutationAdmitted = false;
       try {
         const managed = await this.manager(cwd, local);
         manager = managed.manager;
@@ -168,13 +195,19 @@ export class PackageService {
         });
         const { settings } = managed;
         if (action === "install") {
-          await manager.installAndPersist(source!, { local });
+          if (source === undefined) throw new GatewayError("invalid_request", "Package source is required");
+          await this.validateInstallSource(source, cwd);
+          mutationAdmitted = true;
+          await manager.installAndPersist(source, { local });
           await this.flushSettings(settings);
         } else if (action === "remove") {
-          await manager.removeAndPersist(source!, { local });
+          if (source === undefined) throw new GatewayError("invalid_request", "Package source is required");
+          mutationAdmitted = true;
+          await manager.removeAndPersist(source, { local });
           await this.flushSettings(settings);
         } else if (source === undefined) {
           // An omitted source retains Pi's existing "update all" command.
+          mutationAdmitted = true;
           await manager.update();
         } else {
           // Pi's public update(source) intentionally updates every matching
@@ -182,16 +215,21 @@ export class PackageService {
           // seam to refresh only that row's user/project installation while
           // leaving its existing settings entry untouched.
           this.ensureConfiguredSource(manager, source, local);
+          mutationAdmitted = true;
           await manager.install(source, { local });
         }
         this.broadcast("packages.completed", { operationId, success: true });
       } catch (error) {
-        this.broadcast("packages.completed", {
-          operationId,
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        throw error;
+        try {
+          this.broadcast("packages.completed", {
+            operationId,
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        } catch { /* An advisory observer cannot erase mutation uncertainty. */ }
+        throw mutationAdmitted
+          ? asUncertainOutcome(error, "The admitted package operation has an unproven outcome; reconcile package state before issuing another command")
+          : error;
       } finally {
         manager?.setProgressCallback(undefined);
       }

@@ -1,7 +1,8 @@
-import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { TrustService } from "./trust-service.js";
 import {
   PackageService,
@@ -67,6 +68,23 @@ describe("PackageService", () => {
     await expect(service.checkUpdates(workspace)).rejects.toMatchObject({ code: "busy" });
   });
 
+  it.each(["tilde", "file-url"])("preserves SDK-supported %s local source resolution", async (kind) => {
+    const root = await mkdtemp(join(tmpdir(), "tron-package-path-"));
+    const workspace = join(root, "workspace"), agentDir = join(root, "agent"), packageDir = join(root, "local-package");
+    await Promise.all([mkdir(workspace), mkdir(agentDir), mkdir(packageDir)]);
+    await writeFile(join(packageDir, "package.json"), JSON.stringify({ name: "fixture", pi: { prompts: [] } }));
+    vi.stubEnv("HOME", root);
+    try {
+      const service = new PackageService(agentDir, new TrustService(agentDir), () => {});
+      const source = kind === "tilde" ? "~/local-package" : pathToFileURL(packageDir).href;
+      await expect(service.mutate("install", source, workspace, false)).resolves.toMatchObject({ operationId: expect.any(String) });
+      expect(JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8")).packages).toHaveLength(1);
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("fails closed on malformed canonical settings before package inspection", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-malformed-packages-"));
     const agentDir = join(root, "agent");
@@ -99,6 +117,62 @@ describe("PackageService", () => {
     const completion = events.find((event) => event.topic === "packages.completed");
     expect(completion?.payload).toMatchObject({ success: false });
     expect(JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8"))).not.toHaveProperty("packages");
+  });
+
+  it("keeps a missing local package preflight retryable", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-package-preflight-"));
+    const agentDir = join(root, "agent");
+    const workspace = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(workspace)]);
+    const service = new PackageService(agentDir, new TrustService(agentDir), () => {});
+
+    await expect(service.mutate("install", join(root, "missing-package"), workspace, false)).rejects.toMatchObject({
+      code: "not_found",
+      details: undefined,
+    });
+  });
+
+  it("fences a package mutation when an SDK install applies an effect before failing", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-package-partial-"));
+    const agentDir = join(root, "agent");
+    const workspace = join(root, "workspace");
+    const marker = join(root, "side-effect.marker");
+    const npm = join(root, "partial-npm.sh");
+    await Promise.all([mkdir(agentDir), mkdir(workspace)]);
+    await writeFile(npm, `#!/bin/sh\nprintf '%s\\n' side-effect >> ${JSON.stringify(marker)}\nexit 17\n`);
+    await chmod(npm, 0o755);
+    await writeFile(join(agentDir, "settings.json"), `${JSON.stringify({ npmCommand: [npm] })}\n`);
+    const service = new PackageService(agentDir, new TrustService(agentDir), () => {});
+
+    await expect(service.mutate("install", "npm:partial-package", workspace, false)).rejects.toMatchObject({
+      code: "conflict",
+      details: { outcomeUnknown: true },
+    });
+    expect((await readFile(marker, "utf8")).trim()).toBe("side-effect");
+  });
+
+  it("reports an unknown outcome when the package applied but its settings could not be persisted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-package-uncertain-"));
+    const agentDir = join(root, "agent");
+    const workspace = join(root, "workspace");
+    const packageDir = join(root, "sample-package");
+    await Promise.all([mkdir(agentDir), mkdir(workspace), mkdir(packageDir)]);
+    await writeFile(join(packageDir, "package.json"), `${JSON.stringify({ name: "sample" })}\n`);
+    const settingsPath = join(agentDir, "settings.json");
+    await writeFile(settingsPath, "{}\n");
+    const service = new PackageService(agentDir, new TrustService(agentDir), () => {});
+    // The local install itself succeeds; only the canonical settings write is
+    // blocked, so the package change has landed without a durable record.
+    await chmod(settingsPath, 0o444);
+    try {
+      await expect(service.mutate("install", packageDir, workspace, false)).rejects.toMatchObject({
+        code: "conflict",
+        details: { outcomeUnknown: true },
+      });
+    } finally {
+      await chmod(settingsPath, 0o644);
+    }
+    expect(JSON.parse(await readFile(settingsPath, "utf8"))).not.toHaveProperty("packages");
   });
 
   it("updates only the requested package scope", async () => {

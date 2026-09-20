@@ -6,6 +6,7 @@ import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { KnowledgeObservationService } from "./knowledge-observation.js";
 import { KnowledgeService, type KnowledgeGenerationModel } from "./knowledge-service.js";
 import { KnowledgeStore } from "./knowledge-store.js";
+import { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -229,6 +230,36 @@ describe("KnowledgeService integration", () => {
     expect(input).toContain("confirmed=false");
     expect(input).toContain("contraryEvidence");
     expect(configured.revision).toBe(1);
+  });
+
+  it("retains provider ownership registered after asynchronous reads until the late assessor settles", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-knowledge-late-retirement-")); roots.push(root);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const config = await store.config();
+    await store.configure("late-retirement-config", { ...config, observation: { ...config.observation, model: "fixture/model" } });
+    const source = await store.captureSource({ commandId: "late-retirement-source", record: {
+      kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [],
+      content: { title: "Source", text: "evidence", captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z" },
+    } });
+    const controller = new AbortController();
+    const entered = deferred<void>();
+    const assessment = deferred<Awaited<ReturnType<KnowledgeGenerationModel["assess"]>>>();
+    const work = new GatewayWorkRegistry();
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => ({
+      ...model(), assess: async () => { entered.resolve(); return assessment.promise; },
+    }), work);
+    const triage = service.invoke({ operation: "knowledge.source.triage", request: {
+      commandId: "late-retirement-triage", sourceId: source.record.id, expectedRevision: source.record.revisionId,
+    } }, controller.signal);
+    const cancelled = expect(triage).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+    await entered.promise;
+    controller.abort(new Error("cancelled"));
+    await cancelled;
+    expect(work.size).toBe(1);
+    assessment.resolve(await model().assess({ title: "Source", text: "evidence", interests: [], source: { capturedAt: "2026-01-01T00:00:00Z" } }, new AbortController().signal));
+    await work.waitUntilSettled();
+    expect(work.size).toBe(0);
+    expect((await store.read(source.record.id))?.revisionId).toBe(source.record.revisionId);
   });
 
   it("does not publish a late synthesis when the model ignores cancellation", async () => {

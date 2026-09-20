@@ -1,8 +1,8 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { AutomationScheduler, type AutomationExecutor } from "./automation-scheduler.js";
+import { AutomationScheduler, AutomationAdmissionError, type AutomationExecutor, type AutomationExecutionHandle, type AutomationExecutionResult } from "./automation-scheduler.js";
 import { AutomationStore } from "./automation-store.js";
 
 async function eventually(assertion: () => void): Promise<void> {
@@ -48,6 +48,230 @@ describe("AutomationScheduler", () => {
     expect(updated.nextOccurrenceAt).toBe("2026-01-01T00:15:00.000Z");
     expect(updated.currentRun).toBeUndefined();
     expect(executor.start).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["gateway-shutdown", "user-cancelled"] as const)("bounds %s cancellation without retiring a non-settling owner", async reason => {
+    let now = Date.parse("2026-01-01T00:00:01Z");
+    const root = await mkdtemp(join(tmpdir(), "tron-automation-shutdown-grace-"));
+    try {
+      const store = new AutomationStore(root, { now: () => now });
+      await store.initialize();
+      const record = await store.create({
+        name: "Shutdown", activation: "enabled", target: { kind: "existingSession", sessionId: "session-one" },
+        trigger: { kind: "interval", everySeconds: 300, anchorAt: "2026-01-01T00:00:00.000Z" },
+        misfirePolicy: "latest", overlapPolicy: "skip", executionDeadlineSeconds: 3_600,
+        action: { kind: "sessionPrompt", text: "Review" }, provenance: { kind: "local" },
+      });
+      // Only the bounded grace timers may release shutdown: the executor's cancel
+      // resolves, but its completion promise never does.
+      // Every bounded settle step arms its own grace; keep them all so the test can
+      // release the exact windows the scheduler is waiting on.
+      const timers = new Map<number, Array<() => void>>();
+      const fireGrace = (): void => {
+        const pending = timers.get(5_000) ?? [];
+        timers.delete(5_000);
+        for (const callback of pending) callback();
+      };
+      let cancelCalls = 0;
+      const executor: AutomationExecutor = {
+        start: vi.fn(async (_definition, run) => ({
+          operationId: run.operationId,
+          completion: new Promise<never>(() => {}),
+          cancel: vi.fn(async () => { cancelCalls += 1; }),
+        })),
+      };
+      const scheduler = new AutomationScheduler(store, executor, {
+        now: () => now,
+        hostEpoch: "epoch-one",
+        setTimer: ((callback: () => void, delay: number) => {
+          const pending = timers.get(delay) ?? [];
+          pending.push(callback);
+          timers.set(delay, pending);
+          return { unref() {} } as unknown as NodeJS.Timeout;
+        }) as never,
+        clearTimer: ((timer: NodeJS.Timeout) => { void timer; }) as never,
+      });
+
+      scheduler.start();
+      now = Date.parse("2026-01-01T00:10:30Z");
+      await scheduler.scan();
+      await eventually(() => expect(store.get(record.id).currentRun?.state).toBe("running"));
+
+      const cancellation = reason === "gateway-shutdown" ? scheduler.cancelActiveForShutdown()
+        : scheduler.cancel(record.id, store.get(record.id).currentRun!.runId).then(
+            () => { throw new Error("A non-settling owner must not be reported as retired"); },
+            error => { expect(error).toMatchObject({ details: { outcomeUnknown: true } }); },
+          );
+      // Let the cooperative cancel settle first so the only remaining bound is the
+      // completion grace for a completion that never arrives.
+      await eventually(() => expect(cancelCalls).toBe(1));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await eventually(() => expect(timers.has(5_000)).toBe(true));
+      fireGrace();
+      await cancellation;
+      await eventually(() => expect(store.get(record.id).lastRun?.state).toBe("outcomeUnknown"));
+      expect(store.get(record.id).lastRun?.reason).toBe(`${reason}-settlement-timeout`);
+
+      // Disposal is bounded by the same grace rather than awaiting the completion forever.
+      timers.delete(5_000);
+      const disposal = scheduler.dispose();
+      await eventually(() => expect(timers.has(5_000)).toBe(true));
+      fireGrace();
+      await expect(disposal).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+      expect(() => scheduler.assertRunRetired(store.get(record.id).lastRun!.runId)).toThrow(/still owned/);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("records an unknown outcome when a cooperative cancel itself never settles during shutdown", async () => {
+    let now = Date.parse("2026-01-01T00:00:01Z");
+    const root = await mkdtemp(join(tmpdir(), "tron-automation-shutdown-cancel-grace-"));
+    try {
+      const store = new AutomationStore(root, { now: () => now });
+      await store.initialize();
+      const record = await store.create({
+        name: "ShutdownCancel", activation: "enabled", target: { kind: "existingSession", sessionId: "session-one" },
+        trigger: { kind: "interval", everySeconds: 300, anchorAt: "2026-01-01T00:00:00.000Z" },
+        misfirePolicy: "latest", overlapPolicy: "skip", executionDeadlineSeconds: 3_600,
+        action: { kind: "sessionPrompt", text: "Review" }, provenance: { kind: "local" },
+      });
+      const timers = new Map<number, Array<() => void>>();
+      const fireGrace = (): void => {
+        const pending = timers.get(5_000) ?? [];
+        timers.delete(5_000);
+        for (const callback of pending) callback();
+      };
+      const executor: AutomationExecutor = {
+        start: vi.fn(async (_definition, run) => ({
+          operationId: run.operationId,
+          completion: new Promise<never>(() => {}),
+          // A cancel that never resolves must not hold shutdown open.
+          cancel: vi.fn(() => new Promise<void>(() => {})),
+        })),
+      };
+      const scheduler = new AutomationScheduler(store, executor, {
+        now: () => now,
+        hostEpoch: "epoch-one",
+        setTimer: ((callback: () => void, delay: number) => {
+          const pending = timers.get(delay) ?? [];
+          pending.push(callback);
+          timers.set(delay, pending);
+          return { unref() {} } as unknown as NodeJS.Timeout;
+        }) as never,
+        clearTimer: ((timer: NodeJS.Timeout) => { void timer; }) as never,
+      });
+
+      scheduler.start();
+      now = Date.parse("2026-01-01T00:10:30Z");
+      await scheduler.scan();
+      await eventually(() => expect(store.get(record.id).currentRun?.state).toBe("running"));
+
+      const cancellation = scheduler.cancelActiveForShutdown();
+      await eventually(() => expect(timers.has(5_000)).toBe(true));
+      fireGrace();
+      await cancellation;
+      await eventually(() => expect(store.get(record.id).lastRun?.state).toBe("outcomeUnknown"));
+      expect(store.get(record.id).lastRun?.reason).toBe("gateway-shutdown-cancellation-timeout");
+      expect(store.get(record.id).activation).toBe("blocked");
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("fences late start and retains ownership through terminal acknowledgement after disposal expires", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-automation-late-start-"));
+    const store = new AutomationStore(root);
+    await store.initialize();
+    const record = await store.create({
+      name: "Late start", activation: "draft", target: { kind: "existingSession", sessionId: "session-one" },
+      trigger: { kind: "once", at: "2026-01-02T00:00:00.000Z" },
+      action: { kind: "sessionPrompt", text: "Review" }, provenance: { kind: "local" },
+    });
+    function deferred<T>() {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>(settle => { resolve = settle; });
+      return { promise, resolve };
+    }
+    const entered = deferred<void>();
+    const start = deferred<AutomationExecutionHandle>();
+    const completion = deferred<AutomationExecutionResult>();
+    const cancelled = deferred<void>();
+    const acknowledging = deferred<void>();
+    const acknowledged = deferred<void>();
+    let signal: AbortSignal | undefined;
+    const timers = new Map<NodeJS.Timeout, { callback: () => void; delay: number }>();
+    const scheduler = new AutomationScheduler(store, {
+      start: async (_record, _run, admittedSignal) => {
+        signal = admittedSignal;
+        entered.resolve();
+        return start.promise;
+      },
+    }, {
+      hostEpoch: "epoch-late-start",
+      setTimer: (callback, delay) => {
+        const token = { unref() {} } as NodeJS.Timeout;
+        timers.set(token, { callback, delay });
+        return token;
+      },
+      clearTimer: token => { timers.delete(token); },
+    });
+    const expireGrace = () => {
+      const grace = [...timers].filter(([, value]) => value.delay === 5_000);
+      expect(grace.length).toBeGreaterThan(0);
+      for (const [token, value] of grace) { timers.delete(token); value.callback(); }
+    };
+    try {
+      scheduler.start();
+      const run = await scheduler.runNow(record.id, record.revision);
+      await entered.promise;
+      const disposal = scheduler.dispose();
+      const rejected = expect(disposal).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+      expireGrace();
+      await rejected;
+      expect(signal?.aborted).toBe(true);
+      expect(() => scheduler.assertRunRetired(run.runId)).toThrow(/still owned/);
+      const cancel = vi.fn(async () => { cancelled.resolve(); });
+      start.resolve({
+        completion: completion.promise,
+        cancel,
+        acknowledgeTerminal: async () => { acknowledging.resolve(); await acknowledged.promise; },
+      });
+      await cancelled.promise;
+      expect(cancel).toHaveBeenCalledWith("gateway-shutdown");
+      expect(store.get(record.id).currentRun?.state).not.toBe("running");
+      completion.resolve({ state: "cancelled" });
+      await acknowledging.promise;
+      expect(store.get(record.id).lastRun?.state).toBe("cancelled");
+      expect(() => scheduler.assertRunRetired(run.runId)).toThrow(/still owned/);
+      const waitingForAck = scheduler.dispose();
+      const ackBlocked = expect(waitingForAck).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+      expireGrace();
+      await ackBlocked;
+      acknowledged.resolve();
+      await scheduler.dispose();
+      expect(() => scheduler.assertRunRetired(run.runId)).not.toThrow();
+    } finally {
+      acknowledged.resolve();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps uncertain admission ownership visible after start rejects and dispatch bookkeeping unwinds", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-automation-uncertain-admission-"));
+    const store = new AutomationStore(root);
+    await store.initialize();
+    const record = await store.create({
+      name: "Uncertain admission", activation: "draft", target: { kind: "existingSession", sessionId: "session-one" },
+      trigger: { kind: "once", at: "2026-01-02T00:00:00.000Z" }, action: { kind: "sessionPrompt", text: "Review" }, provenance: { kind: "local" },
+    });
+    const scheduler = new AutomationScheduler(store, {
+      start: async () => { throw new AutomationAdmissionError("canonical receipt unresolved", false, "admission-outcome-unknown", false, true); },
+    }, { hostEpoch: "epoch", setTimer: (() => ({ unref() {} }) as unknown as NodeJS.Timeout), clearTimer: () => {} });
+    try {
+      scheduler.start();
+      const run = await scheduler.runNow(record.id, record.revision);
+      await eventually(() => expect(store.get(record.id).lastRun?.state).toBe("outcomeUnknown"));
+      await expect(scheduler.dispose()).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+      expect(() => scheduler.assertRunRetired(run.runId)).toThrow(/still owned/);
+      expect(() => scheduler.assertRunRetired("another-run")).not.toThrow();
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
 
   it("keeps a draft one-time definition draft after a successful manual run", async () => {

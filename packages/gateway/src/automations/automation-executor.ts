@@ -1,4 +1,4 @@
-import { GatewayError } from "../errors.js";
+import { GatewayError, isUncertainOutcome } from "../errors.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import type { ResourceInvocation } from "../protocol/types.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
@@ -49,7 +49,8 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
     private readonly machineId: string | undefined,
   ) {}
 
-  async start(record: AutomationRecord, run: AutomationRun): Promise<AutomationExecutionHandle> {
+  async start(record: AutomationRecord, run: AutomationRun, signal?: AbortSignal): Promise<AutomationExecutionHandle> {
+    signal?.throwIfAborted();
     const operationId = run.operationId;
     if (!operationId) throw new AutomationAdmissionError("Automation operation identity is missing", false, "invalid-operation");
     const target = run.targetSnapshot;
@@ -82,6 +83,7 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
         slot = leased.slot;
         releaseLease = leased.release;
       }
+      signal?.throwIfAborted();
       if (run.actionSnapshot.kind === "notification") {
         if (target.kind !== "existingSession") throw new AutomationAdmissionError("Workspace automations support session prompts only", false, "invalid-action");
         if (!this.notifications) throw new AutomationAdmissionError("Notifications are unavailable", false, "notifications-unavailable");
@@ -140,6 +142,8 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
       };
       let admittedInvocationId: string | undefined;
       let admission: { operationId: string };
+      const cancelAdmission = () => { void slot.abort("agent", operationId).catch(() => {}); };
+      signal?.addEventListener("abort", cancelAdmission, { once: true });
       try {
         admission = await slot.prompt(
           promptText(run.actionSnapshot.text, resource),
@@ -154,6 +158,7 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
           undefined,
           {
             operationId,
+            ...(signal ? { signal } : {}),
             origin: { kind: "gateway", ownerId: record.id, title: "Automation", confidence: "boundary" },
             onAdmitted: (invocationId) => { admittedInvocationId = invocationId; },
             onTerminal,
@@ -172,11 +177,14 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
             },
           };
         }
+        if (isUncertainOutcome(error)) throw error;
         releaseLease();
         work.settle();
         throw error instanceof AutomationAdmissionError
           ? error
           : new AutomationAdmissionError(error instanceof Error ? error.message : "Agent admission failed", false, "agent-admission-rejected");
+      } finally {
+        signal?.removeEventListener("abort", cancelAdmission);
       }
 
       return {
@@ -197,6 +205,13 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
         },
       };
     } catch (error) {
+      if (isUncertainOutcome(error)) {
+        // The slot retains the exact unresolved canonical write as a drain and
+        // eviction blocker. Its automation lease must not disappear merely
+        // because the caller's admission waiter returned uncertainty.
+        work.transition("automation-terminal-persistence");
+        throw new AutomationAdmissionError("Automation admission has unresolved canonical ownership", false, "admission-outcome-unknown", false, true);
+      }
       releaseLease?.();
       work.settle();
       if (error instanceof AutomationAdmissionError) throw error;

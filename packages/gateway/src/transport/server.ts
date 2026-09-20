@@ -833,7 +833,11 @@ export class GatewayServer {
       if (request.method === "POST" && url.pathname === "/v1/pair") {
         const key = request.socket.remoteAddress ?? "unknown";
         if (!this.pairingLimiter.admit(key)) throw new GatewayError("unauthenticated", "Too many pairing attempts; wait before retrying");
-        const body = JSON.parse((await readBoundedBody(request, 16_384)).toString("utf8")) as Record<string, unknown>;
+        const parsed: unknown = JSON.parse((await readBoundedBody(request, 16_384)).toString("utf8"));
+        if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+          throw new GatewayError("invalid_request", "Pairing requires a JSON object body");
+        }
+        const body = parsed as Record<string, unknown>;
         if (typeof body.code !== "string" || typeof body.deviceName !== "string") throw new GatewayError("invalid_request", "Pairing requires code and deviceName");
         const result = await this.options.devices.pair(body.code.trim(), body.deviceName);
         return sendJson(response, 200, { ...result, ...this.options.service.info() as Record<string, JsonValue> });

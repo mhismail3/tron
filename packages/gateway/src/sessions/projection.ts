@@ -203,13 +203,43 @@ export function safeJson(value: unknown, depth = 0, seen = new WeakSet<object>()
     if (seen.has(value)) return "[circular]";
     seen.add(value);
     if (Array.isArray(value)) {
-      const result = value.slice(0, 1_000).map((item) => safeJson(item, depth + 1, seen));
+      const result: JsonValue[] = [];
+      const length = Math.min(value.length, 1_000);
+      for (let index = 0; index < length; index += 1) {
+        // Reading a hole yields undefined, which JSON.stringify represents as
+        // null. Push every slot explicitly so sparse arrays retain JSON shape.
+        result.push(safeJson(value[index], depth + 1, seen));
+      }
       seen.delete(value);
       return result;
     }
     const result: Record<string, JsonValue> = {};
-    for (const [key, item] of Object.entries(value).slice(0, 1_000)) {
-      result[key] = safeJson(item, depth + 1, seen);
+    const usedKeys = new Set<string>();
+    let entries = 0;
+    // Iterate lazily so a hostile object with millions of keys cannot first
+    // materialize the complete Object.entries array. Keys are data too: bound
+    // them before they become part of the projected object. A bounded key may
+    // collide with a sibling, so add a deterministic suffix instead of
+    // silently overwriting the earlier JSON property.
+    for (const key in value) {
+      if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+      if (entries >= 1_000) break;
+      const keyLimit = MAX_JSON_STRING;
+      const keyMarker = "…";
+      const baseKey = Buffer.byteLength(key) <= keyLimit
+        ? key
+        : `${utf8Prefix(key, keyLimit - Buffer.byteLength(keyMarker))}${keyMarker}`;
+      let boundedKey = baseKey;
+      let collision = 2;
+      while (usedKeys.has(boundedKey)) {
+        const suffix = `${keyMarker}${collision}`;
+        boundedKey = `${utf8Prefix(baseKey, keyLimit - Buffer.byteLength(suffix))}${suffix}`;
+        collision += 1;
+      }
+      usedKeys.add(boundedKey);
+      Object.defineProperty(result, boundedKey, { value: safeJson((value as Record<string, unknown>)[key], depth + 1, seen),
+        enumerable: true, configurable: true, writable: true });
+      entries += 1;
     }
     // `seen` is a recursion stack, not a global visited set. Pi reuses
     // immutable metadata objects across resource entries; repeated siblings
@@ -221,25 +251,47 @@ export function safeJson(value: unknown, depth = 0, seen = new WeakSet<object>()
   return null;
 }
 
-function boundedUtf8Tail(value: string, maximumBytes: number): { value: string; truncated: boolean } {
-  const encoded = Buffer.from(value);
-  if (encoded.length <= maximumBytes) return { value, truncated: false };
-  return {
-    value: encoded.subarray(encoded.length - maximumBytes).toString("utf8").replace(/^\uFFFD/u, ""),
-    truncated: true,
-  };
+function utf8CodePointBytes(codePoint: number): number {
+  return codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;
 }
 
 function utf8Prefix(value: string, maximumBytes: number): string {
-  const encoded = Buffer.from(value);
-  if (encoded.length <= maximumBytes) return value;
-  return encoded.subarray(0, maximumBytes).toString("utf8").replace(/\uFFFD$/u, "");
+  if (maximumBytes <= 0) return "";
+  let bytes = 0;
+  let index = 0;
+  while (index < value.length) {
+    const codePoint = value.codePointAt(index)!;
+    const width = utf8CodePointBytes(codePoint);
+    if (bytes + width > maximumBytes) break;
+    bytes += width;
+    index += codePoint > 0xffff ? 2 : 1;
+  }
+  return index === value.length ? value : value.slice(0, index);
 }
 
 function utf8Suffix(value: string, maximumBytes: number): string {
-  const encoded = Buffer.from(value);
-  if (encoded.length <= maximumBytes) return value;
-  return encoded.subarray(encoded.length - maximumBytes).toString("utf8").replace(/^\uFFFD/u, "");
+  if (maximumBytes <= 0) return "";
+  let bytes = 0;
+  let index = value.length;
+  while (index > 0) {
+    let start = index - 1;
+    const unit = value.charCodeAt(start);
+    if (unit >= 0xdc00 && unit <= 0xdfff && start > 0) {
+      const lead = value.charCodeAt(start - 1);
+      if (lead >= 0xd800 && lead <= 0xdbff) start -= 1;
+    }
+    const codePoint = value.codePointAt(start)!;
+    const width = utf8CodePointBytes(codePoint);
+    if (bytes + width > maximumBytes) break;
+    bytes += width;
+    index = start;
+  }
+  return index === 0 ? value : value.slice(index);
+}
+
+function boundedUtf8Tail(value: string, maximumBytes: number): { value: string; truncated: boolean } {
+  const bounded = utf8Suffix(value, maximumBytes);
+  return { value: bounded, truncated: bounded.length !== value.length };
 }
 
 /** Extracts only explicit display text from Pi's current AgentToolResult. Arbitrary
@@ -250,24 +302,72 @@ export function projectToolOutput(value: unknown, maximumBytes = MAX_LIVE_TOOL_O
   output?: string;
   outputTruncated?: true;
 } {
-  const collect = (candidate: unknown, depth = 0): string[] => {
-    if (depth > 4 || candidate === null || candidate === undefined) return [];
-    if (typeof candidate === "string") return [candidate];
-    if (Array.isArray(candidate)) return candidate.flatMap((item) => collect(item, depth + 1));
-    if (typeof candidate !== "object") return [];
-    const record = candidate as Record<string, unknown>;
-    if (record.type === "text" && typeof record.text === "string") return [record.text];
-    if (Array.isArray(record.content)) return collect(record.content, depth + 1);
-    if (typeof record.output === "string") return [record.output];
-    if (typeof record.text === "string") return [record.text];
-    return [];
+  // Walk newest-first and retain only the suffix that can reach the wire. This
+  // is intentionally not a flatMap/join: command output is cumulative and can
+  // contain millions of old blocks that must never become one intermediate
+  // string. The reverse traversal preserves the old collector's precedence and
+  // depth rules while allowing it to stop after the first overflowing text.
+  const retainedNewestFirst: string[] = [];
+  let retainedBytes = 0;
+  let truncated = false;
+  const addNewest = (text: string): boolean => {
+    if (!text) return false; // filter(Boolean) in the original collector
+    const textBytes = Buffer.byteLength(text);
+    if (retainedNewestFirst.length === 0) {
+      const kept = textBytes <= maximumBytes ? text : utf8Suffix(text, maximumBytes);
+      retainedNewestFirst.unshift(kept);
+      retainedBytes = Buffer.byteLength(kept);
+      if (textBytes > maximumBytes) truncated = true;
+      return truncated;
+    }
+    const capacity = maximumBytes - retainedBytes - 1; // separator
+    if (capacity <= 0) {
+      truncated = true;
+      return true;
+    }
+    if (textBytes > capacity) {
+      retainedNewestFirst.unshift(utf8Suffix(text, capacity));
+      retainedBytes = maximumBytes;
+      truncated = true;
+      return true;
+    }
+    retainedNewestFirst.unshift(text);
+    retainedBytes += textBytes + 1;
+    return false;
   };
-  const output = collect(value).filter(Boolean).join("\n");
-  if (!output) return {};
-  if (Buffer.byteLength(output) <= maximumBytes) return { output };
+  const visitReverse = (candidate: unknown, depth = 0): boolean => {
+    if (depth > 4 || candidate === null || candidate === undefined) return false;
+    if (typeof candidate === "string") return addNewest(candidate);
+    if (Array.isArray(candidate)) {
+      for (let index = candidate.length - 1; index >= 0; index -= 1) {
+        if (visitReverse(candidate[index], depth + 1)) return true;
+      }
+      return false;
+    }
+    if (typeof candidate !== "object") return false;
+    const record = candidate as Record<string, unknown>;
+    if (record.type === "text" && typeof record.text === "string") return addNewest(record.text);
+    if (Array.isArray(record.content)) return visitReverse(record.content, depth + 1);
+    if (typeof record.output === "string") return addNewest(record.output);
+    if (typeof record.text === "string") return addNewest(record.text);
+    return false;
+  };
+  visitReverse(value);
+  if (retainedNewestFirst.length === 0) return {};
+  // Reverse traversal prepends each older block, so the collector is already
+  // in display order. Reversing it here would make newest output appear first.
+  const output = retainedNewestFirst.join("\n");
+  if (!truncated) return { output };
   const marker = "… earlier live output truncated by gateway …\n";
+  const markerBytes = Buffer.byteLength(marker);
+  // A marker larger than the requested envelope cannot be emitted honestly.
+  // Keep the newest tail instead; every returned frame remains within its
+  // caller-owned byte budget (for all feasible JSON/text budgets).
+  if (maximumBytes <= markerBytes) {
+    return { output: utf8Suffix(output, maximumBytes), outputTruncated: true };
+  }
   return {
-    output: marker + utf8Suffix(output, Math.max(256, maximumBytes - Buffer.byteLength(marker))),
+    output: marker + utf8Suffix(output, maximumBytes - markerBytes),
     outputTruncated: true,
   };
 }
@@ -281,13 +381,7 @@ export function mergeLiveToolOutput(
   maximumBytes = MAX_LIVE_TOOL_OUTPUT_BYTES,
 ): { output?: string; outputTruncated?: true } {
   if (incoming.output) {
-    if (Buffer.byteLength(incoming.output) > maximumBytes) {
-      const marker = "… earlier live output truncated by gateway …\n";
-      return {
-        output: marker + utf8Suffix(incoming.output, Math.max(0, maximumBytes - Buffer.byteLength(marker))),
-        outputTruncated: true,
-      };
-    }
+    if (Buffer.byteLength(incoming.output) > maximumBytes) return projectToolOutput(incoming.output, maximumBytes);
     return {
       output: incoming.output,
       ...(incoming.outputTruncated ? { outputTruncated: true } : {}),
@@ -307,30 +401,193 @@ export function projectToolResult(value: unknown, maximumBytes = 24_000): JsonVa
   const record = value as Record<string, unknown>;
   if (!Array.isArray(record.content)) return projectJson(value, maximumBytes);
   let truncated = false;
+  // Retain at most the newest content rows before cloning any row. Each row is
+  // projected independently so a giant detail object cannot be spread into an
+  // unbounded intermediate result.
   const content = record.content.slice(-128).map((part) => {
     if (!part || typeof part !== "object" || Array.isArray(part)) return part;
-    const projected = { ...part as Record<string, unknown> };
-    if (typeof projected.text === "string") {
-      const bounded = boundedUtf8Tail(projected.text, Math.max(1_024, maximumBytes - 1_024));
-      projected.text = bounded.value;
-      truncated ||= bounded.truncated;
+    const source = part as Record<string, unknown>;
+    // Tail the source scalar before generic JSON projection. Otherwise
+    // projectJson first turns a large text field into a preview envelope and
+    // permanently loses the AgentToolResult type/text shape and newest text.
+    // Copy fields lazily as well: a detail object must not be spread before its
+    // enclosing byte budget has admitted it.
+    const result: Record<string, unknown> = {};
+    let fields = 0;
+    for (const key in source) {
+      if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+      if (fields >= 1_000) break;
+      const field = source[key];
+      if (key === "text" && typeof field === "string") {
+        const bounded = boundedUtf8Tail(field, Math.max(0, maximumBytes - 1_024));
+        result[key] = bounded.value;
+        truncated ||= bounded.truncated;
+      } else {
+        result[key] = field;
+      }
+      fields += 1;
     }
-    return projected;
+    return result;
   });
-  const bounded = projectJson({ ...record, content }, maximumBytes);
+  const projectedRecord: Record<string, unknown> = { content };
+  let properties = 1;
+  for (const key in record) {
+    if (!Object.prototype.hasOwnProperty.call(record, key) || key === "content") continue;
+    if (properties >= 1_000) break;
+    projectedRecord[key] = record[key];
+    properties += 1;
+  }
+  const bounded = projectJson(projectedRecord, maximumBytes);
   if (!truncated || typeof bounded !== "object" || bounded === null || Array.isArray(bounded)) return bounded;
   return { ...bounded, truncated: true };
 }
 
+interface BudgetedJsonNode {
+  value: JsonValue;
+  bytes: number;
+  truncated: boolean;
+}
+
+function jsonBytes(value: JsonValue): number {
+  return Buffer.byteLength(JSON.stringify(value));
+}
+
+function boundedJsonNode(
+  value: unknown,
+  maximumBytes: number,
+  depth = 0,
+  seen = new WeakSet<object>(),
+): BudgetedJsonNode {
+  if (maximumBytes <= 0) return { value: null, bytes: 4, truncated: true };
+  if (value === null || typeof value === "boolean") {
+    const projected = value;
+    return { value: projected, bytes: jsonBytes(projected), truncated: false };
+  }
+  if (typeof value === "string") {
+    const clipped = value.length <= MAX_JSON_STRING ? value : `${utf8Prefix(value, MAX_JSON_STRING - Buffer.byteLength("…"))}…`;
+    const clippedBytes = jsonBytes(clipped);
+    if (clippedBytes <= maximumBytes) {
+      return { value: clipped, bytes: clippedBytes, truncated: clipped !== value };
+    }
+    // Do not allocate or encode the source string merely to discover that it
+    // cannot fit. A bounded scalar prefix is enough for the outer truncation
+    // preview, and the returned JSON remains valid.
+    const prefix = utf8Prefix(clipped, Math.max(0, maximumBytes - 2));
+    const projected = prefix;
+    return { value: projected, bytes: jsonBytes(projected), truncated: true };
+  }
+  if (typeof value === "number") {
+    const projected = Number.isFinite(value) ? value : String(value);
+    const bytes = jsonBytes(projected);
+    return { value: projected, bytes, truncated: bytes > maximumBytes };
+  }
+  if (typeof value === "bigint") {
+    const projected = value.toString();
+    return { value: projected, bytes: jsonBytes(projected), truncated: projected.length > maximumBytes };
+  }
+  if (value === undefined || typeof value === "function" || typeof value === "symbol") {
+    return { value: null, bytes: 4, truncated: false };
+  }
+  if (depth >= 12) return { value: "[maximum depth]", bytes: jsonBytes("[maximum depth]"), truncated: false };
+  if (seen.has(value)) return { value: "[circular]", bytes: jsonBytes("[circular]"), truncated: false };
+
+  seen.add(value);
+  let result: JsonValue;
+  let bytes: number;
+  let truncated = false;
+  if (Array.isArray(value)) {
+    const items: JsonValue[] = [];
+    bytes = 2;
+    const length = Math.min(value.length, 1_000);
+    for (let index = 0; index < length; index += 1) {
+      const separator = items.length === 0 ? 0 : 1;
+      const remaining = maximumBytes - bytes - separator;
+      if (remaining < 1) { truncated = true; break; }
+      const child = boundedJsonNode(value[index], remaining, depth + 1, seen);
+      if (bytes + separator + child.bytes > maximumBytes) { truncated = true; break; }
+      items.push(child.value);
+      bytes += separator + child.bytes;
+      truncated ||= child.truncated;
+    }
+    if (items.length < length) truncated = true;
+    result = items;
+  } else {
+    const object = value as Record<string, unknown>;
+    const output: Record<string, JsonValue> = {};
+    const usedKeys = new Set<string>();
+    bytes = 2;
+    let entries = 0;
+    for (const key in object) {
+      if (!Object.prototype.hasOwnProperty.call(object, key)) continue;
+      if (entries >= 1_000) { truncated = true; break; }
+      const boundedKeyBase = Buffer.byteLength(key) <= MAX_JSON_STRING
+        ? key
+        : `${utf8Prefix(key, MAX_JSON_STRING - Buffer.byteLength("…"))}…`;
+      let boundedKey = boundedKeyBase;
+      let collision = 2;
+      while (usedKeys.has(boundedKey)) {
+        const suffix = `…${collision}`;
+        boundedKey = `${utf8Prefix(boundedKeyBase, MAX_JSON_STRING - Buffer.byteLength(suffix))}${suffix}`;
+        collision += 1;
+      }
+      usedKeys.add(boundedKey);
+      const keyBytes = jsonBytes(boundedKey);
+      const separator = entries === 0 ? 0 : 1;
+      const remaining = maximumBytes - bytes - separator - keyBytes - 1;
+      if (remaining < 1) { truncated = true; break; }
+      const child = boundedJsonNode(object[key], remaining, depth + 1, seen);
+      if (bytes + separator + keyBytes + 1 + child.bytes > maximumBytes) {
+        truncated = true;
+        break;
+      }
+      Object.defineProperty(output, boundedKey, { value: child.value, enumerable: true, configurable: true, writable: true });
+      bytes += separator + keyBytes + 1 + child.bytes;
+      entries += 1;
+      truncated ||= child.truncated;
+    }
+    result = output;
+  }
+  seen.delete(value);
+  return { value: result, bytes, truncated };
+}
+
+function boundedProjectionEnvelope(preview: string, maximumBytes: number): JsonValue {
+  const marker = "…";
+  const envelopeBytes = (candidate: string): number => jsonBytes({ truncated: true, preview: candidate });
+  if (envelopeBytes("") <= maximumBytes) {
+    let lower = 0;
+    let upper = preview.length;
+    let best = "";
+    while (lower <= upper) {
+      const middle = Math.floor((lower + upper) / 2);
+      let candidate = preview.slice(0, middle);
+      // Avoid introducing a lone UTF-16 surrogate at the binary-search cut.
+      if (candidate.length > 0 && /[\uD800-\uDBFF]$/u.test(candidate)) candidate = candidate.slice(0, -1);
+      if (envelopeBytes(candidate + marker) <= maximumBytes) {
+        best = candidate;
+        lower = middle + 1;
+      } else {
+        upper = middle - 1;
+      }
+    }
+    const candidate = `${best}${marker}`;
+    if (envelopeBytes(candidate) <= maximumBytes) return { truncated: true, preview: candidate };
+  }
+  // Below the diagnostic envelope budget, return the smallest fitting JSON
+  // scalar. No JSON representation exists for a zero-byte budget.
+  if (maximumBytes >= 4) return null;
+  if (maximumBytes >= 2) return "";
+  return 0;
+}
+
 export function projectJson(value: unknown, maximumBytes = MAX_PROJECTED_JSON_BYTES): JsonValue {
-  const projected = safeJson(value);
-  const encoded = JSON.stringify(projected);
-  if (Buffer.byteLength(encoded) <= maximumBytes) return projected;
-  const previewBytes = Math.max(256, Math.min(24_000, maximumBytes - 128));
-  return {
-    truncated: true,
-    preview: `${utf8Prefix(encoded, previewBytes)}…`,
-  };
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) throw new RangeError("JSON projection requires a positive byte budget");
+  const bounded = boundedJsonNode(value, maximumBytes);
+  if (!bounded.truncated && bounded.bytes <= maximumBytes) return bounded.value;
+  // Keep previews useful without allowing the diagnostic envelope to become a
+  // second copy of a large projected graph.
+  const preview = utf8Prefix(JSON.stringify(bounded.value), 24_000);
+  return boundedProjectionEnvelope(preview, maximumBytes);
 }
 
 /**

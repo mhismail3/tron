@@ -9,6 +9,7 @@ import type {
   SourceIdentity, SourceOriginKind,
 } from "./knowledge-contract.js";
 import { KnowledgeStore } from "./knowledge-store.js";
+import { awaitAbortableWithSettlement } from "./model-await.js";
 
 export const SOURCE_CAPTURE_LIMITS = {
   maxBytes: 8_000_000,
@@ -50,6 +51,8 @@ export interface SourceCaptureOptions {
   now?: () => string;
   limits?: Partial<typeof SOURCE_CAPTURE_LIMITS>;
   signal?: AbortSignal;
+  /** Internal owner handoff for provider promises that may outlive the bounded wait. */
+  retirements?: Promise<void>[];
 }
 
 export interface SourceCaptureResult {
@@ -260,10 +263,17 @@ function sourceDraft(input: SourceCaptureInput, content: SourceContent, evidence
 export async function captureSource(store: KnowledgeStore, input: SourceCaptureInput, options: SourceCaptureOptions = {}): Promise<SourceCaptureResult> {
   const now = options.now ?? (() => new Date().toISOString());
   const limits = { ...SOURCE_CAPTURE_LIMITS, ...(options.limits ?? {}) };
-  if (!Number.isSafeInteger(limits.maxBytes) || limits.maxBytes < 1 || limits.maxBytes > SOURCE_CAPTURE_LIMITS.maxBytes || !Number.isSafeInteger(limits.maxRedirects) || limits.maxRedirects < 0 || limits.maxRedirects > SOURCE_CAPTURE_LIMITS.maxRedirects || !Number.isSafeInteger(limits.timeoutMs) || limits.timeoutMs < 100 || limits.timeoutMs > SOURCE_CAPTURE_LIMITS.timeoutMs) throw invalid("Invalid source capture limits");
+  if (!Number.isSafeInteger(limits.maxBytes) || limits.maxBytes < 1 || limits.maxBytes > SOURCE_CAPTURE_LIMITS.maxBytes
+    || !Number.isSafeInteger(limits.maxRedirects) || limits.maxRedirects < 0 || limits.maxRedirects > SOURCE_CAPTURE_LIMITS.maxRedirects
+    || !Number.isSafeInteger(limits.timeoutMs) || limits.timeoutMs < 100 || limits.timeoutMs > SOURCE_CAPTURE_LIMITS.timeoutMs
+    || !Number.isSafeInteger(limits.maxReadableChars) || limits.maxReadableChars < 1 || limits.maxReadableChars > SOURCE_CAPTURE_LIMITS.maxReadableChars) {
+    throw invalid("Invalid source capture limits");
+  }
   const sourceUrl = assertSafeUrl(input.url);
   const initialConfig = await store.config();
+  if (options.signal?.aborted) throw invalid("Source capture was cancelled");
   const existing = await allSourceRecords(store);
+  if (options.signal?.aborted) throw invalid("Source capture was cancelled");
   const normalized = normalizedUrl(sourceUrl.toString());
   const duplicate = existing.find(record => record.scope === input.scope && record.content.captureDisposition === "complete" && ((input.identity && record.content.identity && JSON.stringify(record.content.identity) === JSON.stringify(input.identity)) || (record.content.uri && normalizedUrl(record.content.uri) === normalized)));
   const retryTarget = existing.find(record => record.scope === input.scope && record.content.captureDisposition !== "complete" && ((input.identity && record.content.identity && JSON.stringify(record.content.identity) === JSON.stringify(input.identity)) || (record.content.uri && normalizedUrl(record.content.uri) === normalized)));
@@ -274,7 +284,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
     const annotations = input.annotations ? [...(duplicate.content.annotations ?? []), ...input.annotations.filter(annotation => !(duplicate.content.annotations ?? []).some(previous => previous.text === annotation.text && previous.locator === annotation.locator))] : duplicate.content.annotations;
     if (nextOrigins.length !== origins.length || annotations?.length !== duplicate.content.annotations?.length) {
       const mergedContent: SourceContent = { ...duplicate.content, origins: nextOrigins, ...(annotations ? { annotations } : {}) };
-      const merged = await store.captureSource({ commandId: input.commandId, expectedRevision: duplicate.revisionId, record: { kind: "source", id: duplicate.id, createdAt: duplicate.createdAt, scope: duplicate.scope, provenance: duplicate.provenance, relations: duplicate.relations, ...(duplicate.temporal ? { temporal: duplicate.temporal } : {}), content: mergedContent } });
+      const merged = await store.captureSource({ commandId: input.commandId, expectedRevision: duplicate.revisionId, ...(options.signal ? { signal: options.signal } : {}), record: { kind: "source", id: duplicate.id, createdAt: duplicate.createdAt, scope: duplicate.scope, provenance: duplicate.provenance, relations: duplicate.relations, ...(duplicate.temporal ? { temporal: duplicate.temporal } : {}), content: mergedContent } });
       if (merged.record.kind !== "source") throw new Error("Source deduplication returned a non-source record");
       return { record: merged.record, duplicate: true, fetched: false };
     }
@@ -294,7 +304,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
     if (operationController.signal.aborted) { clearTimeout(deadlineTimer); options.signal?.removeEventListener("abort", relayAbort); throw invalid("Source fetch timed out or was cancelled"); }
     const capturedAt = timestamp(now);
     const failedContent: SourceContent = { title: input.title?.trim() || sourceUrl.hostname, uri: sourceUrl.toString(), captureDisposition: "failed", capturedAt, origin: input.origin ?? "manual", origins: sourceOrigin(input.origin ?? "manual", capturedAt, { uri: sourceUrl.toString(), ...(input.identity ? { identity: input.identity } : {}) }), ...(input.annotations ? { annotations: input.annotations } : {}), ...(input.identity ? { identity: input.identity } : {}) };
-    const failed = await store.captureSource({ commandId: input.commandId, ...(input.expectedRevision ? { expectedRevision: input.expectedRevision } : {}), record: sourceDraft(input, failedContent) });
+    const failed = await store.captureSource({ commandId: input.commandId, ...(input.expectedRevision ? { expectedRevision: input.expectedRevision } : {}), signal: operationController.signal, record: sourceDraft(input, failedContent) });
     if (failed.record.kind !== "source") throw new Error("Source capture returned a non-source record");
     clearTimeout(deadlineTimer); options.signal?.removeEventListener("abort", relayAbort);
     return { record: failed.record, duplicate: false, fetched: false };
@@ -302,9 +312,10 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
   const capturedAt = timestamp(now);
   const bytes = fetched.bytes;
   const mediaType = fetched.mediaType;
-  const readable = bytes && bytes.byteLength ? extractReadable(bytes, mediaType, SOURCE_CAPTURE_LIMITS.maxReadableChars) : undefined;
+  const readable = bytes && bytes.byteLength ? extractReadable(bytes, mediaType, limits.maxReadableChars) : undefined;
   const disposition: SourceContent["captureDisposition"] = fetched.disposition ?? (bytes && bytes.byteLength > 0 ? (readable === undefined ? "metadata-only" : fetched.quality === "partial" || fetched.truncated || readable.truncated ? "partial" : "complete") : "metadata-only");
   let object: KnowledgeObjectRef | undefined;
+  if (operationController.signal.aborted) throw invalid("Source capture was cancelled");
   if (bytes && bytes.byteLength > 0) {
     const contentHash = createHash("sha256").update(bytes).digest("hex");
     const contentDuplicate = existing.find(record => record.scope === input.scope && record.content.captureDisposition === "complete" && record.content.object?.hash === contentHash);
@@ -314,7 +325,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
       const incomingOrigin = { kind, capturedAt, uri: sourceUrl.toString(), ...(input.identity ? { identity: input.identity } : {}) };
       const annotations = input.annotations ? [...(contentDuplicate.content.annotations ?? []), ...input.annotations.filter(annotation => !(contentDuplicate.content.annotations ?? []).some(previous => previous.text === annotation.text && previous.locator === annotation.locator))] : contentDuplicate.content.annotations;
       const mergedContent: SourceContent = { ...contentDuplicate.content, origins: origins.some(origin => origin.uri === incomingOrigin.uri && JSON.stringify(origin.identity) === JSON.stringify(incomingOrigin.identity)) ? origins : [...origins, incomingOrigin], ...(annotations ? { annotations } : {}) };
-      const merged = await store.captureSource({ commandId: input.commandId, expectedRevision: contentDuplicate.revisionId, record: { kind: "source", id: contentDuplicate.id, createdAt: contentDuplicate.createdAt, scope: contentDuplicate.scope, provenance: contentDuplicate.provenance, relations: contentDuplicate.relations, content: mergedContent } });
+      const merged = await store.captureSource({ commandId: input.commandId, expectedRevision: contentDuplicate.revisionId, signal: operationController.signal, record: { kind: "source", id: contentDuplicate.id, createdAt: contentDuplicate.createdAt, scope: contentDuplicate.scope, provenance: contentDuplicate.provenance, relations: contentDuplicate.relations, content: mergedContent } });
       clearTimeout(deadlineTimer); options.signal?.removeEventListener("abort", relayAbort);
       if (merged.record.kind !== "source") throw new Error("Source deduplication returned a non-source record");
       return { record: merged.record, duplicate: true, fetched: true };
@@ -330,20 +341,36 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
     origin: kind, origins: [...(retryTarget?.content.origins ?? []), ...sourceOrigin(kind, capturedAt, { uri: fetched.finalUrl, ...(input.identity ? { identity: input.identity } : {}) }), ...(fetched.finalUrl !== sourceUrl.toString() ? [{ kind, capturedAt, uri: sourceUrl.toString(), ...(input.identity ? { identity: input.identity } : {}) }] : [])], ...(input.identity ? { identity: input.identity } : {}),
   };
   const request = { commandId: input.commandId, ...(input.expectedRevision ? { expectedRevision: input.expectedRevision } : retryTarget ? { expectedRevision: retryTarget.revisionId } : {}), record: { ...sourceDraft(input, content), ...(retryTarget ? { id: retryTarget.id, createdAt: retryTarget.createdAt } : {}) } };
-  let result = await store.captureSource(request);
+  let result = await store.captureSource({ ...request, signal: operationController.signal });
   if (result.record.kind !== "source") throw new Error("Source capture returned a non-source record");
   let sourceRecord = result.record;
   let assessmentError: string | undefined;
   if (options.model && readable && disposition !== "inaccessible" && disposition !== "failed" && !operationController.signal.aborted) {
     try {
       const interests = input.interests ?? (await store.config()).currentInterests ?? [];
-      const assessment = await options.model.assess({ title: sourceRecord.content.title, text: readable.text, interests: interests.slice(0, 50).map(item => item.slice(0, 500)), source: { ...(sourceRecord.content.uri ? { uri: sourceRecord.content.uri } : {}), ...(mediaType ? { mediaType } : {}), capturedAt } }, operationController.signal);
+      if (operationController.signal.aborted) throw new SourceNetworkError("Source assessment cancelled");
+      // Bound the assessment await: the adapter may ignore its abort signal, and
+      // the deadline must not leave this capture pending after the source record
+      // was already retained. A late assessment stays fenced by the signal and the
+      // revision revalidation below.
+      const assessmentOperation = awaitAbortableWithSettlement(
+        options.model.assess({ title: sourceRecord.content.title, text: readable.text, interests: interests.slice(0, 50).map(item => item.slice(0, 500)), source: { ...(sourceRecord.content.uri ? { uri: sourceRecord.content.uri } : {}), ...(mediaType ? { mediaType } : {}), capturedAt } }, operationController.signal),
+        operationController.signal,
+        () => new Error("Source assessment deadline exceeded or was cancelled"),
+      );
+      options.retirements?.push(assessmentOperation.settled);
+      const assessment = await assessmentOperation.wait;
       if (operationController.signal.aborted) throw new SourceNetworkError("Source assessment cancelled");
       const latestConfig = await store.config();
+      if (operationController.signal.aborted) throw new SourceNetworkError("Source assessment cancelled");
       const latest = await store.read(sourceRecord.id, sourceRecord.revisionId);
-      if (latestConfig.revision !== initialConfig.revision || !latest || latest.kind !== "source" || await store.scopeExcluded({ ...(latest.provenance.sessionId ? { sessionId: latest.provenance.sessionId } : {}), ...(latest.provenance.branchId ? { branchId: latest.provenance.branchId } : {}) })) throw new Error("Source changed or became unavailable during assessment");
+      if (operationController.signal.aborted) throw new SourceNetworkError("Source assessment cancelled");
+      const excluded = latest?.kind === "source" ? await store.scopeExcluded({ ...(latest.provenance.sessionId ? { sessionId: latest.provenance.sessionId } : {}), ...(latest.provenance.branchId ? { branchId: latest.provenance.branchId } : {}) }) : false;
+      if (operationController.signal.aborted) throw new SourceNetworkError("Source assessment cancelled");
+      if (latestConfig.revision !== initialConfig.revision || !latest || latest.kind !== "source" || excluded) throw new Error("Source changed or became unavailable during assessment");
       const assessed: SourceContent = { ...latest.content, assessment: { ...assessment, generatedAt: assessment.generatedAt ?? now() } };
-      result = await store.captureSource({ commandId: `${input.commandId}:assessment`, expectedRevision: sourceRecord.revisionId, record: { ...sourceDraft(input, assessed), id: sourceRecord.id, createdAt: sourceRecord.createdAt } });
+      if (operationController.signal.aborted) throw new SourceNetworkError("Source assessment cancelled");
+      result = await store.captureSource({ commandId: `${input.commandId}:assessment`, expectedRevision: sourceRecord.revisionId, signal: operationController.signal, record: { ...sourceDraft(input, assessed), id: sourceRecord.id, createdAt: sourceRecord.createdAt } });
       if (result.record.kind !== "source") throw new Error("Source assessment returned a non-source record");
       sourceRecord = result.record;
     } catch (error) { assessmentError = error instanceof Error ? error.message : "Source assessment failed"; }

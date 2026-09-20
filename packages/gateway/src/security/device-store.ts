@@ -3,7 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { abortableRead } from "../util/abortable-read.js";
-import { atomicWriteJson, removeIfExists } from "../util/json.js";
+import { durableAtomicWriteJson, durableRemove, isDurablePublicationUncertain } from "../util/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import { GatewayError } from "../errors.js";
@@ -217,7 +217,7 @@ export class DeviceStore {
         purpose: "local-wrapper-health",
         lastUpdated: new Date().toISOString(),
       };
-      await atomicWriteJson(this.authPath, document);
+      await durableAtomicWriteJson(this.authPath, document);
     }
     await this.ensureEnrollment();
   }
@@ -241,7 +241,7 @@ export class DeviceStore {
       expiresAt: new Date(now.getTime() + 10 * 60_000).toISOString(),
       machineId: this.machineId,
     };
-    await atomicWriteJson(this.enrollmentPath, enrollment);
+    await durableAtomicWriteJson(this.enrollmentPath, enrollment);
     return enrollment;
   }
 
@@ -257,7 +257,7 @@ export class DeviceStore {
         "Pairing invitation storage",
       )).value ?? null;
       if (!isEnrollmentDocument(enrollment, this.machineId) || Date.parse(enrollment.expiresAt) <= Date.now()) {
-        await removeIfExists(this.enrollmentPath);
+        await durableRemove(this.enrollmentPath);
         throw new GatewayError("unauthenticated", "Pairing code expired");
       }
       const actual = Buffer.from(code.toUpperCase(), "utf8");
@@ -282,14 +282,14 @@ export class DeviceStore {
       // Consume first: once pairing has been accepted, a persistence failure
       // must not leave the invitation reusable. Regenerate explicitly while
       // still holding the mutex if the device write fails.
-      await removeIfExists(this.enrollmentPath);
       try {
-        await atomicWriteJson(this.devicePath, document);
+        await durableRemove(this.enrollmentPath);
+        await durableAtomicWriteJson(this.devicePath, document);
       } catch (error) {
         await this.ensureEnrollmentLocked(new Date()).catch(() => {});
         throw error;
       }
-      queueMicrotask(() => void this.ensureEnrollment());
+      queueMicrotask(() => { void this.ensureEnrollment().catch(() => { /* The next owned enrollment request retries storage failure. */ }); });
       return { deviceId: record.id, token };
     });
   }
@@ -343,7 +343,16 @@ export class DeviceStore {
       const document = await this.readDevices();
       const next = document.devices.filter((device) => device.id !== deviceId);
       if (next.length === document.devices.length) return false;
-      await atomicWriteJson(this.devicePath, { version: 1, devices: next });
+      try {
+        await durableAtomicWriteJson(this.devicePath, { version: 1, devices: next });
+      } catch (error) {
+        // The writer positively observed our replacement rename. Under this
+        // mutex no competing credential mutation can restore the removed device.
+        // Retire transport even if further storage reads are unavailable; a
+        // failed fsync is not permission to keep revoked connections alive.
+        if (isDurablePublicationUncertain(error)) onRevoked();
+        throw error;
+      }
       // The replacement above is the authority cut. Publication is deliberately
       // synchronous and precedes install cleanup or any other long effect.
       onRevoked();

@@ -20,6 +20,16 @@ function extension(index: number, handlers: ReadonlyMap<string, readonly unknown
 }
 
 describe("hook registration projection", () => {
+  it("skips an impossible identity without hiding later identities or mixing their inventories", () => {
+    const huge = "€".repeat(16_384);
+    const first = { ...extension(1, new Map()), name: huge, path: huge, resolvedPath: huge, scope: huge, source: huge, origin: huge };
+    const second = { ...extension(2, new Map([["session_start", [() => {}]]])), tools: ["second-tool"] };
+    const result = projectHookRegistrations([first, second], []);
+    expect(result.extensions).toHaveLength(1);
+    expect(result.extensions[0]).toMatchObject({ name: second.name, tools: ["second-tool"], handlers: [{ event: "session_start", count: 1 }] });
+    expect(result.hookInventory.extensions).toEqual({ total: 2, retained: 1, omitted: 1 });
+    expect(result.hookInventory.encodedBytes).toBe(Buffer.byteLength(JSON.stringify({ extensions: result.extensions, extensionLoadErrors: result.extensionLoadErrors })));
+  });
   it("retains every existing extension row and exact identity while bounding additions", () => {
     const registrations = projectHookRegistrations([
       extension(1, new Map([["session_start", [() => undefined]]])),
@@ -32,17 +42,28 @@ describe("hook registration projection", () => {
     expect(registrations.hookInventory.extensions).toEqual({ total: 2, retained: 2, omitted: 0 });
   });
 
-  it("accounts for the inherited wire array bound without dropping source rows early", () => {
+  it("applies one aggregate byte envelope across identity rows and load errors", () => {
     const registrations = projectHookRegistrations(
       Array.from({ length: 1_001 }, (_, index) => extension(index, new Map())),
       Array.from({ length: 1_001 }, (_, index) => ({ path: `/broken/${index}.ts`, error: "failed" })),
     );
 
-    expect(registrations.extensions).toHaveLength(1_001);
-    expect(registrations.hookInventory.extensions).toEqual({ total: 1_001, retained: 1_000, omitted: 1 });
+    expect(registrations.extensions.length).toBeLessThan(1_001);
+    expect(registrations.hookInventory.extensions).toEqual({
+      total: 1_001,
+      retained: registrations.extensions.length,
+      omitted: 1_001 - registrations.extensions.length,
+    });
     expect(registrations.hookInventory.handlerEvents).toEqual({ total: 0, retained: 0, omitted: 0 });
-    expect(registrations.hookInventory.loadErrors.retained).toBeLessThanOrEqual(1_000);
-    expect(registrations.hookInventory.loadErrors.omitted).toBeGreaterThan(0);
+    expect(registrations.hookInventory.loadErrors.retained).toBe(registrations.extensionLoadErrors.length);
+    expect(registrations.hookInventory.loadErrors.omitted).toBe(1_001 - registrations.extensionLoadErrors.length);
+    expect(registrations.hookInventory.encodedBytes).toBe(
+      Buffer.byteLength(JSON.stringify({
+        extensions: registrations.extensions,
+        extensionLoadErrors: registrations.extensionLoadErrors,
+      })),
+    );
+    expect(registrations.hookInventory.encodedBytes).toBeLessThanOrEqual(MAX_HOOK_PROJECTION_BYTES);
   });
 
   it("reports handler and error omissions when the additive byte budget is full", () => {
@@ -59,6 +80,12 @@ describe("hook registration projection", () => {
     expect(registrations.hookInventory.loadErrors.omitted).toBeGreaterThan(0);
     expect(registrations.hookInventory.encodedBytes).toBeLessThanOrEqual(MAX_HOOK_PROJECTION_BYTES);
     expect(registrations.extensions).toHaveLength(1);
+    expect(registrations.extensions[0]).toMatchObject({
+      name: "hook-1.ts",
+      path: expect.stringContaining("exact-exact-"),
+      tools: [],
+      commands: [],
+    });
   });
 
   it("omits oversized event names rather than truncating their identity", () => {

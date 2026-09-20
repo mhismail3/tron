@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { GitWorktreeService } from "./git-worktree-service.js";
 
 const execFileAsync = promisify(execFile);
@@ -39,6 +39,7 @@ describe("GitWorktreeService", () => {
       expect(await readFile(join(prepared.cwd, "README.md"), "utf8")).toBe("base\n");
       await prepared.cleanup();
       await expect(readFile(prepared.cwd, "README.md")).rejects.toThrow();
+      await expect(git(root, "show-ref", "--verify", "--quiet", "refs/heads/feature/tron-session")).rejects.toThrow();
     } finally {
       await rm(root, { recursive: true, force: true });
       await rm(tronHome, { recursive: true, force: true });
@@ -79,6 +80,87 @@ describe("GitWorktreeService", () => {
     }
   });
 
+  it("never deletes a pre-existing branch when new worktree creation is rejected", async () => {
+    const { root, tronHome } = await repository();
+    try {
+      await git(root, "branch", "feature/existing");
+      const service = new GitWorktreeService(tronHome);
+      await expect(service.prepare(root, { mode: "newBranchWorktree", branch: "feature/existing" })).rejects.toThrow();
+      expect(await git(root, "branch", "--list", "feature/existing")).toContain("feature/existing");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(tronHome, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves the winner branch when concurrent new-branch requests race", async () => {
+    const { root, tronHome } = await repository();
+    try {
+      const service = new GitWorktreeService(tronHome);
+      const results = await Promise.allSettled(Array.from({ length: 8 }, () => service.prepare(root, {
+        mode: "newBranchWorktree",
+        branch: "feature/concurrent",
+      })));
+      const winners = results.filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<GitWorktreeService["prepare"]>>> => result.status === "fulfilled");
+      const losers = results.filter((result) => result.status === "rejected");
+      expect(winners).toHaveLength(1);
+      expect(losers).toHaveLength(7);
+      // The losing add has no proof that it created the branch and must not
+      // delete the successful request's branch during its failure cleanup.
+      expect(await git(root, "show-ref", "--verify", "--quiet", "refs/heads/feature/concurrent")).toBe("");
+      await winners[0].value.cleanup();
+      await expect(git(root, "show-ref", "--verify", "--quiet", "refs/heads/feature/concurrent")).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(tronHome, { recursive: true, force: true });
+    }
+  });
+
+  it("treats a nonzero Git exit with a live hook descendant as uncertain and terminates the owned group", async () => {
+    const { root, tronHome } = await repository();
+    const pidFile = join(tronHome, "hook-descendant.pid");
+    let pid: number | undefined;
+    try {
+      const hook = join(root, ".git", "hooks", "post-checkout");
+      await writeFile(hook, `#!/bin/sh\n/bin/sleep 60 >/dev/null 2>&1 &\nprintf '%s' "$!" > ${JSON.stringify(pidFile)}\nexit 1\n`);
+      await chmod(hook, 0o755);
+      const service = new GitWorktreeService(tronHome);
+      await expect(service.prepare(root, { mode: "newBranchWorktree", branch: "feature/hook-failure" }))
+        .rejects.toMatchObject({ details: { outcomeUnknown: true }, retryable: false });
+      pid = Number(await readFile(pidFile, "utf8"));
+      await vi.waitFor(() => {
+        expect(() => process.kill(pid!, 0)).toThrow();
+      }, { timeout: 2_000 });
+      // The command's uncertain outcome does not grant cleanup authority.
+      expect(await git(root, "branch", "--list", "feature/hook-failure")).toContain("feature/hook-failure");
+    } finally {
+      if (pid === undefined) pid = Number(await readFile(pidFile, "utf8").catch(() => "NaN"));
+      if (Number.isSafeInteger(pid) && pid! > 1) { try { process.kill(pid!, "SIGKILL"); } catch { /* exact test descendant already exited */ } }
+      await rm(root, { recursive: true, force: true });
+      await rm(tronHome, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves a branch that changed while its owned worktree is active", async () => {
+    const { root, tronHome } = await repository();
+    try {
+      const service = new GitWorktreeService(tronHome);
+      const prepared = await service.prepare(root, {
+        mode: "newBranchWorktree",
+        branch: "feature/changed",
+      });
+      await writeFile(join(prepared.cwd, "changed.txt"), "changed\n");
+      await git(prepared.cwd, "add", "changed.txt");
+      await git(prepared.cwd, "commit", "-qm", "changed");
+      await prepared.cleanup();
+      expect(await git(root, "branch", "--list", "feature/changed")).toContain("feature/changed");
+      await expect(readFile(prepared.cwd, "README.md")).rejects.toThrow();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(tronHome, { recursive: true, force: true });
+    }
+  });
+
   it("creates a worktree from an existing local branch without changing the source checkout", async () => {
     const { root, tronHome } = await repository();
     try {
@@ -95,6 +177,7 @@ describe("GitWorktreeService", () => {
       } finally {
         await prepared.cleanup();
       }
+      expect(await git(root, "branch", "--list", "release")).toContain("release");
     } finally {
       await rm(root, { recursive: true, force: true });
       await rm(tronHome, { recursive: true, force: true });

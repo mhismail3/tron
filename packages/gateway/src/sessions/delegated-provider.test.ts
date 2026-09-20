@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { attributeExtensions } from "../extensions/owner-attribution.js";
 import {
   DELEGATED_PROVIDER_TOOL_NAME,
   delegatedArtifactPathAllowed,
@@ -13,12 +14,17 @@ import {
 const OWNER = { id: "extension:installed", title: "Subagents", source: "npm:pi-subagents" };
 const FOREIGN_OWNER = { id: "extension:foreign", title: "Other", source: "npm:other" };
 
-function extension(input: { path: string; resolvedPath?: string; owner?: typeof OWNER }) {
+function extension(input: { path: string; resolvedPath?: string; owner?: typeof OWNER; source?: string }) {
   return {
     path: input.path,
     resolvedPath: input.resolvedPath ?? input.path,
-    sourceInfo: { path: input.path, source: "npm:pi-subagents", scope: "user", origin: "package" },
+    sourceInfo: { path: input.path, source: input.source ?? "npm:pi-subagents", scope: "user", origin: "package" },
+    handlers: new Map(),
     tools: new Map([[DELEGATED_PROVIDER_TOOL_NAME, { definition: { name: DELEGATED_PROVIDER_TOOL_NAME, execute: async () => ({}) }, sourceInfo: {} }]]),
+    commands: new Map(),
+    shortcuts: new Map(),
+    messageRenderers: new Map(),
+    entryRenderers: new Map(),
     _owner: input.owner,
   };
 }
@@ -39,6 +45,20 @@ describe("delegated provider origin", () => {
     };
     expect(delegatedProviderOrigin([foreign as never])).toEqual({ source: "pi-subagents" });
     expect(delegatedProviderOrigin([])).toEqual({ source: "pi-subagents" });
+  });
+
+  it("requires the finalized provider package identity in addition to path evidence", () => {
+    const spoofed = extension({
+      path: "/tmp/pi-subagents/project-extension/index.ts",
+      source: "npm:other",
+    });
+    const spoofedResult = attributeExtensions({ extensions: [spoofed as never], errors: [], runtime: {} as never });
+    expect(delegatedProviderOrigin(spoofedResult.extensions)).toEqual({ source: "pi-subagents" });
+    const installed = extension({ path: "/tmp/pi-subagents/installed/index.ts" });
+    const installedResult = attributeExtensions({ extensions: [installed as never], errors: [], runtime: {} as never });
+    const origin = delegatedProviderOrigin(installedResult.extensions);
+    expect(origin.source).toBe("npm:pi-subagents");
+    expect(origin.owner?.source).toBe("npm:pi-subagents");
   });
 
   it("accepts only the exact installed owner identity for control", () => {

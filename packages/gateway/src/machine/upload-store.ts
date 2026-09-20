@@ -1107,8 +1107,15 @@ export class UploadStore {
     this.validateID(id);
     const uploadDirectory = await this.ensureUploadDirectory();
     const folder = join(uploadDirectory, id);
-    try { await this.ownedUploadDirectory(id, uploadDirectory); }
-    catch {
+    try {
+      await this.ownedUploadDirectory(id, uploadDirectory);
+    } catch (error) {
+      if (!isConfirmedUploadCorruption(error)) {
+        // An operational ownership-check failure does not prove absence or
+        // corruption. Preserve the canonical folder and rebuilt index so a
+        // later lookup can retry the authoritative filesystem check.
+        throw error;
+      }
       await rm(folder, { recursive: true, force: true });
       this.removeIndexedMetadata(id);
       throw new GatewayError("not_found", "Upload was not found");

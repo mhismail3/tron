@@ -34,6 +34,27 @@ const observation = (sessionId: string, fromEntryId: string): KnowledgeRecordDra
 function command(suffix: string): string { return `knowledge-test-${suffix}`; }
 
 describe("KnowledgeStore", () => {
+  it("finishes an admitted catalog transaction when cancellation follows its durable body write", async () => {
+    const { store, workspace } = await fixture();
+    const controller = new AbortController();
+    const internal = store as unknown as { putRecord: (...args: unknown[]) => Promise<unknown> };
+    const putRecord = internal.putRecord.bind(store);
+    const put = vi.spyOn(internal, "putRecord").mockImplementation(async (...args) => {
+      const result = await putRecord(...args);
+      controller.abort(new Error("cancel after owned body publication"));
+      return result;
+    });
+    try {
+      const saved = await store.captureSource({ commandId: command("admitted-cancel"), record: source("Committed despite late cancellation"), signal: controller.signal });
+      const reopened = new KnowledgeStore(workspace);
+      expect(await reopened.read(saved.record.id)).toEqual(saved.record);
+      expect((await reopened.list({ kind: "source" })).records).toHaveLength(1);
+      // The same receipt remains replayable: a cancelled waiter cannot orphan
+      // bytes or make an already-committed mutation appear to have vanished.
+      await expect(store.captureSource({ commandId: command("admitted-cancel"), record: source("Committed despite late cancellation") }))
+        .resolves.toEqual(saved);
+    } finally { put.mockRestore(); }
+  });
   it("invalidates committed writes from every caller, not reads, rejected writes or receipt replays", async () => {
     const { workspace } = await fixture();
     const changed = vi.fn();

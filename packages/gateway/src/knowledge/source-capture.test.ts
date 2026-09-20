@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { KnowledgeStore } from "./knowledge-store.js";
 import { captureSource, isPrivateAddress } from "./source-capture.js";
@@ -23,6 +23,33 @@ describe("safe source capture", () => {
     expect(isPrivateAddress("::ffff:c0a8:101")).toBe(true);
     expect(isPrivateAddress("2001:db8::1")).toBe(false);
   });
+  it.each([-1, 0, 1.5, Infinity, 2_000_001])("rejects invalid readable input limit %s before fetching", async (maxReadableChars) => {
+    const { store } = await fixture();
+    const fetcher = vi.fn(async () => new Response("not reached"));
+    await expect(captureSource(store, { commandId: command("invalid-readable-bound"), url: "https://example.com/bound", scope: "research" }, {
+      fetcher, resolveHost: publicResolver, limits: { maxReadableChars },
+    })).rejects.toThrow(/Invalid source capture limits/);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("fences the primary source write when cancellation wins before store admission", async () => {
+    const { store } = await fixture();
+    const controller = new AbortController();
+    const capture = store.captureSource.bind(store);
+    const write = vi.spyOn(store, "captureSource").mockImplementationOnce(request => {
+      controller.abort(new Error("cancel before source publication"));
+      return capture(request);
+    });
+    try {
+      await expect(captureSource(store, { commandId: command("cancel-primary"), url: "https://example.com/primary", scope: "research" }, {
+        signal: controller.signal,
+        fetcher: async () => new Response("complete source", { headers: { "content-type": "text/plain" } }),
+        resolveHost: publicResolver,
+      })).rejects.toThrow(/cancel/i);
+      expect((await store.list({ kind: "source" })).records).toEqual([]);
+    } finally { write.mockRestore(); }
+  });
+
   it("rejects credential-bearing query parameters before persistence or fetch", async () => {
     const { store } = await fixture();
     let fetched = false;
@@ -62,6 +89,27 @@ describe("safe source capture", () => {
     expect(Date.now() - started).toBeLessThan(2_000);
   });
 
+  it("returns the retained source with an explicit assessment error when the assessor ignores cancellation", async () => {
+    const { store } = await fixture();
+    // The adapter never settles and ignores its AbortSignal. The bounded await
+    // must release the accepted capture instead of holding it open forever.
+    let assessmentStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => { assessmentStarted = resolve; });
+    const controller = new AbortController();
+    const capture = captureSource(store, { commandId: command("stalled-assessment"), url: "https://example.com/assess", scope: "research" }, {
+      signal: controller.signal,
+      fetcher: async () => new Response("<html><title>Assessed</title><body>Evidence</body></html>", { headers: { "content-type": "text/html" } }),
+      resolveHost: publicResolver,
+      model: { assess: () => { assessmentStarted?.(); return new Promise<never>(() => {}); } },
+    });
+    await started;
+    controller.abort(new Error("caller cancelled"));
+    const captured = await capture;
+    expect(captured.assessmentError).toMatch(/deadline|cancel/i);
+    expect(captured.record.content.captureDisposition).toBe("complete");
+    expect(captured.record.content.assessment).toBeUndefined();
+  });
+
   it("upgrades an incomplete URL capture in place on retry", async () => {
     const { store } = await fixture();
     const partial = await captureSource(store, { commandId: command("partial-first"), url: "https://example.com/retry", scope: "research" }, { fetcher: async () => new Response("x".repeat(20), { headers: { "content-type": "text/plain" } }), resolveHost: publicResolver, limits: { maxBytes: 5 } });
@@ -70,6 +118,17 @@ describe("safe source capture", () => {
     expect(complete.record.id).toBe(partial.record.id);
     expect(complete.record.content.captureDisposition).toBe("complete");
     expect((await store.list({ kind: "source" })).records).toHaveLength(1);
+  });
+
+  it("uses the configured readable-character bound rather than the global maximum", async () => {
+    const { store } = await fixture();
+    const result = await captureSource(store, { commandId: command("readable-bound"), url: "https://example.com/readable-bound", scope: "research" }, {
+      fetcher: async () => new Response("a".repeat(100), { headers: { "content-type": "text/plain" } }),
+      resolveHost: publicResolver,
+      limits: { maxReadableChars: 10 },
+    });
+    expect(result.record.content.text).toHaveLength(10);
+    expect(result.record.content.captureDisposition).toBe("partial");
   });
 
   it("bounds response extraction and keeps capture successful when assessment fails", async () => {

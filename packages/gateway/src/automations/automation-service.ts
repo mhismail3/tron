@@ -167,6 +167,7 @@ export class AutomationService {
     outcome: "succeeded" | "failed" | "cancelled",
     provenance: AutomationProvenance,
   ): Promise<AutomationRecord> {
+    this.scheduler.assertRunRetired(runId);
     const resolved = await this.store.resolveUnknown(id, expectedRevision, runId, outcome, provenance);
     this.scheduler.wake();
     return resolved;

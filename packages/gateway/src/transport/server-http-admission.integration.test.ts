@@ -39,6 +39,28 @@ async function bounded<T>(promise: Promise<T>, label: string): Promise<T> {
 }
 
 describe("Gateway HTTP admission and retirement", () => {
+  it("rejects non-object pairing JSON with bounded invalid_request responses", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-pair-body-"));
+    const devices = new DeviceStore(root, "machine");
+    await devices.initialize();
+    const port = await unusedPort();
+    const gateway = new GatewayServer({
+      host: "127.0.0.1", port, maxFrameBytes: 16_384, devices, uploads: {} as any, sessions: {} as any,
+      auth: {} as any, service: { info: () => ({ protocolVersion: 5 }) } as any, logger: { log: () => {} } as any,
+    });
+    await gateway.listen();
+    cleanups.push(async () => { await bounded(gateway.close(), "pair gateway close"); await rm(root, { recursive: true, force: true }); });
+    for (const body of ["null", "[]", JSON.stringify("x"), "123"]) {
+      const outgoing = request({ host: "127.0.0.1", port, method: "POST", path: "/v1/pair", headers: { "content-type": "application/json" } });
+      outgoing.end(body);
+      const result = await bounded(responseStatus(outgoing), "pair invalid body");
+      const chunks: Buffer[] = [];
+      for await (const chunk of result.response) chunks.push(Buffer.from(chunk));
+      expect(result.status).toBe(400);
+      expect(JSON.parse(Buffer.concat(chunks).toString("utf8"))).toMatchObject({ error: { code: "invalid_request" } });
+    }
+  });
+
   it("uses the same bounded retirement when startup fails with an incomplete HTTP peer", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-startup-retirement-"));
     const devices = new DeviceStore(root, "fixture-machine");

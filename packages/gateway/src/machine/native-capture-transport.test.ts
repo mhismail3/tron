@@ -44,6 +44,28 @@ it("JavaScript owns request/close Promises and native callbacks settle them", as
   expect(raw.closeLocal).toHaveBeenCalledTimes(1);
 });
 
+it("bounds stalled request and local-retirement callbacks without manufacturing a reply", async () => {
+  vi.useFakeTimers();
+  mac();
+  const raw = {
+    request: vi.fn(),
+    closeLocal: vi.fn(),
+  };
+  load.mockReturnValue({ apiVersion: 4, open: () => raw });
+  const transport = openNativeCaptureTransport();
+  const request = transport.request(Buffer.from("control"));
+  const requestFailure = expect(request).rejects.toThrow(/bounded deadline/);
+  await vi.advanceTimersByTimeAsync(10_000);
+  await requestFailure;
+  const close = transport.closeLocal();
+  const closeFailure = expect(close).rejects.toThrow(/bounded deadline/);
+  await vi.advanceTimersByTimeAsync(10_000);
+  await closeFailure;
+  expect(raw.request).toHaveBeenCalledOnce();
+  expect(raw.closeLocal).toHaveBeenCalledOnce();
+  vi.useRealTimers();
+});
+
 it("an incompatible native API cannot open a connection", () => {
   mac();
   const open = vi.fn();

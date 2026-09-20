@@ -170,6 +170,186 @@ describe("KnowledgeObservationService", () => {
     observer.dispose();
   });
 
+  it("retains the exact terminal cut when durable admission fails, then admits it once", async () => {
+    const infer = vi.fn(async () => output);
+    const { store, observer } = await fixture({ infer });
+    const failure = vi.spyOn(store, "setCoverage").mockRejectedValueOnce(new Error("observer store unavailable"));
+    observer.admit({ sessionId: "session-1", entries: [...entries], outcome: "completed", invocationId: "admission-retry-invocation" });
+    await waitFor(() => failure.mock.calls.length >= 1);
+    // The failed admission must not leak the cut to the model...
+    expect(infer).not.toHaveBeenCalled();
+    // ...and must not be dropped: the retained cut is admitted after the store recovers.
+    await waitFor(async () => (await store.list({ kind: "observation" })).records.length === 1);
+    expect(infer).toHaveBeenCalledTimes(1);
+    observer.dispose();
+  });
+
+  it("does not persist exclusion when the privacy read fails, then retries the exact cut", async () => {
+    const infer = vi.fn(async () => output);
+    const { store, observer } = await fixture({ infer });
+    const scopeRead = vi.spyOn(store, "scopeExcluded").mockRejectedValueOnce(new Error("privacy store unavailable"));
+    observer.admit({ sessionId: "session-1", entries: [...entries], outcome: "completed", invocationId: "scope-read-retry" });
+    await waitFor(() => scopeRead.mock.calls.length >= 1);
+    expect(infer).not.toHaveBeenCalled();
+    await waitFor(async () => (await store.status()).coverage.observedCount === 1);
+    expect((await store.status()).coverage.excludedCount).toBe(0);
+    expect(infer).toHaveBeenCalledTimes(1);
+    observer.dispose();
+  });
+
+  it("does not requeue or write after disposal wins an in-flight privacy read", async () => {
+    let release!: (value: boolean) => void;
+    const blocked = new Promise<boolean>(resolve => { release = resolve; });
+    const infer = vi.fn(async () => output);
+    const { store, observer } = await fixture({ infer });
+    const scopeRead = vi.spyOn(store, "scopeExcluded").mockReturnValueOnce(blocked);
+    observer.admit({ sessionId: "session-1", entries: [...entries], outcome: "completed", invocationId: "dispose-scope-read" });
+    await waitFor(() => scopeRead.mock.calls.length === 1);
+    const coverageWrites = vi.spyOn(store, "setCoverage");
+    observer.dispose();
+    release(false);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(coverageWrites).not.toHaveBeenCalled();
+    expect(infer).not.toHaveBeenCalled();
+  });
+
+  it("retains the exact cut when an excluded coverage record cannot be written, then records it once", async () => {
+    const infer = vi.fn(async () => output);
+    const { store, observer } = await fixture({ infer });
+    // A scope-excluded range is never sent to the model, but its disposition is
+    // still coverage authority: a failed write must be retried, not dropped.
+    await store.setScopeExclusion("observer-exclusion-fence", { sessionId: "session-1" }, true, "privacy");
+    const failure = vi.spyOn(store, "setCoverage").mockRejectedValueOnce(new Error("observer store unavailable"));
+    observer.admit({ sessionId: "session-1", entries: [...entries], outcome: "completed", invocationId: "excluded-retry-invocation" });
+    await waitFor(() => failure.mock.calls.length >= 1);
+    expect(infer).not.toHaveBeenCalled();
+    await waitFor(async () => (await store.observationCoverageForScope("session-1"))
+      .some((coverage) => coverage.disposition === "excluded"));
+    expect(infer).not.toHaveBeenCalled();
+    observer.dispose();
+  });
+
+  it("admits a cut that exactly fills the model input including its terminal newline", async () => {
+    const maxInputChars = 1_000;
+    const infer = vi.fn(async (input) => {
+      expect(input.sourceText.length).toBeLessThanOrEqual(maxInputChars);
+      return output;
+    });
+    const { store, observer } = await fixture({ infer });
+    const prefix = "[2026-01-01T00:00:01Z] user: ";
+    const terminal = "[terminal outcome: completed]";
+    // Exactly the remaining budget once the unconditional terminal newline and
+    // outcome suffix are reserved.
+    const exactLength = maxInputChars - prefix.length - 1 - terminal.length;
+    const config = await store.config();
+    await store.configure("observer-exact-bound", { ...config, observation: { ...config.observation, maxInputChars } });
+    observer.admit({ sessionId: "session-1", entries: [{ type: "message", id: "boundary-entry", timestamp: "2026-01-01T00:00:01Z", message: { role: "user", content: "x".repeat(exactLength) } }], outcome: "completed", invocationId: "boundary-invocation" });
+    await waitFor(() => infer.mock.calls.length === 1);
+    expect(infer.mock.calls[0]![0].sourceText.length).toBe(maxInputChars);
+
+    // One character more cannot hold the complete cut, so it is recorded as
+    // explicitly unavailable instead of publishing a truncated prompt.
+    observer.admit({ sessionId: "session-1", entries: [{ type: "message", id: "boundary-overflow-entry", timestamp: "2026-01-01T00:00:02Z", message: { role: "user", content: "x".repeat(exactLength + 1) } }], outcome: "completed", invocationId: "boundary-overflow-invocation" });
+    await waitFor(async () => (await store.observationCoverageForScope("session-1")).some(coverage => coverage.disposition === "unavailable"));
+    expect(infer).toHaveBeenCalledTimes(1);
+    observer.dispose();
+  });
+
+  it("redacts machine-local paths at the model boundary without rewriting URLs", () => {
+    const projected = projectObservationEntry({
+      type: "message",
+      id: "machine-path-entry",
+      timestamp: "2026-01-01T00:00:01Z",
+      message: {
+        role: "bashExecution",
+        command: "cat /tmp/secret/notes.txt",
+        output: [
+          "/Volumes/Work/private/report.md",
+          "~/Documents/keys.pem",
+          "C:\\Users\\me\\secret.txt",
+          "see https://example.test/tmp/public for docs",
+        ].join("\n"),
+      },
+    });
+    const text = projected!.text;
+    expect(text).not.toContain("/tmp/secret");
+    expect(text).not.toContain("/Volumes/Work");
+    expect(text).not.toContain("~/Documents");
+    expect(text).not.toContain("secret.txt");
+    // A URL authority keeps its path: the root is not preceded by a path boundary.
+    expect(text).toContain("https://example.test/tmp/public");
+  });
+
+  it("bounds prospective admission and rejects new cuts rather than evicting admitted cuts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-observer-shed-")); roots.push(root);
+    const workspace = new TronWorkspace(join(root, "home")); workspaces.push(workspace);
+    const store = new KnowledgeStore(workspace);
+    await store.configure("observer-shed-config", {
+      ...DEFAULT_KNOWLEDGE_CONFIG,
+      eligibility: { ...DEFAULT_KNOWLEDGE_CONFIG.eligibility, sessionIds: ["session-1"] },
+      observation: { ...DEFAULT_KNOWLEDGE_CONFIG.observation, enabled: true },
+    });
+    let release: (() => void) | undefined;
+    const infer = vi.fn(async () => new Promise<string>((resolve) => { release = () => resolve(output); }));
+    const shed: number[] = [];
+    const observer = new KnowledgeObservationService(store, { infer }, undefined, (fact) => shed.push(fact.dropped));
+    const admissions: boolean[] = [];
+    for (let index = 0; index < 70; index += 1) {
+      admissions.push(observer.admit({
+        sessionId: "session-1",
+        entries: [{ type: "message", id: `shed-entry-${index}`, timestamp: "2026-01-01T00:00:01Z", message: { role: "user", content: `turn ${index}` } }],
+        outcome: "completed",
+        invocationId: `shed-invocation-${index}`,
+      }));
+    }
+    // The active cut consumes its reservation too. Only the new excess cuts are
+    // rejected; no asynchronous gap-write backlog can bypass the queue limit.
+    expect(admissions.slice(0, 64)).toEqual(Array(64).fill(true));
+    expect(admissions.slice(64)).toEqual(Array(6).fill(false));
+    expect(shed.reduce((total, dropped) => total + dropped, 0)).toBe(6);
+    observer.dispose();
+    release?.();
+  });
+
+  it("rejects an oversized retained payload before copying or serializing it into the observation queue", async () => {
+    const infer = vi.fn(async () => output);
+    const diagnostics: number[] = [];
+    const { store, observer: unused } = await fixture({ infer });
+    unused.dispose();
+    const observer = new KnowledgeObservationService(store, { infer }, undefined, fact => diagnostics.push(fact.dropped));
+    const accepted = observer.admit({ sessionId: "session-1", outcome: "completed", entries: [{
+      type: "message", id: "oversized-retained-entry", timestamp: "2026-01-01T00:00:01Z",
+      message: { role: "user", content: "x".repeat(6 * 1_024 * 1_024) },
+    }] });
+    expect(accepted).toBe(false);
+    expect(diagnostics).toEqual([1]);
+    expect(infer).not.toHaveBeenCalled();
+    expect((await store.status()).coverageCount).toBe(0);
+    observer.dispose();
+  });
+
+  it("owns pre-inference store reads until they settle after disposal", async () => {
+    const work = new GatewayWorkRegistry();
+    const infer = vi.fn(async () => output);
+    const { store, observer } = await fixture({ infer }, work);
+    const config = await store.config();
+    let release!: () => void;
+    const waiting = new Promise<void>(resolve => { release = resolve; });
+    const read = vi.spyOn(store, "config").mockImplementationOnce(async () => { await waiting; return config; });
+    try {
+      observer.admit({ sessionId: "session-1", entries: [...entries], outcome: "completed" });
+      expect(work.size).toBe(1);
+      observer.dispose();
+      expect(work.size).toBe(1);
+      release();
+      await work.waitUntilSettled();
+      expect(work.size).toBe(0);
+      expect((await store.status()).coverageCount).toBe(0);
+      expect(infer).not.toHaveBeenCalled();
+    } finally { release(); read.mockRestore(); observer.dispose(); }
+  });
+
   it("coalesces and durably deduplicates canonical no-tool turns without forwarding thinking", async () => {
     const infer = vi.fn(async (input) => {
       expect(input.sourceText).not.toContain("private reasoning omitted");
@@ -317,6 +497,51 @@ describe("KnowledgeObservationService", () => {
       expect((await store.list()).records).toHaveLength(0);
       expect(infer).toHaveBeenCalledTimes(1);
     } finally { release(output); observer.dispose(); }
+  });
+
+  it("retries a durable failed cut with a new expected coverage revision", async () => {
+    let attempts = 0;
+    const infer = vi.fn(async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("temporary provider failure");
+      return output;
+    });
+    const { store, observer } = await fixture({ infer });
+    observer.admit({ sessionId: "session-1", entries, outcome: "failed", invocationId: "failed-retry-invocation" });
+    await waitFor(async () => (await store.pendingObservationCoverage()).some(coverage => coverage.disposition === "failed"));
+    observer.admit({ sessionId: "session-1", entries, outcome: "failed", invocationId: "failed-retry-invocation" });
+    await waitFor(async () => (await store.status()).coverage.observedCount === 1);
+    expect(infer).toHaveBeenCalledTimes(2);
+    observer.dispose();
+  });
+
+  it("recovers a durable pending cut after the original admission is disposed", async () => {
+    let releaseFirst!: () => void;
+    const first = new Promise<void>(resolve => { releaseFirst = resolve; });
+    const initial = vi.fn(async (input: { signal: AbortSignal }) => {
+      await new Promise<void>(resolve => input.signal.addEventListener("abort", () => resolve(), { once: true }));
+      await first;
+      throw new Error("disposed provider");
+    });
+    const root = await mkdtemp(join(tmpdir(), "tron-observer-pending-recovery-")); roots.push(root);
+    const workspace = new TronWorkspace(join(root, "home")); workspaces.push(workspace);
+    const store = new KnowledgeStore(workspace);
+    await store.configure("pending-recovery-config", {
+      ...DEFAULT_KNOWLEDGE_CONFIG,
+      eligibility: { ...DEFAULT_KNOWLEDGE_CONFIG.eligibility, sessionIds: ["session-1"] },
+      observation: { ...DEFAULT_KNOWLEDGE_CONFIG.observation, enabled: true },
+    });
+    const pendingObserver = new KnowledgeObservationService(store, { infer: initial });
+    pendingObserver.admit({ sessionId: "session-1", entries, outcome: "completed", invocationId: "pending-recovery-invocation" });
+    await waitFor(async () => (await store.pendingObservationCoverage()).some(coverage => coverage.disposition === "pending"));
+    pendingObserver.dispose();
+    releaseFirst();
+    const recovered = vi.fn(async () => output);
+    const recoveryObserver = new KnowledgeObservationService(store, { infer: recovered });
+    recoveryObserver.admit({ sessionId: "session-1", entries, outcome: "completed", invocationId: "pending-recovery-invocation" });
+    await waitFor(async () => (await store.status()).coverage.observedCount === 1);
+    expect(recovered).toHaveBeenCalledTimes(1);
+    recoveryObserver.dispose();
   });
 
   it("records failed model inference as a non-success coverage disposition", async () => {

@@ -5,7 +5,7 @@ import type { JsonValue } from "../protocol/types.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { readJson } from "../util/json.js";
 import { durableAtomicWriteJson } from "../util/durable-json.js";
-import { GatewayError } from "../errors.js";
+import { GatewayError, isUncertainOutcome } from "../errors.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 
 const COMMAND_RECEIPT_MAX_BYTES = 1_048_576 + 4 * 1_024;
@@ -44,12 +44,6 @@ interface Receipt {
 
 function outcomeUnknown(message: string): GatewayError {
   return new GatewayError("conflict", message, false, { outcomeUnknown: true });
-}
-
-function isOutcomeUnknown(error: unknown): error is GatewayError {
-  return error instanceof GatewayError
-    && !!error.details && typeof error.details === "object"
-    && (error.details as Record<string, unknown>).outcomeUnknown === true;
 }
 
 function isReceipt(value: unknown): value is Receipt {
@@ -216,7 +210,7 @@ export class CommandReceiptStore {
       let receipt: Receipt | null;
       try { receipt = await this.readReceipt(path); }
       catch (error) {
-        if (isOutcomeUnknown(error)) continue;
+        if (isUncertainOutcome(error)) continue;
         throw error;
       }
       if (!receipt || receipt.status !== "completed") continue;
@@ -290,7 +284,11 @@ export class CommandReceiptStore {
             usage = await this.inventoryUsage();
             if (usage.entries >= this.maximumEntries
               || usage.bytes + this.reservedCompletionBytes + COMMAND_RECEIPT_MAX_BYTES > this.maximumAggregateBytes) {
-              throw new GatewayError("busy", "Command receipt capacity is full; retry after completed receipts expire", true);
+              // Completed receipts expire on their own, but an uncertain outcome is
+              // a permanent replay fence by design. Name that distinction so an
+              // operator can act on a genuinely exhausted store instead of waiting
+              // for an expiry that never comes.
+              throw new GatewayError("busy", "Command receipt capacity is full; completed receipts expire, but unresolved outcomes retain replay protection and require operator reconciliation", true);
             }
           }
           this.reservedCompletionBytes += COMMAND_RECEIPT_MAX_BYTES;
@@ -312,12 +310,18 @@ export class CommandReceiptStore {
         try {
           result = await operation();
         } catch (error) {
-          // An observed application rejection is definitive. Only process/transport
-          // loss may leave a pending receipt as an uncertain outcome.
+          // An owner that reports an uncertain outcome may already have applied its
+          // effect (post-effect persistence or cleanup failure). Retain the pending
+          // receipt so the identical command cannot replay: callers must
+          // reconcile authoritative state before deciding on a new command. An observed
+          // application rejection is definitive and remains retryable.
+          const uncertain = isUncertainOutcome(error);
           await this.inventoryMutex.run(async () => {
             try {
-              await rm(path, { force: true });
-              this.removeReceipt(pendingBytes);
+              if (!uncertain) {
+                await rm(path, { force: true });
+                this.removeReceipt(pendingBytes);
+              }
             } finally {
               if (reserved) this.reservedCompletionBytes -= COMMAND_RECEIPT_MAX_BYTES;
               reserved = false;

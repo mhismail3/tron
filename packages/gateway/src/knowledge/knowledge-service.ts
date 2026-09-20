@@ -4,9 +4,10 @@ import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { KnowledgeAction, KnowledgeConfig, KnowledgeListRequest, KnowledgeRecallRequest, KnowledgeSearchRequest, ObservationCoverageDisposition, SourceAssessment } from "./knowledge-contract.js";
 import type { KnowledgeStore } from "./knowledge-store.js";
 import { KnowledgeObservationService, type ObservationSettlement } from "./knowledge-observation.js";
+import { awaitAbortableWithSettlement } from "./model-await.js";
 import { captureSource, type SourceAssessmentModel } from "./source-capture.js";
 import { triageSource } from "./source-triage.js";
-import { GatewayError } from "../errors.js";
+import { GatewayError, asUncertainOutcome } from "../errors.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 import { currentInvocationContext } from "../extensions/owner-attribution.js";
 
@@ -172,20 +173,50 @@ export class KnowledgeService {
     private readonly workRegistry?: GatewayWorkRegistry,
   ) { this.observer = observer; }
 
-  private async runOwned<T>(operation: string, task: (signal: AbortSignal) => Promise<T>, parentSignal?: AbortSignal): Promise<T> {
+  private async runOwned<T>(operation: string, task: (signal: AbortSignal, retirements: Promise<void>[]) => Promise<T>, parentSignal?: AbortSignal): Promise<T> {
     const controller = new AbortController();
     const relay = () => controller.abort(parentSignal?.reason);
+    let timedOut = false;
     if (parentSignal) {
       if (parentSignal.aborted) controller.abort(parentSignal.reason);
       else parentSignal.addEventListener("abort", relay, { once: true });
     }
-    const timeout = setTimeout(() => controller.abort(new Error(`Knowledge ${operation} deadline exceeded`)), 120_000);
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort(new Error(`Knowledge ${operation} deadline exceeded`));
+    }, 120_000);
     timeout.unref?.();
     let work: GatewayWorkHandle | undefined;
+    let retirement: Promise<void> | undefined;
     try {
       work = this.workRegistry?.begin({ kind: "knowledge-observation", hostEpoch: this.workRegistry.runtimeEpoch, cancellation: () => controller.abort(new Error("Knowledge operation cancelled")) });
-      return await task(controller.signal);
-    } finally { clearTimeout(timeout); parentSignal?.removeEventListener("abort", relay); work?.settle(); }
+      const taskRetirements: Promise<void>[] = [];
+      if (controller.signal.aborted) throw new GatewayError("busy", `Knowledge ${operation} was cancelled before admission`, true);
+      const task$ = task(controller.signal, taskRetirements);
+      const abortable = awaitAbortableWithSettlement(task$, controller.signal, () => {
+        // A model or store owner is not required to honor AbortSignal. Bound the
+        // Gateway-owned await instead of holding the caller and this work token
+        // open; a late result stays fenced by the same signal. A deadline is an
+        // unknown outcome because the accepted mutation may already have landed.
+        if (timedOut) {
+          return asUncertainOutcome(
+            controller.signal.reason ?? new Error(`Knowledge ${operation} deadline exceeded`),
+            `Knowledge ${operation} did not settle before its deadline; refresh state before retrying`,
+          );
+        }
+        return asUncertainOutcome(controller.signal.reason, `Knowledge ${operation} was cancelled after admission; reconcile its receipt before retrying`);
+      });
+      // Provider retirements are registered after asynchronous store reads. Read
+      // the final list only once task has unwound, not when it first starts.
+      retirement = abortable.settled.then(() => Promise.all(taskRetirements)).then(() => undefined);
+      return await abortable.wait;
+    } finally {
+      clearTimeout(timeout); parentSignal?.removeEventListener("abort", relay);
+      // A bounded caller wait may finish before the accepted task/provider has
+      // settled. Retire the work token only at that real settlement boundary.
+      if (work && retirement) void retirement.then(() => work?.settle());
+      else work?.settle();
+    }
   }
 
   observe(settlement: ObservationSettlement): void { this.observer.admit(settlement); }
@@ -235,7 +266,7 @@ export class KnowledgeService {
       case "knowledge.source.capture": {
         const config = await this.store.config();
         const model = this.modelForConfig?.(config);
-        return this.runOwned("source capture", signal => captureSource(this.store, action.request, { ...(model ? { model } : {}), signal }), signal);
+        return this.runOwned("source capture", (signal, retirements) => captureSource(this.store, action.request, { ...(model ? { model } : {}), signal, retirements }), signal);
       }
       case "knowledge.note.create": {
         const request = action.request;
@@ -254,7 +285,7 @@ export class KnowledgeService {
         const config = await this.store.config();
         const model = this.modelForConfig?.(config);
         if (!model) throw new GatewayError("unsupported", "Knowledge assessment requires an explicitly configured model");
-        return this.runOwned("source triage", signal => triageSource(this.store, { ...action.request, signal }, model), signal);
+        return this.runOwned("source triage", (signal, retirements) => triageSource(this.store, { ...action.request, signal, retirements }, model), signal);
       }
       case "knowledge.reflect": {
         const config = await this.store.config();

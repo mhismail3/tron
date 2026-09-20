@@ -54,6 +54,20 @@ cut is branch-lineage-scoped (not the changing leaf), exact, redacted, and
 input-bounded. Distinct terminal envelopes retain their own invocation/outcome
 when queued. Cancellation or a
 configuration/privacy change leaves the cut retryable and cannot publish late.
+A failed durable admission retains its exact cut with bounded backoff; transition
+receipt IDs include the current coverage revision so failed/pending recovery does
+not conflict with an earlier command's request hash. Prospective admission is
+bounded by 64 cuts, 100,000 entries, and a conservative 32 MiB retained-data budget
+including the active cut. Excess new input is rejected with a diagnostic rather
+than evicting accepted cuts or starting unbounded gap-write tasks. Pre-coverage
+cuts remain process-local and may be lost on shutdown/restart; only a committed
+coverage row is recovery authority. Model-bound text removes recognized machine
+paths and credential shapes without claiming complete secret scrubbing.
+A model timeout bounds the caller wait, not the operation lifetime: the exact
+Gateway work token remains held until the task and all provider promises settle.
+Admission and derivative publication carry cancellation through serialized store
+entry; an already-admitted record-body/catalog transaction finishes its receipt
+rather than abandoning durable private bodies after a late cancellation.
 Branch scope uses append-order first-child continuation, so adding a sibling
 never changes the original branch identity; recovery compares exact canonical
 entry IDs and digest and marks missing/non-active coverage unavailable rather
@@ -303,7 +317,10 @@ display or an explicit bounded region in display-local points; window handles
 show the whole selected window. Selection returns an opaque `native_live` source for `display`, not a
 renderer grant or pixels. Only the canonical display result on the active branch
 permits viewing. The existing live-view registry, authenticated HTTP routes and
-mobile renderer serve both producers with shared viewer/decode budgets.
+mobile renderer serve both producers with shared viewer/decode budgets. Each native transport operation
+(`request`, local retirement) is bounded by an owner deadline: a signed host that never replies produces an
+explicit uncertain failure rather than a fabricated remote join. This bounds the
+caller wait; it does not prove host-side retirement or authorize replay.
 
 `machine/native-capture-client.ts` binds one connection to the canonical session
 and extension load. Import is inert; explicit catalog opens the API-versioned,
@@ -412,6 +429,13 @@ available.
 Each occurrence and run is durable before dispatch. Pre-admission transient
 failures may retry with bounded backoff; accepted agent failures do not. A crash
 before any canonical invocation/marker evidence permits the same run to requeue.
+Gateway shutdown cancels pending admissions through the executor and exact prompt
+preflight as well as already-active executions. Disposal joins dispatch through
+its terminal acknowledgement, not merely the provider completion. An expired
+wait returns an explicit blocker while the execution, marker, and lease remain
+owned; it never reports successful retirement. Resolving an unknown run is refused
+until its process-local owner retires. A handle returned after admission was
+cancelled is cancelled and acknowledged without publishing a new running state.
 Accepted work without exact terminal evidence becomes `outcomeUnknown`, blocks
 future occurrences, and requires an explicit receipt-backed user resolution.
 Successful canonical completion remains marked until the automation terminal
@@ -490,7 +514,7 @@ rejected with bounded diagnostics and can never become an uncaught process exit.
 
 The first-party inline Pi extension reserves `notify({message})`; RuntimeSlot owns automatic terminal alerts. Only Pi's final `agent_settled` at idle is terminal, so automatic retries, compaction retries, queued follow-ups, recoverable tool errors, and extension continuations do not announce an intermediate response. RuntimeSlot matches the exact final run's canonical assistant object and queues fixed, outcome-specific copy for normal completion, output limits, terminal errors (including retry exhaustion), aborts, or a tool/agent stop without a final response. Exact Gateway abort ownership overrides the last assistant reason, including cancellation during retry backoff. It never searches backward for an earlier successful answer or infers an outcome from error prose. The assistant entry ID remains the durable deduplication source and also keys one bounded RuntimeSlot observation disposition shared with successful-response attention state. Without a canonical assistant, the existing invocation terminal receipt ID is the source; a Gateway-derived run without an invocation uses its exact operation identity. An exact mobile subscription may publish `session.presentation.set` only after synchronization; monotonically revisioned visible/hidden updates are token-bound, one per connection, removed on close/replacement/disconnect/rekey/delete, and visible leases expire after 45 seconds unless iOS renews them. If that disposition observes an active chat, RuntimeSlot does not invoke notification enqueue: NotificationService writes only a durable `suppressed` receipt for the completion, creates no relay intent or inbox row, and excludes it from delivery quota. Terminal alerts otherwise carry the bounded session title plus the exact Gateway machine/session route; tapping is therefore profile-qualified rather than inferred from whichever server is selected on iOS. The extension receives only a narrow enqueue closure: the model cannot choose a device, APNs token, environment, topic, relay origin, request ID, priority, badge, payload dictionary, or presentation policy. Admission is persisted before dispatch, expires after fifteen minutes, and returns `queued`, `suppressed`, `rate_limited`, or `unavailable`; APNs acceptance is never described as user delivery. Durable abuse ceilings admit up to 240 intents per session per hour and 480 intents per day globally or per target. Rate-limited attempts are returned synchronously but are not persisted, consume no quota, and cannot extend their own lockout. Preview-disabled grants still replace model-authored `notify` text with fixed generic copy; automatic terminal body copy is fixed by Tron rather than the model. The session title is the product-required terminal-alert title and is therefore shown independently of that model-text preview flag.
 
-Automatic notification admission follows the owning canonical terminal receipt. As with invocation admission generally, the pinned SDK buffers a brand-new session until its first assistant entry: a pre-assistant failure receipt is canonical in memory but has no public eager-flush durability guarantee. Tron does not write the SDK's JSONL or create a second receipt journal to bypass that limitation. Admitted prompt preflight/runtime failures and drain-cutoff interruptions use that same notification boundary even if Pi never creates an assistant. A rejected continuation following a successful response retains that response's already-owned terminal receipt rather than overwriting it with a contradictory failure; the stopped alert uses the preceding exact assistant source. Synthetic progress after rejection is not another admitted run. A queued follow-up's failure receives its own terminal receipt and exact marker retirement even when an earlier successful answer is still committing attention; that earlier receipt cannot substitute for the failed owner. In all cases, requests rejected before Gateway admission, handled commands/inputs, maintenance, and pending user interactions are not agent completions. Orderly shutdown of active foreground work preserves its marker, records `outcomeUnknown`, and attempts one interruption alert. Observation is latched before terminal receipt I/O so navigation during persistence cannot change the suppression decision. The persisted/wire kind `agent_finished` is a neutral terminal category, not success evidence; iOS labels it “Agent finished” with a stop icon and displays the reason-specific body. Push admission failure is diagnostic only and cannot fail canonical settlement. This is best-effort notification of observed lifecycle events, not a crash outbox: abrupt process/Mac loss or failed admission can lose an alert, and restart does not replay historical terminal events. Already admitted notification intents retain their existing durable dispatch/retry behavior. Focused coverage is in `runtime-terminal-notifications.integration.test.ts` and `tron-notify-extension.test.ts`.
+Automatic notification admission follows the owning canonical terminal receipt. As with invocation admission generally, the pinned SDK buffers a brand-new session until its first assistant entry: a pre-assistant failure receipt is canonical in memory but has no public eager-flush durability guarantee. Tron does not write the SDK's JSONL or create a second receipt journal to bypass that limitation. The same reasoning applies to a failed append on an already-flushed session: because the SDK inserts an entry into its live branch before the physical append, an entry that exists only in memory after a failure is never announced as a durable canonical receipt. Gateway fails closed with an unknown outcome for that exact identity rather than reporting success from memory, and a retry cannot repair it by appending a contradictory duplicate. Admitted prompt preflight/runtime failures and drain-cutoff interruptions use that same notification boundary even if Pi never creates an assistant. A rejected continuation following a successful response retains that response's already-owned terminal receipt rather than overwriting it with a contradictory failure; the stopped alert uses the preceding exact assistant source. Synthetic progress after rejection is not another admitted run. A queued follow-up's failure receives its own terminal receipt and exact marker retirement even when an earlier successful answer is still committing attention; that earlier receipt cannot substitute for the failed owner. In all cases, requests rejected before Gateway admission, handled commands/inputs, maintenance, and pending user interactions are not agent completions. Orderly shutdown of active foreground work preserves its marker, records `outcomeUnknown`, and attempts one interruption alert. Observation is latched before terminal receipt I/O so navigation during persistence cannot change the suppression decision. The persisted/wire kind `agent_finished` is a neutral terminal category, not success evidence; iOS labels it “Agent finished” with a stop icon and displays the reason-specific body. Push admission failure is diagnostic only and cannot fail canonical settlement. This is best-effort notification of observed lifecycle events, not a crash outbox: abrupt process/Mac loss or failed admission can lose an alert, and restart does not replay historical terminal events. Already admitted notification intents retain their existing durable dispatch/retry behavior. Focused coverage is in `runtime-terminal-notifications.integration.test.ts` and `tron-notify-extension.test.ts`.
 
 The Gateway also owns a bounded 512-entry user-facing notification inbox in the same owner-only state transaction as delivery admission. A visible `queued` inbox row proves durable admission, not relay or APNs acceptance. New notification content, exact session route, per-target APNs request identities, delivery outcome, and global read state are canonical there; the iOS cache is only a bounded disposable projection. Pre-inbox version-1 documents are admitted without migration loss and gain the optional inbox on their next owned write. `notification.inbox.list` pages newest-first under an exact branch-independent revision/cursor, while `notification.inbox.read` accepts exactly one public inbox ID or APNs request ID and `notification.inbox.readAll` clears all unread entries through ordinary command receipts. Every admission, terminal delivery transition, and read mutation broadcasts `notification.inbox.changed`. Unknown, unavailable, suppressed, and rate-limited attempts create no inbox row. Preview-disabled explicit model text remains generic in both APNs and inbox storage.
 
@@ -537,7 +561,7 @@ from an automation-originated turn to prevent self-replication. Paired Gateway c
  clients may manage automations across that Gateway; this is not a new
  per-session authorization boundary.
 
-Authenticated push RPCs are `push.registration.upsert`, `push.registration.remove`, and `push.registration.status`; authenticated notification-resource RPCs are `notification.inbox.list`, `notification.inbox.read`, and `notification.inbox.readAll`. Upsert derives `deviceId` from the connection and accepts only an opaque installation ID, endpoint-scoped grant ID/secret, the exact public relay origin that issued it, and preview/policy booleans; preview disclosure defaults off. Status returns the Gateway-owned relay origin and a bounded rotation requirement. A mobile grant issued by another origin, missing legacy origin identity, or rejected by the relay is never reactivated in place: iOS rotates it through App Attest and transfers the replacement capability. Upsert, removal, and `device.revoke` enter one bounded lane per target device before command-receipt execution, so cross-method invocation order is authoritative while different devices remain concurrent. Revocation disables local push authority before removing the paired bearer; a later admitted upsert revalidates that the device remains paired, and remote revocation retains a bounded tombstone. A grant ID awaiting revocation cannot be admitted as active again: upsert requires rotated endpoint authority, and restart retires any legacy active projection that overlaps a durable tombstone. Thus a delayed revoke can address only the old capability, never a newly active grant. The public relay origin is read from the canonical maintainer-owned `config/PushService.xcconfig`, embedded into both signed products, and must be an exact public HTTPS origin. It is never accepted from tools, RPC, user settings, or runtime environment. Missing development configuration leaves notification delivery unavailable without affecting Gateway readiness; official packaging fails closed.
+Authenticated push RPCs are `push.registration.upsert`, `push.registration.remove`, and `push.registration.status`; authenticated notification-resource RPCs are `notification.inbox.list`, `notification.inbox.read`, and `notification.inbox.readAll`. Upsert derives `deviceId` from the connection and accepts only an opaque installation ID, endpoint-scoped grant ID/secret, the exact public relay origin that issued it, and preview/policy booleans; preview disclosure defaults off. Status returns the Gateway-owned relay origin and a bounded rotation requirement. A mobile grant issued by another origin, missing legacy origin identity, or rejected by the relay is never reactivated in place: iOS rotates it through App Attest and transfers the replacement capability. Upsert, removal, and `device.revoke` enter one bounded lane per target device before command-receipt execution, so cross-method invocation order is authoritative while different devices remain concurrent. Revocation disables local push authority before removing the paired bearer; a later admitted upsert revalidates that the device remains paired, and remote revocation retains a bounded tombstone. A grant ID awaiting revocation cannot be admitted as active again: upsert requires rotated endpoint authority, and restart retires any legacy active projection that overlaps a durable tombstone. Thus a delayed revoke can address only the old capability, never a newly active grant. The ask-notification policy is rechecked inside the same serialized admission transaction that appends the intent, so a concurrent policy disable can no longer admit and deliver an ask notification after the outer read. The public relay origin is read from the canonical maintainer-owned `config/PushService.xcconfig`, embedded into both signed products, and must be an exact public HTTPS origin. It is never accepted from tools, RPC, user settings, or runtime environment. Missing development configuration leaves notification delivery unavailable without affecting Gateway readiness; official packaging fails closed.
 
 Outbound relay requests use one fixed `/v3/notifications` route, no redirects, a twenty-second deadline that exceeds the relay's bounded APNs deadline, a 2 KiB request and 16 KiB response boundary, and a lowercase-hex HMAC over method, path, timestamp, stable request ID, and the exact body's lowercase-hex SHA-256. Restart recovery retries transient outcomes with the same request ID. When the relay specifically reports that this ID still owns an active provider attempt, the Gateway polls it through the same bounded retry schedule; the relay ledger returns the eventual terminal result without creating a second APNs request. Unclassified ambiguous outcomes remain terminal and are never blindly replayed. Exact relay `invalid_signature` and `installation_unavailable` errors invalidate that grant without persisting or logging response bodies; mobile registration then rotates the capability instead of retrying an identity that cannot reach APNs. Quotas apply across the installation, canonical session, and target grant.
 
@@ -579,7 +603,14 @@ accepts a client filesystem path, reads session content, or creates a public upl
 Bearer admission is linearized with the paired-device document under the
 DeviceStore mutex: the credential check and synchronous HTTP/upgrade registration
 share that mutex, but long body, stream, or provider operations are not awaited
-under it. Device revocation atomically
+under it. The local wrapper credential, pairing invitation, paired-device document,
+and revocation replacement are published through the durable file-plus-directory
+synchronization primitive, so an acknowledged pairing or revocation is not lost to
+a power failure between the rename and the filesystem metadata flush. If the
+replacement rename succeeded but later synchronization fails, transport authority
+is retired under the credential mutex while the durability error remains visible.
+A failed pairing attempt regenerates the invitation even when its consumption
+unlinked the old invitation before a directory-sync failure. Device revocation atomically
 replaces that document, publishes transport retirement immediately, then performs
 best-effort install cleanup. Requests and canonical mutations admitted before the
 cut settle independently of their sockets; revoked connections reject later
@@ -650,7 +681,15 @@ inode/size ownership without rehashing every retained object. The first read ver
 process and caches that immutable-object proof; each maintenance pass rotates through one additional bounded
 integrity audit. A failed digest retains logical/canonical metadata, marks the object unavailable, and fails
 reads explicitly rather than silently dropping history. Orphan objects and malformed shards are removed only
-after logical inventory is reconciled.
+after logical inventory is reconciled. An operational filesystem failure during startup validation (for
+example a transient I/O or permission error while reading metadata or proving object ownership) is not
+treated as corruption: the durable artifact and its immutable object are preserved, the identifier stays
+explicitly unavailable to reads until a later validation succeeds. Quota-affecting ingest and
+canonical reconciliation fail closed while any retained artifact cannot be accounted for. Both
+orphan sweeps and healthy-sibling release preserve unknown object references; a failed validation
+must not become data loss on the next initialization. The same distinction applies to a direct
+upload lookup: only confirmed absence, symlink escape, or malformed evidence self-cleans, while an
+operational ownership-check failure preserves the canonical folder and its indexed ownership.
 
 Exact declared and observed sizes are checked before atomic metadata publication. Persisted logical
 metadata remains limited to an exact 64 KiB canonical document; malformed or oversized entries self-clean
@@ -782,7 +821,18 @@ Requests use `{type,id,method,params}` and receive `{type,id,ok,result|error}`.
 Mutations require `params.commandId`; receipts deduplicate completed commands.
 After an uncertain disconnect, clients reconnect and poll `command.status`, reuse
 a completed result, retry only a confirmed-missing command with the same ID, and
-never blindly replay a pending command. An observed application rejection removes
+never blindly replay a pending command. A mutation whose owner reports an unknown
+outcome keeps its pending receipt even though the operation threw, so the
+identical command ID cannot execute twice. Refresh authoritative state before
+making a new decision; a new command ID is not proof that replay is safe.
+Canonical ownership writes bound the caller's wait, including a write that never
+settles. A timeout or unproven append retains the exact runtime as a visible drain
+and eviction blocker and rejects further mutations and reload. Even a pre-provider
+marker may already have been renamed before an fsync failure. Late physical
+completion does not resume abandoned dependent transitions. This deliberately
+fails closed: the pinned SDK has no supported repair/flush acknowledgement for a
+memory-only canonical entry, so refreshing or resending a command cannot clear
+that blocker. Confirmed identity conflicts remain definitive pre-write rejections. An observed application rejection removes
 its pending receipt so the definitive error remains definitive; process loss or failure
 to persist a successful completion leaves pending state and therefore cannot enable a
 blind duplicate. Each receipt is capped at one response frame plus 4 KiB of
@@ -981,9 +1031,16 @@ UI, native custom/overlay rendering, footer/header/editor/autocomplete, theme UI
 renderer hosting, package-specific integration, and truthful TUI activation remain
 deferred.
 
+Bounded JSON projection admits nodes before copying their values, accounts for
+sparse-array null slots and diagnostic markers, and preserves repeated sibling
+references without expanding an unbounded intermediate tree. Tool-output suffixes
+retain chronological block order and newest text; large tool-result text is tailed
+before generic JSON previews so its text/type identity survives. Focused oracles
+in `projection.test.ts` and `hook-projection.test.ts` cover these boundary cases.
+
 Live and canonical transcript projections preserve the canonical tool name while optionally carrying the bounded human-readable `label` declared by the mounted Pi extension tool definition; native clients use that label for presentation and never derive extension titles from snake_case names. Project Resources exposes the same label beside the canonical name. Live tool projections may also carry an optional extension provenance record derived from the public Pi tool `sourceInfo` and the loaded extension inventory. The Gateway emits that record only when exactly one extension owns the tool and the source path agrees; unknown or ambiguous ownership omits provenance and fails open to the ordinary tool projection. This metadata is disposable presentation state and never modifies Pi JSONL.
 
-Every canonical `custom_message` is context-bearing input under Pi semantics. Producer-visible messages project as right-aligned inbound context; producer-hidden messages remain absent from ordinary chat. At the exact Pi message boundary, Gateway captures available owner identity from the wrapped extension callback and whether the message was stored for a later turn or delivered during active work. Callback and tool/command owner lookups resolve finalized package SourceInfo at admission, not the provisional local source present during extension loading (`owner-attribution.test.ts`). Sender attribution is incomplete in the pinned SDK: custom-message queues do not retain sender async context, and extension-initialization timers are outside the callback wrapper. Ownerless receipts therefore remain unknown, including after reopen; complete attribution requires trusted sender evidence carried through the SDK's exact message object, not a custom-type or run-ID lookup. Pi exposes stored custom messages after their canonical append and turn-triggering messages immediately before it; the Gateway binds the exact canonical tail identity at those respective lifecycle boundaries and appends a bounded `tron.context-delivery.v4` receipt targeting that entry. It never scans forward for an unowned payload candidate. Receipts may follow later branch entries, so projection validates exact target identity and target-before-receipt branch order rather than current-leaf adjacency. Text, title, custom type, timestamps, details, and renderer registration never infer producer identity or delivery. Canonical `custom`/`appendEntry` state remains available to extensions but is omitted from chat and tree projection unless it is a validated Gateway invocation-start receipt; validated extension-notification receipts are promoted only into the chat timeline and never become navigation nodes. When an extension-owned tool returns the public structured delegated-run convention (`details.runId`/`asyncId` plus bounded `results[].progress`), the Gateway additionally projects `ExtensionRunActivity` with stable child identities, active time, tool/turn counts, current tool/path, and a bounded output tail. It is carried on the live tool projection and retained as a bounded recent `extensionActivities` snapshot; native clients must not infer it from rendered widget text or open a child JSONL concurrently. The runtime also admits the explicit `pi-subagents` lifecycle-artifact contract: allowlisted `status.json` files are matched to the canonical session file, read with a hard byte bound, and projected as one workflow activity with bounded child progress so detached async runs remain visible after the launching tool returns. Everything provider-specific about that integration — the provider tool name, the run-directory shape, the accepted lifecycle file names, and the exact installed-owner identity used to authorize controls — lives in one `sessions/delegated-provider.ts` boundary rather than in the session runtime, so the runtime depends on a narrow contract instead of embedding package conventions. That boundary grants no authority by itself: the runtime still proves canonical tool/run ownership before projecting or controlling work, and a same-named tool from another package never becomes the provider. Temporary runtime roots and the project-local `.pi/subagents/async-subagent-runs` layout are scanned under one hard work budget; exact live `asyncDir` bindings refresh before bounded ambient enumeration, and terminal ambient evidence outranks decorative live enrichment. A bounded Gateway-owned `runId` binding maps lifecycle events and artifacts to one real tool-call identity; a synthetic `subagent:<runId>` identity is used only for an initially unmatched, session-owned artifact and is re-keyed when the real tool call arrives. Terminal lifecycle status is authoritative, while later artifacts only enrich retained details and cannot resurrect a completed run; terminal recency uses the producer's completion time rather than the later discovery time. Current artifacts are admitted by their exact schema version; historical versioned or unversioned artifacts can supply terminal evidence only after an exact canonical tool-call/`asyncDir` binding proves ownership, so a Gateway reload cannot strand already-finished delegated work in restart drain. Watchers stop on terminal state, disposal, and retention eviction.
+Every canonical `custom_message` is context-bearing input under Pi semantics. Producer-visible messages project as right-aligned inbound context; producer-hidden messages remain absent from ordinary chat. At the exact Pi message boundary, Gateway captures available owner identity from the wrapped extension callback and whether the message was stored for a later turn or delivered during active work. Callback and tool/command owner lookups resolve finalized package SourceInfo at admission, not the provisional local source present during extension loading (`owner-attribution.test.ts`). Sender attribution is incomplete in the pinned SDK: custom-message queues do not retain sender async context, and extension-initialization timers are outside the callback wrapper. Ownerless receipts therefore remain unknown, including after reopen; complete attribution requires trusted sender evidence carried through the SDK's exact message object, not a custom-type or run-ID lookup. Pi exposes stored custom messages after their canonical append and turn-triggering messages immediately before it; the Gateway binds the exact canonical tail identity at those respective lifecycle boundaries and appends a bounded `tron.context-delivery.v4` receipt targeting that entry. It never scans forward for an unowned payload candidate. Receipts may follow later branch entries, so projection validates exact target identity and target-before-receipt branch order rather than current-leaf adjacency. Text, title, custom type, timestamps, details, and renderer registration never infer producer identity or delivery. Canonical `custom`/`appendEntry` state remains available to extensions but is omitted from chat and tree projection unless it is a validated Gateway invocation-start receipt; validated extension-notification receipts are promoted only into the chat timeline and never become navigation nodes. When an extension-owned tool returns the public structured delegated-run convention (`details.runId`/`asyncId` plus bounded `results[].progress`), the Gateway additionally projects `ExtensionRunActivity` with stable child identities, active time, tool/turn counts, current tool/path, and a bounded output tail. It is carried on the live tool projection and retained as a bounded recent `extensionActivities` snapshot; native clients must not infer it from rendered widget text or open a child JSONL concurrently. The runtime also admits the explicit `pi-subagents` lifecycle-artifact contract: allowlisted `status.json` files are matched to the canonical session file, read with a hard byte bound, and projected as one workflow activity with bounded child progress so detached async runs remain visible after the launching tool returns. Everything provider-specific about that integration — the provider tool name, the run-directory shape, the accepted lifecycle file names, and the exact installed-owner identity used to authorize controls — lives in one `sessions/delegated-provider.ts` boundary rather than in the session runtime, so the runtime depends on a narrow contract instead of embedding package conventions. That boundary grants no authority by itself: the runtime still proves canonical tool/run ownership before projecting or controlling work, and a same-named tool from another package never becomes the provider. Provider recognition requires the finalized `npm:pi-subagents` package identity as well as matching path evidence, so a project or local extension living in a directory named `pi-subagents` cannot impersonate the installed provider. Temporary runtime roots and the project-local `.pi/subagents/async-subagent-runs` layout are scanned under one hard work budget; exact live `asyncDir` bindings refresh before bounded ambient enumeration, and terminal ambient evidence outranks decorative live enrichment. A bounded Gateway-owned `runId` binding maps lifecycle events and artifacts to one real tool-call identity; a synthetic `subagent:<runId>` identity is used only for an initially unmatched, session-owned artifact and is re-keyed when the real tool call arrives. Terminal lifecycle status is authoritative, while later artifacts only enrich retained details and cannot resurrect a completed run; terminal recency uses the producer's completion time rather than the later discovery time. Current artifacts are admitted by their exact schema version; historical versioned or unversioned artifacts can supply terminal evidence only after an exact canonical tool-call/`asyncDir` binding proves ownership, so a Gateway reload cannot strand already-finished delegated work in restart drain. Watchers stop on terminal state, disposal, and retention eviction.
 
 Remote restart is advertised only when `TRON_GATEWAY_SUPERVISED=1` is present from a managed LaunchAgent or repository background supervisor; direct foreground processes fail closed for remote restart. Planned restart exits with code 75 only after the registry drain completes. A handled signal in a supervised runtime also exits 75, while an ordinary foreground signal remains a clean exit; process replacement belongs to the supervisor.
 
@@ -1133,7 +1190,13 @@ not permission to create a checkout, and creation revalidates current Git state.
 `existingBranchWorktree` creates a managed worktree from
 an existing local branch. Git arguments are passed without a shell, branch/ref inputs are
 validated, implicit-`HEAD` creation refuses dirty checkouts, and a worktree is removed again
-if session creation fails. Managed worktree roots and repository directories are created and
+if session creation fails. Only a proven successful add may clean up its exact managed worktree and
+compare-delete its branch at the recorded base commit. A failed or uncertain add grants no branch
+cleanup authority; ambiguous residue is preserved rather than deleting a concurrent winner's branch.
+Cleanup verifies the current worktree association and preserves moved branches. Git output retention is
+byte-bounded. Success and failure both check descendant process-group retirement; a timeout requests
+termination and returns a non-retryable unknown outcome at its hard deadline if retirement cannot be
+proven. No destructive rollback races an unresolved Git command. Managed worktree roots and repository directories are created and
 checked with non-following directory metadata, then realpath containment is proven before Git
 runs, so pre-existing symlinks cannot redirect a target. Pi itself receives only the resulting
 canonical `cwd`; its SDK has no Git/worktree creation option. Persisted worktrees remain available
@@ -1333,7 +1396,10 @@ already-listening callback server, and neither callback data nor
 response bodies are logged, persisted, or returned. Pi remains the sole state/PKCE, token exchange,
 refresh, and credential-storage authority.
 `session.list` and `model.list` are cursor-paginated so Pi catalogs remain
-complete without exceeding bounded gateway frames. Workspace browsing streams directory entries
+complete without exceeding bounded gateway frames. A catalog build suspends the
+request while other owners continue, so the pager reacquires the live owner lease
+after the build before publishing a cursor; a concurrent distinct-owner listing
+can therefore never return an immediately expired cursor. Workspace browsing streams directory entries
 from an identity-checked directory handle and fails visibly, without returning a partial listing,
 above 1,000 examined entries or 768 KiB of projected metadata; ordinary folders retain the established directory-first
 ordering and exact paths. Package inventory and update projections reject duplicate stable
@@ -1499,10 +1565,13 @@ projection includes display-safe extension, prompt, skill, context-file, and too
 metadata while canonical resource files and runtime loaders remain authoritative.
 Extension entries also expose the public loader handler event names and bounded
 registration counts, plus scope/source/origin and separate load errors; callback
-functions are never serialized. The hook inventory reports retained/omitted
-extension, handler-event, load-error, and long-metadata counts rather than
-silently presenting a truncated list. Additive hook metadata is admitted under
-a bounded encoded-byte budget so large registrations cannot overrun transport.
+functions are never serialized. One aggregate encoded-byte envelope reserves
+extension identity rows before optional tools, commands, handlers, and load errors.
+An impossible identity is omitted without hiding later rows. Incremental exact
+item-byte accounting avoids repeatedly serializing the growing envelope; retained
+and omitted row/handler/error counts describe the returned projection. The hook inventory reports retained/omitted
+extension, handler-event, load-error, and long-metadata counts that exactly
+describe the returned rows rather than a separately budgeted addition.
 This is a current runtime registration view, not execution history or health.
 `session.tree` returns the existing newest-first-selected, chronologically restored
 flat outline of at most 1,000 nodes and 700 KiB with depth, child-count, role, and
@@ -1619,6 +1688,12 @@ of waiting forever, allowing supervised shutdown/replacement to recover. Direct 
 idle compaction persist interruption markers before canonical SDK work, and reliable
 bounded-frequency marker/terminal-receipt retries keep the same owner live until durability
 succeeds.
+Package mutation admission fences SDK install/remove/update failures as unknown
+outcomes, including partial update batches. Definite preflight failures remain
+retryable; source interpretation (tilde paths, file URLs and Git shorthand)
+remains with the SDK rather than a second package parser. Advisory completion
+publication cannot erase an uncertain mutation's receipt fence.
+
 Package inventory/update discovery and provider login remain exact administrative owners
 until their underlying asynchronous operation settles; retiring mobile UI does not infer
 provider settlement. Registry tokens are the normal drain authority. Exact-owned
