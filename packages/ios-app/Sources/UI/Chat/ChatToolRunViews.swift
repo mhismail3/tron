@@ -696,7 +696,7 @@ enum ToolRowPreviewFadePolicy {
     }
 }
 
-private enum ToolRowPreviewFadeEdge {
+enum ToolRowPreviewFadeEdge {
     case top
     case bottom
 }
@@ -704,7 +704,7 @@ private enum ToolRowPreviewFadeEdge {
 /// Bounded text uses the same partial edge mask as the compact thinking tail.
 /// Primary values fade at the bottom when more follows; result tails fade at
 /// the top when older output was omitted.
-private struct ToolRowPreviewViewport<Content: View>: View {
+struct ToolRowPreviewViewport<Content: View>: View {
     let edge: ToolRowPreviewFadeEdge
     let sourceIsBounded: Bool
     let maximumVisibleLines: Int?

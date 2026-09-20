@@ -202,9 +202,10 @@ struct SessionProcessRow: View {
     var now = Date.now
     var uptime = ProcessInfo.processInfo.systemUptime
     let openTranscript: () -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        Button(action: openTranscript) { card }
+        Button(action: openTranscript) { rowContent }
             // An inherited sheet theme must not replace this row's lifecycle color.
             .tronSettingsVisualTheme(accent: cardAccent)
             .buttonStyle(.plain)
@@ -213,71 +214,80 @@ struct SessionProcessRow: View {
             .accessibilityLabel(process.title)
             .accessibilityValue(accessibilityValue)
             .accessibilityHint(accessibilityHint)
+            .accessibilityIdentifier("subagent-row-\(process.id)")
     }
 
-    @ViewBuilder
-    private var card: some View {
-        switch style {
-        case .activity:
-            TronGlassCard(accent: cardAccent, cornerRadius: 14, interactive: false) {
-                rowContent
-            }
-        case .history:
-            rowContent
+    private var heading: some View {
+        // Keep large accessibility text readable rather than squeezing the
+        // title between trailing status/timing text and the card edge.
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+        return layout {
+            Text(process.title)
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                .foregroundStyle(Color.tronTextPrimary)
+                .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .tronScrollSurface(accent: cardAccent, cornerRadius: 12, tintOpacity: 0.10)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(statusText)
+                    .font(TronTypography.secondaryCodeDescription)
+                    .foregroundStyle(cardAccent)
+                    .lineLimit(1)
+                if let elapsedMilliseconds {
+                    Text("·")
+                        .font(TronTypography.secondaryCodeDescription)
+                        .foregroundStyle(Color.tronTextSecondary)
+                    elapsedText(elapsedMilliseconds)
+                }
+            }
+            .fixedSize(horizontal: !dynamicTypeSize.isAccessibilitySize, vertical: false)
         }
     }
 
     private var rowContent: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(process.title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if let elapsedMilliseconds { elapsedText(elapsedMilliseconds) }
-            }
-            if let metadataLine {
-                Text(metadataLine)
-                    .font(TronTypography.secondaryDescription)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let countsLine {
-                Text(countsLine)
-                    .font(TronTypography.secondaryDescription)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .lineLimit(1)
-            }
-            HStack {
-                SessionProcessPill(icon: statusIcon, text: statusText, accent: cardAccent)
-                Spacer(minLength: 0)
+            heading
+            if let metadata {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("DETAILS")
+                        .font(TronTypography.caption)
+                        .foregroundStyle(Color.tronTextMuted)
+                    Text(metadata)
+                        .font(TronTypography.code(size: TronTypography.sizeBodySM, weight: .medium))
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             if currentAction != nil || outputPreview != nil {
                 VStack(alignment: .leading, spacing: 4) {
-                    if let currentAction {
-                        Text("Current activity")
-                            .font(TronTypography.sheetSectionHeader)
-                            .foregroundStyle(cardAccent)
-                        activityLabel(currentAction)
-                    }
+                    Text(outputLabel)
+                        .font(TronTypography.caption)
+                        .foregroundStyle(process.lifecycle.state == .running ? cardAccent : Color.tronTextMuted)
+                    if let currentAction { activityLabel(currentAction) }
                     if let outputPreview {
-                        Text(outputPreview)
-                            .font(TronTypography.secondaryDescription)
-                            .foregroundStyle(Color.tronTextSecondary)
-                            .lineLimit(SessionProcessRowPresentation.outputLineLimit)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        // Keep the newest logical lines visible even when they wrap;
+                        // use the tool cards' bounded tail and truncation treatment.
+                        ToolRowPreviewViewport(
+                            edge: .top,
+                            sourceIsBounded: outputPreview.isBounded || process.outputTruncated,
+                            maximumVisibleLines: nil
+                        ) {
+                            Text(outputPreview.text)
+                                .font(TronTypography.code(size: TronTypography.sizeBody2, weight: .medium))
+                                .foregroundStyle(Color.tronTextSecondary)
+                        }
                     }
                 }
                 .accessibilityHidden(true)
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.vertical, 11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .tronScrollSurface(accent: cardAccent, cornerRadius: 12, tintOpacity: 0.10)
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private func elapsedText(_ milliseconds: Int) -> some View {
@@ -295,9 +305,14 @@ struct SessionProcessRow: View {
 
     private func activityLabel(_ text: String) -> some View {
         Label(text, systemImage: "hammer")
-            .font(TronTypography.code(size: TronTypography.sizeBody2, weight: .semibold))
+            .font(TronTypography.code(size: TronTypography.sizeBody2, weight: .medium))
             .foregroundStyle(Color.tronTextSecondary)
             .lineLimit(1)
+    }
+
+    private var metadata: String? {
+        let lines = [metadataLine, countsLine].compactMap { $0 }
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 
     private var metadataLine: String? {
@@ -319,28 +334,22 @@ struct SessionProcessRow: View {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
-    private var statusIcon: String {
-        switch process.lifecycle.state {
-        case .running: return "circle.fill"
-        case .queued: return "clock"
-        case .paused: return "pause.circle"
-        case .failed, .rejected, .interrupted: return "exclamationmark.circle"
-        default: return "checkmark.circle"
-        }
-    }
-
-    private var outputPreview: String? {
+    private var outputPreview: ToolOutputTailPreview? {
         SessionProcessRowPresentation.outputPreview(process.outputTail)
     }
 
-    private var tone: SessionProcessRowTone {
-        SessionProcessRowPresentation.tone(for: process.lifecycle.state)
+    private var outputLabel: String {
+        switch process.lifecycle.state {
+        case .running: "LIVE OUTPUT"
+        case .queued, .paused: "LATEST OUTPUT"
+        case .failed, .rejected, .interrupted: "ERROR"
+        default: "RESULT"
+        }
     }
 
     private var cardAccent: Color { style.accent(for: process.lifecycle.state) }
 
-    /// Lifecycle remains explicit for VoiceOver while container color is the
-    /// sole visible status treatment.
+    /// Explicit lifecycle text accompanies color, including for VoiceOver.
     private var statusText: String {
         switch process.lifecycle.state {
         case .running: "Live"
@@ -360,12 +369,11 @@ struct SessionProcessRow: View {
     private var summaryParts: [String] {
         [
             statusText,
-            startedText,
-            process.executionMode.displayName.isEmpty ? nil : process.executionMode.displayName,
             elapsedMilliseconds.map(SessionProcessRowPresentation.durationText),
+            metadataLine,
+            countsLine,
             currentAction,
-            process.toolCount.map { SessionProcessRowPresentation.countLabel($0, singular: "tool") },
-            process.turnCount.map { SessionProcessRowPresentation.countLabel($0, singular: "turn") },
+            outputPreview.map { "\(outputLabel): \($0.text)" },
         ].compactMap { $0 }
     }
 
@@ -378,37 +386,6 @@ struct SessionProcessRow: View {
     }
 }
 
-enum SessionProcessPillMetrics {
-    static let iconFrameSize: CGFloat = 16
-}
-
-struct SessionProcessPill: View {
-    let icon: String
-    let text: String
-    var accent: Color = .tronSubagent
-
-    var body: some View {
-        ChatCompactPillSurface(tone: .subagent, material: .flat, accentOverride: accent, verticalPadding: 3) {
-            HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
-                ChatCompactPillLeadingIcon(
-                    icon: icon,
-                    accent: accent,
-                    iconSize: ChatCompactPillLayoutPolicy.standardIconSize
-                )
-                .frame(
-                    width: SessionProcessPillMetrics.iconFrameSize,
-                    height: SessionProcessPillMetrics.iconFrameSize
-                )
-                Text(text)
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption + 0.5, weight: .semibold))
-                    .lineLimit(1)
-            }
-            .foregroundStyle(accent)
-        }
-        .accessibilityHidden(true)
-    }
-}
-
 enum SessionProcessRowTone: Equatable, Sendable {
     case inProgress
     case succeeded
@@ -418,7 +395,6 @@ enum SessionProcessRowTone: Equatable, Sendable {
 enum SessionProcessRowPresentation {
     static let outputLineLimit = 3
     private static let maximumActionCharacters = 96
-    private static let maximumOutputLineCharacters = 180
     private static let absentValues: Set<String> = ["null", "undefined"]
 
     static func tone(for state: SessionProcessLifecycleState) -> SessionProcessRowTone {
@@ -515,17 +491,8 @@ enum SessionProcessRowPresentation {
         }
     }
 
-    static func outputPreview(_ raw: String?) -> String? {
-        guard let raw else { return nil }
-        let lines = raw
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .suffix(outputLineLimit)
-            .map { String($0.suffix(maximumOutputLineCharacters)) }
-        guard !lines.isEmpty else { return nil }
-        return lines.joined(separator: "\n")
+    static func outputPreview(_ raw: String?) -> ToolOutputTailPreview? {
+        raw.flatMap { ToolOutputTailPreview.make($0, maximumLines: outputLineLimit) }
     }
 
     private static func normalized(_ raw: String?) -> String? {

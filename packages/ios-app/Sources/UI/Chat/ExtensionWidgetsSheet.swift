@@ -33,14 +33,20 @@ struct SessionActivitySheet: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 8) {
                         let sections = SessionProcessProjection.sections(processes)
-                        if !sections.active.isEmpty {
-                            processSection("Running subagents", processes: sections.active, now: context.date)
-                        }
-                        if !extensionContent.isEmpty {
-                            retainedContent
-                        }
-                        if !sections.recent.isEmpty {
-                            processSection("Completed subagents", processes: sections.recent, now: context.date)
+                        // One collection owns process identity across lifecycle sections.
+                        // Separate lazy ForEach groups can retain a departed live cell
+                        // when its exact process ID arrives in the completed group.
+                        ForEach(rows(sections)) { row in
+                            switch row {
+                            case .heading(let title):
+                                ActivitySectionHeader(title: title)
+                            case .process(let process):
+                                SessionProcessRow(process: process, style: .activity, now: context.date) {
+                                    selectedProcess = process
+                                }
+                            case .extensions:
+                                VStack(alignment: .leading, spacing: 8) { retainedContent }
+                            }
                         }
                         if sections.active.isEmpty && sections.recent.isEmpty && extensionContent.isEmpty {
                             TronGlassCard(accent: .tronSlate) {
@@ -73,14 +79,32 @@ struct SessionActivitySheet: View {
 
     private var activities: [SessionProcessActivity] { processActivities }
 
-    @ViewBuilder
-    private func processSection(_ title: String, processes: [SessionProcessActivity], now: Date) -> some View {
-        ActivitySectionHeader(title: title)
-        ForEach(processes) { process in
-            SessionProcessRow(process: process, style: .activity, now: now) {
-                selectedProcess = process
+    private enum Row: Identifiable {
+        case heading(String)
+        case process(SessionProcessActivity)
+        case extensions
+
+        var id: String {
+            switch self {
+            case .heading(let title): "heading.\(title)"
+            case .process(let process): "process.\(process.id)"
+            case .extensions: "extensions"
             }
         }
+    }
+
+    private func rows(_ sections: SessionProcessProjection.Sections) -> [Row] {
+        var rows: [Row] = []
+        if !sections.active.isEmpty {
+            rows.append(.heading("Running subagents"))
+            rows += sections.active.map(Row.process)
+        }
+        if !extensionContent.isEmpty { rows.append(.extensions) }
+        if !sections.recent.isEmpty {
+            rows.append(.heading("Completed subagents"))
+            rows += sections.recent.map(Row.process)
+        }
+        return rows
     }
 
     @ViewBuilder

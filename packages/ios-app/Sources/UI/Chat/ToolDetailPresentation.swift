@@ -904,7 +904,7 @@ struct ToolDetailPresentation: Hashable, Sendable {
     }
 }
 
-/// A bounded suffix preview for aggregate tool rows. This intentionally keeps
+/// A bounded suffix preview shared by tool and subagent cards. This intentionally keeps
 /// only the newest nonempty logical lines: live output is a current display
 /// frame, not an append-only log, and the full result remains in the detail view.
 struct ToolOutputTailPreview: Hashable, Sendable {
@@ -915,10 +915,10 @@ struct ToolOutputTailPreview: Hashable, Sendable {
     let isBounded: Bool
     let renderedLineCount: Int
 
-    static func make(_ source: String) -> ToolOutputTailPreview? {
-        guard !source.isEmpty else { return nil }
+    static func make(_ source: String, maximumLines: Int = Self.maximumLines) -> ToolOutputTailPreview? {
+        guard !source.isEmpty, maximumLines > 0 else { return nil }
         var lines: [String] = []
-        lines.reserveCapacity(Self.maximumLines)
+        lines.reserveCapacity(maximumLines)
         var current: [Character] = []
         current.reserveCapacity(Self.maximumLineCharacters)
         var hasNonWhitespace = false
@@ -930,7 +930,7 @@ struct ToolOutputTailPreview: Hashable, Sendable {
             let rendered = String(current.reversed())
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if hasNonWhitespace, !rendered.isEmpty {
-                if lines.count < Self.maximumLines {
+                if lines.count < maximumLines {
                     lines.append(rendered)
                     if lineWasBounded { boundedOutput = true }
                 } else {
@@ -955,7 +955,7 @@ struct ToolOutputTailPreview: Hashable, Sendable {
                 finishLine()
                 continue
             }
-            if lines.count == Self.maximumLines {
+            if lines.count == maximumLines {
                 if !character.isWhitespace {
                     omittedLines = true
                     break
