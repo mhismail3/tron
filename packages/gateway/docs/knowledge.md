@@ -237,6 +237,63 @@ the ordinary 100,000-character presentation sanitizer; callers must use the
 advertised offsets and verify the final hash. The enclosing frame/native limits
 still apply, and invalid chunk metadata fails closed.
 
+## Free public X post access
+
+The read-only agent `knowledge` action `x` accepts one HTTPS X/Twitter post
+`url`. It does not require or read connector credentials. Public lookup explicitly
+discloses the numeric post ID to FxTwitter, with X's public syndication endpoint
+as the single fallback. No caller query, cookie, authorization header, paid API,
+or browser session is forwarded. The syndication `token` is a deterministic
+public embed value derived from the ID, not an account credential; only that exact
+host/path/computed value is exempted from URL credential-query rejection.
+
+`x-public-post.ts` owns identity validation, provider parsing, and ordered
+fallback; the source owner supplies DNS-pinned HTTP, public-destination checks,
+2 MB body bounds, zero redirects, a 15-second total deadline, and 5-second attempt
+deadlines. Each provider is tried once. A 429 is reported, never immediately
+retried at that provider; another explicit run must respect its cooldown.
+HTTP success alone is not success: expected root ID, JSON shape, and nonempty
+bounded text must match. Errors are sanitized, cancellation stops fallback, and
+an unavailable result is not a claim of deletion or an empty bookmark library.
+Tool output over 128 KB fails instead of truncating source fields.
+
+Results contain provider/endpoint, canonical X ID/URL, root-post text, exact raw
+provider JSON, attempt outcomes, and limitations. Ordinary short-post text may
+be complete **only for the root text**; threads and linked pages are outside its
+coverage. Long posts, Articles, quotes, and media remain partial until separately
+verified. Syndication is always partial. A usable partial FxTwitter response is
+not discarded in favor of a weaker preview. Article previews are never certified
+as bodies, and media URLs are not downloaded content or transcripts.
+
+`captureSource` / `knowledge.source.capture` accepts `publicPostLookup: true` to
+explicitly opt a single public post into this lookup and the existing canonical
+source store. Without it ordinary capture does not contact mirror providers.
+The retained object contains original provider bytes; readable text contains the
+root post, not author bios and engagement metadata. Canonical URI is
+`https://x.com/i/web/status/{id}`, while `captureReason` records provider, attempt
+outcomes, and coverage limits. Existing scope/revision/deduplication, retention,
+object-reading, and capture bounds remain authoritative. This is not permission
+for paid assessment or a new Raindrop intake policy.
+
+Private bookmark discovery remains separate and supervised through the approved
+`agent_browser` profile. The [X skill](../../../.agents/skills/tron-x/SKILL.md)
+defines bounded enumeration, top-level bookmark membership, page checkpoints,
+identity/coverage validation, and signed-in browser fallback. There is no new
+cookie store, background sync, automatic browser login, or remote mutation.
+Never send known protected content to a public mirror without approval.
+The existing paid `connectorSweep` X path is not selected by this free reader;
+its existing explicit spending gates are unchanged.
+
+Focused regressions: `x-public-post.test.ts` covers identity, URL isolation,
+malformed/mismatched/truncated responses, fallback, partial content, cancellation,
+and safe transport; `x-public-capture.test.ts` covers raw evidence, opt-in,
+canonical URL deduplication, retry revisions, bounds, and actual agent routing.
+Browser login, private history coverage, Article/thread completeness, and provider
+availability are live validation requirements, not conclusions from fixture tests.
+New Gateway tool behavior requires a manual maintainer update; agents never
+initiate a Gateway rebuild/restart. The skill includes a generic-tool read recipe
+for sessions whose running tool schema has not yet been updated.
+
 ## Connector boundaries
 
 Raindrop reads the official `/rest/v1/raindrops/{collectionId}` endpoint in bounded pages; X reads

@@ -145,6 +145,8 @@ export interface SourceContent {
   representations?: SourceRepresentation[];
   mediaType?: string;
   captureDisposition: "complete" | "partial" | "metadata-only" | "inaccessible" | "failed" | "reference-only";
+  /** Sanitized capture phase/reason for recoverable provider or safety failures. */
+  captureReason?: string;
   annotations?: Array<{ text: string; locator?: string; createdAt?: string }>;
   sourcePublishedAt?: string;
   capturedAt: string;
@@ -417,6 +419,8 @@ export interface KnowledgeSourceURLCaptureRequest {
   url: string;
   scope: KnowledgeScope;
   title?: string;
+  /** Disclose this public X post ID to the free public lookup providers. */
+  publicPostLookup?: boolean;
   annotations?: SourceContent["annotations"];
   identity?: SourceIdentity;
   origin?: SourceOriginKind;
@@ -798,6 +802,7 @@ function validateKindContent(kind: KnowledgeRecordKind, value: unknown): void {
       if (assessment.confidence !== undefined && (typeof assessment.confidence !== "number" || !Number.isFinite(assessment.confidence) || assessment.confidence < 0 || assessment.confidence > 1)) throw new Error("Invalid source assessment confidence");
       for (const key of ["profileVersion", "rubricVersion"] as const) if (assessment[key] !== undefined) boundedString(assessment[key], `source assessment ${key}`, 200);
     }
+    if (content.captureReason !== undefined) boundedString(content.captureReason, "source capture reason", 2_000);
     if (content.annotations !== undefined) {
       if (!Array.isArray(content.annotations) || content.annotations.length > 200) throw new Error("Invalid source annotations");
       for (const annotation of content.annotations) { const item = annotation as Record<string, unknown>; boundedString(item.text, "annotation", 20_000); if (item.locator !== undefined) boundedString(item.locator, "annotation locator", 512); if (item.createdAt !== undefined) assertTimestamp(item.createdAt, "annotation createdAt"); }
