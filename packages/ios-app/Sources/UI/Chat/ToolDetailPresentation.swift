@@ -630,7 +630,6 @@ struct ToolDetailPresentation: Hashable, Sendable {
     let structuredResult: JSONValue?
     let prefersStructuredResult: Bool
     let diff: ToolDiffPresentation?
-    let usesCodeResult: Bool
 
     init(tool: ChatToolPresentation) {
         let request = tool.request?.objectValue
@@ -660,7 +659,6 @@ struct ToolDetailPresentation: Hashable, Sendable {
         // Actual JSON text still gets the compact structured presentation.
         prefersStructuredResult = kind == .generic && structuredResult != nil
             && (readableResult == nil || Self.parsedJSON(readableResult ?? "") != nil)
-        usesCodeResult = [.read, .write, .edit, .bash, .grep, .find, .list].contains(kind)
     }
 
     static func kind(for title: String) -> ToolDetailKind {

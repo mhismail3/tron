@@ -44,10 +44,47 @@ struct MultilineComposerTextView: UIViewRepresentable {
     let isEditable: Bool
     let keyboardAppearance: UIKeyboardAppearance
     var maximumLines = 8
+    var onPasteImages: (@MainActor ([NSItemProvider]) -> Void)? = nil
 
     final class LayoutAwareTextView: UITextView {
         var didLayout: ((LayoutAwareTextView) -> Void)?
+        var onPasteImages: (([NSItemProvider]) -> Void)?
         private var isReportingLayout = false
+
+        override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+            // Query only type availability while displaying editing controls;
+            // clipboard contents are read solely in the user's Paste action.
+            if action == #selector(paste(_:)), isEditable, onPasteImages != nil,
+               UIPasteboard.general.hasImages { return true }
+            return super.canPerformAction(action, withSender: sender)
+        }
+
+        override func canPaste(_ itemProviders: [NSItemProvider]) -> Bool {
+            if isEditable, onPasteImages != nil, ComposerPastedImages.containsImages(itemProviders) { return true }
+            return super.canPaste(itemProviders)
+        }
+
+        override func paste(_ sender: Any?) {
+            if isEditable, onPasteImages != nil, UIPasteboard.general.hasImages {
+                paste(itemProviders: UIPasteboard.general.itemProviders)
+            } else {
+                super.paste(sender)
+            }
+        }
+
+        override func paste(itemProviders: [NSItemProvider]) {
+            guard isEditable, let onPasteImages, ComposerPastedImages.containsImages(itemProviders) else {
+                super.paste(itemProviders: itemProviders)
+                return
+            }
+            // Each provider is one clipboard item, not one image representation.
+            // Prefer images over alternate URL/text flavors from Copy Image.
+            // Retain one overflow item so the owner can reject, not silently
+            // drop part of a clipboard selection larger than the attachment cap.
+            onPasteImages(Array(itemProviders.lazy.filter {
+                ComposerPastedImages.containsImages([$0])
+            }.prefix(ChatAttachmentImportPolicy.maximumPhotoSelection + 1)))
+        }
 
         override func layoutSubviews() {
             super.layoutSubviews()
@@ -63,6 +100,9 @@ struct MultilineComposerTextView: UIViewRepresentable {
     func makeUIView(context: Context) -> LayoutAwareTextView {
         let view = LayoutAwareTextView()
         view.delegate = context.coordinator
+        view.onPasteImages = onPasteImages == nil ? nil : { [weak coordinator = context.coordinator] providers in
+            coordinator?.pasteImages(providers)
+        }
         view.didLayout = { [weak coordinator = context.coordinator] view in
             coordinator?.textViewDidLayout(view)
         }
@@ -89,6 +129,9 @@ struct MultilineComposerTextView: UIViewRepresentable {
     func updateUIView(_ view: LayoutAwareTextView, context: Context) {
         context.coordinator.parent.responder?.detach(view)
         context.coordinator.parent = self
+        view.onPasteImages = onPasteImages == nil ? nil : { [weak coordinator = context.coordinator] providers in
+            coordinator?.pasteImages(providers)
+        }
         responder?.attach(view)
         let fontChanged = context.coordinator.updateFont(on: view)
         view.isEditable = isEditable
@@ -108,6 +151,7 @@ struct MultilineComposerTextView: UIViewRepresentable {
         view.resignFirstResponder()
         coordinator.parent.responder?.detach(view)
         view.didLayout = nil
+        view.onPasteImages = nil
         view.delegate = nil
     }
 
@@ -142,6 +186,13 @@ struct MultilineComposerTextView: UIViewRepresentable {
         private(set) var hasMirroredFocus = false
 
         init(_ parent: MultilineComposerTextView) { self.parent = parent }
+
+        func pasteImages(_ providers: [NSItemProvider]) {
+            guard parent.isEditable else { return }
+            if let installedTextRevision, let current = parent.authoritativeTextRevision?.wrappedValue,
+               installedTextRevision.scope != current.scope { return }
+            parent.onPasteImages?(providers)
+        }
 
         func reconcileFocus(on view: UITextView) {
             // A direct tap makes UITextView first responder before SwiftUI mirrors

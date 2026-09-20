@@ -186,21 +186,16 @@ struct ToolDetailSheet: View {
         } else if let preview = presentation.readableResultPreview, !preview.text.isEmpty {
             VStack(alignment: .leading, spacing: 7) {
                 sectionLabel(tool.isRunning ? "Live output" : "Result")
-                if presentation.usesCodeResult {
-                    Text(preview.text)
-                        .font(TronTypography.code(size: TronTypography.sizeBodySM))
-                        .foregroundStyle(Color.tronTextSecondary)
-                        .textSelection(.enabled)
-                        .padding(12)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .tronGlassSurface(accent: accent, tintOpacity: 0.07)
-                } else {
-                    TronMarkdownView(text: preview.text, streaming: tool.isRunning)
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .tronGlassSurface(accent: accent, tintOpacity: 0.07)
-                }
+                // Tool output is literal data, including extension/subagent
+                // output. All tool result containers share the code typography.
+                Text(verbatim: preview.text)
+                    .font(TronTypography.code(size: TronTypography.sizeBodySM))
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .textSelection(.enabled)
+                    .padding(12)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .tronGlassSurface(accent: accent, tintOpacity: 0.07)
             }
             if presentation.kind == .generic, let structured = presentation.structuredResult {
                 structuredResultSection(structured, title: "Details")

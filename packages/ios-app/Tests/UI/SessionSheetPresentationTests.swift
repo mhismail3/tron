@@ -767,6 +767,43 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testAllToolResultContainersUseLiteralMonospace() async throws {
+        let output = "Run: workflow\n  Step: 1\n**literal output**, not Markdown\niiii WWWW 0000"
+        var standardPixels: [UInt8]?
+        for name in ["read", "subagent", "web_search", "fetch_content", "custom_extension"] {
+            let tool = ChatToolPresentation(id: "result-font-\(name)", title: name, toolName: name, subtitle: "Completed",
+                request: nil, response: nil, content: output, fallbackContent: nil, error: false,
+                startedAt: nil, completedAt: nil, durationMs: nil, lastProgressAt: nil, progressSequence: nil)
+            try await withSheet(TronDocumentSheet(title: "Tool result") {
+                ToolDetailSheet(tool: tool, density: .glance)
+            }) { controller in
+                // SwiftUI Text need not create UILabels. Compare the actual
+                // mounted result against the standard built-in code result,
+                // including literal Markdown delimiters and indentation.
+                let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
+                    controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
+                }
+                let cg = try XCTUnwrap(image.cgImage)
+                var pixels = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
+                let context = try XCTUnwrap(CGContext(data: &pixels, width: cg.width, height: cg.height,
+                    bitsPerComponent: 8, bytesPerRow: cg.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+                context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+                if let standardPixels {
+                    XCTAssertEqual(pixels.count, standardPixels.count)
+                    let difference = zip(pixels, standardPixels).reduce(0.0) { $0 + abs(Double($1.0) - Double($1.1)) }
+                    // Allow sub-byte native compositing variation, not a
+                    // different output font or layout.
+                    XCTAssertLessThan(difference / Double(pixels.count), 0.5,
+                        "\(name) must render like the standard monospace result, not Markdown")
+                } else {
+                    standardPixels = pixels
+                }
+                if name == "subagent" { self.capture(controller, name: "subagent-monospace-result") }
+            }
+        }
+    }
+
     func testToolTruncationNotesUseNeutralStyling() async throws {
         let tool = ChatToolPresentation(id: "truncated-message", title: "Subagent", toolName: "subagent", subtitle: "Completed",
             request: .object(["message": .string(String(repeating: "A long informational message. ", count: 50))]),

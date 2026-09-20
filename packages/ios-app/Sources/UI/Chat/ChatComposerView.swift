@@ -50,6 +50,7 @@ struct ChatComposerView: View {
     let onSend: (String?) -> Void
     let onAbort: () -> Void
     let onSelectAttachmentDestination: @MainActor @Sendable (ChatAttachmentDestination) -> Void
+    let onPasteImages: @MainActor ([NSItemProvider]) -> Void
     let onCatchUp: () -> Void
     let onComposerHeight: (CGFloat) -> Void
     let onComposerHeightSettled: (CGFloat) -> Void
@@ -256,7 +257,8 @@ struct ChatComposerView: View {
                     maximumLines: ComposerResourcePanelPolicy.editorLines(
                         panelPresented: resourcePicker != nil,
                         keyboardVisible: keyboardVisible
-                    )
+                    ),
+                    onPasteImages: attachmentActionsEnabled ? onPasteImages : nil
                 )
                 .padding(.horizontal, 2)
                 .padding(.vertical, 10)

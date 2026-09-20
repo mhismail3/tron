@@ -1327,6 +1327,42 @@ control and native menu appearance must remain unchanged; the three resource act
 the native keyboard plus the floating shortcut and command-key surfaces rather
 than validating only PTY output.
 
+### Composer image paste
+
+The native composer Paste action accepts one or multiple copied images, using the
+same `ComposerDraftCoordinator.uploadBatch` admission, thumbnail chips, previews,
+removal, and send path as Select Photos. Image items take precedence over alternate
+text/URL clipboard flavors; text-only paste retains UIKit's normal editing behavior.
+Only the user's Paste action reads clipboard contents. `ComposerPastedImages` reads
+bounded provider files during their callback lifetime without decoding full-size
+images; the existing 10-file/25-MiB draft limits still apply. Oversized selections
+are reported instead of silently losing images. Preparation is scoped to the exact
+chat and cancelled on retirement/coverage; after admission, uploads belong to the
+draft coordinator. Repeated pastes append rather than cancelling previous uploads.
+
+`ComposerPastedImagesTests` covers provider loading, byte limits, image ordering,
+unchanged text/selection, overflow, stale editor scope, and late cancellation.
+`ChatViewScrollHarnessTests.pastedImagesUsePhotoAttachmentFlow` mounts the real
+composer, proves batch chips appear before transport completes, captures a simulator
+preview, and checks repeated image paste plus ordinary text paste. On-device manual
+validation should also copy multiple photos from Photos and paste into a focused
+chat using the native editing menu and hardware Command-V; verify preview, removal,
+and send after upload. No clipboard polling or separate attachment UI is introduced.
+
+### Tool results and question actions
+
+All plain-text Result/Live output containers in `ToolDetailSheet` use the same
+literal, selectable 12-point code font, including subagent and other extension
+tools. Tool names no longer switch these containers to Markdown. Structured JSON,
+diffs, other subagent sections, and assistant Markdown keep their existing renderers.
+`SessionSheetPresentationTests.testAllToolResultContainersUseLiteralMonospace`
+compares rendered extension results with the standard built-in result container.
+
+The Ask User form toolbar places Cancel alone on the left and Close (X) immediately
+left of Send on the right, with separate native surfaces. Close retains the draft;
+Cancel still resolves the request. The native Ask User cancellation UI test checks
+button frames and the single scoped cancellation receipt.
+
 Historical onboarding references captured by executing commit `c3f12c17c` live
 under `docs/assets/parity/`. `TronSmokeUITests` keeps matching medium/pairing
 screenshots in its result bundle. Compare the medium sheet crop as well as the

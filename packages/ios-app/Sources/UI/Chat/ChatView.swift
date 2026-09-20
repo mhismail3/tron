@@ -2868,6 +2868,7 @@ struct ChatView: View {
                 }
             },
             onSelectAttachmentDestination: requestAttachmentPresentation,
+            onPasteImages: importPastedImages,
             onCatchUp: catchUpToTail,
             onComposerHeight: composerHeightChanged,
             onComposerHeightSettled: composerHeightSettled
@@ -3681,6 +3682,48 @@ struct ChatView: View {
             )
         }
         catch { model.presentComposerActionError(error, target: target) }
+    }
+
+    private func importPastedImages(_ providers: [NSItemProvider]) {
+        guard attachmentActionsEnabled, let target = presentationTarget else { return }
+        guard providers.count <= ChatAttachmentImportPolicy.maximumPhotoSelection else {
+            model.presentComposerActionError(ComposerPastedImages.ImportError.tooLarge, target: target)
+            return
+        }
+        // Repeated pastes are independent accepted selections, not replacements
+        // for an earlier paste. Bound preparation work and retire it with its chat.
+        guard sessionPresentation.pastedImageImports.count < ChatAttachmentImportPolicy.maximumPhotoSelection else {
+            model.presentComposerActionError("Wait for the copied images to finish loading.", target: target)
+            return
+        }
+        let id = UUID()
+        sessionPresentation.pastedImageImports[id] = Task { @MainActor in
+            defer { sessionPresentation.pastedImageImports[id] = nil }
+            var candidates: [ComposerAttachmentUploadCandidate] = []
+            var bytes = 0
+            for provider in providers.prefix(ChatAttachmentImportPolicy.maximumPhotoSelection) {
+                guard !Task.isCancelled, presentationTarget == target else { return }
+                do {
+                    let candidate = try await ComposerPastedImages.load(
+                        provider, maximumBytes: ChatAttachmentImportPolicy.maximumFileBytes - bytes
+                    )
+                    guard !Task.isCancelled, presentationTarget == target else { return }
+                    bytes += candidate.data.count
+                    candidates.append(candidate)
+                } catch is CancellationError { return }
+                catch {
+                    guard !Task.isCancelled, presentationTarget == target else { return }
+                    model.presentComposerActionError(error, target: target)
+                }
+            }
+            guard !candidates.isEmpty, !Task.isCancelled, presentationTarget == target else { return }
+            // Once admitted, the draft coordinator owns upload receipts/removal.
+            // Covering the chat must not cancel already-published attachment chips.
+            sessionPresentation.pastedImageImports[id] = nil
+            do { try await model.uploadBatch(candidates, target: target) }
+            catch is CancellationError { return }
+            catch { model.presentComposerActionError(error, target: target) }
+        }
     }
 
     private func importPhotos(_ values: [PhotosPickerItem], target: SessionPresentationIdentity) async {

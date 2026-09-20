@@ -6,6 +6,59 @@ import UIKit
 @MainActor
 @Suite("Hosted ChatView scroll harness", .serialized)
 struct ChatViewScrollHarnessTests {
+    @Test("pasted images use the photo batch chips without replacing the editor or its draft")
+    func pastedImagesUsePhotoAttachmentFlow() async throws {
+        try await withTestWatchdog(timeout: .seconds(20)) {
+            let snapshot = try SessionScenarioBuilder(seed: 1_260).openingTail(targetEncodedBytes: 10_000)
+            try await withHarness(snapshot: snapshot, enablesComposerSubmission: true, enablesPresentationCover: true) { harness in
+                let ready = try await harness.recorder.waitUntil { $0.observation.isReady }
+                try harness.setComposerText("Describe these images")
+                let before = try harness.composerTextAndSelection()
+                let images = [UIColor.red, .blue].map { color in
+                    UIGraphicsImageRenderer(size: CGSize(width: 32, height: 32)).image { context in
+                        color.setFill()
+                        context.fill(CGRect(x: 0, y: 0, width: 32, height: 32))
+                    }
+                }
+                let clipboard = UIPasteboard.general
+                let originalClipboard = clipboard.items
+                defer { clipboard.items = originalClipboard }
+                clipboard.images = images
+                harness.uploads.hold = true
+                try harness.pasteFromClipboard()
+                _ = try await harness.recorder.waitUntil {
+                    harness.currentAttachments.count == 2 && harness.uploads.calls == 1
+                        && $0.observation.composerHeight > ready.observation.composerHeight + 50
+                }
+                #expect(harness.currentAttachments.allSatisfy { $0.preparedThumbnail != nil && $0.mimeType.hasPrefix("image/") })
+                #expect(harness.currentAttachments.allSatisfy { $0.gatewayUploadID == nil })
+                let after = try harness.composerTextAndSelection()
+                #expect(after.text == before.text && after.selection == before.selection && after.identity == before.identity)
+                for _ in 0..<24 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+                harness.captureScreenshot(named: "pasted-photo-batch-chips.png")
+                harness.setCovered(true)
+                try await harness.waitForCoverTransition(presented: true)
+                harness.uploads.hold = false
+                harness.uploads.release()
+                while harness.currentAttachments.contains(where: { $0.gatewayUploadID == nil }) {
+                    try await DisplayFrameScheduler.displayLink.nextFrame()
+                }
+                #expect(harness.currentAttachments.map(\.gatewayUploadID) == ["fixture-upload-1", "fixture-upload-2"])
+                harness.setCovered(false)
+                try await harness.waitForCoverTransition(presented: false)
+                try harness.pasteImages([NSItemProvider(object: images[0])])
+                while harness.currentAttachments.count != 3 || harness.uploads.calls != 3 {
+                    try await DisplayFrameScheduler.displayLink.nextFrame()
+                }
+                try harness.pasteImages([NSItemProvider(object: " in detail" as NSString)])
+                while try harness.composerTextAndSelection().text != "Describe these images in detail" {
+                    try await DisplayFrameScheduler.displayLink.nextFrame()
+                }
+                #expect(harness.currentAttachments.count == 3)
+            }
+        }
+    }
+
     @Test("long assistant Markdown keeps exact intrinsic height with bounded thinking")
     func longAssistantIntrinsicGeometry() throws {
         let body = (0..<120).map { index in
@@ -3269,6 +3322,26 @@ final class ChatViewScrollHarness {
     func focusComposer(_ focused: Bool) throws {
         guard let textView = Self.textViews(in: hostingController.view).first else { throw HarnessError.missingComposer }
         if focused { textView.becomeFirstResponder() } else { textView.resignFirstResponder() }
+    }
+
+    func pasteFromClipboard() throws {
+        guard let textView = Self.textViews(in: hostingController.view).first else { throw HarnessError.missingComposer }
+        #expect(textView.canPerformAction(#selector(UITextView.paste(_:)), withSender: nil))
+        textView.paste(nil)
+    }
+
+    func pasteImages(_ providers: [NSItemProvider]) throws {
+        guard let textView = Self.textViews(in: hostingController.view).first else { throw HarnessError.missingComposer }
+        #expect(textView.canPaste(providers))
+        textView.paste(itemProviders: providers)
+    }
+
+    func captureScreenshot(named name: String) {
+        let view = hostingController.view!
+        let image = UIGraphicsImageRenderer(bounds: view.bounds).image { _ in
+            view.drawHierarchy(in: view.bounds, afterScreenUpdates: true)
+        }
+        if let data = image.pngData() { Attachment.record(data, named: name) }
     }
 
     func setComposerText(_ text: String) throws {

@@ -115,6 +115,7 @@ final class ChatSessionPresentation {
     var canonicalSubmissionAliases = BoundedChatIdentityAliasLedger()
 
     @ObservationIgnored var photoImportTask: Task<Void, Never>?
+    @ObservationIgnored var pastedImageImports: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored var attachmentPresentationTask: Task<Void, Never>?
     @ObservationIgnored private(set) var openingTask: Task<Void, Never>?
     private(set) var openingTaskRevision = 0
@@ -145,6 +146,8 @@ final class ChatSessionPresentation {
     }
 
     func cancelImports() {
+        pastedImageImports.values.forEach { $0.cancel() }
+        pastedImageImports.removeAll()
         photoImportTask?.cancel()
         photoImportTask = nil
         photoImportTarget = nil

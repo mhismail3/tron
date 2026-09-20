@@ -62,12 +62,16 @@ struct ChatSessionPresentationTests {
         owner.attachmentDestination = .files
         owner.queuedAttachmentDestination = .camera
         owner.photoImportTarget = SessionPresentationIdentity(sessionID: "session-a", generation: 9)
+        let paste = Task<Void, Never> {}
+        owner.pastedImageImports[UUID()] = paste
 
         owner.suspendForBackground()
 
         #expect(owner.attachmentDestination == nil)
         #expect(owner.queuedAttachmentDestination == nil)
         #expect(owner.photoImportTarget == nil)
+        #expect(owner.pastedImageImports.isEmpty)
+        #expect(paste.isCancelled)
         #expect(owner.modelPresentationGeneration == 9)
         #expect(owner.open.epoch == epoch)
         #expect(owner.open.phase == .ready)

@@ -1146,10 +1146,9 @@ final class ComposerDraftCoordinator {
         schedulePersistence(for: scope)
     }
 
-    /// Stages one PhotosPicker selection atomically in selection order, then
-    /// uploads every member concurrently. Transport latency can never serialize
-    /// chip publication or leave later selected photos invisible behind one
-    /// active upload.
+    /// Stages one selected or pasted image batch atomically in source order,
+    /// then transfers members through ordered transport tasks. Network latency
+    /// cannot serialize chip publication or hide later images behind an upload.
     func uploadBatch(
         _ candidates: [ComposerAttachmentUploadCandidate],
         target: SessionPresentationIdentity

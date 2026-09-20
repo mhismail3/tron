@@ -136,9 +136,15 @@ final class TronSmokeUITests: XCTestCase {
     func testAskUserAllowCancelCancelSendsExactlyOneScopedCancellation() {
         let app = launchAskUser(multiple: true)
         waitForAskUserForm(in: app)
-        XCTAssertTrue(app.buttons["Cancel form"].exists)
-        XCTAssertTrue(app.buttons["Close form and keep answers"].exists)
-        app.buttons["Cancel form"].tap()
+        let cancel = app.buttons["Cancel form"]
+        let close = app.buttons["Close form and keep answers"]
+        let send = app.buttons["Submit all answers"]
+        XCTAssertTrue(cancel.exists && close.exists && send.exists)
+        XCTAssertLessThan(cancel.frame.maxX, app.frame.midX)
+        XCTAssertGreaterThan(close.frame.minX, app.frame.midX)
+        XCTAssertLessThanOrEqual(close.frame.maxX, send.frame.minX)
+        keepScreenshot(named: "ask-user-cancel-left-close-send-right")
+        cancel.tap()
         XCTAssertTrue(app.staticTexts["Mutation count: 1"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.staticTexts["extension.respond cancelled=true scope=ask-user-interaction/hosted-ask-user-epoch/1"].exists)
         XCTAssertFalse(app.staticTexts["Mutation count: 2"].exists)

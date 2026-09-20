@@ -65,19 +65,7 @@ struct ExtensionFormSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(action: close) {
-                        Image(systemName: "xmark")
-                            .font(TronTypography.buttonSM)
-                    }
-                    .tronToolbarAction(accent: .tronTextMuted)
-                    .disabled(submitting)
-                    .accessibilityLabel("Close form and keep answers")
-                }
                 if form?.allowCancel == true {
-                    // Keep draft dismissal and domain cancellation in distinct
-                    // native toolbar surfaces rather than one shared capsule.
-                    ToolbarSpacer(.fixed, placement: .topBarLeading)
                     ToolbarItem(placement: .topBarLeading) {
                         Button("Cancel", action: cancel)
                             .font(TronTypography.buttonSM)
@@ -89,6 +77,18 @@ struct ExtensionFormSheet: View {
                 ToolbarItem(placement: .principal) {
                     TronSheetTitle(title: form?.title ?? "Questions", accent: .tronAmber)
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: close) {
+                        Image(systemName: "xmark")
+                            .font(TronTypography.buttonSM)
+                    }
+                    .tronToolbarAction(accent: .tronTextMuted)
+                    .disabled(submitting)
+                    .accessibilityLabel("Close form and keep answers")
+                }
+                // Local dismissal keeps the draft; Cancel on the opposite side
+                // resolves the domain request. Keep Close distinct from Send.
+                ToolbarSpacer(.fixed, placement: .topBarTrailing)
                 ToolbarItem(placement: .topBarTrailing) {
                     if form != nil {
                         Button(action: submit) {
