@@ -6,7 +6,7 @@ import SwiftUI
 final class DashboardHeaderState {
     static let blurFadeDistance: CGFloat = 80
     static let stretchDistance: CGFloat = 120
-    static let initialDrop: CGFloat = 10
+    static let initialDrop: CGFloat = 25
     static let titleSize: CGFloat = 34
     private(set) var offset: CGFloat = 0
 
@@ -21,11 +21,11 @@ final class DashboardHeaderState {
         reduceMotion ? 0 : Self.initialDrop * (1 - Self.ease(progress))
     }
 
-    // Two base font points of shrink, or at most four percent of pull stretch.
+    // Two base font points of shrink, or at most six percent of pull stretch.
     func titleScale(reduceMotion: Bool) -> CGFloat {
         guard !reduceMotion else { return 1 }
         let pull = max(0, -offset / Self.stretchDistance)
-        return 1 - (2 / Self.titleSize) * Self.ease(progress) + 0.04 * Self.ease(pull)
+        return 1 - (2 / Self.titleSize) * Self.ease(progress) + 0.06 * Self.ease(pull)
     }
 
     private static func ease(_ value: CGFloat) -> CGFloat {

@@ -28,9 +28,9 @@ final class DashboardChromeTests: XCTestCase {
     func testHeaderMotionIsSmallBoundedReversibleAndRespectsReduceMotion() {
         let state = DashboardHeaderState()
         let samples: [(CGFloat, CGFloat, CGFloat)] = [
-            (0, 10, 1), (40, 5, 33 / 34), (80, 0, 32 / 34), (800, 0, 32 / 34),
-            (40, 5, 33 / 34), (0, 10, 1), (-60, 10, 1.02), (-120, 10, 1.04),
-            (-800, 10, 1.04), (0, 10, 1),
+            (0, 25, 1), (40, 12.5, 33 / 34), (80, 0, 32 / 34), (800, 0, 32 / 34),
+            (40, 12.5, 33 / 34), (0, 25, 1), (-60, 25, 1.03), (-120, 25, 1.06),
+            (-800, 25, 1.06), (0, 25, 1),
         ]
         for (offset, y, scale) in samples {
             state.update(offset: offset)
@@ -106,7 +106,7 @@ final class DashboardChromeTests: XCTestCase {
             try await self.waitUntil { scroll.contentOffset.y > original.y + 100 }
             try await self.attach(host.view, name: "dashboard-scrolled-dark")
             let compact = try XCTUnwrap(self.elements(in: host.view).first { $0.accessibilityLabel == "Tron" }).accessibilityFrame
-            XCTAssertEqual(compact.minY, titleFrame.minY - 10, accuracy: 1)
+            XCTAssertEqual(compact.minY, titleFrame.minY - 25, accuracy: 1)
             XCTAssertEqual(compact.minX, titleFrame.minX, accuracy: 1)
             XCTAssertEqual(compact.height / titleFrame.height, 32 / 34, accuracy: 0.015)
             XCTAssertEqual(scroll.convert(scroll.bounds, to: host.view).minY, contentTop, accuracy: 1,
@@ -121,7 +121,7 @@ final class DashboardChromeTests: XCTestCase {
             let stretched = try XCTUnwrap(self.elements(in: host.view).first { $0.accessibilityLabel == "Tron" }).accessibilityFrame
             XCTAssertEqual(stretched.minY, titleFrame.minY, accuracy: 1)
             XCTAssertEqual(stretched.minX, titleFrame.minX, accuracy: 1)
-            XCTAssertEqual(stretched.height / titleFrame.height, 1.04, accuracy: 0.015)
+            XCTAssertEqual(stretched.height / titleFrame.height, 1.06, accuracy: 0.015)
             XCTAssertEqual(menu.convert(menu.bounds, to: host.view), frame)
             scroll.setContentOffset(original, animated: true)
             try await self.waitUntil {
@@ -182,7 +182,7 @@ final class DashboardChromeTests: XCTestCase {
             try await self.waitUntil { scroll.contentOffset.y > original.y + 30 }
             try await self.attach(host.view, name: "dashboard-mid-scroll-light-accessibility")
             let midway = try XCTUnwrap(self.elements(in: host.view).first { $0.accessibilityLabel == "Tron" }).accessibilityFrame
-            XCTAssertEqual(midway.minY, titleFrame.minY - 5, accuracy: 1)
+            XCTAssertEqual(midway.minY, titleFrame.minY - 12.5, accuracy: 1)
             XCTAssertEqual(midway.height / titleFrame.height, 33 / 34, accuracy: 0.015)
             XCTAssertEqual(midway.minX, titleFrame.minX, accuracy: 1)
         }

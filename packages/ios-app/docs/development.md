@@ -17,10 +17,10 @@ Sessions, Automations, and Knowledge compose `DashboardChrome`: a leading
 34-point base-size heading, a scroll-revealed top blur, and one bottom-right
 56-point glass button containing a 34-point Tron logo. Titles and controls use each
 dashboard's accent; long headings fit narrow/accessibility layouts before motion is applied.
-The header and content start 10 points lower. Over the first 80 points of upward
+The header and content start 25 points lower. Over the first 80 points of upward
 scroll, the header rises to its original position and gently scales from 34 to
-32 points; the list's extra 10-point content margin scrolls away natively. Pull-down leaves that 10-point resting position intact while stretching
-the title by at most 4%, reached at 120 points of native rubber-band displacement.
+32 points; the list's extra 25-point content margin scrolls away natively. Pull-down leaves that 25-point resting position intact while stretching
+the title by at most 6%, reached at 120 points of native rubber-band displacement.
 Smooth-ended transforms follow the signed, inset-normalized native scroll offset;
 there is no extra animator, gesture recognizer, timer, or scroll-dependent content inset.
 Only the title and backdrop observe `DashboardHeaderState`, not the catalogue or row
