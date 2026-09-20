@@ -321,7 +321,9 @@ workflow reservations. New Knowledge assessments persist that usage and
 published-price estimate on the immutable assessment derivative and attempt
 receipt. Intake reports the approved ceiling, conservative reserved allowance,
 selected cohort cap, settled count, known estimated usage cost, and unknown
-legacy usage separately. Cost totals and unknown/uncertain attempt counts derive
+usage separately. These are cohort totals; `captured`, `retained`, `archived`,
+`pending`, and `moved` describe this invocation, while `budget` describes the
+entire frozen cohort. Cost totals and unknown/uncertain attempt counts derive
 from durable cohort receipts, so they survive moved items, reruns, and restart;
 known costs are a subtotal when other attempts remain unknown. Pending identities
 outside the selected cohort are reported separately, not labeled as assessed or
@@ -333,8 +335,13 @@ question separately, rechecks cancellation after admission, redacts transport
 failures, and never retries a paid POST. The adapter sends the pinned
 `jev-1.13.0` typed contract to TypeSafe, validates the real choice/score
 probability maps, score legend and expectation, and records fixed local labels
-plus interest-bound profile/rubric versions and an exact input digest; it does
-not persist Jev prose as source truth. Novelty is intentionally omitted because
+plus interest-bound profile/rubric versions, a digest of the complete captured
+input, a digest of the exact bounded model state, and `full` versus `sampled`
+coverage. Complete readable evidence is sent when it fits. Oversized evidence is
+represented by a UTF-8/code-point-safe, explicitly labelled bounded excerpt while
+canonical raw bytes remain untouched; sampled assessments can classify but can
+never archive. This is bounded sampling, not a hidden multi-call summary or
+provider fallback. It does not persist Jev prose as source truth. Novelty is intentionally omitted because
 this bounded item request has no corpus evidence. The intake supplies its
 reservation through the model adapter's `beforeDispatch` seam, after Jev
 preflight and credential lookup; validation or missing-key failures therefore
@@ -343,7 +350,10 @@ an uncertain dispatched receipt and is never retried automatically. Complete
 source capture remains durable and pending when Jev is unavailable. The first
 pilot is frozen; `knowledge.connector.assessment.approve` appends an explicit
 new <=10-item/$1 cohort for later work without resetting prior receipts or
-binding fields. By default, later cohorts select only identities not already
+binding fields. A valid historical paid assessment remains reusable when its
+source/profile digest is unchanged; changing code or the current rubric does
+not silently trigger a new paid assessment. Explicit reassessment
+requires a fresh approval and receipt. By default, later cohorts select only identities not already
 assigned to a cohort. An explicitly supplied `itemIds` list freezes pending
 identities for renewed assessment attempts; previous uncertain charges remain
 reserved, and the new cohort has its own additional allowance. This is renewed
@@ -351,8 +361,26 @@ paid authority, never an automatic retry or refund. Approvals cannot proceed
 while a remote move is unresolved. Intake must match the approved bounds,
 account, collection, and interest profile.
 
-Capture quality, source admission, and remote delivery are separate. Incomplete
-or failed capture remains `pending`. A completed item receives a durable
+Capture quality, source admission, and remote delivery are separate. A bounded
+per-item outcome accompanies each intake result with canonical source identity
+and revision when available, capture/admission reason, assessment phase, and
+move result. Outcomes retain cohort order and the canonical source revision
+reached by each item; reused assessments are distinguished from new dispatches.
+Summary counts and outcomes describe the same cohort but different scopes:
+invocation counters count work performed, while outcomes also cover previously
+processed identities and unattempted items blocked by an earlier remote effect;
+missing pending identities are reported as recoverable reconciliation work rather
+than silently omitted. Incomplete or failed capture remains `pending`. A
+
+destination safety check failure is also durable as a `reference-only` source
+with a sanitized capture-phase reason and provider identity; no forbidden hop is
+fetched, and per-hop SSRF checks remain active. An initial blocked URL records
+that no linked request was attempted; a blocked redirect records that an earlier
+request was attempted while no request was sent to the forbidden target. The
+reason records that the safety guard rejected the destination at capture time,
+without asserting that
+the original bookmark URL itself was private or malformed. A completed item
+receives a durable
 `retained` or recoverable `archived` source-admission state; archived sources
 are absent from normal retrieval but can be explicitly listed/read/restored
 without using privacy suppression. Connector captures awaiting admission are
@@ -364,7 +392,9 @@ does the existing Raindrop preflight/receipt/PUT/read-back path attempt the
 configured Agent Sorted move. Uncertain provider effects remain pending for
 reconciliation. Offset pages are not treated as an atomic snapshot: each
 bounded run revisits page zero and uses durable IDs, so moved items shrinking
-earlier pages cannot silently skip later entries.
+earlier pages cannot silently skip later entries. Malformed read envelopes are
+rejected locally before credential lookup or provider HTTP; provider failures
+remain sanitized.
 The operation is manual only; no recurring approval, scheduler, X integration,
 or collection creation is implied.
 

@@ -110,8 +110,12 @@ export interface SourceAssessment {
   confidence?: number;
   profileVersion?: string;
   rubricVersion?: string;
-  /** Digest of the exact captured evidence and interests assessed by the model. */
+  /** Digest of the complete captured evidence and interests for this assessment. */
   inputDigest?: string;
+  /** Digest of the exact bounded state actually supplied to the model. */
+  assessmentInputDigest?: string;
+  /** Full evidence was evaluated, or a bounded excerpt was evaluated. */
+  coverage?: "full" | "sampled";
   /** Bounded useful-category classification; not an evidence-quality claim. */
   classification?: string;
   /** Provider-reported usage and a local published-price estimate. Absent on legacy assessments. */
@@ -145,6 +149,8 @@ export interface SourceContent {
   representations?: SourceRepresentation[];
   mediaType?: string;
   captureDisposition: "complete" | "partial" | "metadata-only" | "inaccessible" | "failed" | "reference-only";
+  /** Sanitized capture phase/reason for recoverable provider or safety failures. */
+  captureReason?: string;
   annotations?: Array<{ text: string; locator?: string; createdAt?: string }>;
   sourcePublishedAt?: string;
   capturedAt: string;
@@ -789,6 +795,9 @@ function validateKindContent(kind: KnowledgeRecordKind, value: unknown): void {
       if (!["high", "medium", "low", "none", "unknown"].includes(assessment.evidenceQuality as string) || !["current", "aging", "stale", "unknown"].includes(assessment.freshness as string)) throw new Error("Invalid source assessment quality");
       assertTimestamp(assessment.generatedAt, "source assessment generatedAt");
       if (assessment.model !== undefined) boundedString(assessment.model, "source assessment model", 200);
+      if (assessment.inputDigest !== undefined && !/^[a-f0-9]{64}$/.test(String(assessment.inputDigest))) throw new Error("Invalid source assessment input digest");
+      if (assessment.assessmentInputDigest !== undefined && !/^[a-f0-9]{64}$/.test(String(assessment.assessmentInputDigest))) throw new Error("Invalid source assessment state digest");
+      if (assessment.coverage !== undefined && !["full", "sampled"].includes(String(assessment.coverage))) throw new Error("Invalid source assessment coverage");
       if (assessment.usage !== undefined) {
         const usage = assessment.usage as Record<string, unknown>;
         if (!usage || typeof usage !== "object" || Array.isArray(usage) || !Number.isSafeInteger(usage.inputTokens) || (usage.inputTokens as number) < 0 || !Number.isSafeInteger(usage.outputTokens) || (usage.outputTokens as number) < 0 || typeof usage.estimatedCostCents !== "number" || !Number.isFinite(usage.estimatedCostCents) || usage.estimatedCostCents < 0) throw new Error("Invalid source assessment usage");
@@ -798,6 +807,7 @@ function validateKindContent(kind: KnowledgeRecordKind, value: unknown): void {
       if (assessment.confidence !== undefined && (typeof assessment.confidence !== "number" || !Number.isFinite(assessment.confidence) || assessment.confidence < 0 || assessment.confidence > 1)) throw new Error("Invalid source assessment confidence");
       for (const key of ["profileVersion", "rubricVersion"] as const) if (assessment[key] !== undefined) boundedString(assessment[key], `source assessment ${key}`, 200);
     }
+    if (content.captureReason !== undefined) boundedString(content.captureReason, "source capture reason", 2_000);
     if (content.annotations !== undefined) {
       if (!Array.isArray(content.annotations) || content.annotations.length > 200) throw new Error("Invalid source annotations");
       for (const annotation of content.annotations) { const item = annotation as Record<string, unknown>; boundedString(item.text, "annotation", 20_000); if (item.locator !== undefined) boundedString(item.locator, "annotation locator", 512); if (item.createdAt !== undefined) assertTimestamp(item.createdAt, "annotation createdAt"); }
