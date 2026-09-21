@@ -202,6 +202,27 @@ once record bodies begin writing, their catalog and receipt commit must finish
 rather than orphaning private bytes. Cancelled assessments cannot enter a new
 derivative transaction after asynchronous revalidation. Connector calls fail as unsupported until their named extension seam is installed;
 legacy import is installed only when explicitly named checkout roots are configured.
+
+## Explicit connector authority migration
+
+A legacy catalog with provider-keyed connector rows is not upgraded by startup.
+Use `scripts/tron connection-migrate` during a user-approved offline window.
+`preflight` and `prepare` are write-free; `stage` writes only a private plan and
+journal. The resolver uses the actual `TronWorkspace.describe()` root for
+`<tronHome>/workspace/state/knowledge/state.json` and
+`catalog-<catalogID>.sqlite`, while `ConnectionOwner` supplies its independent
+`<tronHome>/state/integrations/connections.json` path.
+
+Publication is a resumable ordered operation: durable journal, owner authority,
+then an in-place SQLite control-row transaction that changes only connector
+keys/envelopes and increments the catalog revision. Existing records, immutable
+objects, every catalog table and receipt, configuration, checkpoints, pending
+identities, assessment cohorts/usage, and `pendingRemote` remain in the
+Knowledge authority. The plan stores source state/catalog hashes and refuses
+changed, newer, malformed, missing-companion, or conflicting input. Recovery
+rechecks exact authority contents and completes only the selected journal phase;
+there is no standalone provider JSON, blind snapshot replacement, startup
+fallback, or indefinite dual-write period.
 `knowledge-observation.test.ts` covers global admission, exclusion-before-inference,
 and narrowing scope during inference. `runtime-knowledge-observation.integration.test.ts`
 drives real canonical runtime turns through the observation owner and checks

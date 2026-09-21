@@ -48,6 +48,31 @@ receipts. Setup, policy, and disconnect use exact owner-typed commands and
 bounded receipts. Runtime bindings are session/generation-scoped admission
 projections, not persisted child authority. See [Connection management](docs/connections.md).
 
+### Knowledge connector migration
+
+A pre-refactor provider-keyed Knowledge catalog is migrated only by the
+explicit, offline operator command below; Gateway startup never invokes it:
+
+```bash
+scripts/tron connection-migrate preflight --tron-home <resolved-tron-home>
+scripts/tron connection-migrate prepare --tron-home <resolved-tron-home>
+scripts/tron connection-migrate stage --tron-home <resolved-tron-home> --staging <private-staging-path>
+scripts/tron connection-migrate publish --tron-home <resolved-tron-home> --staging <private-staging-path> --confirm-offline
+scripts/tron connection-migrate recover --tron-home <resolved-tron-home> --staging <private-staging-path>
+```
+
+The resolver obtains the Knowledge workspace from `TronWorkspace` and the
+ConnectionOwner path from `connectionStatePath`; it never derives one from the
+other. Preparation records the source manifest/catalog revision and hashes.
+Publication writes the owner authority first, then transactionally updates the
+existing catalog control row in place, preserving records, objects, tables,
+receipts, configuration, checkpoints, pending work, cohorts, usage, and
+remote-effect receipts. A private cross-file journal resumes only after exact
+source and destination checks; it never creates a provider JSON sidecar,
+blindly replaces a catalog, falls back indefinitely, or dual-writes.
+The user/maintainer must quiesce writers, verify a backup, and manually run the
+operator action; no agent may run it against live state.
+
 ## Knowledge boundaries
 
 Knowledge state is owned by the Gateway under `state/knowledge`; iOS consumes
