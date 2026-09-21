@@ -30,6 +30,8 @@ import {
   projectToolResult,
   projectTranscript,
   projectTranscriptPage,
+  projectTranscriptPageAfter,
+  projectedTranscriptOrdinal,
   projectTree,
   safeJson,
   SESSION_SNAPSHOT_BYTES,
@@ -48,6 +50,39 @@ function wireNodes(value: unknown): number {
 }
 
 describe("aggregate transcript structure", () => {
+  it("pages forward from the exact projected boundary under byte and node budgets", () => {
+    const manager = SessionManager.inMemory("/tmp/forward-page-fixture");
+    for (let index = 0; index < 40; index++) {
+      manager.appendMessage({ role: "user", content: [{ type: "text", text: `${index} ${"large ".repeat(200)}` }], timestamp: index });
+    }
+    const page = projectTranscriptPageAfter(manager, new BlobStore(), 12, 8_192, manager.getBranch()[11]?.id);
+    expect(page.start).toBe(12);
+    expect(page.end).toBeGreaterThan(page.start);
+    expect(page.items[0]?.id).toBe(manager.getBranch()[12]?.id);
+    expect(page.items.every((item, index) => item.id === manager.getBranch()[page.start + index]?.id)).toBe(true);
+    expect(page.total).toBe(40);
+    expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThanOrEqual(8_192);
+  });
+
+  it("derives deep target pages from projected identity, not raw JSONL ordinal", () => {
+    const manager = SessionManager.inMemory("/tmp/projected-ordinal-fixture");
+    manager.appendSessionInfo("hidden metadata");
+    manager.appendMessage({ role: "user", content: "before target", timestamp: 1 });
+    manager.appendMessage({ role: "toolResult", toolCallId: "tool", toolName: "fixture", content: "tool output", isError: false, timestamp: 2 });
+    manager.appendMessage({ role: "user", content: "deep target", timestamp: 3 });
+    const target = manager.getBranch().find(entry => entry.type === "message" && entry.message.role === "user" && entry.message.content === "deep target");
+    expect(target).toBeDefined();
+    const projectedOrdinal = projectedTranscriptOrdinal(manager, target!.id);
+    expect(projectedOrdinal).toBeGreaterThanOrEqual(0);
+    const page = projectTranscriptPage(manager, new BlobStore(), projectedOrdinal + 1);
+    expect(page.items.some(item => item.id === target.id)).toBe(true);
+    expect(page.end).toBe(projectedOrdinal + 1);
+    expect(page.items.map(item => item.id)).toEqual(manager.getBranch()
+      .filter(entry => entry.type !== "session_info")
+      .slice(page.start, page.end)
+      .map(entry => entry.id));
+  });
+
   it("compacts dense browser details below native limits without losing rows, text, or canonical data", () => {
     const manager = SessionManager.inMemory("/tmp/dense-browser-fixture");
     for (let index = 0; index < 40; index++) {

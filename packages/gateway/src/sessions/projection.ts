@@ -1995,9 +1995,19 @@ export interface TranscriptPage {
   /** Exact next projected entry at `end`, echoed so clients can validate the
    * page boundary without treating raw parent links as display adjacency. */
   nextEntryId?: string;
+  /** Exact previous projected entry at `start`, echoed for forward paging. */
+  previousEntryId?: string;
   runtimeGeneration?: string;
   leafEntryId?: string;
   forkBoundary?: TranscriptForkBoundary;
+}
+
+export function projectedTranscriptOrdinal(
+  manager: TranscriptSessionReader,
+  entryID: string,
+  branchCut?: SessionEntry[],
+): number {
+  return projectableTranscriptEntries(manager, undefined, branchCut).entries.findIndex(entry => entry.id === entryID);
 }
 
 export function projectTranscriptPage(
@@ -2075,6 +2085,64 @@ export function projectTranscriptPage(
     end,
     total: entries.length,
     ...(entries[end]?.id ? { nextEntryId: entries[end].id } : {}),
+    ...(forkBoundary ? { forkBoundary } : {}),
+  };
+}
+
+export function projectTranscriptPageAfter(
+  manager: TranscriptSessionReader,
+  blobs: BlobStore,
+  after: number,
+  byteBudget = TRANSCRIPT_PAGE_BYTES,
+  expectedPreviousEntryId?: string,
+  toolMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
+  presentationIDs?: ReadonlyMap<string, string>,
+  toolLabels?: ReadonlyMap<string, string>,
+  bashMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
+  forkAnchor?: ForkBoundaryAnchor,
+  branchCut?: SessionEntry[],
+): TranscriptPage {
+  const { branch, entries, contextDelivery, toolSegmentIDs } = projectableTranscriptEntries(manager, presentationIDs, branchCut);
+  const invocationValues = invocationProjection(invocationReceipts(branch, manager.getSessionId?.()));
+  const invocationStates = new Map(invocationValues.map((value) => [value.invocationId, value.lifecycle]));
+  const invocationByCanonicalEntry = new Map(invocationValues
+    .filter(value => value.canonicalEntryId !== undefined)
+    .map(value => [value.canonicalEntryId!, value]));
+  const forkBoundary = projectForkBoundary(branch, entries, forkAnchor);
+  const start = Math.max(0, Math.min(after, entries.length));
+  if (expectedPreviousEntryId !== undefined && entries[start - 1]?.id !== expectedPreviousEntryId) {
+    throw new Error("session transcript anchor changed");
+  }
+  let end = start;
+  let bytes = 2;
+  const selected: TranscriptItem[] = [];
+  while (end < entries.length && selected.length < TRANSCRIPT_PAGE_ITEMS) {
+    const entry = entries[end]!;
+    const boundInvocation = invocationByCanonicalEntry.get(entry.id);
+    const expectedSkillArguments = boundInvocation?.resourceInvocation?.source === "skill"
+      ? boundInvocation.resourceInvocation.arguments : undefined;
+    const item = projectEntry(entry, blobs, toolMetadata, presentationIDs, toolLabels,
+      contextDelivery.get(entry.id), toolSegmentIDs.get(entry.id), expectedSkillArguments,
+      bashMetadata, manager.getSessionId?.());
+    if (!item) throw new Error("projectable transcript entry produced no item");
+    const enriched = withInvocationSemantics(item, boundInvocation, invocationStates);
+    const itemBytes = Buffer.byteLength(JSON.stringify(enriched)) + 1;
+    if (bytes + itemBytes > byteBudget && selected.length > 0) break;
+    if (itemBytes > byteBudget) {
+      selected.push(compactTranscriptPageItem(enriched, Math.max(256, byteBudget - 3)));
+      end += 1;
+      break;
+    }
+    selected.push(enriched);
+    bytes += itemBytes;
+    end += 1;
+  }
+  const nextEntryId = entries[end]?.id;
+  const previousEntryId = entries[start - 1]?.id;
+  return {
+    items: fitTranscriptStructure(selected), start, end, total: entries.length,
+    ...(nextEntryId ? { nextEntryId } : {}),
+    ...(previousEntryId ? { previousEntryId } : {}),
     ...(forkBoundary ? { forkBoundary } : {}),
   };
 }

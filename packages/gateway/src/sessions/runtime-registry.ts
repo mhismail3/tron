@@ -78,6 +78,8 @@ import { branchFromParsedSession } from "./session-branch.js";
 import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-boundary.js";
 import type { KnowledgeService } from "../knowledge/knowledge-service.js";
 import type { JevDecisionClient } from "../knowledge/jev-client.js";
+import type { SessionSearchForkBoundary } from "./session-search-contract.js";
+import { validateSearchBranch } from "./session-search-text.js";
 import { observationEntriesDigest } from "../knowledge/knowledge-observation.js";
 
 const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
@@ -177,6 +179,27 @@ async function readOpenedSessionEntries(
   }
   try { return parseSessionEntries(bytes.toString("utf8")); }
   catch { return undefined; }
+}
+
+function parseStrictSessionJSONL(bytes: Buffer): FileEntry[] {
+  const text = bytes.toString("utf8");
+  if (!text || !text.endsWith("\n")) throw new GatewayError("invalid_request", "Session JSONL has an incomplete tail");
+  const lines = text.slice(0, -1).split("\n");
+  const raw = lines.map((line, index) => {
+    if (!line.trim()) throw new GatewayError("invalid_request", `Session JSONL contains an empty line at ${index + 1}`);
+    try {
+      const value: unknown = JSON.parse(line);
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("not an object");
+      return value;
+    } catch {
+      throw new GatewayError("invalid_request", `Session JSONL contains malformed line ${index + 1}`);
+    }
+  });
+  let entries: FileEntry[];
+  try { entries = parseSessionEntries(text); }
+  catch { throw new GatewayError("invalid_request", "Session JSONL could not be parsed"); }
+  if (entries.length !== raw.length) throw new GatewayError("invalid_request", "Session JSONL contains an unsupported record");
+  return entries;
 }
 
 const DEFAULT_CATALOG_DISCOVERY_LIMITS = {
@@ -429,6 +452,7 @@ export class RuntimeRegistry {
   private readonly displayArtifacts: DisplayArtifactStore;
   private readonly workspace: TronWorkspace;
   private knowledgeService: KnowledgeService | undefined;
+  private searchInvalidator: ((sessionID: string, nextSessionID?: string) => void) | undefined;
   private readonly markers: RunMarkerStore;
   private readonly extensionActivityRecency = new ExtensionActivityRecency();
   private readonly processActivityRecency = new ProcessActivityRecency();
@@ -551,6 +575,10 @@ export class RuntimeRegistry {
   /** Shared workspace owner for capability stores; callers must not construct a
    * second workspace authority for the same Tron installation. */
   knowledgeWorkspace(): TronWorkspace { return this.workspace; }
+
+  setSearchInvalidator(invalidator: (sessionID: string, nextSessionID?: string) => void): void {
+    this.searchInvalidator = invalidator;
+  }
 
   setKnowledgeService(service: KnowledgeService): void {
     if (this.knowledgeService && this.knowledgeService !== service) throw new Error("Knowledge service is already installed");
@@ -827,6 +855,7 @@ export class RuntimeRegistry {
         }
         // Identity and map ownership are already committed. Observers are
         // notification-only and cannot trigger the slot's pre-commit rollback.
+        try { this.searchInvalidator?.(previousId, nextId); } catch {}
         try { this.options.sessionRekeyed?.(previousId, nextId); } catch {}
         this.invalidateCatalogAcquisition();
         this.revision += 1;
@@ -841,6 +870,7 @@ export class RuntimeRegistry {
     this.summaryRevisions.set(summary.sessionId, summaryRevision);
     const revisioned = { ...summary, summaryRevision };
     this.latestSummaries.set(summary.sessionId, revisioned);
+    try { this.searchInvalidator?.(summary.sessionId); } catch {}
     this.options.sessionSummaryChanged(revisioned);
   }
 
@@ -1678,6 +1708,71 @@ export class RuntimeRegistry {
       this.catalogPageSources.delete(oldest);
     }
     return source;
+  }
+
+  /** Read-only derived-search owner seam. Open sessions use the SDK-selected
+   * branch held by their existing RuntimeSlot; cold sessions use one complete
+   * canonical file parse after catalog admission and never create a runtime. */
+  async readSearchCut(sessionId: string): Promise<{
+    summary: CatalogSessionInfo;
+    entries: FileEntry[];
+    fileIdentity?: string;
+    forkBoundary?: SessionSearchForkBoundary;
+    runtimeGeneration?: string;
+    leafEntryId?: string;
+  }> {
+    const catalog = await this.catalog("user");
+    const info = this.catalogStructuralIndex?.allInfos.find(candidate => candidate.id === sessionId);
+    if (!info || !catalog.sessions.some(session => session.id === sessionId)) throw new GatewayError("not_found", "Session is not available for search");
+    const slot = this.slots.get(sessionId);
+    if (slot) {
+      const cut = slot.searchCanonicalCut();
+      const gapOrdinal = cut.forkBoundary ? cut.entries.findIndex(entry => entry.id === cut.forkBoundary!.inheritedEntryId) + 1 : 0;
+      return { summary: info, entries: cut.entries, ...(info.fileIdentity ? { fileIdentity: info.fileIdentity } : {}), ...(cut.forkBoundary && gapOrdinal > 0 ? { forkBoundary: { kind: cut.forkBoundary.kind, inheritedEntryId: cut.forkBoundary.inheritedEntryId, gapOrdinal } } : {}), runtimeGeneration: cut.runtimeGeneration, ...(cut.leafEntryId ? { leafEntryId: cut.leafEntryId } : {}) };
+    }
+    const bytes = await readFile(info.path);
+    if (bytes.byteLength > MAX_READ_ONLY_SUBAGENT_SESSION_BYTES) throw new GatewayError("busy", "Session exceeds the bounded search read budget", true);
+    // Parse the complete file for graph admission, then ask the pinned SDK
+    // reader for its canonical leaf/branch. Physical line order is not branch
+    // authority when sibling forks are present.
+    const entries = parseStrictSessionJSONL(bytes);
+    const coldManager = SessionManager.open(info.path);
+    const selectedEntries = coldManager.getBranch();
+    // Full-file graph validation is an admission gate; retain the SDK-selected
+    // branch below as the canonical projection after every sibling is checked.
+    validateSearchBranch(entries, undefined, coldManager.getLeafId() ?? undefined);
+    const selectedLeafId = coldManager.getLeafId() ?? undefined;
+    const selectedFile = coldManager.getHeader() ? [coldManager.getHeader()!, ...selectedEntries] : entries;
+    let forkBoundary: SessionSearchForkBoundary | undefined;
+    if (info.parentSessionPath) {
+      try {
+        const parentBytes = await readFile(info.parentSessionPath);
+        if (parentBytes.byteLength <= MAX_READ_ONLY_SUBAGENT_SESSION_BYTES) {
+          const parentEntries = parseStrictSessionJSONL(parentBytes);
+          const anchor = resolveForkBoundaryAnchor(selectedFile, parentEntries, "sessionFork", selectedLeafId);
+          if (anchor) {
+            const gapOrdinal = selectedFile.findIndex(entry => entry.id === anchor.inheritedEntryId) + 1;
+            if (gapOrdinal > 0) forkBoundary = { kind: anchor.kind, inheritedEntryId: anchor.inheritedEntryId, gapOrdinal };
+          }
+        }
+      } catch { /* incomplete parent evidence leaves coverage partial */ }
+    }
+    return { summary: info, entries: selectedFile, ...(info.fileIdentity ? { fileIdentity: info.fileIdentity } : {}), ...(forkBoundary ? { forkBoundary } : {}), ...(selectedLeafId ? { leafEntryId: selectedLeafId } : {}) };
+  }
+
+  async readSearchTranscriptPage(sessionId: string, before: number, expectedRuntimeGeneration?: string, expectedLeafEntryId?: string): Promise<TranscriptPage> {
+    const slot = this.slots.get(sessionId) ?? await this.acquire(sessionId);
+    return slot.transcriptPage(before, undefined, expectedRuntimeGeneration, expectedLeafEntryId);
+  }
+
+  async readSearchTranscriptPageAtEntry(sessionId: string, entryID: string, expectedRuntimeGeneration?: string, expectedLeafEntryId?: string, windowEnd?: number): Promise<TranscriptPage> {
+    const slot = this.slots.get(sessionId) ?? await this.acquire(sessionId);
+    return slot.transcriptPageAtEntry(entryID, expectedRuntimeGeneration, expectedLeafEntryId, windowEnd);
+  }
+
+  async readSearchTranscriptPageAfter(sessionId: string, after: number, expectedPreviousEntryId?: string, expectedRuntimeGeneration?: string, expectedLeafEntryId?: string): Promise<TranscriptPage> {
+    const slot = this.slots.get(sessionId) ?? await this.acquire(sessionId);
+    return slot.transcriptPageAfter(after, expectedPreviousEntryId, expectedRuntimeGeneration, expectedLeafEntryId);
   }
 
   async catalog(scope: "user" | "all" = "user"): Promise<{
@@ -3225,6 +3320,7 @@ export class RuntimeRegistry {
           throw new GatewayError("busy", "Project trust is being reconfigured", true);
         }
         if (slot?.isBusy) throw new GatewayError("busy", "Stop the active session before deleting it");
+        this.searchInvalidator?.(sessionId);
         await this.options.beforeSessionDelete?.(sessionId);
         this.cancelIdleEviction(sessionId, slot);
         if (slot) await slot.dispose();

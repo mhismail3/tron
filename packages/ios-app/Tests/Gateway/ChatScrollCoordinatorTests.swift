@@ -2543,6 +2543,52 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
+    @Test("historical window search uses coordinator render admission for exact entry")
+    func historicalWindowSearchUsesCoordinatorRenderAdmission() throws {
+        let coordinator = self.prependReadyCoordinator()
+        let installed = try installedToolTranscript(ids: ["historical"], statuses: [.running], timelineGeneration: 9)
+        let renderedID = try #require(installed.timeline.ids.first)
+        let semanticID = try #require(installed.timeline.preferredSemanticIDByRenderedID[renderedID])
+        coordinator.requestHistoricalEntryScroll(semanticID: semanticID, installed: nil)
+        coordinator.geometryChanged(previous: away, current: away)
+        #expect(coordinator.command == nil)
+        coordinator.installedTranscriptChanged(installed)
+        #expect(coordinator.command == nil)
+        // Lazy historical rows may be offscreen: there is deliberately no
+        // semanticFrameChanged until the materialization command reveals it.
+        coordinator.geometryChanged(previous: away, current: away)
+        #expect(coordinator.command?.origin == .layout)
+        #expect(coordinator.command?.destination == .materialize(renderedID))
+    }
+
+    @Test("installed historical entry waits for its late rendered semantic row")
+    func historicalEntryScrollWaitsForLateRenderMapping() async throws {
+        try await withTestWatchdog { @MainActor in
+            let clock = ManualClock()
+            let recorder = ResultRecorder()
+            let coordinator = self.prependReadyCoordinator(clock: clock)
+            let anchor = ChatSemanticAnchor(semanticID: "historical-entry", renderedID: "row", layoutEpoch: coordinator.layoutEpoch, viewportOffsetY: 20)
+            #expect(coordinator.beginHistoryPageLoad(
+                anchor: anchor,
+                load: { @MainActor _ in
+                    let epoch = coordinator.beginInstalledLayoutEpoch()
+                    return .installed(ChatPrependPage(renderedAnchorID: "historical-entry-rendered", installedLayout: epoch))
+                }, completion: recorder.record
+            ))
+            for _ in 0..<10 { await Task.yield() }
+            #expect(coordinator.command == nil)
+            coordinator.semanticFrameChanged(renderedID: "historical-entry-rendered", layoutEpoch: coordinator.layoutEpoch, frame: CGRect(x: 0, y: 80, width: 100, height: 30))
+            coordinator.geometryChanged(previous: away, current: away)
+            #expect(coordinator.command?.origin == .prepend)
+            #expect(coordinator.command?.destination == .offsetY(360))
+            #expect(recorder.values.isEmpty)
+            coordinator.commandApplied(try #require(coordinator.command))
+            coordinator.semanticFrameChanged(renderedID: "historical-entry-rendered", layoutEpoch: coordinator.layoutEpoch, frame: CGRect(x: 0, y: 20, width: 100, height: 30))
+            coordinator.geometryChanged(previous: away, current: away)
+            #expect(recorder.values == [.success])
+        }
+    }
+
     @Test("prepend deadline revokes a pending correction command")
     func prependDeadlineRevokesPendingCorrection() async throws {
         try await withTestWatchdog { @MainActor in

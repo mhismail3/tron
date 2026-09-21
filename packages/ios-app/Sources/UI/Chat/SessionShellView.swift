@@ -72,6 +72,14 @@ struct SessionShellView: View {
     @State private var newSessionDetent: PresentationDetent = .medium
     @State private var showSettings = false
     @State private var search = ""
+    @State private var contentSearchSessionIDs: Set<String> = []
+    @State private var searchResults: [SessionSearchResult] = []
+    @State private var searchGroups: [SessionSearchSessionGroup] = []
+    @State private var searchProfileStatuses: [SessionSearchProfileStatus] = []
+    @State private var searchLoading = false
+    @State private var remoteRankingEnabled = false
+    @State private var rankingPolicyTask: Task<Void, Never>?
+    @State private var restoringRankingPolicy = false
     @State private var showingSearch = false
     @State private var presentedSession: AppModel.SessionNavigationRoute?
     @State private var sessionToDelete: SessionSummary?
@@ -166,7 +174,11 @@ struct SessionShellView: View {
                 identity: "dashboard.rename-confirmation"
             )
             .onChange(of: model.profiles.selected?.id, initial: true) { previousProfileID, profileID in
-                if previousProfileID != profileID { routeReplacementOwner.invalidate(); knowledgeDraftText = nil; knowledgeDraftIdentity = nil }
+                if previousProfileID != profileID {
+                    routeReplacementOwner.invalidate(); knowledgeDraftText = nil; knowledgeDraftIdentity = nil
+                    rankingPolicyTask?.cancel(); rankingPolicyTask = nil
+                    remoteRankingEnabled = profileID.map(model.sessionSearchConsent(for:)) ?? false
+                }
                 var route = presentedSession
                 profileRouteOwner.reconcile(
                     profileID: profileID,
@@ -193,6 +205,12 @@ struct SessionShellView: View {
                 guard activity.allowsPresentationPublication else { return }
                 scheduleDashboardReconciliation()
             }
+            .onChange(of: search) { _, value in
+                if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    contentSearchSessionIDs = []; searchResults = []; searchGroups = []; searchProfileStatuses = []
+                    model.dismissSessionSearch()
+                }
+            }
             .onChange(of: activity, initial: true) { _, current in
                 dashboardPresentationIsActive = current.allowsPresentationPublication
                 if dashboardPresentationIsActive {
@@ -200,15 +218,55 @@ struct SessionShellView: View {
                 } else {
                     dashboardReconcileTask?.cancel()
                     dashboardReconcileTask = nil
+                    model.dismissSessionSearch()
+                    searchLoading = false
                 }
             }
             .onDisappear {
                 dashboardReconcileTask?.cancel()
                 dashboardReconcileTask = nil
+                rankingPolicyTask?.cancel()
+                rankingPolicyTask = nil
             }
             .task(id: model.actionablePushNavigationRequest?.id) {
                 guard let request = model.actionablePushNavigationRequest else { return }
                 await presentPushNavigation(request)
+            }
+            .task(id: "search-policy:\(model.profiles.selected?.id ?? ""):\(model.profileRevision):\(model.dashboardPresentationRevision)") {
+                guard let profileID = model.profiles.selected?.id else { return }
+                restoringRankingPolicy = true
+                await model.restoreSessionSearchPolicy(profileID: profileID, force: true)
+                guard !Task.isCancelled, model.profiles.selected?.id == profileID else { return }
+                remoteRankingEnabled = model.sessionSearchConsent(for: profileID)
+                restoringRankingPolicy = false
+            }
+            .task(id: "\(model.profiles.selected?.id ?? ""):\(search):\(remoteRankingEnabled):\(activity):\(serverFilter.searchIdentity):\(model.profileRevision):\(model.dashboardPresentationRevision):\(model.sessionSearchConsent(for: model.profiles.selected?.id ?? ""))") {
+                guard activity.allowsPresentationPublication else { return }
+                do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
+                guard !Task.isCancelled else { return }
+                let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !query.isEmpty else {
+                    contentSearchSessionIDs = []; searchResults = []; searchGroups = []; searchProfileStatuses = []; searchLoading = false
+                    return
+                }
+                searchLoading = true
+                let localGroups = dashboardPresentation.sessions.filter { session in
+                    serverFilter.allows(session.gatewayProfileID, selectedProfileID: model.profiles.selected?.id)
+                        && (session.title.localizedCaseInsensitiveContains(query) || session.cwd.localizedCaseInsensitiveContains(query))
+                }.map { session in
+                    SessionSearchSessionGroup(profileID: session.gatewayProfileID ?? "unknown", profileLabel: session.gatewayProfileLabel ?? "Gateway", sessionId: session.id, title: session.title, cwd: session.cwd, updatedAt: session.updatedAt, passages: [], isLocalMatch: true)
+                }
+                searchGroups = localGroups
+                let targets = model.dashboardServerSources
+                    .filter { serverFilter.allows($0.profileID, selectedProfileID: model.profiles.selected?.id) }
+                    .map { SessionSearchProfileTarget(profileID: $0.profileID, label: $0.label, capabilities: $0.capabilities, isSelected: $0.profileID == model.profiles.selected?.id) }
+                let aggregate = await model.searchSessions(query: query, targets: targets, remoteRanking: remoteRankingEnabled)
+                guard !Task.isCancelled else { return }
+                searchGroups = SessionSearchGrouping.merge(local: localGroups, remote: aggregate.groups)
+                searchProfileStatuses = aggregate.profiles
+                searchResults = aggregate.groups.flatMap(\.passages)
+                contentSearchSessionIDs = Set(searchGroups.map(\.sessionId))
+                searchLoading = false
             }
     }
 
@@ -326,6 +384,7 @@ struct SessionShellView: View {
                 initialEditorText: route.editorText,
                 initialModel: route.initialModel,
                 initialHistoryEntryID: route.initialHistoryEntryID,
+                initialSearchResult: route.initialSearchResult,
                 onForkCreated: present,
                 performanceSignposts: model.performanceSignpostsForCapture
             )
@@ -346,16 +405,33 @@ struct SessionShellView: View {
     }
 
     private var dashboardSearchBar: some View {
-        TronSearchBar(
-            text: $search,
-            prompt: "Search sessions",
-            focusOnAppear: true,
-            onClose: dismissDashboardSearch,
-            onFocusChange: { focused in
-                if !focused { dismissDashboardSearch() }
-            }
-        )
-        .padding(.horizontal, TronSpacing.section)
+        VStack(alignment: .leading, spacing: 6) {
+            TronSearchBar(
+                text: $search,
+                prompt: "Search sessions",
+                focusOnAppear: true,
+                onClose: dismissDashboardSearch,
+                onFocusChange: { focused in
+                    if !focused { dismissDashboardSearch() }
+                }
+            )
+            Toggle("Send this query and up to 16 selected conversation snippets to the configured Jev provider (max 0.2688¢/query, 2.688¢/day)", isOn: $remoteRankingEnabled)
+                .font(.caption)
+                .tint(.tronEmerald)
+                .onChange(of: remoteRankingEnabled) { _, enabled in
+                    guard !restoringRankingPolicy, let profileID = model.profiles.selected?.id else { return }
+                    rankingPolicyTask?.cancel()
+                    rankingPolicyTask = Task { @MainActor in
+                        do { _ = try await model.setSessionSearchRemoteRanking(enabled, profileID: profileID) }
+                        catch {
+                            guard !Task.isCancelled, model.profiles.selected?.id == profileID else { return }
+                            remoteRankingEnabled = model.sessionSearchConsent(for: profileID)
+                            model.presentError(error)
+                        }
+                    }
+                }
+                .padding(.horizontal, TronSpacing.section)
+        }
         .padding(.vertical, 8)
         .simultaneousGesture(
             DragGesture(minimumDistance: 16)
@@ -601,6 +677,9 @@ struct SessionShellView: View {
                 .accessibilityLabel("Loading sessions")
                 .tronDashboardInitialOffset()
                 .transition(TronDashboardContentMotion.transition(reduceMotion: reduceMotion))
+            } else if showingSearch && !search.isEmpty {
+                searchResultList
+                    .transition(TronDashboardContentMotion.transition(reduceMotion: reduceMotion))
             } else {
                 sessionList
                     .transition(TronDashboardContentMotion.transition(reduceMotion: reduceMotion))
@@ -611,6 +690,82 @@ struct SessionShellView: View {
             TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
             value: isSessionDashboardInitiallyLoading
         )
+    }
+
+    private var searchResultList: some View {
+        List {
+            if searchLoading {
+                HStack(spacing: 8) { ProgressView(); Text("Searching connected Gateways…").font(.caption).foregroundStyle(.secondary) }
+            }
+            ForEach(searchProfileStatuses) { status in
+                if status.state != "ready" && status.state != "cancelled" {
+                    Text("\(status.label): \(status.message ?? status.state)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            ForEach(searchGroups) { group in
+                Section {
+                    if group.passages.isEmpty {
+                        Button { openLocalSearchGroup(group) } label: {
+                            Label("Open matching session", systemImage: "arrow.right.circle")
+                                .font(.subheadline)
+                        }
+                    } else {
+                        ForEach(group.passages) { result in
+                            Button { openSearchResult(result) } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(result.snippet).font(.subheadline).lineLimit(3)
+                                    Text(result.passageKind == "user" ? "You · entry \(result.ordinal)" : "Tron · entry \(result.ordinal)")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 5)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                } header: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text(group.title.isEmpty ? group.sessionId : group.title).font(.headline)
+                            if group.isLocalMatch { Text("local").font(.caption2).foregroundStyle(.secondary) }
+                        }
+                        Text("\(group.profileLabel) · \(group.cwd)").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .overlay {
+            if !searchLoading && searchGroups.isEmpty && searchProfileStatuses.allSatisfy({ $0.state == "ready" }) {
+                ContentUnavailableView("No matches", systemImage: "magnifyingglass", description: Text("Try a title, folder, or conversation phrase."))
+            }
+        }
+        .listStyle(.plain)
+        .contentMargins(.bottom, 92)
+        .tronCollectionSurface()
+    }
+
+    private func openLocalSearchGroup(_ group: SessionSearchSessionGroup) {
+        let intent = navigationOwner.begin()
+        Task { @MainActor in
+            guard let route = try? await model.navigationRoute(profileID: group.profileID, sessionID: group.sessionId),
+                  navigationOwner.admit(intent), model.ownsNavigationRoute(route) else { return }
+            present(route)
+        }
+    }
+
+    private func openSearchResult(_ result: SessionSearchResult) {
+        let profileID = result.gatewayProfileID ?? model.profiles.selected?.id
+        guard let profileID else { return }
+        let navigationIntent = navigationOwner.begin()
+        Task { @MainActor in
+            do {
+                let route = try await model.navigationRoute(profileID: profileID, sessionID: result.sessionId, searchResult: result)
+                guard navigationOwner.admit(navigationIntent), model.ownsNavigationRoute(route) else { return }
+                dashboardMode = .sessions
+                present(route)
+            } catch is CancellationError { return } catch { model.presentError(error) }
+        }
     }
 
     private var sessionList: some View {
@@ -877,7 +1032,8 @@ struct SessionShellView: View {
             )
                 && (search.isEmpty
                     || session.title.localizedCaseInsensitiveContains(search)
-                    || session.cwd.localizedCaseInsensitiveContains(search))
+                    || session.cwd.localizedCaseInsensitiveContains(search)
+                    || contentSearchSessionIDs.contains(session.id))
         }
     }
 

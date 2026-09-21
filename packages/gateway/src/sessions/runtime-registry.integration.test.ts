@@ -55,6 +55,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     workRegistry?: GatewayWorkRegistry;
     phaseObserver?: (phase: "catalog-warming" | "attention-recovery") => void;
     sessionListChanged?: () => void;
+    beforeInitialize?: (sessionFile: string) => Promise<void>;
     stageTiming?: (
       stage: string,
       durationMs: number,
@@ -93,6 +94,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const startupEvidence = options.phaseObserver
       ? vi.spyOn(registry as any, "catalogStructureEvidence")
       : undefined;
+    if (options.beforeInitialize) await options.beforeInitialize(manager.getSessionFile()!);
     await registry.initialize(options.phaseObserver);
     return {
       root,
@@ -112,6 +114,16 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+  });
+
+  it("rejects malformed or incomplete cold JSONL before branch projection", async () => {
+    const fixture = await coldFixture("strict-search-jsonl");
+    await fixture.registry.catalog("user");
+    await appendFile(fixture.sessionFile, "{}\\n");
+    vi.spyOn(fixture.registry, "catalog").mockResolvedValue({ sessions: [{ id: fixture.manager.getSessionId() }] as any, listRevision: 1 });
+    await expect(fixture.registry.readSearchCut(fixture.manager.getSessionId())).rejects.toMatchObject({ code: "invalid_request" });
+    await appendFile(fixture.sessionFile, "{}");
+    await expect(fixture.registry.readSearchCut(fixture.manager.getSessionId())).rejects.toMatchObject({ code: "invalid_request" });
   });
 
   it("fences canonical history reads to the exact live runtime", async () => {

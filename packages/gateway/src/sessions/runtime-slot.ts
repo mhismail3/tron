@@ -82,6 +82,8 @@ import {
   projectToolOutput,
   projectToolResult,
   projectTranscriptPage,
+  projectTranscriptPageAfter,
+  projectedTranscriptOrdinal,
   canonicalToolResultCallIDs,
   canonicalToolResultCallIDsFromBranch,
   projectTree,
@@ -836,6 +838,19 @@ export class RuntimeSlot {
   canonicalSessionEntries(): FileEntry[] {
     const header = this.sessionManager.getHeader();
     return header ? [header, ...this.sessionManager.getBranch()] : [];
+  }
+
+  /** Exact owner seam for derived search. This is a bounded snapshot of the
+   * SDK-selected branch, never a second session runtime or file-tail guess. */
+  searchCanonicalCut(): { entries: FileEntry[]; forkBoundary?: ForkBoundaryAnchor; runtimeGeneration: string; leafEntryId?: string } {
+    const entries = this.canonicalSessionEntries();
+    const leafEntryId = entries.at(-1)?.id;
+    return {
+      entries,
+      ...(this.forkBoundary ? { forkBoundary: this.forkBoundary } : {}),
+      runtimeGeneration: this.runtimeGeneration,
+      ...(leafEntryId ? { leafEntryId } : {}),
+    };
   }
 
   private observationBranchId(entries: readonly FileEntry[]): string {
@@ -5500,6 +5515,53 @@ export class RuntimeSlot {
       extensionPresentation: this.ui.state(),
       diagnostics: this.runtime.diagnostics.map((diagnostic) => ({ type: diagnostic.type, message: diagnostic.message })),
     });
+  }
+
+  transcriptPageAtEntry(
+    entryID: string,
+    expectedRuntimeGeneration?: string,
+    expectedLeafEntryID?: string,
+    windowEnd?: number,
+  ): TranscriptPage {
+    this.assertNoTrustReload();
+    const ordinal = projectedTranscriptOrdinal(this.runtime.session.sessionManager, entryID);
+    if (ordinal < 0) throw new GatewayError("not_found", "The canonical entry is not projectable on the active transcript");
+    return this.transcriptPage(
+      Math.max(ordinal + 1, windowEnd ?? ordinal + 1),
+      undefined,
+      expectedRuntimeGeneration,
+      expectedLeafEntryID,
+    );
+  }
+
+  transcriptPageAfter(
+    after: number,
+    expectedPreviousEntryId?: string,
+    expectedRuntimeGeneration?: string,
+    expectedLeafEntryId?: string,
+  ): TranscriptPage {
+    this.assertNoTrustReload();
+    if (expectedRuntimeGeneration !== undefined && expectedRuntimeGeneration !== this.runtimeGeneration) {
+      throw new GatewayError("conflict", "The session runtime changed while loading history. Refresh the session and try again.", true);
+    }
+    const leafEntryId = this.runtime.session.sessionManager.getLeafId();
+    if (expectedLeafEntryId !== undefined && expectedLeafEntryId !== leafEntryId) {
+      throw new GatewayError("conflict", "The session branch changed while loading history. Refresh the session and try again.", true);
+    }
+    try {
+      return {
+        ...projectTranscriptPageAfter(this.runtime.session.sessionManager, this.dependencies.blobs, after,
+          undefined, expectedPreviousEntryId, this.toolMetadata, this.presentationIDs, this.toolLabels(),
+          this.bashMetadata, this.forkBoundary),
+        runtimeGeneration: this.runtimeGeneration,
+        ...(leafEntryId ? { leafEntryId } : {}),
+      };
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("anchor changed")) {
+        throw new GatewayError("conflict", "The session branch changed while loading history. Refresh the session and try again.", true);
+      }
+      throw error;
+    }
   }
 
   transcriptPage(

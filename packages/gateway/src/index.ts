@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { existsSync } from "node:fs";
 import { ModelRuntime, SettingsManager, createAgentSessionServices } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "./config.js";
 import { DeviceStore } from "./security/device-store.js";
@@ -37,6 +38,10 @@ import { KnowledgeObservationService, ModelRuntimeObservationModel, modelForConf
 import { MacKeychainConnectorCredentialStore } from "./knowledge/connector-credentials.js";
 import { JevSourceAssessmentModel } from "./knowledge/jev-assessment.js";
 import { JevDecisionClient } from "./knowledge/jev-client.js";
+import { SessionSearchIndex } from "./sessions/session-search-index.js";
+import { SessionSearchAllowanceLedger } from "./sessions/session-search-allowance.js";
+import { SessionSearchService } from "./sessions/session-search-service.js";
+import { admitSearchEmbeddingHelper, NaturalLanguageEmbeddingClient } from "./sessions/session-search-embedding.js";
 import { createKnowledgeConnectorExtension } from "./knowledge/connectors.js";
 import { createKnowledgeImporter } from "./knowledge/legacy-import.js";
 
@@ -166,6 +171,21 @@ const sessions = new RuntimeRegistry({
     );
   },
 });
+const bundledSearchHelper = join(dirname(dirname(process.execPath)), "TronSearchEmbeddingHelper");
+const developmentHelperOverride = process.env.NODE_ENV === "development" ? process.env.TRON_SEARCH_EMBEDDING_HELPER : undefined;
+const searchHelperCandidate = developmentHelperOverride ?? (existsSync(bundledSearchHelper) ? bundledSearchHelper : undefined);
+let sessionSearch: SessionSearchService | undefined;
+let sessionSearchIndex: SessionSearchIndex | undefined;
+try {
+  sessionSearchIndex = await SessionSearchIndex.open(join(config.tronHome, "gateway", "session-search.sqlite"));
+  let sessionSearchAllowance: SessionSearchAllowanceLedger | undefined;
+  try { sessionSearchAllowance = await SessionSearchAllowanceLedger.open(join(config.tronHome, "gateway", "session-search-jev-allowance.sqlite")); }
+  catch (error) { logger.log("warning", `Optional Jev allowance is unavailable; remote ranking disabled (${error instanceof Error ? error.message : String(error)})`, { event: "session-search.jev-ledger-unavailable", source: "search" }); }
+  sessionSearch = new SessionSearchService(sessions, sessionSearchIndex, jevClient, sessionSearchAllowance);
+} catch (error) {
+  sessionSearchIndex?.close();
+  logger.log("warning", `Optional session search index is unavailable; chat remains available (${error instanceof Error ? error.message : String(error)})`, { event: "session-search.index-unavailable", source: "search" });
+}
 const knowledgeStore = new KnowledgeStore(sessions.knowledgeWorkspace(), () => transport?.broadcast("knowledge.changed", {}));
 const knowledgeConnector = createKnowledgeConnectorExtension(knowledgeStore, {
   credentials: knowledgeCredentials,
@@ -257,6 +277,7 @@ automations = new AutomationService(automationStore, automationScheduler, sessio
 automationToolOperations = new GatewayScheduleToolOperations(automations, receipts);
 
 let stopping = false;
+let sessionSearchWarmTask: Promise<void> | undefined;
 let storageMaintenanceTimer: NodeJS.Timeout | undefined;
 let uploadStoragePressure: "normal" | "low" | "exhausted" = "normal";
 async function shutdown(reason: string, exitCode = 0): Promise<void> {
@@ -295,6 +316,9 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
     notifications.dispose();
     knowledge.dispose();
     await automations.dispose();
+    await sessionSearchWarmTask?.catch(() => {});
+    sessionSearchWarmTask = undefined;
+    await sessionSearch?.close();
     await sessions.dispose();
     // The retained pi-coding-agent session exposes no disposal API on the
     // administration resource loader/model runtime. Admission closure and exact
@@ -365,6 +389,7 @@ const service = new GatewayService({
   workRegistry,
   automations,
   knowledge,
+  ...(sessionSearch ? { sessionSearch } : {}),
 });
 transport = new GatewayServer({
   host: config.host,
@@ -405,6 +430,14 @@ await transport.listen(async () => {
     logger.log("warning", "Knowledge catalog upgrade reported an error; inspect Knowledge status. No reset was attempted.", { event: "knowledge.upgrade-failed", source: "knowledge" });
   });
   await sessions.initialize((phase) => transport.setStartupPhase(phase));
+  sessionSearchWarmTask = (async () => {
+    if (stopping || !sessionSearch) return;
+    if (searchHelperCandidate && await admitSearchEmbeddingHelper(searchHelperCandidate)) {
+      if (stopping) return;
+      sessionSearch.setSemanticClient(new NaturalLanguageEmbeddingClient(searchHelperCandidate));
+    } else if (searchHelperCandidate) logger.log("warning", "Signed NaturalLanguage search helper admission failed; semantic search remains unavailable", { event: "session-search.helper-unavailable", source: "search" });
+    if (!stopping) await sessionSearch.warm();
+  })().catch((error) => logger.log("warning", `Session search warm-up failed; lexical search will recover on demand (${error instanceof Error ? error.message : String(error)})`, { event: "session-search.warm-failed", source: "search" }));
   transport.setStartupPhase("automation-recovery");
   await automations.initialize();
   transport.setStartupPhase("storage-warming");

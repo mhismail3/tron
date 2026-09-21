@@ -1882,6 +1882,22 @@ helper. The locked package's install hook is followed by Tron's `postinstall`
 repair, which enforces executable permissions on that helper; terminal tests
 open a real PTY so packaging cannot silently ship a non-executable helper.
 
+## Session search
+
+When advertised as `session-search.v1`, `session.search` performs bounded
+canonical-message lexical retrieval and `session.search.anchor` validates the
+entry/file/branch revision before returning an exact transcript page. Search
+uses a disposable Gateway-owned postings database; canonical JSONL remains the
+only transcript authority. Open sessions are read through their existing
+RuntimeSlot, while cold files undergo complete graph validation before branch
+selection. The index excludes tool, thinking, hidden, delegated, and abandoned
+content and reports partial coverage for malformed or interrupted files. Local
+semantic ranking and Jev reranking are separate explicit readiness/consent
+states; neither is silently represented as lexical success. Jev policy and
+reservations use a separate durable ledger (`session-search-jev-allowance.sqlite`)
+with one-millionth-cent microCents, idempotent settlement, bounded history, and
+fail-closed corruption handling; the disposable postings index never owns spend.
+
 ## Development
 
 ```bash

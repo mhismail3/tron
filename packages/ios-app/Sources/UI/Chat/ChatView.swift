@@ -8,6 +8,7 @@ struct ChatView: View {
     private let initialEditorText: String?
     private let initialModel: ModelRef?
     private let initialHistoryEntryID: String?
+    private let initialSearchResult: SessionSearchResult?
     private let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
     private let displayFrameScheduler: DisplayFrameScheduler
     private let performanceSignposts: any PerformanceSignposting
@@ -62,6 +63,7 @@ struct ChatView: View {
         initialEditorText: String? = nil,
         initialModel: ModelRef? = nil,
         initialHistoryEntryID: String? = nil,
+        initialSearchResult: SessionSearchResult? = nil,
         onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
         hostedProbe: ChatHostedProbe? = nil,
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
@@ -71,6 +73,7 @@ struct ChatView: View {
         self.initialEditorText = initialEditorText
         self.initialModel = initialModel
         self.initialHistoryEntryID = initialHistoryEntryID
+        self.initialSearchResult = initialSearchResult
         self._initialModelSettled = State(initialValue: initialModel == nil)
         self.onForkCreated = onForkCreated
         self.hostedProbe = hostedProbe
@@ -91,6 +94,7 @@ struct ChatView: View {
         initialEditorText: String? = nil,
         initialModel: ModelRef? = nil,
         initialHistoryEntryID: String? = nil,
+        initialSearchResult: SessionSearchResult? = nil,
         onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared
@@ -99,6 +103,7 @@ struct ChatView: View {
         self.initialEditorText = initialEditorText
         self.initialModel = initialModel
         self.initialHistoryEntryID = initialHistoryEntryID
+        self.initialSearchResult = initialSearchResult
         self._initialModelSettled = State(initialValue: initialModel == nil)
         self.onForkCreated = onForkCreated
         self.displayFrameScheduler = displayFrameScheduler
@@ -300,6 +305,25 @@ struct ChatView: View {
         .onChange(of: presentationActivity) { _, activity in
             guard activity.allowsPresentationPublication else { return }
             admitPendingFloatingDisplay()
+        }
+        .task(id: "search-anchor:\(sessionID):\(initialHistoryEntryID ?? "")") {
+            guard let entryID = initialHistoryEntryID,
+                  let searchResult = initialSearchResult,
+                  let profileID = model.profiles.selected?.id else { return }
+            // The mounted presentation is the admission fence; the owning
+            // scroll coordinator waits for the exact historical row's layout.
+            guard let generation = model.sessionPresentationGeneration(for: sessionID) else { return }
+            do {
+                guard try await model.navigateToSearchResult(searchResult, profileID: profileID) else {
+                    model.presentError(NSError(domain: "TronSearchNavigation", code: 1, userInfo: [NSLocalizedDescriptionKey: "The searched message could not be loaded. Try searching again."]))
+                    return
+                }
+                guard generation == model.sessionPresentationGeneration(for: sessionID), !Task.isCancelled else { return }
+                scrollCoordinator.requestHistoricalEntryScroll(semanticID: entryID, installed: transcriptPresentation.installed)
+            } catch is CancellationError { return } catch {
+                guard !Task.isCancelled else { return }
+                model.presentError(error)
+            }
         }
     }
 
@@ -2927,6 +2951,24 @@ struct ChatView: View {
                 .frame(width: titleWidth)
                 .clipped()
                 .accessibilityLabel(chatTitle)
+        }
+        if model.isShowingHistoricalTranscript {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button { Task { _ = await model.loadHistoricalEarlierTranscript(sessionID: sessionID) } } label: {
+                    Image(systemName: "chevron.left")
+                }
+                .accessibilityLabel("Load older history")
+                Button { Task { _ = await model.loadHistoricalLaterTranscript(sessionID: sessionID) } } label: {
+                    Image(systemName: "chevron.right")
+                }
+                .accessibilityLabel("Load newer history")
+                Button { model.returnToLatestTranscript(sessionID: sessionID) } label: {
+                    Image(systemName: "arrow.uturn.down")
+                        .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
+                        .foregroundStyle(Color.tronEmerald)
+                }
+                .accessibilityLabel("Return to latest messages")
+            }
         }
         ToolbarItem(placement: .primaryAction) {
             Button { sessionPresentation.showSettings = true } label: {

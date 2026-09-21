@@ -25,10 +25,18 @@ export interface JevChoiceAnswer { type: "choice"; choice: string; probabilities
 export interface JevScoreAnswer { type: "score"; score: number; legend: Record<string, string>; probabilities: Record<string, number>; confidence: number }
 export type JevAnswer = JevNoulAnswer | JevChoiceAnswer | JevScoreAnswer;
 export interface JevDecisionResponse { requestedModel: string; actualModel: string; answers: Record<string, JevAnswer>; usage: { input_tokens: number; output_tokens: number }; estimatedCostCents: number; maxEstimatedChargeCents: number }
+export type JevDispatchCertainty = "notSent" | "sent" | "uncertain";
+
+export class JevEvaluationError extends Error {
+  constructor(message: string, readonly certainty: JevDispatchCertainty) { super(message); this.name = "JevEvaluationError"; }
+}
+
 export interface JevDispatchContext {
   /** Per-call bound, not a workflow allowance. Workflow owners reserve separately. */
   maxChargeCents?: number;
   beforeDispatch?: () => Promise<void>;
+  /** Called immediately before the POST is handed to the HTTP transport. */
+  onDispatch?: (certainty: "sent") => void;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value && typeof value === "object" && !Array.isArray(value)); }
@@ -142,12 +150,17 @@ export class JevDecisionClient {
     assertActive(signal);
     let response: JevHTTPResponse;
     try {
+      try { context.onDispatch?.("sent"); }
+      catch (error) { if (error instanceof JevEvaluationError) throw error; throw new JevEvaluationError("Jev dispatch admission was revoked", "notSent"); }
       response = await this.http(JEV_ENDPOINT, { method: "POST", headers: { authorization: `Bearer ${token}`, accept: "application/json", "content-type": "application/json" }, body, signal });
-    } catch { throw new Error(signal.aborted ? "Jev evaluation cancelled" : "Jev provider request failed"); }
-    assertActive(signal);
-    if (response.status < 200 || response.status >= 300) throw new Error(`Jev request failed (${response.status})`);
-    if (Buffer.byteLength(response.body, "utf8") > JEV_MAX_RESPONSE_BYTES) throw new Error("Jev response exceeded its bounded body limit");
-    let value: unknown; try { value = JSON.parse(response.body); } catch { throw invalid(); }
+    } catch (error) {
+      if (error instanceof JevEvaluationError) throw error;
+      throw new JevEvaluationError(signal.aborted ? "Jev evaluation cancelled" : "Jev provider request failed", "uncertain");
+    }
+    try { assertActive(signal); } catch { throw new JevEvaluationError("Jev evaluation was cancelled after dispatch", "uncertain"); }
+    if (response.status < 200 || response.status >= 300) throw new JevEvaluationError(`Jev request failed (${response.status})`, "uncertain");
+    if (Buffer.byteLength(response.body, "utf8") > JEV_MAX_RESPONSE_BYTES) throw new JevEvaluationError("Jev response exceeded its bounded body limit", "uncertain");
+    let value: unknown; try { value = JSON.parse(response.body); } catch { throw new JevEvaluationError("Jev response is invalid", "uncertain"); }
     const usage = isRecord(value) && isRecord(value.usage) ? value.usage : undefined;
     if (!isRecord(value) || value.model !== requestedModel || !isRecord(value.answers) || Object.keys(value.answers).length !== Object.keys(admitted.questions).length || !usage || !Number.isSafeInteger(usage.input_tokens) || !Number.isSafeInteger(usage.output_tokens) || (usage.input_tokens as number) < 0 || (usage.input_tokens as number) > INPUT_TOKEN_CEILING || (usage.output_tokens as number) < 0) throw invalid();
     const answers: Record<string, JevAnswer> = Object.create(null);

@@ -184,6 +184,23 @@ execute the signed embedded runtime, not only check that the binary is present;
 a hardened Node runtime without its JIT entitlement exits before the Gateway
 can bind its port.
 
+### Session search embedding helper
+
+The `TronSearchEmbeddingHelper` target is copied to
+`Contents/Resources/TronSearchEmbeddingHelper` and signed by the app's final
+composition phase. The Gateway admits semantic readiness only after running its
+bounded synthetic qualification (512 dimensions, paraphrase similarity, and a
+negative control). Bundled runtime launches derive this path beside the Gateway
+payload. The Gateway admits only the regular, non-symlink helper whose exact
+`TronSearchEmbeddingHelper` code identity, `MYGKXH6TY4` team, hardened runtime
+signature, and real path match the packaged artifact. A source-built helper may
+set `TRON_SEARCH_EMBEDDING_HELPER` only when `NODE_ENV=development`; production
+ignores that override. Missing, unsigned, tampered, unsupported-language, or
+semantically unqualified helpers leave search lexical-only and are never treated
+as ready. Helper responses include the NaturalLanguage sentence embedding
+revision, and Gateway qualification requires that revision, language, and
+512-dimensional vector metadata to remain stable for every vector and query.
+
 The same build embeds the signed Aqua `Tron Native Host` at
 `Contents/Library/Native/Tron Native Host.app`. Its target explicitly keeps
 `PRODUCT_NAME=TronNativeHost`; the shared Release configuration's `Tron` product
@@ -612,3 +629,15 @@ from the read-only mounted DMG. Notarize and staple the app and DMG, then publis
 release assets deliberately. `packages/mac-app/scripts/package-dmg.sh`
 owns DMG layout verification and requires `create-dmg` on `PATH`. Never add an
 automated production release or deployment command.
+
+### Session embedding helper qualification
+
+The Release app bundles `Resources/TronSearchEmbeddingHelper`, a separately
+signed NaturalLanguage process. Before enabling semantic readiness, run the
+built helper with bounded synthetic JSONL frames and record its model language,
+dimension, timeout/crash behavior, and zero-overlap paraphrase cosine result.
+Bundled Gateway launches derive the helper beside the packaged runtime; the
+`TRON_SEARCH_EMBEDDING_HELPER` override is development-only and requires
+`NODE_ENV=development`. An absent or unqualified helper leaves semantic
+coverage explicitly unavailable and does not disable lexical search. Do not use
+private or live transcript text for qualification.
