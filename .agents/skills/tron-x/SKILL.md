@@ -32,6 +32,9 @@ The result includes canonical X URL/ID, selected provider/endpoint, exact raw
 bounded provider JSON per page, extracted root-post text, selected same-author
 continuations with explicit parent provenance, excluded commentary, bounded
 provider-declared outbound URLs, attempt outcomes, stop reasons, and limitations.
+Empty short-post text is accepted only when numeric identity and substantive
+bounded Article body blocks are present; readable output separates Article body
+from post commentary and cites selected replies.
 `complete` means the requested root scope only; conversation cursor exhaustion is
 provider-enumeration scope, not proof that deleted or hidden posts cannot exist. Long posts, Articles, quotes, and media are conservatively partial pending
 browser verification. A syndication response is always partial. Explicit source
@@ -77,7 +80,7 @@ read (not an equivalent canonical source capture):
 ```
 
 Call `fetch_content`, then `get_search_content` using its responseId. Verify
-`code == 200`, `tweet.id` exactly equals the requested ID, and nonempty `tweet.text`.
+`code == 200`, `status.id` exactly equals the requested ID, and either nonempty `status.text` or a substantive `status.article.content.blocks` body. Article body blocks are readable evidence but do not establish universal thread or media completeness.
 Keep provider JSON and missing-content qualifications; an HTTP success or tool
 success flag is insufficient. If unavailable, prefer the browser fallback below.
 The core reader owns the public syndication token computation; do not request

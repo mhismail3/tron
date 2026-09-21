@@ -269,8 +269,10 @@ tried once. The DNS-pinned transport sends only the bounded descriptive
 is required by the public providers and is not identity impersonation. A 429 is
 reported with an honest stop reason, never immediately retried at that provider;
 another explicit run must respect its cooldown.
-HTTP success alone is not success: expected root ID, JSON shape, and nonempty
-bounded text must match. Errors are sanitized, cancellation stops fallback, and
+HTTP success alone is not success: expected root ID, JSON shape, and either
+nonempty bounded post text or substantive Article body blocks must match. Article
+body text is retained with an explicit heading and remains partial because embeds,
+media, and universal completeness are not established. Errors are sanitized, cancellation stops fallback, and
 an unavailable result is not a claim of deletion or an empty bookmark library.
 Tool output over 128 KB fails instead of truncating source fields.
 
@@ -291,7 +293,11 @@ preview.
 explicitly opt a single public post into this lookup and the existing canonical
 source store. Without it ordinary capture does not contact mirror providers.
 The retained object contains original provider bytes; readable text contains the
-root post, not author bios and engagement metadata. Provider-declared outbound
+root post, verified selected continuation/ancestor posts with canonical citations,
+and, when present, the ordered Article body under an explicit heading—not author
+bios and engagement metadata. Article entity links are retained only when
+referenced by Article blocks and are cited to the declaring post. Excluded
+commentary is not promoted into readable publication text. Provider-declared outbound
 `http` and `https` URLs are bounded and, for explicit capture, are passed through
 the same source owner as separate canonical Sources; redirects are validated per
 hop without invented HTTPS upgrades. After a validated redirect, the final URI is matched within the requested scope

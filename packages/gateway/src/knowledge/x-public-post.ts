@@ -7,6 +7,8 @@ export const X_PUBLIC_LINK_MAX_LENGTH = 4_096;
 export const X_PUBLIC_MAX_PAGES = 8;
 export const X_PUBLIC_MAX_ITEMS = 256;
 export const X_PUBLIC_MAX_BODY_BYTES = 2_000_000;
+const X_PUBLIC_MAX_ARTICLE_BLOCKS = 512;
+const X_PUBLIC_MAX_ARTICLE_TEXT = 1_000_000;
 const credentialQueryKey = /^(?:token|api[_-]?key|key|secret|password|passwd|auth|signature|sig|access[_-]?token|credential|session)$/i;
 
 export interface XPostAttempt {
@@ -16,10 +18,21 @@ export interface XPostAttempt {
   page?: number;
   retryAt?: string;
 }
+export interface XPublicArticle {
+  id: string;
+  title?: string;
+  text: string;
+  linkedUrls?: string[];
+  truncated?: boolean;
+  limitations: string[];
+}
 export interface XPublicPostEntry {
   id: string;
   url: string;
   text: string;
+  /** Provider's short-post commentary; absent when the post is Article-only. */
+  postText?: string;
+  article?: XPublicArticle;
   authorId: string;
   parentId?: string;
   role: "root" | "continuation" | "commentary" | "ancestor";
@@ -57,6 +70,9 @@ export interface XPublicPost {
   raw?: string;
   /** Additional bounded page payloads; never silently discarded. */
   rawPages?: string[];
+  /** Readable root content, including an Article body when one is present. */
+  readableText?: string;
+  article?: XPublicArticle;
 }
 export interface XPostResponse { status: number; body?: string; truncated?: boolean; retryAfter?: string; rateLimitReset?: string }
 export type XPostGet = (url: string, signal: AbortSignal) => Promise<XPostResponse>;
@@ -100,6 +116,55 @@ export function normalizePublicLinkedUrl(value: unknown): string | undefined {
     return normalized.length <= X_PUBLIC_LINK_MAX_LENGTH ? normalized : undefined;
   } catch { return undefined }
 }
+function articleEntityLinks(article: Record<string, any>): { urls: string[]; truncated: boolean; malformed: boolean } {
+  const blocks = Array.isArray(article.content?.blocks) ? article.content.blocks : [];
+  const entityMap = article.content?.entityMap;
+  const entities = new Map<string, string>(); let malformed = !Array.isArray(blocks) || blocks.length === 0;
+  if (Array.isArray(entityMap)) for (const item of entityMap) {
+    const entry = object(item); const key = typeof entry?.key === "string" || typeof entry?.key === "number" ? String(entry.key) : undefined;
+    const data = object(object(entry?.value)?.data); const url = typeof data?.url === "string" ? data.url : undefined;
+    if (!key || !url) { malformed ||= Boolean(entry); continue; } entities.set(key, url);
+  } else if (object(entityMap)) for (const [key, item] of Object.entries(entityMap)) {
+    const data = object(object(item)?.data); const url = typeof data?.url === "string" ? data.url : undefined;
+    if (url) entities.set(key, url); else malformed = true;
+  }
+  const candidates: unknown[] = [];
+  for (const block of blocks) for (const range of Array.isArray(object(block)?.entityRanges) ? object(block)!.entityRanges : []) {
+    const key = object(range)?.key; const url = key !== undefined ? entities.get(String(key)) : undefined;
+    if (url) candidates.push(url); else if (key !== undefined) malformed = true;
+  }
+  const links: string[] = [];
+  for (const candidate of candidates) { const normalized = normalizePublicLinkedUrl(candidate); if (normalized && !links.includes(normalized)) links.push(normalized); }
+  return { urls: links.slice(0, 8), truncated: links.length > 8, malformed };
+}
+function articleEvidence(post: Record<string, any>): XPublicArticle | undefined {
+  const article = object(post.article); if (!article) return undefined;
+  const id = numericId(article.id); if (!id) return undefined;
+  const rawBlocks = Array.isArray(object(article.content)?.blocks) ? object(article.content)!.blocks : [];
+  const limitations: string[] = []; const chunks: string[] = []; let chars = 0;
+  if (!rawBlocks.length) limitations.push("Article body blocks were absent or malformed; title/preview metadata is not treated as body text.");
+  if (rawBlocks.length > X_PUBLIC_MAX_ARTICLE_BLOCKS) limitations.push(`Article body exceeded the bounded ${X_PUBLIC_MAX_ARTICLE_BLOCKS}-block retention limit.`);
+  for (const rawBlock of rawBlocks.slice(0, X_PUBLIC_MAX_ARTICLE_BLOCKS)) {
+    const block = object(rawBlock); const text = typeof block?.text === "string" ? block.text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "").trim() : "";
+    if (!block || typeof block?.text !== "string") { limitations.push("Some Article blocks were malformed and omitted."); continue; }
+    if (!text) continue;
+    const remaining = X_PUBLIC_MAX_ARTICLE_TEXT - chars;
+    if (remaining <= 0) { limitations.push("Article body exceeded the bounded readable-text limit."); break; }
+    chunks.push(text.slice(0, remaining)); chars += Math.min(text.length, remaining);
+    if (text.length > remaining) { limitations.push("Article body exceeded the bounded readable-text limit."); break; }
+  }
+  const links = articleEntityLinks(article);
+  if (links.malformed) limitations.push("Some Article link metadata was malformed or unreferenced; only block-referenced safe links were retained.");
+  if (links.truncated) limitations.push("Article-declared links exceeded the bounded retained-link limit.");
+  if (article.cover_media || article.media_entities || article.content?.entityMap) limitations.push("Article embeds and media metadata are retained in raw evidence but were not downloaded or interpreted.");
+  const text = chunks.join("\n\n");
+  return { id, ...(typeof article.title === "string" && article.title.trim() ? { title: article.title.trim().slice(0, 10_000) } : {}), text, ...(links.urls.length ? { linkedUrls: links.urls } : {}), ...(links.truncated ? { truncated: true } : {}), limitations };
+}
+function postReadableText(postText: string, article?: XPublicArticle): string | undefined {
+  if (!article?.text) return postText || undefined;
+  const heading = article.title ? `X Article: ${article.title}` : "X Article";
+  return postText ? `${postText}\n\n${heading}\n\n${article.text}` : `${heading}\n\n${article.text}`;
+}
 function outboundUrls(post: Record<string, any>): { urls: string[]; truncated: boolean } {
   const candidates: unknown[] = [];
   const entities = object(post.entities);
@@ -108,25 +173,18 @@ function outboundUrls(post: Record<string, any>): { urls: string[]; truncated: b
     const candidate = typeof entry?.expanded_url === "string" ? entry.expanded_url : typeof entry?.replacement === "string" ? entry.replacement : undefined;
     if (candidate) candidates.push(candidate);
   }
+  const article = articleEvidence(post); if (article?.linkedUrls) candidates.push(...article.linkedUrls);
   const links: string[] = [];
-  for (const candidate of candidates) {
-    const normalized = normalizePublicLinkedUrl(candidate);
-    if (normalized && !links.includes(normalized)) links.push(normalized);
-  }
-  return { urls: links.slice(0, 8), truncated: links.length > 8 };
+  for (const candidate of candidates) { const normalized = normalizePublicLinkedUrl(candidate); if (normalized && !links.includes(normalized)) links.push(normalized); }
+  return { urls: links.slice(0, 8), truncated: links.length > 8 || Boolean(article?.truncated) };
 }
 function statusEntry(value: unknown, endpoint: string, page: number, role: XPublicPostEntry["role"]): XPublicPostEntry | undefined {
-  const post = object(value);
-  if (!post) return undefined;
-  const id = numericId(post.id) ?? numericId(post.id_str);
-  const author = object(post?.author) ?? object(post?.user);
-  const authorId = numericId(author?.id);
-  const text = typeof post?.text === "string" ? post.text.trim() : "";
-  if (!id || !authorId || !text || text.length > 100_000 || author?.protected === true) return undefined;
-  const reply = object(post?.replying_to);
-  const parentId = numericId(reply?.status) ?? numericId(reply?.id);
-  const links = outboundUrls(post);
-  return { id, url: `https://x.com/i/web/status/${id}`, text, authorId, ...(parentId ? { parentId } : {}), role, selected: false, ...(links.urls.length ? { linkedUrls: links.urls } : {}), ...(links.truncated ? { linksTruncated: true } : {}), provenance: { endpoint, page } };
+  const post = object(value); if (!post) return undefined;
+  const id = numericId(post.id) ?? numericId(post.id_str); const author = object(post?.author) ?? object(post?.user); const authorId = numericId(author?.id);
+  const postText = typeof post?.text === "string" ? post.text.trim() : ""; const article = articleEvidence(post); const readable = postReadableText(postText, article);
+  if (!id || !authorId || !readable || readable.length > X_PUBLIC_MAX_ARTICLE_TEXT + 100_000 || author?.protected === true) return undefined;
+  const reply = object(post?.replying_to); const parentId = numericId(reply?.status) ?? numericId(reply?.id); const links = outboundUrls(post);
+  return { id, url: `https://x.com/i/web/status/${id}`, text: readable, ...(postText ? { postText } : {}), ...(article ? { article } : {}), authorId, ...(parentId ? { parentId } : {}), role, selected: false, ...(links.urls.length ? { linkedUrls: links.urls } : {}), ...(links.truncated ? { linksTruncated: true } : {}), provenance: { endpoint, page } };
 }
 function rootQuality(value: unknown): string[] {
   const post = object(value);
@@ -134,7 +192,9 @@ function rootQuality(value: unknown): string[] {
   const limitations: string[] = [];
   if (post.is_note_tweet === undefined) limitations.push("Provider did not establish whether the root is long-form; completeness is unverified.");
   else if (post.is_note_tweet === true) limitations.push("Long-post text is provider-supplied; verify its ending in X before claiming completeness.");
+  const article = articleEvidence(post);
   if (post.article || /https?:\/\/(?:x|twitter)\.com\/i\/article\//i.test(typeof post.text === "string" ? post.text : "")) limitations.push("X Article body/embeds require browser verification; this response is not certified as the full Article.");
+  if (article?.limitations.length) limitations.push(...article.limitations);
   if (post.media || post.mediaDetails || post.video || (Array.isArray(post.photos) && post.photos.length > 0)) limitations.push("Media metadata/URLs are retained, not downloaded, transcribed, or visually analyzed.");
   if (post.quote || post.quoted_tweet || post.quoted_status) limitations.push("Quoted-post context is retained in raw evidence but has not been independently verified.");
   return limitations;
@@ -210,6 +270,9 @@ function linkedFromSelected(root: XPublicPostEntry, selected: XPublicPostEntry[]
   const urls = allUrls.slice(0, 8);
   const references = allReferences.filter(reference => urls.includes(reference.url)).slice(0, 16);
   return { urls, references, truncated: posts.some(post => post.linksTruncated) || allUrls.length > urls.length || allReferences.filter(reference => urls.includes(reference.url)).length > references.length };
+}
+function readableConversationText(root: XPublicPostEntry, selected: XPublicPostEntry[]): string {
+  return [root.text, ...selected.map(post => `X ${post.role} ${post.id} (${post.url})\n\n${post.text}`)].join("\n\n");
 }
 function limitations(coverage: XPublicCoverage, reasons: string[], complete: boolean, selectedCount: number): string[] {
   const result = ["FxEmbed v2 verifies the requested numeric post identity. Same-author continuations are selected only through explicit numeric parent links; replies to commenters and unrelated commenters are retained as commentary, not publication continuations."];
@@ -291,7 +354,7 @@ export async function lookupPublicXPost(input: string, get: XPostGet, signal: Ab
     const complete = !relationshipIncomplete && (stop === "cursor-exhausted" || coverage === "root");
     const rootQualityPartial = rootLimitations.length > 0;
     const rootLimitationsExtra = linkLimitReached ? ["Provider-declared outbound links exceeded the bounded retained URL/reference limit; omitted links were not silently treated as complete."] : [];
-    return { ...identity, provider: "fxembed-v2", endpoint: endpointFor(), text: root.text, title: `X post by ${root.authorId}`, authorId: root.authorId, coverage, coverageComplete: complete, continuations: selected, commentary: selectedResult.commentary, posts: allPosts, stopReasons: reasons, disposition: coverage === "root" && complete && !rootQualityPartial ? "complete" : "partial", limitations: [...limitations(coverage, reasons, complete, selected.length + 1), ...rootLimitations, ...rootLimitationsExtra], ...(linkLimitReached ? { linkLimitReached: true } : {}), ...(linked.urls.length ? { linkedUrls: linked.urls, linkedReferences: linked.references } : {}), attempts, ...(pages[0] ? { raw: pages[0] } : {}), ...(pages.length > 1 ? { rawPages: pages } : {}) };
+    return { ...identity, provider: "fxembed-v2", endpoint: endpointFor(), text: root.text, readableText: readableConversationText(root, selected), ...(root.article ? { article: root.article } : {}), title: root.article?.title || `X post by ${root.authorId}`, authorId: root.authorId, coverage, coverageComplete: complete, continuations: selected, commentary: selectedResult.commentary, posts: allPosts, stopReasons: reasons, disposition: coverage === "root" && complete && !rootQualityPartial ? "complete" : "partial", limitations: [...limitations(coverage, reasons, complete, selected.length + 1), ...rootLimitations, ...rootLimitationsExtra], ...(linkLimitReached ? { linkLimitReached: true } : {}), ...(linked.urls.length ? { linkedUrls: linked.urls, linkedReferences: linked.references } : {}), attempts, ...(pages[0] ? { raw: pages[0] } : {}), ...(pages.length > 1 ? { rawPages: pages } : {}) };
   }
   // The independent syndication fallback is root-only and never parses the
   // retired FxTwitter v1 response shape.
@@ -309,5 +372,5 @@ export async function lookupPublicXPost(input: string, get: XPostGet, signal: Ab
   let fallbackPayload: Record<string, any> | undefined;
   try { fallbackPayload = object(JSON.parse(fallbackRaw)); } catch { /* already validated by fallbackPost */ }
   const fallbackLimitations = fallbackPayload ? rootQuality(fallbackPayload) : [];
-  return { ...identity, provider: "x-syndication", endpoint: fallbackEndpoint, text: fallback.text, title: `X post by ${fallback.authorId}`, authorId: fallback.authorId, coverage, coverageComplete: false, continuations: [], commentary: [], posts: [fallback], stopReasons: [...(stop ? [stop] : [])], disposition: "partial", limitations: ["Syndication is a root-only fallback; thread, reply, parent-chain, long-post, Article, and media completeness are not established.", ...fallbackLimitations, ...(stop ? [`FxEmbed v2 stopped with ${stop} before this fallback.`] : []), ...(linked.truncated ? ["Provider-declared outbound links exceeded the bounded retained URL/reference limit."] : []), ...(linked.urls.length ? [`Discovered ${linked.urls.length} bounded outbound URL(s); each target requires separate safe source capture.`] : [])], ...(linked.truncated ? { linkLimitReached: true } : {}), ...(linked.urls.length ? { linkedUrls: linked.urls, linkedReferences: linked.references } : {}), attempts, raw: fallbackRaw };
+  return { ...identity, provider: "x-syndication", endpoint: fallbackEndpoint, text: fallback.text, readableText: fallback.text, title: `X post by ${fallback.authorId}`, authorId: fallback.authorId, coverage, coverageComplete: false, continuations: [], commentary: [], posts: [fallback], stopReasons: [...(stop ? [stop] : [])], disposition: "partial", limitations: ["Syndication is a root-only fallback; thread, reply, parent-chain, long-post, Article, and media completeness are not established.", ...fallbackLimitations, ...(stop ? [`FxEmbed v2 stopped with ${stop} before this fallback.`] : []), ...(linked.truncated ? ["Provider-declared outbound links exceeded the bounded retained URL/reference limit."] : []), ...(linked.urls.length ? [`Discovered ${linked.urls.length} bounded outbound URL(s); each target requires separate safe source capture.`] : [])], ...(linked.truncated ? { linkLimitReached: true } : {}), ...(linked.urls.length ? { linkedUrls: linked.urls, linkedReferences: linked.references } : {}), attempts, raw: fallbackRaw };
 }

@@ -12,6 +12,7 @@ const homes: string[] = [];
 async function fixture() { const home = await mkdtemp(join(tmpdir(), "tron-x-capture-")); homes.push(home); return new KnowledgeStore(new TronWorkspace(home)); }
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(homes.splice(0).map(home => rm(home, { recursive: true, force: true }))); });
 const v2 = (extra: Record<string, unknown> = {}) => JSON.stringify({ code: 200, status: { id: "123456789", text: "Actual synthetic post", author: { id: "42" }, replying_to: null, raw_text: { facets: [] }, is_note_tweet: false, ...extra }, thread: [], replies: [], cursor: {} });
+const articleV2 = JSON.stringify({ code: 200, status: { id: "123456789", text: "", author: { id: "42" }, replying_to: null, article: { id: "987654321", title: "Captured Article", content: { blocks: [{ type: "header-two", text: "Heading", entityRanges: [] }, { type: "unstyled", text: "Captured body text.", entityRanges: [] }], entityMap: [] } }, raw_text: { facets: [] } }, thread: [], replies: [], cursor: {} });
 const request = { commandId: "x-capture-synthetic", url: "https://x.com/synthetic/status/123456789?s=20", scope: "research" as const, publicPostLookup: true };
 const options = { resolveHost: async () => ["93.184.216.34"], fetcher: vi.fn(async () => new Response(v2(), { headers: { "content-type": "application/json" } })) };
 
@@ -22,6 +23,11 @@ describe("X public v2 capture ownership", () => {
     expect(result.record.content.captureReason).toContain("/2/conversation/123456789");
     const object = await store.readObject(result.record.content.object!, { recordId: result.record.id, revisionId: result.record.revisionId }); expect(new TextDecoder().decode(object!)).toBe(v2());
     const duplicate = await capture.captureSource(store, { ...request, commandId: "x-capture-duplicate", url: "https://twitter.com/other/status/123456789" }, options); expect(duplicate.duplicate).toBe(true); expect(options.fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("stores readable Article body text while preserving the exact provider object", async () => {
+    const store = await fixture(); const result = await capture.captureSource(store, request, { ...options, fetcher: vi.fn(async () => new Response(articleV2, { headers: { "content-type": "application/json" } })) });
+    expect(result.record.content.text).toContain("X Article: Captured Article"); expect(result.record.content.text).toContain("Captured body text."); expect(result.record.content.captureDisposition).toBe("partial");
+    const object = await store.readObject(result.record.content.object!, { recordId: result.record.id, revisionId: result.record.revisionId }); expect(new TextDecoder().decode(object!)).toBe(articleV2);
   });
   it("refreshes explicitly requested conversation coverage in the same source envelope", async () => {
     const store = await fixture(); const fetcher = vi.fn().mockResolvedValue(new Response(v2({ text: "root" }), { headers: { "content-type": "application/json" } }));
@@ -89,7 +95,7 @@ describe("X public v2 capture ownership", () => {
     const fetcher = vi.fn(async (url: string | URL) => String(url).includes("api.fxtwitter.com") ? new Response(root, { headers: { "content-type": "application/json" } }) : new Response("Underlying guide evidence", { headers: { "content-type": "text/plain" } }));
     const result = await capture.captureSource(store, { ...request, publicPostCoverage: "conversation" }, { ...options, fetcher });
     const records = (await store.list({ kind: "source", includePending: true, includeArchived: true, limit: 10 })).records.filter(record => record.kind === "source");
-    expect(records).toHaveLength(2); expect(result.record.content.linkedUrls).toEqual(["http://example.test/guide"]);
+    expect(records).toHaveLength(2); expect(result.record.content.linkedUrls).toEqual(["http://example.test/guide"]); expect(result.record.content.text).toContain("X continuation 2 (https://x.com/i/web/status/2)"); expect(result.record.content.text).toContain("Continuation http://example.test/guide");
     const target = records.find(record => record.id !== result.record.id)!; expect(target.content.text).toBe("Underlying guide evidence"); expect(target.provenance.evidence).toContainEqual(expect.objectContaining({ locator: "https://x.com/i/web/status/2" }));
   });
   it("does not contact public providers without explicit lookup permission", async () => {
