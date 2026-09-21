@@ -46,6 +46,15 @@ function within(root: string, candidate: string): boolean {
   const rest = relative(root, candidate);
   return rest === "" || (!isAbsolute(rest) && rest !== ".." && !rest.startsWith(`..${sep}`));
 }
+async function safeParent(path: string, label: string): Promise<void> {
+  try {
+    const parent = await lstat(dirname(path));
+    if (parent.isSymbolicLink() || !parent.isDirectory()) fail(`${label} parent must be a private real directory`);
+  } catch (error) {
+    if (error instanceof InternalMigrationError) throw error;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") fail(`${label} parent cannot be inspected safely`);
+  }
+}
 async function regular(path: string, label: string): Promise<import("node:fs").Stats> {
   let entry: import("node:fs").Stats;
   try { entry = await lstat(path); } catch { fail(`${label} is missing or unreadable`); }
@@ -104,6 +113,8 @@ export async function preflightInternalLayout(options: Pick<InternalMigrationOpt
 }> {
   const source = absolute(options.source, "source");
   const destination = absolute(options.destination, "destination");
+  await safeParent(source, "source");
+  await safeParent(destination, "destination");
   if (source === destination || within(source, destination) || within(destination, source)) fail("migration roots overlap");
   let sourceManifest: InternalMigrationManifest | undefined;
   try { sourceManifest = await manifest(source); } catch (error) {
@@ -125,6 +136,9 @@ export async function stageInternalLayout(options: InternalMigrationOptions): Pr
   const source = absolute(options.source, "source");
   const destination = absolute(options.destination, "destination");
   const staging = absolute(options.staging, "staging");
+  await safeParent(source, "source");
+  await safeParent(destination, "destination");
+  await safeParent(staging, "staging");
   if (within(source, staging) || within(staging, source) || within(source, destination) || within(destination, source)) fail("migration roots overlap");
   const sourceEntry = await regular(source, "migration source");
   await assertMissing(destination, "destination");
@@ -161,16 +175,25 @@ export async function verifyInternalLayout(stagingInput: string): Promise<Marker
   return marker;
 }
 
+/** Complete the second half of publication after source retirement. The
+ * marker remains beside the staging path so recovery can prove completion even
+ * though the staged file has moved to its destination. */
+async function finishPublication(marker: Marker): Promise<Marker> {
+  await assertMissing(marker.destination, "destination");
+  await regular(marker.staging, "migration staging");
+  await rename(marker.staging, marker.destination);
+  const published = { ...marker, phase: "published" as const };
+  await writeFile(markerPath(marker.staging), `${JSON.stringify(published)}\n`, { flag: "w", mode: 0o600 });
+  return published;
+}
+
 /** Publication is explicit and never called by Gateway startup. */
 export async function publishInternalLayout(stagingInput: string): Promise<Marker> {
   const marker = await verifyInternalLayout(stagingInput);
   await assertMissing(marker.retired, "retired source");
   await rename(marker.source, marker.retired);
   await markerReplace(markerPath(marker.staging), { ...marker, phase: "source-retired" });
-  await rename(marker.staging, marker.destination);
-  const published = { ...marker, phase: "published" as const };
-  await writeFile(markerPath(marker.staging), `${JSON.stringify(published)}\n`, { flag: "w", mode: 0o600 });
-  return published;
+  return finishPublication({ ...marker, phase: "source-retired" });
 }
 
 export async function recoverInternalLayout(stagingInput: string): Promise<{ readonly action: "none" | "finish-publication" | "conflict"; readonly marker: Marker }> {
@@ -183,7 +206,8 @@ export async function recoverInternalLayout(stagingInput: string): Promise<{ rea
   if ((marker.phase === "staged" || marker.phase === "source-retired") && !sourceExists && !destinationExists && stagingExists) {
     const retired = { ...marker, phase: "source-retired" as const };
     if (marker.phase === "staged") await markerReplace(markerPath(marker.staging), retired);
-    return { action: "finish-publication", marker: retired };
+    const published = await finishPublication(retired);
+    return { action: "none", marker: published };
   }
   if (marker.phase === "source-retired" && !sourceExists && destinationExists && !stagingExists) {
     validateManifest(await manifest(marker.destination), marker.manifest);

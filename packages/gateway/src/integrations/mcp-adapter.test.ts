@@ -11,11 +11,11 @@ import { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 const cleanup: Array<() => Promise<void>> = [];
 const policy = { enabled: true, allowWrites: true, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false };
 
-async function setupConnection(root: string, config: Record<string, unknown>, id: string): Promise<{ owner: ConnectionOwner; adapter: McpAdapter }> {
+async function setupConnection(root: string, config: Record<string, unknown>, id: string, connectionPolicy = policy): Promise<{ owner: ConnectionOwner; adapter: McpAdapter }> {
   const owner = new ConnectionOwner(root);
   const credentials = new InMemoryConnectorCredentialStore(new Map([[`connector:mcp:${id}`, "fixture-token"]]));
   const begin = await owner.execute({ kind: "setup.begin", commandId: `${id}-begin`, instanceId: id, definitionId: "mcp.remote-http", method: config.transport === "http" ? "endpoint" : "local-command" });
-  await owner.execute({ kind: "setup.complete", commandId: `${id}-complete`, operationId: (begin as { operationId: string }).operationId, instanceId: id, providerAccountId: "fixture", credentialRef: `connector:mcp:${id}`, policy, configuration: config as never });
+  await owner.execute({ kind: "setup.complete", commandId: `${id}-complete`, operationId: (begin as { operationId: string }).operationId, instanceId: id, providerAccountId: "fixture", credentialRef: `connector:mcp:${id}`, policy: connectionPolicy, configuration: config as never });
   const workRegistry = new GatewayWorkRegistry();
   return { owner, adapter: new McpAdapter({ connections: owner, credentials, workRegistry }), workRegistry };
 }
@@ -36,11 +36,13 @@ function rpcServer(handler: (request: any) => any): Promise<{ server: Server; en
       request.on("data", chunk => { body += chunk; });
       request.on("end", () => {
         const message = body ? JSON.parse(body) : undefined;
-        const result = message ? handler(message) : undefined;
-        response.setHeader("mcp-session-id", "fixture-session");
-        if (!result) { response.statusCode = 202; response.end(); return; }
-        response.setHeader("content-type", "application/json");
-        response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
+        Promise.resolve(message ? handler(message) : undefined).then(result => {
+          response.setHeader("mcp-session-id", "fixture-session");
+          if (!result) { response.statusCode = 202; response.end(); return; }
+          response.setHeader("content-type", "application/json");
+          if (result && typeof result === "object" && "__raw" in result) { response.end((result as { __raw: string }).__raw); return; }
+          response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
+        });
       });
     });
     server.listen(0, "127.0.0.1", () => {
@@ -66,13 +68,79 @@ describe("Mac-owned MCP adapter", () => {
       throw new Error(`unexpected ${message.method}`);
     });
     cleanup.push(() => new Promise<void>(resolve => fixture.server.close(() => resolve())));
-    const { adapter } = await setupConnection(root, { transport: "http", endpoint: fixture.endpoint }, "remote");
+    const { owner, adapter } = await setupConnection(root, { transport: "http", endpoint: fixture.endpoint }, "remote");
+    expect((await owner.snapshot()).instances.find(instance => instance.id === "remote")?.health).toBe("setup-required");
     const tools = await registerFactory(adapter);
+    expect((await owner.snapshot()).instances.find(instance => instance.id === "remote")?.health).toBe("ready");
     expect(Object.keys(tools)).toEqual(["mcp_remote_echo", "mcp_remote_mutate"]);
     const result = await tools.mcp_remote_echo.execute("call", { text: "ok" }, undefined, undefined, {});
     expect(result.content[0]).toMatchObject({ type: "text", text: '{"text":"ok"}' });
     const unknown = await tools.mcp_remote_mutate.execute("mutation", {}, undefined, undefined, {});
     expect(unknown.details).toMatchObject({ outcome: "unknown" });
+  });
+
+  it("fences a previously registered tool after its owner is disabled", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-mcp-revoke-"));
+    cleanup.push(() => rm(root, { recursive: true, force: true }));
+    let calls = 0;
+    const fixture = await rpcServer(message => {
+      if (message.method === "initialize") return { protocolVersion: "2025-11-25", capabilities: { tools: {} }, serverInfo: { name: "fixture", version: "1" } };
+      if (message.method === "tools/list") return { tools: [{ name: "mutate", inputSchema: { type: "object" }, annotations: { readOnlyHint: false } }] };
+      if (message.method === "tools/call") { calls += 1; return { content: [{ type: "text", text: "called" }] }; }
+      return undefined;
+    });
+    cleanup.push(() => new Promise<void>(resolve => fixture.server.close(() => resolve())));
+    const { owner, adapter } = await setupConnection(root, { transport: "http", endpoint: fixture.endpoint }, "revoke");
+    const tools = await registerFactory(adapter);
+    await owner.execute({ kind: "policy.update", commandId: "revoke-policy-0001", instanceId: "revoke", policy: { ...policy, enabled: false } });
+    const result = await tools.mcp_revoke_mutate.execute("mutation", {}, undefined, undefined, {});
+    expect(result.details).toMatchObject({ outcome: "unknown" });
+    expect(calls).toBe(0);
+  });
+
+  it("serializes calls for one account while allowing separate adapters to share its lane", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-mcp-lane-"));
+    cleanup.push(() => rm(root, { recursive: true, force: true }));
+    let active = 0; let maximum = 0;
+    const fixture = await rpcServer(async message => {
+      if (message.method === "initialize") return { protocolVersion: "2025-11-25", capabilities: { tools: {} }, serverInfo: { name: "fixture", version: "1" } };
+      if (message.method === "tools/list") return { tools: [{ name: "mutate", inputSchema: { type: "object" }, annotations: { readOnlyHint: false } }] };
+      if (message.method === "tools/call") { active += 1; maximum = Math.max(maximum, active); await new Promise(resolve => setTimeout(resolve, 20)); active -= 1; return { content: [{ type: "text", text: "called" }] }; }
+      return undefined;
+    });
+    cleanup.push(() => new Promise<void>(resolve => fixture.server.close(() => resolve())));
+    const { adapter } = await setupConnection(root, { transport: "http", endpoint: fixture.endpoint }, "lane");
+    const first = await registerFactory(adapter, "session-a", "host-a");
+    const second = await registerFactory(adapter, "session-b", "host-b");
+    await Promise.all([
+      first.mcp_lane_mutate.execute("one", {}, undefined, undefined, {}),
+      second.mcp_lane_mutate.execute("two", {}, undefined, undefined, {}),
+    ]);
+    expect(maximum).toBe(1);
+  });
+
+  it("rejects an unknown-length HTTP response once its body exceeds the bound", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-mcp-body-"));
+    cleanup.push(() => rm(root, { recursive: true, force: true }));
+    const fixture = await rpcServer(message => message.method === "initialize"
+      ? { __raw: "x".repeat(2 * 1024 * 1024 + 1) }
+      : undefined);
+    cleanup.push(() => new Promise<void>(resolve => fixture.server.close(() => resolve())));
+    const { adapter } = await setupConnection(root, { transport: "http", endpoint: fixture.endpoint }, "body");
+    await expect(adapter.extensionFactories("session", "host")).rejects.toThrow(/bounded size|connection failed/i);
+  });
+
+  it("rejects write-capable MCP admission when the owner write policy is disabled", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-mcp-policy-"));
+    cleanup.push(() => rm(root, { recursive: true, force: true }));
+    const fixture = await rpcServer(message => {
+      if (message.method === "initialize") return { protocolVersion: "2025-11-25", capabilities: { tools: {} }, serverInfo: { name: "fixture", version: "1" } };
+      if (message.method === "tools/list") return { tools: [{ name: "read", inputSchema: { type: "object" }, annotations: { readOnlyHint: true } }] };
+      return undefined;
+    });
+    cleanup.push(() => new Promise<void>(resolve => fixture.server.close(() => resolve())));
+    const { adapter } = await setupConnection(root, { transport: "http", endpoint: fixture.endpoint }, "policy", { ...policy, allowWrites: false });
+    await expect(adapter.extensionFactories("session", "host")).rejects.toThrow(/write policy/);
   });
 
   it("launches trusted stdio without shell interpolation or ambient secret inheritance", async () => {

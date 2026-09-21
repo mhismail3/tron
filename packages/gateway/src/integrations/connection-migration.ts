@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile, lstat, mkdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { KnowledgeCatalog, type KnowledgeTable } from "../knowledge/knowledge-catalog.js";
+import { CATALOG_STORAGE_VERSION } from "../knowledge/knowledge-store.js";
 import { durableAtomicWriteJson } from "../util/durable-json.js";
 import type { ConnectionInstance, ConnectionOwnerState, ConnectionPolicy } from "./connection-contract.js";
 import { CONNECTION_STATE_SCHEMA_VERSION, validateConnectionState } from "./connection-contract.js";
@@ -27,6 +28,8 @@ export interface LegacyConnectorState {
 
 export interface KnowledgeConnectorSource {
   schemaVersion: 1;
+  /** Current Knowledge manifests are catalog storage version 2. */
+  storageVersion?: 1 | typeof CATALOG_STORAGE_VERSION;
   stateRevision: number;
   catalogID?: string;
   config: unknown;
@@ -122,14 +125,31 @@ export async function readLegacyConnectorState(path: string, fileSystem: { readF
   if (!value || typeof value !== "object" || Array.isArray(value)) throw invalid("Knowledge state is invalid");
   const manifest = value as Record<string, unknown>;
   if (manifest.storageVersion !== undefined) {
-    if (manifest.storageVersion !== 1 || manifest.schemaVersion !== 1 || typeof manifest.catalogID !== "string") throw invalid("Knowledge catalog manifest is newer or invalid");
+    if (manifest.storageVersion !== CATALOG_STORAGE_VERSION || manifest.schemaVersion !== 1 || typeof manifest.catalogID !== "string") throw invalid("Knowledge catalog manifest is newer or invalid");
     const catalogPath = join(dirname(path), `catalog-${manifest.catalogID}.sqlite`);
     let catalog: KnowledgeCatalog;
     try { catalog = new KnowledgeCatalog(catalogPath, true); } catch { throw invalid("Knowledge catalog could not be opened"); }
     try {
       const control = catalog.control<Record<string, unknown> & { schemaVersion: 1; stateRevision: number; connectors?: Record<string, LegacyConnectorState> }>();
       const receipts = Object.fromEntries((catalog.table<Record<string, unknown>>("receipts") as KnowledgeTable<Record<string, unknown>>).entries());
-      const source = { schemaVersion: control.schemaVersion, stateRevision: control.stateRevision, catalogID: manifest.catalogID, config: control.config, connectors: control.connectors ?? {}, receipts };
+      let connectors = control.connectors ?? {};
+      // Catalog storage deliberately omits the generic account envelope once
+      // ConnectionOwner is active. Read that companion authority only to
+      // construct the offline migration plan; never infer credentials from a
+      // provider record or silently continue without the envelope.
+      if (Object.values(connectors).some(value => value && (value.accountId === undefined || value.credentialRef === undefined))) {
+        const ownerPath = join(dirname(dirname(path)), "integrations", "connections.json");
+        try {
+          const owner = JSON.parse(await fileSystem.readFile(ownerPath, "utf8")) as ConnectionOwnerState;
+          validateConnectionState(owner);
+          connectors = Object.fromEntries(Object.entries(connectors).map(([key, value]) => {
+            const envelope = owner.instances[key];
+            if (!envelope) throw invalid("Knowledge catalog connector has no matching connection owner");
+            return [key, { ...value, enabled: envelope.policy.enabled, accountId: envelope.providerAccountId, ...(envelope.scope ? { scope: envelope.scope } : {}), credentialRef: envelope.credentialRef, allowWrites: envelope.policy.allowWrites, paidAccessApproved: envelope.policy.paidAccessApproved, paidBudgetCents: envelope.policy.paidBudgetCents, recurringApproved: envelope.policy.recurringApproved, connectionId: key }];
+          }));
+        } catch (error) { throw error instanceof Error && error.message.startsWith("Connection migration:") ? error : invalid("Knowledge catalog connector envelope is unavailable"); }
+      }
+      const source = { storageVersion: CATALOG_STORAGE_VERSION, schemaVersion: control.schemaVersion, stateRevision: control.stateRevision, catalogID: manifest.catalogID, config: control.config, connectors, receipts };
       validateSource(source);
       return clone(source);
     } catch (error) { throw error instanceof Error && error.message.startsWith("Connection migration:") ? error : invalid("Knowledge catalog control is invalid"); }

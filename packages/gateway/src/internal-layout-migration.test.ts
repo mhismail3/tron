@@ -1,4 +1,4 @@
-import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -72,6 +72,21 @@ describe("internal layout migration", () => {
     await expect(recoverInternalLayout(value.staging)).resolves.toMatchObject({ action: "none" });
     await cleanupInternalLayout(value.staging);
     await expect(lstat(value.staging)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("finishes the source-retired crash window instead of returning a repeated action", async () => {
+    const root = await fixture("tron-internal-migration-crash-");
+    const value = options(root);
+    await mkdir(join(root, "tron/internal"), { recursive: true });
+    await writeFile(value.source, "stable", { mode: 0o600 });
+    const staged = await stageInternalLayout(value);
+    await rename(value.source, staged.retired);
+    await writeFile(`${value.staging}.tron-internal-migration.json`, `${JSON.stringify({ ...staged, phase: "source-retired" })}\n`, { flag: "w", mode: 0o600 });
+    const recovered = await recoverInternalLayout(value.staging);
+    expect(recovered.action).toBe("none");
+    expect(recovered.marker.phase).toBe("published");
+    expect(await readFile(value.destination, "utf8")).toBe("stable");
+    await expect(recoverInternalLayout(value.staging)).resolves.toMatchObject({ action: "none", marker: { phase: "published" } });
   });
 
   it("does not regenerate a missing source or silently create authority", async () => {

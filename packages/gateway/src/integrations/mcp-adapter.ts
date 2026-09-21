@@ -1,4 +1,5 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { AsyncMutex } from "../util/async-mutex.js";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Tool as McpTool } from "@modelcontextprotocol/sdk/types.js";
@@ -31,6 +32,7 @@ type ToolOutcome = { outcome: "success" | "remote-error" | "unknown"; connection
 interface ActiveConnection {
   readonly client: Client;
   readonly close: () => Promise<void>;
+  closed?: boolean;
 }
 
 function invalid(message: string): GatewayError { return new GatewayError("invalid_request", message); }
@@ -108,8 +110,24 @@ function endpointFetch(endpoint: URL, token: string | undefined): typeof fetch {
     if (token) headers.set("authorization", `Bearer ${token}`);
     const response = await fetch(url, { ...init, headers, redirect: "error" });
     const contentLength = response.headers.get("content-length");
-    if (contentLength && Number(contentLength) > HTTP_MAX_RESPONSE_BYTES) throw new Error("MCP HTTP response exceeds its bounded size");
-    return response;
+    if (contentLength && (!/^\d+$/.test(contentLength) || Number(contentLength) > HTTP_MAX_RESPONSE_BYTES)) throw new Error("MCP HTTP response exceeds its bounded size");
+    if (!response.body) return response;
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    try {
+      while (true) {
+        const next = await reader.read();
+        if (next.done) break;
+        total += next.value.byteLength;
+        if (total > HTTP_MAX_RESPONSE_BYTES) throw new Error("MCP HTTP response exceeds its bounded size");
+        chunks.push(next.value);
+      }
+    } finally { reader.releaseLock(); }
+    const body = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
+    return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
   };
 }
 
@@ -126,14 +144,22 @@ export interface McpAdapterOptions {
 }
 
 export class McpAdapter {
+  private readonly lanes = new Map<string, AsyncMutex>();
+
   constructor(private readonly options: McpAdapterOptions) {}
+
+  private lane(connectionId: string): AsyncMutex {
+    let lane = this.lanes.get(connectionId);
+    if (!lane) { lane = new AsyncMutex(); this.lanes.set(connectionId, lane); }
+    return lane;
+  }
 
   /** Returns factories for ready instances only. A configured instance that
    * cannot authenticate fails runtime admission rather than silently granting
    * a partially discovered tool set. */
   async extensionFactories(sessionId: string, hostEpoch: string): Promise<ExtensionFactory[]> {
     const snapshot = await this.options.connections.snapshot();
-    const instances = snapshot.instances.filter(instance => instance.definitionId === "mcp.remote-http" && instance.health === "ready" && instance.policy.enabled);
+    const instances = snapshot.instances.filter(instance => instance.definitionId === "mcp.remote-http" && (instance.health === "ready" || instance.health === "setup-required") && instance.policy.enabled);
     const factories: ExtensionFactory[] = [];
     const names = new Set<string>();
     for (const projection of instances) {
@@ -145,6 +171,9 @@ export class McpAdapter {
   }
 
   private async factoryFor(instance: ConnectionInstance, sessionId: string, hostEpoch: string, names: Set<string>): Promise<ExtensionFactory> {
+    // MCP annotations are untrusted. A server cannot turn a write-capable
+    // connection into a read-only one by labelling a tool read-only.
+    if (!instance.policy.allowWrites) throw unavailable("MCP tools require an enabled write policy");
     const active = await this.connect(instance);
     const discovered: McpTool[] = [];
     let cursor: string | undefined;
@@ -159,6 +188,10 @@ export class McpAdapter {
       discovered.push(...listed.tools);
       cursor = listed.nextCursor;
     } while (cursor);
+    try {
+      await this.options.connections.markRuntimeReady(instance.id, instance.setupRevision);
+      await this.options.connections.admitRuntimeBinding({ schemaVersion: 1, integrationId: instance.definitionId, connectionId: instance.id, capabilityId: "tools", sessionId, runtimeGeneration: Number.isFinite(Number(hostEpoch)) ? Number(hostEpoch) : 0, provider: { owner: "connection", definitionId: instance.definitionId, connectionId: instance.id } });
+    } catch (error) { await active.close(); throw error; }
     const tools = discovered.map(tool => this.admitTool(instance, tool, names, active, sessionId, hostEpoch));
     return async (pi) => {
       for (const tool of tools) pi.registerTool(tool as ToolDefinition<any>);
@@ -181,20 +214,28 @@ export class McpAdapter {
       label: boundedText(tool.title ?? sourceName, 160, "MCP tool title") || sourceName,
       description: `${description} (MCP server ${instance.id}; source tool ${sourceName})`,
       parameters: tool.inputSchema as any,
-      executionMode: "parallel",
+      executionMode: "sequential",
       execute: async (toolCallId, params, signal, onUpdate) => {
         const controller = new AbortController();
         const abort = () => controller.abort(signal?.reason);
         if (signal?.aborted) abort(); else signal?.addEventListener("abort", abort, { once: true });
         const work = this.options.workRegistry?.begin({ kind: "mcp-tool-call", sessionId, hostEpoch, cancellation: () => controller.abort() });
         try {
-          const result = await active.client.callTool({ name: sourceName, arguments: params as Record<string, unknown> }, undefined, {
+          const result = await this.lane(instance.id).run(async () => {
+            const current = await this.options.connections.resolveInstance(instance.id);
+            if (active.closed || current.setupRevision !== instance.setupRevision || current.health !== "ready" || !current.policy.enabled || !current.policy.allowWrites) {
+              active.closed = true;
+              await active.close();
+              throw unavailable("MCP connection is no longer admitted");
+            }
+            return active.client.callTool({ name: sourceName, arguments: params as Record<string, unknown> }, undefined, {
             signal: controller.signal,
             timeout: CALL_TIMEOUT_MS,
             onprogress: (progress: { progress: number; total?: number | undefined }) => {
               work?.progress();
               onUpdate?.({ content: [textContent(`MCP progress: ${String(progress.progress)}${progress.total === undefined ? "" : `/${progress.total}`}`)], details: { outcome: "success", connectionId: instance.id, tool: sourceName } satisfies ToolOutcome });
             },
+            });
           });
           const content = toAgentContent(result);
           return { content, details: { outcome: result.isError ? "remote-error" : "success", connectionId: instance.id, tool: sourceName } satisfies ToolOutcome };

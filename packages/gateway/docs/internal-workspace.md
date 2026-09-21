@@ -34,7 +34,7 @@ hidden folders, and still supports folder creation. Session directory selection,
 recent directories, project trust, worktrees, and Automation cwd capture are
 unchanged. Merely using this root never changes a session cwd or grants trust.
 No workspace document is automatically collected or loaded as global instructions.
-Secrets belong in existing credential stores, not workspace documents.
+Secrets belong in existing credential stores, not workspace documents. Internal-layout publications keep a resumable marker beside staging; recovery completes a source-retired rename only after validating the staged bytes and destination absence, and never recreates a missing authority.
 
 ## Initialization, failure and recovery
 

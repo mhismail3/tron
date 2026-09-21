@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { KnowledgeCatalog } from "../knowledge/knowledge-catalog.js";
 import { prepareConnectionMigration, publishConnectionMigration, readLegacyConnectorState, recoverConnectionMigration, verifyMigrationPlan } from "./connection-migration.js";
 
 const source = () => ({
@@ -24,6 +25,32 @@ describe("connection migration", () => {
       expect(read.stateRevision).toBe(17);
       expect(read.connectors.raindrop.pendingRemote).toBeDefined();
       expect(read.receipts["knowledge.connector.state\u0000page-1"]).toBeDefined();
+    } finally { await rm(home, { recursive: true, force: true }); }
+  });
+
+  it("reads the production catalog v2 control and receipt tables with the owner envelope", async () => {
+    const home = await mkdtemp(join(tmpdir(), "tron-connection-catalog-"));
+    try {
+      const plan = prepareConnectionMigration(source());
+      const catalogID = "11111111-1111-4111-8111-111111111111";
+      const knowledgeRoot = join(home, "state/knowledge");
+      await mkdir(knowledgeRoot, { recursive: true, mode: 0o700 });
+      const catalogPath = join(knowledgeRoot, `catalog-${catalogID}.sqlite`);
+      const catalog = new KnowledgeCatalog(catalogPath, false, true);
+      const providerState = structuredClone(source().connectors.raindrop) as Record<string, unknown>;
+      for (const key of ["enabled", "accountId", "scope", "credentialRef", "allowWrites", "paidAccessApproved", "paidBudgetCents", "recurringApproved"]) delete providerState[key];
+      providerState.connectionId = Object.keys(plan.ownerState.instances)[0];
+      catalog.setControl({ schemaVersion: 1, stateRevision: 17, catalogID, config: source().config, connectors: { [providerState.connectionId as string]: providerState } });
+      catalog.table("receipts").set("knowledge.connector.state\\u0000page-1", { operation: "discover", requestHash: "abc", result: { kind: "value", value: true }, recordIds: [] });
+      catalog.close();
+      await writeFile(join(knowledgeRoot, "state.json"), JSON.stringify({ schemaVersion: 1, storageVersion: 2, catalogID }), { mode: 0o600 });
+      await mkdir(join(home, "state/integrations"), { recursive: true, mode: 0o700 });
+      await writeFile(join(home, "state/integrations/connections.json"), JSON.stringify(plan.ownerState), { mode: 0o600 });
+      const read = await readLegacyConnectorState(join(knowledgeRoot, "state.json"));
+      expect(read.storageVersion).toBe(2);
+      expect(read.connectors[providerState.connectionId as string].credentialRef).toBe("connector:raindrop:one");
+      expect(read.receipts["knowledge.connector.state\\u0000page-1"]).toBeDefined();
+      expect(prepareConnectionMigration(read).providerStates[0]?.state.pendingRemote).toBeDefined();
     } finally { await rm(home, { recursive: true, force: true }); }
   });
 

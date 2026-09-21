@@ -160,6 +160,24 @@ export class ConnectionOwner {
     });
   }
 
+  /** A transport adapter calls this only after successful handshake and tool
+   * discovery. Setup alone must not project an MCP endpoint as available. */
+  async markRuntimeReady(instanceId: string, setupRevision: number): Promise<void> {
+    assertConnectionId(instanceId);
+    return this.mutex.run(async () => {
+      const state = await this.load(true);
+      const instance = state.instances[instanceId];
+      if (!instance || instance.setupRevision !== setupRevision || !instance.policy.enabled || instance.health === "disabled" || instance.health === "disconnected") throw conflict("Connection instance is no longer admitted");
+      if (instance.health === "ready") return;
+      if (instance.health !== "setup-required") throw conflict("Connection instance is not awaiting runtime admission");
+      instance.health = "ready";
+      instance.updatedAt = now();
+      state.stateRevision += 1;
+      validateConnectionState(state);
+      await this.save(state);
+    });
+  }
+
   /** Runtime owners call this during admission; no binding is persisted and a
    * disabled/disconnected account cannot be inherited by a child runtime. */
   async admitRuntimeBinding(binding: RuntimeBinding): Promise<RuntimeBinding> {
@@ -216,7 +234,7 @@ export class ConnectionOwner {
       if (definition.implementation === "mcp" && operation.method === "endpoint" && command.configuration?.transport !== "http") throw invalid("Endpoint setup requires HTTP MCP configuration");
       if (definition.implementation === "mcp" && operation.method === "local-command" && command.configuration?.transport !== "stdio") throw invalid("Local command setup requires stdio MCP configuration");
       if (definition.implementation !== "mcp" && command.configuration !== undefined) throw invalid("Only MCP connections accept transport configuration");
-      const instance: ConnectionInstance = { id: command.instanceId, definitionId: definition.id, implementation: definition.implementation, providerAccountId: command.providerAccountId, ...(command.scope ? { scope: command.scope } : {}), credentialRef: command.credentialRef, ...(command.configuration ? { configuration: copy(command.configuration) } : {}), policy: copy(command.policy), health: command.policy.enabled ? "ready" : "disabled", createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp, setupRevision: (existing?.setupRevision ?? 0) + 1 };
+      const instance: ConnectionInstance = { id: command.instanceId, definitionId: definition.id, implementation: definition.implementation, providerAccountId: command.providerAccountId, ...(command.scope ? { scope: command.scope } : {}), credentialRef: command.credentialRef, ...(command.configuration ? { configuration: copy(command.configuration) } : {}), policy: copy(command.policy), health: command.policy.enabled ? (definition.implementation === "mcp" ? "setup-required" : "ready") : "disabled", createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp, setupRevision: (existing?.setupRevision ?? 0) + 1 };
       state.instances[instance.id] = instance; operation.status = "completed"; operation.updatedAt = timestamp;
       return resultForInstance(instance);
     }
@@ -229,7 +247,7 @@ export class ConnectionOwner {
     const instance = state.instances[command.instanceId]; if (!instance) throw conflict("Connection instance is unknown");
     if (instance.health === "disconnected") throw conflict("Connection instance is disconnected");
     if (command.kind === "policy.update") {
-      instance.policy = copy(command.policy); instance.health = command.policy.enabled ? "ready" : "disabled"; instance.updatedAt = timestamp; instance.setupRevision += 1; delete instance.lastError;
+      instance.policy = copy(command.policy); instance.health = command.policy.enabled ? (instance.implementation === "mcp" ? "setup-required" : "ready") : "disabled"; instance.updatedAt = timestamp; instance.setupRevision += 1; delete instance.lastError;
       return resultForInstance(instance);
     }
     instance.health = "disconnected"; instance.policy = { ...instance.policy, enabled: false }; instance.updatedAt = timestamp; instance.setupRevision += 1;

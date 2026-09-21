@@ -1,4 +1,4 @@
-import { realpathSync, statSync } from "node:fs";
+import { lstatSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { mkdir } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -58,9 +58,20 @@ export function delegatedProviderEnvironment(root: string, environment: NodeJS.P
 }
 
 /** Prepare the admission root before the provider can publish a run. */
+function rejectSymlinkPath(path: string): void {
+  const canonicalPath = resolve(path);
+  try {
+    if (lstatSync(canonicalPath).isSymbolicLink()) throw new Error("delegated artifact path cannot contain symlinks");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
 export async function ensureDelegatedArtifactRoot(root: string): Promise<void> {
   const canonicalRoot = resolve(root);
+  rejectSymlinkPath(canonicalRoot);
   await mkdir(canonicalRoot, { recursive: true, mode: 0o700 });
+  rejectSymlinkPath(canonicalRoot);
   const owner = process.getuid?.();
   const metadata = statSync(canonicalRoot);
   if (!metadata.isDirectory() || owner !== undefined && metadata.uid !== owner || (metadata.mode & 0o077) !== 0) {
@@ -128,6 +139,8 @@ export function delegatedArtifactPathAllowed(asyncPath: string, cwd: string, adm
   };
   const candidate = resolve(asyncPath);
   try {
+    if (ownedRoot !== undefined) rejectSymlinkPath(ownedRoot);
+    rejectSymlinkPath(candidate);
     const physical = realpathSync(candidate);
     if (ownedRoot !== undefined) {
       const rootStat = statSync(ownedRoot);
