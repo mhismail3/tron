@@ -1,5 +1,26 @@
 import SwiftUI
 
+/// The group owns the same themed glass as Connection and Protocol; the input
+/// must not install a second, independently colored surface.
+struct CustomModelIDsEditor: View {
+    @Binding var text: String
+    @Environment(\.tronSettingsVisualTheme) private var theme
+
+    var body: some View {
+        TronSettingsGroup("Models", detail: "One model ID per line. These appear in model selection.") {
+            TextField("Model IDs", text: $text, axis: .vertical)
+                .lineLimit(2...8).textInputAutocapitalization(.never).autocorrectionDisabled()
+                .textFieldStyle(.plain)
+                .font(TronTypography.code(size: TronTypography.sizeBody))
+                .foregroundStyle(Color.tronTextPrimary)
+                .tint(theme?.accent ?? .tronEmerald)
+                .padding(.horizontal, TronSpacing.section)
+                .padding(.vertical, TronSpacing.md)
+                .frame(minHeight: 52)
+        }
+    }
+}
+
 struct CustomModelsSettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.colorScheme) private var colorScheme
@@ -187,11 +208,7 @@ struct CustomModelsSettingsView: View {
                         TronTextSettingRow(icon: "network", title: "Base URL", value: editedProviderBinding(provider.baseURL, providerID: providerID), keyboard: .URL)
                     }
                 }
-                TronSettingsGroup("Models", detail: "One model ID per line. These appear in model selection.", accent: .tronBlue, surfaceStyle: .uncontained) {
-                    TextField("Model IDs", text: editedProviderBinding(provider.models, providerID: providerID), axis: .vertical)
-                        .lineLimit(2...8).textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .tronField(monospaced: true, surfaceTint: Color.tronBlue.opacity(0.15), border: Color.tronBlue.opacity(0.30))
-                }
+                CustomModelIDsEditor(text: editedProviderBinding(provider.models, providerID: providerID))
                 TronSettingsGroup("Protocol") {
                     TronSelectionRow(icon: "network", title: "API Format", value: apiTitle(api.wrappedValue)) {
                         Button("Inherited / per model") { api.wrappedValue = "" }

@@ -4,6 +4,28 @@ import XCTest
 
 @MainActor
 final class SettingsLayoutStyleTests: XCTestCase {
+    func testCustomModelEditorUsesSurroundingSettingsGlass() async throws {
+        for scheme in [ColorScheme.light, .dark] {
+            let fixture = VStack(spacing: 18) {
+                TronSettingsGroup("Connection") {
+                    TronValueRow(icon: "cpu", title: "Provider ID", value: "fixture")
+                }
+                CustomModelIDsEditor(text: .constant("model-small\nmodel-large"))
+                TronSettingsGroup("Protocol") {
+                    TronValueRow(icon: "network", title: "API Format", value: "OpenAI Chat")
+                }
+            }
+            .padding(20)
+            .tronPresentation().tronSettingsLayout().tronSettingsVisualTheme(accent: .tronCyan)
+            .background(Color.tronBackground)
+            try await withHost(fixture, size: CGSize(width: 440, height: 520), scheme: scheme) { host in
+                // Capture the production editor beside its real shared group
+                // surfaces so tint/border drift is visible in both appearances.
+                attach(image(host), name: "custom-model-editor-shared-glass-\(scheme)")
+            }
+        }
+    }
+
     func testSettingsRedesignScreensRenderRootAndRepresentativeFixtures() async throws {
         let socket = ScriptedGatewaySocket()
         let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: [socket]).factory)
