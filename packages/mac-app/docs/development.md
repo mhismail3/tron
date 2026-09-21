@@ -561,6 +561,43 @@ Focused regressions: `python3 scripts/test-mac-reinstall.py`; set `TRON_TEST_APP
 to a built app to include real bundled preflight/staging/verification against
 temporary homes. CI runs both filesystem tests and the bundled-tool integration.
 
+### Local recovery location and retention
+
+Use `~/.tron-maintenance` as the single local recovery storage root, outside
+live `~/.tron` so snapshots cannot recursively include their own backups. The
+reinstall helper already owns `<operation-id>/receipt.json`, source manifests,
+`backups/` and any `retired-stable-payloads/`. Do not move these independently,
+rewrite completed receipts, or use symlinks to conceal relocated stores.
+
+For a coordinated migration, prepare the app checkpoint first to obtain the
+operation directory. The maintainer places the separately verified **pre-write**
+backup, isolated restore evidence and journals under that operation's
+`pre-migration/`, before publishing migrations. Keep it distinct from the helper's
+**post-write** `backups/`. This is a location convention, not a new receipt field:
+the reinstall helper does not verify the manually owned pre-migration checkpoint.
+Its own manifests and isolated restore proof remain mandatory. Use the owning
+migration tool's required same-filesystem staging location; do not relocate live
+staging or journals merely to satisfy the archival layout.
+
+Keep one accepted, coherent recovery set, including both checkpoints when a
+migration requires them, until its replacement has passed restore and continuity
+checks. Retention is explicit and manual, never age-based automatic deletion.
+Review older sets for unique history or unmerged source before removing them.
+Historical source archives and concise incident evidence may live in the same
+root's `archives/`, clearly separate from verified operation components.
+Retire released build/test output before preparing a snapshot rather than
+silently excluding unknown workspace files from the backup inventory.
+
+Keep a concise recovery index identifying each retained checkpoint, original
+revision, verification evidence and recovery constraints. A path-bound legacy
+checkpoint must stay where its validators expect it until relocation has its
+own verified mapping; listing it centrally is not proof it was physically moved
+or newly verified. Do not make another full copy merely to reorganize folders.
+These are local recovery checkpoints, not scheduled ongoing backups and not
+protection against disk loss. Off-device backup requires a separately configured
+protected destination. Restoration and any app/Gateway transition remain
+maintainer actions.
+
 ### Agent-home cutover (operator-owned)
 
 Follow the canonical [agent-home cutover runbook](agent-home-cutover.md) for the
