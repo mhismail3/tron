@@ -6,7 +6,7 @@ import { isIP } from "node:net";
 import type {
   KnowledgeEvidenceRef, KnowledgeObjectRef, KnowledgeRecord, KnowledgeRecordDraft,
   KnowledgeScope, SourceAssessment, SourceContent,
-  SourceIdentity, SourceOriginKind,
+  SourceIdentity, SourceOrigin, SourceOriginKind,
 } from "./knowledge-contract.js";
 import { KnowledgeStore, type KnowledgeMutationResult } from "./knowledge-store.js";
 import { awaitAbortableWithSettlement } from "./model-await.js";
@@ -304,6 +304,13 @@ function sourceMatches(record: KnowledgeRecord & { kind: "source" }, input: Sour
   return false;
 }
 
+function childCommand(base: string, suffix: string): string {
+  const normalizedBase = base.replace(/[^A-Za-z0-9._:-]/g, "_");
+  const normalizedSuffix = suffix.replace(/[^A-Za-z0-9._:-]/g, "_");
+  const digest = createHash("sha256").update(`${base}\u0000${suffix}`).digest("hex").slice(0, 16);
+  return `${normalizedBase.slice(0, 72)}:${normalizedSuffix.slice(0, 64)}:${digest}`;
+}
+
 function appendCaptureReason(existing: string | undefined, addition: string): string {
   const value = existing ? `${existing} ${addition}` : addition;
   return value.slice(0, 2_000);
@@ -363,6 +370,36 @@ function retrySourceDraft(retryTarget: KnowledgeRecord & { kind: "source" }, con
   };
 }
 
+function mergeRelation(relations: KnowledgeRecord["relations"], relation: KnowledgeRecord["relations"][number]): KnowledgeRecord["relations"] {
+  const index = relations.findIndex(previous => previous.type === relation.type && previous.recordId === relation.recordId);
+  if (index < 0) return [...relations, relation];
+  if (JSON.stringify(relations[index]) === JSON.stringify(relation)) return relations;
+  return relations.map((previous, position) => position === index ? relation : previous);
+}
+
+function mergeEvidence(evidence: KnowledgeEvidenceRef[], citation: KnowledgeEvidenceRef): KnowledgeEvidenceRef[] {
+  const index = evidence.findIndex(previous => previous.recordId === citation.recordId && previous.locator === citation.locator);
+  if (index < 0) return [...evidence, citation];
+  return evidence.map((previous, position) => position === index ? citation : previous);
+}
+
+function referralOrigins(root: KnowledgeRecord & { kind: "source" }, input: SourceCaptureInput): SourceOrigin[] {
+  if (root.content.origins && root.content.origins.length > 0) return root.content.origins;
+  const kind = root.content.origin ?? input.origin ?? "manual";
+  const identity = root.content.identity ?? input.identity;
+  return [{ kind, capturedAt: root.content.capturedAt, uri: root.content.uri ?? input.url, ...(identity ? { identity } : {}) }];
+}
+
+function mergeBoundedOrigins(existing: SourceOrigin[], incoming: SourceOrigin[]): { origins: SourceOrigin[]; omitted: number } {
+  const origins = [...existing]; let omitted = 0;
+  for (const origin of incoming) {
+    if (origins.some(previous => previous.kind === origin.kind && previous.uri === origin.uri && JSON.stringify(previous.identity) === JSON.stringify(origin.identity))) continue;
+    if (origins.length >= 20) { omitted += 1; continue; }
+    origins.push(origin);
+  }
+  return { origins, omitted };
+}
+
 function sourceDraft(input: SourceCaptureInput, content: SourceContent, evidence: KnowledgeEvidenceRef[] = []): KnowledgeRecordDraft & { kind: "source" } {
   const admittedContent = input.origin === "connector" && !content.admission
     ? { ...content, admission: { status: "pending" as const, reason: "Connector capture awaits local admission", decidedAt: content.capturedAt } }
@@ -389,32 +426,48 @@ async function captureLinkedPublicSources(
   for (const [index, targetUrl] of links.entries()) {
     try {
       const target = await captureSource(store, {
-        commandId: `${input.commandId}:linked:${index}`.slice(0, 160),
+        commandId: childCommand(input.commandId, `linked:${index}`),
         url: targetUrl,
         scope: input.scope,
-        ...(input.origin ? { origin: input.origin } : {}),
         annotations: [{ text: "Bounded target discovered in public X provider entities; author thread membership was not inferred." }],
       }, { ...(options.fetcher ? { fetcher: options.fetcher } : {}), ...(options.resolveHost ? { resolveHost: options.resolveHost } : {}), ...(options.limits ? { limits: options.limits } : {}), ...(options.signal ? { signal: options.signal } : {}) });
       let targetRecord = target.record;
       const rootRelation = { type: "related" as const, recordId: targetRecord.id, revisionId: targetRecord.revisionId };
-      const rootUpdate = await store.captureSource({
-        commandId: `${input.commandId}:linked-root:${index}`.slice(0, 160), expectedRevision: currentRoot.revisionId, ...(options.signal ? { signal: options.signal } : {}),
-        record: { kind: "source", id: currentRoot.id, createdAt: currentRoot.createdAt, scope: currentRoot.scope, provenance: currentRoot.provenance, relations: [...currentRoot.relations, rootRelation], ...(currentRoot.temporal ? { temporal: currentRoot.temporal } : {}), content: currentRoot.content },
-      });
-      if (rootUpdate.record.kind !== "source") throw new Error("Linked root relation returned a non-source record");
-      currentRoot = rootUpdate.record;
-      const originKind: SourceOriginKind = input.origin ?? "manual";
-      const origin = { kind: originKind, capturedAt: currentRoot.content.capturedAt, uri: input.url, ...(input.identity ? { identity: input.identity } : {}) };
-      const targetUpdate = await store.captureSource({
-        commandId: `${input.commandId}:linked-target:${index}`.slice(0, 160), expectedRevision: targetRecord.revisionId, ...(options.signal ? { signal: options.signal } : {}),
-        record: {
-          kind: "source", id: targetRecord.id, createdAt: targetRecord.createdAt, scope: targetRecord.scope,
-          provenance: { ...targetRecord.provenance, evidence: [...targetRecord.provenance.evidence, { recordId: currentRoot.id, revisionId: currentRoot.revisionId, locator: targetUrl }] },
-          relations: [...targetRecord.relations, { type: "related" as const, recordId: currentRoot.id, revisionId: currentRoot.revisionId }],
-          ...(targetRecord.temporal ? { temporal: targetRecord.temporal } : {}), content: { ...targetRecord.content, origins: [...(targetRecord.content.origins ?? []), origin].slice(-20) },
-        },
-      });
-      if (targetUpdate.record.kind !== "source") throw new Error("Linked target relation returned a non-source record");
+      const rootRelations = mergeRelation(currentRoot.relations, rootRelation);
+      if (rootRelations !== currentRoot.relations) {
+        const rootUpdate = await store.captureSource({
+          commandId: childCommand(input.commandId, `linked-root:${index}`), expectedRevision: currentRoot.revisionId, ...(options.signal ? { signal: options.signal } : {}),
+          record: { kind: "source", id: currentRoot.id, createdAt: currentRoot.createdAt, scope: currentRoot.scope, provenance: currentRoot.provenance, relations: rootRelations, ...(currentRoot.temporal ? { temporal: currentRoot.temporal } : {}), content: currentRoot.content },
+        });
+        if (rootUpdate.record.kind !== "source") throw new Error("Linked root relation returned a non-source record");
+        currentRoot = rootUpdate.record;
+      }
+      const referrals = referralOrigins(currentRoot, input);
+      const boundedOrigins = mergeBoundedOrigins(targetRecord.content.origins ?? [], referrals);
+      const targetHost = new URL(targetUrl).hostname.toLowerCase();
+      const githubUi = (targetHost === "github.com" || targetHost.endsWith(".github.com")) && targetRecord.content.captureDisposition === "complete";
+      let targetCaptureReason = targetRecord.content.captureReason;
+      if (githubUi) targetCaptureReason = appendCaptureReason(targetCaptureReason, "GitHub UI capture is partial; repository and file completeness are not established.");
+      if (boundedOrigins.omitted > 0) targetCaptureReason = appendCaptureReason(targetCaptureReason, `Referral provenance bound reached; ${boundedOrigins.omitted} new origin(s) were not added.`);
+      const targetProvenance = { ...targetRecord.provenance, evidence: mergeEvidence(targetRecord.provenance.evidence, { recordId: currentRoot.id, revisionId: currentRoot.revisionId, locator: targetUrl }) };
+      const targetRelations = mergeRelation(targetRecord.relations, { type: "related" as const, recordId: currentRoot.id, revisionId: currentRoot.revisionId });
+      const targetContent: SourceContent = {
+        ...targetRecord.content,
+        ...(githubUi ? { captureDisposition: "partial" as const } : {}),
+        ...(boundedOrigins.origins.length > 0 ? { origins: boundedOrigins.origins } : {}),
+        ...(targetCaptureReason ? { captureReason: targetCaptureReason } : {}),
+      };
+      if (JSON.stringify(targetProvenance) !== JSON.stringify(targetRecord.provenance) || JSON.stringify(targetRelations) !== JSON.stringify(targetRecord.relations) || JSON.stringify(targetContent) !== JSON.stringify(targetRecord.content)) {
+        const targetUpdate = await store.captureSource({
+          commandId: childCommand(input.commandId, `linked-target:${index}`), expectedRevision: targetRecord.revisionId, ...(options.signal ? { signal: options.signal } : {}),
+          record: {
+            kind: "source", id: targetRecord.id, createdAt: targetRecord.createdAt, scope: targetRecord.scope,
+            provenance: targetProvenance, relations: targetRelations,
+            ...(targetRecord.temporal ? { temporal: targetRecord.temporal } : {}), content: targetContent,
+          },
+        });
+        if (targetUpdate.record.kind !== "source") throw new Error("Linked target relation returned a non-source record");
+      }
     } catch (error) {
       // HTTP/safety failures are durable target records. Only a bounded target
       // timeout is recoverable here; cancellation and store conflicts must stay
@@ -499,7 +552,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
     }
     const failedContent: SourceContent = { title: input.title?.trim() || sourceUrl.hostname, uri: sourceUrl.toString(), captureDisposition: "failed", capturedAt, origin: input.origin ?? "manual", origins: sourceOrigin(input.origin ?? "manual", capturedAt, { uri: sourceUrl.toString(), ...(input.identity ? { identity: input.identity } : {}) }), ...(input.annotations ? { annotations: input.annotations } : {}), ...(input.identity ? { identity: input.identity } : {}), ...(input.collectionId ? { collectionId: input.collectionId } : {}), ...(input.sourcePublishedAt ? { sourcePublishedAt: input.sourcePublishedAt } : {}) };
     try {
-      const failed = await store.captureSource({ commandId: input.commandId, ...(input.expectedRevision ? { expectedRevision: input.expectedRevision } : {}), signal: operationController.signal, record: retryTarget ? retrySourceDraft(retryTarget, failedContent) : sourceDraft(input, failedContent) });
+      const failed = await store.captureSource({ commandId: input.commandId, ...(input.expectedRevision ? { expectedRevision: input.expectedRevision } : retryTarget ? { expectedRevision: retryTarget.revisionId } : {}), signal: operationController.signal, record: retryTarget ? retrySourceDraft(retryTarget, failedContent) : sourceDraft(input, failedContent) });
       if (failed.record.kind !== "source") throw new Error("Source capture returned a non-source record");
       return { record: failed.record, duplicate: false, fetched: false };
     } finally { cleanup(); }
@@ -554,7 +607,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
       sourceRecord = linked.record;
       if (linked.failures.length > 0) {
         const updated = await store.captureSource({
-          commandId: `${input.commandId}:linked-failures`.slice(0, 160), expectedRevision: sourceRecord.revisionId, ...(options.signal ? { signal: options.signal } : {}),
+          commandId: childCommand(input.commandId, "linked-failures"), expectedRevision: sourceRecord.revisionId, ...(options.signal ? { signal: options.signal } : {}),
           record: { kind: "source", id: sourceRecord.id, createdAt: sourceRecord.createdAt, scope: sourceRecord.scope, provenance: sourceRecord.provenance, relations: sourceRecord.relations, ...(sourceRecord.temporal ? { temporal: sourceRecord.temporal } : {}), content: { ...sourceRecord.content, captureReason: appendCaptureReason(sourceRecord.content.captureReason, `Linked target limitations: ${linked.failures.join(", ")}.`) } },
         });
         if (updated.record.kind !== "source") throw new Error("Linked failure diagnostic returned a non-source record");

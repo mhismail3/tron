@@ -45,6 +45,21 @@ describe("X public lookup ownership", () => {
     expect(target?.provenance.evidence).toContainEqual(expect.objectContaining({ recordId: result.record.id }));
     expect(result.record.relations).toContainEqual(expect.objectContaining({ type: "related", recordId: target?.id }));
   });
+  it("keeps bounded child command IDs distinct for long roots and linked reruns idempotent", async () => {
+    const store = await fixture();
+    const longCommand = "x".repeat(160);
+    const root = JSON.stringify({ code: 200, tweet: { id: "123456789", text: "Two underlying sources", is_note_tweet: false, author: { screen_name: "synthetic" }, entities: { urls: [{ expanded_url: "https://docs.example.test/one" }, { expanded_url: "https://docs.example.test/two" }] } } });
+    const fetcher = vi.fn(async (url: string | URL) => String(url).includes("api.fxtwitter.com") ? new Response(root, { headers: { "content-type": "application/json" } }) : new Response(`Evidence for ${url}`, { headers: { "content-type": "text/plain" } }));
+    const first = await capture.captureSource(store, { ...request, commandId: longCommand }, { ...options, fetcher });
+    expect(first.record.relations).toHaveLength(2);
+    expect((await store.list({ kind: "source", includePending: true, includeArchived: true, limit: 10 })).records).toHaveLength(3);
+    const callsAfterFirst = fetcher.mock.calls.length;
+    const rerun = await capture.captureSource(store, { ...request, commandId: longCommand }, { ...options, fetcher });
+    expect(rerun.duplicate).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(callsAfterFirst);
+    expect((await store.list({ kind: "source", includePending: true, includeArchived: true, limit: 10 })).records).toHaveLength(3);
+    expect(rerun.record.relations).toHaveLength(2);
+  });
   it("does not contact FxTwitter without explicit lookup permission", async () => {
     const store = await fixture(); const seen: string[] = [];
     await capture.captureSource(store, { ...request, publicPostLookup: false }, { resolveHost: options.resolveHost, fetcher: async url => { seen.push(String(url)); return new Response(null, { status: 403 }); } });
@@ -83,6 +98,27 @@ describe("X public lookup ownership", () => {
     expect(success.record.content.representations).toEqual(seeded.record.content.representations);
     expect(success.record.provenance).toEqual(seeded.record.provenance);
     expect((await store.list({ kind: "source", includePending: true, includeArchived: true, limit: 10 })).records).toHaveLength(1);
+  });
+  it("uses URL-only hydration to carry the existing Raindrop origin onto the linked target without assigning target identity", async () => {
+    const store = await fixture();
+    const seeded = await store.captureSource({ commandId: "seed-url-only", record: { kind: "source", scope: "research", provenance: { actor: "connector", source: "raindrop:account:item", evidence: [] }, relations: [], content: { title: "Pending X", uri: "https://x.com/synthetic/status/123456789", captureDisposition: "reference-only", capturedAt: "2026-01-01T00:00:00.000Z", origin: "connector", origins: [{ kind: "connector", capturedAt: "2026-01-01T00:00:00.000Z", uri: "https://x.com/synthetic/status/123456789", identity: { provider: "raindrop", accountId: "account", itemId: "item" } }], identity: { provider: "raindrop", accountId: "account", itemId: "item" }, admission: { status: "pending", reason: "awaiting hydration", decidedAt: "2026-01-01T00:00:00.000Z" } } } });
+    const root = JSON.stringify({ code: 200, tweet: { id: "123456789", text: "See the guide", is_note_tweet: false, author: { screen_name: "synthetic" }, entities: { urls: [{ expanded_url: "https://docs.example.test/guide" }] } } });
+    const result = await capture.captureSource(store, request, { ...options, fetcher: vi.fn(async (url: string | URL) => String(url).includes("api.fxtwitter.com") ? new Response(root, { headers: { "content-type": "application/json" } }) : new Response("guide", { headers: { "content-type": "text/plain" } })) });
+    expect(result.record.id).toBe(seeded.record.id);
+    const records = (await store.list({ kind: "source", includePending: true, includeArchived: true, limit: 10 })).records.filter(record => record.kind === "source");
+    const target = records.find(record => record.id !== result.record.id)!;
+    expect(target.content.identity).toBeUndefined();
+    expect(target.content.origins).toContainEqual(expect.objectContaining({ kind: "connector", identity: { provider: "raindrop", accountId: "account", itemId: "item" } }));
+    expect(target.relations).toContainEqual(expect.objectContaining({ type: "related", recordId: result.record.id }));
+  });
+  it("downgrades linked GitHub UI pages to partial repository/file coverage", async () => {
+    const store = await fixture();
+    const root = JSON.stringify({ code: 200, tweet: { id: "123456789", text: "Read this repo", is_note_tweet: false, author: { screen_name: "synthetic" }, entities: { urls: [{ expanded_url: "https://github.com/example/project" }] } } });
+    const result = await capture.captureSource(store, request, { ...options, fetcher: vi.fn(async (url: string | URL) => String(url).includes("api.fxtwitter.com") ? new Response(root, { headers: { "content-type": "application/json" } }) : new Response("<html><title>Repo</title><body>file listing</body></html>", { headers: { "content-type": "text/html" } })) });
+    const records = (await store.list({ kind: "source", includePending: true, includeArchived: true, limit: 10 })).records.filter(record => record.kind === "source");
+    const target = records.find(record => record.id !== result.record.id)!;
+    expect(target.content.captureDisposition).toBe("partial");
+    expect(target.content.captureReason).toContain("repository and file completeness");
   });
   it("retries failed capture in the same record and preserves incomplete content honestly", async () => {
     const store = await fixture();

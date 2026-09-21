@@ -278,7 +278,9 @@ URLs are bounded and, for explicit capture, are passed through the same source
 owner as separate canonical Sources. Each target is related to the referring post
 and receives evidence plus the original connector origin; target deduplication
 preserves distinct origins. Redirects receive per-hop DNS/SSRF checks, and target
-failures remain explicit partial/inaccessible/failed/reference evidence. Canonical URI is
+failures remain explicit partial/inaccessible/failed/reference evidence. Linked
+GitHub UI pages are downgraded to partial because a page/file view cannot certify
+repository or file completeness. Canonical URI is
 `https://x.com/i/web/status/{id}`, while `captureReason` records provider, attempt
 outcomes, and coverage limits. Existing scope/revision/deduplication, retention,
 object-reading, and capture bounds remain authoritative. A retry matched by the
@@ -306,8 +308,10 @@ its existing explicit spending gates are unchanged.
 
 Focused regressions: `x-public-post.test.ts` covers identity, URL isolation,
 malformed/mismatched/truncated responses, fallback, partial content, cancellation,
-and safe transport; `x-public-capture.test.ts` covers raw evidence, opt-in,
-canonical URL deduplication, retry revisions, bounds, and actual agent routing.
+and safe transport; `x-public-capture.test.ts` covers raw evidence, opt-in, canonical URL
+identity deduplication, retry envelope preservation, linked-source relations and
+origin bounds, GitHub UI partial coverage, command-id bounds, and actual agent
+routing.
 Browser login, private history coverage, Article/thread completeness, and provider
 availability are live validation requirements, not conclusions from fixture tests.
 New Gateway tool behavior requires a manual maintainer update; agents never

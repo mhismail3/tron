@@ -34,7 +34,9 @@ media. Long posts, Articles, quotes, and media are conservatively partial pendin
 browser verification. A syndication response is always partial. Explicit source
 capture may retain each bounded external target as its own canonical Source,
 relating it to the referring post and preserving connector provenance; redirects
-remain subject to per-hop SSRF checks. Inspect raw JSON for links and nested
+remain subject to per-hop SSRF checks. GitHub UI targets remain partial because a
+page/file view does not certify repository or file completeness. Inspect raw JSON
+for links and nested
 context, never promote a preview/title to an Article body or a video URL to a
 transcript.
 

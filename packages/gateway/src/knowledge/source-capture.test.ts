@@ -138,6 +138,14 @@ describe("safe source capture", () => {
     expect((await store.list({ kind: "source" })).records).toHaveLength(1);
   });
 
+  it("records a retry network error on the existing incomplete source", async () => {
+    const { store } = await fixture();
+    const first = await captureSource(store, { commandId: command("network-first"), url: "https://example.com/network", scope: "research" }, { fetcher: async () => new Response("partial evidence", { headers: { "content-type": "text/plain" } }), resolveHost: publicResolver, limits: { maxBytes: 5 } });
+    const retried = await captureSource(store, { commandId: command("network-retry"), url: "https://example.com/network", scope: "research" }, { fetcher: async () => { throw new Error("synthetic network failure"); }, resolveHost: publicResolver });
+    expect(retried.record.id).toBe(first.record.id);
+    expect(retried.record.content.captureDisposition).toBe("partial");
+    expect(retried.record.content.text).toBe("parti");
+  });
   it("uses the configured readable-character bound rather than the global maximum", async () => {
     const { store } = await fixture();
     const result = await captureSource(store, { commandId: command("readable-bound"), url: "https://example.com/readable-bound", scope: "research" }, {
