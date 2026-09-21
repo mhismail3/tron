@@ -289,6 +289,17 @@ class RecoveryArchiveTests(unittest.TestCase):
         self.assertTrue(self.source.exists())
         self.assertFalse((self.operation / 'recovery.json').exists())
 
+    def test_progress_reports_work_without_changing_archive_digest(self):
+        baseline = reinstall.archive_fingerprint(self.source)
+        clock = iter(range(0, 100000, 11))
+        progress = io.StringIO()
+        with patch.object(reinstall.time, 'monotonic', side_effect=lambda: next(clock)), \
+                contextlib.redirect_stderr(progress):
+            observed = reinstall.archive_fingerprint(self.source)
+        self.assertEqual(observed, baseline)
+        self.assertIn('entries,', progress.getvalue())
+        self.assertIn('GiB hashed', progress.getvalue())
+
     def test_depth_and_symlinked_roots_are_bounded(self):
         with patch.object(reinstall, 'MAX_ARCHIVE_ENTRIES', 1):
             with self.assertRaisesRegex(reinstall.Stop, 'archive-inventory-limit'):

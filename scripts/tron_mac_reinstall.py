@@ -18,6 +18,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 
 REPO = Path(__file__).resolve().parent.parent
@@ -498,10 +499,12 @@ def archive_fingerprint(root, copy_provenance=False):
             'archive-root: expected an owned regular file or directory')
     digest = hashlib.sha256()
     count = 0
+    hashed_bytes = 0
+    started = last_progress = time.monotonic()
     root_entry = None
 
     def visit(path, relative, depth=0):
-        nonlocal count, root_entry
+        nonlocal count, root_entry, hashed_bytes, last_progress
         count += 1
         require(count <= MAX_ARCHIVE_ENTRIES and depth <= 128,
                 'archive-inventory-limit: recovery tree exceeds bounds')
@@ -514,6 +517,12 @@ def archive_fingerprint(root, copy_provenance=False):
         digest.update(json.dumps({'path': relative, 'entry': digest_item}, sort_keys=True,
                                  separators=(',', ':')).encode())
         digest.update(b'\n')
+        hashed_bytes += item.get('size', 0)
+        now = time.monotonic()
+        if now - last_progress >= 10:
+            print(f'Archive scan: {count:,} entries, {hashed_bytes / (1024 ** 3):.1f} GiB hashed, '
+                  f'{now - started:.0f}s elapsed', file=sys.stderr, flush=True)
+            last_progress = now
         if item['type'] == 'dir':
             for child in sorted(path.iterdir(), key=lambda value: value.name):
                 visit(child, relative + '/' + child.name if relative != '.' else child.name, depth + 1)
@@ -568,7 +577,8 @@ def _verify_recorded_manifest(manifest_path, backup_path):
     require((stat.S_ISDIR(backup_info.st_mode) or stat.S_ISREG(backup_info.st_mode))
             and backup_info.st_uid in (os.getuid(), 0),
             'archive-manifest: unsafe backup component')
-    for relative, expected_entry in expected.items():
+    last_progress = time.monotonic()
+    for checked, (relative, expected_entry) in enumerate(expected.items(), 1):
         actual_path = _safe_archive_child(backup_path, relative)
         require(exists(actual_path), 'archive-manifest: recorded entry is absent')
         actual, _ = _archive_entry(actual_path, backup_path, relative)
@@ -579,6 +589,11 @@ def _verify_recorded_manifest(manifest_path, backup_path):
         require(isinstance(owner, dict) and actual_path.lstat().st_uid == owner.get('uid')
                 and actual_path.lstat().st_gid == owner.get('gid'),
                 'archive-manifest: recorded owner differs')
+        now = time.monotonic()
+        if now - last_progress >= 10:
+            print(f'Checkpoint verification: {checked:,}/{len(expected):,} entries checked',
+                  file=sys.stderr, flush=True)
+            last_progress = now
     actual_count = 0
     expected_names = set(expected)
     for _, relative in _archive_paths(backup_path):
