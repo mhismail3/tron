@@ -135,7 +135,7 @@ struct RuntimeBehaviorSettingsView: View {
                 scopeGroup
                 modelDefaultsSection
                 if let target = settingsTarget { SettingsAutosaveNotice(key: .settings(target, sessionID: target.scope == .project ? projectSessionID : nil)) }
-                TronSettingsGroup("Provider Transport", accent: .tronCyan, surfaceStyle: .scrollOptimized) {
+                TronSettingsGroup("Provider Transport", accent: .tronCyan, surfaceStyle: .glass) {
                     VStack(spacing: 0) {
                         choiceRow("network", "Transport", transportLabel, accent: .tronCyan) {
                             Button("Automatic") { editing.update { $0.transport = "auto" } }
@@ -149,7 +149,7 @@ struct RuntimeBehaviorSettingsView: View {
                         numberRow("bolt.horizontal", "WebSocket timeout", "Milliseconds", value: editing.websocketTimeout, accent: .tronCyan)
                     }
                 }
-                TronSettingsGroup("Message Queue", accent: .tronPurple, surfaceStyle: .scrollOptimized) {
+                TronSettingsGroup("Message Queue", accent: .tronPurple, surfaceStyle: .glass) {
                     VStack(spacing: 0) {
                         choiceRow("arrow.turn.up.right", "Steering delivery", queueLabel(draft.steeringMode), accent: .tronPurple) {
                             Button("Deliver all") { editing.update { $0.steeringMode = "all" } }
@@ -162,7 +162,7 @@ struct RuntimeBehaviorSettingsView: View {
                         }
                     }
                 }
-                TronSettingsGroup("Branch Summaries", accent: .tronTeal, surfaceStyle: .scrollOptimized) {
+                TronSettingsGroup("Branch Summaries", accent: .tronTeal, surfaceStyle: .glass) {
                     VStack(spacing: 0) {
                         numberRow("arrow.triangle.branch", "Branch summary reserve", "Tokens reserved for branch summaries", value: editing.branchReserve, accent: .tronTeal)
                         TronSettingsDivider(accent: .tronTeal)
@@ -175,7 +175,7 @@ struct RuntimeBehaviorSettingsView: View {
                         )
                     }
                 }
-                TronSettingsGroup("Retry", accent: .tronAmber, surfaceStyle: .scrollOptimized) {
+                TronSettingsGroup("Retry", accent: .tronAmber, surfaceStyle: .glass) {
                     VStack(spacing: 0) {
                         TronToggleRow(
                             icon: "arrow.clockwise",
@@ -196,12 +196,12 @@ struct RuntimeBehaviorSettingsView: View {
                         numberRow("timer", "Maximum provider delay", "Delay cap in milliseconds", value: editing.providerRetryDelay, accent: .tronAmber)
                     }
                 }
-                TronSettingsGroup("Conversation", surfaceStyle: .scrollOptimized) {
+                TronSettingsGroup("Conversation", surfaceStyle: .glass) {
                     VStack(spacing: 0) {
                         toggleRows
                     }
                 }
-                TronSettingsGroup("Markdown", accent: .tronPurple, surfaceStyle: .scrollOptimized) {
+                TronSettingsGroup("Markdown", accent: .tronPurple, surfaceStyle: .glass) {
                     VStack(spacing: 0) {
                         choiceRow("flowchart", "Mermaid diagrams", mermaidLabel, accent: .tronPurple) {
                             Button("Off") { editing.update { $0.mermaid = "off" } }
@@ -226,7 +226,7 @@ struct RuntimeBehaviorSettingsView: View {
                         }
                     }
                 }
-                TronSettingsGroup("Privacy and Warnings", accent: .tronSlate, surfaceStyle: .scrollOptimized) {
+                TronSettingsGroup("Privacy and Warnings", accent: .tronSlate, surfaceStyle: .glass) {
                     VStack(spacing: 0) {
                         TronToggleRow(icon: "chart.bar", title: "Installation telemetry", accent: .tronSlate, isOn: editing.installTelemetry)
                         TronSettingsDivider(accent: .tronSlate)
@@ -273,7 +273,7 @@ struct RuntimeBehaviorSettingsView: View {
                 "Model Defaults",
                 detail: "Defaults apply to new sessions; existing sessions keep their current runtime.",
                 accent: .tronPurple,
-                surfaceStyle: .scrollOptimized
+                surfaceStyle: .glass
             ) {
                 VStack(spacing: 0) {
                     TronModelSelectionRow(
@@ -281,6 +281,13 @@ struct RuntimeBehaviorSettingsView: View {
                         models: availableModels,
                         navigationTitle: "Models"
                     )
+                    TronSettingsDivider(accent: .tronPurple)
+                    TronThinkingSelectionRow(
+                        selection: editing.thinking,
+                        levels: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+                        information: "Reasoning effort; higher levels can take longer"
+                    )
+                    .id(settingsTarget)
                     if model.gatewayInfo?.capabilities.contains("context-window.v1") == true,
                        let selectedModel = selectedModelSummary,
                        let limits = selectedContextWindowLimits {
@@ -294,13 +301,6 @@ struct RuntimeBehaviorSettingsView: View {
                         )
                         .id("\(scope.rawValue):\(selectedModel.ref.contextWindowKey)")
                     }
-                    TronSettingsDivider(accent: .tronPurple)
-                    TronThinkingSelectionRow(
-                        selection: editing.thinking,
-                        levels: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
-                        information: "Reasoning effort; higher levels can take longer"
-                    )
-                    .id(settingsTarget)
                 }
             }
             TronSettingsRow(icon: "list.bullet.rectangle", title: "Model Catalog", subtitle: modelCatalogSummary, accent: .tronPurple) {
@@ -346,7 +346,7 @@ struct RuntimeBehaviorSettingsView: View {
             detail: scope == .project
                 ? "These overrides apply only to the trusted current workspace."
                 : "These defaults apply to every workspace on this Mac.",
-            surfaceStyle: .scrollOptimized
+            surfaceStyle: .glass
         ) {
             if allowsProjectScope {
                 choiceRow("scope", "Settings Scope", scope == .project ? "Current Project" : "Global Defaults") {

@@ -167,7 +167,14 @@ extension. Connection setup owns the selected account/scope and opaque `credenti
 Once `ConnectionOwner` is active, connector actions require an exact
 `connectionId` and Knowledge persists provider progress under that instance
 key, without copying the generic account envelope. Tokens never enter
-knowledge state, receipts, logs, prompts, iOS models, or process arguments. Status and effect admission read the current ConnectionOwner instance revision, policy, and bounded `credentialAvailability`/`providerIdentity` observations; persisted Knowledge progress or an older observation cannot keep a policy-reset or successor instance ready. Setup intent never reports a provider capability as ready. An explicit connector operation may perform a fresh provider identity admission for the current revision; setup-required is not a permanent deadlock. `allowWrites`, `paidAccessApproved`, and `recurringApproved` remain
+knowledge state, receipts, logs, prompts, iOS models, or process arguments. Status and effect admission read the current ConnectionOwner instance revision, policy, and bounded `credentialAvailability`/`providerIdentity` observations; persisted Knowledge progress or an older observation cannot keep a policy-reset or successor instance ready. Setup intent never reports a provider capability as ready. An explicit connector operation may perform a fresh provider identity admission for the current revision; setup-required is not a permanent deadlock. A successful Raindrop `/user` admission may also retain one bounded email,
+username, or name as `providerDisplayName` for the connection projection, only
+when its numeric `_id` matches the configured account and the exact setup
+revision is still current. Invalid or unavailable metadata is ignored rather
+than blocking admission; mismatch, credential/policy changes, setup revision
+changes, and disconnect clear the label. `providerAccountId` remains the
+canonical technical identity and is never replaced by display metadata.
+`allowWrites`, `paidAccessApproved`, and `recurringApproved` remain
 independent controls and default to false. The Gateway registers `knowledge.v1` typed RPC
 handlers and a bounded first-party `knowledge` retrieval tool. The tool performs explicit
 search/recall/read/list plus typed `connectorSweep` and `synthesis` actions for existing

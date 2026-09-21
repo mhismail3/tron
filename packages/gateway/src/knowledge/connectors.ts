@@ -10,7 +10,7 @@ import { isConnectorCredentialReference, type ConnectorCredentialStore } from ".
 import { currentInvocationContext } from "../extensions/owner-attribution.js";
 import { jevInputDigest, jevProfileVersion, JEV_MODEL } from "./jev-assessment.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
-import type { ConnectionInstance } from "../integrations/connection-contract.js";
+import type { ConnectionInstance, ProviderAdmissionObservation } from "../integrations/connection-contract.js";
 import { FixedHostBodyTooLarge, requestFixedHost } from "./fixed-host-transport.js";
 
 const MAX_PAGE = 50;
@@ -54,6 +54,21 @@ function command(base: string, suffix: string): string {
 }
 function id(value: unknown, label: string): string | undefined { return typeof value === "string" && value.length > 0 && value.length <= 512 ? value : typeof value === "number" && Number.isSafeInteger(value) ? String(value) : undefined; }
 function text(value: unknown, maximum = 100_000): string | undefined { return typeof value === "string" && value.length > 0 ? value.slice(0, maximum) : undefined; }
+function providerDisplayName(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  return normalized.length > 0 && normalized.length <= 320 && !/[\u0000-\u001f\u007f]/.test(normalized) ? normalized : undefined;
+}
+function raindropUser(value: unknown): { accountId?: string; displayName?: string } {
+  const user = value && typeof value === "object" && !Array.isArray(value) && "user" in value
+    ? (value as Record<string, unknown>).user
+    : value;
+  if (!user || typeof user !== "object" || Array.isArray(user)) return {};
+  const record = user as Record<string, unknown>;
+  const accountId = id(record._id ?? record.id, "Raindrop account");
+  const displayName = providerDisplayName(record.email) ?? providerDisplayName(record.username) ?? providerDisplayName(record.name);
+  return { ...(accountId ? { accountId } : {}), ...(displayName ? { displayName } : {}) };
+}
 function url(value: unknown): string | undefined { if (typeof value !== "string") return undefined; try { const parsed = new URL(value); return ["http:", "https:"].includes(parsed.protocol) && !parsed.username && !parsed.password ? parsed.toString() : undefined; } catch { return undefined; } }
 function retryable(status: number): boolean { return status === 408 || status === 425 || status === 429 || status >= 500; }
 function authFailure(status: number): boolean { return status === 401 || status === 403; }
@@ -196,15 +211,15 @@ export class KnowledgeConnectorExtension {
     }
   }
 
-  private async verifyRaindropAccount(state: KnowledgeConnectorState, token: string | (() => Promise<string>), signal: AbortSignal, beforeAttempt?: () => Promise<void>): Promise<void> {
+  private async verifyRaindropAccount(state: KnowledgeConnectorState, token: string | (() => Promise<string>), signal: AbortSignal, beforeAttempt?: () => Promise<void>): Promise<Pick<ProviderAdmissionObservation, "providerDisplayName">> {
     // Raindrop account IDs are numeric by contract. Synthetic connector tests
     // may use non-provider IDs, but real configured accounts always receive the
     // live /user fence before discovery or an effect.
-    if (!state.accountId || !/^\d+$/.test(state.accountId)) return;
+    if (!state.accountId || !/^\d+$/.test(state.accountId)) return {};
     const result = await requestJson(this.http, "https://api.raindrop.io/rest/v1/user", token, { sleep: this.sleep, signal, ...(beforeAttempt ? { beforeAttempt } : {}) });
-    const user = result.value?.user ?? result.value;
-    const authenticatedID = id(user?._id ?? user?.id, "Raindrop account");
-    if (!authenticatedID || authenticatedID !== state.accountId) throw new GatewayError("conflict", "Raindrop authenticated account does not match configured account");
+    const account = raindropUser(result.value);
+    if (!account.accountId || account.accountId !== state.accountId) throw new GatewayError("conflict", "Raindrop authenticated account does not match configured account");
+    return account.displayName ? { providerDisplayName: account.displayName } : {};
   }
 
   private async cancellableSleep(signal: AbortSignal, milliseconds: number): Promise<void> {
@@ -228,11 +243,11 @@ export class KnowledgeConnectorExtension {
     return this.store.withConnectorContext(connectionId, task);
   }
 
-  private async recordAdmission(state: KnowledgeConnectorState, credentialAvailability: "available" | "unavailable" | "unknown", providerIdentity: "admitted" | "mismatch" | "unknown", commandId: string, expectedSetupRevision?: number): Promise<void> {
+  private async recordAdmission(state: KnowledgeConnectorState, credentialAvailability: "available" | "unavailable" | "unknown", providerIdentity: "admitted" | "mismatch" | "unknown", commandId: string, expectedSetupRevision?: number, display?: Pick<ProviderAdmissionObservation, "providerDisplayName">): Promise<void> {
     if (this.options.connections && state.connectionId) {
       const instance = await this.options.connections.resolveInstance(state.connectionId);
       if (expectedSetupRevision !== undefined && instance.setupRevision !== expectedSetupRevision) throw new GatewayError("conflict", "Connection setup changed during provider admission");
-      await this.options.connections.recordProviderObservation(state.connectionId, expectedSetupRevision ?? instance.setupRevision, { credentialAvailability, providerIdentity });
+      await this.options.connections.recordProviderObservation(state.connectionId, expectedSetupRevision ?? instance.setupRevision, { credentialAvailability, providerIdentity, ...(credentialAvailability === "available" && providerIdentity === "admitted" && display?.providerDisplayName ? display : {}) });
       return;
     }
     await this.store.updateConnectorState(command(commandId, "admission"), state.connector, value => ({ ...(value ?? state), credentialAvailability, providerIdentity }));
@@ -285,9 +300,8 @@ export class KnowledgeConnectorExtension {
       // The configured account ID is an authority fence, not a display label.
       // Verify it on every read so a stale token cannot expose another account.
       const identity = await requestEndpoint("https://api.raindrop.io/rest/v1/user");
-      const user = identity.value?.user ?? identity.value;
-      const authenticatedID = id(user?._id ?? user?.id, "Raindrop account");
-      if (!authenticatedID || authenticatedID !== state.accountId) throw new GatewayError("conflict", "Raindrop authenticated account does not match configured account");
+      const account = raindropUser(identity.value);
+      if (!account.accountId || account.accountId !== state.accountId) throw new GatewayError("conflict", "Raindrop authenticated account does not match configured account");
       let endpoint: string;
       let value: unknown;
       let headers = identity.headers;
@@ -681,8 +695,8 @@ export class KnowledgeConnectorExtension {
       // intentionally separate from the configured account label and from the
       // source URL capture policy.
       if (connector === "raindrop") {
-        await this.verifyRaindropAccount(current, currentToken, signal, beforeProviderAttempt);
-        await this.recordAdmission(current, "available", "admitted", request.commandId, expectedSetupRevision);
+        const profile = await this.verifyRaindropAccount(current, currentToken, signal, beforeProviderAttempt);
+        await this.recordAdmission(current, "available", "admitted", request.commandId, expectedSetupRevision, profile);
       }
       const discovered = await this.discover(request.commandId, connector, current, currentToken, limit, signal, xPricing?.maxAttempts, beforeProviderAttempt);
       let state = await this.store.connectorState(connector) ?? current;
@@ -721,7 +735,7 @@ export class KnowledgeConnectorExtension {
     } catch (error) {
       const health = error instanceof ConnectorHTTPError && authFailure(error.status) ? "auth-error" : error instanceof ConnectorHTTPError && error.status === 429 ? "rate-limited" : "error";
       const message = error instanceof ConnectorHTTPError ? `Provider request failed (${error.status})` : error instanceof Error ? error.message : "Connector failed";
-      if (message.includes("authenticated account does not match")) await this.recordAdmission(current, "available", "mismatch", request.commandId);
+      if (message.includes("authenticated account does not match")) await this.recordAdmission(current, "available", "mismatch", request.commandId, expectedSetupRevision);
       await this.store.updateConnectorState(command(request.commandId, "error"), connector, state => ({ ...(state ?? current), health, lastError: message, lastRunAt: this.now(), remaining: state?.pending.length ?? current.pending.length }));
       clearTimeout(deadline);
       throw new GatewayError(health === "auth-error" ? "unsupported" : "internal", message, true);

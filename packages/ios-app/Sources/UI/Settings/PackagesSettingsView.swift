@@ -175,7 +175,7 @@ struct PackagesSettingsView: View {
                     TronSettingsNotice(message: packageError, retry: reload)
                 }
 
-                TronSettingsGroup("Installed", surfaceStyle: .scrollOptimized) {
+                TronSettingsGroup("Installed", surfaceStyle: .glass) {
                     if let packages = inventory?.packages, !packages.isEmpty {
                         VStack(spacing: 0) {
                             ForEach(Array(packages.enumerated()), id: \.element.id) { index, package in
@@ -274,7 +274,7 @@ struct PackagesSettingsView: View {
             "Resource Scope",
             detail: resolutionSummary,
             accent: .tronBlue,
-            surfaceStyle: .scrollOptimized
+            surfaceStyle: .glass
         ) {
             TronValueRow(icon: "scope", title: "Scope", value: projectCWD == nil ? "Global resources" : "Current project")
             if let projectCWD {

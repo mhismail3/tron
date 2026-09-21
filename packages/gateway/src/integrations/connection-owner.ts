@@ -75,6 +75,9 @@ function now(): string { return new Date().toISOString(); }
 function initialState(): ConnectionOwnerState { return { schemaVersion: CONNECTION_STATE_SCHEMA_VERSION, stateRevision: 0, instances: {}, setupOperations: {}, receipts: {} }; }
 function statePath(tronHome: string): string { return join(tronHome, ...CONNECTION_STATE_RELATIVE_PATH); }
 function copy<T>(value: T): T { return structuredClone(value); }
+function boundedProviderDisplayName(value: string): boolean {
+  return value.length >= 1 && value.length <= 320 && !/[\u0000-\u001f\u007f]/.test(value);
+}
 
 function capabilityAvailability(
   capability: IntegrationDefinition["capabilities"][number],
@@ -121,7 +124,7 @@ function validateCommand(command: ConnectionCommand): void {
 }
 
 function resultForInstance(instance: ConnectionInstance): Record<string, unknown> {
-  return { id: instance.id, definitionId: instance.definitionId, implementation: instance.implementation, providerAccountId: instance.providerAccountId, ...(instance.scope ? { scope: instance.scope } : {}), policy: instance.policy, health: instance.health, createdAt: instance.createdAt, updatedAt: instance.updatedAt, setupRevision: instance.setupRevision, ...(instance.lastError ? { lastError: instance.lastError } : {}) };
+  return { id: instance.id, definitionId: instance.definitionId, implementation: instance.implementation, providerAccountId: instance.providerAccountId, ...(instance.scope ? { scope: instance.scope } : {}), ...(instance.providerDisplayName ? { providerDisplayName: instance.providerDisplayName } : {}), policy: instance.policy, health: instance.health, createdAt: instance.createdAt, updatedAt: instance.updatedAt, setupRevision: instance.setupRevision, ...(instance.lastError ? { lastError: instance.lastError } : {}) };
 }
 
 export class ConnectionOwner {
@@ -187,8 +190,19 @@ export class ConnectionOwner {
       const instance = state.instances[instanceId];
       if (!instance || instance.setupRevision !== setupRevision || !instance.policy.enabled || instance.health === "disconnected") throw conflict("Connection instance is no longer admitted");
       if (!["available", "unavailable", "unknown"].includes(observation.credentialAvailability) || !["admitted", "mismatch", "unknown"].includes(observation.providerIdentity)) throw invalid("Provider admission observation is invalid");
+      const admittedDisplayName = observation.credentialAvailability === "available"
+        && observation.providerIdentity === "admitted"
+        && observation.providerDisplayName !== undefined
+        && boundedProviderDisplayName(observation.providerDisplayName)
+        ? observation.providerDisplayName
+        : undefined;
       instance.credentialAvailability = observation.credentialAvailability;
       instance.providerIdentity = observation.providerIdentity;
+      if (admittedDisplayName !== undefined) {
+        instance.providerDisplayName = admittedDisplayName;
+      } else {
+        delete instance.providerDisplayName;
+      }
       instance.health = observation.credentialAvailability === "available" && observation.providerIdentity === "admitted" ? "ready" : observation.credentialAvailability === "unavailable" || observation.providerIdentity === "mismatch" ? "auth-error" : "setup-required";
       instance.updatedAt = now();
       state.stateRevision += 1;
@@ -307,10 +321,10 @@ export class ConnectionOwner {
       // Compare under the same mutex as publication, after receipt replay. A
       // stale sheet cannot restore permissions changed by another owner client.
       if (instance.setupRevision !== command.expectedSetupRevision) throw conflict("Connection changed; reopen its settings before saving");
-      instance.policy = copy(command.policy); instance.health = command.policy.enabled ? "setup-required" : "disabled"; instance.credentialAvailability = "unknown"; instance.providerIdentity = "unknown"; instance.updatedAt = timestamp; instance.setupRevision += 1; delete instance.lastError;
+      instance.policy = copy(command.policy); instance.health = command.policy.enabled ? "setup-required" : "disabled"; instance.credentialAvailability = "unknown"; instance.providerIdentity = "unknown"; delete instance.providerDisplayName; instance.updatedAt = timestamp; instance.setupRevision += 1; delete instance.lastError;
       return resultForInstance(instance);
     }
-    instance.health = "disconnected"; instance.policy = { ...instance.policy, enabled: false }; instance.updatedAt = timestamp; instance.setupRevision += 1;
+    instance.health = "disconnected"; instance.policy = { ...instance.policy, enabled: false }; delete instance.providerDisplayName; instance.updatedAt = timestamp; instance.setupRevision += 1;
     return resultForInstance(instance);
   }
 

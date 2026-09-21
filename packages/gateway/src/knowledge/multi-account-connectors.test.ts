@@ -22,12 +22,13 @@ it("derives readiness from the current owner across policy reset, disconnect, an
   const extension = new KnowledgeConnectorExtension(store, {
     connections: owner,
     credentials: new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:one", "token-one"], ["connector:raindrop:two", "token-two"]])),
-    http: async (url, init) => { calls += 1; return url.endsWith("/user") ? response({ user: { _id: init.headers.authorization === "Bearer token-two" ? 202 : 101 } }) : response({ items: [] }); },
+    http: async (url, init) => { calls += 1; return url.endsWith("/user") ? response({ user: { _id: init.headers.authorization === "Bearer token-two" ? 202 : 101, email: { malformed: true }, username: "fixture-user" } }) : response({ items: [] }); },
     sleep: async () => {},
   });
   const configure = (commandId: string) => extension.invoke({ operation: "knowledge.connector.configure", request: { commandId, connector: "raindrop", connectionId: "account", enabled: true } });
   await configure("configure-readiness-0001");
   await extension.invoke({ operation: "knowledge.connector.run", request: { commandId: "admit-readiness-0001", connector: "raindrop", connectionId: "account", dryRun: true, limit: 1 } });
+  expect((await owner.snapshot()).instances.find(item => item.id === "account")).toMatchObject({ providerDisplayName: "fixture-user" });
   await configure("reset-readiness-0001");
   await expect(extension.invoke({ operation: "knowledge.connector.status", request: { connector: "raindrop", connectionId: "account" } })).resolves.toMatchObject({ health: "setup-required", credentialAvailability: "unknown", providerIdentity: "unknown" });
   await extension.invoke({ operation: "knowledge.connector.run", request: { commandId: "readmit-readiness-0001", connector: "raindrop", connectionId: "account", dryRun: true, limit: 1 } });

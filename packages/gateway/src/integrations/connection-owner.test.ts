@@ -20,10 +20,14 @@ describe("ConnectionOwner", () => {
       expect(snapshot.capabilities.filter(item => item.id === "read" && item.connectionId).map(item => item.connectionId).sort()).toEqual(["account-one", "account-two"]);
       expect(snapshot.instances.every(item => item.credentialAvailability === "unknown" && item.providerIdentity === "unknown")).toBe(true);
       await expect(owner.recordProviderObservation("account-one", 0, { credentialAvailability: "available", providerIdentity: "admitted" })).rejects.toThrow("no longer admitted");
-      await owner.recordProviderObservation("account-one", 1, { credentialAvailability: "available", providerIdentity: "admitted" });
+      await owner.recordProviderObservation("account-one", 1, { credentialAvailability: "available", providerIdentity: "admitted", providerDisplayName: "one@example.test" });
       await owner.recordProviderObservation("account-two", 1, { credentialAvailability: "available", providerIdentity: "admitted" });
       const admitted = await owner.snapshot();
-      expect(admitted.instances.find(item => item.id === "account-one")).toMatchObject({ credentialConfigured: true, credentialAvailability: "available", providerIdentity: "admitted", health: "ready" });
+      expect(admitted.instances.find(item => item.id === "account-one")).toMatchObject({ credentialConfigured: true, credentialAvailability: "available", providerIdentity: "admitted", providerDisplayName: "one@example.test", health: "ready" });
+      await expect(owner.recordProviderObservation("account-one", 0, { credentialAvailability: "available", providerIdentity: "admitted", providerDisplayName: "stale@example.test" })).rejects.toThrow("no longer admitted");
+      await owner.recordProviderObservation("account-one", 1, { credentialAvailability: "available", providerIdentity: "mismatch", providerDisplayName: "ignored@example.test" });
+      expect((await owner.snapshot()).instances.find(item => item.id === "account-one")?.providerDisplayName).toBeUndefined();
+      await owner.recordProviderObservation("account-one", 1, { credentialAvailability: "available", providerIdentity: "admitted" });
       expect(admitted.capabilities.find(item => item.id === "move" && item.connectionId === "account-one")).toMatchObject({ availability: "unavailable", detail: "Write approval is required for this capability" });
       expect(admitted.capabilities.find(item => item.id === "assess" && item.connectionId === "account-one")).toMatchObject({ availability: "unavailable", detail: "Paid access approval is required for this capability" });
       expect(admitted.capabilities.find(item => item.id === "move" && item.connectionId === "account-two")?.availability).toBe("available");
@@ -35,7 +39,7 @@ describe("ConnectionOwner", () => {
       await expect(owner.execute({ kind: "policy.update", commandId: "stale-policy-one-0001", instanceId: "account-one", expectedSetupRevision: 1, policy: { ...latestPolicy, allowWrites: false } })).rejects.toThrow("Connection changed");
       expect((await owner.resolveInstance("account-one")).policy).toEqual(latestPolicy);
       await expect(owner.execute({ kind: "policy.update", commandId: "policy-approve-one-0001", instanceId: "account-one", expectedSetupRevision: 1, policy: latestPolicy })).resolves.toMatchObject({ setupRevision: 2 });
-      await owner.recordProviderObservation("account-one", 2, { credentialAvailability: "available", providerIdentity: "admitted" });
+      await owner.recordProviderObservation("account-one", 2, { credentialAvailability: "available", providerIdentity: "admitted", providerDisplayName: "one@example.test" });
       const approved = await owner.snapshot();
       expect(approved.capabilities.find(item => item.id === "move" && item.connectionId === "account-one")?.availability).toBe("available");
       expect(approved.capabilities.find(item => item.id === "assess" && item.connectionId === "account-one")?.availability).toBe("available");

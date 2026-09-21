@@ -47,12 +47,22 @@ struct IntegrationInstance: Codable, Hashable, Sendable, Identifiable {
     let credentialConfigured: Bool
     let credentialAvailability: String?
     let providerIdentity: String?
+    let providerDisplayName: String?
     var policy: IntegrationPolicy
     let health: String
     let createdAt: String
     let updatedAt: String
     let setupRevision: Int
     let lastError: String?
+
+    /// Provider metadata is a verified display projection; the canonical ID
+    /// remains the technical identity and is the honest fallback.
+    var displayTitle: String {
+        if let providerDisplayName, !providerDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return providerDisplayName
+        }
+        return "Account \(providerAccountId)"
+    }
 }
 
 struct IntegrationCapabilityStatus: Codable, Hashable, Sendable, Identifiable {

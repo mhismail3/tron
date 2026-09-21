@@ -67,6 +67,8 @@ export interface ConnectionInstance {
   /** Bounded owner observations; absent legacy values are treated as unknown. */
   credentialAvailability?: CredentialAvailability;
   providerIdentity?: ProviderIdentityAdmission;
+  /** Verified provider metadata for display; never an account authority. */
+  providerDisplayName?: string;
   lastError?: string;
 }
 
@@ -107,6 +109,8 @@ export interface ConnectionSetupOperation {
 export interface ProviderAdmissionObservation {
   credentialAvailability: CredentialAvailability;
   providerIdentity: ProviderIdentityAdmission;
+  /** Accepted only alongside an admitted identity and exact setup revision. */
+  providerDisplayName?: string;
 }
 
 export type ConnectionCommand =
@@ -200,6 +204,7 @@ export function validateConnectionInstance(value: unknown): asserts value is Con
   bounded(item.providerAccountId, "Provider account", 256); if (item.scope !== undefined) bounded(item.scope, "Connection scope", 512);
   assertCredentialReference(item.credentialRef); validateConnectionPolicy(item.policy);
   if (item.credentialAvailability !== undefined && !["available", "unavailable", "unknown"].includes(item.credentialAvailability as string) || item.providerIdentity !== undefined && !["admitted", "mismatch", "unknown"].includes(item.providerIdentity as string)) throw new Error("Connection admission observation is invalid");
+  if (item.providerDisplayName !== undefined) bounded(item.providerDisplayName, "Provider display name", 320);
   if (item.configuration !== undefined) {
     if (item.implementation !== "mcp") throw new Error("Only MCP instances may contain transport configuration");
     validateMcpConnectionConfiguration(item.configuration);

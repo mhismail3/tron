@@ -40,25 +40,35 @@ struct IntegrationsSettingsView: View {
     @State private var selectedInstance: IntegrationInstance?
 
     var body: some View {
-        KnowledgeFormSheet(title: surface.title, accent: .tronCyan) {
-            if let snapshot {
-                let definitions = snapshot.definitions.filter(surface.includes)
-                ForEach(definitions) { definition in
-                    definitionSection(definition, snapshot: snapshot)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                if let snapshot {
+                    let definitions = snapshot.definitions.filter(surface.includes)
+                    ForEach(definitions) { definition in
+                        definitionSection(definition, snapshot: snapshot)
+                    }
+                    if definitions.isEmpty {
+                        TronPlaceholderState(
+                            title: "No supported integrations",
+                            detail: emptySurfaceDetail,
+                            icon: surface == .mcpServers ? "server.rack" : "link"
+                        )
+                    }
+                } else if isLoading {
+                    HStack { Spacer(); ProgressView("Loading integrations…"); Spacer() }
+                        .padding(.vertical, 28)
                 }
-                if definitions.isEmpty {
-                    TronPlaceholderState(
-                        title: "No supported integrations",
-                        detail: emptySurfaceDetail,
-                        icon: surface == .mcpServers ? "server.rack" : "link"
-                    )
-                }
-            } else if isLoading {
-                HStack { Spacer(); ProgressView("Loading integrations…"); Spacer() }
-                    .padding(.vertical, 28)
+                if let error { TronSettingsNotice(message: error, accent: .tronError) }
             }
-            if let error { TronSettingsNotice(message: error, accent: .tronError) }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 18)
+            .padding(.bottom, 32)
         }
+        .scrollDismissesKeyboard(.interactively)
+        .tronScrollEdgeChrome()
+        .tronNavigationTitle(surface.title, accent: .tronCyan)
+        .tronSettingsLayout()
+        .tronSettingsVisualTheme(accent: .tronCyan)
         .task(id: PresentationActivityTaskID(source: "integrations/\(model.knowledgePresentationIdentity)", presentationActive: activity.allowsPresentationPublication)) {
             guard activity.allowsPresentationPublication else { return }
             load()
@@ -124,10 +134,7 @@ struct IntegrationsSettingsView: View {
             : "\(available) of \(statuses.count) capabilities available"
         TronSettingsRow(
             icon: instance.health == "ready" ? "checkmark.circle" : "exclamationmark.circle",
-            // providerIdentity is admission provenance (for example "admitted"),
-            // not an account label. The owner exposes providerAccountId as the
-            // only human-facing account identity in this projection.
-            title: instance.providerAccountId,
+            title: instance.displayTitle,
             subtitle: "\(healthLabel(instance.health)) · \(capabilitySummary)",
             subtitleLineLimit: 2,
             accent: instance.health == "ready" ? .tronEmerald : .tronAmber
@@ -246,7 +253,7 @@ private struct IntegrationInstanceView: View {
     var body: some View {
         KnowledgeFormSheet(title: definition?.displayName ?? "Connection", accent: .tronCyan, isWorking: mutation != nil, onAction: save) {
             TronSettingsGroup("Connection", accent: .tronBlue) {
-                TronSettingsRow(icon: "person.crop.circle", title: "Account", subtitle: instance.providerAccountId)
+                TronSettingsRow(icon: "person.crop.circle", title: "Account", subtitle: instance.displayTitle)
                 if let scope = instance.scope {
                     TronSettingsDivider(accent: .tronBlue)
                     TronSettingsRow(icon: "scope", title: "Scope", subtitle: scope)
@@ -300,6 +307,7 @@ private struct IntegrationInstanceView: View {
     private var technicalMetadata: [TronTechnicalMetadataItem] {
         [
             TronTechnicalMetadataItem(title: "Connection ID", value: instance.id, icon: "number"),
+            TronTechnicalMetadataItem(title: "Provider account ID", value: instance.providerAccountId, icon: "number"),
             TronTechnicalMetadataItem(title: "Implementation", value: instance.implementation, icon: "gearshape"),
             TronTechnicalMetadataItem(title: "Credential", value: instance.credentialConfigured ? "Configured" : "Not configured", icon: "key"),
             TronTechnicalMetadataItem(title: "Credential availability", value: instance.credentialAvailability ?? "unknown", icon: "key"),

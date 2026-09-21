@@ -19,6 +19,16 @@ final class IntegrationModelsTests: XCTestCase {
         XCTAssertNil(snapshot.instances.first?.lastError)
     }
 
+    func testProviderDisplayTitlePrefersVerifiedMetadataAndUsesHonestAccountFallback() throws {
+        let data = Data(#"""
+        {"id":"account-a","definitionId":"knowledge.raindrop","implementation":"knowledge-connector","providerAccountId":"12345","providerDisplayName":"person@example.test","credentialConfigured":true,"policy":{"enabled":true,"allowWrites":false,"paidAccessApproved":false,"paidBudgetCents":0,"recurringApproved":false},"health":"ready","createdAt":"fixture","updatedAt":"fixture","setupRevision":4}
+        """#.utf8)
+        let withMetadata = try JSONDecoder.gateway.decode(IntegrationInstance.self, from: data)
+        XCTAssertEqual(withMetadata.displayTitle, "person@example.test")
+        let withoutMetadata = IntegrationInstance(id: "account-b", definitionId: "knowledge.raindrop", implementation: "knowledge-connector", providerAccountId: "67890", scope: nil, credentialConfigured: true, credentialAvailability: nil, providerIdentity: nil, providerDisplayName: nil, policy: withMetadata.policy, health: "ready", createdAt: "fixture", updatedAt: "fixture", setupRevision: 1, lastError: nil)
+        XCTAssertEqual(withoutMetadata.displayTitle, "Account 67890")
+    }
+
     func testPresentationAdmissionDropsRetiredOrOutOfOrderReads() {
         let first = KnowledgePresentationIdentity(profileID: "profile-a", lifecycleGeneration: 1, connectionID: 10)
         let replacement = KnowledgePresentationIdentity(profileID: "profile-b", lifecycleGeneration: 2, connectionID: 11)
