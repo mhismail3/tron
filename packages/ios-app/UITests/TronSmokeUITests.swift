@@ -215,12 +215,142 @@ final class TronSmokeUITests: XCTestCase {
     }
 
     @MainActor
+    func testSessionPaginationKeepsShowLessBesideShowMoreAndClearOfLogo() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-session-pagination-fixture"]
+        app.launch()
+        let more = app.buttons["Show more sessions in Example workspace"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5), app.debugDescription)
+        more.tap()
+        let less = app.buttons["Show less sessions in Example workspace"]
+        for _ in 0..<8 where !less.isHittable { app.swipeUp() }
+        XCTAssertTrue(more.isHittable)
+        XCTAssertTrue(less.isHittable)
+        XCTAssertEqual(less.frame.minX - more.frame.maxX, 24, accuracy: 2)
+        XCTAssertEqual(less.frame.minY, more.frame.minY, accuracy: 2)
+        let logo = app.buttons["dashboard.menu"]
+        XCTAssertFalse(less.frame.intersects(logo.frame))
+        keepScreenshot(named: "session-pagination-grouped-at-scroll-end")
+        more.tap()
+        for _ in 0..<8 where !less.isHittable { app.swipeUp() }
+        XCTAssertTrue(less.isHittable)
+        XCTAssertFalse(more.exists)
+        XCTAssertLessThan(less.frame.maxX, logo.frame.minX)
+        less.tap()
+        XCTAssertFalse(less.exists)
+        XCTAssertTrue(more.exists)
+    }
+
+    @MainActor
+    func testAutomationInventorySummaryAndDetailTables() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-automation-fixture", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        let card = app.buttons["automation-card.automation-0"]
+        XCTAssertTrue(card.waitForExistence(timeout: 8), app.debugDescription)
+        for fact in ["Daily workspace review", "Draft", "Every 1 day", "Server, Studio server", "Last run", "Updated", "Sep 1, 2026"] {
+            XCTAssertTrue(card.label.contains(fact), "Missing \(fact): \(card.label)")
+        }
+        XCTAssertTrue(app.buttons["automation-card.automation-1"].label.contains("No runs yet"))
+        let status = card.staticTexts["Draft"]
+        let title = card.staticTexts["Daily workspace review"]
+        XCTAssertTrue(status.exists)
+        XCTAssertLessThanOrEqual(status.frame.minY, title.frame.minY + 8, "Status belongs in the top corner, not below the title")
+        XCTAssertEqual(status.frame.maxX, card.frame.maxX - 14, accuracy: 2)
+        XCTAssertLessThan(card.frame.height, 130, "Inline metadata should not recreate the tall divided card")
+        keepScreenshot(named: "automation-inventory-summary-cards")
+        card.tap()
+        let summary = app.otherElements["automation-detail-summary"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(summary.staticTexts["Daily workspace review"].exists, app.debugDescription)
+        let detail = app.scrollViews.containing(.other, identifier: "automation-detail-summary").firstMatch
+        let updated = summary.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Updated")).firstMatch
+        XCTAssertTrue(updated.exists, app.debugDescription)
+        XCTAssertTrue(updated.label.contains("Sep 20, 2026"), "Detail must use the newer record, not the selected catalog summary: \(updated.label)")
+        XCTAssertEqual(detail.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Server,")).count, 1)
+        let promptLabel = "Prompt, Review the workspace and summarize changes since the previous run. Do not modify files."
+        XCTAssertTrue(app.staticTexts[promptLabel].exists, app.debugDescription)
+        XCTAssertFalse(app.buttons[promptLabel].exists)
+        keepScreenshot(named: "automation-detail-expanded-summary-and-tables")
+        let recent = app.staticTexts["RECENT RUNS"]
+        for _ in 0..<6 where !recent.isHittable { app.swipeUp() }
+        XCTAssertTrue(recent.isHittable, app.debugDescription)
+        let delete = app.buttons["Delete"]
+        XCTAssertTrue(delete.isHittable)
+        XCTAssertLessThan(delete.frame.maxY, recent.frame.minY)
+        keepScreenshot(named: "automation-detail-controls-before-history")
+        let run = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Succeeded")).firstMatch
+        XCTAssertTrue(run.isHittable, app.debugDescription)
+        run.tap()
+        XCTAssertTrue(app.staticTexts["Run Details"].waitForExistence(timeout: 5), app.debugDescription)
+    }
+
+    @MainActor
+    func testAskUserOtherEditorExpandsMediumSheetAndOpensKeyboard() {
+        let app = launchAskUser()
+        waitForAskUserForm(in: app)
+        let close = app.buttons["Close form and keep answers"]
+        let mediumY = close.frame.minY
+        XCTAssertGreaterThan(mediumY, app.frame.height * 0.4)
+        app.buttons["Staging"].tap()
+        app.buttons["Other"].tap()
+        let editor = app.textViews["Other response for Environment"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertEqual(close.frame.minY, mediumY, accuracy: 2, "Revealing Other must not focus an unmounted editor")
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        keepScreenshot(named: "ask-user-other-editor-medium")
+        editor.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        let expanded = NSPredicate { element, _ in
+            guard let element = element as? XCUIElement else { return false }
+            return element.frame.minY < mediumY - 100
+        }
+        expectation(for: expanded, evaluatedWith: close)
+        waitForExpectations(timeout: 5)
+        editor.typeText("First line\nSecond line")
+        XCTAssertEqual(editor.value as? String, "First line\nSecond line")
+        keepScreenshot(named: "ask-user-other-editor-large-keyboard")
+        app.buttons["Other"].tap()
+        XCTAssertTrue(editor.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
+        XCTAssertEqual(app.buttons["Staging"].value as? String, "Selected")
+        app.buttons["Other"].tap()
+        XCTAssertTrue(editor.waitForExistence(timeout: 3))
+        XCTAssertEqual(editor.value as? String, "")
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        app.buttons["Close form and keep answers"].tap()
+        XCTAssertTrue(app.staticTexts["Mutation count: 0"].waitForExistence(timeout: 3))
+    }
+
+    @MainActor
+    func testAskUserSingleChoiceOtherEditorHidesWhenChoosingAnOption() {
+        let app = launchAskUser(styled: true)
+        let close = app.buttons["Close form and keep answers"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        let mediumY = close.frame.minY
+        XCTAssertGreaterThan(mediumY, app.frame.height * 0.4)
+        app.buttons["Other"].tap()
+        let editor = app.textViews["Other response for Environment"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertEqual(close.frame.minY, mediumY, accuracy: 2)
+        editor.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertLessThan(close.frame.minY, mediumY - 100)
+        editor.typeText("A custom environment")
+        app.buttons["Staging, A pre-release environment for validation."].tap()
+        XCTAssertTrue(editor.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["Submit all answers"].isEnabled)
+        keepScreenshot(named: "ask-user-other-editor-hidden-single-choice")
+    }
+
+    @MainActor
     func testAskUserClosePreservesSelectionsAndOtherDraftOnReopen() {
         let app = launchAskUser()
         waitForAskUserForm(in: app)
         app.buttons["Staging"].tap()
         app.buttons["Other"].tap()
-        let other = app.textFields["Other response for Environment"]
+        let other = app.textViews["Other response for Environment"]
         XCTAssertTrue(other.waitForExistence(timeout: 3))
         other.tap()
         other.typeText("local canary")
@@ -230,7 +360,7 @@ final class TronSmokeUITests: XCTestCase {
         app.buttons["Reopen Ask User"].tap()
         XCTAssertTrue(app.buttons["Staging"].waitForExistence(timeout: 3))
         XCTAssertEqual(app.buttons["Staging"].value as? String, "Selected")
-        let restored = app.textFields["Other response for Environment"]
+        let restored = app.textViews["Other response for Environment"]
         XCTAssertTrue(restored.waitForExistence(timeout: 3))
         restored.tap()
         app.buttons["Submit all answers"].tap()
@@ -256,7 +386,7 @@ final class TronSmokeUITests: XCTestCase {
         app.buttons["Staging"].tap()
         app.buttons["Production"].tap()
         app.buttons["Other"].tap()
-        let other = app.textFields["Other response for Environment"]
+        let other = app.textViews["Other response for Environment"]
         XCTAssertTrue(other.waitForExistence(timeout: 3))
         other.tap()
         other.typeText("A canary region")
@@ -266,7 +396,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["A canary region"].exists)
         XCTAssertTrue(app.staticTexts["Mutation count: 1"].exists)
         XCTAssertTrue(app.staticTexts["extension.respond cancelled=false selected=environment-a,environment-b other=A canary region"].exists)
-        XCTAssertFalse(app.textFields["Other response for Environment"].exists)
+        XCTAssertFalse(app.textViews["Other response for Environment"].exists)
         keepScreenshot(named: "ask-user-completed-read-only-fixture")
     }
 
@@ -285,7 +415,8 @@ final class TronSmokeUITests: XCTestCase {
         let cancel = app.buttons["Cancel form"]
         XCTAssertTrue(close.isHittable)
         XCTAssertTrue(cancel.isHittable)
-        XCTAssertLessThan(close.frame.maxX, cancel.frame.minX)
+        XCTAssertLessThan(cancel.frame.maxX, close.frame.minX)
+        XCTAssertLessThanOrEqual(close.frame.maxX, app.buttons["Submit all answers"].frame.minX)
         XCTAssertFalse(app.buttons["Submit all answers"].isEnabled)
         keepScreenshot(named: "ask-user-styled-active-disabled")
         option.tap()

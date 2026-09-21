@@ -137,6 +137,33 @@ function parseRaindrop(value: any): PendingItem[] {
     return { id: itemId, title: text(item.title, 512) ?? link, url: link, ...(text(item.excerpt) ? { excerpt: text(item.excerpt) } : {}), ...(text(item.note, 20_000) ? { annotation: text(item.note, 20_000) } : {}), ...(text(item.created, 80) ? { publishedAt: text(item.created, 80) } : {}), ...(parseCollection(item) ? { collectionId: parseCollection(item) } : {}), ...(metadataComplete ? { apiPayload } : {}), metadataComplete };
   }).filter((item: PendingItem | undefined): item is PendingItem => Boolean(item));
 }
+type IntakeOutcome = {
+  itemId: string;
+  title: string;
+  disposition: "pending" | "retained" | "archived" | "already-processed";
+  reason: string;
+  assessment: "not-run" | "preflight-failed" | "dispatched-uncertain" | "dispatched-settled" | "dispatched-settled-sampled" | "reused";
+  move: "not-attempted" | "moved" | "conflict" | "unsupported" | "blocked";
+  sourceId?: string;
+  sourceRevision?: string;
+};
+
+function validateRaindropReadRequest(value: unknown): KnowledgeRaindropRequest["read"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw bad("Raindrop read request is invalid");
+  const read = value as Record<string, unknown>; const operation = read.operation;
+  if (!["user", "collections", "collection", "bookmarks", "item", "highlights", "tags"].includes(operation as string)) throw bad("Raindrop read operation is invalid");
+  if (operation === "collection" && (typeof read.collectionId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(read.collectionId))) throw bad("Collection ID is invalid");
+  if (operation === "item" && (typeof read.itemId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(read.itemId))) throw bad("Item ID is invalid");
+  if ((operation === "bookmarks" || operation === "highlights") && read.collectionId !== undefined && (typeof read.collectionId !== "string" || !/^-?\d{1,18}$/.test(read.collectionId))) throw bad("Collection ID is invalid");
+  if ((operation === "bookmarks" || operation === "highlights") && (read.page !== undefined && (!Number.isSafeInteger(read.page) || (read.page as number) < 0 || (read.page as number) > 1_000_000) || read.perpage !== undefined && (!Number.isSafeInteger(read.perpage) || (read.perpage as number) < 1 || (read.perpage as number) > 50))) throw bad("Raindrop page is invalid");
+  if (operation === "bookmarks" && read.nested !== undefined && typeof read.nested !== "boolean") throw bad("Raindrop nested flag is invalid");
+  if (operation === "collections" && read.children !== undefined && typeof read.children !== "boolean") throw bad("Raindrop children flag is invalid");
+  if ((operation === "bookmarks" || operation === "tags") && read.search !== undefined && (typeof read.search !== "string" || read.search.length > 512)) throw bad("Raindrop search exceeds its limit");
+  if ((operation === "bookmarks" || operation === "highlights") && read.sort !== undefined && (typeof read.sort !== "string" || read.sort.length > 64)) throw bad("Raindrop sort exceeds its limit");
+  const allowed = operation === "bookmarks" ? ["operation", "collectionId", "page", "perpage", "search", "sort", "nested"] : operation === "highlights" ? ["operation", "collectionId", "page", "perpage"] : operation === "collections" ? ["operation", "children"] : operation === "collection" ? ["operation", "collectionId"] : operation === "item" ? ["operation", "itemId"] : operation === "tags" ? ["operation", "search"] : ["operation"];
+  if (Object.keys(read).some(key => !allowed.includes(key))) throw bad("Raindrop read request contains unsupported fields");
+  return value as KnowledgeRaindropRequest["read"];
+}
 function parseX(value: any): PendingItem[] {
   if (!value || !Array.isArray(value.data)) return [];
   return value.data.map((item: XBookmarkDTO) => {
@@ -168,6 +195,7 @@ export class KnowledgeConnectorExtension {
   }
 
   private async readRaindrop(request: KnowledgeRaindropRequest, externalSignal?: AbortSignal): Promise<Record<string, unknown>> {
+    const read = validateRaindropReadRequest((request as unknown as { read?: unknown })?.read);
     const state = await this.store.connectorState("raindrop");
     if (!state?.enabled || !state.accountId || !state.credentialRef) throw new GatewayError("unsupported", "Raindrop connector is not configured; set the numeric Raindrop user _id in accountId");
     if (!/^\d+$/.test(state.accountId)) throw new GatewayError("invalid_request", "Raindrop accountId must be the numeric user _id; obtain it through a secure local /user check, never by sharing the token");
@@ -206,7 +234,6 @@ export class KnowledgeConnectorExtension {
       let endpoint: string;
       let value: unknown;
       let headers = identity.headers;
-      const read = request.read;
       if (read.operation === "user") {
         const raw = JSON.stringify(identity.value);
         if (Buffer.byteLength(raw, "utf8") > BODY_LIMIT) throw new GatewayError("invalid_request", "Raindrop metadata exceeded 2 MB; reduce the requested metadata");
@@ -434,47 +461,83 @@ export class KnowledgeConnectorExtension {
       const cohortId = cohortAuthority.id;
       const cohort = cohortAuthority.itemIds;
       let captured = 0; let retained = 0; let archived = 0; let pending = 0; let assessmentFailed = 0; let moved = 0; let lastError: string | undefined;
+      const outcomeMap = new Map<string, IntakeOutcome>();
+      const setOutcome = (item: Pick<PendingItem, "id" | "title">, patch: Partial<Omit<IntakeOutcome, "itemId" | "title">>) => {
+        const previous = outcomeMap.get(item.id);
+        outcomeMap.set(item.id, { ...(previous ?? { itemId: item.id, title: item.title.slice(0, 512) }), ...patch, ...(patch.reason !== undefined ? { reason: patch.reason.slice(0, 2_000) } : {}) } as IntakeOutcome);
+      };
+      const canonicalFor = async (itemId: string): Promise<KnowledgeRecord & { kind: "source" } | undefined> => {
+        let cursor: string | undefined;
+        do {
+          const page = await this.store.list({ kind: "source", includePending: true, includeArchived: true, limit: 100, ...(cursor ? { cursor } : {}) });
+          const found = page.records.find(record => record.kind === "source" && (record.content.identity?.provider === "raindrop" && record.content.identity.accountId === state.accountId && record.content.identity.itemId === itemId || record.content.origins?.some(origin => origin.identity?.provider === "raindrop" && origin.identity.accountId === state.accountId && origin.identity.itemId === itemId)));
+          if (found?.kind === "source") return found;
+          cursor = page.nextCursor;
+        } while (cursor);
+        return undefined;
+      };
       const approvedItems = cohort.map(itemId => live.pending.find(item => item.id === itemId)).filter((item): item is NonNullable<typeof item> => Boolean(item));
+      const approvedSet = new Set(approvedItems.map(item => item.id));
+      for (const itemId of cohort) if (!approvedSet.has(itemId)) {
+        const stateNow = await this.store.connectorState("raindrop");
+        const canonical = await canonicalFor(itemId);
+        setOutcome({ id: itemId, title: canonical?.content.title ?? "" }, stateNow?.capturedIds.includes(itemId) || canonical ? { ...(canonical ? { sourceId: canonical.id, sourceRevision: canonical.revisionId } : {}), disposition: "already-processed", reason: canonical ? "Canonical source exists; remote location was not reverified by this run" : "Connector receipt says processed; canonical source lookup was unavailable", assessment: canonical?.content.assessment ? "reused" : "not-run", move: "blocked" } : { disposition: "pending", reason: "Cohort identity is no longer pending and no canonical source was found", assessment: "not-run", move: "blocked" });
+      }
       for (const item of approvedItems) {
-        if ((await this.store.connectorState("raindrop"))?.pendingRemote) { lastError = "Raindrop has an unresolved remote effect"; break; }
+        if ((await this.store.connectorState("raindrop"))?.pendingRemote) { lastError = "Raindrop has an unresolved remote effect"; for (const tail of approvedItems.slice(approvedItems.indexOf(item))) setOutcome(tail, { disposition: "pending", reason: "Blocked by unresolved remote effect; reconcile before processing", assessment: "not-run", move: "blocked" }); break; }
         try {
           live = await this.store.connectorState("raindrop") ?? live;
           const result = await captureSource(this.store, { commandId: command(request.commandId, `capture-${item.id}`), url: item.url, scope: "research", title: item.title, origin: "connector", ...(item.collectionId ? { collectionId: item.collectionId } : {}), identity: { provider: "raindrop", accountId: live.accountId!, itemId: item.id }, ...(item.annotation ? { annotations: [{ text: item.annotation }] } : {}) }, { signal, ...(this.options.sourceFetch ? { fetcher: (sourceUrl, init) => this.options.sourceFetch!(sourceUrl.toString(), item.excerpt, init?.signal ?? signal) } : {}), ...(this.options.resolveHost ? { resolveHost: this.options.resolveHost } : {}) });
-          let source = await this.attachProviderPayload(item, result.record, command(request.commandId, `metadata-${item.id}`));
+          let source = result.record;
+          setOutcome(item, { sourceId: source.id, sourceRevision: source.revisionId, disposition: "pending", assessment: "not-run", move: "not-attempted", reason: "Source captured; processing not yet complete" });
+          source = await this.attachProviderPayload(item, result.record, command(request.commandId, `metadata-${item.id}`));
+          let sourceRef = { sourceId: source.id, sourceRevision: source.revisionId };
           source = await this.markUnsafeLinkedCapture(item, source, command(request.commandId, `quality-${item.id}`));
+          sourceRef = { sourceId: source.id, sourceRevision: source.revisionId };
           captured += 1;
           if (source.content.captureDisposition !== "complete" || item.metadataComplete === false || !source.content.text) {
-            await this.store.setSourceAdmission({ commandId: command(request.commandId, `pending-${item.id}`), recordId: source.id, expectedRevision: source.revisionId, status: "pending", reason: "Capture is incomplete or provider metadata is bounded without complete linked evidence" });
-            pending += 1; continue;
+            const admission = await this.store.setSourceAdmission({ commandId: command(request.commandId, `pending-${item.id}`), recordId: source.id, expectedRevision: source.revisionId, status: "pending", reason: "Capture is incomplete or provider metadata is bounded without complete linked evidence" });
+            source = admission.record as KnowledgeRecord & { kind: "source" }; sourceRef = { sourceId: source.id, sourceRevision: source.revisionId };
+            pending += 1; setOutcome(item, { ...sourceRef, disposition: "pending", reason: source.content.captureReason ?? "Capture is incomplete or provider metadata is bounded without complete linked evidence", assessment: "not-run", move: "not-attempted" }); continue;
           }
           let assessment = source.content.assessment;
+          let assessmentOutcome: IntakeOutcome["assessment"] = "not-run";
           const interests = (await this.store.config()).currentInterests ?? [];
-          const assessmentCurrent = assessment?.model === "jev-1.13.0" && assessment.profileVersion === jevProfileVersion(interests) && assessment.rubricVersion === "tron-source-rubric-v2" && assessment.inputDigest === jevInputDigest({ title: source.content.title, text: source.content.text ?? "", interests, source: { ...(source.content.uri ? { uri: source.content.uri } : {}), ...(source.content.mediaType ? { mediaType: source.content.mediaType } : {}), ...(source.content.collectionId ? { collectionId: source.content.collectionId } : {}), captureDisposition: source.content.captureDisposition, capturedAt: source.content.capturedAt } }, interests);
+          // Recovery reuses an immutable decision bound to unchanged evidence
+          // and interests. A code/rubric upgrade alone is not paid re-triage authority.
+          const assessmentCurrent = assessment?.model === JEV_MODEL && assessment.profileVersion === jevProfileVersion(interests) && Boolean(assessment.rubricVersion) && assessment.inputDigest === jevInputDigest({ title: source.content.title, text: source.content.text ?? "", interests, source: { ...(source.content.uri ? { uri: source.content.uri } : {}), ...(source.content.mediaType ? { mediaType: source.content.mediaType } : {}), ...(source.content.collectionId ? { collectionId: source.content.collectionId } : {}), captureDisposition: source.content.captureDisposition, capturedAt: source.content.capturedAt } }, interests);
+          if (assessmentCurrent) assessmentOutcome = "reused";
+          setOutcome(item, { ...sourceRef, disposition: "pending", assessment: assessmentOutcome, move: "not-attempted", reason: "Assessment and admission in progress" });
           if (!assessmentCurrent) {
-            if (!this.options.assessment) { pending += 1; lastError = "Jev source assessment is not configured"; continue; }
+            if (!this.options.assessment) { pending += 1; lastError = "Jev source assessment is not configured"; setOutcome(item, { ...sourceRef, disposition: "pending", reason: lastError, assessment: "not-run", move: "not-attempted" }); continue; }
             let dispatched = false;
             try {
               const triaged = await triageSource(this.store, { commandId: command(request.commandId, `assess-${item.id}`), sourceId: source.id, expectedRevision: source.revisionId, signal, beforeDispatch: async () => { await this.reserveAssessment(command(request.commandId, `assess-${item.id}`), item.id, approvedPilot, cohortId); dispatched = true; } }, this.options.assessment);
-              assessment = triaged.assessment; source = triaged.source;
+              assessment = triaged.assessment; source = triaged.source; sourceRef = { sourceId: source.id, sourceRevision: source.revisionId }; assessmentOutcome = assessment.coverage === "sampled" ? "dispatched-settled-sampled" : "dispatched-settled";
+              setOutcome(item, { ...sourceRef, assessment: assessmentOutcome });
               const usage = assessment?.usage ? { inputTokens: assessment.usage.inputTokens, outputTokens: assessment.usage.outputTokens, estimatedCostCents: assessment.usage.estimatedCostCents } : undefined;
               await this.settleAssessment(command(request.commandId, `assess-${item.id}`), item.id, cohortId, usage);
-            } catch (error) { assessmentFailed += 1; pending += 1; lastError = dispatched ? "Jev assessment outcome is uncertain; reconcile before retrying" : (error instanceof Error ? error.message : "Jev assessment failed"); continue; }
+            } catch (error) { assessmentFailed += 1; pending += 1; lastError = dispatched ? "Jev assessment outcome is uncertain; reconcile before retrying" : (error instanceof Error ? error.message : "Jev assessment failed"); setOutcome(item, { ...sourceRef, disposition: "pending", reason: lastError, assessment: dispatched ? "dispatched-uncertain" : "preflight-failed", move: "not-attempted" }); continue; }
           }
           const finalInterests = (await this.store.config()).currentInterests ?? [];
-          if (!assessment || (assessment.model === JEV_MODEL && assessment.inputDigest !== undefined && (assessment.profileVersion !== jevProfileVersion(finalInterests) || assessment.inputDigest !== jevInputDigest({ title: source.content.title, text: source.content.text ?? "", interests: finalInterests, source: { ...(source.content.uri ? { uri: source.content.uri } : {}), ...(source.content.mediaType ? { mediaType: source.content.mediaType } : {}), ...(source.content.collectionId ? { collectionId: source.content.collectionId } : {}), captureDisposition: source.content.captureDisposition, capturedAt: source.content.capturedAt } }, finalInterests)))) throw new GatewayError("conflict", "Source assessment authority changed before admission");
+          if (!assessment || (assessment.model === JEV_MODEL && assessment.coverage !== undefined && (assessment.coverage !== "full" && assessment.coverage !== "sampled")) || (assessment.model === JEV_MODEL && assessment.inputDigest !== undefined && (assessment.profileVersion !== jevProfileVersion(finalInterests) || assessment.inputDigest !== jevInputDigest({ title: source.content.title, text: source.content.text ?? "", interests: finalInterests, source: { ...(source.content.uri ? { uri: source.content.uri } : {}), ...(source.content.mediaType ? { mediaType: source.content.mediaType } : {}), ...(source.content.collectionId ? { collectionId: source.content.collectionId } : {}), captureDisposition: source.content.captureDisposition, capturedAt: source.content.capturedAt } }, finalInterests)))) throw new GatewayError("conflict", "Source assessment authority changed before admission");
           const status = assessment.recommendation === "archived" ? "archived" : "retained";
           const admitted = source.content.admission?.status === status ? source : (await this.store.setSourceAdmission({ commandId: command(request.commandId, `admit-${item.id}`), recordId: source.id, expectedRevision: source.revisionId, status, reason: status === "archived" ? "Jev clear low-value classification; recoverable intake archive" : "Jev intake accepted source", ...(assessment?.profileVersion ? { profileVersion: assessment.profileVersion } : {}), ...(assessment?.rubricVersion ? { rubricVersion: assessment.rubricVersion } : {}) })).record as KnowledgeRecord & { kind: "source" };
+          source = admitted; sourceRef = { sourceId: source.id, sourceRevision: source.revisionId };
+          setOutcome(item, { ...sourceRef, disposition: status, assessment: assessmentOutcome });
           if (status === "archived") archived += 1; else retained += 1;
-          if (!live.allowWrites || !live.destination || item.collectionId === live.destination) { pending += 1; continue; }
+          if (!live.allowWrites || !live.destination || item.collectionId === live.destination) { pending += 1; setOutcome(item, { ...sourceRef, disposition: status, reason: "Remote move is not authorized or destination is unavailable", assessment: assessmentOutcome, move: "not-attempted" }); continue; }
           const movedResult = await this.moveRaindrop({ commandId: command(request.commandId, `move-${item.id}`), itemId: item.id, source: admitted, expectedRevision: admitted.revisionId, identity: { provider: "raindrop", accountId: live.accountId!, itemId: item.id }, sourceCollection, destination: live.destination }, signal);
           if (movedResult.status !== "moved") {
             pending += 1; lastError = "Raindrop destination move could not be verified";
-            if ((await this.store.connectorState("raindrop"))?.pendingRemote) break;
+            setOutcome(item, { ...sourceRef, disposition: status, reason: lastError, assessment: assessmentOutcome, move: movedResult.status });
+            if ((await this.store.connectorState("raindrop"))?.pendingRemote) { for (const tail of approvedItems.slice(approvedItems.indexOf(item) + 1)) setOutcome(tail, { disposition: "pending", reason: "Blocked by unresolved remote effect; reconcile before processing", assessment: "not-run", move: "blocked" }); break; }
             continue;
           }
           moved += 1;
+          setOutcome(item, { ...sourceRef, disposition: status, reason: "Locally admitted and remotely verified", assessment: assessmentOutcome, move: "moved" });
           await this.store.updateConnectorState(command(request.commandId, `done-${item.id}`), "raindrop", current => { const next = current ?? live; return { ...next, pending: next.pending.filter(candidate => candidate.id !== item.id), capturedIds: [...new Set([...next.capturedIds, item.id])].slice(-2_000), remaining: Math.max(0, next.pending.length - 1) }; });
-        } catch (error) { pending += 1; lastError = error instanceof Error ? error.message : "Raindrop intake failed"; }
+        } catch (error) { pending += 1; lastError = error instanceof Error ? error.message : "Raindrop intake failed"; const prior = outcomeMap.get(item.id); if (prior?.move === "moved") setOutcome(item, { reason: "Remote move verified; local completion receipt requires reconciliation", assessment: prior.assessment, move: "moved" }); else setOutcome(item, { disposition: prior?.disposition ?? "pending", reason: lastError, assessment: prior?.assessment ?? "not-run", move: prior?.move ?? "not-attempted" }); }
       }
       const finalState = await this.store.connectorState("raindrop") ?? live;
       const finalAuthority = finalState.assessmentPilot?.id === cohortId ? finalState.assessmentPilot : finalState.assessmentApprovals?.find(item => item.id === cohortId) ?? cohortAuthority;
@@ -483,7 +546,7 @@ export class KnowledgeConnectorExtension {
       // from the estimate on a later run. Unknown is never silently zero.
       const attempts = Object.values(finalState?.assessmentAttempts ?? {}).filter(attempt => attempt.cohortId === cohortId || (!attempt.cohortId && cohortId === finalState?.assessmentPilot?.id));
       const known = attempts.filter(attempt => attempt.estimatedCostCents !== undefined);
-      return { connector: "raindrop", dryRun: false, discovered: discovered.discovered, captured, retained, archived, assessmentFailed, moved, pending, budget: { approvedCeilingCents: finalAuthority.budgetCents, conservativeReservedCents: finalAuthority.reservedCents, cohortItemCap: finalAuthority.maxItems, cohortSelectedItems: cohort.length, settledItems: finalAuthority.usedItems, ...(known.length > 0 ? { estimatedUsageCostCents: known.reduce((sum, attempt) => sum + attempt.estimatedCostCents!, 0) } : {}), usageKnownAssessments: known.length, usageUnknownAssessments: attempts.length - known.length, uncertainAttempts: attempts.filter(attempt => attempt.status === "dispatched").length, pendingOutsideCohortItems: (finalState?.pending ?? []).filter(item => !cohort.includes(item.id)).length }, ...(lastError ? { error: lastError } : {}) };
+      return { connector: "raindrop", dryRun: false, discovered: discovered.discovered, captured, retained, archived, assessmentFailed, moved, pending, outcomes: cohort.map(itemId => outcomeMap.get(itemId)!).filter(Boolean), budget: { approvedCeilingCents: finalAuthority.budgetCents, conservativeReservedCents: finalAuthority.reservedCents, cohortItemCap: finalAuthority.maxItems, cohortSelectedItems: cohort.length, settledItems: finalAuthority.usedItems, ...(known.length > 0 ? { estimatedUsageCostCents: known.reduce((sum, attempt) => sum + attempt.estimatedCostCents!, 0) } : {}), usageKnownAssessments: known.length, usageUnknownAssessments: attempts.length - known.length, uncertainAttempts: attempts.filter(attempt => attempt.status === "dispatched").length, pendingOutsideCohortItems: (finalState?.pending ?? []).filter(item => !cohort.includes(item.id)).length }, ...(lastError ? { error: lastError } : {}) };
     } finally { clearTimeout(deadline); }
   }
 

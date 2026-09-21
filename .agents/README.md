@@ -15,6 +15,8 @@ facts in the owning source and package docs, not copied into skills.
 | [tron-ios](skills/tron-ios/SKILL.md) | Required routing for iOS build, test, simulator, device, signing, archive, and artifact work |
 | [tron-workspace-housekeeping](skills/tron-workspace-housekeeping/SKILL.md) | Evidence-based post-merge cleanup of branches, inactive worktrees, and stale Git metadata; protect active agents and unmerged work |
 | [tron-raindrop](skills/tron-raindrop/SKILL.md) | Bounded, read-only Raindrop bookmark and collection API access through the Mac credential owner |
+| [tron-jev](skills/tron-jev/SKILL.md) | Explicit bounded typed Jev decisions; not source retrieval or chat completion |
+| [tron-x](skills/tron-x/SKILL.md) | Free public X post lookup, explicit raw-evidence capture, and supervised authenticated bookmark discovery |
 
 For a broad investigation, start with code health and its coverage ledger. Use
 test confidence to evaluate the evidence, then performance only where a cost or

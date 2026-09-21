@@ -1180,16 +1180,20 @@ private enum SessionDashboardLayout {
     }
 }
 
-private struct SessionListExpansionControls: View {
+struct SessionListExpansionControls: View {
     let workspaceName: String
     let canShowLess: Bool
     let canShowMore: Bool
     let isEnabled: Bool
     let onShowLess: () -> Void
     let onShowMore: () -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 24))
+        layout {
             if canShowMore {
                 expansionButton(
                     title: "Show more",
@@ -1199,8 +1203,6 @@ private struct SessionListExpansionControls: View {
                 )
                 .transition(.opacity)
             }
-
-            Spacer(minLength: SessionDashboardLayout.iconTextSpacing)
 
             if canShowLess {
                 expansionButton(
@@ -1212,7 +1214,8 @@ private struct SessionListExpansionControls: View {
                 .transition(.opacity)
             }
         }
-        .frame(maxWidth: .infinity)
+        // Keep both actions together, away from the lower-right dashboard logo.
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.leading, SessionDashboardLayout.expansionControlLeadingPadding)
         .padding(.trailing, SessionDashboardLayout.expansionControlTrailingPadding)
         .disabled(!isEnabled)

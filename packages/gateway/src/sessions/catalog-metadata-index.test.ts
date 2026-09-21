@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rename, truncate, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rename, truncate, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -50,6 +50,42 @@ afterEach(async () => {
 });
 
 describe("CatalogMetadataIndex", () => {
+  it("bounds multibyte previews and renamed sessions in appended metadata", async () => {
+    const f = await fixture();
+    const index = new CatalogMetadataIndex(f.gateway);
+    const row = (await index.entryFromSummary(summary(f.path)))!;
+    const prompt = "😀".repeat(5_000);
+    const name = "漢".repeat(5_000);
+    await appendFile(f.path, [
+      { type: "message", timestamp: "2026-01-02T00:00:00.000Z", message: {
+        role: "user", content: [{ type: "text", text: prompt }],
+      } },
+      { type: "session_info", name },
+    ].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+    const before = await readFile(f.path, "utf8");
+    const next = (await index.append(row))!;
+    expect(next.firstMessage).toBe("😀".repeat(255) + "…");
+    expect(next.name).toBe("漢".repeat(340) + "…");
+    expect(next.messageCount).toBe(1);
+    expect(next.updatedAt).toBe("2026-01-02T00:00:00.000Z");
+    expect(await index.save(f.catalog, [next])).toBe(true);
+    expect(await reconcileSaved(index, f.catalog, [next])).toEqual([next]);
+    expect(await readFile(f.path, "utf8")).toBe(before);
+  });
+
+  it.each(["firstMessage", "name"] as const)("discards an oversized cached %s instead of reviving unbounded metadata", async (field) => {
+    const f = await fixture();
+    const index = new CatalogMetadataIndex(f.gateway);
+    const row = (await index.entryFromSummary(summary(f.path)))!;
+    await index.save(f.catalog, [row]);
+    const document = JSON.parse(await readFile(index.path, "utf8"));
+    // Fewer than 1,024 code units, but more than 1 KiB. A cached row must
+    // obey the same byte bound as fresh and suffix metadata scans.
+    document.rows[0][field] = "漢".repeat(500);
+    await writeFile(index.path, JSON.stringify(document));
+    expect(await reconcileSaved(index, f.catalog, [row])).toBeUndefined();
+  });
+
   it("keeps full and suffix metadata semantics aligned for arrays, tool results, timestamps, and clears", () => {
     const target: CatalogMetadataAccumulator = {
       messageCount: 0, firstMessage: "(no messages)", name: "named", updatedAt: "2026-01-01T00:00:00.000Z",

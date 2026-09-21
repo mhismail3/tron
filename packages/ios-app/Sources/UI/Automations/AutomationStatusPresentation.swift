@@ -23,13 +23,6 @@ enum AutomationStatusPresentation {
         if run == .skipped { return "arrow.right.circle" }
         switch activation { case .enabled: return "checkmark.circle.fill"; case .paused: return "pause.circle.fill"; case .draft: return "pencil.circle"; case .completed: return "checkmark.seal"; case .blocked: return "exclamationmark.triangle.fill" }
     }
-    static func accessible(_ summary: GatewayAutomationSummary) -> String {
-        var result = "\(summary.name), \(summary.activation.label), \(summary.typedActionKind?.label ?? summary.actionKind), \(summary.trigger.summary)"
-        if let next = summary.nextOccurrenceAt { result += ", next \(AutomationDateFormatting.date(next))" }
-        if summary.consecutiveFailureCount > 0 { result += ", \(summary.consecutiveFailureCount) consecutive failures" }
-        if let blocked = summary.blockedReason { result += ", blocked: \(blocked)" }
-        return result
-    }
 }
 
 struct AutomationStatusBadge: View {

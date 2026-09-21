@@ -5,14 +5,14 @@ import type { KnowledgeAction, KnowledgeConfig, KnowledgeListRequest, KnowledgeR
 import type { KnowledgeStore } from "./knowledge-store.js";
 import { KnowledgeObservationService, type ObservationSettlement } from "./knowledge-observation.js";
 import { awaitAbortableWithSettlement } from "./model-await.js";
-import { captureSource, type SourceAssessmentModel } from "./source-capture.js";
+import { captureSource, readPublicXPost, type SourceAssessmentModel } from "./source-capture.js";
 import { triageSource } from "./source-triage.js";
 import { GatewayError, asUncertainOutcome } from "../errors.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 import { currentInvocationContext } from "../extensions/owner-attribution.js";
 
 const toolParameters = Type.Object({
-  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("triageSource"), Type.Literal("restoreSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorSweep"), Type.Literal("raindrop"), Type.Literal("raindropIntake"), Type.Literal("synthesis")]),
+  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("triageSource"), Type.Literal("restoreSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorSweep"), Type.Literal("x"), Type.Literal("raindrop"), Type.Literal("raindropIntake"), Type.Literal("synthesis")]),
   query: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   commandId: Type.Optional(Type.String({ minLength: 8, maxLength: 160 })),
   connector: Type.Optional(Type.Union([Type.Literal("raindrop"), Type.Literal("x")])),
@@ -44,6 +44,7 @@ const toolParameters = Type.Object({
   offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 8_000_000 })),
   sourceId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
   url: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
+  publicPostLookup: Type.Optional(Type.Boolean()),
   title: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   scope: Type.Optional(Type.Union([Type.Literal("personal"), Type.Literal("research")])),
   noteBody: Type.Optional(Type.String({ maxLength: 100_000 })),
@@ -292,7 +293,9 @@ export class KnowledgeService {
       case "knowledge.recall": return this.store.recall(action.request);
       case "knowledge.source.capture": {
         const config = await this.store.config();
-        const model = this.modelForConfig?.(config);
+        // Free public hydration is capture only. Paid assessment is a separate
+        // explicit triage operation, never a hidden fallback for an X read.
+        const model = action.request.publicPostLookup ? undefined : this.modelForConfig?.(config);
         return this.runOwned("source capture", (signal, retirements) => captureSource(this.store, action.request, { ...(model ? { model } : {}), signal, retirements }), signal);
       }
       case "knowledge.note.create": {
@@ -453,9 +456,16 @@ export class KnowledgeService {
         const result = await this.store.list(request);
         return { text: `${result.records.map(record => `${record.id} (${record.kind}): ${recordLabel(record).slice(0, 1_000)}`).join("\n") || "No knowledge records."}${result.nextCursor ? `\nContinue with cursor=${result.nextCursor}.` : ""}${result.incomplete ? "\nThe bounded canonical scan is incomplete; results are not exhaustive." : ""}`, details: { stateRevision: result.stateRevision, records: result.records.map(recordSummary), ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}), ...(result.incomplete ? { incomplete: true } : {}) } };
       }
+      case "x": {
+        if (!parameters.url) throw new GatewayError("invalid_request", "Public X reads require url");
+        const result = await this.runOwned("public X read", ownedSignal => readPublicXPost(parameters.url!, { signal: ownedSignal }), signal);
+        const text = JSON.stringify(result);
+        if (Buffer.byteLength(text, "utf8") > 128_000) throw new GatewayError("invalid_request", "X response exceeds the read tool bound; use captureSource with publicPostLookup and then bounded readObject");
+        return { text, details: result };
+      }
       case "captureSource": {
         if (!parameters.commandId || !parameters.url || !parameters.scope) throw new GatewayError("invalid_request", "Source capture requires commandId, url, and scope");
-        const result = await this.invoke({ operation: "knowledge.source.capture", request: { commandId: parameters.commandId, url: parameters.url, scope: parameters.scope, ...(parameters.title ? { title: parameters.title } : {}) } }, signal);
+        const result = await this.invoke({ operation: "knowledge.source.capture", request: { commandId: parameters.commandId, url: parameters.url, scope: parameters.scope, ...(parameters.publicPostLookup === undefined ? {} : { publicPostLookup: parameters.publicPostLookup }), ...(parameters.title ? { title: parameters.title } : {}) } }, signal);
         const record = result && typeof result === "object" && "record" in result ? (result as { record?: import("./knowledge-contract.js").KnowledgeRecord }).record : undefined;
         return { text: record ? `${record.id} (source): ${recordLabel(record).slice(0, 4_000)}` : "Source capture completed.", details: result };
       }

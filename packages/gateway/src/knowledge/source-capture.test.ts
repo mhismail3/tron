@@ -72,13 +72,31 @@ describe("safe source capture", () => {
     expect((await store.list({ kind: "source" })).records).toHaveLength(1);
   });
 
-  it("blocks private redirect destinations and records inaccessible responses without a fake success", async () => {
+  it("records destination safety failures without fetching the forbidden hop, while preserving SSRF defenses", async () => {
     const { store } = await fixture();
-    const redirect = async () => new Response(null, { status: 302, headers: { location: "http://127.0.0.1/admin" } });
-    await expect(captureSource(store, { commandId: command("private-redirect"), url: "https://example.com/start", scope: "research" }, { fetcher: redirect, resolveHost: publicResolver })).rejects.toThrow(/publicly routable/);
+    const fetchedUrls: string[] = [];
+    const redirect = async (url: URL) => { fetchedUrls.push(url.toString()); return new Response(null, { status: 302, headers: { location: "http://127.0.0.1/admin" } }); };
+    const blocked = await captureSource(store, { commandId: command("private-redirect"), url: "https://example.com/start", scope: "research" }, { fetcher: redirect, resolveHost: publicResolver });
+    expect(fetchedUrls).toEqual(["https://example.com/start"]);
+    expect(blocked.record.content.captureDisposition).toBe("reference-only");
+    expect(blocked.record.content.captureReason).toContain("Redirect target failed");
+    expect(blocked.fetched).toBe(true);
+    expect(blocked.record.content.admission?.status).toBeUndefined();
     const inaccessible = await captureSource(store, { commandId: command("login-wall"), url: "https://example.com/login", scope: "research" }, { fetcher: async () => new Response("login", { status: 401, headers: { "content-type": "text/html" } }), resolveHost: publicResolver });
     expect(inaccessible.record.content.captureDisposition).toBe("inaccessible");
     expect(inaccessible.record.content.text).toBeUndefined();
+    let fetched = false;
+    const directBlocked = await captureSource(store, { commandId: command("direct-private"), url: "http://127.0.0.1/admin", scope: "research" }, { fetcher: async () => { fetched = true; return new Response("must not fetch"); }, resolveHost: publicResolver });
+    expect(fetched).toBe(false); expect(directBlocked.fetched).toBe(false); expect(directBlocked.record.content.captureDisposition).toBe("reference-only");
+  });
+
+  it("cleans the operation timer when publishing a blocked-source result fails", async () => {
+    const { store } = await fixture();
+    const publish = vi.spyOn(store, "captureSource").mockRejectedValueOnce(new Error("synthetic store failure"));
+    const started = Date.now();
+    await expect(captureSource(store, { commandId: command("blocked-store-failure"), url: "http://127.0.0.1/admin", scope: "research" }, { resolveHost: publicResolver })).rejects.toThrow("synthetic store failure");
+    expect(Date.now() - started).toBeLessThan(500);
+    publish.mockRestore();
   });
 
   it("terminates a stalled response body at the operation deadline", async () => {

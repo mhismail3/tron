@@ -237,6 +237,63 @@ the ordinary 100,000-character presentation sanitizer; callers must use the
 advertised offsets and verify the final hash. The enclosing frame/native limits
 still apply, and invalid chunk metadata fails closed.
 
+## Free public X post access
+
+The read-only agent `knowledge` action `x` accepts one HTTPS X/Twitter post
+`url`. It does not require or read connector credentials. Public lookup explicitly
+discloses the numeric post ID to FxTwitter, with X's public syndication endpoint
+as the single fallback. No caller query, cookie, authorization header, paid API,
+or browser session is forwarded. The syndication `token` is a deterministic
+public embed value derived from the ID, not an account credential; only that exact
+host/path/computed value is exempted from URL credential-query rejection.
+
+`x-public-post.ts` owns identity validation, provider parsing, and ordered
+fallback; the source owner supplies DNS-pinned HTTP, public-destination checks,
+2 MB body bounds, zero redirects, a 15-second total deadline, and 5-second attempt
+deadlines. Each provider is tried once. A 429 is reported, never immediately
+retried at that provider; another explicit run must respect its cooldown.
+HTTP success alone is not success: expected root ID, JSON shape, and nonempty
+bounded text must match. Errors are sanitized, cancellation stops fallback, and
+an unavailable result is not a claim of deletion or an empty bookmark library.
+Tool output over 128 KB fails instead of truncating source fields.
+
+Results contain provider/endpoint, canonical X ID/URL, root-post text, exact raw
+provider JSON, attempt outcomes, and limitations. Ordinary short-post text may
+be complete **only for the root text**; threads and linked pages are outside its
+coverage. Long posts, Articles, quotes, and media remain partial until separately
+verified. Syndication is always partial. A usable partial FxTwitter response is
+not discarded in favor of a weaker preview. Article previews are never certified
+as bodies, and media URLs are not downloaded content or transcripts.
+
+`captureSource` / `knowledge.source.capture` accepts `publicPostLookup: true` to
+explicitly opt a single public post into this lookup and the existing canonical
+source store. Without it ordinary capture does not contact mirror providers.
+The retained object contains original provider bytes; readable text contains the
+root post, not author bios and engagement metadata. Canonical URI is
+`https://x.com/i/web/status/{id}`, while `captureReason` records provider, attempt
+outcomes, and coverage limits. Existing scope/revision/deduplication, retention,
+object-reading, and capture bounds remain authoritative. This is not permission
+for paid assessment or a new Raindrop intake policy.
+
+Private bookmark discovery remains separate and supervised through the approved
+`agent_browser` profile. The [X skill](../../../.agents/skills/tron-x/SKILL.md)
+defines bounded enumeration, top-level bookmark membership, page checkpoints,
+identity/coverage validation, and signed-in browser fallback. There is no new
+cookie store, background sync, automatic browser login, or remote mutation.
+Never send known protected content to a public mirror without approval.
+The existing paid `connectorSweep` X path is not selected by this free reader;
+its existing explicit spending gates are unchanged.
+
+Focused regressions: `x-public-post.test.ts` covers identity, URL isolation,
+malformed/mismatched/truncated responses, fallback, partial content, cancellation,
+and safe transport; `x-public-capture.test.ts` covers raw evidence, opt-in,
+canonical URL deduplication, retry revisions, bounds, and actual agent routing.
+Browser login, private history coverage, Article/thread completeness, and provider
+availability are live validation requirements, not conclusions from fixture tests.
+New Gateway tool behavior requires a manual maintainer update; agents never
+initiate a Gateway rebuild/restart. The skill includes a generic-tool read recipe
+for sessions whose running tool schema has not yet been updated.
+
 ## Connector boundaries
 
 Raindrop reads the official `/rest/v1/raindrops/{collectionId}` endpoint in bounded pages; X reads
@@ -321,7 +378,9 @@ workflow reservations. New Knowledge assessments persist that usage and
 published-price estimate on the immutable assessment derivative and attempt
 receipt. Intake reports the approved ceiling, conservative reserved allowance,
 selected cohort cap, settled count, known estimated usage cost, and unknown
-legacy usage separately. Cost totals and unknown/uncertain attempt counts derive
+usage separately. These are cohort totals; `captured`, `retained`, `archived`,
+`pending`, and `moved` describe this invocation, while `budget` describes the
+entire frozen cohort. Cost totals and unknown/uncertain attempt counts derive
 from durable cohort receipts, so they survive moved items, reruns, and restart;
 known costs are a subtotal when other attempts remain unknown. Pending identities
 outside the selected cohort are reported separately, not labeled as assessed or
@@ -333,8 +392,13 @@ question separately, rechecks cancellation after admission, redacts transport
 failures, and never retries a paid POST. The adapter sends the pinned
 `jev-1.13.0` typed contract to TypeSafe, validates the real choice/score
 probability maps, score legend and expectation, and records fixed local labels
-plus interest-bound profile/rubric versions and an exact input digest; it does
-not persist Jev prose as source truth. Novelty is intentionally omitted because
+plus interest-bound profile/rubric versions, a digest of the complete captured
+input, a digest of the exact bounded model state, and `full` versus `sampled`
+coverage. Complete readable evidence is sent when it fits. Oversized evidence is
+represented by a UTF-8/code-point-safe, explicitly labelled bounded excerpt while
+canonical raw bytes remain untouched; sampled assessments can classify but can
+never archive. This is bounded sampling, not a hidden multi-call summary or
+provider fallback. It does not persist Jev prose as source truth. Novelty is intentionally omitted because
 this bounded item request has no corpus evidence. The intake supplies its
 reservation through the model adapter's `beforeDispatch` seam, after Jev
 preflight and credential lookup; validation or missing-key failures therefore
@@ -343,7 +407,10 @@ an uncertain dispatched receipt and is never retried automatically. Complete
 source capture remains durable and pending when Jev is unavailable. The first
 pilot is frozen; `knowledge.connector.assessment.approve` appends an explicit
 new <=10-item/$1 cohort for later work without resetting prior receipts or
-binding fields. By default, later cohorts select only identities not already
+binding fields. A valid historical paid assessment remains reusable when its
+source/profile digest is unchanged; changing code or the current rubric does
+not silently trigger a new paid assessment. Explicit reassessment
+requires a fresh approval and receipt. By default, later cohorts select only identities not already
 assigned to a cohort. An explicitly supplied `itemIds` list freezes pending
 identities for renewed assessment attempts; previous uncertain charges remain
 reserved, and the new cohort has its own additional allowance. This is renewed
@@ -351,8 +418,26 @@ paid authority, never an automatic retry or refund. Approvals cannot proceed
 while a remote move is unresolved. Intake must match the approved bounds,
 account, collection, and interest profile.
 
-Capture quality, source admission, and remote delivery are separate. Incomplete
-or failed capture remains `pending`. A completed item receives a durable
+Capture quality, source admission, and remote delivery are separate. A bounded
+per-item outcome accompanies each intake result with canonical source identity
+and revision when available, capture/admission reason, assessment phase, and
+move result. Outcomes retain cohort order and the canonical source revision
+reached by each item; reused assessments are distinguished from new dispatches.
+Summary counts and outcomes describe the same cohort but different scopes:
+invocation counters count work performed, while outcomes also cover previously
+processed identities and unattempted items blocked by an earlier remote effect;
+missing pending identities are reported as recoverable reconciliation work rather
+than silently omitted. Incomplete or failed capture remains `pending`. A
+
+destination safety check failure is also durable as a `reference-only` source
+with a sanitized capture-phase reason and provider identity; no forbidden hop is
+fetched, and per-hop SSRF checks remain active. An initial blocked URL records
+that no linked request was attempted; a blocked redirect records that an earlier
+request was attempted while no request was sent to the forbidden target. The
+reason records that the safety guard rejected the destination at capture time,
+without asserting that
+the original bookmark URL itself was private or malformed. A completed item
+receives a durable
 `retained` or recoverable `archived` source-admission state; archived sources
 are absent from normal retrieval but can be explicitly listed/read/restored
 without using privacy suppression. Connector captures awaiting admission are
@@ -364,7 +449,9 @@ does the existing Raindrop preflight/receipt/PUT/read-back path attempt the
 configured Agent Sorted move. Uncertain provider effects remain pending for
 reconciliation. Offset pages are not treated as an atomic snapshot: each
 bounded run revisits page zero and uses durable IDs, so moved items shrinking
-earlier pages cannot silently skip later entries.
+earlier pages cannot silently skip later entries. Malformed read envelopes are
+rejected locally before credential lookup or provider HTTP; provider failures
+remain sanitized.
 The operation is manual only; no recurring approval, scheduler, X integration,
 or collection creation is implied.
 

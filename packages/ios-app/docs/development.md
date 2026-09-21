@@ -59,6 +59,31 @@ accents, accessibility sizing, and search routing.
 
 ## Knowledge dashboard
 
+The dashboard opens on **Chronicle**, the observation timeline. The top-level **Library**
+area contains **Sources** and **Syntheses** as nested sections. Both navigation levels use
+`TronSegmentedControl`, matching Manage Session → Workspace's custom glass tabs and
+40-point minimum height, with the Knowledge accent and readable text color—not native
+segmented pickers. Notes are treated as
+syntheses only when their canonical role is `synthesis`, never relabeled from their source
+or manual-note identity. Pending
+intake and archived sources live behind a separate **Intake & archive** control and are
+not mixed into the retained Sources page. Sources show a usable title, safe original
+HTTP(S) domain/link, and compact capture coverage; partial, metadata/media-only,
+inaccessible, failed, and reference-only states do not imply complete text; a complete
+object without extracted text is identified as an object, not as readable text. Detail
+shows only captured text that exists, exact capture limitations, origin/provenance, and
+any user-approved admission reason. Secondary assessment metadata includes provider
+classification/coverage and version/usage fields without conflating them with capture
+coverage or epistemic confidence. Source detail keeps the original title, domain, and safe link
+above the capture-coverage warning and the one captured-content body; origin/provenance and
+technical revision/object/assessment metadata remain secondary. The existing Gateway list
+contract has no synthesis-role filter, so the Syntheses view filters the bounded canonical note
+page and states that limitation rather than inventing a synthesis endpoint. Filtered pages retain
+their Gateway cursor and keep **Load more** available even when a page contributes no visible rows.
+The `HOSTED_TEST` Knowledge layout fixture captures Chronicle/Library, source disposition
+examples, and an empty Syntheses page with continuation; captures are synthetic rendering
+evidence, not live Gateway or VoiceOver validation.
+
 Knowledge is styled as its own adaptive identity rather than inheriting the Sessions emerald or
 Automations cyan palette: use `Color.tronKnowledge` for deep violet in light appearance and lavender
 in dark appearance, with `tronKnowledgeText` only where readable text contrast requires it. Keep warning,
@@ -159,20 +184,36 @@ rows, fields, segmented controls, and keyboard dismissal behavior; do not reintr
 large-title reservation or custom control styling there. Selection rows put the current value in the
 standard action pill; new prompt automations default to New Session in Workspace, while loaded edits
 retain their canonical target. Date values use localized standard action pills: the date opens a native calendar and the time
-opens a time-only wheel, each bound to the same field without changing the other component. The dashboard cards and detail sheet use the same inline navigation, settings
-containers, semantic typography, and responsive key/value rows; the entire visible dashboard card,
-including its padded blank area, opens the existing detail route. Inventory cards use one concise
-status/frequency/timing line, while detail leads with action, target, schedule, status, and recent runs.
-The detail toolbar owns the title exactly once; lifecycle status remains a compact Schedule row rather than
-another title card. Technical schedule/target/about metadata stays in the main readable detail containers;
-the four controls remain a bare 2×2 action grid with Run Now before Edit, preserving each action's
-existing color, confirmation, and disabled behavior. Action availability separates selected-Gateway ownership from readiness and
+opens a time-only wheel, each bound to the same field without changing the other component.
+Inventory cards and the expanded detail summary share `AutomationSummaryCard` and the same facts.
+Inventory puts the icon/title on the left and plain lifecycle/current-run status in the upper-right.
+Below, cadence/server and inline Last run/Updated values use two tight, edge-aligned rows with no divider.
+Timestamp labels have a six-point baseline-aligned gap before their values, rather than a text-space separator.
+Rows fall back to a vertical layout when their full values cannot fit. Inventory timestamps are relative;
+the expanded summary retains its divided layout, full localized dates, and untruncated headline. The latest started execution is Last run, falling back to the previous run's start, completion,
+or scheduled time when needed; a future occurrence is never presented as a past run. Titles, cadence,
+server names, and timestamps wrap, with stacked metrics at accessibility sizes. The entire inventory
+card, including padded blank space, opens the existing detail route. Its VoiceOver label includes all
+summary facts and attention reasons. The open sheet builds its summary from the authoritative record,
+not the possibly older selection/catalog value; its toolbar is titled Automation.
+
+Below the summary, remaining action, schedule, target, current-run, and provenance facts use the same
+`TronMetadataTable` as tool/subagent details: divided glass rows, reading-family labels, selectable code
+values, no type qualifiers, and no row navigation. Text-led rows stack at accessibility sizes. Summary
+fields are not repeated in these tables. The four controls remain a bare 2×2 action grid with Run Now
+before Edit; Cancel run joins Controls only for a current execution. Recent Runs is last, below all
+controls, and retains its existing run-detail route. Confirmation, color, and disabled behavior remain
+with the existing action owner. Action availability separates selected-Gateway ownership from readiness and
 in-flight mutation state; a lagging or absent catalog row cannot veto an authoritative detail read.
 The Gateway still checks each command's expected revision. Save uses an accessible blue checkmark-only
 control, and deadline steppers share the compact pill height. Existing-session target selection uses a large, scoped picker with dashboard
 project grouping. An unset workspace omits the browse path so the Gateway resolves its own default;
 explicit selections retain their exact path. Validate changes with
-`AutomationProtocolTests` and `AutomationCoordinatorTests`. Workspace targets are selected through the existing focused-Gateway WorkspaceBrowser and trust
+`AutomationProtocolTests`, `AutomationCoordinatorTests`, and `AutomationPresentationTests`; hosted
+`SessionSheetPresentationTests` cover summary geometry and `StructuredJSONTableLayoutTests` protects
+shared row sizing. The native Automation UI regression covers all inventory facts, a newer detail
+record replacing stale catalog metadata, non-tappable table rows, controls-before-history ordering,
+and the retained run-detail route. Its read-only `HOSTED_TEST` transport accepts no mutations. Workspace targets are selected through the existing focused-Gateway WorkspaceBrowser and trust
 flow, and their paths remain transient form state. Every workspace run creates and retains a new
 ordinary session; Run Details offers Open Session only through the owning profile/session route.
 Do not add recurrence calculation, workspace mirrors, prompt/notification text to caches, or local
@@ -185,6 +226,10 @@ Its two eager row groups use the shared emerald Liquid Glass surface, matching t
 controls; subagent retention inherits this settings theme rather than the activity palette.
 **Chats per project** accepts 1–100 (default 10) through the shared numeric settings field. It sets
 both the initial project row count and Show more batch size; Show less returns to that baseline.
+The two actions stay leading-aligned with a 24-point gap, rather than placing Show less beneath the
+bottom-right dashboard menu. Accessibility sizes stack the actions; either sole action remains leading.
+Hosted sizing and the native `testSessionPaginationKeepsShowLessBesideShowMoreAndClearOfLogo` regression
+cover single/paired controls, the scroll-end logo boundary, and both action callbacks.
 Changes apply when the dashboard becomes visible, without resetting project disclosure or changing
 Recent Activity ordering or Gateway catalog reads. Pagination retires pending animations while
 retaining generation counters so old completions cannot affect the new setting.
@@ -1362,6 +1407,17 @@ The Ask User form toolbar places Cancel alone on the left and Close (X) immediat
 left of Send on the right, with separate native surfaces. Close retains the draft;
 Cancel still resolves the request. The native Ask User cancellation UI test checks
 button frames and the single scoped cancellation receipt.
+
+Other answers use the queued/steering message editor's native `TextEditor` and
+shared `tronTextEditor` surface. Selecting Other smoothly reveals it without
+requesting focus before it is mounted; deselection fades it out and releases focus.
+Reduce Motion installs the size change without animation. Tapping the editor selects
+the large sheet detent as it takes focus, keeping the paged question viewport usable
+while the keyboard appears; changing question pages clears focus. The Other button
+and editor have separate hit targets and accessibility values, with glass drawn only
+as their decorative background. A retiring editor cannot write an answer back after
+Other was deselected. Native Ask User UI regressions exercise medium-to-large typing,
+multiline input, both kinds of deselection, close/reopen drafts, and exact submission.
 
 Historical onboarding references captured by executing commit `c3f12c17c` live
 under `docs/assets/parity/`. `TronSmokeUITests` keeps matching medium/pairing
