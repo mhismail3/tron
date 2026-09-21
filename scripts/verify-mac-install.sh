@@ -4,10 +4,12 @@
 set -u
 
 ARTIFACT_ONLY=false
+REQUIRE_BUNDLED=false
 case "${1:-}" in
   --artifact-only) ARTIFACT_ONLY=true; shift ;;
+  --require-bundled) REQUIRE_BUNDLED=true; shift ;;
   '') ;;
-  *) echo 'usage: verify-mac-install.sh [--artifact-only]' >&2; exit 64 ;;
+  *) echo 'usage: verify-mac-install.sh [--artifact-only|--require-bundled]' >&2; exit 64 ;;
 esac
 [[ $# == 0 ]] || exit 64
 
@@ -170,6 +172,9 @@ verify_payload() {
   local label="$1" home="$2" channel="$3" bundled="$4" payload manifest expected actual selected_version
   if [[ "$ARTIFACT_ONLY" == true ]]; then payload="$bundled"; else
     payload="$(payload_for "$home" "$channel" "$bundled")"
+  fi
+  if [[ "$REQUIRE_BUNDLED" == true && "$label" == stable && "$payload" != "$bundled" ]]; then
+    fail "Stable must run the installed app's bundled payload for this reinstall"
   fi
   manifest="$payload/manifest.json"
   if ! regular_file "$manifest"; then fail "$label payload manifest missing"; return; fi

@@ -37,7 +37,7 @@ The migration helpers are:
 - machine identity/internal files: [`internal-workspace.md`](internal-workspace.md)
   and `scripts/tron internal-migrate`;
 - delegated provider tree and references: this runbook and
-  `scripts/tron delegated-migrate`;
+  `scripts/tron delegated-migrate` (marker schema 3);
 - Mac wizard state: the [Mac wizard-state cutover](../../mac-app/docs/wizard-state-cutover.md)
   and `scripts/tron wizard-migrate`;
 - Knowledge/ConnectionOwner catalog: [`connections.md`](connections.md) and
@@ -64,7 +64,7 @@ user-approved home. Include:
 
 ```bash
 scripts/tron internal-migrate preflight --source <legacy-machine-id> --destination <shared-machine-id> --staging <private-machine-id-staging>
-scripts/tron delegated-migrate preflight --destination-root <tronHome>/internal/subagents --legacy-root <tmp-provider-root> [--legacy-root <project>]
+scripts/tron delegated-migrate preflight --destination-root <tronHome>/internal/subagents --legacy-root <tmp-provider-root>
 scripts/tron connection-migrate preflight --tron-home <tronHome>
 ```
 
@@ -72,9 +72,21 @@ The delegated inventory must account for every provider directory/file,
 owner, mode, size/digest, absolute provider-root reference, terminal proof,
 and retained resumable session reference. It must stop on active work,
 missing resumable sessions, symlinks, path traversal, unsafe ownership or
-permissions, collision, unknown/newer state, or an unproven reference. The
-provider root is not a broad temporary-directory move; only the exact
-provider-root shapes and explicitly listed project roots are admitted. Before
+permissions, collision, unknown/newer state, or an unproven reference.
+The pinned provider created legacy directories/files with its process umask
+(often 0755/0644). Schema 3 admits owner-controlled sources with no group/other
+write access, while preserving exact source modes/digests in the journal and
+publishing a private copy (owner bits only). It never chmods the source. Links,
+foreign owners, special modes, and writable-by-others paths still refuse. The
+512 MiB temporary-tree bound remains unchanged; project history size is not
+part of that bound. The provider temporary store is the pinned package's exact
+`<tmpdir>/pi-subagents-uid-<uid>` root (or an explicitly configured provider
+root). Never scan all `pi-subagents-*` directories: tests and retired copies
+are not active provider authorities. Project `.pi/subagents` and session
+`subagent-artifacts` remain provider-configured history destinations, are
+included in the backup/reference inventory, and are not moved by a temporary
+root cutover. Moving them would strand references and the provider would
+recreate their original locations. Before
 any source retirement, `verify`/`publish` re-inventories every source path and
 separately checks the complete staged tree: source digests describe unchanged
 bytes, while staged digests describe approved provider-reference rewrites.
@@ -135,7 +147,24 @@ publication and then resume migrations. Do the following in this exact order:
    its `stage` rechecks the source and its `publish` rechecks the journal,
    source digests, owner authority, and catalog revision.
 4. After **all** migration publications and their exact post-publication checks
-   succeed, freeze the Mac reinstall operation exactly once:
+   succeed, the maintainer selects the approved bundled payload while still
+   offline, before the reinstall snapshot:
+
+   ```bash
+   scripts/tron mac reinstall --select-bundled-offline
+   ```
+
+   This explicit operation attests to the same retirement/quiescence boundary,
+   revalidates the prepared and installed app identities, and atomically retires
+   the entire Stable channel store into the existing maintenance operation.
+   Current, previous, pending-attempt state and payloads remain together as
+   protected rollback evidence. No Gateway is started and no pointer is edited.
+   A missing channel makes the existing signed launcher select the app bundle.
+   An interrupted operation is resumed with this same command; journal and
+   full tree evidence must match. It never automatically restores old code.
+   If any source changes or reappears, stop; do not delete it to get a passing
+   checkpoint. Existing active profiles must remain stopped throughout.
+5. Then freeze the Mac reinstall operation exactly once:
 
    ```bash
    scripts/tron mac reinstall --confirm-offline
@@ -266,23 +295,22 @@ Agents must not restart, rebuild, promote, replace, or activate a Gateway or
 installed app. The iOS protocol models/fixtures and Gateway protocol must be
 from the same approved source revision; reject mixed wire revisions.
 
-App replacement alone does **not** select a new Gateway payload. Establish the
-payload-selection route **before the maintenance window**. The bundled payload
+App replacement alone does **not** select a new Gateway payload. Use the
+explicit offline selection step above **before the reinstall snapshot**. The bundled payload
 is used only when no admissible external selection remains under the documented
 launcher contract. A stale external payload with the same protocol can override
 the new bundle; do not infer an upgrade from app replacement.
 
 The existing `gateway-payload-deploy.mjs promote` operation performs an
 authenticated drain/restart against a running Gateway. It is **not an offline
-selection command** and must not be inserted between Pause and Resume. If an
-admissible old external selection would survive app replacement, stop before
-migration publication until a maintainer has reviewed an exact supported
-selection/registration procedure for that installed state. Do not start old
-code against migrated data, casually edit/delete selection pointers, or promise
-a single downtime window without resolving this gate. Any intentional offline
-selection-state change must precede the reinstall `--confirm-offline` snapshot.
+selection command** and must not be inserted between Pause and Resume. Only
+`mac reinstall --select-bundled-offline` owns offline bundle selection. This
+operation is refused after the reinstall snapshot starts. Preserve its
+`stable-selection.json` manifest and `retired-stable-payloads` directory with
+the pre-migration backup; rollback across a migration is an explicit maintainer
+decision, not pending-attempt recovery or an automatic older-payload launch.
 
-After Resume, run `scripts/tron mac verify` and require `system.info` to report
+After Resume, run `scripts/tron mac verify --require-bundled` and require `system.info` to report
 the reviewed revision, payload fingerprint, protocol, and app/runtime identity.
 Stop on any mismatch; do not repair it with a source-only rebuild or an
 unreviewed pointer edit.

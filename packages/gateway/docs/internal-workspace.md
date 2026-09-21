@@ -153,7 +153,10 @@ activation and retirement of live paths remain manual operator actions.
 The pinned `pi-subagents` provider reads `PI_SUBAGENTS_TEMP_ROOT` before its
 module initializes and derives its provider-owned trees from that root. Gateway
 startup sets `<tronHome>/internal/subagents` only after a read-only inventory
-proves no retained provider tree remains outside it. If retained artifacts are
+proves the exact legacy temporary provider root has no retained work.
+Project/session artifact history remains at its configured location; it is
+not part of the temporary-store move. Discovery never includes similarly
+named test directories or retired copies. If retained artifacts are
 found, startup fails with a migration-required diagnostic; it never silently
 adopts a new root. The complete ordered command sequence, backup/quiescence,
 reference and recovery checks, activation boundary, and GO/NO-GO checklist are

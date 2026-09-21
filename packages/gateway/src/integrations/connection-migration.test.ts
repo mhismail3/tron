@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { KnowledgeCatalog } from "../knowledge/knowledge-catalog.js";
@@ -21,6 +21,21 @@ const source = () => ({
 });
 
 describe("connection migration", () => {
+  it("inspects an existing workspace without taking ownership or creating missing state", async () => {
+    const home = await mkdtemp(join(tmpdir(), "tron-read-only-migration-"));
+    const workspace = new TronWorkspace(home);
+    try {
+      const absent = await TronWorkspace.describeExisting(join(home, "missing"));
+      expect(absent.available).toBe(false);
+      expect(await readdir(home)).toEqual([]);
+      await workspace.initialize();
+      const before = await readdir(join(home, "gateway", "workspace-state"));
+      expect((await TronWorkspace.describeExisting(home)).available).toBe(true);
+      expect(await readdir(join(home, "gateway", "workspace-state"))).toEqual(before);
+      expect((await workspace.describe()).available).toBe(true);
+    } finally { await workspace.dispose(); await rm(home, { recursive: true, force: true }); }
+  });
+
   it("rejects a pre-catalog connector-only snapshot instead of inventing an authority", async () => {
     const home = await mkdtemp(join(tmpdir(), "tron-connection-source-"));
     try {

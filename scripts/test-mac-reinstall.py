@@ -35,6 +35,8 @@ class Platform:
         self.busy = False
         self.health = True
         self.verifications = 0
+        self.bundled = True
+        self.required_bundled = False
 
     def validate_app(self, app, current_contract=True):
         return {'team': 'EXAMPLE123', 'cdhash': (app / 'identity').read_text(), 'resources': 'fixture'}
@@ -43,7 +45,9 @@ class Platform:
         if self.busy:
             raise reinstall.Stop('service-loaded: fixture')
 
-    def verify_installed(self):
+    def verify_installed(self, require_bundled=False):
+        self.required_bundled = require_bundled
+        reinstall.require(not require_bundled or self.bundled, "wrong-selected-payload: fixture external")
         self.verifications += 1
         reinstall.require(self.health, 'installed-verification: fixture failed')
 
@@ -78,6 +82,122 @@ class Fixture:
     def run_workflow(self, **kwargs):
         with contextlib.redirect_stdout(io.StringIO()):
             self.workflow.run(self.args(**kwargs))
+
+
+class BundledSelectionTests(Fixture, unittest.TestCase):
+    def selected_store(self):
+        source = self.home / '.tron/gateway/payloads/stable'
+        source.mkdir(parents=True, mode=0o700)
+        for name in ('current.json', 'previous.json', 'pending-attempt.json'):
+            (source / name).write_text('fixture ' + name)
+        (source / 'versions').mkdir()
+        (source / 'versions/old-code').write_bytes(b'old executable fixture')
+        return source
+
+    def test_whole_channel_retirement_precedes_snapshot_and_requires_bundled_live_verification(self):
+        source = self.selected_store()
+        proof = reinstall.tree_manifest(source)
+        self.run_workflow(app=self.app)
+        self.run_workflow(select_bundled_offline=True)
+        self.assertFalse(source.exists())
+        self.assertEqual(reinstall.tree_manifest(self.workflow.operation / 'retired-stable-payloads'), proof)
+        self.assertFalse((self.workflow.operation / 'backups').exists())
+        self.run_workflow(select_bundled_offline=True)
+        # Approved migrations intentionally happen before the snapshot.
+        (self.home / '.tron/agent/migrated').write_text('new authority')
+        self.run_workflow(confirm_offline=True)
+        (self.installed / 'identity').write_text('new')
+        self.platform.bundled = False
+        with self.assertRaisesRegex(reinstall.Stop, 'wrong-selected-payload'):
+            self.run_workflow(verify=True)
+        self.assertNotEqual(self.workflow.receipt['phase'], 'verified')
+        self.platform.bundled = True
+        self.run_workflow(verify=True)
+        self.assertTrue(self.platform.required_bundled)
+
+    def test_busy_candidate_changed_or_wrong_order_cannot_retire_selection(self):
+        source = self.selected_store()
+        original = reinstall.tree_manifest(source)
+        self.run_workflow(app=self.app)
+        self.platform.busy = True
+        with self.assertRaisesRegex(reinstall.Stop, 'service-loaded'):
+            self.run_workflow(select_bundled_offline=True)
+        self.platform.busy = False
+        (self.app / 'identity').write_text('changed')
+        with self.assertRaisesRegex(reinstall.Stop, 'artifact-changed'):
+            self.run_workflow(select_bundled_offline=True)
+        (self.app / 'identity').write_text('new')
+        self.run_workflow(confirm_offline=True)
+        with self.assertRaisesRegex(reinstall.Stop, 'selection-order'):
+            self.run_workflow(select_bundled_offline=True)
+        self.assertEqual(reinstall.tree_manifest(source), original)
+
+    def test_recovery_after_atomic_retirement_never_recreates_old_selection(self):
+        source = self.selected_store()
+        self.run_workflow(app=self.app)
+        real_rename = reinstall.rename_exclusive
+        def interrupted(a, b):
+            real_rename(a, b)
+            raise OSError('interrupted after durable rename')
+        with patch.object(reinstall, 'rename_exclusive', side_effect=interrupted):
+            with self.assertRaises(OSError):
+                self.run_workflow(select_bundled_offline=True)
+        self.assertFalse(source.exists())
+        self.assertEqual(self.workflow.receipt['bundledSelection']['phase'], 'retiring')
+        with self.assertRaisesRegex(reinstall.Stop, 'selection-incomplete'):
+            self.run_workflow(confirm_offline=True)
+        self.run_workflow(select_bundled_offline=True)
+        self.assertFalse(source.exists())
+        self.assertEqual(self.workflow.receipt['bundledSelection']['phase'], 'selected')
+
+    def test_changed_source_after_interrupted_journal_cannot_be_adopted(self):
+        source = self.selected_store()
+        self.run_workflow(app=self.app)
+        with patch.object(reinstall, 'rename_exclusive', side_effect=OSError('before rename')):
+            with self.assertRaises(OSError):
+                self.run_workflow(select_bundled_offline=True)
+        (source / 'current.json').write_text('other writer')
+        with self.assertRaisesRegex(reinstall.Stop, 'selection-source-changed'):
+            self.run_workflow(select_bundled_offline=True)
+        self.assertTrue(source.exists())
+
+    def test_retired_store_corruption_blocks_snapshot(self):
+        self.selected_store()
+        self.run_workflow(app=self.app)
+        self.run_workflow(select_bundled_offline=True)
+        (self.workflow.operation / 'retired-stable-payloads/current.json').write_text('corrupt')
+        with self.assertRaisesRegex(reinstall.Stop, 'selection-backup-changed'):
+            self.run_workflow(confirm_offline=True)
+        self.assertFalse((self.workflow.operation / 'backups').exists())
+
+    def test_absent_channel_is_recorded_and_reappearance_blocks_snapshot(self):
+        self.run_workflow(app=self.app)
+        self.run_workflow(select_bundled_offline=True)
+        self.assertFalse((self.workflow.operation / 'retired-stable-payloads').exists())
+        self.selected_store()
+        with self.assertRaisesRegex(reinstall.Stop, 'selection-changed'):
+            self.run_workflow(confirm_offline=True)
+
+    def test_symlinked_channel_refuses_without_retiring_target(self):
+        target = self.root / 'external'
+        target.mkdir()
+        parent = self.home / '.tron/gateway/payloads'
+        parent.mkdir()
+        (parent / 'stable').symlink_to(target, target_is_directory=True)
+        self.run_workflow(app=self.app)
+        with self.assertRaisesRegex(reinstall.Stop, 'unsafe-path'):
+            self.run_workflow(select_bundled_offline=True)
+        self.assertTrue(target.exists())
+
+    def test_real_platform_passes_required_bundled_verification_flag(self):
+        calls = []
+        def command(argv, *args, **kwargs):
+            calls.append([str(x) for x in argv])
+            return b''
+        platform = reinstall.MacPlatform(self.home, self.installed)
+        with patch.object(reinstall, 'command', side_effect=command):
+            platform.verify_installed(require_bundled=True)
+        self.assertIn('--require-bundled', calls[0])
 
 
 class ReinstallTests(Fixture, unittest.TestCase):

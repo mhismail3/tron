@@ -446,6 +446,29 @@ by `com.tron.server`/`com.tron.mac` on 9847. `scripts/tron dev` uses
 
 ### Resumable local reinstall preparation
 
+For a coordinated state migration, use the [cutover runbook](../../gateway/docs/cutover-runbook.md).
+Its pre-migration backup is separate from this helper's post-migration snapshot.
+After migrations and their validation, while the old wrapper and every writer
+remain stopped, run `scripts/tron mac reinstall --select-bundled-offline`.
+This explicit maintainer operation validates both recorded app identities and
+retires the complete `~/.tron/gateway/payloads/stable` directory by same-filesystem
+exclusive rename into `~/.tron-maintenance/<operation>/retired-stable-payloads`.
+The private `stable-selection.json` manifest and receipt prove recovery before
+or after the rename; re-run the same command after an interruption. Existing
+current/previous/pending-attempt state stays with its payloads, outside launcher
+discovery. No Gateway starts, and the next installed-app launch uses its signed
+bundle. Never resume the old app against migrated state. No individual pointer
+is edited or deleted, and recovery never auto-restores an older runtime.
+
+Selection must complete before `--confirm-offline`. The helper refuses a
+selection after snapshot creation, changed evidence, or a channel reappearing
+before activation. Following bundled selection, `--verify` requires the bundled
+runtime explicitly, rather than accepting a coherent older external runtime.
+The read-only standalone equivalent is `scripts/tron mac verify --require-bundled`.
+Keep retired payloads through the observation window and any version-specific
+rollback review. This command is not a replacement for native retirement or
+for the pre-migration protected backup.
+
 After preparing the signed Release artifact above, the user/maintainer can use:
 
 ```bash

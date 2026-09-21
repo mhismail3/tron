@@ -413,7 +413,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const staging = argument(args, "--staging");
     if (!operation || !tronHome) usage();
     const { TronWorkspace } = await import("../workspace/tron-workspace.js");
-    const workspace = new TronWorkspace(tronHome!);
+    const workspace = { describe: () => TronWorkspace.describeExisting(tronHome!) };
     const paths = await resolveConnectionMigrationPaths(workspace, tronHome!);
     let result: unknown;
     if (operation === "preflight") result = paths;

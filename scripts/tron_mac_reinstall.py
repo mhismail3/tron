@@ -409,12 +409,13 @@ class MacPlatform:
                 continue
             if re.search(r'Tron\.app/Contents/MacOS|Tron Native Host\.app|Tron Agent\.app|'
                          r'Gateway/app/dist/index\.js|gateway/dist/index\.js|tron-dev.*__|'
+                         r'gateway-payload-deploy\.mjs|async-runner\.(?:ts|js)|'
                          r'agent-home-(?:preflight|migration)\.js|'
                          r'pi-coding-agent/.*/(cli|index)\.js|(?:^|/)(?:pi|npm|pnpm|yarn)(?: |$)', text):
                 raise Stop('writer-present: stop standalone clients, workers and package operations before retry')
 
-    def verify_installed(self):
-        command([REPO / 'scripts/tron', 'mac', 'verify'], 'installed-verification',
+    def verify_installed(self, require_bundled=False):
+        command([REPO / 'scripts/verify-mac-install.sh', *(['--require-bundled'] if require_bundled else [])], 'installed-verification',
                 env=dict(os.environ, TRON_APP_PATH=str(self.installed)))
         loaded = command(['/bin/launchctl', 'print', f'gui/{os.getuid()}/com.tron.server'],
                          'agent-authority-verification', timeout=15).decode()
@@ -483,6 +484,81 @@ class Reinstall:
         self.receipt = receipt
         safe_path(Path(receipt['app']))
 
+    @property
+    def stable_channel(self):
+        return safe_path(self.home / '.tron/gateway/payloads/stable')
+
+    def selection_evidence(self):
+        selection = self.receipt.get('bundledSelection')
+        require(isinstance(selection, dict) and set(selection) == {'phase', 'manifestDigest'}
+                and selection['phase'] in ('retiring', 'selected'),
+                'selection-journal: preserve the operation for review')
+        proof = read_json(self.operation / 'stable-selection.json')
+        require(manifest_digest(proof) == selection['manifestDigest'],
+                'selection-journal: retired payload inventory changed')
+        return selection, proof
+
+    def verify_bundled_selection(self, before_activation=True):
+        if 'bundledSelection' not in self.receipt:
+            return
+        selection, proof = self.selection_evidence()
+        require(selection['phase'] == 'selected',
+                'selection-incomplete: rerun --select-bundled-offline before the snapshot')
+        retired = self.operation / 'retired-stable-payloads'
+        require((tree_manifest(retired) if exists(retired) else None) == proof,
+                'selection-backup-changed: preserve the retired payload store for review')
+        if before_activation:
+            require(not exists(self.stable_channel),
+                    'selection-changed: Stable payload store reappeared; do not activate')
+
+    def select_bundled_offline(self):
+        """Retire the whole channel atomically, never individual pointers.
+
+        The launcher already selects the signed bundle when the channel is
+        absent. Keeping current/previous/pending and their payloads together
+        outside the live store also prevents pending-attempt rollback from
+        starting pre-migration code. Recovery only finishes this retirement;
+        restoring old selection is a separate version-specific rollback.
+        """
+        require(self.kind == 'reinstall' and self.receipt['phase'] == 'awaiting-offline'
+                and not self.receipt['components'],
+                'selection-order: select bundled before --confirm-offline, using mac reinstall')
+        self.platform.offline()
+        require(self.platform.validate_app(Path(self.receipt['app'])) == self.receipt['candidate'],
+                'artifact-changed: prepared app differs from recorded artifact')
+        require(self.platform.validate_app(self.platform.installed, False) == self.receipt['original'],
+                'old-app-changed: retire selection before replacing the app')
+        source = self.stable_channel
+        for container in (source.parent.parent, source.parent):
+            if exists(container):
+                owned_container(container)
+        retired = self.operation / 'retired-stable-payloads'
+        if 'bundledSelection' not in self.receipt:
+            require(not exists(retired), 'selection-collision: preserve existing retirement evidence')
+            if exists(source):
+                owned_container(source)
+                require(source.stat().st_dev == self.operation.stat().st_dev,
+                        'cross-filesystem: selection retirement must be atomic')
+            proof = tree_manifest(source) if exists(source) else None
+            write_json(self.operation / 'stable-selection.json', proof)
+            self.receipt['bundledSelection'] = {'phase': 'retiring', 'manifestDigest': manifest_digest(proof)}
+            self.save()
+        selection, proof = self.selection_evidence()
+        if selection['phase'] == 'retiring':
+            if exists(source):
+                require(proof is not None and not exists(retired) and tree_manifest(source) == proof,
+                        'selection-source-changed: do not choose between competing stores')
+                self.platform.offline()
+                rename_exclusive(source, retired)
+            require((tree_manifest(retired) if exists(retired) else None) == proof,
+                    'selection-retirement-incomplete: preserve the operation and retry after inspection')
+            require(not exists(source), 'selection-changed: another writer recreated the channel')
+            self.receipt['bundledSelection']['phase'] = 'selected'
+            self.save()
+        self.verify_bundled_selection()
+        print('Bundled Gateway selected for the next installed-app launch. Retired channel retained; no process started.\n'
+              'Finish every offline migration, then run --confirm-offline. Never resume the old app against migrated state.')
+
     def sources(self):
         sources = {'agent': self.source_agent(), 'old-app': self.platform.installed,
                    'browser-config': self.home / '.pi/config/pi-agent-browser-native/config.json',
@@ -545,10 +621,12 @@ class Reinstall:
         return sum(sizes.values())
 
     def prepare(self):
+        self.verify_bundled_selection()
         self.backup()
         self.save('awaiting-replacement')
 
     def before_activation(self, app_replaced=False):
+        self.verify_bundled_selection()
         self.layout()
         self.verify_backups()
         # Reject data changes during an interrupted offline window.
@@ -566,11 +644,15 @@ class Reinstall:
         identity = self.platform.validate_app(self.platform.installed)
         require(identity == self.receipt['candidate'], 'wrong-installed-app: Finder replacement does not match prepared artifact')
         self.layout()
-        self.platform.verify_installed()
+        self.verify_bundled_selection(before_activation=False)
+        if 'bundledSelection' in self.receipt:
+            self.platform.verify_installed(require_bundled=True)
+        else:
+            self.platform.verify_installed()
         self.save('verified')
 
     def run(self, args):
-        actions = [args.status, args.verify, args.finish]
+        actions = [args.status, args.verify, args.finish, getattr(args, 'select_bundled_offline', False)]
         actions.extend(getattr(args, name, False) for name in self.confirmation_options)
         require(sum(bool(value) for value in actions) <= 1,
                 'arguments: choose exactly one action or offline confirmation')
@@ -585,6 +667,9 @@ class Reinstall:
                 self.begin(safe_path(args.app))
             print(f'Operation: {self.operation}\nPhase: {self.receipt["phase"]}', flush=True)
             if args.status:
+                return
+            if getattr(args, 'select_bundled_offline', False):
+                self.select_bundled_offline()
                 return
             if args.verify:
                 require(self.receipt['phase'] in ('awaiting-replacement', 'awaiting-resume', 'verified'),
@@ -641,6 +726,8 @@ def parser(description=__doc__, confirmation_options=None):
     result.add_argument('--app', type=Path, help='prepared signed Release artifact (first invocation only)')
     for name, help_text in (confirmation_options or Reinstall.confirmation_options).items():
         result.add_argument('--' + name.replace('_', '-'), action='store_true', help=help_text)
+    result.add_argument('--select-bundled-offline', action='store_true',
+                        help='attest all writers stopped; retire Stable external selection before the offline snapshot (reinstall only)')
     result.add_argument('--status', action='store_true', help='show the saved checkpoint')
     result.add_argument('--verify', action='store_true', help='verify user-installed and resumed app')
     result.add_argument('--finish', action='store_true', help='archive verified operation; retain all backups')

@@ -36,8 +36,8 @@ Commands:
   bundle gateway                    Stage the Mac gateway payload and Node runtimes
   ios generate                      Regenerate iOS with pinned XcodeGen
   mac generate                      Regenerate macOS with pinned XcodeGen
-  mac verify                        Verify installed app, payload, LaunchAgent, and PID
-  mac reinstall --app <Release.app> [--confirm-offline|--verify|--status]
+  mac verify [--require-bundled]    Verify installed app, payload, LaunchAgent, and PID
+  mac reinstall --app <Release.app> [--select-bundled-offline|--confirm-offline|--verify|--status]
                                     Resumable local preparation; manual replacement
   version                           Print the canonical Tron version
 
@@ -134,7 +134,7 @@ case "$cmd" in
         exec "$ROOT/scripts/generate-xcode-project" mac "${@:2}"
         ;;
       verify)
-        exec "$ROOT/scripts/verify-mac-install.sh"
+        exec "$ROOT/scripts/verify-mac-install.sh" "${@:2}"
         ;;
       reinstall)
         exec python3 "$ROOT/scripts/tron_mac_reinstall.py" "${@:2}"

@@ -38,7 +38,10 @@ catalog receipts). It extracts account/ref/policy into the connection owner
 while preserving provider state (checkpoints, pending identities, cohorts,
 usage, and `pendingRemote`) and the global receipt/request-hash map. It rejects
 newer, incomplete, malformed, duplicate account/scope, and conflicting state
-before a plan is accepted. Hashing sorts object keys recursively, so a nested
+before a plan is accepted. CLI preflight/prepare inspect the existing workspace
+through its read-only descriptor; they do not create directories or acquire the
+running workspace owner's lock. Missing workspace state refuses instead of
+initializing a replacement. Hashing sorts object keys recursively, so a nested
 provider-state mutation is rejected by `verifyMigrationPlan`.
 
 Publication is an operator-only offline action with separate owner and provider

@@ -1,15 +1,16 @@
 import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { chmod, lstat, mkdir, opendir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
-import { readdirSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { durableAtomicWriteJson } from "../util/durable-json.js";
 
 const MAX_ENTRIES = 20_000;
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 512 * 1024 * 1024;
-const MARKER_VERSION = 2;
-const RUN_STATES = new Set(["queued", "running", "pending", "detached", "paused"]);
+const MARKER_VERSION = 3;
+const RUN_STATES = new Set(["queued", "running", "paused"]);
+const TERMINAL_STATES = new Set(["complete", "failed", "partial", "stopped", "rejected"]);
 const TERMINAL_PROOF = new Set(["observed"]);
 
 export interface DelegatedRootMigrationOptions {
@@ -39,7 +40,7 @@ export interface DelegatedRootDirectoryManifest {
   readonly uid: number;
 }
 interface DelegatedRootMarker {
-  readonly version: 2;
+  readonly version: 3;
   readonly operationID: string;
   readonly sources: readonly string[];
   readonly destination: string;
@@ -84,18 +85,30 @@ function within(root: string, candidate: string): boolean {
 }
 function markerPath(staging: string): string { return `${staging}.tron-delegated-cutover.json`; }
 function privateMode(mode: number): boolean { return (mode & 0o077) === 0; }
-async function ownerDirectory(path: string, label: string): Promise<void> {
+async function rejectRedirectedParents(path: string): Promise<void> {
+  for (let current = resolve(path); current !== sep; current = dirname(current)) {
+    const entry = await lstat(current).catch(error => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw error;
+    });
+    // These two aliases belong to macOS, not a migration owner.
+    if (entry?.isSymbolicLink() && !["/var", "/tmp"].includes(current)) fail(`migration path contains a symlink: ${current}`);
+  }
+}
+async function ownerDirectory(path: string, label: string, legacy = false): Promise<void> {
+  await rejectRedirectedParents(path);
   let entry;
   try { entry = await lstat(path); } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
     fail(`${label} cannot be inspected safely`);
   }
-  if (!entry!.isDirectory() || entry!.isSymbolicLink() || !privateMode(entry!.mode)
+  if (!entry!.isDirectory() || entry!.isSymbolicLink() || !(legacy ? sourceMode(entry!.mode, true) : privateMode(entry!.mode))
     || process.getuid?.() !== undefined && entry!.uid !== process.getuid?.()) {
-    fail(`${label} must be a private owner directory`);
+    fail(`${label} must be an owned, non-writable-by-others directory${legacy ? "" : " with private permissions"}`);
   }
 }
 async function regular(path: string, label: string): Promise<{ bytes: number; mode: number; uid: number }> {
+  await rejectRedirectedParents(path);
   let entry;
   try { entry = await lstat(path); } catch { fail(`${label} is missing or unreadable`); }
   if (!entry!.isFile() || entry!.isSymbolicLink() || entry!.nlink !== 1 || !privateMode(entry!.mode)
@@ -125,14 +138,21 @@ async function readJson(path: string): Promise<unknown | undefined> {
 interface TreeFile { relativePath: string; absolutePath: string; bytes: number; mode: number; uid: number; }
 interface TreeDirectory { relativePath: string; absolutePath: string; mode: number; uid: number; }
 interface TreeInventory { files: TreeFile[]; directories: TreeDirectory[]; }
-async function walk(root: string): Promise<TreeInventory> {
+// The pinned provider used the process umask (usually 0755/0644). Admit
+// owner-controlled legacy bytes, preserve their source proof, and publish a
+// private copy. Never chmod or weaken integrity checks on the live source.
+function sourceMode(mode: number, directory: boolean): boolean {
+  return (mode & 0o7022) === 0 && (mode & (directory ? 0o700 : 0o400)) === (directory ? 0o700 : 0o400);
+}
+function owned(uid: number): boolean { return process.getuid?.() === undefined || uid === process.getuid(); }
+async function walk(root: string, legacy = false): Promise<TreeInventory> {
   const files: TreeFile[] = [];
   const directories: TreeDirectory[] = [];
   let total = 0;
   let examined = 0;
   async function visit(current: string): Promise<void> {
     const directory = await lstat(current);
-    if (directory.isSymbolicLink() || !directory.isDirectory() || !privateMode(directory.mode)) fail(`delegated tree contains an unsafe directory: ${current}`);
+    if (directory.isSymbolicLink() || !directory.isDirectory() || !owned(directory.uid) || !(legacy ? sourceMode(directory.mode, true) : privateMode(directory.mode))) fail(`delegated tree contains an unsafe directory: ${current}`);
     directories.push({ relativePath: relative(root, current), absolutePath: current, mode: directory.mode & 0o7777, uid: directory.uid });
     const handle = await opendir(current);
     for await (const entry of handle) {
@@ -141,35 +161,39 @@ async function walk(root: string): Promise<TreeInventory> {
       const childStat = await lstat(child);
       if (childStat.isSymbolicLink()) fail(`delegated tree contains a symlink: ${child}`);
       if (childStat.isDirectory()) { await visit(child); continue; }
-      if (!childStat.isFile() || childStat.nlink !== 1 || !privateMode(childStat.mode)) fail(`delegated artifact is not a private owner-only regular file: ${child}`);
+      if (!childStat.isFile() || childStat.nlink !== 1 || !owned(childStat.uid) || !(legacy ? sourceMode(childStat.mode, false) : privateMode(childStat.mode))) fail(`delegated artifact is not a private owner-only regular file: ${child}`);
       if (basename(child) === "session.jsonl") fail(`canonical transcript is inside delegated provider root and cannot be cut over: ${child}`);
       if (childStat.size > MAX_FILE_BYTES || (total += childStat.size) > MAX_TOTAL_BYTES) fail("delegated artifact tree exceeds the bounded size");
       files.push({ relativePath: relative(root, child), absolutePath: child, bytes: childStat.size, mode: childStat.mode & 0o7777, uid: childStat.uid });
     }
   }
-  try { await visit(root); } catch (error) {
+  await rejectRedirectedParents(root);
+  try { await lstat(root); } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return { files: [], directories: [] };
     throw error;
   }
+  // A child disappearing is a changed source, never proof of an empty root.
+  await visit(root);
   return { files, directories };
 }
 
 function rewritten(bytes: Buffer, sourceRoots: readonly string[], destination: string): Buffer {
   if (bytes.length === 0) return bytes;
   let text: string;
-  try { text = bytes.toString("utf8"); } catch { return bytes; }
+  try { text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); } catch { return bytes; }
   for (const source of sourceRoots) {
     // Only exact provider-root references are rewritten. Session transcripts
     // and arbitrary paths outside the provider roots remain byte-for-byte.
-    text = text.split(source).join(destination);
+    const escaped = source.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    text = text.replace(new RegExp(`${escaped}(?=/|[\\s"'\\\\]|$)`, "gu"), () => destination);
   }
   return Buffer.from(text, "utf8");
 }
 
 async function inventoryRoot(rootInput: string, allRoots: readonly string[]): Promise<DelegatedRootInventory> {
   const root = absolute(rootInput, "legacy root");
-  await ownerDirectory(root, "legacy root");
-  const inventory = await walk(root);
+  await ownerDirectory(root, "legacy root", true);
+  const inventory = await walk(root, true);
   const files = inventory.files;
   const references = new Set<string>();
   for (const file of files) {
@@ -193,6 +217,11 @@ async function inventoryRoot(rootInput: string, allRoots: readonly string[]): Pr
     }
     const record = status as Record<string, unknown>;
     const state = typeof record.state === "string" ? record.state : undefined;
+    if (!state || !RUN_STATES.has(state) && !TERMINAL_STATES.has(state)
+      || record.lifecycleArtifactVersion !== undefined && record.lifecycleArtifactVersion !== 3) {
+      resumabilityRefusals.push(`${file.absolutePath}: unknown provider state/version; inspect before cutover`);
+      continue;
+    }
     const proof = record.processTerminal && typeof record.processTerminal === "object"
       ? (record.processTerminal as Record<string, unknown>).state : undefined;
     if (state && RUN_STATES.has(state) && !TERMINAL_PROOF.has(String(proof))) activeRuns.push(file.absolutePath);
@@ -209,19 +238,17 @@ async function inventoryRoot(rootInput: string, allRoots: readonly string[]): Pr
     absoluteReferences: [...references].filter(value => allRoots.some(source => within(source, resolve(value)))) };
 }
 
-export function discoverDelegatedLegacyRoots(input: { destinationRoot: string; cwd?: string; tempDirectory?: string }): string[] {
-  const destination = resolve(input.destinationRoot);
-  const result = new Set<string>();
-  const temporary = input.tempDirectory ?? tmpdir();
-  // This is the provider's documented root shape, not a general temporary
-  // directory scan. Project roots are limited to the Gateway's known cwd.
-  try {
-    const entries = readdirSync(temporary, { withFileTypes: true }) as Array<{ name: string; isDirectory(): boolean }>;
-    for (const entry of entries) if (entry.isDirectory() && entry.name.startsWith("pi-subagents-")) result.add(resolve(temporary, entry.name));
-  } catch { /* startup preflight reports explicit roots supplied by the operator */ }
-  const project = resolve(input.cwd ?? process.cwd(), ".pi", "subagents");
-  if (project !== destination) result.add(project);
-  return [...result].filter(root => root !== destination);
+export function discoverDelegatedLegacyRoots(input: { destinationRoot: string; tempDirectory?: string; legacyRoot?: string | undefined }): string[] {
+  // pi-subagents 0.59.0 scopes its Mac temporary store to the current UID.
+  // Project/session artifact history is a separate configured destination;
+  // moving it would strand references and the provider would recreate it.
+  // Prefix scans also capture unrelated test fixtures and retired stores.
+  const uid = process.getuid?.();
+  if (uid === undefined) fail("delegated legacy discovery requires a reviewed user scope");
+  const root = input.legacyRoot === undefined
+    ? join(input.tempDirectory ?? tmpdir(), `pi-subagents-uid-${uid}`)
+    : absolute(input.legacyRoot, "legacy provider override");
+  return resolve(root) === resolve(input.destinationRoot) ? [] : [resolve(root)];
 }
 
 export async function preflightDelegatedRootCutover(options: DelegatedRootMigrationOptions): Promise<DelegatedRootPreflight> {
@@ -229,10 +256,11 @@ export async function preflightDelegatedRootCutover(options: DelegatedRootMigrat
   await ownerDirectory(destinationRoot, "destination root");
   const roots = [...new Set(options.legacyRoots.map(root => absolute(root, "legacy root")))].filter(root => root !== destinationRoot);
   if (roots.some((root, index) => roots.some((other, otherIndex) => index !== otherIndex && within(root, other)))) fail("delegated legacy roots overlap");
+  if (roots.some(root => within(root, destinationRoot) || within(destinationRoot, root))) fail("delegated source and destination overlap");
   const inventories = await Promise.all(roots.map(root => inventoryRoot(root, roots)));
   const retained = inventories.filter(item => item.entries > 0);
   let destinationEntries: Array<{ relativePath: string }> = [];
-  try { destinationEntries = (await walk(destinationRoot)).files.map(file => ({ relativePath: file.relativePath })); } catch (error) { if (!(error instanceof DelegatedRootMigrationError) || !error.message.includes("missing")) throw error; }
+  try { if (retained.length) destinationEntries = (await walk(destinationRoot)).files.map(file => ({ relativePath: file.relativePath })); } catch (error) { if (!(error instanceof DelegatedRootMigrationError) || !error.message.includes("missing")) throw error; }
   if (retained.length && destinationEntries.length) return { status: "conflict", destinationRoot, roots: inventories, changesMade: false };
   if (inventories.some(item => item.activeRuns.length || item.resumabilityRefusals.length)) {
     return { status: "conflict", destinationRoot, roots: inventories, changesMade: false };
@@ -260,17 +288,17 @@ async function copyTree(sources: readonly string[], staging: string, destination
   const directories: DelegatedRootDirectoryManifest[] = [];
   const directoryModes = new Map<string, { mode: number; uid: number }>();
   for (const source of sources) {
-    const inventory = await walk(source);
+    const inventory = await walk(source, true);
     for (const directory of inventory.directories) {
       const path = directory.relativePath;
       const prior = directoryModes.get(path);
       if (prior && (prior.mode !== directory.mode || prior.uid !== directory.uid)) fail(`delegated directory metadata collision during staging: ${path}`);
       if (!prior) {
         directoryModes.set(path, { mode: directory.mode, uid: directory.uid });
-        directories.push({ source, path, mode: directory.mode, uid: directory.uid });
+        directories.push({ source, path, mode: directory.mode & 0o700, uid: directory.uid });
       }
-      await mkdir(join(staging, path), { recursive: true, mode: directory.mode });
-      await chmod(join(staging, path), directory.mode);
+      await mkdir(join(staging, path), { recursive: true, mode: directory.mode & 0o700 });
+      await chmod(join(staging, path), directory.mode & 0o700);
     }
     for (const file of inventory.files) {
       const path = file.relativePath;
@@ -280,8 +308,8 @@ async function copyTree(sources: readonly string[], staging: string, destination
       await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
       const original = await readFile(file.absolutePath);
       const bytes = rewritten(original, sources, destinationRoot);
-      await writeFile(destination, bytes, { flag: "wx", mode: file.mode });
-      await chmod(destination, file.mode);
+      await writeFile(destination, bytes, { flag: "wx", mode: file.mode & 0o700 });
+      await chmod(destination, file.mode & 0o700);
       manifests.push({ source, path, bytes: original.byteLength, mode: file.mode, uid: file.uid,
         digest: createHash("sha256").update(original).digest("hex"), stagedDigest: createHash("sha256").update(bytes).digest("hex") });
     }
@@ -293,6 +321,8 @@ export async function stageDelegatedRootCutover(options: DelegatedRootMigrationS
   if (!options.acknowledgeQuiescence || !options.acknowledgeBackup) fail("staging requires explicit quiescence and backup acknowledgements");
   const destination = absolute(options.destinationRoot, "destination root");
   const staging = absolute(options.staging, "staging");
+  if ([destination, ...options.legacyRoots].some(root => within(resolve(root), staging) || within(staging, resolve(root)))) fail("delegated staging overlaps an authority");
+  await rejectRedirectedParents(staging);
   const preflight = await preflightDelegatedRootCutover(options);
   if (preflight.status === "not-required") fail("no retained delegated artifacts require migration");
   if (preflight.status === "conflict") fail("delegated cutover preflight found an active, unresumable, overlapping, or conflicting authority");
@@ -304,16 +334,16 @@ export async function stageDelegatedRootCutover(options: DelegatedRootMigrationS
   const sources = preflight.roots.filter(root => root.entries > 0).map(root => root.root);
   const operationID = randomUUID();
   const retired = sources.map(source => `${source}.retired-${operationID}`);
-  const marker: DelegatedRootMarker = { version: 2, operationID, sources, destination, staging, retired, entries: [], directories: [], sourceDirectories: [], phase: "staged" };
+  const marker: DelegatedRootMarker = { version: 3, operationID, sources, destination, staging, retired, entries: [], directories: [], sourceDirectories: [], phase: "staged" };
   await writeFile(markerPath(staging), `${JSON.stringify(marker)}\n`, { flag: "wx", mode: 0o600 });
   const copied = await copyTree(sources, staging, destination);
   const sourceDirectories: DelegatedRootDirectoryManifest[] = [];
   for (const source of sources) {
-    const inventory = await walk(source);
+    const inventory = await walk(source, true);
     sourceDirectories.push(...inventory.directories.map(directory => ({ source, path: directory.relativePath, mode: directory.mode, uid: directory.uid })));
   }
   const completed = { ...marker, entries: copied.manifests, directories: copied.directories, sourceDirectories };
-  await writeFile(markerPath(staging), `${JSON.stringify(completed)}\n`, { flag: "w", mode: 0o600 });
+  await replaceMarker(completed);
   return completed;
 }
 
@@ -323,7 +353,7 @@ function safeManifestPath(path: string, label: string, allowRoot = false): void 
 async function verifySourceRoot(marker: DelegatedRootMarker, index: number): Promise<void> {
   const sourceRoot = marker.sources[index] ?? fail("delegated source manifest is malformed");
   const source = sourceRoot;
-  const inventory = await walk(sourceRoot);
+  const inventory = await walk(sourceRoot, true);
   const files = marker.entries.filter(entry => entry.source === source);
   const directories = marker.sourceDirectories.filter(entry => entry.source === source);
   if (new Set(files.map(entry => entry.path)).size !== files.length || new Set(directories.map(entry => entry.path)).size !== directories.length) fail("delegated source manifest contains duplicate paths");
@@ -357,7 +387,7 @@ async function verifyStagedContents(marker: DelegatedRootMarker): Promise<void> 
     const stagedFile = file ?? fail(`staged delegated artifact is missing: ${entry.path}`);
     const metadata = await regular(stagedFile.absolutePath, `staged delegated artifact ${entry.path}`);
     const digest = createHash("sha256").update(await readFile(stagedFile.absolutePath)).digest("hex");
-    if (metadata.bytes !== stagedFile.bytes || metadata.mode !== entry.mode || metadata.uid !== entry.uid || digest !== entry.stagedDigest) fail(`staged delegated artifact changed: ${entry.path}`);
+    if (metadata.bytes !== stagedFile.bytes || metadata.mode !== (entry.mode & 0o700) || metadata.uid !== entry.uid || digest !== entry.stagedDigest) fail(`staged delegated artifact changed: ${entry.path}`);
   }
 }
 async function verifyStaged(marker: DelegatedRootMarker): Promise<void> {
@@ -371,7 +401,7 @@ async function verifyRetiredTree(marker: DelegatedRootMarker, index: number): Pr
   const sourceRoot = marker.sources[index] ?? fail("delegated retirement manifest is malformed");
   const root = retiredRoot;
   const source = sourceRoot;
-  const inventory = await walk(retiredRoot);
+  const inventory = await walk(retiredRoot, true);
   const expectedFiles = marker.entries.filter(entry => entry.source === source);
   const expectedDirectories = marker.sourceDirectories.filter(entry => entry.source === source);
   if (new Set(expectedFiles.map(entry => entry.path)).size !== expectedFiles.length || new Set(expectedDirectories.map(entry => entry.path)).size !== expectedDirectories.length) fail("retired delegated manifest contains duplicate paths");
@@ -396,7 +426,7 @@ async function verifyPublishedTree(marker: DelegatedRootMarker): Promise<void> {
   }
   for (const entry of marker.entries) {
     const file = inventory.files.find(candidate => candidate.relativePath === entry.path);
-    if (!file || entry.uid !== file.uid || entry.mode !== file.mode || entry.stagedDigest !== createHash("sha256").update(await readFile(file.absolutePath)).digest("hex")) fail(`published delegated artifact changed: ${entry.path}`);
+    if (!file || entry.uid !== file.uid || (entry.mode & 0o700) !== file.mode || entry.stagedDigest !== createHash("sha256").update(await readFile(file.absolutePath)).digest("hex")) fail(`published delegated artifact changed: ${entry.path}`);
   }
 }
 async function ensureDestinationParent(destination: string): Promise<void> {
@@ -411,7 +441,7 @@ async function ensureDestinationParent(destination: string): Promise<void> {
   await ownerDirectory(parent, "delegated destination parent");
 }
 async function replaceMarker(marker: DelegatedRootMarker): Promise<void> {
-  await writeFile(markerPath(marker.staging), `${JSON.stringify(marker)}\n`, { flag: "w", mode: 0o600 });
+  await durableAtomicWriteJson(markerPath(marker.staging), marker, 0o600);
 }
 export async function verifyDelegatedRootCutover(staging: string): Promise<DelegatedRootMarker> {
   const marker = await markerRead(staging); await verifyStaged(marker); return marker;
@@ -436,7 +466,7 @@ export async function publishDelegatedRootCutover(staging: string): Promise<Dele
   await rename(marker.staging, marker.destination);
   const published = { ...retiringMarker, phase: "published" as const };
   await verifyPublishedTree(published);
-  await writeFile(markerPath(marker.staging), `${JSON.stringify(published)}\n`, { flag: "w", mode: 0o600 });
+  await replaceMarker(published);
   return published;
 }
 export async function recoverDelegatedRootCutover(staging: string): Promise<{ readonly action: "none" | "finish-publication" | "conflict"; readonly marker: DelegatedRootMarker }> {
@@ -460,7 +490,7 @@ export async function recoverDelegatedRootCutover(staging: string): Promise<{ re
       await verifyRetiredTree(marker, index);
     }
     await rename(marker.staging, marker.destination);
-    const published = { ...marker, phase: "published" as const }; await verifyPublishedTree(published); await writeFile(markerPath(marker.staging), `${JSON.stringify(published)}\n`, { flag: "w", mode: 0o600 });
+    const published = { ...marker, phase: "published" as const }; await verifyPublishedTree(published); await replaceMarker(published);
     return { action: "finish-publication", marker: published };
   }
   if (marker.phase === "source-retired" && destinationExists && !stagingExists) {
@@ -474,9 +504,9 @@ export async function cleanupDelegatedRootCutover(staging: string): Promise<void
   await rm(marker.staging, { recursive: true, force: false }); await rm(markerPath(marker.staging), { force: false });
 }
 
-export async function assertDelegatedRootCutoverReady(tronHome: string, cwd = process.cwd()): Promise<void> {
+export async function assertDelegatedRootCutoverReady(tronHome: string): Promise<void> {
   const destinationRoot = join(resolve(tronHome), "internal", "subagents");
-  const legacyRoots = discoverDelegatedLegacyRoots({ destinationRoot, cwd });
+  const legacyRoots = discoverDelegatedLegacyRoots({ destinationRoot, legacyRoot: process.env.PI_SUBAGENTS_TEMP_ROOT });
   const preflight = await preflightDelegatedRootCutover({ legacyRoots, destinationRoot });
   if (preflight.status !== "not-required") {
     const roots = preflight.roots.filter(root => root.entries > 0).map(root => root.root).join(", ");

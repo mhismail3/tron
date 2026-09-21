@@ -27,6 +27,17 @@ export class TronWorkspace {
     this.root = join(this.home, "workspace");
   }
 
+  /** Inspection must not acquire the live owner's lock or create a missing
+   * workspace. Offline migration CLIs use this existing-path descriptor. */
+  static async describeExisting(tronHome: string): Promise<TronWorkspaceDescriptor> {
+    const workspace = new TronWorkspace(tronHome);
+    try {
+      await workspace.directory(workspace.home);
+      await workspace.directory(workspace.root);
+      return { root: workspace.root, available: true };
+    } catch { return { root: workspace.root, available: false, reason: "unavailable" }; }
+  }
+
   private async directory(path: string, create = false): Promise<{ dev: number; ino: number }> {
     if (create) {
       try { await mkdir(path, { mode: 0o700 }); }
