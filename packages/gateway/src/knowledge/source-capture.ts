@@ -600,7 +600,8 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
   const capturedAt = timestamp(now);
   const bytes = fetched.bytes;
   const mediaType = fetched.mediaType;
-  const readable = publicPost ? (publicPost.text ? { text: publicPost.text.slice(0, limits.maxReadableChars), truncated: publicPost.text.length > limits.maxReadableChars } : undefined) : bytes && bytes.byteLength ? extractReadable(bytes, mediaType, limits.maxReadableChars) : undefined;
+  const publicReadable = publicPost?.readableText ?? publicPost?.text;
+  const readable = publicPost ? (publicReadable ? { text: publicReadable.slice(0, limits.maxReadableChars), truncated: publicReadable.length > limits.maxReadableChars } : undefined) : bytes && bytes.byteLength ? extractReadable(bytes, mediaType, limits.maxReadableChars) : undefined;
   const disposition: SourceContent["captureDisposition"] = publicPost && (fetched.truncated || readable?.truncated) ? "partial" : fetched.disposition ?? (bytes && bytes.byteLength > 0 ? (readable === undefined ? "metadata-only" : fetched.quality === "partial" || readable.quality === "partial" || fetched.truncated || readable.truncated ? "partial" : "complete") : "metadata-only");
   // A redirect can reveal an existing canonical target that was not discoverable
   // from the requested alias. Re-scan after fetch so the owner receives the

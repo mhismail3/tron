@@ -5,6 +5,7 @@ import { readPublicXPost } from "./source-capture.js";
 const url = "https://x.com/synthetic/status/123456789";
 const v2 = (extra: Record<string, unknown> = {}) => JSON.stringify({ code: 200, status: { id: "123456789", text: "Root publication", author: { id: "42", protected: false }, replying_to: null, raw_text: { facets: [] }, is_note_tweet: false, ...extra }, thread: [], replies: [], cursor: {} });
 const reply = (id: string, author: string, parent: string, text: string, extra: Record<string, unknown> = {}) => ({ id, text, author: { id: author, protected: false }, replying_to: { status: parent }, raw_text: { facets: [] }, ...extra });
+const article = (extra: Record<string, unknown> = {}) => ({ id: "987654321", title: "A substantive article", content: { blocks: [{ type: "header-two", text: "The heading", entityRanges: [] }, { type: "unstyled", text: "The article body is evidence.", entityRanges: [{ key: 0, offset: 0, length: 8 }] }], entityMap: [{ key: 0, value: { data: { url: "https://example.test/article-source" } } }] }, ...extra });
 const signal = () => new AbortController().signal;
 
 describe("public X v2 hydration", () => {
@@ -22,6 +23,36 @@ describe("public X v2 hydration", () => {
     expect(result.commentary?.map(post => post.id)).toEqual(["3", "4", "5"]);
     expect(result.linkedReferences).toEqual([{ url: "http://example.test/model", postId: "2", postUrl: "https://x.com/i/web/status/2", role: "continuation" }]);
     expect(result.stopReasons).toContain("missing-parent");
+  });
+  it("accepts an empty short-text Article when identity and substantive blocks are present", async () => {
+    const body = JSON.stringify({ code: 200, status: { id: "123456789", text: "", author: { id: "42", protected: false }, replying_to: null, article: article(), raw_text: { facets: [] } }, thread: [], replies: [], cursor: {} });
+    const result = await lookupPublicXPost(url, vi.fn(async () => ({ status: 200, body })), signal());
+    expect(result.text).toContain("X Article: A substantive article"); expect(result.text).toContain("The article body is evidence."); expect(result.article?.id).toBe("987654321"); expect(result.linkedUrls).toEqual(["https://example.test/article-source"]); expect(result.linkedReferences?.[0]).toMatchObject({ postId: "123456789", role: "root" });
+  });
+  it("rejects preview-only or malformed Article payloads while accepting real post text", async () => {
+    const preview = JSON.stringify({ code: 200, status: { id: "123456789", text: "", author: { id: "42" }, article: { id: "987654321", title: "Preview only", preview_text: "Not the body" } }, thread: [], replies: [], cursor: {} });
+    const result = await lookupPublicXPost(url, vi.fn().mockResolvedValueOnce({ status: 200, body: preview }).mockResolvedValueOnce({ status: 503 }), signal());
+    expect(result.disposition).toBe("inaccessible"); expect(result.stopReasons).toContain("unavailable");
+    const malformed = JSON.stringify({ code: 200, status: { id: "123456789", text: "Commentary survives", author: { id: "42" }, article: { id: "987654321", content: { blocks: [{ text: 42 }] } } }, thread: [], replies: [], cursor: {} });
+    const retained = await lookupPublicXPost(url, vi.fn(async () => ({ status: 200, body: malformed })), signal()); expect(retained.text).toBe("Commentary survives");
+  });
+  it("keeps empty-text Article replies selectable by numeric identity and parent", async () => {
+    const body = JSON.stringify({ code: 200, status: { id: "123456789", text: "", author: { id: "42" }, article: article(), replying_to: null }, thread: [], replies: [reply("2", "42", "123456789", "", { article: article({ id: "987654322", title: "Follow-up", content: { blocks: [{ text: "Follow-up body", entityRanges: [] }], entityMap: [] } }) })], cursor: {} });
+    const result = await lookupPublicXPost(url, vi.fn(async () => ({ status: 200, body })), signal(), { coverage: "conversation" }); expect(result.continuations?.map(post => post.id)).toEqual(["2"]); expect(result.continuations?.[0]?.text).toContain("Follow-up body");
+  });
+  it("does not accept protected or mismatched Article identities", async () => {
+    const protectedRoot = JSON.stringify({ code: 200, status: { id: "123456789", text: "", author: { id: "42", protected: true }, article: article() }, thread: [], replies: [], cursor: {} });
+    const mismatch = JSON.stringify({ code: 200, status: { id: "999", text: "", author: { id: "42" }, article: article() }, thread: [], replies: [], cursor: {} });
+    const result = await lookupPublicXPost(url, vi.fn().mockResolvedValueOnce({ status: 200, body: protectedRoot }).mockResolvedValueOnce({ status: 200, body: mismatch }), signal()); expect(result.disposition).toBe("inaccessible");
+  });
+  it("marks bounded Article blocks and embeds partial without dropping readable evidence", async () => {
+    const blocks = Array.from({ length: 513 }, (_, index) => ({ text: `Block ${index}`, entityRanges: [] }));
+    const body = JSON.stringify({ code: 200, status: { id: "123456789", text: "", author: { id: "42" }, article: article({ content: { blocks, entityMap: [], cover_media: { id: "media" } } }) }, thread: [], replies: [], cursor: {} });
+    const result = await lookupPublicXPost(url, vi.fn(async () => ({ status: 200, body })), signal()); expect(result.text).toContain("Block 0"); expect(result.disposition).toBe("partial"); expect(result.limitations.join(" ")).toContain("bounded 512-block"); expect(result.limitations.join(" ")).toContain("embeds and media");
+  });
+  it("keeps root requests free of replies even when Article content is present", async () => {
+    const body = JSON.stringify({ code: 200, status: { id: "123456789", text: "", author: { id: "42" }, article: article() }, thread: [], replies: [reply("2", "42", "123456789", "follow-up")], cursor: { bottom: "ignored" } });
+    const result = await lookupPublicXPost(url, vi.fn(async () => ({ status: 200, body })), signal(), { coverage: "root" }); expect(result.posts?.map(post => post.id)).toEqual(["123456789"]); expect(result.continuations).toEqual([]);
   });
   it("paginates with finite cursor and item bounds, deduplicating repeated pages", async () => {
     const first = JSON.stringify({ code: 200, status: { id: "123456789", text: "Root", author: { id: "42" }, replying_to: null }, thread: [], replies: [reply("2", "42", "123456789", "one")], cursor: { bottom: "next" } });
