@@ -515,8 +515,12 @@ macOS assigns the copying process's attribution even when `copyfile` reports
 successful metadata preservation. The helper leaves that OS-owned attribute
 alone and retains its observed source digest in the inventory. This is the only
 copy-comparison exception; ACLs, link modes, quarantine and every other xattr
-must still match. Source-stability and atomic-retirement comparisons remain
-exact, including provenance. Link modes are applied without following targets.
+must still match. Live-source comparisons remain exact, including provenance.
+Exclusive Stable-channel retirement may also reassign provenance on the renamed
+root directory only; every nested entry and all other root metadata must match.
+The original source inventory is retained unchanged, and an interrupted rename
+resumes through the same selection command. Link modes are applied without
+following targets.
 Owner-only maintenance directories protect backup contents; do not
 upload them or raw manifests/settings. External state referenced by custom
 settings or browser overrides requires its own operator-managed backup.

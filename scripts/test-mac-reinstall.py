@@ -150,6 +150,71 @@ class BundledSelectionTests(Fixture, unittest.TestCase):
         self.assertFalse(source.exists())
         self.assertEqual(self.workflow.receipt['bundledSelection']['phase'], 'selected')
 
+    @unittest.skipUnless(sys.platform == 'darwin', 'Darwin rename attribution')
+    def test_recovery_accepts_only_renamed_root_provenance_and_preserves_original_proof(self):
+        source = self.selected_store()
+        self.run_workflow(app=self.app)
+        retired = self.workflow.operation / 'retired-stable-payloads'
+        real_xattrs = reinstall.xattr_digests
+        real_rename = reinstall.rename_exclusive
+        def attributed(path):
+            actual = real_xattrs(path)
+            if Path(path) in (source, retired):
+                actual['com.apple.provenance'] = ('a' if Path(path) == source else 'b') * 64
+            return actual
+        def interrupted(a, b):
+            real_rename(a, b)
+            raise OSError('interrupted after durable rename')
+        with patch.object(reinstall, 'xattr_digests', side_effect=attributed):
+            with patch.object(reinstall, 'rename_exclusive', side_effect=interrupted):
+                with self.assertRaises(OSError):
+                    self.run_workflow(select_bundled_offline=True)
+            evidence = (self.workflow.operation / 'stable-selection.json').read_bytes()
+            self.assertFalse(source.exists())
+            self.run_workflow(select_bundled_offline=True)
+            self.assertEqual(self.workflow.receipt['bundledSelection']['phase'], 'selected')
+            self.assertEqual((self.workflow.operation / 'stable-selection.json').read_bytes(), evidence)
+            self.run_workflow(confirm_offline=True)
+            self.assertEqual(self.workflow.receipt['phase'], 'awaiting-replacement')
+            def changed_child(path):
+                value = attributed(path)
+                if Path(path) == retired / 'current.json':
+                    value['com.apple.provenance'] = 'c' * 64
+                return value
+            with patch.object(reinstall, 'xattr_digests', side_effect=changed_child):
+                with self.assertRaisesRegex(reinstall.Stop, 'selection-backup-changed'):
+                    self.workflow.verify_bundled_selection()
+            def changed_root_quarantine(path):
+                value = attributed(path)
+                if Path(path) == retired:
+                    value['com.apple.quarantine'] = 'd' * 64
+                return value
+            with patch.object(reinstall, 'xattr_digests', side_effect=changed_root_quarantine):
+                with self.assertRaisesRegex(reinstall.Stop, 'selection-backup-changed'):
+                    self.workflow.verify_bundled_selection()
+            os.chmod(retired, 0o750)
+            with self.assertRaisesRegex(reinstall.Stop, 'selection-backup-changed'):
+                self.workflow.verify_bundled_selection()
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'Darwin rename attribution')
+    def test_source_provenance_drift_still_blocks_before_selection_retirement(self):
+        source = self.selected_store()
+        self.run_workflow(app=self.app)
+        with patch.object(reinstall, 'rename_exclusive', side_effect=OSError('before rename')):
+            with self.assertRaises(OSError):
+                self.run_workflow(select_bundled_offline=True)
+        real_xattrs = reinstall.xattr_digests
+        def changed(path):
+            actual = real_xattrs(path)
+            if Path(path) == source:
+                actual['com.apple.provenance'] = 'c' * 64
+            return actual
+        with patch.object(reinstall, 'xattr_digests', side_effect=changed):
+            with self.assertRaisesRegex(reinstall.Stop, 'selection-source-changed'):
+                self.run_workflow(select_bundled_offline=True)
+        self.assertTrue(source.exists())
+        self.assertFalse((self.workflow.operation / 'retired-stable-payloads').exists())
+
     def test_changed_source_after_interrupted_journal_cannot_be_adopted(self):
         source = self.selected_store()
         self.run_workflow(app=self.app)

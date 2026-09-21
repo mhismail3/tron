@@ -245,8 +245,8 @@ def copied_entry_matches(actual, expected):
     if sys.platform != 'darwin':
         return actual == expected
     # macOS assigns the copying process's provenance even when copyfile succeeds
-    # at copying all xattrs. Do not forge/remove that OS-owned attribution. Only
-    # copies allow this difference; source and atomic-retirement evidence stays exact.
+    # at copying all xattrs. Do not forge/remove that OS-owned attribution.
+    # Live source comparisons remain exact; retirement has its own root-only rule.
     def portable(entry):
         return {**entry, 'xattrs': {name: value for name, value in entry['xattrs'].items()
                                   if name != 'com.apple.provenance'}}
@@ -258,6 +258,19 @@ def copied_tree_matches(actual, expected):
         return actual is expected
     return actual.keys() == expected.keys() and all(
         copied_entry_matches(actual[name], item) for name, item in expected.items())
+
+
+def retired_channel_matches(actual, expected):
+    # Darwin can reassign provenance on the directory passed to renamex_np.
+    # Only that root attribution may differ; nested entries and all other
+    # metadata remain exact. Keep the original source manifest unchanged.
+    if actual is None or expected is None:
+        return actual is expected
+    return actual.keys() == expected.keys() and all(
+        copied_entry_matches(actual[name], item)
+        if name == '.' and item['type'] == actual[name]['type'] == 'dir'
+        else actual[name] == item
+        for name, item in expected.items())
 
 
 def sync_tree(root, manifest):
@@ -530,7 +543,7 @@ class Reinstall:
         require(selection['phase'] == 'selected',
                 'selection-incomplete: rerun --select-bundled-offline before the snapshot')
         retired = self.operation / 'retired-stable-payloads'
-        require((tree_manifest(retired) if exists(retired) else None) == proof,
+        require(retired_channel_matches(tree_manifest(retired) if exists(retired) else None, proof),
                 'selection-backup-changed: preserve the retired payload store for review')
         if before_activation:
             require(not exists(self.stable_channel),
@@ -575,7 +588,7 @@ class Reinstall:
                         'selection-source-changed: do not choose between competing stores')
                 self.platform.offline()
                 rename_exclusive(source, retired)
-            require((tree_manifest(retired) if exists(retired) else None) == proof,
+            require(retired_channel_matches(tree_manifest(retired) if exists(retired) else None, proof),
                     'selection-retirement-incomplete: preserve the operation and retry after inspection')
             require(not exists(source), 'selection-changed: another writer recreated the channel')
             self.receipt['bundledSelection']['phase'] = 'selected'

@@ -120,7 +120,9 @@ On macOS, preserve the observed source `com.apple.provenance` in the manifest,
 but allow the OS to assign copies their own attribution as documented by the
 [reinstall copy contract](../../mac-app/docs/development.md). Do not remove or
 forge it. File bytes, owners, modes (including links), ACLs and all other xattrs
-must match; live-source and atomic-retirement inventories stay exact.
+must match; live-source inventories stay exact. Stable-channel retirement also
+admits OS-reassigned provenance on the renamed root directory only, while
+retaining the original inventory and checking every nested entry exactly.
 Do not proceed without a protected backup and proven restoration of the
 non-secret stores.
 
