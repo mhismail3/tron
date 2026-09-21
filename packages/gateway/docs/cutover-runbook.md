@@ -124,6 +124,18 @@ angle-bracket values with paths from preflight, and do not invent flags.
    PATH=/opt/homebrew/bin:$PATH npx vitest run src/sessions/delegated-root-migration.test.ts
    ```
 
+   The connector pagination/cohort regression is also part of the pre-cutover
+   evidence. Its 51-item case retains a full ten-item cohort, a partial head,
+   and effect-before-response recovery; its 51-item all-partial case crosses
+   the provider's 50-item API boundary and asserts page 1 discovery without a
+   second full capture/assessment corpus. Run it without changing its
+   per-test deadline or global worker/pool settings:
+
+   ```bash
+   cd packages/gateway
+   PATH=/opt/homebrew/bin:$PATH npx vitest run src/knowledge/raindrop-intake-multipage.test.ts
+   ```
+
    Publish retires each legacy root only after source and staging verification,
    then exposes `<tronHome>/internal/subagents`; verify the new root’s private
    permissions and that no old root remains writable. If publication stops

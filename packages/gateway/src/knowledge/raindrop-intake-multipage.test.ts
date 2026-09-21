@@ -19,7 +19,12 @@ const response = (value: unknown, status = 200): ConnectorHTTPResponse => ({ sta
 const command = (name: string) => `multipage-intake-${name}`;
 
 describe("Raindrop intake pagination and cohort accounting", () => {
-  it.each([{ total: 55, incomplete: 5 }, { total: 70, incomplete: 55 }])("discovers shifted pages and recovers with $incomplete incomplete heads among $total items", async ({ total, incomplete }) => {
+  // Keep both fixtures above the provider's 50-item page boundary. The first
+  // exercises one full ten-item cohort with a partial head and
+  // effect-before-response recovery; the second keeps every item partial and
+  // advances enough cohorts to cross into page 1 without paying for a second
+  // full capture/assessment corpus.
+  it.each([{ total: 51, incomplete: 1, cohorts: 0 }, { total: 51, incomplete: 51, cohorts: 5 }])("discovers shifted pages and recovers with $incomplete incomplete heads among $total items", async ({ total, incomplete, cohorts }) => {
     const root = await mkdtemp(join(tmpdir(), "tron-intake-multipage-")); roots.push(root);
     let workspace = new TronWorkspace(root); workspaces.push(workspace);
     let store = new KnowledgeStore(workspace);
@@ -79,7 +84,7 @@ describe("Raindrop intake pagination and cohort accounting", () => {
     }
     await completeCohort("first", "pilot", Math.max(0, 10 - incomplete));
 
-    for (let cohort = 1; cohort <= Math.ceil((total - 10) / 10); cohort += 1) {
+    for (let cohort = 1; cohort <= cohorts; cohort += 1) {
       const id = `cohort-${cohort}`;
       await extension.invoke({ operation: "knowledge.connector.assessment.approve", request: { commandId: command(`approve-${cohort}`), connector: "raindrop", id, maxItems: 10, budgetCents: 10 } });
       const firstId = cohort * 10 + 1;
@@ -87,12 +92,18 @@ describe("Raindrop intake pagination and cohort accounting", () => {
       await completeCohort(id, id, Math.max(0, lastId - Math.max(incomplete, firstId - 1)));
     }
     const state = await store.connectorState("raindrop");
-    expect(state?.pending.map(item => item.id)).toEqual(Array.from({ length: incomplete }, (_, index) => String(index + 1)));
+    const selected = Math.min(total, 10 + cohorts * 10);
+    const discovered = Math.min(total, 10 + (cohorts + 1) * 10);
+    const expectedPending = [
+      ...Array.from({ length: Math.min(incomplete, discovered) }, (_, index) => String(index + 1)),
+      ...Array.from({ length: Math.max(0, discovered - Math.max(selected, incomplete)) }, (_, index) => String(Math.max(selected, incomplete) + index + 1)),
+    ];
+    expect(state?.pending.map(item => item.id)).toEqual(expectedPending);
     expect(state?.pendingRemote).toBeUndefined();
-    const completeIds = Array.from({ length: total - incomplete }, (_, index) => String(incomplete + index + 1));
+    const completeIds = Array.from({ length: Math.max(0, selected - incomplete) }, (_, index) => String(incomplete + index + 1));
     expect(moved).toEqual(completeIds);
-    expect(Object.keys(state?.assessmentAttempts ?? {})).toHaveLength(total - incomplete);
-    expect(state?.assessmentApprovals?.reduce((sum, item) => sum + item.itemIds.length, 0)).toBe(total - 10);
+    expect(Object.keys(state?.assessmentAttempts ?? {})).toHaveLength(completeIds.length);
+    expect(state?.assessmentApprovals?.reduce((sum, item) => sum + item.itemIds.length, 0) ?? 0).toBe(selected - 10);
     expect(requestedPages).toContain(0);
     if (incomplete > 50) expect(requestedPages).toContain(1);
   }, 30_000);
