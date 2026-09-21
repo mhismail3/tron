@@ -109,19 +109,80 @@ non-secret stores.
 
 ## 4. Stage, verify, and publish in order
 
-Use a private same-filesystem staging directory and preserve each helper’s
-journal. Commands below are exact only for the prepared helpers; replace
-angle-bracket values with paths from preflight, and do not invent flags.
+This is one coordinated maintenance window, not one command. The Mac reinstall
+helper has a deliberate checkpoint contract: `--confirm-offline` freezes its
+own source manifests and protected app/state backup, and any later data change
+is refused as `source-changed`/`state-inventory-changed`. Since these migrations
+intentionally change state, never run `--confirm-offline` before migration
+publication and then resume migrations. Do the following in this exact order:
 
-1. Stage/verify machine identity with quiescence and backup acknowledgements;
-   check source/destination bytes, mode `0600`, owner, digest, and conflict
-   marker. Publish only after verification.
-2. Stage/verify delegated roots with
-   `--acknowledge-quiescence --acknowledge-backup`. The helper preserves
-   provider directory layout and terminal artifacts, rewrites only exact old
-   provider-root references in provider artifacts, never canonical transcript
-   JSONL, and records source/staged digests plus file and directory metadata.
-   Run the exact focused owner regression before an operator cutover:
+1. Prepare the signed app checkpoint only (this validates and records the
+   candidate; it does not take the offline snapshot):
+
+   ```bash
+   scripts/tron mac reinstall --app <prepared-Release.app>
+   ```
+
+2. Using the old installed wrapper, retire the native helper through
+   **Permissions… → Disable Helper for Update**, then choose **Pause Tron** and
+   quit. Stop Debug, mobile clients, workers, schedulers, package operations,
+   and every other writer. Do not replace or launch the new app yet.
+3. Run every read-only owner preflight, create and verify the protected backup,
+   then stage, verify, and publish the migrations below while all writers remain
+   stopped. Use private same-filesystem staging directories and preserve each
+   helper’s journal. Commands are exact; replace angle-bracket values only with
+   paths from preflight. There is no connection-migration `verify` subcommand:
+   its `stage` rechecks the source and its `publish` rechecks the journal,
+   source digests, owner authority, and catalog revision.
+4. After **all** migration publications and their exact post-publication checks
+   succeed, freeze the Mac reinstall operation exactly once:
+
+   ```bash
+   scripts/tron mac reinstall --confirm-offline
+   ```
+
+   Do not rerun this as a migration checkpoint or use it between publications.
+   If it stops, preserve the maintenance operation and migration journals; do
+   not rewrite a receipt or continue with an unproven order. Only then may the
+   user replace/launch the app and choose Resume as described in Section 5.
+
+Stage/verify machine identity with quiescence and backup acknowledgements;
+check source/destination bytes, mode `0600`, owner, digest, and conflict marker.
+Publish only after verification. The exact commands are:
+
+```bash
+scripts/tron internal-migrate stage \
+  --source <legacy-machine-id> \
+  --destination <stable-tron-home>/internal/machine-group-id \
+  --staging <private-internal-staging> \
+  --acknowledge-quiescence --acknowledge-backup
+scripts/tron internal-migrate verify --staging <private-internal-staging>
+scripts/tron internal-migrate publish --staging <private-internal-staging>
+```
+
+The machine-group destination is the one canonical `<userHome>/.tron/internal/
+machine-group-id` shared by Stable and Debug; run this migration once, not once
+per profile. If preflight reports no migration required, do not manufacture a
+second identity.
+
+Stage/verify delegated roots with
+`--acknowledge-quiescence --acknowledge-backup`. The helper preserves provider
+directory layout and terminal artifacts, rewrites only exact old provider-root
+references in provider artifacts, never canonical transcript JSONL, and records
+source/staged digests plus file and directory metadata. The exact commands are:
+
+```bash
+scripts/tron delegated-migrate stage \
+  --destination-root <stable-tron-home>/internal/subagents \
+  --legacy-root <legacy-provider-root> \
+  --staging <private-delegated-staging> \
+  --acknowledge-quiescence --acknowledge-backup
+scripts/tron delegated-migrate verify --staging <private-delegated-staging>
+scripts/tron delegated-migrate publish --staging <private-delegated-staging>
+```
+
+Include one `--legacy-root` for every admitted legacy root reported by
+preflight. Run the exact focused owner regression before an operator cutover:
 
    ```bash
    cd packages/gateway
@@ -150,23 +211,36 @@ angle-bracket values with paths from preflight, and do not invent flags.
    before completing or refusing the operation. Re-running `recover` after a
    verified publication is a no-op; it does not trust the journal as proof of
    bytes.
-3. Stage/verify/publish the Mac wizard-state record with the exact commands
-   in [Mac wizard-state cutover](../../mac-app/docs/wizard-state-cutover.md).
-   Use an explicit Stable/Debug profile and home; the helper reads only
-   `tron.mac.wizardStep` through `/usr/bin/defaults`, refuses malformed/newer
-   data, conflicts, unsafe paths and links, and retains private rollback
-   evidence. `.onboarded` remains completion authority and is never changed.
-   If publication is interrupted, `verify` must refuse the ambiguous
-   destination; use the owner’s explicit `recover --staging <staging>` only
-   after its digest/source proof passes.
-   General agent-home migration is not a step in this cutover.
-4. Prepare/stage/verify/publish the Knowledge catalog and ConnectionOwner
-   authority through the production `TronWorkspace` and catalog-control paths.
-   Preserve records, source counts, checkpoints, pending identities, cohorts,
-   usage, receipts, pending remote effects, opaque refs, and account/scope
-   policy. Current status must be read from the ConnectionOwner
-   revision/observations; Knowledge progress is not a second admission
-   authority. Run the focused readiness regression before an operator cutover:
+Stage/verify/publish the Mac wizard-state record with the exact commands in
+[Mac wizard-state cutover](../../mac-app/docs/wizard-state-cutover.md). Use an
+explicit Stable/Debug profile and home; the helper reads only
+`tron.mac.wizardStep` through `/usr/bin/defaults`, refuses malformed/newer
+data, conflicts, unsafe paths and links, and retains private rollback
+evidence. `.onboarded` remains completion authority and is never changed. If
+publication is interrupted, `verify` must refuse the ambiguous destination; use
+the owner’s explicit `recover --staging <staging>` only after its digest/source
+proof passes. General agent-home migration is not a step in this cutover.
+
+Prepare/stage/publish the Knowledge catalog and ConnectionOwner authority through
+the production `TronWorkspace` and catalog-control paths. Preserve records,
+source counts, checkpoints, pending identities, cohorts, usage, receipts,
+pending remote effects, opaque refs, and account/scope policy. Current status
+must be read from the ConnectionOwner revision/observations; Knowledge progress
+is not a second admission authority. The exact commands are:
+
+```bash
+scripts/tron connection-migrate preflight --tron-home <stable-tron-home>
+scripts/tron connection-migrate prepare --tron-home <stable-tron-home>
+scripts/tron connection-migrate stage \
+  --tron-home <stable-tron-home> --staging <private-connection-staging>
+scripts/tron connection-migrate publish \
+  --tron-home <stable-tron-home> --staging <private-connection-staging> \
+  --confirm-offline
+```
+
+`connection-migrate --confirm-offline` is only the migration helper’s explicit
+operator-approval flag; it is not the Mac reinstall checkpoint above. Run the
+focused readiness regression before an operator cutover:
 
    ```bash
    cd packages/gateway
@@ -184,13 +258,26 @@ writers after publication.
 
 ## 5. Activation (manual user action only)
 
-After all staged artifacts pass independent review, the user/maintainer
-manually replaces/activates the approved Mac/Gateway artifact and iOS build in
-the documented lockstep. Agents must not restart, rebuild, promote, replace,
-or activate a Gateway or installed app. The iOS protocol models/fixtures and
-Gateway protocol must be from the same approved source revision; reject mixed
-wire revisions. Verify the running Gateway reports the recorded artifact
-revision/digest before client use.
+After all staged artifacts pass independent review and the Mac
+`--confirm-offline` checkpoint succeeds, the user/maintainer manually replaces
+and launches the approved Mac app, chooses **Resume Tron**, and only then
+performs any separately approved Gateway/iOS activation in documented lockstep.
+Agents must not restart, rebuild, promote, replace, or activate a Gateway or
+installed app. The iOS protocol models/fixtures and Gateway protocol must be
+from the same approved source revision; reject mixed wire revisions.
+
+App replacement alone does **not** select a new Gateway payload. Before Resume,
+the maintainer must choose the intended Stable payload explicitly: an external
+payload requires its exact validated selection (`scripts/gateway-payload-deploy.mjs
+promote --channel stable --version <version> --fingerprint <fingerprint>`),
+while the bundled payload is used only when no admissible external selection
+remains under the documented payload-selection procedure. A stale external
+payload with the same protocol remains admissible and can override the new
+bundle; do not infer an upgrade from app replacement. After Resume, run
+`scripts/tron mac verify` and require `system.info` to report the reviewed
+revision, payload fingerprint, protocol, and app/runtime identity. Stop on any
+mismatch; do not repair it with a source-only rebuild or an unreviewed pointer
+edit.
 
 ## 6. Post-cutover checks and observation window
 

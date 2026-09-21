@@ -187,6 +187,12 @@ final class SessionPresentationStore {
     private var pendingTarget: SessionPresentationIdentity?
     private(set) var snapshot: SessionSnapshot? {
         didSet {
+            if oldValue?.sessionId != snapshot?.sessionId
+                || oldValue?.runtimeGeneration != snapshot?.runtimeGeneration
+                || oldValue?.leafEntryId != snapshot?.leafEntryId
+                || snapshot == nil {
+                historicalTranscriptWindow = nil
+            }
             let next = snapshot.map(SessionContextPresentation.init)
             // Presentation equality excludes the transport cursor. Mutation
             // admission reads the current authoritative snapshot at the action.
@@ -210,6 +216,18 @@ final class SessionPresentationStore {
     private(set) var chatTimelineGeneration = 0
     private(set) var isAuthoritative = false
     @ObservationIgnored private var mountedTranscriptWindow: MountedTranscriptWindow?
+    @ObservationIgnored private var historicalTranscriptWindow: MountedHistoricalTranscriptWindow?
+    private struct MountedHistoricalTranscriptWindow: Equatable, Sendable {
+        let sessionID: String
+        let runtimeGeneration: String
+        let leafEntryID: String?
+        let structureRevision: Int
+        let start: Int
+        let end: Int
+        let total: Int
+        let targetEntryID: String
+        let items: [TranscriptItem]
+    }
     private struct VisibleTranscriptProjection {
         let timelineGeneration: Int
         let items: [TranscriptItem]
@@ -357,6 +375,11 @@ final class SessionPresentationStore {
     var mountedTranscriptCoverage: MountedTranscriptCoverage? {
         guard let snapshot else { return nil }
         return visibleTranscriptProjection(for: snapshot).coverage
+    }
+
+    var isShowingHistoricalTranscript: Bool {
+        guard let snapshot else { return false }
+        return historicalWindow(for: snapshot) != nil
     }
 
     var visibleTranscript: [TranscriptItem] {
@@ -674,6 +697,21 @@ final class SessionPresentationStore {
         return window
     }
 
+    private func historicalWindow(for authority: SessionSnapshot) -> MountedHistoricalTranscriptWindow? {
+        guard let window = historicalTranscriptWindow,
+              window.sessionID == authority.sessionId,
+              window.runtimeGeneration == authority.runtimeGeneration,
+              window.leafEntryID == authority.leafEntryId,
+              window.structureRevision == structureRevision,
+              authority.transcriptTotal == window.total,
+              window.start >= 0, window.end > window.start, window.end <= window.total,
+              window.items.count == window.end - window.start,
+              Set(window.items.map(\.id)).count == window.items.count,
+              window.items.contains(where: { $0.id == window.targetEntryID }),
+              window.items.allSatisfy({ SessionSnapshotTranscriptAdmissionPolicy.admitsItem($0) }) else { return nil }
+        return window
+    }
+
     private func visibleTranscriptProjection(
         for authority: SessionSnapshot
     ) -> VisibleTranscriptProjection {
@@ -682,16 +720,17 @@ final class SessionPresentationStore {
             return cached
         }
         let window = mountedWindow(for: authority)
+        let historical = historicalWindow(for: authority)
         #if HOSTED_TEST
         hostedVisibleTranscriptProjectionBuildCount &+= 1
         #endif
         let projection = VisibleTranscriptProjection(
             timelineGeneration: chatTimelineGeneration,
-            items: window.map { $0.prefixItems + authority.transcript } ?? authority.transcript,
-            coverage: window?.coverage,
-            start: window?.coverage.start ?? authority.transcriptStart,
-            end: window?.coverage.end ?? authorityTranscriptEnd(authority),
-            total: window?.coverage.total ?? authority.transcriptTotal
+            items: historical?.items ?? (window.map { $0.prefixItems + authority.transcript } ?? authority.transcript),
+            coverage: historical.map { MountedTranscriptCoverage(sessionID: $0.sessionID, runtimeGeneration: $0.runtimeGeneration, leafEntryID: $0.leafEntryID, total: $0.total, start: $0.start, end: $0.end, structureRevision: $0.structureRevision) } ?? window?.coverage,
+            start: historical?.start ?? window?.coverage.start ?? authority.transcriptStart,
+            end: historical?.end ?? window?.coverage.end ?? authorityTranscriptEnd(authority),
+            total: historical?.total ?? window?.coverage.total ?? authority.transcriptTotal
         )
         visibleTranscriptProjectionCache = projection
         return projection
@@ -840,6 +879,158 @@ final class SessionPresentationStore {
             start: oldVisibleStart
         ), coverage.end == newTailEnd else { return nil }
         return MountedTranscriptWindow(coverage: coverage, prefixItems: retainedPrefix)
+    }
+
+    @discardableResult
+    func installHistoricalSearchWindow(
+        _ anchor: SessionSearchAnchorResponse,
+        sessionID: String,
+        presentationGeneration: Int
+    ) -> Bool {
+        guard let target = mountedTarget,
+              target.sessionID == sessionID,
+              target.generation == presentationGeneration,
+              owns(target), isAuthoritative,
+              let authority = snapshot,
+              authority.sessionId == sessionID,
+              let runtimeGeneration = anchor.runtimeGeneration,
+              runtimeGeneration == authority.runtimeGeneration,
+              anchor.leafEntryId == authority.leafEntryId,
+              anchor.start >= 0, anchor.end > anchor.start,
+              anchor.end <= anchor.total,
+              anchor.items.count == anchor.end - anchor.start,
+              let targetOrdinal = anchor.targetOrdinal,
+              (anchor.start..<anchor.end).contains(targetOrdinal),
+              anchor.items.contains(where: { $0.id == anchor.entryId }),
+              SessionSnapshotTranscriptAdmissionPolicy.admitsPage(anchor.items) else {
+            transcriptLoadState = .failed("The searched history window is stale. Tap to retry.")
+            return false
+        }
+        historicalTranscriptWindow = MountedHistoricalTranscriptWindow(
+            sessionID: sessionID,
+            runtimeGeneration: runtimeGeneration,
+            leafEntryID: anchor.leafEntryId,
+            structureRevision: structureRevision,
+            start: anchor.start,
+            end: anchor.end,
+            total: anchor.total,
+            targetEntryID: anchor.entryId,
+            items: anchor.items
+        )
+        transcriptLoadState = .idle
+        advanceChatProjection(canonical: true)
+        delegate?.sessionPresentationStoreCheckpointCache()
+        return true
+    }
+
+    func returnToLatestTranscript(sessionID: String, presentationGeneration: Int) -> Bool {
+        guard let target = mountedTarget,
+              target == SessionPresentationIdentity(sessionID: sessionID, generation: presentationGeneration),
+              owns(target) else { return false }
+        historicalTranscriptWindow = nil
+        advanceChatProjection(canonical: true)
+        return true
+    }
+
+    func loadHistoricalEarlier(sessionID: String, presentationGeneration: Int) async -> Bool {
+        guard let window = historicalTranscriptWindow else { return false }
+        return await loadHistoricalPage(sessionID: sessionID, presentationGeneration: presentationGeneration, boundary: window.start, forward: false)
+    }
+
+    func loadHistoricalLater(sessionID: String, presentationGeneration: Int) async -> Bool {
+        guard let window = historicalTranscriptWindow else { return false }
+        return await loadHistoricalPage(sessionID: sessionID, presentationGeneration: presentationGeneration, boundary: window.end, forward: true)
+    }
+
+    private func loadHistoricalPage(sessionID: String, presentationGeneration: Int, boundary: Int, forward: Bool) async -> Bool {
+        guard let connectionID = await client.activeConnectionID(),
+              !Task.isCancelled,
+              let target = mountedTarget,
+              target == SessionPresentationIdentity(sessionID: sessionID, generation: presentationGeneration),
+              owns(target), isAuthoritative,
+              let authority = snapshot,
+              let oldWindow = historicalTranscriptWindow,
+              oldWindow.sessionID == sessionID,
+              oldWindow.runtimeGeneration == authority.runtimeGeneration,
+              oldWindow.leafEntryID == authority.leafEntryId,
+              boundary >= 0, boundary <= oldWindow.total,
+              forward ? boundary < oldWindow.total : boundary > 0 else { return false }
+        let admittedSubscription = subscriptionToken
+        let admittedConnectionGeneration = connectionGeneration
+        let expectedConnection = GatewayConnectionAdmission(connectionID: connectionID)
+        struct Params: Codable {
+            let sessionId: String
+            let before: Int?
+            let after: Int?
+            let expectedNextEntryId: String?
+            let expectedPreviousEntryId: String?
+            let expectedRuntimeGeneration: String
+            let expectedLeafEntryId: String?
+        }
+        struct Response: Decodable {
+            let items: [TranscriptItem]
+            let start: Int
+            let end: Int
+            let total: Int
+            let runtimeGeneration: String?
+            let leafEntryId: String?
+            let nextEntryId: String?
+            let previousEntryId: String?
+        }
+        do {
+            let response: Response = try await client.request(
+                "session.transcript",
+                Params(sessionId: sessionID, before: forward ? nil : boundary, after: forward ? boundary : nil,
+                       expectedNextEntryId: forward ? nil : oldWindow.items.first?.id,
+                       expectedPreviousEntryId: forward ? oldWindow.items.last?.id : nil,
+                       expectedRuntimeGeneration: authority.runtimeGeneration, expectedLeafEntryId: authority.leafEntryId),
+                timeout: .seconds(15), expectedConnection: expectedConnection
+            )
+            let currentConnectionID = await client.activeConnectionID()
+            // Revalidate the complete presentation lease after the last await,
+            // including same-session remounts that preserve runtime and leaf.
+            guard !Task.isCancelled,
+                  currentConnectionID == connectionID,
+                  connectionGeneration == admittedConnectionGeneration,
+                  subscriptionToken == admittedSubscription,
+                  mountedTarget == target, owns(target), isAuthoritative,
+                  response.runtimeGeneration == authority.runtimeGeneration,
+                  response.leafEntryId == authority.leafEntryId,
+                  response.total == oldWindow.total,
+                  response.start >= 0,
+                  forward ? response.start == boundary : response.end == boundary,
+                  response.end > response.start,
+                  response.items.count == response.end - response.start,
+                  SessionSnapshotTranscriptAdmissionPolicy.admitsPage(response.items),
+                  structureRevision == oldWindow.structureRevision,
+                  historicalTranscriptWindow == oldWindow,
+                  snapshot?.runtimeGeneration == authority.runtimeGeneration,
+                  snapshot?.leafEntryId == authority.leafEntryId else { return false }
+            let targetID = response.items.contains(where: { $0.id == oldWindow.targetEntryID }) ? oldWindow.targetEntryID : response.items.first!.id
+            historicalTranscriptWindow = MountedHistoricalTranscriptWindow(
+                sessionID: sessionID, runtimeGeneration: authority.runtimeGeneration, leafEntryID: authority.leafEntryId,
+                structureRevision: structureRevision, start: response.start, end: response.end, total: response.total,
+                targetEntryID: targetID, items: response.items
+            )
+            advanceChatProjection(canonical: true)
+            return true
+        } catch is CancellationError {
+            return false
+        } catch {
+            let currentConnectionID = await client.activeConnectionID()
+            guard !Task.isCancelled,
+                  currentConnectionID == connectionID,
+                  connectionGeneration == admittedConnectionGeneration,
+                  subscriptionToken == admittedSubscription,
+                  mountedTarget == target,
+                  owns(target), isAuthoritative,
+                  structureRevision == oldWindow.structureRevision,
+                  historicalTranscriptWindow == oldWindow,
+                  snapshot?.runtimeGeneration == authority.runtimeGeneration,
+                  snapshot?.leafEntryId == authority.leafEntryId else { return false }
+            transcriptLoadState = .failed("Historical window changed while loading. Tap to retry.")
+            return false
+        }
     }
 
     func loadEarlier(sessionID: String, presentationGeneration: Int) async -> SessionTranscriptLoadResult {
@@ -2839,6 +3030,7 @@ final class SessionPresentationStore {
                 contextRevision &+= 1
                 if branchChanged {
                     mountedTranscriptWindow = nil
+         historicalTranscriptWindow = nil
                     synchronization.requireFreshInstall(sessionID: snapshot.sessionId)
                 } else if let window = mountedTranscriptWindow {
                     // Re-key the retained coverage to the new structure lease.

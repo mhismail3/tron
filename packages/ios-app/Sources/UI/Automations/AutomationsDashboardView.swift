@@ -422,39 +422,10 @@ struct AutomationsDashboardView: View {
     }
 
     private func automationCard(_ profile: AutomationDashboardProfile, _ summary: GatewayAutomationSummary) -> some View {
-        let status = summary.currentRun?.state.label ?? summary.activation.label
-        let timing = summary.lastRun.map { "Last \(AutomationDateFormatting.relative($0.terminalAt ?? $0.scheduledFor))" }
-            ?? summary.nextOccurrenceAt.map { "Next \(AutomationDateFormatting.relative($0))" }
-            ?? "No run yet"
+        let presentation = AutomationSummaryPresentation(summary: summary, server: profile.label)
         return Button { selected = AutomationSummarySelection(profileID: profile.id, summary: summary) } label: {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Image(systemName: summary.typedActionKind?.icon ?? "clock")
-                    .foregroundStyle(Color.tronAutomation)
-                    .frame(width: 24)
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(summary.name)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text([status, summary.trigger.summary, timing].joined(separator: " · "))
-                        .font(TronTypography.bodySM)
-                        .foregroundStyle(summary.isAttentionRequired ? Color.tronError : Color.tronTextSecondary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let reason = summary.blockedReason {
-                        Text(reason)
-                            .font(TronTypography.caption)
-                            .foregroundStyle(Color.tronError)
-                            .lineLimit(2)
-                    }
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, TronSpacing.lg)
-            .padding(.vertical, 13)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+            AutomationSummaryCard(presentation: presentation)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("automation-card.\(summary.id)")
@@ -464,7 +435,7 @@ struct AutomationsDashboardView: View {
             tintOpacity: 0.14,
             interactive: true
         )
-        .accessibilityLabel(AutomationStatusPresentation.accessible(summary))
+        .accessibilityLabel(presentation.accessibilityLabel)
     }
 
     private var attentionBanner: some View {

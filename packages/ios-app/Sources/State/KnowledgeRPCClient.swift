@@ -58,12 +58,12 @@ final class KnowledgeRPCClient {
         guard value.coverage.id == cut.id, value.coverage.range == cut.range, value.coverage.disposition == .excluded else { throw invalidResponse() }
         return value
     }
-    func list(kind: KnowledgeRecordKind? = nil, scope: KnowledgeScope? = nil, cursor: String? = nil, limit: Int = 50) async throws -> KnowledgeListResponse {
-        let value: KnowledgeListResponse = try await request("knowledge.list", KnowledgeListRequest(kind: kind, scope: scope, includeSuppressed: false, cursor: cursor, limit: min(100, max(1, limit))))
+    func list(kind: KnowledgeRecordKind? = nil, scope: KnowledgeScope? = nil, includeArchived: Bool = false, includePending: Bool = false, cursor: String? = nil, limit: Int = 50) async throws -> KnowledgeListResponse {
+        let value: KnowledgeListResponse = try await request("knowledge.list", KnowledgeListRequest(kind: kind, scope: scope, includeSuppressed: false, includeArchived: includeArchived ? true : nil, includePending: includePending ? true : nil, cursor: cursor, limit: min(100, max(1, limit))))
         guard value.records.count <= 100 else { throw invalidResponse() }; return value
     }
-    func search(query: String, kind: KnowledgeRecordKind? = nil, scope: KnowledgeScope? = nil, limit: Int = 50) async throws -> KnowledgeSearchResponse {
-        let value: KnowledgeSearchResponse = try await request("knowledge.search", KnowledgeSearchRequest(query: String(query.prefix(500)), kind: kind, scope: scope, limit: min(100, max(1, limit))))
+    func search(query: String, kind: KnowledgeRecordKind? = nil, scope: KnowledgeScope? = nil, includeArchived: Bool = false, includePending: Bool = false, limit: Int = 50) async throws -> KnowledgeSearchResponse {
+        let value: KnowledgeSearchResponse = try await request("knowledge.search", KnowledgeSearchRequest(query: String(query.prefix(500)), kind: kind, scope: scope, includeArchived: includeArchived ? true : nil, includePending: includePending ? true : nil, limit: min(100, max(1, limit))))
         guard value.hits.count <= 100, value.indexState == "canonical" else { throw invalidResponse() }; return value
     }
     func recall(query: String? = nil, sessionID: String? = nil, entryID: String? = nil, scope: KnowledgeScope? = nil, limit: Int = 20) async throws -> KnowledgeRecallResponse {
@@ -80,11 +80,11 @@ final class KnowledgeRPCClient {
     }
     /// Object bytes require the exact source record revision that owns the
     /// selected object or representation; a hash alone is not authority.
-    func readObject(_ reference: KnowledgeObjectRef, recordID: String, revisionID: String, offset: Int = 0) async throws -> KnowledgeObjectRead? {
-        struct Params: Encodable { let recordId: String; let revisionId: String; let hash: String; let bytes: Int; let mediaType: String; let offset: Int }
+    func readObject(_ reference: KnowledgeObjectRef, recordID: String, revisionID: String, includeArchived: Bool = false, offset: Int = 0) async throws -> KnowledgeObjectRead? {
+        struct Params: Encodable { let recordId: String; let revisionId: String; let hash: String; let bytes: Int; let mediaType: String; let includeArchived: Bool?; let offset: Int }
         let requestedOffset = max(0, offset)
         guard reference.bytes >= 0, reference.bytes <= 512_000, !reference.hash.isEmpty, !reference.mediaType.isEmpty else { throw invalidResponse() }
-        let value: JSONValue = try await request("knowledge.object.read", Params(recordId: recordID, revisionId: revisionID, hash: reference.hash, bytes: reference.bytes, mediaType: reference.mediaType, offset: requestedOffset), timeout: .seconds(30))
+        let value: JSONValue = try await request("knowledge.object.read", Params(recordId: recordID, revisionId: revisionID, hash: reference.hash, bytes: reference.bytes, mediaType: reference.mediaType, includeArchived: includeArchived ? true : nil, offset: requestedOffset), timeout: .seconds(30))
         if value == .null { return nil }
         let object = try value.decode(KnowledgeObjectRead.self)
         guard let decoded = Data(base64Encoded: object.base64),

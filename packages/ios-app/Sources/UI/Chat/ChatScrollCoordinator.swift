@@ -159,6 +159,7 @@ final class ChatScrollCoordinator {
         var readyForMeasurement = false
         var correctionCount = 0
         var correctionCommandToken: Int?
+        let directTarget: Bool
     }
 
     private struct PrependContext {
@@ -994,7 +995,8 @@ final class ChatScrollCoordinator {
             token: token,
             anchor: anchor,
             requiredSampleRevision: semanticFrameRevision,
-            requiredGeometryRevision: geometryRevision
+            requiredGeometryRevision: geometryRevision,
+            directTarget: false
         )
         layoutRestoreTimeoutTask?.cancel()
         layoutRestoreTimeoutTask = Task { [weak self, clock] in
@@ -1075,12 +1077,36 @@ final class ChatScrollCoordinator {
         }
     }
 
+    func requestHistoricalEntryScroll(semanticID: String, installed: InstalledChatTranscript?) {
+        cancelLayoutRestore()
+        sequence &+= 1
+        let token = sequence
+        let admittedPresentation = presentation
+        layoutRestore = LayoutRestore(
+            token: token,
+            anchor: ChatSemanticAnchor(semanticID: semanticID, renderedID: "", layoutEpoch: layoutEpoch, viewportOffsetY: 0),
+            requiredSampleRevision: semanticFrameRevision,
+            requiredGeometryRevision: geometryRevision,
+            directTarget: true
+        )
+        layoutRestoreTimeoutTask?.cancel()
+        layoutRestoreTimeoutTask = Task { [weak self, clock] in
+            do { try await clock.sleep(.seconds(1)); try Task.checkCancellation() } catch { return }
+            guard let self, self.presentation == admittedPresentation, self.layoutRestore?.token == token else { return }
+            self.cancelLayoutRestore()
+        }
+        installedTranscriptChanged(installed)
+    }
+
     func installedTranscriptChanged(_ installed: InstalledChatTranscript?) {
         guard var restore = layoutRestore else { return }
         guard let installed else { return }
-        guard viewportMode == .anchored,
-              let renderedID = installed.timeline.renderedIDBySemanticID[restore.anchor.semanticID] else {
+        guard (restore.directTarget || viewportMode == .anchored) else {
             cancelLayoutRestore()
+            return
+        }
+        guard let renderedID = installed.timeline.renderedIDBySemanticID[restore.anchor.semanticID] else {
+            if !restore.directTarget { cancelLayoutRestore() }
             return
         }
         let installedLayout = beginInstalledLayoutEpoch()
@@ -1634,13 +1660,21 @@ final class ChatScrollCoordinator {
     private func evaluateLayoutRestoreIfReady() {
         guard var restore = layoutRestore, restore.readyForMeasurement,
               command == nil, restore.correctionCommandToken == nil,
-              viewportMode == .anchored, !isUserInteracting,
+              (restore.directTarget || viewportMode == .anchored), !isUserInteracting,
               let renderedID = restore.renderedAnchorID,
               restore.expectedLayoutEpoch == layoutEpoch,
-              let sample = semanticFrames[renderedID],
-              sample.layoutEpoch == layoutEpoch,
-              sample.revision > restore.requiredSampleRevision,
               geometryRevision > restore.requiredGeometryRevision else { return }
+        if restore.directTarget {
+            // An offscreen lazy row has no frame until it is materialized.
+            // Its installed identity and current viewport layout admit the jump;
+            // frame evidence is needed only for relative offset restoration.
+            cancelLayoutRestore()
+            publish(.materialize(renderedID), animation: .smooth(duration: 0.25), origin: .layout)
+            return
+        }
+        guard let sample = semanticFrames[renderedID],
+              sample.layoutEpoch == layoutEpoch,
+              sample.revision > restore.requiredSampleRevision else { return }
         restore.readyForMeasurement = false
         let residual = sample.frame.minY - restore.anchor.viewportOffsetY
         if abs(residual) <= 1 || restore.correctionCount >= 2 {

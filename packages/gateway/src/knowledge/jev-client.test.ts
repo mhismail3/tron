@@ -24,6 +24,27 @@ describe("JevDecisionClient", () => {
     expect(result.estimatedCostCents).toBeCloseTo(0.000042, 10);
     expect(result.maxEstimatedChargeCents).toBeCloseTo(0.2688, 10);
   });
+  it("does not dispatch a stale blocked epoch after disable and re-enable", async () => {
+    const calls: string[] = [];
+    const fixture = new JevDecisionClient(credentials(), async (_url, init) => { calls.push(init.body); return { status: 200, body: body(valid) }; });
+    let epoch = 1;
+    let enabled = false;
+    let release!: () => void;
+    const hold = new Promise<void>(resolve => { release = resolve; });
+    const blocked = fixture.evaluate(request(), new AbortController().signal, { beforeDispatch: async () => {
+      const captured = epoch;
+      await hold;
+      if (!enabled || captured !== epoch) throw new Error("admission blocked");
+    }});
+    await Promise.resolve();
+    epoch = 2;
+    enabled = true;
+    release();
+    await expect(blocked).rejects.toThrow("admission blocked");
+    await fixture.evaluate(request(), new AbortController().signal, { beforeDispatch: async () => {} });
+    expect(calls).toHaveLength(1);
+  });
+
   it("does not dispatch after cancellation during admission", async () => {
     const controller = new AbortController(); const fixture = client(body(valid));
     await expect(fixture.client.evaluate(request(), controller.signal, { beforeDispatch: async () => { controller.abort(); } })).rejects.toThrow(/cancelled/);

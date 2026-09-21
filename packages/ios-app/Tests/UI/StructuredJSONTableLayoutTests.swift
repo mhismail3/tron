@@ -61,6 +61,17 @@ final class StructuredJSONTableLayoutTests: XCTestCase {
         }
     }
 
+    func testPlainMetadataRowsStackAtAccessibilitySizes() throws {
+        let rows = [
+            TronMetadataTableRow(id: "timezone", title: "Timezone", value: "America/Los_Angeles"),
+            TronMetadataTableRow(id: "policy", title: "After downtime", value: "Run latest missed occurrence"),
+        ]
+        let table = TronMetadataTable(title: "Schedule", accent: .tronAutomation, rows: rows)
+        let standard = Self.intrinsicHeight(table, width: 326)
+        let accessible = table.environment(\.dynamicTypeSize, .accessibility3)
+        XCTAssertGreaterThan(Self.intrinsicHeight(accessible, width: 326), standard)
+    }
+
     private struct Element {
         let label: String
         let hint: String

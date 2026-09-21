@@ -142,16 +142,34 @@ final class DashboardGatewayConnectionPool {
         entries[profileID]?.connectionID
     }
 
+    func requestAdmission(for profileID: String) -> GatewayConnectionAdmission? {
+        guard let connectionID = entries[profileID]?.connectionID else { return nil }
+        return GatewayConnectionAdmission(connectionID: connectionID)
+    }
+
     func request(
         profileID: String,
         method: String,
         params: JSONValue,
         timeout: Duration = .seconds(15)
     ) async throws -> JSONValue {
+        guard let admission = requestAdmission(for: profileID) else {
+            throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
+        }
+        return try await request(profileID: profileID, method: method, params: params, timeout: timeout, expectedConnection: admission)
+    }
+
+    func request(
+        profileID: String,
+        method: String,
+        params: JSONValue,
+        timeout: Duration = .seconds(15),
+        expectedConnection: GatewayConnectionAdmission
+    ) async throws -> JSONValue {
         guard let client = entries[profileID]?.client else {
             throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
         }
-        return try await client.requestValue(method, params, timeout: timeout)
+        return try await client.requestValue(method, params, timeout: timeout, expectedConnection: expectedConnection)
     }
 
     func info(for profileID: String) async -> GatewayInfo? {

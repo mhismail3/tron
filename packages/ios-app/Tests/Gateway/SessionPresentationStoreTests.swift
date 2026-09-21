@@ -49,6 +49,16 @@ struct SessionPresentationStoreTests {
         }
     }
 
+    private func waitForMethod(_ method: String, socket: ScriptedGatewaySocket, startingAt frameIndex: Int) async throws -> (request: JSONValue, index: Int) {
+        var index = frameIndex
+        while true {
+            try await socket.waitUntilSent(count: index + 1)
+            let request = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[index])
+            if request.objectValue?["method"]?.stringValue == method { return (request, index) }
+            index += 1
+        }
+    }
+
     @discardableResult
     private func answerAttentionRead(
         _ socket: ScriptedGatewaySocket,
@@ -89,6 +99,105 @@ struct SessionPresentationStoreTests {
         ] {
             #expect(!GatewayTokenAdmissionPolicy.admit(token))
         }
+    }
+
+    @Test("bounded historical search window stays separate from the live tail")
+    func historicalSearchWindowUsesExactOwnerIdentity() throws {
+        let store = SessionPresentationStore(client: GatewayClient(), performanceSignposts: SystemPerformanceSignposts.shared)
+        var snapshot = try SessionScenarioBuilder(seed: 812).openingTail(targetEncodedBytes: 4_096)
+        snapshot.transcriptStart = 100
+        snapshot.transcriptTotal = 101
+        store.installHostedAuthoritativeSnapshot(snapshot)
+        let generation = try #require(store.presentationGeneration(for: snapshot.sessionId))
+        let target = try #require(snapshot.transcript.last)
+        let anchor = SessionSearchAnchorResponse(
+            sessionId: snapshot.sessionId, entryId: target.id, start: 42,
+            end: 43, total: try #require(snapshot.transcriptTotal),
+            items: [target], runtimeGeneration: snapshot.runtimeGeneration,
+            leafEntryId: snapshot.leafEntryId, targetOrdinal: 42,
+            hasEarlier: true, hasLater: true
+        )
+        #expect(store.installHistoricalSearchWindow(anchor, sessionID: snapshot.sessionId, presentationGeneration: generation))
+        #expect(store.isShowingHistoricalTranscript)
+        #expect(store.visibleTranscript.last?.id == target.id)
+        #expect(store.returnToLatestTranscript(sessionID: snapshot.sessionId, presentationGeneration: generation))
+        #expect(!store.isShowingHistoricalTranscript)
+    }
+
+    @Test("historical owner admits delayed older and newer pages without losing projected bounds")
+    func delayedHistoricalPagesPreserveBounds() async throws {
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        let profile = GatewayProfile(id: "history", label: "History", host: "gateway.test", port: 9847, machineId: "machine", deviceId: "device")
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+        _ = try await client.connect(profile: profile, token: "token")
+        defer { Task { await client.close() } }
+        let builder = SessionScenarioBuilder(seed: 8_901)
+        let all = builder.pagedMixedSession(totalEntries: 14).page(before: 14, count: 14)
+        var snapshot = try builder.openingTail(targetEncodedBytes: 4_096)
+        snapshot.transcript = Array(all[10..<14])
+        snapshot.transcriptStart = 10
+        snapshot.transcriptTotal = 14
+        let store = SessionPresentationStore(client: client, performanceSignposts: SystemPerformanceSignposts.shared)
+        store.installHostedAuthoritativeSnapshot(snapshot)
+        let generation = try #require(store.presentationGeneration(for: snapshot.sessionId))
+        let anchor = SessionSearchAnchorResponse(
+            sessionId: snapshot.sessionId, entryId: all[7].id, start: 5, end: 10, total: 14,
+            items: Array(all[5..<10]), runtimeGeneration: snapshot.runtimeGeneration,
+            leafEntryId: snapshot.leafEntryId, targetOrdinal: 7, hasEarlier: true, hasLater: true
+        )
+        #expect(store.installHistoricalSearchWindow(anchor, sessionID: snapshot.sessionId, presentationGeneration: generation))
+        let older = Task { await store.loadHistoricalEarlier(sessionID: snapshot.sessionId, presentationGeneration: generation) }
+        let olderRequest = try await waitForMethod("session.transcript", socket: socket, startingAt: 0)
+        let olderID = try #require(olderRequest.request.objectValue?["id"]?.stringValue)
+        let olderItems = try JSONDecoder.gateway.decode(JSONValue.self, from: JSONEncoder.gateway.encode(Array(all[0..<5])))
+        await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+            "type": .string("response"), "id": .string(olderID), "ok": .bool(true),
+            "result": .object(["items": olderItems, "start": .number(0), "end": .number(5), "total": .number(14), "runtimeGeneration": .string(snapshot.runtimeGeneration), "leafEntryId": snapshot.leafEntryId.map(JSONValue.string) ?? .null, "nextEntryId": .string(all[5].id)])
+        ])))
+        #expect(await older.value)
+        #expect(store.visibleTranscript.map(\.id) == all[0..<5].map(\.id))
+        let newer = Task { await store.loadHistoricalLater(sessionID: snapshot.sessionId, presentationGeneration: generation) }
+        let newerRequest = try await waitForMethod("session.transcript", socket: socket, startingAt: olderRequest.index + 1)
+        let newerID = try #require(newerRequest.request.objectValue?["id"]?.stringValue)
+        let newerItems = try JSONDecoder.gateway.decode(JSONValue.self, from: JSONEncoder.gateway.encode(Array(all[5..<14])))
+        await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+            "type": .string("response"), "id": .string(newerID), "ok": .bool(true),
+            "result": .object(["items": newerItems, "start": .number(5), "end": .number(14), "total": .number(14), "runtimeGeneration": .string(snapshot.runtimeGeneration), "leafEntryId": snapshot.leafEntryId.map(JSONValue.string) ?? .null, "nextEntryId": .null])
+        ])))
+        #expect(await newer.value)
+        #expect(store.visibleTranscript.map(\.id) == all[5..<14].map(\.id))
+        #expect(store.visibleTranscript.count == 9)
+
+        #expect(store.installHistoricalSearchWindow(anchor, sessionID: snapshot.sessionId, presentationGeneration: generation))
+        let stale = Task { await store.loadHistoricalLater(sessionID: snapshot.sessionId, presentationGeneration: generation) }
+        let staleRequest = try await waitForMethod("session.transcript", socket: socket, startingAt: newerRequest.index + 1)
+        #expect(store.returnToLatestTranscript(sessionID: snapshot.sessionId, presentationGeneration: generation))
+        let staleID = try #require(staleRequest.request.objectValue?["id"]?.stringValue)
+        await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+            "type": .string("response"), "id": .string(staleID), "ok": .bool(false),
+            "error": .object(["code": .string("conflict"), "message": .string("stale history"), "retryable": .bool(true)])
+        ])))
+        #expect(!(await stale.value))
+        #expect(!store.isShowingHistoricalTranscript)
+        #expect(store.transcriptLoadState == .idle)
+
+        // A valid conflict retires only the request, not its connection.
+        _ = try #require(await client.activeConnectionID())
+        // Runtime/leaf and history can survive a same-session remount. The old
+        // request must not publish into its successor presentation generation.
+        #expect(store.installHistoricalSearchWindow(anchor, sessionID: snapshot.sessionId, presentationGeneration: generation))
+        let remounted = Task { await store.loadHistoricalEarlier(sessionID: snapshot.sessionId, presentationGeneration: generation) }
+        let remountedRequest = try await waitForMethod("session.transcript", socket: socket, startingAt: staleRequest.index + 1)
+        let next = SessionPresentationIdentity(sessionID: snapshot.sessionId, generation: generation + 1)
+        store.installHostedPresentationTargets(target: next, pending: nil)
+        let remountedID = try #require(remountedRequest.request.objectValue?["id"]?.stringValue)
+        await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+            "type": .string("response"), "id": .string(remountedID), "ok": .bool(true),
+            "result": .object(["items": olderItems, "start": .number(0), "end": .number(5), "total": .number(14), "runtimeGeneration": .string(snapshot.runtimeGeneration), "leafEntryId": snapshot.leafEntryId.map(JSONValue.string) ?? .null, "nextEntryId": .string(all[5].id)])
+        ])))
+        #expect(!(await remounted.value))
+        #expect(store.transcriptLoadState == .idle)
     }
 
     @Test("pending presentation owns notices before first open mounts")

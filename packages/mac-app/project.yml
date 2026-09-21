@@ -30,6 +30,18 @@ packages:
     path: native-computer-control
 
 targets:
+  TronSearchEmbeddingHelper:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources/Search
+    settings:
+      base:
+        PRODUCT_NAME: TronSearchEmbeddingHelper
+        MACOSX_DEPLOYMENT_TARGET: "15.0"
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_HARDENED_RUNTIME: YES
+
   TronMac:
     type: application
     platform: macOS
@@ -39,6 +51,7 @@ targets:
         excludes:
           - "Resources/**"
           - "NativeHost/**"
+          - "Search/**"
       # Ordinary resources are copied through Xcode's resource phase. The
       # tracked Library tree is excluded because the post-build script owns
       # its `Contents/Library` placement and nested signing order.
@@ -50,6 +63,9 @@ targets:
           - "Library/**"
           - "Gateway/**"
     dependencies:
+      - target: TronSearchEmbeddingHelper
+        embed: false
+        link: false
       - target: TronNativeHost
         embed: false
         link: false
@@ -113,6 +129,9 @@ targets:
           # only the explicit Library/Native copy below belongs in the app.
           rm -rf "$DST" "$GATEWAY_DST" "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Resources/TronNativeHost.app"
           mkdir -p "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Resources" "$DST/Native"
+          EMBEDDING_HELPER="$BUILT_PRODUCTS_DIR/TronSearchEmbeddingHelper"
+          test -x "$EMBEDDING_HELPER" || { echo "Missing signed NaturalLanguage embedding helper at $EMBEDDING_HELPER" >&2; exit 1; }
+          install -m 0755 "$EMBEDDING_HELPER" "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Resources/TronSearchEmbeddingHelper"
           ditto "$SRC" "$DST"
           ditto "$NATIVE_SRC" "$NATIVE_DST"
           install -m 0644 "$DERIVED_FILE_DIR/tron-native-capture.node" "$DST/Native/tron-native-capture.node"
@@ -153,6 +172,7 @@ targets:
             # Sign the Aqua TCC host after copying it into its final nested
             # location, then the outer app seals both native compositions.
             codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$NATIVE_DST"
+            codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Resources/TronSearchEmbeddingHelper"
             codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$DST/Native/tron-native-capture.node"
             # Native signing changes payload bytes. Recompute the selected
             # bundle fingerprint before the outer app seals its resources.

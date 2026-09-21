@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
+import { boundedSummaryText } from "./summary-text.js";
 import { historyPage, historyEntry, type HistoryCursor } from "./history.js";
 import {
   DELEGATED_PROVIDER_TOOL_NAME,
+  DELEGATED_SUPERVISOR_TOOL_NAME,
   delegatedArtifactPathAllowed,
   delegatedProviderOrigin,
   isInstalledDelegatedTool,
@@ -82,6 +84,8 @@ import {
   projectToolOutput,
   projectToolResult,
   projectTranscriptPage,
+  projectTranscriptPageAfter,
+  projectedTranscriptOrdinal,
   canonicalToolResultCallIDs,
   canonicalToolResultCallIDsFromBranch,
   projectTree,
@@ -246,14 +250,6 @@ const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
 const EXTENSION_ARTIFACT_MISSING_GRACE_MS = 30_000;
 const MAX_EXTENSION_EVENT_TAIL_BYTES = 64 * 1_024;
 const MAX_EXTENSION_EVENT_LINES = 256;
-
-function boundedSummaryText(value: string, maximumBytes = 1_024): string {
-  const encoded = Buffer.from(value);
-  if (encoded.length <= maximumBytes) return value;
-  const suffix = "…";
-  const available = Math.max(0, maximumBytes - Buffer.byteLength(suffix));
-  return `${encoded.subarray(0, available).toString("utf8").replace(/\uFFFD$/u, "")}${suffix}`;
-}
 
 export type SessionAttentionRebindDisposition = "migrate" | "preserve" | "reset" | "discard";
 
@@ -842,6 +838,19 @@ export class RuntimeSlot {
   canonicalSessionEntries(): FileEntry[] {
     const header = this.sessionManager.getHeader();
     return header ? [header, ...this.sessionManager.getBranch()] : [];
+  }
+
+  /** Exact owner seam for derived search. This is a bounded snapshot of the
+   * SDK-selected branch, never a second session runtime or file-tail guess. */
+  searchCanonicalCut(): { entries: FileEntry[]; forkBoundary?: ForkBoundaryAnchor; runtimeGeneration: string; leafEntryId?: string } {
+    const entries = this.canonicalSessionEntries();
+    const leafEntryId = entries.at(-1)?.id;
+    return {
+      entries,
+      ...(this.forkBoundary ? { forkBoundary: this.forkBoundary } : {}),
+      runtimeGeneration: this.runtimeGeneration,
+      ...(leafEntryId ? { leafEntryId } : {}),
+    };
   }
 
   private observationBranchId(entries: readonly FileEntry[]): string {
@@ -4318,7 +4327,9 @@ export class RuntimeSlot {
       // otherwise arbitrary tool results must not claim an artifact run.
       const toolCallId = typeof message.toolCallId === "string" ? message.toolCallId : undefined;
       const toolName = typeof message.toolName === "string" ? message.toolName : undefined;
-      if (!toolCallId || !toolName || !this.extensionToolOrigin(toolName)) continue;
+      // Supervisor receipts reference the target run; they never launch or own
+      // it. Counting a reply as a second owner blocks its terminal artifact.
+      if (!toolCallId || !toolName || toolName === DELEGATED_SUPERVISOR_TOOL_NAME || !this.extensionToolOrigin(toolName)) continue;
       const details = message.details !== null && typeof message.details === "object" && !Array.isArray(message.details)
         ? message.details as Record<string, unknown>
         : undefined;
@@ -4684,7 +4695,9 @@ export class RuntimeSlot {
     completedAt?: string,
     durationMs?: number,
   ): ExtensionRunActivity | undefined {
-    if (!extensionOrigin) return undefined;
+    // The native supervisor is ordinary control-tool activity, not a new
+    // delegated execution, even when its receipt includes the target runId.
+    if (!extensionOrigin || toolName === DELEGATED_SUPERVISOR_TOOL_NAME) return undefined;
     const current = this.extensionActivities.get(toolCallId);
     const foregroundSubagentOwner = this.isForegroundSubagentTool(toolName, extensionOrigin);
     const admittedForegroundSubagent = foregroundSubagentOwner && hasForegroundSubagentRunActivity(value);
@@ -5510,6 +5523,53 @@ export class RuntimeSlot {
       extensionPresentation: this.ui.state(),
       diagnostics: this.runtime.diagnostics.map((diagnostic) => ({ type: diagnostic.type, message: diagnostic.message })),
     });
+  }
+
+  transcriptPageAtEntry(
+    entryID: string,
+    expectedRuntimeGeneration?: string,
+    expectedLeafEntryID?: string,
+    windowEnd?: number,
+  ): TranscriptPage {
+    this.assertNoTrustReload();
+    const ordinal = projectedTranscriptOrdinal(this.runtime.session.sessionManager, entryID);
+    if (ordinal < 0) throw new GatewayError("not_found", "The canonical entry is not projectable on the active transcript");
+    return this.transcriptPage(
+      Math.max(ordinal + 1, windowEnd ?? ordinal + 1),
+      undefined,
+      expectedRuntimeGeneration,
+      expectedLeafEntryID,
+    );
+  }
+
+  transcriptPageAfter(
+    after: number,
+    expectedPreviousEntryId?: string,
+    expectedRuntimeGeneration?: string,
+    expectedLeafEntryId?: string,
+  ): TranscriptPage {
+    this.assertNoTrustReload();
+    if (expectedRuntimeGeneration !== undefined && expectedRuntimeGeneration !== this.runtimeGeneration) {
+      throw new GatewayError("conflict", "The session runtime changed while loading history. Refresh the session and try again.", true);
+    }
+    const leafEntryId = this.runtime.session.sessionManager.getLeafId();
+    if (expectedLeafEntryId !== undefined && expectedLeafEntryId !== leafEntryId) {
+      throw new GatewayError("conflict", "The session branch changed while loading history. Refresh the session and try again.", true);
+    }
+    try {
+      return {
+        ...projectTranscriptPageAfter(this.runtime.session.sessionManager, this.dependencies.blobs, after,
+          undefined, expectedPreviousEntryId, this.toolMetadata, this.presentationIDs, this.toolLabels(),
+          this.bashMetadata, this.forkBoundary),
+        runtimeGeneration: this.runtimeGeneration,
+        ...(leafEntryId ? { leafEntryId } : {}),
+      };
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("anchor changed")) {
+        throw new GatewayError("conflict", "The session branch changed while loading history. Refresh the session and try again.", true);
+      }
+      throw error;
+    }
   }
 
   transcriptPage(

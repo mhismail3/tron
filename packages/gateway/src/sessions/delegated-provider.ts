@@ -25,6 +25,9 @@ import { attributedToolOwner } from "../extensions/owner-attribution.js";
 /** The provider tool whose results can own delegated work. */
 export const DELEGATED_PROVIDER_TOOL_NAME = "subagent";
 
+/** Control receipts reference an existing run; they never own its lifecycle. */
+export const DELEGATED_SUPERVISOR_TOOL_NAME = "subagent_supervisor";
+
 /** Fallback source label used when no installed owner can be resolved. */
 export const DELEGATED_PROVIDER_SOURCE = "pi-subagents";
 

@@ -160,6 +160,7 @@ struct DashboardServerSource: Identifiable, Equatable, Sendable {
     let label: String
     let sessionCount: Int
     let state: DashboardServerConnectionState
+    let capabilities: Set<String>
 
     var id: String { profileID }
 }
@@ -372,6 +373,7 @@ struct DashboardServerFilterState: Equatable, Sendable {
     }
 
     var isFiltering: Bool { !selectedProfileIDs.isEmpty || sortMode != .projectServer }
+    var searchIdentity: String { "\(selectedProfileIDs.sorted().joined(separator: ",")):\(sortMode.rawValue)" }
     var isAllSelected: Bool { selectedProfileIDs.isEmpty }
     mutating func reconcile(profileIDs: [String]) {
         let admitted = Set(profileIDs)

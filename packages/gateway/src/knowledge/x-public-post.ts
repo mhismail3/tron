@@ -1,7 +1,9 @@
 /** Public post hydration, not authenticated bookmark discovery. Only the numeric
  * post ID leaves this boundary; no caller cookies, headers, or query parameters. */
 export type XPostProvider = "fxtwitter" | "x-syndication";
-export interface XPostAttempt { provider: XPostProvider; outcome: "ok" | "unavailable" | "rate-limited" | "invalid-response" | "network-error"; retryAt?: string; }
+export const X_PUBLIC_LINK_MAX_LENGTH = 4_096;
+const credentialQueryKey = /^(?:token|api[_-]?key|key|secret|password|passwd|auth|signature|sig|access[_-]?token|credential|session)$/i;
+export interface XPostAttempt { provider: XPostProvider; outcome: "ok" | "unavailable" | "rate-limited" | "invalid-response" | "network-error"; status?: number; retryAt?: string; }
 export interface XPublicPost {
   id: string;
   url: string;
@@ -12,6 +14,8 @@ export interface XPublicPost {
   /** Only ordinary root-post text can be complete. No thread/media guarantee. */
   disposition: "complete" | "partial" | "inaccessible";
   limitations: string[];
+  /** Bounded outbound URLs from provider entities/facets; these are not fetched by this reader. */
+  linkedUrls?: string[];
   attempts: XPostAttempt[];
   raw?: string;
 }
@@ -41,14 +45,47 @@ function object(value: unknown): Record<string, any> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : undefined;
 }
 
-function parsePost(raw: string, provider: XPostProvider, id: string): Pick<XPublicPost, "text" | "title" | "disposition" | "limitations"> | undefined {
+/** Normalize provider-declared links before they enter persisted source metadata. */
+export function normalizePublicLinkedUrl(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > X_PUBLIC_LINK_MAX_LENGTH) return undefined;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password || url.port) return undefined;
+    for (const key of url.searchParams.keys()) if (credentialQueryKey.test(key)) return undefined;
+    if (["x.com", "www.x.com", "twitter.com", "www.twitter.com", "mobile.twitter.com"].includes(url.hostname.toLowerCase()) && /\/(?:[^/]+\/)?status\/[1-9][0-9]{0,19}/i.test(url.pathname)) return undefined;
+    url.hash = "";
+    const normalized = url.toString();
+    return normalized.length <= X_PUBLIC_LINK_MAX_LENGTH ? normalized : undefined;
+  } catch { return undefined; }
+}
+
+function outboundUrls(post: Record<string, any>): string[] {
+  const candidates: unknown[] = [];
+  const entities = object(post.entities);
+  for (const value of [entities?.urls, object(post.raw_text)?.facets]) {
+    if (Array.isArray(value)) for (const item of value) {
+      const entry = object(item);
+      const candidate = typeof entry?.expanded_url === "string" ? entry.expanded_url : typeof entry?.replacement === "string" ? entry.replacement : undefined;
+      if (candidate) candidates.push(candidate);
+    }
+  }
+  const links: string[] = [];
+  for (const candidate of candidates) {
+    if (links.length >= 8) break;
+    const normalized = normalizePublicLinkedUrl(candidate);
+    if (normalized && !links.includes(normalized)) links.push(normalized);
+  }
+  return links;
+}
+
+function parsePost(raw: string, provider: XPostProvider, id: string): Pick<XPublicPost, "text" | "title" | "disposition" | "limitations" | "linkedUrls"> | undefined {
   let payload: Record<string, any> | undefined;
   try { payload = object(JSON.parse(raw)); } catch { return undefined; }
   if (!payload) return undefined;
   const post = provider === "fxtwitter" ? (payload.code === 200 ? object(payload.tweet) : undefined) : payload;
   if (!post || (provider === "fxtwitter" ? post.id : post.id_str) !== id || post.author?.protected === true || post.user?.protected === true) return undefined;
   if (typeof post.text !== "string" || !post.text.trim() || post.text.length > 100_000) return undefined;
-  const limitations: string[] = ["Only this post is retrieved; replies, a complete thread, and linked pages are not fetched."];
+  const limitations: string[] = ["Only this post is retrieved; replies and a complete thread are not fetched. Outbound URLs are discovered from provider entities but linked pages are not fetched by this read."];
   let partial = provider === "x-syndication" || post.is_note_tweet !== false;
   if (provider === "fxtwitter" && post.is_note_tweet === undefined) limitations.push("Provider did not establish whether the post is long-form; completeness is unverified.");
   if (provider === "x-syndication") limitations.push("Syndication is a fallback preview; long-post and Article completeness is not established.");
@@ -73,7 +110,9 @@ function parsePost(raw: string, provider: XPostProvider, id: string): Pick<XPubl
     partial = true;
     limitations.push("Long-post text is provider-supplied; verify its ending in X before claiming completeness.");
   }
-  return { text, title: typeof author === "string" ? `X post by @${author.slice(0, 50)}` : `X post ${id}`, disposition: partial ? "partial" : "complete", limitations };
+  const linkedUrls = outboundUrls(post);
+  if (linkedUrls.length > 0) limitations.push(`Discovered ${linkedUrls.length} bounded outbound URL${linkedUrls.length === 1 ? "" : "s"}; each target requires separate safe source capture.`);
+  return { text, title: typeof author === "string" ? `X post by @${author.slice(0, 50)}` : `X post ${id}`, disposition: partial ? "partial" : "complete", limitations, ...(linkedUrls.length > 0 ? { linkedUrls } : {}) };
 }
 
 /** One attempt per provider, sequentially. No retry storm, paid API, or hidden
@@ -100,13 +139,13 @@ export async function lookupPublicXPost(input: string, get: XPostGet, signal: Ab
       const afterTime = after && /^\d+(?:\.\d+)?$/.test(after) ? Date.now() + Number(after) * 1_000 : after ? Date.parse(after) : NaN;
       const resetTime = response.rateLimitReset && /^\d+$/.test(response.rateLimitReset) ? Number(response.rateLimitReset) * 1_000 : NaN;
       const retryTime = Math.max(...[afterTime, resetTime].filter(time => Number.isFinite(time) && time > Date.now() && time < 8.64e15));
-      attempts.push({ provider, outcome: "rate-limited", ...(Number.isFinite(retryTime) ? { retryAt: new Date(retryTime).toISOString() } : {}) });
+      attempts.push({ provider, outcome: "rate-limited", status: response.status, ...(Number.isFinite(retryTime) ? { retryAt: new Date(retryTime).toISOString() } : {}) });
       continue;
     }
-    if (response.status !== 200) { attempts.push({ provider, outcome: "unavailable" }); continue; }
+    if (response.status !== 200) { attempts.push({ provider, outcome: "unavailable", status: response.status }); continue; }
     const raw = response.body;
     const parsed = !response.truncated && raw && Buffer.byteLength(raw, "utf8") <= 2_000_000 ? parsePost(raw, provider, identity.id) : undefined;
-    if (!parsed || raw === undefined) { attempts.push({ provider, outcome: "invalid-response" }); continue; }
+    if (!parsed || raw === undefined) { attempts.push({ provider, outcome: "invalid-response", status: response.status }); continue; }
     attempts.push({ provider, outcome: "ok" });
     return { ...identity, ...parsed, provider, endpoint, attempts, raw };
   }

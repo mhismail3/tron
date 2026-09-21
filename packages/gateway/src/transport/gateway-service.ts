@@ -10,6 +10,7 @@ import { PI_VERSION, GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } f
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, string, text as boundedText } from "../util/validation.js";
 import type { DeviceStore } from "../security/device-store.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import type { SessionSearchService } from "../sessions/session-search-service.js";
 import { EXTENSION_ACTIVITY_HISTORY_CAPABILITY } from "../sessions/extension-activity-history.js";
 import {
   PROCESS_ACTIVITY_CAPABILITY,
@@ -121,6 +122,24 @@ function rejectUnknownFields(params: Record<string, unknown>, allowed: readonly 
   }
 }
 
+function parseSessionSearchAnchorRevision(value: unknown): import("../sessions/session-search-contract.js").SessionSearchAnchorRevision {
+  const input = object(value, "anchorRevision");
+  rejectUnknownFields(input, ["indexRevision", "fileIdentity", "branchDigest", "leafEntryId", "entryOrdinal", "forkBoundary"], "anchorRevision");
+  const revision: import("../sessions/session-search-contract.js").SessionSearchAnchorRevision = {
+    indexRevision: string(input.indexRevision, "anchorRevision.indexRevision", { max: 256 }),
+    fileIdentity: string(input.fileIdentity, "anchorRevision.fileIdentity", { max: 512 }),
+    branchDigest: string(input.branchDigest, "anchorRevision.branchDigest", { max: 256 }),
+    entryOrdinal: integer(input.entryOrdinal, "anchorRevision.entryOrdinal", 0, 100_000),
+  };
+  if (input.leafEntryId !== undefined) revision.leafEntryId = string(input.leafEntryId, "anchorRevision.leafEntryId", { max: 512 });
+  if (input.forkBoundary !== undefined) {
+    const boundary = object(input.forkBoundary, "anchorRevision.forkBoundary");
+    rejectUnknownFields(boundary, ["kind", "inheritedEntryId", "gapOrdinal"], "anchorRevision.forkBoundary");
+    revision.forkBoundary = { kind: oneOf(boundary.kind, "anchorRevision.forkBoundary.kind", ["sessionFork", "subagentFork"] as const), inheritedEntryId: string(boundary.inheritedEntryId, "anchorRevision.forkBoundary.inheritedEntryId", { max: 512 }), gapOrdinal: integer(boundary.gapOrdinal, "anchorRevision.forkBoundary.gapOrdinal", 0, 100_000) };
+  }
+  return revision;
+}
+
 function parseSessionSourceControl(value: unknown): SessionSourceControlRequest | undefined {
   if (value === undefined || value === null) return undefined;
   const source = object(value, "sourceControl");
@@ -153,7 +172,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 const restartDrainMethods = new Set([
   "system.info", "system.logs", "system.logs.export", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.drain.status",
   "device.install.config.status", "device.install.status",
-  "session.history.list", "session.history.entry",
+  "session.history.list", "session.history.entry", "session.search", "session.search.anchor",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
   "session.workspace.inspect", "session.workspace.list", "session.workspace.file", "session.workspace.git.diff", "session.workspace.git.history.list", "session.workspace.git.history.get", "session.workspace.git.history.diff",
   "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.abort", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel",
@@ -221,6 +240,7 @@ export interface GatewayServiceDependencies {
   knowledge?: KnowledgeService;
   /** Generic account-envelope owner. Provider progress/evidence remains with its adapter. */
   connections?: ConnectionOwner;
+  sessionSearch?: SessionSearchService;
   /** Bounded account-usage owner; injectable for fixture transport tests. */
   providerUsage?: ProviderUsageOwner;
 }
@@ -337,6 +357,7 @@ export class GatewayService {
         ...(this.dependencies.automations?.status().ready ? [AUTOMATIONS_CAPABILITY, AUTOMATIONS_TIMELINE_CAPABILITY] : []),
         ...(this.dependencies.knowledge ? ["knowledge.v1", "knowledge-global-observation.v1", "knowledge-coverage-dismiss.v1", "knowledge-coverage-filter.v1"] : []),
         ...(this.dependencies.connections ? ["connections.v1"] : []),
+        ...(this.dependencies.sessionSearch ? ["session-search.v1"] : []),
       ],
     };
   }
@@ -756,6 +777,47 @@ export class GatewayService {
           ));
         }, true);
 
+      case "session.search": {
+        const search = this.dependencies.sessionSearch;
+        if (!search) throw new GatewayError("unsupported", "Session search is unavailable");
+        rejectUnknownFields(params, ["query", "scope", "maxResults", "remoteRanking", "remoteConsent"], "session.search");
+        const query = boundedText(params.query, "query", 2_048);
+        const scope = params.scope === undefined ? "user" : oneOf(params.scope, "scope", ["user"] as const);
+        const maxResults = params.maxResults === undefined ? undefined : integer(params.maxResults, "maxResults", 1, 50);
+        const remoteRanking = params.remoteRanking === undefined ? false : boolean(params.remoteRanking, "remoteRanking");
+        const remoteConsent = params.remoteConsent === undefined ? false : boolean(params.remoteConsent, "remoteConsent");
+        return safeJson(await search.search({ query, scope, ...(maxResults === undefined ? {} : { maxResults }), remoteRanking, remoteConsent }, client.signal));
+      }
+      case "session.search.policy.get": {
+        const search = this.dependencies.sessionSearch;
+        if (!search) throw new GatewayError("unsupported", "Session search is unavailable");
+        rejectUnknownFields(params, [], "session.search.policy.get");
+        return safeJson(search.getPolicy());
+      }
+      case "session.search.policy.set": {
+        const search = this.dependencies.sessionSearch;
+        if (!search) throw new GatewayError("unsupported", "Session search is unavailable");
+        rejectUnknownFields(params, ["enabled", "perQueryMicroCents", "dailyMicroCents", "policyRevision"], "session.search.policy.set");
+        const policy = {
+          enabled: boolean(params.enabled, "enabled"),
+          perQueryMicroCents: integer(params.perQueryMicroCents, "perQueryMicroCents", 0, 100_000_000),
+          dailyMicroCents: integer(params.dailyMicroCents, "dailyMicroCents", 0, 1_000_000_000),
+          policyRevision: integer(params.policyRevision, "policyRevision", 1, Number.MAX_SAFE_INTEGER),
+        };
+        search.setPolicy(policy);
+        return safeJson(search.getPolicy());
+      }
+      case "session.search.anchor": {
+        const search = this.dependencies.sessionSearch;
+        if (!search) throw new GatewayError("unsupported", "Session search is unavailable");
+        rejectUnknownFields(params, ["sessionId", "entryId", "anchorRevision", "before", "expectedRuntimeGeneration", "expectedLeafEntryId", "windowEnd"], "session.search.anchor");
+        const sessionId = string(params.sessionId, "sessionId", { max: 512 });
+        const entryId = string(params.entryId, "entryId", { max: 512 });
+        const anchorRevision = parseSessionSearchAnchorRevision(params.anchorRevision);
+        const before = params.before === undefined ? undefined : integer(params.before, "before", 0, 100);
+        const windowEnd = params.windowEnd === undefined ? undefined : integer(params.windowEnd, "windowEnd", 1, 100_000_000);
+        return safeJson(await search.anchor({ sessionId, entryId, anchorRevision, ...(before === undefined ? {} : { before }), ...(windowEnd === undefined ? {} : { windowEnd }), ...(params.expectedRuntimeGeneration === undefined ? {} : { expectedRuntimeGeneration: string(params.expectedRuntimeGeneration, "expectedRuntimeGeneration", { max: 256 }) }), ...(params.expectedLeafEntryId === undefined ? {} : { expectedLeafEntryId: string(params.expectedLeafEntryId, "expectedLeafEntryId", { max: 512 }) }) }, client.signal));
+      }
       case "session.list": {
         const scope = params.scope === undefined ? "user" : oneOf(params.scope, "scope", ["user", "all"] as const);
         const cursor = optionalString(params.cursor, "cursor", 96);
@@ -911,18 +973,20 @@ export class GatewayService {
         const before = params.before === undefined
           ? undefined
           : integer(params.before, "before", 0, Number.MAX_SAFE_INTEGER);
+        const after = params.after === undefined
+          ? undefined
+          : integer(params.after, "after", 0, Number.MAX_SAFE_INTEGER);
+        if (before !== undefined && after !== undefined) throw new GatewayError("invalid_request", "Specify only one transcript page direction");
         const expectedNextEntryId = optionalString(params.expectedNextEntryId, "expectedNextEntryId", 200);
+        const expectedPreviousEntryId = optionalString(params.expectedPreviousEntryId, "expectedPreviousEntryId", 200);
         const expectedRuntimeGeneration = optionalString(params.expectedRuntimeGeneration, "expectedRuntimeGeneration", 200);
         const expectedLeafEntryId = optionalString(params.expectedLeafEntryId, "expectedLeafEntryId", 200);
         const slot = await this.openedSlot(client, params);
         // Paging is a bounded read for an already-open presentation. It must
         // never create or revive event-subscription ownership after a close.
-        return safeJson(slot.transcriptPage(
-          before,
-          expectedNextEntryId,
-          expectedRuntimeGeneration,
-          expectedLeafEntryId,
-        ));
+        return safeJson(after !== undefined
+          ? slot.transcriptPageAfter(after, expectedPreviousEntryId, expectedRuntimeGeneration, expectedLeafEntryId)
+          : slot.transcriptPage(before, expectedNextEntryId, expectedRuntimeGeneration, expectedLeafEntryId));
       }
       case "session.extensionActivity.list": {
         const slot = await this.openedSlot(client, params);

@@ -151,6 +151,8 @@ export interface SourceContent {
   captureDisposition: "complete" | "partial" | "metadata-only" | "inaccessible" | "failed" | "reference-only";
   /** Sanitized capture phase/reason for recoverable provider or safety failures. */
   captureReason?: string;
+  /** Bounded provider-declared outbound targets; target sources are separate records. */
+  linkedUrls?: string[];
   annotations?: Array<{ text: string; locator?: string; createdAt?: string }>;
   sourcePublishedAt?: string;
   capturedAt: string;
@@ -824,6 +826,17 @@ function validateKindContent(kind: KnowledgeRecordKind, value: unknown): void {
       for (const key of ["profileVersion", "rubricVersion"] as const) if (assessment[key] !== undefined) boundedString(assessment[key], `source assessment ${key}`, 200);
     }
     if (content.captureReason !== undefined) boundedString(content.captureReason, "source capture reason", 2_000);
+    if (content.linkedUrls !== undefined) {
+      if (!Array.isArray(content.linkedUrls) || content.linkedUrls.length > 8) throw new Error("Invalid linked source URLs");
+      for (const value of content.linkedUrls) {
+        boundedString(value, "linked source URL", 4_096);
+        try {
+          const url = new URL(value);
+          if (url.protocol !== "https:" || url.username || url.password) throw new Error();
+          for (const key of url.searchParams.keys()) if (/^(?:token|api[_-]?key|key|secret|password|passwd|auth|signature|sig|access[_-]?token|credential|session)$/i.test(key)) throw new Error();
+        } catch { throw new Error("Linked source URL must be an https URL without credentials"); }
+      }
+    }
     if (content.annotations !== undefined) {
       if (!Array.isArray(content.annotations) || content.annotations.length > 200) throw new Error("Invalid source annotations");
       for (const annotation of content.annotations) { const item = annotation as Record<string, unknown>; boundedString(item.text, "annotation", 20_000); if (item.locator !== undefined) boundedString(item.locator, "annotation locator", 512); if (item.createdAt !== undefined) assertTimestamp(item.createdAt, "annotation createdAt"); }

@@ -257,13 +257,41 @@ struct KnowledgeSourceOrigin: Codable, Hashable, Sendable { let kind: KnowledgeS
 enum KnowledgeEvidenceQuality: String, Codable, Sendable { case high, medium, low, none, unknown }
 enum KnowledgeFreshness: String, Codable, Sendable { case current, aging, stale, unknown }
 enum KnowledgeSourceAdmission: String, Codable, Hashable, Sendable { case pending, retained, archived }
-struct KnowledgeSourceAssessment: Codable, Hashable, Sendable { let summary: String; let contribution: String?; let whyItMatters: String?; let evidenceQuality: KnowledgeEvidenceQuality; let freshness: KnowledgeFreshness; let possibleUse: String?; let generatedAt: String; let model: String?; let recommendation: KnowledgeSourceAdmission? = nil; let confidence: Double? = nil; let profileVersion: String? = nil; let rubricVersion: String? = nil }
+struct KnowledgeSourceAssessmentUsage: Codable, Hashable, Sendable {
+    let inputTokens: Int; let outputTokens: Int; let estimatedCostCents: Int; let pricing: String
+}
+struct KnowledgeSourceAssessment: Codable, Hashable, Sendable {
+    let summary: String; let contribution: String?; let whyItMatters: String?; let evidenceQuality: KnowledgeEvidenceQuality; let freshness: KnowledgeFreshness; let possibleUse: String?; let generatedAt: String; let model: String?; let recommendation: KnowledgeSourceAdmission?; let confidence: Double?; let profileVersion: String?; let rubricVersion: String?
+    // These fields are provider assessment metadata, not capture completeness or epistemic confidence.
+    let inputDigest: String?; let assessmentInputDigest: String?; let coverage: String?; let classification: String?; let usage: KnowledgeSourceAssessmentUsage?
+    init(summary: String, contribution: String?, whyItMatters: String?, evidenceQuality: KnowledgeEvidenceQuality, freshness: KnowledgeFreshness, possibleUse: String?, generatedAt: String, model: String?, recommendation: KnowledgeSourceAdmission? = nil, confidence: Double? = nil, profileVersion: String? = nil, rubricVersion: String? = nil, inputDigest: String? = nil, assessmentInputDigest: String? = nil, coverage: String? = nil, classification: String? = nil, usage: KnowledgeSourceAssessmentUsage? = nil) {
+        self.summary = summary; self.contribution = contribution; self.whyItMatters = whyItMatters; self.evidenceQuality = evidenceQuality; self.freshness = freshness; self.possibleUse = possibleUse; self.generatedAt = generatedAt; self.model = model; self.recommendation = recommendation; self.confidence = confidence; self.profileVersion = profileVersion; self.rubricVersion = rubricVersion; self.inputDigest = inputDigest; self.assessmentInputDigest = assessmentInputDigest; self.coverage = coverage; self.classification = classification; self.usage = usage
+    }
+    private enum CodingKeys: String, CodingKey { case summary, contribution, whyItMatters, evidenceQuality, freshness, possibleUse, generatedAt, model, recommendation, confidence, profileVersion, rubricVersion, inputDigest, assessmentInputDigest, coverage, classification, usage }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        summary = try c.decode(String.self, forKey: .summary); contribution = try c.decodeIfPresent(String.self, forKey: .contribution); whyItMatters = try c.decodeIfPresent(String.self, forKey: .whyItMatters)
+        evidenceQuality = try c.decode(KnowledgeEvidenceQuality.self, forKey: .evidenceQuality); freshness = try c.decode(KnowledgeFreshness.self, forKey: .freshness); possibleUse = try c.decodeIfPresent(String.self, forKey: .possibleUse); generatedAt = try c.decode(String.self, forKey: .generatedAt); model = try c.decodeIfPresent(String.self, forKey: .model)
+        recommendation = try c.decodeIfPresent(KnowledgeSourceAdmission.self, forKey: .recommendation); confidence = try c.decodeIfPresent(Double.self, forKey: .confidence); profileVersion = try c.decodeIfPresent(String.self, forKey: .profileVersion); rubricVersion = try c.decodeIfPresent(String.self, forKey: .rubricVersion)
+        inputDigest = try c.decodeIfPresent(String.self, forKey: .inputDigest); assessmentInputDigest = try c.decodeIfPresent(String.self, forKey: .assessmentInputDigest); coverage = try c.decodeIfPresent(String.self, forKey: .coverage); classification = try c.decodeIfPresent(String.self, forKey: .classification); usage = try c.decodeIfPresent(KnowledgeSourceAssessmentUsage.self, forKey: .usage)
+    }
+}
 struct KnowledgeSourceAdmissionState: Codable, Hashable, Sendable { let status: KnowledgeSourceAdmission; let reason: String?; let decidedAt: String; let profileVersion: String?; let rubricVersion: String? }
 struct KnowledgeSourceRetention: Codable, Hashable, Sendable { let sensitivity: String; let usageConstraint: String?; let evidenceAvailable: Bool; let originalHash: String? }
 struct KnowledgeSourceContent: Codable, Hashable, Sendable {
-    let title: String; let uri: String?; var collectionId: String? = nil; let text: String?; let object: KnowledgeObjectRef?; var representations: [KnowledgeSourceRepresentation]? = nil; let mediaType: String?
-    let captureDisposition: KnowledgeCaptureDisposition; let annotations: [KnowledgeSourceAnnotation]?; let sourcePublishedAt: String?; let capturedAt: String; let origin: String?
-    let origins: [KnowledgeSourceOrigin]?; let identity: KnowledgeSourceIdentity?; var retention: KnowledgeSourceRetention? = nil; let assessment: KnowledgeSourceAssessment?; var admission: KnowledgeSourceAdmissionState? = nil
+    let title: String; let uri: String?; var collectionId: String?; let text: String?; let object: KnowledgeObjectRef?; var representations: [KnowledgeSourceRepresentation]?; let mediaType: String?
+    let captureDisposition: KnowledgeCaptureDisposition; let captureReason: String?; let annotations: [KnowledgeSourceAnnotation]?; let sourcePublishedAt: String?; let capturedAt: String; let origin: String?
+    let origins: [KnowledgeSourceOrigin]?; let identity: KnowledgeSourceIdentity?; var retention: KnowledgeSourceRetention?; let assessment: KnowledgeSourceAssessment?; var admission: KnowledgeSourceAdmissionState?
+    init(title: String, uri: String?, collectionId: String? = nil, text: String?, object: KnowledgeObjectRef?, representations: [KnowledgeSourceRepresentation]? = nil, mediaType: String?, captureDisposition: KnowledgeCaptureDisposition, captureReason: String? = nil, annotations: [KnowledgeSourceAnnotation]?, sourcePublishedAt: String?, capturedAt: String, origin: String?, origins: [KnowledgeSourceOrigin]?, identity: KnowledgeSourceIdentity?, retention: KnowledgeSourceRetention? = nil, assessment: KnowledgeSourceAssessment?, admission: KnowledgeSourceAdmissionState? = nil) {
+        self.title = title; self.uri = uri; self.collectionId = collectionId; self.text = text; self.object = object; self.representations = representations; self.mediaType = mediaType; self.captureDisposition = captureDisposition; self.captureReason = captureReason; self.annotations = annotations; self.sourcePublishedAt = sourcePublishedAt; self.capturedAt = capturedAt; self.origin = origin; self.origins = origins; self.identity = identity; self.retention = retention; self.assessment = assessment; self.admission = admission
+    }
+    private enum CodingKeys: String, CodingKey { case title, uri, collectionId, text, object, representations, mediaType, captureDisposition, captureReason, annotations, sourcePublishedAt, capturedAt, origin, origins, identity, retention, assessment, admission }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title = try c.decode(String.self, forKey: .title); uri = try c.decodeIfPresent(String.self, forKey: .uri); collectionId = try c.decodeIfPresent(String.self, forKey: .collectionId); text = try c.decodeIfPresent(String.self, forKey: .text); object = try c.decodeIfPresent(KnowledgeObjectRef.self, forKey: .object); representations = try c.decodeIfPresent([KnowledgeSourceRepresentation].self, forKey: .representations); mediaType = try c.decodeIfPresent(String.self, forKey: .mediaType)
+        captureDisposition = try c.decode(KnowledgeCaptureDisposition.self, forKey: .captureDisposition); captureReason = try c.decodeIfPresent(String.self, forKey: .captureReason); annotations = try c.decodeIfPresent([KnowledgeSourceAnnotation].self, forKey: .annotations); sourcePublishedAt = try c.decodeIfPresent(String.self, forKey: .sourcePublishedAt); capturedAt = try c.decode(String.self, forKey: .capturedAt); origin = try c.decodeIfPresent(String.self, forKey: .origin)
+        origins = try c.decodeIfPresent([KnowledgeSourceOrigin].self, forKey: .origins); identity = try c.decodeIfPresent(KnowledgeSourceIdentity.self, forKey: .identity); retention = try c.decodeIfPresent(KnowledgeSourceRetention.self, forKey: .retention); assessment = try c.decodeIfPresent(KnowledgeSourceAssessment.self, forKey: .assessment); admission = try c.decodeIfPresent(KnowledgeSourceAdmissionState.self, forKey: .admission)
+    }
 }
 struct KnowledgeObservationRange: Codable, Hashable, Sendable {
     let sessionId: String; let branchId: String?; let fromEntryId: String; let toEntryId: String; let entryIds: [String]; let entryDigest: String; let projectId: String?; let invocationIds: [String]?
@@ -340,8 +368,12 @@ struct KnowledgeImportMapping: Codable, Hashable, Sendable { let legacyId: Strin
 struct KnowledgeImportResult: Codable, Hashable, Sendable { let operation: String; let source: String; let planHash: String; let planned: Int; let selected: Int; let imported: Int; let resumed: Int; let skipped: Int; let failed: Int; let completed: Bool; let progress: KnowledgeImportProgress; let mappings: [KnowledgeImportMapping]; let warnings: [String] }
 struct KnowledgeTriageResult: Codable, Hashable, Sendable { let source: KnowledgeRecord; let assessment: KnowledgeSourceAssessment }
 
-struct KnowledgeListRequest: Encodable, Sendable { let kind: KnowledgeRecordKind?; let scope: KnowledgeScope?; let includeSuppressed: Bool; let cursor: String?; let limit: Int }
-struct KnowledgeSearchRequest: Encodable, Sendable { let query: String; let kind: KnowledgeRecordKind?; let scope: KnowledgeScope?; let limit: Int }
+struct KnowledgeListRequest: Encodable, Sendable {
+    let kind: KnowledgeRecordKind?; let scope: KnowledgeScope?; let includeSuppressed: Bool; let includeArchived: Bool?; let includePending: Bool?; let cursor: String?; let limit: Int
+}
+struct KnowledgeSearchRequest: Encodable, Sendable {
+    let query: String; let kind: KnowledgeRecordKind?; let scope: KnowledgeScope?; let includeArchived: Bool?; let includePending: Bool?; let limit: Int
+}
 struct KnowledgeRecallRequest: Encodable, Sendable { let query: String?; let sessionId: String?; let entryId: String?; let scope: KnowledgeScope?; let limit: Int }
 
 extension KnowledgeRecord {
@@ -349,7 +381,68 @@ extension KnowledgeRecord {
         switch content { case .source(let c): c.title; case .observation: "Observation"; case .note(let c): c.title }
     }
     var summary: String {
-        switch content { case .source(let c): c.text ?? c.uri ?? c.captureDisposition.rawValue; case .observation(let c): c.items.map { $0.text }.joined(separator: " "); case .note(let c): c.body ?? "" }
+        switch content { case .source(let c): c.text ?? KnowledgeSourcePresentationPolicy.coverageSummary(c); case .observation(let c): c.items.map { $0.text }.joined(separator: " "); case .note(let c): c.body ?? "" }
+    }
+}
+
+/// Presentation-only source semantics. Capture coverage, intake admission, and
+/// assessment quality remain separate so a partial/reference source is never
+/// presented as complete text or as a confidence score.
+enum KnowledgeSourcePresentationPolicy {
+    static func safeURL(_ value: String?) -> URL? {
+        guard let value, let url = URL(string: value),
+              let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme),
+              let host = url.host, !host.isEmpty, url.user == nil, url.password == nil else { return nil }
+        return url
+    }
+
+    static func domain(_ value: String?) -> String? { safeURL(value)?.host?.lowercased() }
+
+    static func coverageTitle(_ disposition: KnowledgeCaptureDisposition) -> String {
+        switch disposition {
+        case .complete: "Captured source available"
+        case .partial: "Partial capture"
+        case .metadataOnly: "Metadata/media retained"
+        case .inaccessible: "Reference retained; source inaccessible"
+        case .failed: "Capture failed; reference retained"
+        case .referenceOnly: "Reference retained; not fetched"
+        }
+    }
+
+    static func coverageTitle(_ source: KnowledgeSourceContent) -> String {
+        guard source.captureDisposition == .complete else { return coverageTitle(source.captureDisposition) }
+        return source.text?.isEmpty == false ? "Captured text available" : "Captured object retained; extracted text unavailable"
+    }
+
+    static func coverageDetail(_ source: KnowledgeSourceContent) -> String {
+        if let reason = source.captureReason, !reason.isEmpty { return reason }
+        switch source.captureDisposition {
+        case .complete: return source.text?.isEmpty == false ? "The retained extraction may be read below." : "A complete retained object exists, but no extracted text is available to display."
+        case .partial: return "Only part of the source was captured; retained text must not be treated as complete."
+        case .metadataOnly: return "Metadata or media was retained without extracted text."
+        case .inaccessible: return "The original reference was retained, but its content was not available to capture."
+        case .failed: return "Capture did not complete; no unavailable content was read."
+        case .referenceOnly: return "Only the original reference was retained; no source content was fetched."
+        }
+    }
+
+    static func coverageSummary(_ source: KnowledgeSourceContent) -> String {
+        if let domain = domain(source.uri) { return "\(coverageTitle(source)) · \(domain)" }
+        return coverageTitle(source)
+    }
+
+    static func admissionLabel(_ admission: KnowledgeSourceAdmissionState?) -> String? {
+        guard let admission else { return nil }
+        switch admission.status {
+        case .pending: return "Pending intake"
+        case .retained: return "Retained"
+        case .archived: return "Archived"
+        }
+    }
+
+    static func isIntakeOrArchive(_ record: KnowledgeRecord) -> Bool {
+        guard case .source(let source) = record.content else { return false }
+        return source.admission?.status == .pending || source.admission?.status == .archived
     }
 }
 
@@ -404,7 +497,7 @@ enum KnowledgeCorrectionPolicy {
         case .source(let value):
             var annotations = value.annotations ?? []
             annotations.append(KnowledgeSourceAnnotation(text: "User correction: \(replacementText)", locator: "user-correction", createdAt: nil))
-            return .source(KnowledgeSourceContent(title: value.title, uri: value.uri, collectionId: value.collectionId, text: value.text, object: value.object, representations: value.representations, mediaType: value.mediaType, captureDisposition: value.captureDisposition, annotations: annotations, sourcePublishedAt: value.sourcePublishedAt, capturedAt: value.capturedAt, origin: value.origin, origins: value.origins, identity: value.identity, retention: value.retention, assessment: value.assessment, admission: value.admission))
+            return .source(KnowledgeSourceContent(title: value.title, uri: value.uri, collectionId: value.collectionId, text: value.text, object: value.object, representations: value.representations, mediaType: value.mediaType, captureDisposition: value.captureDisposition, captureReason: value.captureReason, annotations: annotations, sourcePublishedAt: value.sourcePublishedAt, capturedAt: value.capturedAt, origin: value.origin, origins: value.origins, identity: value.identity, retention: value.retention, assessment: value.assessment, admission: value.admission))
         case .observation(let value):
             return .observation(KnowledgeObservationContent(range: value.range, items: [KnowledgeObservationItem(text: replacementText, attribution: .user, observedAt: value.items.first?.observedAt ?? record.updatedAt, certainty: .qualified, evidence: value.items.first?.evidence, field: nil)], observer: value.observer))
         case .note(let value):
