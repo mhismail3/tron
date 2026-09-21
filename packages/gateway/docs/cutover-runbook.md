@@ -266,18 +266,26 @@ Agents must not restart, rebuild, promote, replace, or activate a Gateway or
 installed app. The iOS protocol models/fixtures and Gateway protocol must be
 from the same approved source revision; reject mixed wire revisions.
 
-App replacement alone does **not** select a new Gateway payload. Before Resume,
-the maintainer must choose the intended Stable payload explicitly: an external
-payload requires its exact validated selection (`scripts/gateway-payload-deploy.mjs
-promote --channel stable --version <version> --fingerprint <fingerprint>`),
-while the bundled payload is used only when no admissible external selection
-remains under the documented payload-selection procedure. A stale external
-payload with the same protocol remains admissible and can override the new
-bundle; do not infer an upgrade from app replacement. After Resume, run
-`scripts/tron mac verify` and require `system.info` to report the reviewed
-revision, payload fingerprint, protocol, and app/runtime identity. Stop on any
-mismatch; do not repair it with a source-only rebuild or an unreviewed pointer
-edit.
+App replacement alone does **not** select a new Gateway payload. Establish the
+payload-selection route **before the maintenance window**. The bundled payload
+is used only when no admissible external selection remains under the documented
+launcher contract. A stale external payload with the same protocol can override
+the new bundle; do not infer an upgrade from app replacement.
+
+The existing `gateway-payload-deploy.mjs promote` operation performs an
+authenticated drain/restart against a running Gateway. It is **not an offline
+selection command** and must not be inserted between Pause and Resume. If an
+admissible old external selection would survive app replacement, stop before
+migration publication until a maintainer has reviewed an exact supported
+selection/registration procedure for that installed state. Do not start old
+code against migrated data, casually edit/delete selection pointers, or promise
+a single downtime window without resolving this gate. Any intentional offline
+selection-state change must precede the reinstall `--confirm-offline` snapshot.
+
+After Resume, run `scripts/tron mac verify` and require `system.info` to report
+the reviewed revision, payload fingerprint, protocol, and app/runtime identity.
+Stop on any mismatch; do not repair it with a source-only rebuild or an
+unreviewed pointer edit.
 
 ## 6. Post-cutover checks and observation window
 
