@@ -41,11 +41,18 @@ it("runs same-provider accounts against separate refs, identity fences, checkpoi
   for (const [id, commandId] of [["first", "configure-first-0001"], ["second", "configure-second-0001"]] as const) {
     await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId, connector: "raindrop", connectionId: id, enabled: true } });
   }
+  const beforeAdmission = await extension.invoke({ operation: "knowledge.connector.status", request: { connector: "raindrop", connectionId: "first" } }) as { health: string; credentialAvailability: string; providerIdentity: string };
+  expect(beforeAdmission).toMatchObject({ health: "setup-required", credentialAvailability: "unknown", providerIdentity: "unknown" });
   mismatchFirstIdentity = true;
   await expect(extension.invoke({ operation: "knowledge.connector.run", request: { commandId: "run-first-fenced-0001", connector: "raindrop", connectionId: "first", dryRun: false, limit: 1 } })).rejects.toThrow("authenticated account");
+  const mismatched = await extension.invoke({ operation: "knowledge.connector.status", request: { connector: "raindrop", connectionId: "first" } }) as { providerIdentity: string };
+  expect(mismatched.providerIdentity).toBe("mismatch");
   mismatchFirstIdentity = false;
   await extension.invoke({ operation: "knowledge.connector.run", request: { commandId: "run-first-0001", connector: "raindrop", connectionId: "first", dryRun: false, limit: 1 } });
   await extension.invoke({ operation: "knowledge.connector.run", request: { commandId: "run-second-0001", connector: "raindrop", connectionId: "second", dryRun: false, limit: 1 } });
+  const afterAdmission = await extension.invoke({ operation: "knowledge.connector.status", request: { connector: "raindrop", connectionId: "first" } }) as { health: string; credentialAvailability: string; providerIdentity: string; connectionId?: string };
+  expect(afterAdmission).toMatchObject({ connectionId: "first", credentialAvailability: "available", providerIdentity: "admitted" });
+  expect(["ready", "partial"]).toContain(afterAdmission.health);
   // The same command ID is valid across accounts only because the receipt
   // operation includes the admitted connection identity.
   await store.updateConnectorState("checkpoint-shared-0001", "raindrop", state => ({ ...(state ?? {} as any), checkpoints: { page: "1" } }), { checkpoint: "first" }, "first");

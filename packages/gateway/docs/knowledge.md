@@ -167,7 +167,7 @@ extension. Connection setup owns the selected account/scope and opaque `credenti
 Once `ConnectionOwner` is active, connector actions require an exact
 `connectionId` and Knowledge persists provider progress under that instance
 key, without copying the generic account envelope. Tokens never enter
-knowledge state, receipts, logs, prompts, iOS models, or process arguments. `allowWrites`, `paidAccessApproved`, and `recurringApproved` remain
+knowledge state, receipts, logs, prompts, iOS models, or process arguments. Connection projections expose only bounded `credentialAvailability` and `providerIdentity` observations (`unknown` until the adapter verifies them); setup intent never reports a provider capability as ready. An adapter revalidates both observations after each setup/policy revision. `allowWrites`, `paidAccessApproved`, and `recurringApproved` remain
 independent controls and default to false. The Gateway registers `knowledge.v1` typed RPC
 handlers and a bounded first-party `knowledge` retrieval tool. The tool performs explicit
 search/recall/read/list plus typed `connectorSweep` and `synthesis` actions for existing

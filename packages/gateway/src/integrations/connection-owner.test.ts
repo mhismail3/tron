@@ -18,6 +18,12 @@ describe("ConnectionOwner", () => {
       expect(snapshot.instances.map(item => item.providerAccountId).sort()).toEqual(["100", "200"]);
       expect("credentialRef" in snapshot.instances[0]!).toBe(false);
       expect(snapshot.capabilities.filter(item => item.id === "read" && item.connectionId).map(item => item.connectionId).sort()).toEqual(["account-one", "account-two"]);
+      expect(snapshot.instances.every(item => item.credentialAvailability === "unknown" && item.providerIdentity === "unknown")).toBe(true);
+      await expect(owner.recordProviderObservation("account-one", 0, { credentialAvailability: "available", providerIdentity: "admitted" })).rejects.toThrow("no longer admitted");
+      await owner.recordProviderObservation("account-one", 1, { credentialAvailability: "available", providerIdentity: "admitted" });
+      await owner.recordProviderObservation("account-two", 1, { credentialAvailability: "available", providerIdentity: "admitted" });
+      const admitted = await owner.snapshot();
+      expect(admitted.instances.find(item => item.id === "account-one")).toMatchObject({ credentialConfigured: true, credentialAvailability: "available", providerIdentity: "admitted", health: "ready" });
       await expect(owner.execute({ kind: "setup.complete", commandId: "late-complete-0001", operationId: first.operationId, instanceId: "account-two", providerAccountId: "999", credentialRef: "connector:raindrop:wrong", policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } })).rejects.toThrow("another instance");
       await owner.execute({ kind: "disconnect", commandId: "disconnect-one-0001", instanceId: "account-one" });
       const after = await owner.snapshot();

@@ -581,7 +581,10 @@ export interface KnowledgeConnectorState {
   assessmentApprovals?: Array<{ id: string; maxItems: number; budgetCents: number; usedItems: number; reservedCents: number; accountId: string; sourceCollection: string; profileVersion: string; itemIds: string[] }>;
   /** Durable per-cohort/item paid-attempt fence; legacy item-only keys remain valid. */
   assessmentAttempts?: Record<string, { itemId?: string; cohortId?: string; status: "dispatched" | "settled"; chargeCents: number; inputTokens?: number; outputTokens?: number; estimatedCostCents?: number }>;
-  health: "unconfigured" | "ready" | "running" | "partial" | "rate-limited" | "auth-error" | "error";
+  health: "unconfigured" | "setup-required" | "ready" | "running" | "partial" | "rate-limited" | "auth-error" | "error";
+  /** Adapter observations are bounded; unknown is the pre-admission state. */
+  credentialAvailability?: "available" | "unavailable" | "unknown";
+  providerIdentity?: "admitted" | "mismatch" | "unknown";
   lastRunAt?: string;
   lastError?: string;
   remaining: number;
@@ -605,8 +608,11 @@ export interface KnowledgeConnectorStatus {
   configured: boolean;
   enabled: boolean;
   health: KnowledgeConnectorState["health"];
+  credentialAvailability: "available" | "unavailable" | "unknown";
+  providerIdentity: "admitted" | "mismatch" | "unknown";
   accountId?: string;
   scope?: string;
+  destination?: string;
   lastRunAt?: string;
   lastError?: string;
   remaining: number;

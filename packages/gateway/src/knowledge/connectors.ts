@@ -122,14 +122,16 @@ class ConnectorShapeError extends Error { constructor() { super("Connector retur
 function initial(connector: Connector): KnowledgeConnectorState {
   return { connector, enabled: false, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false, pending: [], capturedIds: [], health: "unconfigured", remaining: 0 };
 }
-function stateStatus(state: KnowledgeConnectorState | undefined, connector: Connector): KnowledgeConnectorStatus {
+function stateStatus(state: KnowledgeConnectorState | undefined, connector: Connector, requiresAdmission = false): KnowledgeConnectorStatus {
   const value = state ?? initial(connector);
   const configured = Boolean(value.credentialRef && value.accountId && value.scope);
-  // Health is operational state; configuration truth is derived from the
-  // current authority so an old unconfigured marker cannot contradict a valid
-  // enabled configuration. Disabled or incomplete connectors remain honest.
-  const health = !configured || !value.enabled ? "unconfigured" : (value.health === "unconfigured" ? "ready" : value.health);
-  return { connector, ...(value.connectionId ? { connectionId: value.connectionId } : {}), configured, enabled: value.enabled, health, ...(value.accountId ? { accountId: value.accountId } : {}), ...(value.scope ? { scope: value.scope } : {}), ...(value.lastRunAt ? { lastRunAt: value.lastRunAt } : {}), ...(value.lastError ? { lastError: value.lastError } : {}), remaining: value.remaining, pending: value.pending.length, paidBudgetCents: value.paidBudgetCents, allowWrites: value.allowWrites, recurringApproved: value.recurringApproved, paidAccessApproved: value.paidAccessApproved, ...(value.assessmentPilot ? { assessmentPilot: value.assessmentPilot } : {}), ...(value.assessmentApprovals ? { assessmentApprovals: value.assessmentApprovals } : {}) };
+  const credentialAvailability = value.credentialAvailability ?? "unknown";
+  const providerIdentity = value.providerIdentity ?? "unknown";
+  // Setup intent is not provider admission. Until the adapter records both
+  // observations, an owner-backed connector remains explicitly setup-required.
+  const admitted = credentialAvailability === "available" && providerIdentity === "admitted";
+  const health = !configured || !value.enabled ? "unconfigured" : requiresAdmission && !admitted ? "setup-required" : (value.health === "unconfigured" ? "ready" : value.health);
+  return { connector, ...(value.connectionId ? { connectionId: value.connectionId } : {}), configured, enabled: value.enabled, health, credentialAvailability, providerIdentity, ...(value.accountId ? { accountId: value.accountId } : {}), ...(value.scope ? { scope: value.scope } : {}), ...(value.destination ? { destination: value.destination } : {}), ...(value.lastRunAt ? { lastRunAt: value.lastRunAt } : {}), ...(value.lastError ? { lastError: value.lastError } : {}), remaining: value.remaining, pending: value.pending.length, paidBudgetCents: value.paidBudgetCents, allowWrites: value.allowWrites, recurringApproved: value.recurringApproved, paidAccessApproved: value.paidAccessApproved, ...(value.assessmentPilot ? { assessmentPilot: value.assessmentPilot } : {}), ...(value.assessmentApprovals ? { assessmentApprovals: value.assessmentApprovals } : {}) };
 }
 function parseCollection(item: RaindropItemDTO): string | undefined {
   if (!item.collection || typeof item.collection !== "object") return undefined;
@@ -228,13 +230,21 @@ export class KnowledgeConnectorExtension {
     return this.store.withConnectorContext(connectionId, task);
   }
 
+  private async recordAdmission(state: KnowledgeConnectorState, credentialAvailability: "available" | "unavailable" | "unknown", providerIdentity: "admitted" | "mismatch" | "unknown", commandId: string): Promise<void> {
+    await this.store.updateConnectorState(command(commandId, "admission"), state.connector, value => ({ ...(value ?? state), credentialAvailability, providerIdentity }));
+    if (this.options.connections && state.connectionId) {
+      const instance = await this.options.connections.resolveInstance(state.connectionId);
+      await this.options.connections.recordProviderObservation(state.connectionId, instance.setupRevision, { credentialAvailability, providerIdentity });
+    }
+  }
+
   async invoke(action: KnowledgeAction, signal?: AbortSignal): Promise<unknown> {
     const request = action.request as { connectionId?: string; connector?: Connector };
     const connector = request.connector ?? "raindrop";
     if (action.operation === "knowledge.raindrop.read") return this.lane("raindrop", request.connectionId).run(() => this.withConnection("raindrop", request.connectionId, () => this.readRaindrop(action.request, signal)));
     if (action.operation === "knowledge.connector.configure") return this.lane(action.request.connector, request.connectionId).run(() => this.withConnection(action.request.connector, request.connectionId, () => this.configure(action.request)));
     if (action.operation === "knowledge.connector.assessment.approve") return this.lane("raindrop", request.connectionId).run(() => this.withConnection("raindrop", request.connectionId, () => this.approveAssessment(action.request)));
-    if (action.operation === "knowledge.connector.status") return this.withConnection(action.request.connector, request.connectionId, async () => stateStatus(await this.store.connectorState(action.request.connector), action.request.connector));
+    if (action.operation === "knowledge.connector.status") return this.withConnection(action.request.connector, request.connectionId, async () => stateStatus(await this.store.connectorState(action.request.connector, request.connectionId), action.request.connector, Boolean(this.options.connections)));
     if (action.operation === "knowledge.connector.run") return this.lane(action.request.connector, request.connectionId).run(() => this.withConnection(action.request.connector, request.connectionId, () => this.run(action.request, signal)));
     if (action.operation === "knowledge.raindrop.intake") return this.lane("raindrop", request.connectionId).run(() => this.withConnection("raindrop", request.connectionId, () => this.intake(action.request, signal)));
     throw bad("Unsupported knowledge connector operation");
@@ -623,7 +633,7 @@ export class KnowledgeConnectorExtension {
       if (reconciled?.pendingRemote) throw new GatewayError("conflict", "Connector has an unresolved remote effect");
     }
     const token = await this.options.credentials.read(current.credentialRef);
-    if (!token) { await this.store.updateConnectorState(command(request.commandId, "auth"), connector, state => ({ ...(state ?? current), health: "auth-error", lastError: "Credential reference is unavailable", lastRunAt: this.now() })); throw new GatewayError("unsupported", "Connector credential is unavailable"); }
+    if (!token) { await this.recordAdmission(current, "unavailable", "unknown", request.commandId); await this.store.updateConnectorState(command(request.commandId, "auth"), connector, state => ({ ...(state ?? current), health: "auth-error", lastError: "Credential reference is unavailable", lastRunAt: this.now() })); throw new GatewayError("unsupported", "Connector credential is unavailable"); }
     const assertCurrentAuthority = async (): Promise<void> => {
       const live = await this.store.connectorState(connector);
       if (!live?.enabled || live.accountId !== current.accountId || live.scope !== current.scope || live.credentialRef !== current.credentialRef) throw new GatewayError("conflict", "Connector configuration changed during provider discovery");
@@ -659,7 +669,10 @@ export class KnowledgeConnectorExtension {
       // The provider account fence precedes generic sweep discovery. It is
       // intentionally separate from the configured account label and from the
       // source URL capture policy.
-      if (connector === "raindrop") await this.verifyRaindropAccount(current, currentToken, signal, beforeProviderAttempt);
+      if (connector === "raindrop") {
+        await this.verifyRaindropAccount(current, currentToken, signal, beforeProviderAttempt);
+        await this.recordAdmission(current, "available", "admitted", request.commandId);
+      }
       const discovered = await this.discover(request.commandId, connector, current, currentToken, limit, signal, xPricing?.maxAttempts, beforeProviderAttempt);
       let state = await this.store.connectorState(connector) ?? current;
       if (request.dryRun) {
@@ -697,6 +710,7 @@ export class KnowledgeConnectorExtension {
     } catch (error) {
       const health = error instanceof ConnectorHTTPError && authFailure(error.status) ? "auth-error" : error instanceof ConnectorHTTPError && error.status === 429 ? "rate-limited" : "error";
       const message = error instanceof ConnectorHTTPError ? `Provider request failed (${error.status})` : error instanceof Error ? error.message : "Connector failed";
+      if (message.includes("authenticated account does not match")) await this.recordAdmission(current, "available", "mismatch", request.commandId);
       await this.store.updateConnectorState(command(request.commandId, "error"), connector, state => ({ ...(state ?? current), health, lastError: message, lastRunAt: this.now(), remaining: state?.pending.length ?? current.pending.length }));
       clearTimeout(deadline);
       throw new GatewayError(health === "auth-error" ? "unsupported" : "internal", message, true);

@@ -10,6 +10,28 @@ private actor CoverageTestRecorder {
 }
 
 final class KnowledgeModelsTests: XCTestCase {
+    @MainActor
+    func testConnectorStatusCarriesExactConnectionRoute() async throws {
+        var captured: (String, JSONValue)?
+        let client = KnowledgeRPCClient(request: { method, params, _ in
+            captured = (method, params)
+            return .object(["connector": .string("raindrop"), "connectionId": .string("account-two"), "configured": .bool(true), "enabled": .bool(true), "health": .string("setup-required"), "credentialAvailability": .string("unknown"), "providerIdentity": .string("unknown"), "accountId": .string("202"), "scope": .string("0"), "remaining": .number(0), "pending": .number(0), "paidBudgetCents": .number(0), "allowWrites": .bool(false), "recurringApproved": .bool(false), "paidAccessApproved": .bool(false)])
+        })
+        _ = try await client.connectorStatus("raindrop", connectionID: "account-two")
+        XCTAssertEqual(captured?.0, "knowledge.connector.status")
+        XCTAssertEqual(captured?.1.objectValue?["connector"], .string("raindrop"))
+        XCTAssertEqual(captured?.1.objectValue?["connectionId"], .string("account-two"))
+        XCTAssertEqual(captured?.1.objectValue?.count, 2)
+    }
+
+    func testConnectorStatusKeepsConnectionIdentityAndDoesNotTreatSetupAsReady() throws {
+        let data = Data(#"{"connector":"raindrop","connectionId":"account-two","configured":true,"enabled":true,"health":"setup-required","credentialAvailability":"unknown","providerIdentity":"unknown","accountId":"202","scope":"0","lastRunAt":null,"lastError":null,"remaining":0,"pending":0,"paidBudgetCents":0,"allowWrites":false,"recurringApproved":false,"paidAccessApproved":false}"#.utf8)
+        let status = try JSONDecoder().decode(KnowledgeConnectorStatus.self, from: data)
+        XCTAssertEqual(status.connectionId, "account-two")
+        XCTAssertFalse(status.available)
+        XCTAssertEqual(status.detail, "Provider admission is not established.")
+    }
+
     func testObservationPresentationSeparatesStatementDateAndTechnicalEvidence() throws {
         let record = KnowledgeObservationFixture.record()
         let presentation = try XCTUnwrap(KnowledgeObservationPresentation(record: record))

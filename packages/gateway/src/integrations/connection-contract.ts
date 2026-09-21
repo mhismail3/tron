@@ -9,6 +9,8 @@ export type ConnectionSetupMethod = "oauth" | "token" | "local-command" | "endpo
 export type ConnectionImplementationKind = "knowledge-connector" | "mcp";
 export type ConnectionHealth = "unconfigured" | "setup-required" | "ready" | "disabled" | "auth-error" | "error" | "disconnected";
 export type ConnectionCapabilityAvailability = "available" | "unavailable" | "requires-setup" | "disabled" | "unsupported";
+export type CredentialAvailability = "available" | "unavailable" | "unknown";
+export type ProviderIdentityAdmission = "admitted" | "mismatch" | "unknown";
 export type ConnectionEffect = "read" | "write" | "paid" | "disclosure";
 
 /** A supplier-level identity. Definitions are composed from built-in/package
@@ -62,6 +64,9 @@ export interface ConnectionInstance {
   createdAt: string;
   updatedAt: string;
   setupRevision: number;
+  /** Bounded owner observations; absent legacy values are treated as unknown. */
+  credentialAvailability?: CredentialAvailability;
+  providerIdentity?: ProviderIdentityAdmission;
   lastError?: string;
 }
 
@@ -97,6 +102,11 @@ export interface ConnectionSetupOperation {
   status: "pending" | "completed" | "cancelled";
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ProviderAdmissionObservation {
+  credentialAvailability: CredentialAvailability;
+  providerIdentity: ProviderIdentityAdmission;
 }
 
 export type ConnectionCommand =
@@ -189,6 +199,7 @@ export function validateConnectionInstance(value: unknown): asserts value is Con
   if (!["knowledge-connector", "mcp"].includes(item.implementation as string)) throw new Error("Connection implementation is invalid");
   bounded(item.providerAccountId, "Provider account", 256); if (item.scope !== undefined) bounded(item.scope, "Connection scope", 512);
   assertCredentialReference(item.credentialRef); validateConnectionPolicy(item.policy);
+  if (item.credentialAvailability !== undefined && !["available", "unavailable", "unknown"].includes(item.credentialAvailability as string) || item.providerIdentity !== undefined && !["admitted", "mismatch", "unknown"].includes(item.providerIdentity as string)) throw new Error("Connection admission observation is invalid");
   if (item.configuration !== undefined) {
     if (item.implementation !== "mcp") throw new Error("Only MCP instances may contain transport configuration");
     validateMcpConnectionConfiguration(item.configuration);

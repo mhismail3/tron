@@ -266,7 +266,7 @@ function planFromSource(input: KnowledgeConnectorSource, sourceName: string): Co
     const credentialRef = legacy.credentialRef as string;
     const instanceId = typeof legacy.connectionId === "string" ? legacy.connectionId : connectionId(connector, accountId, scope);
     const timestamp = new Date(0).toISOString();
-    const instance: ConnectionInstance = { id: instanceId, definitionId: `knowledge.${connector}`, implementation: "knowledge-connector", providerAccountId: accountId, ...(scope ? { scope } : {}), credentialRef, policy: policy(legacy), health: legacy.enabled ? "ready" : "disabled", createdAt: timestamp, updatedAt: timestamp, setupRevision: 1 };
+    const instance: ConnectionInstance = { id: instanceId, definitionId: `knowledge.${connector}`, implementation: "knowledge-connector", providerAccountId: accountId, ...(scope ? { scope } : {}), credentialRef, policy: policy(legacy), health: legacy.enabled ? "setup-required" : "disabled", createdAt: timestamp, updatedAt: timestamp, setupRevision: 1, credentialAvailability: "unknown", providerIdentity: "unknown" };
     if (instances[instanceId]) throw invalid("conflicting duplicate connection identity");
     instances[instanceId] = instance;
     const state = clone(legacy) as Record<string, unknown>;

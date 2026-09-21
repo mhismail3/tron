@@ -45,6 +45,8 @@ struct IntegrationInstance: Codable, Hashable, Sendable, Identifiable {
     let providerAccountId: String
     let scope: String?
     let credentialConfigured: Bool
+    let credentialAvailability: String?
+    let providerIdentity: String?
     var policy: IntegrationPolicy
     let health: String
     let createdAt: String

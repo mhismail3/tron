@@ -141,16 +141,19 @@ final class KnowledgeRPCClient {
         struct Params: Encodable { let sessionId: String; let sourceRevisionIds: [String] }
         return try await mutate("knowledge.reflect", parameters: Params(sessionId: sessionID, sourceRevisionIds: Array(sourceRevisionIDs.prefix(100))))
     }
-    func connectorStatus(_ connector: String) async throws -> KnowledgeConnectorStatus {
-        struct Params: Encodable { let connector: String }; return try await request("knowledge.connector.status", Params(connector: connector))
+    func connectorStatus(_ connector: String, connectionID: String) async throws -> KnowledgeConnectorStatus {
+        struct Params: Encodable { let connector: String; let connectionId: String }
+        return try await request("knowledge.connector.status", Params(connector: connector, connectionId: connectionID))
     }
-    func configureConnector(_ connector: String, enabled: Bool, accountID: String? = nil, scope: String? = nil, destination: String? = nil, credentialRef: String? = nil, allowWrites: Bool? = nil, paidAccessApproved: Bool? = nil, paidBudgetCents: Int? = nil, recurringApproved: Bool? = nil) async throws -> KnowledgeConnectorStatus {
-        struct Params: Encodable { let connector: String; let enabled: Bool; let accountId: String?; let scope: String?; let destination: String?; let credentialRef: String?; let allowWrites: Bool?; let paidAccessApproved: Bool?; let paidBudgetCents: Int?; let recurringApproved: Bool? }
-        return try await mutate("knowledge.connector.configure", parameters: Params(connector: connector, enabled: enabled, accountId: accountID, scope: scope, destination: destination, credentialRef: credentialRef, allowWrites: allowWrites, paidAccessApproved: paidAccessApproved, paidBudgetCents: paidBudgetCents, recurringApproved: recurringApproved))
+    /// Domain policy only. Account identity, credential references, and setup
+    /// are owned by IntegrationsRPCClient and never cross this RPC boundary.
+    func configureConnector(_ connector: String, connectionID: String, enabled: Bool, allowWrites: Bool, paidAccessApproved: Bool, paidBudgetCents: Int = 0, recurringApproved: Bool, destination: String? = nil) async throws -> KnowledgeConnectorStatus {
+        struct Params: Encodable { let connector: String; let connectionId: String; let enabled: Bool; let destination: String?; let allowWrites: Bool; let paidAccessApproved: Bool; let paidBudgetCents: Int; let recurringApproved: Bool }
+        return try await mutate("knowledge.connector.configure", parameters: Params(connector: connector, connectionId: connectionID, enabled: enabled, destination: destination, allowWrites: allowWrites, paidAccessApproved: paidAccessApproved, paidBudgetCents: max(0, paidBudgetCents), recurringApproved: recurringApproved))
     }
-    func runConnector(_ connector: String, dryRun: Bool, limit: Int = 50) async throws -> KnowledgeConnectorRunResult {
-        struct Params: Encodable { let connector: String; let dryRun: Bool; let limit: Int }
-        return try await mutate("knowledge.connector.run", parameters: Params(connector: connector, dryRun: dryRun, limit: min(100, max(1, limit))))
+    func runConnector(_ connector: String, connectionID: String, dryRun: Bool, limit: Int = 50) async throws -> KnowledgeConnectorRunResult {
+        struct Params: Encodable { let connector: String; let connectionId: String; let dryRun: Bool; let limit: Int }
+        return try await mutate("knowledge.connector.run", parameters: Params(connector: connector, connectionId: connectionID, dryRun: dryRun, limit: min(100, max(1, limit))))
     }
     func importDryRun(source: String, limit: Int = 50, offset: Int = 0) async throws -> KnowledgeImportPlan {
         struct Params: Encodable { let source: String; let limit: Int; let offset: Int }

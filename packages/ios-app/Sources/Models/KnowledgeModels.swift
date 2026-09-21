@@ -325,11 +325,13 @@ struct KnowledgeSourceCaptureResult: Codable, Hashable, Sendable { let record: K
 struct KnowledgeForgetResult: Codable, Hashable, Sendable { let forgotten: Bool; let recordId: String; let stateRevision: Int }
 struct KnowledgeExclusionResult: Codable, Hashable, Sendable { let recordId: String; let excluded: Bool; let stateRevision: Int }
 struct KnowledgeConnectorStatus: Codable, Hashable, Sendable {
-    let connector: String; let configured: Bool; let enabled: Bool; let health: String; let accountId: String?; let scope: String?; let lastRunAt: String?; let lastError: String?; let remaining: Int; let pending: Int; let paidBudgetCents: Int; let allowWrites: Bool; let recurringApproved: Bool; let paidAccessApproved: Bool
-    var available: Bool { true }
+    let connector: String; let connectionId: String?; let configured: Bool; let enabled: Bool; let health: String; let credentialAvailability: String?; let providerIdentity: String?; let accountId: String?; let scope: String?; let destination: String?; let lastRunAt: String?; let lastError: String?; let remaining: Int; let pending: Int; let paidBudgetCents: Int; let allowWrites: Bool; let recurringApproved: Bool; let paidAccessApproved: Bool
+    /// Configuration is intent; provider use is available only after both
+    /// bounded owner observations admit the credential and account identity.
+    var available: Bool { health == "ready" && credentialAvailability == "available" && providerIdentity == "admitted" }
     var writesEnabled: Bool { allowWrites }
     var state: String { health }
-    var detail: String? { lastError }
+    var detail: String? { lastError ?? (available ? nil : "Provider admission is not established.") }
 }
 struct KnowledgeConnectorRunResult: Codable, Hashable, Sendable { let dryRun: Bool; let connector: String; let discovered: Int; let captured: Int?; let pending: Int; let remaining: Int?; let health: String; let partial: Int?; let error: String? }
 struct KnowledgeImportPlan: Codable, Hashable, Sendable { let operation: String; let source: String; let planHash: String; let planned: Int; let selected: Int; let imported: Int; let resumed: Int; let skipped: Int; let failed: Int; let completed: Bool; let progress: KnowledgeImportProgress; let mappings: [KnowledgeImportMapping]; let warnings: [String] }

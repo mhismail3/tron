@@ -934,116 +934,143 @@ struct KnowledgeConnectorsView: View {
     @Environment(\.tronPresentationActivity) private var activity
     @Environment(\.dismiss) private var dismiss
     @State private var identity: KnowledgePresentationIdentity?
+    @State private var integrationSnapshot: IntegrationSnapshot?
     @State private var statuses: [String: KnowledgeConnectorStatus] = [:]
     @State private var configuring: String?
     @State private var message: String?
     @State private var refreshGeneration: [String: Int] = [:]
     @State private var refreshInFlight = Set<String>()
     @State private var runInFlight = Set<String>()
+    private var instances: [IntegrationInstance] { integrationSnapshot?.instances.filter { $0.definitionId == "knowledge.raindrop" || $0.definitionId == "knowledge.x" } ?? [] }
     var body: some View {
         KnowledgeFormSheet(title: "Connectors") {
-            ForEach(["raindrop", "x"], id: \.self) { connector in
+            if instances.isEmpty {
+                TronSettingsNotice(message: "Set up a Raindrop or X account in Settings > Integrations. Knowledge actions become available after that owner admits the account.", accent: .tronAmber)
+            }
+            ForEach(instances) { instance in
+                let connector = instance.definitionId.replacingOccurrences(of: "knowledge.", with: "")
+                let status = statuses[instance.id]
                 TronSettingsGroup(connector == "x" ? "X" : "Raindrop", accent: .tronKnowledge) {
-                    TronSettingsRow(icon: "person.crop.circle", title: "Account",
-                                    subtitle: statuses[connector].map { $0.configured ? ($0.enabled ? "Enabled" : "Disabled") : "Not configured" } ?? "Checking status…") {
-                        Button { configuring = connector } label: { TronInlineActionLabel("Configure") }.buttonStyle(.plain)
+                    TronSettingsRow(icon: "person.crop.circle", title: instance.providerAccountId,
+                                    subtitle: status.map { $0.configured ? ($0.enabled ? ($0.available ? "Enabled" : "Awaiting provider admission") : "Disabled") : "Not configured" } ?? "Checking status…") {
+                        Button { configuring = instance.id } label: { TronInlineActionLabel("Configure") }.buttonStyle(.plain)
                     }
                     TronSettingsDivider(accent: .tronKnowledge)
                     TronSettingsRow(icon: "arrow.clockwise", title: "Status") {
-                        Button { refresh(connector) } label: { TronInlineActionLabel("Refresh") }.buttonStyle(.plain)
-                            .disabled(refreshInFlight.contains(connector))
+                        Button { refresh(instance) } label: { TronInlineActionLabel("Refresh") }.buttonStyle(.plain)
+                            .disabled(refreshInFlight.contains(instance.id))
                     }
                     TronSettingsDivider(accent: .tronKnowledge)
                     TronSettingsRow(icon: "arrow.triangle.2.circlepath", title: "Sync", subtitle: "Run using the saved permissions.") {
-                        Button { run(connector) } label: { TronInlineActionLabel(runInFlight.contains(connector) ? "Running…" : "Run") }.buttonStyle(.plain)
-                            .disabled(statuses[connector]?.configured != true || runInFlight.contains(connector))
+                        Button { run(instance) } label: { TronInlineActionLabel(runInFlight.contains(instance.id) ? "Running…" : "Run") }.buttonStyle(.plain)
+                            .disabled(status?.configured != true || runInFlight.contains(instance.id))
                     }
                 }
-                .tronSettingsCaption(statuses[connector]?.writesEnabled == false ? "Remote writes are disabled." : nil)
-                if let detail = statuses[connector]?.detail { TronSettingsNotice(message: detail, accent: .tronAmber) }
+                .tronSettingsCaption(status?.writesEnabled == false ? "Remote writes are disabled." : nil)
+                if let detail = status?.detail { TronSettingsNotice(message: detail, accent: .tronAmber) }
             }
             if let message { TronSettingsCaption(message) }
         }
         .task(id: PresentationActivityTaskID(source: "\(model.knowledgePresentationIdentity)", presentationActive: activity.allowsPresentationPublication)) {
             guard activity.allowsPresentationPublication else { return }
-            refresh("raindrop"); refresh("x")
+            loadInstances()
         }
         .onChange(of: activity.allowsPresentationPublication) { _, active in
             if !active {
                 // Reads retire with their surface; accepted connector runs do not.
-                for connector in ["raindrop", "x"] { refreshGeneration[connector, default: 0] &+= 1 }
+                for instance in instances { refreshGeneration[instance.id, default: 0] &+= 1 }
                 refreshInFlight.removeAll()
             }
         }
         .tronManagedSheet(isPresented: Binding(get: { configuring != nil }, set: { if !$0 { configuring = nil } }), identity: "knowledge.connector.edit") {
-            if let connector = configuring {
-                KnowledgeConnectorEditView(connector: connector, status: statuses[connector]) { configuring = nil }.environment(model)
+            if let instanceID = configuring, let instance = instances.first(where: { $0.id == instanceID }) {
+                KnowledgeConnectorEditView(instance: instance, status: statuses[instanceID]) { configuring = nil }.environment(model)
             }
         }
     }
-    private func refresh(_ connector: String) {
-        guard activity.allowsPresentationPublication, !refreshInFlight.contains(connector) else { return }
-        refreshInFlight.insert(connector)
+    private func loadInstances() {
+        guard activity.allowsPresentationPublication else { return }
         let requestIdentity = model.knowledgePresentationIdentity
-        let ticket = (refreshGeneration[connector] ?? 0) &+ 1
-        refreshGeneration[connector] = ticket
         Task { @MainActor in
-            guard ticket == refreshGeneration[connector], activity.allowsPresentationPublication,
+            do {
+                let loaded = try await model.integrations.snapshot()
+                guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
+                integrationSnapshot = loaded
+                for instance in loaded.instances where instance.definitionId == "knowledge.raindrop" || instance.definitionId == "knowledge.x" { refresh(instance) }
+            } catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; message = error.localizedDescription }
+        }
+    }
+    private func refresh(_ instance: IntegrationInstance) {
+        guard activity.allowsPresentationPublication, !refreshInFlight.contains(instance.id) else { return }
+        refreshInFlight.insert(instance.id)
+        let requestIdentity = model.knowledgePresentationIdentity
+        let ticket = (refreshGeneration[instance.id] ?? 0) &+ 1
+        refreshGeneration[instance.id] = ticket
+        let connector = instance.definitionId.replacingOccurrences(of: "knowledge.", with: "")
+        Task { @MainActor in
+            guard ticket == refreshGeneration[instance.id], activity.allowsPresentationPublication,
                   model.knowledgePresentationIdentity == requestIdentity else { return }
             do {
-                let status = try await model.knowledge.connectorStatus(connector)
-                guard ticket == refreshGeneration[connector], activity.allowsPresentationPublication,
+                let status = try await model.knowledge.connectorStatus(connector, connectionID: instance.id)
+                guard ticket == refreshGeneration[instance.id], activity.allowsPresentationPublication,
                       model.knowledgePresentationIdentity == requestIdentity else { return }
-                identity = requestIdentity; statuses[connector] = status; refreshInFlight.remove(connector)
-            } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { refreshInFlight.remove(connector) }; return }
+                identity = requestIdentity; statuses[instance.id] = status; refreshInFlight.remove(instance.id)
+            } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { refreshInFlight.remove(instance.id) }; return }
             catch {
-                guard ticket == refreshGeneration[connector], activity.allowsPresentationPublication,
+                guard ticket == refreshGeneration[instance.id], activity.allowsPresentationPublication,
                       model.knowledgePresentationIdentity == requestIdentity else { return }
-                refreshInFlight.remove(connector); statuses[connector] = nil; message = error.localizedDescription
+                refreshInFlight.remove(instance.id); statuses[instance.id] = nil; message = error.localizedDescription
             }
         }
     }
-    private func run(_ connector: String) { guard let status = statuses[connector], status.configured, activity.allowsPresentationPublication, !runInFlight.contains(connector) else { return }; runInFlight.insert(connector); let requestIdentity = identity ?? model.knowledgePresentationIdentity; Task { @MainActor in guard model.knowledgePresentationIdentity == requestIdentity else { return }; do { let result = try await model.knowledge.runConnector(connector, dryRun: false); guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; runInFlight.remove(connector); message = result.error ?? "Run accepted (\(result.pending) pending)." } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { runInFlight.remove(connector) }; return } catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; runInFlight.remove(connector); message = error.localizedDescription } } }
+    private func run(_ instance: IntegrationInstance) {
+        guard let status = statuses[instance.id], status.configured, activity.allowsPresentationPublication, !runInFlight.contains(instance.id) else { return }
+        runInFlight.insert(instance.id)
+        let requestIdentity = identity ?? model.knowledgePresentationIdentity
+        let connector = instance.definitionId.replacingOccurrences(of: "knowledge.", with: "")
+        Task { @MainActor in
+            guard model.knowledgePresentationIdentity == requestIdentity else { return }
+            do {
+                let result = try await model.knowledge.runConnector(connector, connectionID: instance.id, dryRun: false)
+                guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
+                runInFlight.remove(instance.id); message = result.error ?? "Run accepted (\(result.pending) pending)."
+            } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { runInFlight.remove(instance.id) }; return }
+            catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; runInFlight.remove(instance.id); message = error.localizedDescription }
+        }
+    }
 }
 
 private struct KnowledgeConnectorEditView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var activity
-    let connector: String
+    let instance: IntegrationInstance
     let status: KnowledgeConnectorStatus?
     let onSaved: () -> Void
     @State private var enabled: Bool
-    @State private var accountID: String
-    @State private var scope: String
-    @State private var destination = ""
-    @State private var credentialRef = ""
+    @State private var destination: String
     @State private var allowWrites: Bool
     @State private var paidAccessApproved: Bool
     @State private var recurringApproved: Bool
     @State private var saving = false
     @State private var error: String?
-    init(connector: String, status: KnowledgeConnectorStatus?, onSaved: @escaping () -> Void) {
-        self.connector = connector; self.status = status; self.onSaved = onSaved
-        _enabled = State(initialValue: status?.enabled ?? false); _accountID = State(initialValue: status?.accountId ?? ""); _scope = State(initialValue: status?.scope ?? ""); _allowWrites = State(initialValue: status?.allowWrites ?? false); _paidAccessApproved = State(initialValue: status?.paidAccessApproved ?? false); _recurringApproved = State(initialValue: status?.recurringApproved ?? false)
+    private var connector: String { instance.definitionId.replacingOccurrences(of: "knowledge.", with: "") }
+    init(instance: IntegrationInstance, status: KnowledgeConnectorStatus?, onSaved: @escaping () -> Void) {
+        self.instance = instance; self.status = status; self.onSaved = onSaved
+        _enabled = State(initialValue: instance.policy.enabled); _destination = State(initialValue: status?.destination ?? ""); _allowWrites = State(initialValue: instance.policy.allowWrites); _paidAccessApproved = State(initialValue: instance.policy.paidAccessApproved); _recurringApproved = State(initialValue: instance.policy.recurringApproved)
     }
     var body: some View {
         KnowledgeFormSheet(title: connector == "x" ? "X connector" : "Raindrop connector", isWorking: saving, onAction: save) {
             TronSettingsGroup("Account", accent: .tronKnowledge) {
-                TronToggleRow(icon: "power", title: "Enabled", isOn: $enabled)
-                TronSettingsDivider(accent: .tronKnowledge)
-                TronTextSettingRow(icon: "person.crop.circle", title: "Account ID", value: $accountID)
-                TronSettingsDivider(accent: .tronKnowledge)
-                TronTextSettingRow(icon: "folder", title: connector == "raindrop" ? "Collection ID" : "User ID", value: $scope)
-                TronSettingsDivider(accent: .tronKnowledge)
-                TronSettingsRow(icon: "key", title: "Credential reference", subtitle: "Stored on your Mac") {
-                    SecureField("Mac Keychain reference", text: $credentialRef).tronInlineField(monospaced: true)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .multilineTextAlignment(.trailing).frame(minWidth: 80, maxWidth: 180)
-                        .accessibilityLabel("Mac Keychain reference")
+                TronSettingsRow(icon: "person.crop.circle", title: "Account", subtitle: instance.providerAccountId)
+                if let scope = status?.scope ?? instance.scope {
+                    TronSettingsDivider(accent: .tronKnowledge)
+                    TronSettingsRow(icon: "folder", title: connector == "raindrop" ? "Collection" : "User", subtitle: scope)
                 }
+                TronSettingsDivider(accent: .tronKnowledge)
+                TronToggleRow(icon: "power", title: "Enabled", isOn: $enabled)
             }
-            .tronSettingsCaption("Credentials stay in the Mac Keychain; this is only an opaque reference.")
+            .tronSettingsCaption("Account identity and credentials are set up in Settings > Integrations. This view changes Knowledge policy only.")
             if connector == "raindrop" {
                 TronSettingsGroup("Remote policy", accent: .tronKnowledge) {
                     TronTextSettingRow(icon: "folder.badge.plus", title: "Destination collection", detail: "Optional", value: $destination)
@@ -1066,7 +1093,7 @@ private struct KnowledgeConnectorEditView: View {
         let requestIdentity = model.knowledgePresentationIdentity
         Task { @MainActor in
             do {
-                _ = try await model.knowledge.configureConnector(connector, enabled: enabled, accountID: accountID.nilIfEmpty, scope: scope.nilIfEmpty, destination: destination.nilIfEmpty, credentialRef: credentialRef.nilIfEmpty, allowWrites: allowWrites, paidAccessApproved: paidAccessApproved, recurringApproved: recurringApproved)
+                _ = try await model.knowledge.configureConnector(connector, connectionID: instance.id, enabled: enabled, allowWrites: allowWrites, paidAccessApproved: paidAccessApproved, paidBudgetCents: instance.policy.paidBudgetCents, recurringApproved: recurringApproved, destination: destination.nilIfEmpty)
                 guard activity.allowsPresentationPublication,
                       model.knowledgePresentationIdentity == requestIdentity else { return }
                 saving = false; onSaved(); dismiss()
