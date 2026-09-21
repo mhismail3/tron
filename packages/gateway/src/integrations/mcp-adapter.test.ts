@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -23,7 +23,7 @@ async function setupConnection(root: string, config: Record<string, unknown>, id
 async function registerFactory(adapter: McpAdapter, session = "session", host = "host"): Promise<Record<string, any>> {
   const tools: Record<string, any> = {};
   for (const factory of await adapter.extensionFactories(session, host)) {
-    await factory({ registerTool(tool: any) { tools[tool.name] = tool; }, on() {} } as any);
+    await factory({ registerTool(tool: any) { tools[tool.name] = tool; }, on(event: string, handler: () => Promise<void>) { if (event === "session_shutdown") cleanup.push(handler); } } as any);
   }
   return tools;
 }
@@ -92,7 +92,7 @@ describe("Mac-owned MCP adapter", () => {
     cleanup.push(() => new Promise<void>(resolve => fixture.server.close(() => resolve())));
     const { owner, adapter } = await setupConnection(root, { transport: "http", endpoint: fixture.endpoint }, "revoke");
     const tools = await registerFactory(adapter);
-    await owner.execute({ kind: "policy.update", commandId: "revoke-policy-0001", instanceId: "revoke", policy: { ...policy, enabled: false } });
+    await owner.execute({ kind: "policy.update", commandId: "revoke-policy-0001", instanceId: "revoke", expectedSetupRevision: 1, policy: { ...policy, enabled: false } });
     const result = await tools.mcp_revoke_mutate.execute("mutation", {}, undefined, undefined, {});
     expect(result.details).toMatchObject({ outcome: "unknown" });
     expect(calls).toBe(0);
@@ -155,8 +155,55 @@ describe("Mac-owned MCP adapter", () => {
       return undefined;
     });
     cleanup.push(() => new Promise<void>(resolve => fixture.server.close(() => resolve())));
-    const { adapter } = await setupConnection(root, { transport: "http", endpoint: fixture.endpoint }, "policy", { ...policy, allowWrites: false });
+    const { owner, adapter } = await setupConnection(root, { transport: "http", endpoint: fixture.endpoint }, "policy", { ...policy, allowWrites: false });
+    await owner.markRuntimeReady("policy", 1);
+    expect((await owner.snapshot()).capabilities.find(item => item.id === "tools" && item.connectionId === "policy")).toMatchObject({
+      availability: "unavailable",
+      detail: "Write approval is required for this capability"
+    });
     await expect(adapter.extensionFactories("session", "host")).rejects.toThrow(/write policy/);
+  });
+
+  it.each(["list-error", "collision"])("retires every stdio child when a later server fails %s admission", async failure => {
+    const root = await mkdtemp(join(tmpdir(), "tron-mcp-retirement-"));
+    cleanup.push(() => rm(root, { recursive: true, force: true }));
+    const script = join(root, "server.mjs");
+    await writeFile(script, `import { writeFileSync } from 'node:fs';
+      writeFileSync(process.argv[2], String(process.pid));
+      let buffer = ''; process.stdin.setEncoding('utf8');
+      process.stdin.on('end', () => process.exit(0));
+      process.stdin.on('data', chunk => {
+        buffer += chunk;
+        for (const line of buffer.split('\\n').slice(0, -1)) {
+          const m = JSON.parse(line); let result;
+          if (m.method === 'initialize') result = {protocolVersion:'2025-11-25',capabilities:{tools:{}},serverInfo:{name:'fixture',version:'1'}};
+          if (m.method === 'tools/list') {
+            if (process.argv[3] === 'list-error') {
+              process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,error:{code:-32603,message:'fixture discovery failed'}})+'\\n'); continue;
+            }
+            const tool = {name:'echo',inputSchema:{type:'object'}};
+            result = {tools: process.argv[3] === 'collision' ? [tool,tool] : [tool]};
+          }
+          if (result) process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');
+        }
+        buffer = buffer.slice(buffer.lastIndexOf('\\n') + 1);
+      });`);
+    const firstPid = join(root, "first.pid"), secondPid = join(root, "second.pid");
+    await setupConnection(root, { transport: "stdio", command: process.execPath, args: [script, firstPid, "ok"] }, "first");
+    const { owner } = await setupConnection(root, { transport: "stdio", command: process.execPath, args: [script, secondPid, failure] }, "second");
+    const credentials = new InMemoryConnectorCredentialStore(new Map([["connector:mcp:first", "fixture"], ["connector:mcp:second", "fixture"]]));
+    // Cleanup is fixture-owned only; it cannot mask the assertions below.
+    cleanup.push(async () => {
+      for (const file of [firstPid, secondPid]) {
+        try { process.kill(Number(await readFile(file, "utf8")), "SIGTERM"); } catch { /* already retired */ }
+      }
+    });
+    await expect(new McpAdapter({ connections: owner, credentials }).extensionFactories("session", "1")).rejects.toThrow(failure === "collision" ? /collision/ : /discovery failed/);
+    for (const file of [firstPid, secondPid]) {
+      const pid = Number(await readFile(file, "utf8"));
+      expect(() => process.kill(pid, 0)).toThrow();
+    }
+    expect((await owner.resolveInstance("second")).health).toBe("setup-required");
   });
 
   it("launches trusted stdio without shell interpolation or ambient secret inheritance", async () => {

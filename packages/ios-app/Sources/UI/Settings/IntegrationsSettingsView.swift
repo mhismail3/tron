@@ -5,36 +5,70 @@ import SwiftUI
 /// connection ID to the owner and every read is fenced to the current Gateway
 /// profile, lifecycle generation, and connection epoch.
 struct IntegrationsSettingsView: View {
+    enum Surface: Hashable {
+        case connectedServices
+        case mcpServers
+
+        var title: String {
+            switch self {
+            case .connectedServices: "Connected Services"
+            case .mcpServers: "MCP Servers"
+            }
+        }
+
+        func includes(_ definition: IntegrationDefinition) -> Bool {
+            switch self {
+            case .connectedServices: definition.implementation != "mcp"
+            case .mcpServers: definition.implementation == "mcp"
+            }
+        }
+    }
+
+    let surface: Surface
+
+    init(surface: Surface) {
+        self.surface = surface
+    }
+
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var activity
     @State private var snapshot: IntegrationSnapshot?
-    @State private var identity: KnowledgePresentationIdentity?
     @State private var loadGeneration = 0
     @State private var isLoading = false
     @State private var error: String?
     @State private var setupDefinition: IntegrationDefinition?
     @State private var selectedInstance: IntegrationInstance?
-    @State private var disconnectInstance: IntegrationInstance?
-    @State private var actionMessage: String?
 
     var body: some View {
-        KnowledgeFormSheet(title: "Integrations") {
+        KnowledgeFormSheet(title: surface.title, accent: .tronCyan) {
             if let snapshot {
-                ForEach(snapshot.definitions) { definition in
+                let definitions = snapshot.definitions.filter(surface.includes)
+                ForEach(definitions) { definition in
                     definitionSection(definition, snapshot: snapshot)
                 }
-                if snapshot.definitions.isEmpty {
-                    TronSettingsNotice(message: "No supported integrations are available on this Gateway.", accent: .tronAmber)
+                if definitions.isEmpty {
+                    TronPlaceholderState(
+                        title: "No supported integrations",
+                        detail: emptySurfaceDetail,
+                        icon: surface == .mcpServers ? "server.rack" : "link"
+                    )
                 }
             } else if isLoading {
                 HStack { Spacer(); ProgressView("Loading integrations…"); Spacer() }
                     .padding(.vertical, 28)
             }
             if let error { TronSettingsNotice(message: error, accent: .tronError) }
-            if let actionMessage { TronSettingsCaption(actionMessage) }
         }
         .task(id: PresentationActivityTaskID(source: "integrations/\(model.knowledgePresentationIdentity)", presentationActive: activity.allowsPresentationPublication)) {
             guard activity.allowsPresentationPublication else { return }
+            load()
+        }
+        .onChange(of: model.knowledgePresentationIdentity) { _, _ in
+            loadGeneration &+= 1
+            isLoading = false
+            snapshot = nil
+            selectedInstance = nil
+            setupDefinition = nil
             load()
         }
         .onChange(of: activity.allowsPresentationPublication) { _, active in
@@ -42,28 +76,25 @@ struct IntegrationsSettingsView: View {
         }
         .tronManagedSheet(isPresented: Binding(get: { setupDefinition != nil }, set: { if !$0 { setupDefinition = nil } }), identity: "integrations.setup") {
             if let definition = setupDefinition {
-                IntegrationSetupView(definition: definition) { self.setupDefinition = nil }
+                IntegrationSetupView(definition: definition) {
+                    self.setupDefinition = nil
+                    load()
+                }
                     .environment(model)
             }
         }
         .tronManagedSheet(isPresented: Binding(get: { selectedInstance != nil }, set: { if !$0 { selectedInstance = nil } }), identity: "integrations.instance") {
             if let instance = selectedInstance {
-                IntegrationInstanceView(instance: instance, definition: snapshot?.definitions.first { $0.id == instance.definitionId }) {
+                IntegrationInstanceView(
+                    instance: instance,
+                    definition: snapshot?.definitions.first { $0.id == instance.definitionId },
+                    statuses: snapshot?.capabilities.filter { $0.connectionId == instance.id } ?? []
+                ) {
                     self.selectedInstance = nil
                     load()
                 }
                 .environment(model)
             }
-        }
-        .confirmationDialog(
-            "Disconnect this account?",
-            isPresented: Binding(get: { disconnectInstance != nil }, set: { if !$0 { disconnectInstance = nil } }),
-            presenting: disconnectInstance
-        ) { instance in
-            Button("Disconnect", role: .destructive) { disconnect(instance) }
-            Button("Cancel", role: .cancel) {}
-        } message: { instance in
-            Text("Future calls will be disabled for connection \(instance.id). Existing provider data is not deleted.")
         }
     }
 
@@ -76,7 +107,7 @@ struct IntegrationsSettingsView: View {
                 if instance.id != instances.last?.id { TronSettingsDivider(accent: .tronBlue) }
             }
             if !instances.isEmpty { TronSettingsDivider(accent: .tronBlue) }
-            TronSettingsRow(icon: "plus.circle", title: "Add account or server", subtitle: setupSummary(definition)) {
+            TronSettingsRow(icon: "plus.circle", title: definition.implementation == "mcp" ? "Add server" : "Add account", subtitle: setupSummary(definition)) {
                 Button { setupDefinition = definition } label: { TronInlineActionLabel("Set up") }
                     .buttonStyle(.plain)
             }
@@ -87,17 +118,21 @@ struct IntegrationsSettingsView: View {
     @ViewBuilder
     private func instanceRow(_ instance: IntegrationInstance, definition: IntegrationDefinition, snapshot: IntegrationSnapshot) -> some View {
         let statuses = snapshot.capabilities.filter { $0.connectionId == instance.id }
+        let available = statuses.count { $0.availability == "available" }
+        let capabilitySummary = statuses.isEmpty
+            ? "No capabilities reported"
+            : "\(available) of \(statuses.count) capabilities available"
         TronSettingsRow(
             icon: instance.health == "ready" ? "checkmark.circle" : "exclamationmark.circle",
+            // providerIdentity is admission provenance (for example "admitted"),
+            // not an account label. The owner exposes providerAccountId as the
+            // only human-facing account identity in this projection.
             title: instance.providerAccountId,
-            subtitle: "\(healthLabel(instance.health)) · \(instance.id)",
+            subtitle: "\(healthLabel(instance.health)) · \(capabilitySummary)",
             subtitleLineLimit: 2,
             accent: instance.health == "ready" ? .tronEmerald : .tronAmber
         ) {
             Button { selectedInstance = instance } label: { TronInlineActionLabel("Manage") }.buttonStyle(.plain)
-        }
-        ForEach(Array(statuses.enumerated()), id: \.offset) { _, status in
-            TronSettingsRow(icon: capabilityIcon(status.availability), title: status.id, subtitle: capabilityDetail(status))
         }
     }
 
@@ -116,9 +151,7 @@ struct IntegrationsSettingsView: View {
                     currentRequest: loadGeneration,
                     requestedRequest: ticket
                 ) else { return }
-                identity = requestIdentity; snapshot = loaded; isLoading = false
-            } catch is CancellationError {
-                if ticket == loadGeneration { isLoading = false }
+                snapshot = loaded; isLoading = false
             } catch {
                 guard IntegrationPresentationAdmission.admits(
                     presentationActive: activity.allowsPresentationPublication,
@@ -127,25 +160,23 @@ struct IntegrationsSettingsView: View {
                     currentRequest: loadGeneration,
                     requestedRequest: ticket
                 ) else { return }
-                isLoading = false; snapshot = nil; self.error = error.localizedDescription
+                isLoading = false
+                if !(error is CancellationError) { snapshot = nil; self.error = error.localizedDescription }
             }
         }
     }
 
-    private func disconnect(_ instance: IntegrationInstance) {
-        disconnectInstance = nil
-        let requestIdentity = identity ?? model.knowledgePresentationIdentity
-        Task { @MainActor in
-            do {
-                _ = try await model.integrations.disconnect(instanceID: instance.id)
-                guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
-                actionMessage = "Disconnected \(instance.providerAccountId)."; load()
-            } catch { actionMessage = error.localizedDescription }
+    private var emptySurfaceDetail: String {
+        switch surface {
+        case .connectedServices: "No supported account-based services are advertised by this Gateway."
+        case .mcpServers: "No tools-only MCP server definitions are advertised by this Gateway. OAuth and non-tool MCP features are not supported."
         }
     }
 
     private func setupSummary(_ definition: IntegrationDefinition) -> String {
-        definition.implementation == "mcp" ? "Connect a trusted HTTP endpoint or local command" : "Use the Mac-owned credential reference"
+        definition.implementation == "mcp"
+            ? "Connect a trusted HTTP endpoint or local command; MCP tools only"
+            : "Connect using credentials stored on your Mac"
     }
 
     private func capabilityCaption(definition: IntegrationDefinition, snapshot: IntegrationSnapshot) -> String? {
@@ -158,15 +189,40 @@ struct IntegrationsSettingsView: View {
     private func healthLabel(_ health: String) -> String {
         switch health { case "ready": "Ready"; case "disabled": "Disabled"; case "auth-error": "Authentication error"; case "disconnected": "Disconnected"; case "setup-required": "Setup required"; default: "Unavailable" }
     }
-    private func capabilityIcon(_ availability: String) -> String {
-        availability == "available" ? "checkmark.circle" : availability == "unsupported" ? "minus.circle" : "exclamationmark.triangle"
-    }
-    private func capabilityDetail(_ status: IntegrationCapabilityStatus) -> String {
-        if let detail = status.detail, !detail.isEmpty { return detail }
-        return availabilityLabel(status.availability) + (status.effects.isEmpty ? "" : " · " + status.effects.joined(separator: ", "))
-    }
     private func availabilityLabel(_ value: String) -> String {
         switch value { case "available": "Available"; case "requires-setup": "Setup required"; case "disabled": "Disabled"; case "unsupported": "Unsupported"; default: "Unavailable" }
+    }
+}
+
+/// The receipt executor owns the accepted command. The sheet retains only its
+/// task handle; activity-scoped observers may leave/rejoin without replaying it.
+struct IntegrationMutation {
+    let id = UUID()
+    let identity: KnowledgePresentationIdentity
+    let task: Task<Void, Error>
+}
+
+struct IntegrationMutationObserver: ViewModifier {
+    @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var activity
+    @Binding var mutation: IntegrationMutation?
+    @Binding var error: String?
+    let completed: () -> Void
+
+    func body(content: Content) -> some View {
+        content.task(id: PresentationActivityTaskID(source: mutation?.id, presentationActive: activity.allowsPresentationPublication)) {
+            guard activity.allowsPresentationPublication, let accepted = mutation else { return }
+            let result = await accepted.task.result
+            guard !Task.isCancelled, activity.allowsPresentationPublication,
+                  model.knowledgePresentationIdentity == accepted.identity,
+                  mutation?.id == accepted.id else { return }
+            mutation = nil
+            switch result {
+            case .success: completed()
+            case .failure(let failure):
+                if !(failure is CancellationError) { error = failure.localizedDescription }
+            }
+        }
     }
 }
 
@@ -176,33 +232,38 @@ private struct IntegrationInstanceView: View {
     @Environment(\.tronPresentationActivity) private var activity
     let instance: IntegrationInstance
     let definition: IntegrationDefinition?
+    let statuses: [IntegrationCapabilityStatus]
     let onChanged: () -> Void
     @State private var policy: IntegrationPolicy
-    @State private var saving = false
+    @State private var mutation: IntegrationMutation?
     @State private var error: String?
 
-    init(instance: IntegrationInstance, definition: IntegrationDefinition?, onChanged: @escaping () -> Void) {
-        self.instance = instance; self.definition = definition; self.onChanged = onChanged
+    init(instance: IntegrationInstance, definition: IntegrationDefinition?, statuses: [IntegrationCapabilityStatus], onChanged: @escaping () -> Void) {
+        self.instance = instance; self.definition = definition; self.statuses = statuses; self.onChanged = onChanged
         _policy = State(initialValue: instance.policy)
     }
 
     var body: some View {
-        KnowledgeFormSheet(title: definition?.displayName ?? "Connection", isWorking: saving, onAction: save) {
+        KnowledgeFormSheet(title: definition?.displayName ?? "Connection", accent: .tronCyan, isWorking: mutation != nil, onAction: save) {
             TronSettingsGroup("Connection", accent: .tronBlue) {
                 TronSettingsRow(icon: "person.crop.circle", title: "Account", subtitle: instance.providerAccountId)
                 if let scope = instance.scope {
                     TronSettingsDivider(accent: .tronBlue)
                     TronSettingsRow(icon: "scope", title: "Scope", subtitle: scope)
                 }
-                TronSettingsDivider(accent: .tronBlue)
-                TronSettingsRow(icon: "number", title: "Connection ID", subtitle: instance.id)
             }
+            capabilitiesSection
+            TronTechnicalMetadataSection(title: "Technical details", items: technicalMetadata, accent: .tronSlate)
             TronSettingsGroup("Policy", accent: .tronPurple) {
                 TronToggleRow(icon: "power", title: "Enabled", isOn: $policy.enabled)
                 TronSettingsDivider(accent: .tronPurple)
                 TronToggleRow(icon: "arrow.right.arrow.left", title: "Allow writes", isOn: $policy.allowWrites)
                 TronSettingsDivider(accent: .tronPurple)
                 TronToggleRow(icon: "creditcard", title: "Paid access approved", isOn: $policy.paidAccessApproved)
+                if policy.paidAccessApproved {
+                    TronSettingsDivider(accent: .tronPurple)
+                    TronNumberSettingRow(icon: "creditcard", title: "Paid budget", detail: "Cents; a positive budget is required", value: $policy.paidBudgetCents, accent: .tronPurple)
+                }
                 TronSettingsDivider(accent: .tronPurple)
                 TronToggleRow(icon: "repeat", title: "Recurring runs approved", isOn: $policy.recurringApproved)
             }
@@ -211,29 +272,74 @@ private struct IntegrationInstanceView: View {
             if let error { TronSettingsNotice(message: error, accent: .tronError) }
             Button("Disconnect", role: .destructive) { disconnect() }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .disabled(mutation != nil)
         }
+        .modifier(IntegrationMutationObserver(mutation: $mutation, error: $error) {
+            onChanged()
+            dismiss()
+        })
+    }
+
+    private var capabilitiesSection: some View {
+        TronSettingsGroup("Capabilities", detail: "Each status reflects the owner’s current prerequisites and policy.", accent: .tronCyan) {
+            if statuses.isEmpty {
+                TronSettingsRow(icon: "questionmark.circle", title: "No capabilities reported", subtitle: "The Gateway did not advertise capability details.")
+            } else {
+                ForEach(Array(statuses.enumerated()), id: \.offset) { _, status in
+                    TronSettingsRow(
+                        icon: status.availability == "available" ? "checkmark.circle" : "exclamationmark.triangle",
+                        title: definition?.capabilities.first { $0.id == status.id }?.displayName ?? status.id,
+                        subtitle: capabilityDetail(status),
+                        accent: status.availability == "available" ? .tronEmerald : .tronAmber
+                    )
+                }
+            }
+        }
+    }
+
+    private var technicalMetadata: [TronTechnicalMetadataItem] {
+        [
+            TronTechnicalMetadataItem(title: "Connection ID", value: instance.id, icon: "number"),
+            TronTechnicalMetadataItem(title: "Implementation", value: instance.implementation, icon: "gearshape"),
+            TronTechnicalMetadataItem(title: "Credential", value: instance.credentialConfigured ? "Configured" : "Not configured", icon: "key"),
+            TronTechnicalMetadataItem(title: "Credential availability", value: instance.credentialAvailability ?? "unknown", icon: "key"),
+            TronTechnicalMetadataItem(title: "Account verification", value: instance.providerIdentity ?? "unknown", icon: "person.crop.circle.badge.checkmark"),
+            TronTechnicalMetadataItem(title: "Health", value: instance.health, icon: "heart.text.square")
+        ]
+    }
+
+    private func capabilityDetail(_ status: IntegrationCapabilityStatus) -> String {
+        if let detail = status.detail, !detail.isEmpty { return detail }
+        let label: String = switch status.availability {
+        case "available": "Available"
+        case "requires-setup": "Setup required"
+        case "disabled": "Disabled"
+        case "unsupported": "Unsupported"
+        default: "Unavailable"
+        }
+        return label + (status.effects.isEmpty ? "" : " · " + status.effects.joined(separator: ", "))
     }
 
     private func save() {
-        guard !saving, policy != instance.policy else { dismiss(); return }
-        saving = true; error = nil
-        let requestIdentity = model.knowledgePresentationIdentity
-        Task { @MainActor in
-            do {
-                _ = try await model.integrations.updatePolicy(instanceID: instance.id, policy: policy)
-                guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
-                saving = false; onChanged(); dismiss()
-            } catch is CancellationError { saving = false }
-            catch { saving = false; self.error = error.localizedDescription }
-        }
+        guard mutation == nil, activity.allowsPresentationPublication else { return }
+        guard policy != instance.policy else { dismiss(); return }
+        error = nil
+        let identity = model.knowledgePresentationIdentity
+        let submitted = policy
+        mutation = IntegrationMutation(identity: identity, task: Task { @MainActor in
+            guard model.knowledgePresentationIdentity == identity else { throw CancellationError() }
+            _ = try await model.integrations.updatePolicy(instanceID: instance.id, expectedSetupRevision: instance.setupRevision, policy: submitted)
+        })
     }
 
     private func disconnect() {
-        saving = true
-        Task { @MainActor in
-            do { _ = try await model.integrations.disconnect(instanceID: instance.id); saving = false; onChanged(); dismiss() }
-            catch { saving = false; self.error = error.localizedDescription }
-        }
+        guard mutation == nil, activity.allowsPresentationPublication else { return }
+        error = nil
+        let identity = model.knowledgePresentationIdentity
+        mutation = IntegrationMutation(identity: identity, task: Task { @MainActor in
+            guard model.knowledgePresentationIdentity == identity else { throw CancellationError() }
+            _ = try await model.integrations.disconnect(instanceID: instance.id)
+        })
     }
 }
 
@@ -252,8 +358,7 @@ private struct IntegrationSetupView: View {
     @State private var command = ""
     @State private var args = ""
     @State private var policy = IntegrationPolicy(enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false)
-    @State private var operation: IntegrationSetupStarted?
-    @State private var saving = false
+    @State private var mutation: IntegrationMutation?
     @State private var error: String?
 
     init(definition: IntegrationDefinition, onFinished: @escaping () -> Void) {
@@ -262,8 +367,8 @@ private struct IntegrationSetupView: View {
     }
 
     var body: some View {
-        KnowledgeFormSheet(title: "Set up \(definition.displayName)", isWorking: saving, onAction: operation == nil ? { complete() } : nil) {
-            if operation == nil {
+        KnowledgeFormSheet(title: "Set up \(definition.displayName)", accent: .tronCyan, isWorking: mutation != nil, onAction: complete) {
+            if mutation == nil {
                 TronSettingsGroup("Account", accent: .tronBlue) {
                     TronTextSettingRow(icon: "number", title: "Instance ID", value: $instanceID)
                     TronSettingsDivider(accent: .tronBlue)
@@ -278,18 +383,21 @@ private struct IntegrationSetupView: View {
                     }
                 }
                 if definition.implementation == "mcp" { mcpConfiguration() }
-                TronSettingsGroup("Secure credential handoff", accent: .tronPurple) {
-                    TronTextSettingRow(icon: "key", title: "Opaque Keychain reference", value: $credentialRef)
+                TronSettingsGroup("Credential handoff", accent: .tronPurple) {
+                    TronTextSettingRow(icon: "key", title: "Credential reference", value: $credentialRef)
                 }
-                .tronSettingsCaption("Enter only the opaque reference created by the Mac credential owner. Never enter a token or secret here.")
+                .tronSettingsCaption("Use the credential reference supplied by the paired Mac. The secret stays in its secure credential store and is never sent to or retained by this device.")
                 policySection
             } else {
-                TronSettingsNotice(message: "Setup is ready to complete. The credential value remains in the Mac-owned secure store.", accent: .tronEmerald)
+                TronSettingsCaption("Completing setup on the selected Mac. Credentials remain in its secure store.")
                 ProgressView("Completing setup…")
             }
             if let error { TronSettingsNotice(message: error, accent: .tronError) }
         }
-        .onDisappear { if operation != nil { /* accepted completion remains owner-owned */ } }
+        .modifier(IntegrationMutationObserver(mutation: $mutation, error: $error) {
+            onFinished()
+            dismiss()
+        })
     }
 
     @ViewBuilder
@@ -316,26 +424,30 @@ private struct IntegrationSetupView: View {
             TronToggleRow(icon: "arrow.right.arrow.left", title: "Allow writes", isOn: $policy.allowWrites)
             TronSettingsDivider(accent: .tronPurple)
             TronToggleRow(icon: "creditcard", title: "Paid access approved", isOn: $policy.paidAccessApproved)
+            if policy.paidAccessApproved {
+                TronSettingsDivider(accent: .tronPurple)
+                TronNumberSettingRow(icon: "creditcard", title: "Paid budget", detail: "Cents; a positive budget is required", value: $policy.paidBudgetCents, accent: .tronPurple)
+            }
             TronSettingsDivider(accent: .tronPurple)
             TronToggleRow(icon: "repeat", title: "Recurring runs approved", isOn: $policy.recurringApproved)
         }
     }
 
     private func complete() {
-        guard !saving else { return }
+        guard mutation == nil, activity.allowsPresentationPublication else { return }
         guard !instanceID.isEmpty, !accountID.isEmpty, !credentialRef.isEmpty else { error = "Instance ID, account/server identity, and an opaque credential reference are required."; return }
         if definition.implementation == "mcp" && method == "local-command" && command.isEmpty { error = "An executable is required for local-command setup."; return }
         if definition.implementation == "mcp" && method != "local-command" && endpoint.isEmpty { error = "An HTTP endpoint is required for remote setup."; return }
-        saving = true; error = nil
+        error = nil
         let requestIdentity = model.knowledgePresentationIdentity
-        Task { @MainActor in
-            do {
+        let instanceID = instanceID, accountID = accountID, scope = scope, credentialRef = credentialRef
+        let method = method, endpoint = endpoint, command = command, args = args, policy = policy
+        mutation = IntegrationMutation(identity: requestIdentity, task: Task { @MainActor in
+                guard model.knowledgePresentationIdentity == requestIdentity else { throw CancellationError() }
                 let begun = try await model.integrations.beginSetup(instanceID: instanceID, definitionID: definition.id, method: method)
-                // Begin accepted the owner operation. Continue the exact
-                // operation even if the sheet is dismissed or the Gateway
-                // reconnects; only the final presentation publication is
-                // fenced below.
-                operation = begun
+                // Begin's receipt remains owned even after dismissal. Completion
+                // is a separate command: never send it to a replacement Gateway.
+                guard model.knowledgePresentationIdentity == requestIdentity else { throw CancellationError() }
                 let configuration: IntegrationSetupConfiguration? = definition.implementation == "mcp"
                     ? IntegrationSetupConfiguration(
                         transport: method == "local-command" ? "stdio" : "http",
@@ -345,11 +457,7 @@ private struct IntegrationSetupView: View {
                         cwd: nil, env: nil
                     ) : nil
                 _ = try await model.integrations.completeSetup(operationID: begun.operationId, instanceID: instanceID, providerAccountID: accountID, scope: scope.nilIfEmpty, credentialRef: credentialRef, policy: policy, configuration: configuration)
-                guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
-                saving = false; onFinished(); dismiss()
-            } catch is CancellationError { saving = false }
-            catch { saving = false; self.error = error.localizedDescription }
-        }
+        })
     }
 }
 

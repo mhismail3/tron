@@ -169,6 +169,8 @@ struct PackagesSettingsView: View {
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
+                resolutionSection
+
                 if let packageError {
                     TronSettingsNotice(message: packageError, retry: reload)
                 }
@@ -213,7 +215,7 @@ struct PackagesSettingsView: View {
             .padding(.vertical, 18)
         }
         .tronScrollEdgeChrome()
-        .tronNavigationTitle("Packages and Resources")
+        .tronNavigationTitle("Available Resources")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 TronReloadToolbarButton(isReloading: reloading, action: reload)
@@ -265,6 +267,41 @@ struct PackagesSettingsView: View {
                 onConfirm: { remove(package) }
             )
         }
+    }
+
+    private var resolutionSection: some View {
+        TronSettingsGroup(
+            "Resource Scope",
+            detail: resolutionSummary,
+            accent: .tronBlue,
+            surfaceStyle: .scrollOptimized
+        ) {
+            TronValueRow(icon: "scope", title: "Scope", value: projectCWD == nil ? "Global resources" : "Current project")
+            if let projectCWD {
+                TronSettingsDivider(accent: .tronBlue)
+                TronProgressiveSheetLink(
+                    accessibilityLabel: "Project Trust",
+                    identity: "settings.available-resources.project-trust",
+                    accent: .tronBlue
+                ) {
+                    TrustSettingsView(target: TrustTarget(cwd: projectCWD))
+                } label: {
+                    TronSettingsRow(
+                        icon: "checkmark.shield",
+                        title: "Project Trust",
+                        subtitle: "Review whether project-local resources may load",
+                        accent: .tronBlue
+                    )
+                }
+            }
+        }
+    }
+
+    private var resolutionSummary: String {
+        guard let inventory else { return "Waiting for the Gateway resource projection" }
+        let packageCount = inventory.packages.count
+        let resourceCount = PackageResolvedResourcesPresentation(resources: inventory.resources).categories.reduce(0) { $0 + $1.items.count }
+        return "\(packageCount) installed package\(packageCount == 1 ? "" : "s") · \(resourceCount) resolved resource\(resourceCount == 1 ? "" : "s")"
     }
 
     private func reload() {

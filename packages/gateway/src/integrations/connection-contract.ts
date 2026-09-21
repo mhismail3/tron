@@ -113,7 +113,7 @@ export type ConnectionCommand =
   | { kind: "setup.begin"; commandId: string; instanceId: string; definitionId: string; method: ConnectionSetupMethod }
   | { kind: "setup.complete"; commandId: string; operationId: string; instanceId: string; providerAccountId: string; scope?: string; credentialRef: string; policy: ConnectionPolicy; configuration?: McpConnectionConfiguration }
   | { kind: "setup.cancel"; commandId: string; operationId: string; instanceId: string }
-  | { kind: "policy.update"; commandId: string; instanceId: string; policy: ConnectionPolicy }
+  | { kind: "policy.update"; commandId: string; instanceId: string; expectedSetupRevision: number; policy: ConnectionPolicy }
   | { kind: "disconnect"; commandId: string; instanceId: string };
 
 export type ConnectionAction =

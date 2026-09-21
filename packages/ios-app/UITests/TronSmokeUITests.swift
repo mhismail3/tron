@@ -5,6 +5,22 @@ import XCTest
 
 final class TronSmokeUITests: XCTestCase {
     @MainActor
+    func testRuntimeBehaviorThinkingSliderOpensAfterDefaultsConsolidation() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-runtime-settings-fixture"]
+        app.launch()
+        defer { app.terminate() }
+        let control = app.buttons.matching(identifier: "thinking-level-control")
+            .matching(NSPredicate(format: "label == %@", "Thinking")).firstMatch
+        XCTAssertTrue(control.waitForExistence(timeout: 5))
+        XCTAssertTrue(control.isEnabled)
+        control.tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "thinking-level-slider").firstMatch.waitForExistence(timeout: 3))
+        keepScreenshot(named: "runtime-behavior-thinking-editor-fixture")
+    }
+
+    @MainActor
     func testKnowledgeSettingsSubmenuStaysOpenDuringParentUpdates() {
         continueAfterFailure = false
         let app = XCUIApplication()

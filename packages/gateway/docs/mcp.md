@@ -33,7 +33,11 @@ and exact transport shutdown. A trusted executable is not a sandbox.
 Tool discovery is bounded to 128 tools. Names are prefixed with the connection
 instance (`mcp_<instance>_<server-tool>`) and collisions fail admission rather
 than replacing provenance. Schemas, descriptions, progress, content, and
-results are bounded and treated as untrusted. A changed server tool list is
+results are bounded and treated as untrusted. Failed discovery, tool validation,
+or later-server admission retires every transport acquired by that admission
+attempt before returning failure; no partial factory set is published. Stdio
+regressions observe process exit for both the failing server and earlier valid
+servers, rather than checking rejection alone. A changed server tool list is
 not silently granted to an already loaded runtime; an explicit runtime reload
 rediscovers and admits the candidate set. Calls re-resolve ConnectionOwner
 admission before dispatch, so disconnect or policy disable fences tools already

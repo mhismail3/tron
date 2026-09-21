@@ -387,7 +387,7 @@ export class KnowledgeConnectorExtension {
     let currentAuthority = authority;
     if (this.options.connections) {
       const policy = authority!.policy;
-      await this.options.connections.execute({ kind: "policy.update", commandId: command(request.commandId, "connection-policy"), instanceId: authority!.id, policy: { enabled: request.enabled, allowWrites: request.allowWrites ?? policy.allowWrites, paidAccessApproved: request.paidAccessApproved ?? policy.paidAccessApproved, paidBudgetCents: request.paidBudgetCents ?? policy.paidBudgetCents, recurringApproved: request.recurringApproved ?? policy.recurringApproved } });
+      await this.options.connections.execute({ kind: "policy.update", commandId: command(request.commandId, "connection-policy"), instanceId: authority!.id, expectedSetupRevision: authority!.setupRevision, policy: { enabled: request.enabled, allowWrites: request.allowWrites ?? policy.allowWrites, paidAccessApproved: request.paidAccessApproved ?? policy.paidAccessApproved, paidBudgetCents: request.paidBudgetCents ?? policy.paidBudgetCents, recurringApproved: request.recurringApproved ?? policy.recurringApproved } });
       currentAuthority = await this.options.connections.resolveInstance(authority!.id);
       delete next.credentialAvailability;
       delete next.providerIdentity;

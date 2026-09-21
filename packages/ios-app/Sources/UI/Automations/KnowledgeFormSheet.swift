@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// Knowledge forms share the existing settings geometry and toolbar controls.
+/// Knowledge and connection forms share the existing settings geometry and toolbar controls.
 /// This is presentation only: each form retains its own draft and command owner.
 struct KnowledgeFormSheet<Content: View>: View {
     let title: String
+    var accent: Color = .tronKnowledge
     var actionTitle = "Save"
     var isWorking = false
     var actionDisabled = false
@@ -21,13 +22,13 @@ struct KnowledgeFormSheet<Content: View>: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .tronScrollEdgeChrome()
-            .tronNavigationTitle(title, accent: .tronKnowledge)
+            .tronNavigationTitle(title, accent: accent)
             .toolbar {
                 if onAction != nil {
                     ToolbarItem(placement: .cancellationAction) {
                         Button { dismiss() } label: {
                             Image(systemName: "xmark").font(TronTypography.buttonSM)
-                                .foregroundStyle(Color.tronKnowledge)
+                                .foregroundStyle(accent)
                         }
                         .accessibilityLabel("Cancel")
                         .disabled(isWorking)
@@ -38,14 +39,14 @@ struct KnowledgeFormSheet<Content: View>: View {
                         TronToolbarTextLabel(onAction == nil ? "Done" : actionTitle,
                                              systemImage: "checkmark", isWorking: isWorking)
                     }
-                    .tronToolbarAction(accent: actionDisabled || isWorking ? .tronTextMuted : .tronKnowledge)
+                    .tronToolbarAction(accent: actionDisabled || isWorking ? .tronTextMuted : accent)
                     .disabled(actionDisabled || isWorking)
                 }
             }
         }
         .foregroundStyle(Color.tronTextPrimary)
         .tronSettingsLayout()
-        .tronSettingsVisualTheme(accent: .tronKnowledge)
+        .tronSettingsVisualTheme(accent: accent)
         .tronTopBlur(.sheet)
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)

@@ -74,9 +74,9 @@ final class IntegrationsRPCClient {
         guard value.operationId == operationID, value.instanceId == instanceID, value.status == "cancelled" else { throw invalidResponse() }
     }
 
-    func updatePolicy(instanceID: String, policy: IntegrationPolicy) async throws -> IntegrationSetupCompleted {
-        struct Params: Encodable { let instanceId: String; let policy: IntegrationPolicy }
-        let value: IntegrationSetupCompleted = try await mutate("connections.policy.update", parameters: Params(instanceId: instanceID, policy: policy))
+    func updatePolicy(instanceID: String, expectedSetupRevision: Int, policy: IntegrationPolicy) async throws -> IntegrationSetupCompleted {
+        struct Params: Encodable { let instanceId: String; let expectedSetupRevision: Int; let policy: IntegrationPolicy }
+        let value: IntegrationSetupCompleted = try await mutate("connections.policy.update", parameters: Params(instanceId: instanceID, expectedSetupRevision: expectedSetupRevision, policy: policy))
         guard value.id == instanceID, value.setupRevision >= 1 else { throw invalidResponse() }
         return value
     }

@@ -76,6 +76,31 @@ function initialState(): ConnectionOwnerState { return { schemaVersion: CONNECTI
 function statePath(tronHome: string): string { return join(tronHome, ...CONNECTION_STATE_RELATIVE_PATH); }
 function copy<T>(value: T): T { return structuredClone(value); }
 
+function capabilityAvailability(
+  capability: IntegrationDefinition["capabilities"][number],
+  instance: ConnectionInstanceProjection
+): { availability: ConnectionCapabilityStatus["availability"]; detail?: string } {
+  if (!capability.supported) return { availability: "unsupported", detail: "Capability is not implemented by this adapter" };
+  if (instance.health === "disconnected") return { availability: "unavailable", detail: "Connection is disconnected" };
+  if (!instance.policy.enabled) return { availability: "disabled", detail: "Connection is disabled by policy" };
+  const providerPrerequisitesAdmitted = instance.implementation === "mcp"
+    ? true
+    : instance.credentialAvailability === "available" && instance.providerIdentity === "admitted";
+  if (instance.health !== "ready" || !providerPrerequisitesAdmitted) {
+    return { availability: "unavailable", detail: instance.lastError ?? "Connection prerequisites are not admitted" };
+  }
+  if (capability.effects.includes("write") && !instance.policy.allowWrites) {
+    return { availability: "unavailable", detail: "Write approval is required for this capability" };
+  }
+  if (capability.effects.includes("paid") && !instance.policy.paidAccessApproved) {
+    return { availability: "unavailable", detail: "Paid access approval is required for this capability" };
+  }
+  if (capability.effects.includes("paid") && instance.policy.paidBudgetCents <= 0) {
+    return { availability: "unavailable", detail: "A positive paid-access budget is required for this capability" };
+  }
+  return { availability: "available" };
+}
+
 function validateCommand(command: ConnectionCommand): void {
   if (!command || typeof command !== "object") throw invalid("Connection command is invalid");
   if (typeof command.commandId !== "string" || command.commandId.length < 8 || command.commandId.length > 160) throw invalid("Connection commandId is invalid");
@@ -88,7 +113,11 @@ function validateCommand(command: ConnectionCommand): void {
     return;
   }
   if (command.kind === "setup.cancel") { assertConnectionId(command.operationId, "setup operation id"); assertConnectionId(command.instanceId); return; }
-  assertConnectionId(command.instanceId); if (command.kind === "policy.update") validateConnectionPolicy(command.policy);
+  assertConnectionId(command.instanceId);
+  if (command.kind === "policy.update") {
+    validateConnectionPolicy(command.policy);
+    if (!Number.isSafeInteger(command.expectedSetupRevision) || command.expectedSetupRevision < 1) throw invalid("Policy updates require the observed setup revision");
+  }
 }
 
 function resultForInstance(instance: ConnectionInstance): Record<string, unknown> {
@@ -212,7 +241,9 @@ export class ConnectionOwner {
       return copy(binding);
     }
     const instance = snapshot.instances.find(item => item.id === binding.connectionId);
-    if (!instance || instance.definitionId !== binding.integrationId || instance.health !== "ready" || !instance.policy.enabled) throw conflict("Connection instance is not admitted for this runtime");
+    if (!instance || instance.definitionId !== binding.integrationId) throw conflict("Connection instance is not admitted for this runtime");
+    const availability = capabilityAvailability(capability, instance);
+    if (availability.availability !== "available") throw conflict(availability.detail ?? "Integration capability is not admitted for this runtime");
     return copy(binding);
   }
 
@@ -226,7 +257,10 @@ export class ConnectionOwner {
       const matching = instances.filter(instance => instance.definitionId === definition.id);
       if (matching.length === 0) {
         capabilities.push({ id: capability.id, availability: capability.supported ? "requires-setup" : "unsupported", effects: [...capability.effects], definitionId: definition.id, provenance: { owner: "connection", definitionId: definition.id }, ...(capability.supported ? {} : { detail: "Capability is not implemented by this adapter" }) });
-      } else for (const instance of matching) capabilities.push({ id: capability.id, availability: !capability.supported ? "unsupported" : instance.health === "ready" && instance.policy.enabled && (instance.credentialAvailability ?? "unknown") === "available" && (instance.providerIdentity ?? "unknown") === "admitted" ? "available" : instance.health === "disconnected" ? "unavailable" : instance.policy.enabled ? "unavailable" : "disabled", effects: [...capability.effects], definitionId: definition.id, connectionId: instance.id, provenance: { owner: "connection", definitionId: definition.id, connectionId: instance.id }, ...(instance.lastError ? { detail: instance.lastError } : {}) });
+      } else for (const instance of matching) {
+        const status = capabilityAvailability(capability, instance);
+        capabilities.push({ id: capability.id, availability: status.availability, effects: [...capability.effects], definitionId: definition.id, connectionId: instance.id, provenance: { owner: "connection", definitionId: definition.id, connectionId: instance.id }, ...(status.detail ? { detail: status.detail } : {}) });
+      }
     }
     return { definitions: this.definitions.map(copy), instances, setupOperations: Object.values(state.setupOperations).map(copy), capabilities, stateRevision: state.stateRevision };
   }
@@ -238,7 +272,10 @@ export class ConnectionOwner {
       if (!definition || !definition.setupMethods.includes(command.method)) throw unsupported("Setup method is not supported by this integration");
       const existing = state.instances[command.instanceId]; if (existing && existing.health !== "disconnected") throw conflict("Connection instance already exists; use a new instance ID");
       const active = Object.values(state.setupOperations).find(item => item.instanceId === command.instanceId && item.status === "pending");
-      if (active) return { operationId: active.operationId, instanceId: active.instanceId, status: active.status };
+      if (active) {
+        if (active.definitionId !== command.definitionId || active.method !== command.method) throw conflict("Pending setup belongs to another integration or method");
+        return { operationId: active.operationId, instanceId: active.instanceId, definitionId: active.definitionId, method: active.method, status: active.status };
+      }
       const operation: ConnectionSetupOperation = { operationId: randomUUID(), instanceId: command.instanceId, definitionId: command.definitionId, method: command.method, status: "pending", createdAt: timestamp, updatedAt: timestamp };
       state.setupOperations[operation.operationId] = operation;
       return { operationId: operation.operationId, instanceId: operation.instanceId, definitionId: operation.definitionId, method: operation.method, status: operation.status };
@@ -267,6 +304,9 @@ export class ConnectionOwner {
     const instance = state.instances[command.instanceId]; if (!instance) throw conflict("Connection instance is unknown");
     if (instance.health === "disconnected") throw conflict("Connection instance is disconnected");
     if (command.kind === "policy.update") {
+      // Compare under the same mutex as publication, after receipt replay. A
+      // stale sheet cannot restore permissions changed by another owner client.
+      if (instance.setupRevision !== command.expectedSetupRevision) throw conflict("Connection changed; reopen its settings before saving");
       instance.policy = copy(command.policy); instance.health = command.policy.enabled ? "setup-required" : "disabled"; instance.credentialAvailability = "unknown"; instance.providerIdentity = "unknown"; instance.updatedAt = timestamp; instance.setupRevision += 1; delete instance.lastError;
       return resultForInstance(instance);
     }

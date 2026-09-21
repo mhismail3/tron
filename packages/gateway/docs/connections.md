@@ -21,13 +21,25 @@ The accepted owner-typed commands are:
 - `connections.policy.update`; and
 - `connections.disconnect`.
 
-Setup completion is bound to one operation ID and instance ID. Accepted writes
+Setup completion is bound to one operation ID and instance ID. A repeated pending
+setup returns that exact operation only for the same definition and method.
+Policy updates require `expectedSetupRevision` from the observed instance; the
+owner checks it under its mutation lock, after receipt replay, so stale account
+sheets cannot overwrite newer approvals or budgets. All native and Knowledge
+callers carry this precondition; an old client missing it fails closed rather
+than performing an unconditional write. No persisted-state migration is needed.
+Accepted writes
 have bounded command receipts and replay the exact result only for the same
 request hash. Disconnect disables future admission but does not claim that a
 provider credential was revoked; revocation remains the credential owner's
 contract. Capability status is derived per capability and per instance, so one
 unavailable capability does not become a successful empty list or hide another
-instance.
+instance. Availability uses capability effects, not only overall account health:
+write capabilities require write approval, paid capabilities require approval
+and a positive budget, and MCP tools require write approval even when the server
+labels individual tools read-only. Knowledge credential/account observations and
+MCP handshake/discovery readiness remain adapter-owned evidence. Availability is
+not a claim that tools are loaded into every existing conversation.
 
 ## Prepared state migration
 

@@ -24,6 +24,21 @@ describe("ConnectionOwner", () => {
       await owner.recordProviderObservation("account-two", 1, { credentialAvailability: "available", providerIdentity: "admitted" });
       const admitted = await owner.snapshot();
       expect(admitted.instances.find(item => item.id === "account-one")).toMatchObject({ credentialConfigured: true, credentialAvailability: "available", providerIdentity: "admitted", health: "ready" });
+      expect(admitted.capabilities.find(item => item.id === "move" && item.connectionId === "account-one")).toMatchObject({ availability: "unavailable", detail: "Write approval is required for this capability" });
+      expect(admitted.capabilities.find(item => item.id === "assess" && item.connectionId === "account-one")).toMatchObject({ availability: "unavailable", detail: "Paid access approval is required for this capability" });
+      expect(admitted.capabilities.find(item => item.id === "move" && item.connectionId === "account-two")?.availability).toBe("available");
+      await expect(owner.admitRuntimeBinding({ schemaVersion: 1, integrationId: "knowledge.raindrop", connectionId: "account-one", capabilityId: "move", sessionId: "session-one", runtimeGeneration: 1, provider: { owner: "connection", definitionId: "knowledge.raindrop", connectionId: "account-one" } })).rejects.toThrow("Write approval is required");
+      await owner.execute({ kind: "policy.update", commandId: "policy-approve-one-0001", instanceId: "account-one", expectedSetupRevision: 1, policy: { enabled: true, allowWrites: true, paidAccessApproved: true, paidBudgetCents: 25, recurringApproved: false } });
+      const latestPolicy = (await owner.resolveInstance("account-one")).policy;
+      // A distinct stale command cannot revoke or restore fields from the old
+      // sheet; replay of the accepted command still returns its original receipt.
+      await expect(owner.execute({ kind: "policy.update", commandId: "stale-policy-one-0001", instanceId: "account-one", expectedSetupRevision: 1, policy: { ...latestPolicy, allowWrites: false } })).rejects.toThrow("Connection changed");
+      expect((await owner.resolveInstance("account-one")).policy).toEqual(latestPolicy);
+      await expect(owner.execute({ kind: "policy.update", commandId: "policy-approve-one-0001", instanceId: "account-one", expectedSetupRevision: 1, policy: latestPolicy })).resolves.toMatchObject({ setupRevision: 2 });
+      await owner.recordProviderObservation("account-one", 2, { credentialAvailability: "available", providerIdentity: "admitted" });
+      const approved = await owner.snapshot();
+      expect(approved.capabilities.find(item => item.id === "move" && item.connectionId === "account-one")?.availability).toBe("available");
+      expect(approved.capabilities.find(item => item.id === "assess" && item.connectionId === "account-one")?.availability).toBe("available");
       await expect(owner.execute({ kind: "setup.complete", commandId: "late-complete-0001", operationId: first.operationId, instanceId: "account-two", providerAccountId: "999", credentialRef: "connector:raindrop:wrong", policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } })).rejects.toThrow("another instance");
       await owner.execute({ kind: "disconnect", commandId: "disconnect-one-0001", instanceId: "account-one" });
       const after = await owner.snapshot();

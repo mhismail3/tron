@@ -162,19 +162,27 @@ export class McpAdapter {
     const instances = snapshot.instances.filter(instance => instance.definitionId === "mcp.remote-http" && (instance.health === "ready" || instance.health === "setup-required") && instance.policy.enabled);
     const factories: ExtensionFactory[] = [];
     const names = new Set<string>();
-    for (const projection of instances) {
-      const instance = await this.options.connections.resolveInstance(projection.id);
-      const factory = await this.factoryFor(instance, sessionId, hostEpoch, names);
-      factories.push(factory);
+    const opened: ActiveConnection[] = [];
+    try {
+      for (const projection of instances) {
+        const instance = await this.options.connections.resolveInstance(projection.id);
+        factories.push(await this.factoryFor(instance, sessionId, hostEpoch, names, opened));
+      }
+      return factories;
+    } catch (error) {
+      // No factory reaches the runtime on partial admission. Retire every
+      // transport acquired by this attempt, including earlier valid servers.
+      await Promise.allSettled(opened.map(active => active.close()));
+      throw error;
     }
-    return factories;
   }
 
-  private async factoryFor(instance: ConnectionInstance, sessionId: string, hostEpoch: string, names: Set<string>): Promise<ExtensionFactory> {
+  private async factoryFor(instance: ConnectionInstance, sessionId: string, hostEpoch: string, names: Set<string>, opened: ActiveConnection[]): Promise<ExtensionFactory> {
     // MCP annotations are untrusted. A server cannot turn a write-capable
     // connection into a read-only one by labelling a tool read-only.
     if (!instance.policy.allowWrites) throw unavailable("MCP tools require an enabled write policy");
     const active = await this.connect(instance);
+    opened.push(active);
     const discovered: McpTool[] = [];
     let cursor: string | undefined;
     let pages = 0;
@@ -188,11 +196,9 @@ export class McpAdapter {
       discovered.push(...listed.tools);
       cursor = listed.nextCursor;
     } while (cursor);
-    try {
-      await this.options.connections.markRuntimeReady(instance.id, instance.setupRevision);
-      await this.options.connections.admitRuntimeBinding({ schemaVersion: 1, integrationId: instance.definitionId, connectionId: instance.id, capabilityId: "tools", sessionId, runtimeGeneration: Number.isFinite(Number(hostEpoch)) ? Number(hostEpoch) : 0, provider: { owner: "connection", definitionId: instance.definitionId, connectionId: instance.id } });
-    } catch (error) { await active.close(); throw error; }
     const tools = discovered.map(tool => this.admitTool(instance, tool, names, active, sessionId, hostEpoch));
+    await this.options.connections.markRuntimeReady(instance.id, instance.setupRevision);
+    await this.options.connections.admitRuntimeBinding({ schemaVersion: 1, integrationId: instance.definitionId, connectionId: instance.id, capabilityId: "tools", sessionId, runtimeGeneration: Number.isFinite(Number(hostEpoch)) ? Number(hostEpoch) : 0, provider: { owner: "connection", definitionId: instance.definitionId, connectionId: instance.id } });
     return async (pi) => {
       for (const tool of tools) pi.registerTool(tool as ToolDefinition<any>);
       pi.on("session_shutdown", async () => { await active.close(); });

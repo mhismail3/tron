@@ -4,6 +4,146 @@ import XCTest
 
 @MainActor
 final class SettingsLayoutStyleTests: XCTestCase {
+    func testSettingsRedesignScreensRenderRootAndRepresentativeFixtures() async throws {
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: [socket]).factory)
+        let cacheRoot = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let model = AppModel(client: client, cache: SnapshotCache(root: cacheRoot))
+        defer {
+            Task { await model.teardown(); await client.close(); try? FileManager.default.removeItem(at: cacheRoot) }
+        }
+
+        try await withHost(
+            SettingsView(scope: .dashboard)
+                .environment(model)
+                .tronPresentation()
+                .tronSettingsLayout(),
+            size: CGSize(width: 440, height: 900),
+            scheme: .dark
+        ) { host in
+            attach(image(host), name: "settings-redesign-root-dark")
+        }
+        try await withHost(
+            IntegrationsSettingsView(surface: .mcpServers)
+                .environment(model)
+                .tronPresentation()
+                .tronSettingsLayout(),
+            size: CGSize(width: 440, height: 900),
+            scheme: .dark
+        ) { host in
+            attach(image(host), name: "settings-redesign-mcp-dark")
+        }
+        try await withHost(
+            PackagesSettingsView(projectCWD: "/fixture/project")
+                .environment(model)
+                .tronPresentation()
+                .tronSettingsLayout()
+                .environment(\.dynamicTypeSize, .accessibility3),
+            size: CGSize(width: 320, height: 900),
+            scheme: .light
+        ) { host in
+            attach(image(host), name: "settings-redesign-resources-accessibility-light")
+        }
+    }
+
+    func testConnectedServicesRendersOwnerSnapshot() async throws {
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: [socket]).factory)
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let model = AppModel(client: client, cache: SnapshotCache(root: root))
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+        do {
+            try await model.connectHostedGateway(profile: GatewayProfile(id: "profile", label: "Fixture Mac", host: "gateway.test", port: 9847, machineId: "machine", deviceId: "device"), token: "fixture-token")
+            try await withHost(IntegrationsSettingsView(surface: .connectedServices)
+                .environment(model).tronPresentation().tronSettingsLayout(),
+                size: CGSize(width: 440, height: 900), scheme: .dark) { host in
+                let read = try await request(socket, count: 2)
+                XCTAssertEqual(read.method, "connections.list")
+                let value = try JSONDecoder.gateway.decode(JSONValue.self, from: Data(#"""
+                {"definitions":[{"schemaVersion":1,"id":"knowledge.raindrop","implementation":"knowledge-connector","displayName":"Raindrop","setupMethods":["token"],"capabilities":[{"id":"read","displayName":"Read bookmarks","effects":["read"],"supported":true}]}],
+                "instances":[{"id":"fixture-account","definitionId":"knowledge.raindrop","implementation":"knowledge-connector","providerAccountId":"Research account","credentialConfigured":true,"credentialAvailability":"available","providerIdentity":"admitted","policy":{"enabled":true,"allowWrites":false,"paidAccessApproved":false,"paidBudgetCents":0,"recurringApproved":false},"health":"ready","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","setupRevision":1}],
+                "capabilities":[{"id":"read","availability":"available","effects":["read"],"definitionId":"knowledge.raindrop","connectionId":"fixture-account","provenance":{"owner":"connection","definitionId":"knowledge.raindrop","connectionId":"fixture-account"}}],"setupOperations":[],"stateRevision":1}
+                """#.utf8))
+                await socket.enqueue(try reply(read.id, value))
+                try await Task.sleep(for: .milliseconds(100))
+                host.view.layoutIfNeeded()
+                attach(image(host), name: "connected-services-account-fixture-dark")
+            }
+        } catch {
+            await model.teardown(); await client.close(); try? FileManager.default.removeItem(at: root)
+            throw error
+        }
+        await model.teardown(); await client.close(); try? FileManager.default.removeItem(at: root)
+    }
+
+    func testRuntimeBehaviorRendersInlineDefaults() async throws {
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: [socket]).factory)
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let model = AppModel(client: client, cache: SnapshotCache(root: root))
+        do {
+            try await withHost(NavigationStack { RuntimeBehaviorSettingsView(projectCWD: nil) }
+                .environment(model).tronPresentation().tronSettingsLayout().tronSettingsVisualTheme(accent: .tronPurple),
+                size: CGSize(width: 440, height: 900), scheme: .dark) { host in
+                // Interaction is exercised by the HOSTED_TEST UI journey; this
+                // native layout fixture does not expose a complete AX tree.
+                attach(image(host), name: "runtime-behavior-inline-defaults-dark")
+            }
+        } catch {
+            await model.teardown(); await client.close(); try? FileManager.default.removeItem(at: root)
+            throw error
+        }
+        await model.teardown(); await client.close(); try? FileManager.default.removeItem(at: root)
+    }
+
+    func testIntegrationMutationSettlementRejoinsAfterPresentationSuspension() async throws {
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: [socket]).factory)
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let model = AppModel(client: client, cache: SnapshotCache(root: root))
+        do {
+            for fails in [false, true] {
+                let probe = IntegrationMutationProbe()
+                let started = expectation(description: "Accepted command started")
+                var release: CheckedContinuation<Void, Error>?
+                defer { release?.resume(throwing: CancellationError()) }
+                var starts = 0
+                let accepted = Task<Void, Error> { @MainActor in
+                    starts += 1
+                    try await withCheckedThrowingContinuation { continuation in
+                        release = continuation
+                        started.fulfill()
+                    }
+                }
+                probe.pending = IntegrationMutation(identity: model.knowledgePresentationIdentity, task: accepted)
+                try await withHost(IntegrationMutationFixture(probe: probe).environment(model), size: CGSize(width: 320, height: 120)) { _ in
+                    await fulfillment(of: [started], timeout: 2)
+                    probe.active = false
+                    try await Task.sleep(for: .milliseconds(40))
+                    let continuation = try XCTUnwrap(release)
+                    release = nil
+                    if fails { continuation.resume(throwing: GatewayFailure(code: "conflict", message: "Fixture conflict", retryable: false, details: nil)) }
+                    else { continuation.resume() }
+                    _ = await accepted.result
+                    try await Task.sleep(for: .milliseconds(40))
+                    XCTAssertNotNil(probe.pending, "Inactive observers cannot publish completion")
+                    XCTAssertNil(probe.error)
+                    XCTAssertEqual(probe.completions, 0)
+                    probe.active = true
+                    try await Task.sleep(for: .milliseconds(60))
+                    XCTAssertNil(probe.pending)
+                    XCTAssertEqual(probe.completions, fails ? 0 : 1)
+                    XCTAssertEqual(probe.error != nil, fails)
+                    XCTAssertEqual(starts, 1, "Resuming presentation must not replay an accepted command")
+                }
+            }
+        } catch {
+            await model.teardown(); await client.close(); try? FileManager.default.removeItem(at: root)
+            throw error
+        }
+        await model.teardown(); await client.close(); try? FileManager.default.removeItem(at: root)
+    }
+
     func testFlatSummaryKeepsItsContainerWithoutBackdropGlass() async throws {
         for scheme in [ColorScheme.light, .dark] {
             try await withHost(Text("Summary").font(TronTypography.body)
@@ -152,7 +292,7 @@ final class SettingsLayoutStyleTests: XCTestCase {
                                                ("dark", .dark, .large, 440), ("large-text", .dark, .accessibility3, 320)] {
             let fixture = ScrollView {
                 VStack(spacing: 18) {
-                    TronSettingsGroup("Models and Defaults", accent: .tronPurple) {
+                    TronSettingsGroup("Model Defaults", accent: .tronPurple) {
                         VStack(spacing: 0) {
                             TronSelectionRow(icon: "cpu", title: "Model", detail: "Default for new sessions", value: "Example Model", accent: .tronPurple) { Button("Example Model") {} }
                             TronSettingsDivider(accent: .tronPurple)
@@ -571,6 +711,23 @@ final class SettingsLayoutStyleTests: XCTestCase {
         await fulfillment(of: [appeared], timeout: 2)
         host.view.layoutIfNeeded()
         try await check(host)
+    }
+}
+
+@MainActor @Observable
+private final class IntegrationMutationProbe {
+    var pending: IntegrationMutation?
+    var error: String?
+    var active = true
+    var completions = 0
+}
+
+private struct IntegrationMutationFixture: View {
+    @Bindable var probe: IntegrationMutationProbe
+    var body: some View {
+        Text("Accepted integration command")
+            .modifier(IntegrationMutationObserver(mutation: $probe.pending, error: $probe.error) { probe.completions += 1 })
+            .environment(\.tronPresentationActivity, probe.active ? .active : .covered)
     }
 }
 

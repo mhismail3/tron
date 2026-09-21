@@ -46,17 +46,44 @@ struct ProjectTrustSummary: Equatable, Sendable {
     var savedDecisionLabel: String { savedDecision.map { $0 ? "Trusted" : "Blocked" } ?? "Not saved" }
 }
 
+private struct TrustDefaultDraft: Equatable {
+    var decision = "ask"
+
+    init() {}
+
+    init(decision: String) {
+        self.decision = decision
+    }
+
+    func patch(comparedTo baseline: Self) -> JSONValue {
+        decision == baseline.decision ? .object([:]) : .object(["defaultProjectTrust": .string(decision)])
+    }
+}
+
 struct TrustSettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
     let target: TrustTarget?
+    let allowsGlobalDefault: Bool
     @State private var inspection: JSONValue?
+    @State private var defaultDraft = TrustDefaultDraft()
+    @State private var defaultDrafts = ScopedSettingsDraftStore<TrustDefaultDraft>()
+    @State private var defaultLoadGeneration = 0
+
+    init(target: TrustTarget?, allowsGlobalDefault: Bool = false) {
+        self.target = target
+        self.allowsGlobalDefault = allowsGlobalDefault
+    }
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 16) {
+                if allowsGlobalDefault {
+                    SettingsAutosaveNotice(key: .settings(.global, sessionID: nil))
+                    globalDefaultSection
+                }
                 if target != nil {
                     if let inspection {
                         let summary = ProjectTrustSummary(inspection)
@@ -86,6 +113,7 @@ struct TrustSettingsView: View {
             .padding(20)
         }
         .tronScrollEdgeChrome()
+        .tronSettingsAutosave(draft: $defaultDraft, store: $defaultDrafts, initial: TrustDefaultDraft())
         .tronNavigationTitle("Project Trust")
         .task(id: PresentationActivityTaskID(
             source: TrustLoadID(target: target, invalidationGeneration: model.trustRevision,
@@ -95,6 +123,64 @@ struct TrustSettingsView: View {
             guard presentationActivity.allowsPresentationPublication else { return }
             await load()
         }
+        .task(id: PresentationActivityTaskID(
+            source: SettingsLoadID(target: .global, invalidationGeneration: model.settingsInvalidationGeneration,
+                                   foregroundGeneration: model.foregroundReconciliationGeneration),
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) {
+            guard allowsGlobalDefault, presentationActivity.allowsPresentationPublication else { return }
+            await loadGlobalDefault()
+        }
+    }
+
+    private var globalDefaultSection: some View {
+        let editing = defaultBinding
+        return TronSettingsGroup(
+            "Default Project Trust",
+            detail: "Used when a workspace has no saved decision. Trust controls project-local resource loading; it is not a sandbox.",
+            accent: .tronAmber
+        ) {
+            TronSelectionRow(
+                icon: "checkmark.shield",
+                title: "Default policy",
+                value: editing.wrappedValue.decision.capitalized,
+                accent: .tronAmber
+            ) {
+                Button("Ask") { editing.wrappedValue.decision = "ask" }
+                Button("Always") { editing.wrappedValue.decision = "always" }
+                Button("Never") { editing.wrappedValue.decision = "never" }
+            }
+        }
+    }
+
+    private var defaultBinding: Binding<TrustDefaultDraft> {
+        SettingsAutosave.binding(
+            draft: $defaultDraft,
+            store: $defaultDrafts,
+            model: model,
+            target: .global,
+            admits: { allowsGlobalDefault && presentationActivity.allowsDataPublication },
+            patch: { $0.patch(comparedTo: $1) }
+        )
+    }
+
+    private func loadGlobalDefault() async {
+        guard presentationActivity.allowsPresentationPublication, !Task.isCancelled else { return }
+        let identity = model.knowledgePresentationIdentity
+        defaultLoadGeneration &+= 1
+        let ticket = defaultLoadGeneration
+        let target = SettingsTarget.global
+        _ = defaultDrafts.seedBaselineIfMissing(defaultDraft, for: target)
+        guard await model.refreshSettings(target: target),
+              ticket == defaultLoadGeneration,
+              identity == model.knowledgePresentationIdentity,
+              presentationActivity.allowsPresentationPublication,
+              !Task.isCancelled,
+              let value = model.settings(for: target)?.objectValue?["effective"]?.objectValue,
+              let decision = value["defaultProjectTrust"]?.stringValue else { return }
+        let loaded = TrustDefaultDraft(decision: decision)
+        guard defaultDrafts.install(loaded, for: target, ifCurrent: defaultDraft) else { return }
+        defaultDraft = loaded
     }
 
     private func trustSummaryCard(_ summary: ProjectTrustSummary) -> some View {
@@ -232,14 +318,21 @@ struct TrustSettingsView: View {
     }
 
     private func update(_ decision: Bool?) {
-        guard let target else { return }
-        Task {
+        guard let target, presentationActivity.allowsPresentationPublication else { return }
+        let requestIdentity = model.knowledgePresentationIdentity
+        Task { @MainActor in
             do {
                 let value = try await model.setTrust(target: target, decision: decision)
-                guard target == self.target else { return }
+                guard presentationActivity.allowsPresentationPublication,
+                      model.knowledgePresentationIdentity == requestIdentity,
+                      target == self.target else { return }
                 inspection = value
+            } catch is CancellationError {
+                return
             } catch {
-                guard target == self.target else { return }
+                guard presentationActivity.allowsPresentationPublication,
+                      model.knowledgePresentationIdentity == requestIdentity,
+                      target == self.target else { return }
                 model.presentError(error)
             }
         }

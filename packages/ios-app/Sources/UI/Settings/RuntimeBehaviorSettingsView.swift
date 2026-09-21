@@ -25,6 +25,11 @@ struct RuntimeBehaviorDraft: Equatable {
     var branchReserve = 16_384
     var branchSkipPrompt = false
     var retryEnabled = true
+    var selectedModel: ModelRef?
+    var thinking = "medium"
+    var modelContextWindows: [String: Int] = [:]
+    var inheritedModelContextWindows: [String: Int] = [:]
+    var contextWindowMinimum: Int?
     var retryCount = 3
     var retryDelay = 1_000
     var providerTimeout = 120_000
@@ -52,6 +57,24 @@ struct RuntimeBehaviorDraft: Equatable {
         if branchReserve != baseline.branchReserve { branch["reserveTokens"] = .number(Double(branchReserve)) }
         if branchSkipPrompt != baseline.branchSkipPrompt { branch["skipPrompt"] = .bool(branchSkipPrompt) }
         if !branch.isEmpty { patch["branchSummary"] = .object(branch) }
+        if thinking != baseline.thinking { patch["defaultThinkingLevel"] = .string(thinking) }
+        if selectedModel != baseline.selectedModel {
+            if let selectedModel {
+                patch["defaultModel"] = .object(["provider": .string(selectedModel.provider), "id": .string(selectedModel.id)])
+            } else {
+                patch["defaultModel"] = .null
+            }
+        }
+        let contextKeys = Set(modelContextWindows.keys).union(baseline.modelContextWindows.keys)
+        var contextPatch: [String: JSONValue] = [:]
+        for key in contextKeys {
+            if let value = modelContextWindows[key], baseline.modelContextWindows[key] != value {
+                contextPatch[key] = .number(Double(value))
+            } else if modelContextWindows[key] == nil, baseline.modelContextWindows[key] != nil {
+                contextPatch[key] = .null
+            }
+        }
+        if !contextPatch.isEmpty { patch["modelContextWindows"] = .object(contextPatch) }
         var retry: [String: JSONValue] = [:]
         if retryEnabled != baseline.retryEnabled { retry["enabled"] = .bool(retryEnabled) }
         if retryCount != baseline.retryCount { retry["maxRetries"] = .number(Double(retryCount)) }
@@ -88,18 +111,30 @@ struct RuntimeBehaviorSettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
     let projectCWD: String?
+    let projectSessionID: String?
     @State private var scope: SettingsScope = .global
     @State private var draft = RuntimeBehaviorDraft()
     @State private var drafts = ScopedSettingsDraftStore<RuntimeBehaviorDraft>()
+    @State private var refreshingCatalog = false
+    @State private var catalogRefreshGeneration = 0
+    @State private var catalogError: String?
+    @State private var loadGeneration = 0
+    @State private var sliderPresentation = ConfigurationSliderPresentation()
 
     private var allowsProjectScope: Bool { projectCWD != nil }
+
+    init(projectCWD: String?, projectSessionID: String? = nil) {
+        self.projectCWD = projectCWD
+        self.projectSessionID = projectSessionID
+    }
 
     var body: some View {
         let editing = editBinding
         return ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
                 scopeGroup
-                if let target = settingsTarget { SettingsAutosaveNotice(key: .settings(target, sessionID: nil)) }
+                modelDefaultsSection
+                if let target = settingsTarget { SettingsAutosaveNotice(key: .settings(target, sessionID: target.scope == .project ? projectSessionID : nil)) }
                 TronSettingsGroup("Provider Transport", accent: .tronCyan, surfaceStyle: .scrollOptimized) {
                     VStack(spacing: 0) {
                         choiceRow("network", "Transport", transportLabel, accent: .tronCyan) {
@@ -205,11 +240,23 @@ struct RuntimeBehaviorSettingsView: View {
             .padding(.vertical, 18)
         }
         .tronScrollEdgeChrome()
+        .tronConfigurationSliderHost(sliderPresentation)
+        .environment(\.configurationSliderSignposts, model.performanceSignpostsForCapture)
         .tronNavigationTitle("Runtime Behavior")
+        .onChange(of: catalogTarget) { _, _ in invalidateCatalogRefresh() }
+        .onChange(of: model.knowledgePresentationIdentity) { _, _ in invalidateCatalogRefresh() }
+        .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
+            if !active { invalidateCatalogRefresh() }
+        }
         .tronSettingsAutosave(draft: $draft, store: $drafts, initial: RuntimeBehaviorDraft())
         .task(id: PresentationActivityTaskID(
-            source: SettingsLoadID(target: settingsTarget, invalidationGeneration: model.settingsInvalidationGeneration,
-                                   foregroundGeneration: model.foregroundReconciliationGeneration),
+            source: RuntimeBehaviorLoadID(
+                settingsTarget: settingsTarget,
+                providerTarget: catalogTarget,
+                settingsInvalidationGeneration: model.settingsInvalidationGeneration,
+                providerInvalidationGeneration: model.providerInvalidationGeneration,
+                foregroundGeneration: model.foregroundReconciliationGeneration
+            ),
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
             guard presentationActivity.allowsPresentationPublication else { return }
@@ -217,6 +264,80 @@ struct RuntimeBehaviorSettingsView: View {
             await load()
         }
 
+    }
+
+    private var modelDefaultsSection: some View {
+        let editing = editBinding
+        return VStack(alignment: .leading, spacing: 18) {
+            TronSettingsGroup(
+                "Model Defaults",
+                detail: "Defaults apply to new sessions; existing sessions keep their current runtime.",
+                accent: .tronPurple,
+                surfaceStyle: .scrollOptimized
+            ) {
+                VStack(spacing: 0) {
+                    TronModelSelectionRow(
+                        selection: editing.selectedModel,
+                        models: availableModels,
+                        navigationTitle: "Models"
+                    )
+                    if model.gatewayInfo?.capabilities.contains("context-window.v1") == true,
+                       let selectedModel = selectedModelSummary,
+                       let limits = selectedContextWindowLimits {
+                        TronSettingsDivider(accent: .tronPurple)
+                        ContextWindowSelectionRow(
+                            selection: contextWindowBinding(for: selectedModel),
+                            limits: limits,
+                            inheritedValue: draft.inheritedModelContextWindows[selectedModel.ref.contextWindowKey],
+                            resetLabel: scope == .project ? "Use inherited default" : "Use model default",
+                            information: "Conversation capacity for new sessions"
+                        )
+                        .id("\(scope.rawValue):\(selectedModel.ref.contextWindowKey)")
+                    }
+                    TronSettingsDivider(accent: .tronPurple)
+                    TronThinkingSelectionRow(
+                        selection: editing.thinking,
+                        levels: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+                        information: "Reasoning effort; higher levels can take longer"
+                    )
+                    .id(settingsTarget)
+                }
+            }
+            TronSettingsRow(icon: "list.bullet.rectangle", title: "Model Catalog", subtitle: modelCatalogSummary, accent: .tronPurple) {
+                Button { Task { await refreshModelCatalog() } } label: {
+                    TronInlineActionLabel("Refresh", icon: "arrow.clockwise", isWorking: refreshingCatalog, accent: .tronPurple)
+                }
+                .buttonStyle(.plain)
+                .disabled(refreshingCatalog)
+            }
+            .tronGlassSurface(accent: .tronPurple, tintOpacity: 0.14)
+            if let catalogError { TronSettingsNotice(message: catalogError, accent: .tronError) }
+        }
+    }
+
+    private var catalogTarget: ProviderCatalogTarget {
+        scope == .project
+            ? projectSessionID.map(ProviderCatalogTarget.session(id:)) ?? .global
+            : .global
+    }
+
+    private var availableModels: [ModelSummary] {
+        model.providerCatalog(for: catalogTarget)?.models.filter(\.available) ?? []
+    }
+
+    private var selectedModelSummary: ModelSummary? {
+        guard let selected = draft.selectedModel else { return nil }
+        return availableModels.first { $0.ref == selected }
+    }
+
+    private var selectedContextWindowLimits: ContextWindowLimits? {
+        selectedModelSummary?.contextWindowLimits?.withMinimum(draft.contextWindowMinimum)
+    }
+
+    private var modelCatalogSummary: String {
+        guard model.providerCatalog(for: catalogTarget) != nil else { return "Catalog not loaded" }
+        let count = availableModels.count
+        return "\(count) model\(count == 1 ? "" : "s") currently available"
     }
 
     private var scopeGroup: some View {
@@ -278,8 +399,47 @@ struct RuntimeBehaviorSettingsView: View {
     private var editBinding: Binding<RuntimeBehaviorDraft> {
         let target = settingsTarget
         return SettingsAutosave.binding(draft: $draft, store: $drafts, model: model, target: target,
+            sessionID: target?.scope == .project ? projectSessionID : nil,
             admits: { target == settingsTarget && presentationActivity.allowsDataPublication },
             patch: { $0.patch(comparedTo: $1) })
+    }
+
+    private func contextWindowBinding(for modelSummary: ModelSummary) -> Binding<Int?> {
+        let editing = editBinding
+        return Binding(
+            get: { editing.wrappedValue.modelContextWindows[modelSummary.ref.contextWindowKey] },
+            set: { value in editing.update { $0.modelContextWindows[modelSummary.ref.contextWindowKey] = value } }
+        )
+    }
+
+    private func invalidateCatalogRefresh() {
+        catalogRefreshGeneration &+= 1
+        refreshingCatalog = false
+        catalogError = nil
+    }
+
+    private func refreshModelCatalog() async {
+        guard presentationActivity.allowsPresentationPublication, !refreshingCatalog else { return }
+        catalogRefreshGeneration &+= 1
+        let ticket = catalogRefreshGeneration
+        let identity = model.knowledgePresentationIdentity
+        let target = catalogTarget
+        refreshingCatalog = true
+        catalogError = nil
+        func admits() -> Bool {
+            IntegrationPresentationAdmission.admits(
+                presentationActive: presentationActivity.allowsPresentationPublication,
+                currentIdentity: model.knowledgePresentationIdentity, requestedIdentity: identity,
+                currentRequest: catalogRefreshGeneration, requestedRequest: ticket
+            ) && catalogTarget == target
+        }
+        defer { if admits() { refreshingCatalog = false } }
+        do {
+            try await model.refreshModelCatalog(target: target, force: true)
+        } catch is CancellationError {
+        } catch {
+            if admits() { catalogError = error.localizedDescription }
+        }
     }
 
     private func selectScope(_ newScope: SettingsScope) {
@@ -297,24 +457,51 @@ struct RuntimeBehaviorSettingsView: View {
 
     private func load() async {
         let foreground = model.foregroundReconciliationGeneration
+        let identity = model.knowledgePresentationIdentity
+        loadGeneration &+= 1
+        let ticket = loadGeneration
         guard let target = settingsTarget else { return }
         // Installing a projection never submits an autosave; a user edit made
         // while this read is pending still rejects its stale result.
         _ = drafts.seedBaselineIfMissing(draft, for: target)
-        guard await model.refreshSettings(target: target),
+        let requestedCatalogTarget = catalogTarget
+        async let settingsReady = model.refreshSettings(target: target)
+        async let catalogReady = model.refreshProviders(target: requestedCatalogTarget)
+        let loadedSettings = await settingsReady
+        _ = await catalogReady
+        guard loadedSettings,
+              ticket == loadGeneration,
+              identity == model.knowledgePresentationIdentity,
               foreground == model.foregroundReconciliationGeneration,
               presentationActivity.allowsPresentationPublication,
               !Task.isCancelled,
               target == settingsTarget,
-              let loaded = projectionDraft(target: target),
+              requestedCatalogTarget == catalogTarget,
+              let loaded = projectionDraft(target: target, catalogTarget: requestedCatalogTarget),
               drafts.install(loaded, for: target, ifCurrent: draft) else { return }
         draft = loaded
     }
 
-    private func projectionDraft(target: SettingsTarget) -> RuntimeBehaviorDraft? {
+    private func projectionDraft(target: SettingsTarget, catalogTarget: ProviderCatalogTarget) -> RuntimeBehaviorDraft? {
         guard let root = model.settings(for: target)?.objectValue,
               let value = root["effective"]?.objectValue else { return nil }
         var loaded = RuntimeBehaviorDraft()
+        if let object = value["defaultModel"]?.objectValue,
+           let provider = object["provider"]?.stringValue,
+           let id = object["id"]?.stringValue {
+            loaded.selectedModel = ModelRef(provider: provider, id: id)
+        } else {
+            loaded.selectedModel = model.preferredAvailableModel(for: catalogTarget)
+        }
+        loaded.thinking = value["defaultThinkingLevel"]?.stringValue ?? loaded.thinking
+        if let scopeDocument = root["documents"]?.objectValue?[target.scope.rawValue]?.objectValue {
+            loaded.modelContextWindows = Self.contextWindows(scopeDocument["modelContextWindows"])
+        }
+        if target.scope == .project,
+           let globalDocument = root["documents"]?.objectValue?["global"]?.objectValue {
+            loaded.inheritedModelContextWindows = Self.contextWindows(globalDocument["modelContextWindows"])
+        }
+        loaded.contextWindowMinimum = value["contextWindowMinimum"]?.intValue
         loaded.transport = value.string("transport", fallback: loaded.transport)
         loaded.steeringMode = value.string("steeringMode", fallback: loaded.steeringMode)
         loaded.followUpMode = value.string("followUpMode", fallback: loaded.followUpMode)
@@ -353,6 +540,14 @@ struct RuntimeBehaviorSettingsView: View {
             loaded.analytics = telemetry.bool("analytics", fallback: loaded.analytics)
         }
         return loaded
+    }
+
+    private static func contextWindows(_ value: JSONValue?) -> [String: Int] {
+        guard let object = value?.objectValue else { return [:] }
+        return object.compactMapValues { value in
+            guard let number = value.intValue, number > 0 else { return nil }
+            return number
+        }
     }
 
 }

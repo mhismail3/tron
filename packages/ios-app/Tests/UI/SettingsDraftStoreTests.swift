@@ -5,26 +5,26 @@ import Testing
 struct SettingsDraftStoreTests {
     @Test("default settings reload identity includes the active provider target")
     func providerTargetIdentity() {
-        let global = AgentDefaultsLoadID(
+        let global = RuntimeBehaviorLoadID(
             settingsTarget: .global,
             providerTarget: .global,
             settingsInvalidationGeneration: 0,
             providerInvalidationGeneration: 0, foregroundGeneration: 0
         )
-        let project = AgentDefaultsLoadID(
+        let project = RuntimeBehaviorLoadID(
             settingsTarget: .project(cwd: "/workspace/project"),
             providerTarget: .session(id: "session-a"),
             settingsInvalidationGeneration: 0,
             providerInvalidationGeneration: 0, foregroundGeneration: 0
         )
         #expect(global != project)
-        #expect(global != AgentDefaultsLoadID(
+        #expect(global != RuntimeBehaviorLoadID(
             settingsTarget: .global,
             providerTarget: .global,
             settingsInvalidationGeneration: 0,
             providerInvalidationGeneration: 1, foregroundGeneration: 0
         ))
-        #expect(global != AgentDefaultsLoadID(settingsTarget: .global, providerTarget: .global,
+        #expect(global != RuntimeBehaviorLoadID(settingsTarget: .global, providerTarget: .global,
             settingsInvalidationGeneration: 0, providerInvalidationGeneration: 0, foregroundGeneration: 1))
     }
 
@@ -46,9 +46,9 @@ struct SettingsDraftStoreTests {
             "skills": .array([.string("/project/skill")])
         ])
 
-        var defaults = AgentDefaultsDraft()
-        defaults.retry = false
-        let defaultsPatch = defaults.patch(comparedTo: AgentDefaultsDraft()).objectValue
+        var defaults = RuntimeBehaviorDraft()
+        defaults.retryEnabled = false
+        let defaultsPatch = defaults.patch(comparedTo: RuntimeBehaviorDraft()).objectValue
         #expect(defaultsPatch == [
             "retry": .object(["enabled": .bool(false)])
         ])
@@ -57,11 +57,11 @@ struct SettingsDraftStoreTests {
     @Test("context window defaults patch only changed model keys and supports scope reset")
     func modelContextWindowPatch() {
         let model = ModelRef(provider: "openai-codex", id: "gpt-6-astra")
-        var baseline = AgentDefaultsDraft()
+        var baseline = RuntimeBehaviorDraft()
         baseline.modelContextWindows[model.contextWindowKey] = 272_000
         var edited = baseline
         edited.modelContextWindows["other/model"] = 128_000
-        edited.setContextWindowOverride(nil, for: model)
+        edited.modelContextWindows[model.contextWindowKey] = nil
 
         #expect(edited.patch(comparedTo: baseline).objectValue?["modelContextWindows"]?.objectValue == [
             model.contextWindowKey: .null,
@@ -73,15 +73,15 @@ struct SettingsDraftStoreTests {
     @Test("context drafts retain other models and reveal inheritance without writing it")
     func contextWindowInheritance() {
         let model = ModelRef(provider: "p", id: "m"); let other = ModelRef(provider: "p", id: "other")
-        var baseline = AgentDefaultsDraft()
+        var baseline = RuntimeBehaviorDraft()
         baseline.modelContextWindows = [model.contextWindowKey: 500_000, other.contextWindowKey: 100_000]
         baseline.inheritedModelContextWindows = [model.contextWindowKey: 272_000]
         var draft = baseline
-        draft.setContextWindowOverride(nil, for: model)
+        draft.modelContextWindows[model.contextWindowKey] = nil
         #expect(draft.inheritedModelContextWindows[model.contextWindowKey] == 272_000)
         #expect(draft.modelContextWindows[other.contextWindowKey] == 100_000)
         #expect(draft.patch(comparedTo: baseline).objectValue?["modelContextWindows"] == .object([model.contextWindowKey: .null]))
-        draft.setContextWindowOverride(500_000, for: model)
+        draft.modelContextWindows[model.contextWindowKey] = 500_000
         #expect(draft.patch(comparedTo: baseline).objectValue?.isEmpty == true)
     }
 

@@ -77,6 +77,12 @@ struct TronMobileApp: App {
                 HostedAutomationFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-dashboard-menu-fixture") {
                 HostedDashboardMenuFixtureView()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-runtime-settings-fixture") {
+                NavigationStack { RuntimeBehaviorSettingsView(projectCWD: nil) }
+                    .environment(hostedModel)
+                    .tronPresentation()
+                    .tronSettingsLayout()
+                    .tronSettingsVisualTheme(accent: .tronPurple)
             } else if ProcessInfo.processInfo.arguments.contains("-tron-extension-widgets-fixture") {
                 HostedExtensionWidgetsFixtureView()
             } else {

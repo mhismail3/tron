@@ -611,8 +611,7 @@ The provider catalog's `usageSupported` flag marks rows that will answer, so a s
 reserves its usage line with an animated skeleton and crossfades to the resolved summary instead of
 growing mid-load; a failed read retires the skeleton, and a Gateway without the flag reserves nothing.
 
-Compaction Settings consolidates automatic compaction and advanced reserve/recent controls
-formerly duplicated under Models and Defaults and Runtime Behavior. The existing scoped draft
+Compaction Settings owns automatic compaction and advanced reserve/recent controls. The existing scoped draft
 store/coordinator owns edits, target switching and confirmed writes. `compaction-policy.v1`
 adds independent thinking (default: inherit conversation), bounded optional focus and an
 explicit standard reset that preserves budgets; project scope also offers deletion of thinking/focus
@@ -633,7 +632,7 @@ sequence/runtime-generation reconciliation prevents a delayed compaction snapsho
 from resurrecting a completed operation. `SettingsDraftStoreTests` and
 `SessionSnapshotEventAdmissionTests` cover reset, bounds, decoding and retirement.
 
-Models and Defaults exposes a separate forced-refresh action row below its
+Runtime Behavior's Model Defaults section exposes a separate forced-refresh action row below its
 model controls for the displayed catalog target, reloads successful updates and cached fallbacks
 before reporting provider failures or timeout, and
 never mutates the settings draft, saved defaults, or credentials. Models with
@@ -1313,8 +1312,8 @@ very tall scrolling collections use the shared static scroll surface instead:
 it preserves tint, border, geometry, and hit regions without installing a live
 backdrop filter for every row or a multi-screen card. Long settings screens use
 lazy outer stacks, while their small divider-owned sections remain eager. The main Settings sheet places its
-divider-owned rows in three category containers rather than one backdrop per destination: emerald App &
-Connections, purple Agent, and blue Workspace & Diagnostics. Row icons and dividers use the owning
+divider-owned rows in four category containers rather than one backdrop per destination: emerald App &
+Connections, purple Agent Behavior, cyan Integrations, and blue Workspace & Diagnostics. Row icons and dividers use the owning
 container accent. Each progressive destination installs that row accent as an environment-owned visual theme
 for ordinary titles, controls, icons, dividers, fields, and containers, including nested sheets; informational
 text cards mix the same hue toward slate. Settings action text resolves to white against dark Liquid Glass and to
@@ -1714,7 +1713,7 @@ model card's final row. The leading native toolbar group contains only Rename Se
 Terminal icons, mirroring the dashboard's grouped actions, while Done stays trailing.
 Rename keeps the dashboard's clearable native text-entry alert and trimmed nonempty admission.
 The model action opens the progressive searchable `ModelPicker` with purple title, controls,
-and cards. Its sheet title is **Models**, also used by the picker within Settings → Models and Defaults;
+and cards. Its sheet title is **Models**, also used by the picker within Settings → Runtime Behavior → Model Defaults;
 the parent settings destination retains its existing name. The model card scopes the same purple theme to
 its inline controls and nested sheets. An in-flight choice appears immediately without replacing canonical authority.
 Context-window model/revision guards, Thinking's available-level list, and compaction
@@ -1728,7 +1727,7 @@ draft. Completion rechecks the live presentation registry as well as the exact e
 so a retired surface cannot publish during its closing animation. Live Thinking revalidates
 session/model/runtime, idle phase, available levels and the displayed base value before
 submission, retaining the existing serialized/idempotent mutation and rollback owner.
-The shared Models and Defaults controls keep local slider drafts until dismissal, then submit the
+The shared Runtime Behavior Model Defaults controls keep local slider drafts until dismissal, then submit the
 single final change through settings autosave. Their information subtitles describe behavior rather
 than repeating the chosen value. Model Catalog has a distinct list icon and a trailing Refresh capsule. Defaults keep the full model-independent
 thinking list, not a live model's subset. Exact settings-target row identity and binding admission
@@ -1831,7 +1830,8 @@ positional “Item” labels. The overview derives stable row titles, subtitles,
 and identities once per admitted resource revision, then reuses that projection
 while scrolling; large resource groups use the static scroll surface. Reload is owned by that sheet and publishes visible progress; the canonical
 `session.resourcesChanged` revision is the sole post-mutation read owner, so mutation and projection loads cannot race one shared busy flag.
-Packages and Resources is one page: installed packages first, a standalone Install Package action,
+Available Resources starts with resource scope, inventory counts, and a project-trust route when applicable,
+then installed packages, a standalone Install Package action,
 then inline Skills, Prompts and Themes containers using Manage Session's emerald/cyan/teal resource
 accents. Resolved extensions are not duplicated beneath the installed list. Opaque, no-space source
 titles remain continuous and horizontally inspectable; ordinary titles and provenance wrap naturally,
@@ -1839,10 +1839,9 @@ with complete source/status information retained for accessibility. Resolved res
 same friendly title formatter as session resources, stripping Markdown/JSON suffixes and deriving a
 skill name from its directory. Raw paths, IDs and metadata remain untouched. Shared source/scope
 information appears once as a category caption, not repeated in each row; mixed sources retain row
-provenance. Empty categories use captions rather than empty info cards, and there is no aggregate
-resource-count card. Full technical resource data remains available separately, including extension-only
-or additive categories. Locations and Overrides is a separate sibling sheet directly below Packages
-and Resources in Settings, retaining optional discovery paths, advanced Mac overrides and autosave. Session storage remains
+provenance. Empty categories use captions rather than empty info cards. Scope counts describe inventory,
+not tools loaded into every existing conversation. Full technical resource data remains available separately, including extension-only
+or additive categories. Locations and Overrides is a separate sibling sheet in Workspace & Diagnostics, retaining optional discovery paths, advanced Mac overrides and autosave. Session storage remains
 Gateway-owned and is not exposed as a location override. Package catalog admission failures remain
 local to the Packages sheet, preserving the sheet while presenting a bounded retry
 state instead of routing a projection error through a global modal alert. Visible Settings reads include
@@ -2105,9 +2104,16 @@ The stack is never persisted and is not a second state authority.
 
 ## Integration management projection
 
-`IntegrationsRPCClient` and `IntegrationsSettingsView` expose the Gateway connection-owner contract as a native management surface. Definitions, account instances, capability status, and setup operations are redacted projections: the instance ID is the identity used by every action, never a provider name or account key. Same-provider accounts therefore retain independent policy, health, and disconnect state. Reads are fenced by the selected Gateway profile, lifecycle generation, connection epoch, presentation activity, and a latest-load ticket; a failed or unavailable child is not rendered as an empty success.
+`IntegrationsRPCClient` and `IntegrationsSettingsView` expose the Gateway connection-owner contract as a native management surface. Lists remain lightweight account/server rows; capability names and effect-specific diagnostics are progressive details in the selected connection sheet. Definitions, account instances, capability status, and setup operations are redacted projections: the instance ID is the identity used by every action, never a provider name or account key. Same-provider accounts therefore retain independent policy, health, and disconnect state. Reads are fenced by the selected Gateway profile, lifecycle generation, connection epoch, presentation activity, and a latest-load ticket; a failed or unavailable child is not rendered as an empty success.
 
-Setup is owner-typed (`token`, `endpoint`, or `local-command`) and uses the Gateway's confirmed mutation receipt executor. The iOS form accepts only an opaque Mac Keychain credential reference, never token values or generic agent-readable secret fields. Endpoint and local-command configuration remain explicit; local commands are presented as trusted local code and are not shell-interpolated by the client. Policy controls (enabled, writes, paid, and recurring) are independent and instance-scoped. Dismissing a sheet retires only presentation reads; an accepted setup, policy, or disconnect mutation continues with its owner, and reconnect never replays it. Capability rows distinguish setup-required, disabled, unavailable, unsupported, and available states and surface owner-provided error detail.
+Settings exposes separate Connected Services and tools-only MCP Servers surfaces, both backed by this owner and filtered from its advertised definitions. Setup is owner-typed (`token`, `endpoint`, or `local-command`) and uses the Gateway's confirmed mutation receipt executor. The iOS form accepts only an opaque Mac Keychain credential reference, never token values or generic agent-readable secret fields. Endpoint and local-command configuration remain explicit; local commands are presented as trusted local code and are not shell-interpolated by the client. Policy controls (enabled, writes, paid, and recurring) are independent and instance-scoped. Capability availability is effect-specific: write capabilities require write approval, paid capabilities require paid approval and a positive bounded budget, and every capability still requires admitted credentials/runtime health. Mixed-effect MCP tools remain unavailable without write approval because the adapter's runtime prerequisite is write-enabled; the adapter also rechecks policy before each call. The same checks run at runtime binding admission; explicit Knowledge intake/approval flows retain their separate bounded semantics. Dismissing a sheet retires only presentation reads; an accepted setup, policy, or disconnect mutation continues with its owner, and reconnect never replays it. Capability rows distinguish setup-required, disabled, unavailable, unsupported, and available states and surface owner-provided error detail.
+
+Policy writes include the instance's observed `expectedSetupRevision`; stale sheets fail closed rather than
+replacing newer approvals or budgets. Accepted mutation tasks remain with the receipt executor. Their
+activity-scoped observers rejoin on foreground return without replaying a command or publishing into
+retired sheets. Setup checks the exact Gateway identity between begin and complete, because completion
+is a separate command; a profile replacement leaves the original pending operation with its original owner.
+Account technical details expose credential availability and account verification, never credential references.
 
 `KnowledgeDashboardView` continues to use Knowledge's domain owner for provider evidence, checkpoints, and source operations. It enumerates the redacted connection-owner instances and sends the exact `connectionId` on every status, policy, and run request, so two accounts from one provider cannot cross routes. Account identity, credential references, and setup are handled only by `IntegrationsRPCClient`; the dashboard changes Knowledge policy and never sends provider-only setup fields to Knowledge. Status keeps configured intent separate from `credentialAvailability` and `providerIdentity`; unknown or non-admitted observations are not rendered as ready. Package/resource installation, trust, provider-model authentication, and Gateway pairing remain their existing owner routes rather than generic integration actions.
 

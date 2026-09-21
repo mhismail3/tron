@@ -37,6 +37,35 @@ final class IntegrationModelsTests: XCTestCase {
     }
 
     @MainActor
+    func testPolicyMutationCarriesObservedRevisionAndExactConnection() async throws {
+        let socket = ScriptedGatewaySocket()
+        let gateway = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        let suite = UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let lifecycle = GatewayLifecycleCoordinator(client: gateway, profiles: GatewayProfileStore(defaults: defaults),
+            clock: .continuous, reconnectDelayPolicy: .standard, uuidSource: .random, pairer: GatewayPairer(),
+            pairingCommit: { _, _ in }, profileTokenLookup: { _ in nil })
+        let executor = ConfirmedMutationExecutor(client: gateway, lifecycle: lifecycle, clock: .continuous, performanceSignposts: RecordingPerformanceSignposts())
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+        do {
+            try await lifecycle.connectHosted(profile: GatewayProfile(id: "fixture", label: "Fixture", host: "gateway.test", port: 9847, machineId: "machine", deviceId: "device"), token: "fixture-token")
+            let policy = IntegrationPolicy(enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false)
+            var captured: JSONValue?
+            let client = IntegrationsRPCClient(request: { method, parameters, _ in
+                XCTAssertEqual(method, "connections.policy.update")
+                captured = parameters
+                return try JSONValue.encode(IntegrationSetupCompleted(id: "account-two", definitionId: "knowledge.raindrop", implementation: "knowledge-connector", providerAccountId: "fixture", scope: nil, policy: policy, health: "setup-required", createdAt: "fixture", updatedAt: "fixture", setupRevision: 8, lastError: nil))
+            }, mutationExecutor: executor)
+            _ = try await client.updatePolicy(instanceID: "account-two", expectedSetupRevision: 7, policy: policy)
+            XCTAssertEqual(captured?.objectValue?["instanceId"], .string("account-two"))
+            XCTAssertEqual(captured?.objectValue?["expectedSetupRevision"], .number(7))
+            XCTAssertNotNil(captured?.objectValue?["commandId"]?.stringValue)
+        } catch { await gateway.close(); throw error }
+        await gateway.close()
+    }
+
+    @MainActor
     func testIntegrationListRejectsNonConnectionCapabilityProvenance() async {
         let client = IntegrationsRPCClient(request: { _, _, _ in
             .object([
