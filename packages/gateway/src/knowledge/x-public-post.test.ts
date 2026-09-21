@@ -3,7 +3,7 @@ import { lookupPublicXPost, xPostIdentity, xEmbedToken, type XPostResponse } fro
 import { readPublicXPost } from "./source-capture.js";
 
 const url = "https://x.com/synthetic/status/123456789";
-const v2 = (extra: Record<string, unknown> = {}) => JSON.stringify({ code: 200, status: { id: "123456789", text: "Root publication", author: { id: "42", protected: false }, replying_to: null, raw_text: { facets: [] }, ...extra }, thread: [], replies: [], cursor: {} });
+const v2 = (extra: Record<string, unknown> = {}) => JSON.stringify({ code: 200, status: { id: "123456789", text: "Root publication", author: { id: "42", protected: false }, replying_to: null, raw_text: { facets: [] }, is_note_tweet: false, ...extra }, thread: [], replies: [], cursor: {} });
 const reply = (id: string, author: string, parent: string, text: string, extra: Record<string, unknown> = {}) => ({ id, text, author: { id: author, protected: false }, replying_to: { status: parent }, raw_text: { facets: [] }, ...extra });
 const signal = () => new AbortController().signal;
 
@@ -29,6 +29,34 @@ describe("public X v2 hydration", () => {
     const get = vi.fn().mockResolvedValueOnce({ status: 200, body: first }).mockResolvedValueOnce({ status: 200, body: second });
     const result = await lookupPublicXPost(url, get, signal(), { coverage: "conversation", maxPages: 2 });
     expect(get).toHaveBeenCalledTimes(2); expect(result.continuations?.map(post => post.id)).toEqual(["2", "3"]); expect(result.rawPages).toHaveLength(2); expect(result.stopReasons).toContain("cursor-exhausted");
+  });
+  it("keeps root scope root-only even when the provider returns conversation replies", async () => {
+    const body = JSON.stringify({ code: 200, status: { id: "123456789", text: "Root", author: { id: "42" }, is_note_tweet: false, raw_text: { facets: [{ type: "url", replacement: "http://example.test/root" }] } }, thread: [], replies: [reply("2", "42", "123456789", "child", { raw_text: { facets: [{ type: "url", replacement: "http://example.test/child" }] } })], cursor: { bottom: "ignored" } });
+    const result = await lookupPublicXPost(url, vi.fn(async () => ({ status: 200, body })), signal(), { coverage: "root" });
+    expect(result.continuations).toEqual([]); expect(result.commentary).toEqual([]); expect(result.posts?.map(post => post.id)).toEqual(["123456789"]); expect(result.linkedUrls).toEqual(["http://example.test/root"]);
+  });
+  it("preserves root quality limitations and rejects protected syndication fallbacks", async () => {
+    const media = await lookupPublicXPost(url, vi.fn(async () => ({ status: 200, body: v2({ media: { photos: [{}] } }) })), signal());
+    expect(media.disposition).toBe("partial"); expect(media.limitations.join(" ")).toContain("Media metadata");
+    const protectedRoot = JSON.stringify({ code: 200, status: { id: "123456789", text: "protected", author: { id: "42", protected: true }, is_note_tweet: false }, thread: [], replies: [], cursor: {} });
+    const protectedFallback = JSON.stringify({ id_str: "123456789", text: "protected", user: { id_str: "42", protected: true } });
+    const result = await lookupPublicXPost(url, vi.fn().mockResolvedValueOnce({ status: 200, body: protectedRoot }).mockResolvedValueOnce({ status: 200, body: protectedFallback }), signal());
+    expect(result.disposition).toBe("inaccessible"); expect(result.attempts.at(-1)?.outcome).toBe("invalid-response");
+  });
+  it("fences thread parent cycles without spinning or selecting the root as an ancestor", async () => {
+    const body = JSON.stringify({ code: 200, status: { id: "123456789", text: "Endpoint", author: { id: "42" }, replying_to: { status: "2" } }, thread: [reply("2", "9", "123456789", "cycle")], replies: [], cursor: {} });
+    const result = await lookupPublicXPost(url, vi.fn(async () => ({ status: 200, body })), signal(), { coverage: "thread" });
+    expect(result.continuations).toEqual([]); expect(result.stopReasons).toContain("invalid-parent-cycle"); expect(result.coverageComplete).toBe(false);
+  });
+  it("caps retained posts before normalization and reports the item bound", async () => {
+    const body = JSON.stringify({ code: 200, status: { id: "123456789", text: "Root", author: { id: "42" }, is_note_tweet: false }, thread: [], replies: [reply("2", "42", "123456789", "one"), reply("3", "9", "123456789", "two"), reply("4", "9", "123456789", "three")], cursor: { bottom: "more" } });
+    const result = await lookupPublicXPost(url, vi.fn(async () => ({ status: 200, body })), signal(), { coverage: "conversation", maxItems: 2 });
+    expect(result.posts?.length).toBeLessThanOrEqual(2); expect(result.stopReasons).toContain("max-items"); expect(result.coverageComplete).toBe(false);
+  });
+  it("reports bounded outbound-link truncation consistently", async () => {
+    const facets = Array.from({ length: 10 }, (_, index) => ({ type: "url", replacement: `http://example.test/${index}` }));
+    const result = await lookupPublicXPost(url, vi.fn(async () => ({ status: 200, body: v2({ raw_text: { facets } }) })), signal());
+    expect(result.linkLimitReached).toBe(true); expect(result.linkedUrls).toHaveLength(8); expect(result.linkedReferences?.every(reference => result.linkedUrls?.includes(reference.url))).toBe(true); expect(result.limitations.join(" ")).toContain("bounded retained URL");
   });
   it("uses thread coverage as an ancestor chain and never treats it as forward discovery", async () => {
     const body = JSON.stringify({ code: 200, status: { id: "123456789", text: "Endpoint", author: { id: "42" }, replying_to: { status: "2" } }, thread: [reply("1", "42", "0", "Ancestor"), reply("2", "9", "1", "Other author parent")], replies: [reply("3", "42", "123456789", "Forward")], cursor: {} });

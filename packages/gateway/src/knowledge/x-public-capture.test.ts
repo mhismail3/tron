@@ -11,7 +11,7 @@ import * as capture from "./source-capture.js";
 const homes: string[] = [];
 async function fixture() { const home = await mkdtemp(join(tmpdir(), "tron-x-capture-")); homes.push(home); return new KnowledgeStore(new TronWorkspace(home)); }
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(homes.splice(0).map(home => rm(home, { recursive: true, force: true }))); });
-const v2 = (extra: Record<string, unknown> = {}) => JSON.stringify({ code: 200, status: { id: "123456789", text: "Actual synthetic post", author: { id: "42" }, replying_to: null, raw_text: { facets: [] }, ...extra }, thread: [], replies: [], cursor: {} });
+const v2 = (extra: Record<string, unknown> = {}) => JSON.stringify({ code: 200, status: { id: "123456789", text: "Actual synthetic post", author: { id: "42" }, replying_to: null, raw_text: { facets: [] }, is_note_tweet: false, ...extra }, thread: [], replies: [], cursor: {} });
 const request = { commandId: "x-capture-synthetic", url: "https://x.com/synthetic/status/123456789?s=20", scope: "research" as const, publicPostLookup: true };
 const options = { resolveHost: async () => ["93.184.216.34"], fetcher: vi.fn(async () => new Response(v2(), { headers: { "content-type": "application/json" } })) };
 
