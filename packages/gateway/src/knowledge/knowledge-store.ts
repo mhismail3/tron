@@ -751,7 +751,7 @@ export class KnowledgeStore {
       if (key) next.connectionId = key;
       validateConnectorState(next, connector);
       const persisted = structuredClone(next);
-      if (envelope) for (const field of ["enabled", "accountId", "scope", "credentialRef", "allowWrites", "paidAccessApproved", "paidBudgetCents", "recurringApproved"]) delete (persisted as unknown as Record<string, unknown>)[field];
+      if (envelope) for (const field of ["enabled", "accountId", "scope", "credentialRef", "allowWrites", "paidAccessApproved", "paidBudgetCents", "recurringApproved", "credentialAvailability", "providerIdentity"]) delete (persisted as unknown as Record<string, unknown>)[field];
       state.connectors = { ...(state.connectors ?? {}), [stateKey]: persisted };
       return next;
     });

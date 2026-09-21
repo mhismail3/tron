@@ -1,4 +1,4 @@
-import { chmod, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
@@ -86,6 +86,47 @@ describe("delegated provider root cutover", () => {
     await expect(preflightDelegatedRootCutover(value)).rejects.toThrow(/private/);
   });
 
+  it("rejects unmanifested staged files and staged symlinks before publication", async () => {
+    const root = await fixture("tron-delegated-cutover-staged-integrity-");
+    const value = options(root);
+    await mkdir(join(root, "tron", "internal"), { recursive: true, mode: 0o700 });
+    await retainedRun(value.legacyRoots[0]!);
+    await stageDelegatedRootCutover(value);
+    await writeFile(join(value.staging, "unexpected.json"), "unexpected", { mode: 0o600 });
+    await expect(verifyDelegatedRootCutover(value.staging)).rejects.toThrow(/missing or extra/);
+    await expect(lstat(value.destinationRoot)).rejects.toMatchObject({ code: "ENOENT" });
+    await rm(join(value.staging, "unexpected.json"));
+    await symlink("status.json", join(value.staging, "staged-link"));
+    await expect(verifyDelegatedRootCutover(value.staging)).rejects.toThrow(/symlink/);
+    await expect(lstat(value.destinationRoot)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it.each(["added", "removed"] as const)("rejects a source path %s after staging without retiring the source", async mutation => {
+    const root = await fixture(`tron-delegated-cutover-source-${mutation}-`);
+    const value = options(root);
+    await mkdir(join(root, "tron", "internal"), { recursive: true, mode: 0o700 });
+    await retainedRun(value.legacyRoots[0]!);
+    await stageDelegatedRootCutover(value);
+    const status = join(value.legacyRoots[0]!, "async-subagent-runs", "run-1", "status.json");
+    if (mutation === "added") await writeFile(join(value.legacyRoots[0]!, "new.json"), "new", { mode: 0o600 });
+    else await rm(status);
+    await expect(publishDelegatedRootCutover(value.staging)).rejects.toThrow(/source/);
+    expect(await lstat(value.legacyRoots[0]!)).toBeTruthy();
+    await expect(lstat(value.destinationRoot)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rejects changed source directory metadata before retirement", async () => {
+    const root = await fixture("tron-delegated-cutover-directory-drift-");
+    const value = options(root);
+    await mkdir(join(root, "tron", "internal"), { recursive: true, mode: 0o700 });
+    await retainedRun(value.legacyRoots[0]!);
+    await stageDelegatedRootCutover(value);
+    await chmod(join(value.legacyRoots[0]!, "async-subagent-runs"), 0o710);
+    await expect(publishDelegatedRootCutover(value.staging)).rejects.toThrow(/source directory|unsafe directory/);
+    expect(await lstat(value.legacyRoots[0]!)).toBeTruthy();
+    await expect(lstat(value.destinationRoot)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("recovers publication after source retirement without creating a second authority", async () => {
     const root = await fixture("tron-delegated-cutover-recovery-");
     const value = options(root);
@@ -94,8 +135,7 @@ describe("delegated provider root cutover", () => {
     const staged = await stageDelegatedRootCutover(value);
     const markerPath = `${value.staging}.tron-delegated-cutover.json`;
     const marker = JSON.parse(await readFile(markerPath, "utf8"));
-    await rm(value.legacyRoots[0]!, { recursive: true });
-    await mkdir(`${value.legacyRoots[0]}.retired-${marker.operationID}`, { recursive: true });
+    await rename(value.legacyRoots[0]!, `${value.legacyRoots[0]}.retired-${marker.operationID}`);
     await writeFile(markerPath, JSON.stringify({ ...marker, phase: "source-retired" }) + "\n");
     const recovered = await recoverDelegatedRootCutover(value.staging);
     expect(recovered.action).toBe("finish-publication");

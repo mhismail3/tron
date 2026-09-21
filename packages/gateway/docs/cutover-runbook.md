@@ -10,9 +10,10 @@ app replacement, and cleanup.
 ## 0. Approved source and prerequisites
 
 Before a maintenance window, record the exact reviewed feature-branch commit
-in the change record. The B2 implementation source commit for this run is
-`2f3e1f9e5`; do not activate the earlier `68d568cac` or `9355d50ed` revisions,
-which predate this cutover implementation. Record the final value with:
+in the change record. Record the exact reviewed source commit for the cutover;
+do not activate an older revision or an artifact built from another worktree.
+The delegated integrity implementation requires the current marker schema and
+focused regressions in `delegated-root-migration.test.ts`. Record the final value with:
 
 ```bash
 git rev-parse HEAD
@@ -69,7 +70,12 @@ and retained resumable session reference. It must stop on active work,
 missing resumable sessions, symlinks, path traversal, unsafe ownership or
 permissions, collision, unknown/newer state, or an unproven reference. The
 provider root is not a broad temporary-directory move; only the exact
-provider-root shapes and explicitly listed project roots are admitted.
+provider-root shapes and explicitly listed project roots are admitted. Before
+any source retirement, `verify`/`publish` re-inventories every source path and
+separately checks the complete staged tree: source digests describe unchanged
+bytes, while staged digests describe approved provider-reference rewrites.
+Unlisted staged files/directories, changed modes/owners, removed or added
+source paths, and parent substitutions are refused without a destination.
 
 ## 2. Quiesce and prove zero work
 
@@ -110,9 +116,22 @@ angle-bracket values with paths from preflight, and do not invent flags.
    `--acknowledge-quiescence --acknowledge-backup`. The helper preserves
    provider directory layout and terminal artifacts, rewrites only exact old
    provider-root references in provider artifacts, never canonical transcript
-   JSONL, and records source/staged digests plus identity. Publish retires each
-   legacy root before exposing `<tronHome>/internal/subagents`; verify the new
-   root’s private permissions and that no old root remains writable.
+   JSONL, and records source/staged digests plus file and directory metadata.
+   Run the exact focused owner regression before an operator cutover:
+
+   ```bash
+   cd packages/gateway
+   PATH=/opt/homebrew/bin:$PATH npx vitest run src/sessions/delegated-root-migration.test.ts
+   ```
+
+   Publish retires each legacy root only after source and staging verification,
+   then exposes `<tronHome>/internal/subagents`; verify the new root’s private
+   permissions and that no old root remains writable. If publication stops
+   after the journal enters `source-retired`, run `recover --staging <staging>`;
+   recovery revalidates staged bytes, retained roots, and the published tree
+   before completing or refusing the operation. Re-running `recover` after a
+   verified publication is a no-op; it does not trust the journal as proof of
+   bytes.
 3. Stage/verify the Mac agent-home and versioned wizard-key record using its
    owner runbook. `.onboarded` remains completion authority; malformed/newer
    wizard data is not reset.
@@ -120,7 +139,16 @@ angle-bracket values with paths from preflight, and do not invent flags.
    authority through the production `TronWorkspace` and catalog-control paths.
    Preserve records, source counts, checkpoints, pending identities, cohorts,
    usage, receipts, pending remote effects, opaque refs, and account/scope
-   policy. Do not publish a provider JSON sidecar or edit canonical evidence.
+   policy. Current status must be read from the ConnectionOwner
+   revision/observations; Knowledge progress is not a second admission
+   authority. Run the focused readiness regression before an operator cutover:
+
+   ```bash
+   cd packages/gateway
+   PATH=/opt/homebrew/bin:$PATH npx vitest run src/knowledge/multi-account-connectors.test.ts
+   ```
+
+   Do not publish a provider JSON sidecar or edit canonical evidence.
 
 For every step, compare source and destination bytes/digests, permissions,
 owners, identity, revision, receipts/request hashes, and journal phase. A

@@ -12,6 +12,36 @@ const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 const response = (value: unknown): ConnectorHTTPResponse => ({ status: 200, headers: new Headers(), body: JSON.stringify(value) });
 
+it("derives readiness from the current owner across policy reset, disconnect, and same-ID re-setup", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-knowledge-readiness-")); roots.push(root);
+  const owner = new ConnectionOwner(root);
+  const setup = await owner.execute({ kind: "setup.begin", commandId: "begin-readiness-0001", instanceId: "account", definitionId: "knowledge.raindrop", method: "token" }) as { operationId: string };
+  await owner.execute({ kind: "setup.complete", commandId: "complete-readiness-0001", operationId: setup.operationId, instanceId: "account", providerAccountId: "101", scope: "0", credentialRef: "connector:raindrop:one", policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } });
+  const store = new KnowledgeStore(new TronWorkspace(root));
+  let calls = 0;
+  const extension = new KnowledgeConnectorExtension(store, {
+    connections: owner,
+    credentials: new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:one", "token-one"], ["connector:raindrop:two", "token-two"]])),
+    http: async (url, init) => { calls += 1; return url.endsWith("/user") ? response({ user: { _id: init.headers.authorization === "Bearer token-two" ? 202 : 101 } }) : response({ items: [] }); },
+    sleep: async () => {},
+  });
+  const configure = (commandId: string) => extension.invoke({ operation: "knowledge.connector.configure", request: { commandId, connector: "raindrop", connectionId: "account", enabled: true } });
+  await configure("configure-readiness-0001");
+  await extension.invoke({ operation: "knowledge.connector.run", request: { commandId: "admit-readiness-0001", connector: "raindrop", connectionId: "account", dryRun: true, limit: 1 } });
+  await configure("reset-readiness-0001");
+  await expect(extension.invoke({ operation: "knowledge.connector.status", request: { connector: "raindrop", connectionId: "account" } })).resolves.toMatchObject({ health: "setup-required", credentialAvailability: "unknown", providerIdentity: "unknown" });
+  await extension.invoke({ operation: "knowledge.connector.run", request: { commandId: "readmit-readiness-0001", connector: "raindrop", connectionId: "account", dryRun: true, limit: 1 } });
+  await expect(extension.invoke({ operation: "knowledge.connector.status", request: { connector: "raindrop", connectionId: "account" } })).resolves.toMatchObject({ health: "ready", credentialAvailability: "available", providerIdentity: "admitted" });
+  await owner.execute({ kind: "disconnect", commandId: "disconnect-readiness-0001", instanceId: "account" });
+  const callsBeforeBlockedRun = calls;
+  await expect(extension.invoke({ operation: "knowledge.connector.run", request: { commandId: "blocked-disconnect-0001", connector: "raindrop", connectionId: "account", dryRun: true, limit: 1 } })).rejects.toThrow();
+  expect(calls).toBe(callsBeforeBlockedRun);
+  const reSetup = await owner.execute({ kind: "setup.begin", commandId: "begin-resetup-0001", instanceId: "account", definitionId: "knowledge.raindrop", method: "token" }) as { operationId: string };
+  await owner.execute({ kind: "setup.complete", commandId: "complete-resetup-0001", operationId: reSetup.operationId, instanceId: "account", providerAccountId: "202", scope: "0", credentialRef: "connector:raindrop:two", policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } });
+  await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: "configure-resetup-0001", connector: "raindrop", connectionId: "account", enabled: true } });
+  await expect(extension.invoke({ operation: "knowledge.connector.status", request: { connector: "raindrop", connectionId: "account" } })).resolves.toMatchObject({ accountId: "202", health: "setup-required", credentialAvailability: "unknown", providerIdentity: "unknown" });
+});
+
 it("runs same-provider accounts against separate refs, identity fences, checkpoints, and receipts", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-multi-account-")); roots.push(root);
   const owner = new ConnectionOwner(root);

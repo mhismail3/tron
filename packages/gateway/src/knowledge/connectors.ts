@@ -113,16 +113,23 @@ class ConnectorShapeError extends Error { constructor() { super("Connector retur
 function initial(connector: Connector): KnowledgeConnectorState {
   return { connector, enabled: false, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false, pending: [], capturedIds: [], health: "unconfigured", remaining: 0 };
 }
-function stateStatus(state: KnowledgeConnectorState | undefined, connector: Connector, requiresAdmission = false): KnowledgeConnectorStatus {
+function stateStatus(state: KnowledgeConnectorState | undefined, connector: Connector, authority?: ConnectionInstance): KnowledgeConnectorStatus {
   const value = state ?? initial(connector);
-  const configured = Boolean(value.credentialRef && value.accountId && value.scope);
-  const credentialAvailability = value.credentialAvailability ?? "unknown";
-  const providerIdentity = value.providerIdentity ?? "unknown";
-  // Setup intent is not provider admission. Until the adapter records both
-  // observations, an owner-backed connector remains explicitly setup-required.
+  // ConnectionOwner is the sole authority for account admission. Knowledge
+  // keeps domain progress, but persisted observations cannot make a policy-reset
+  // or successor instance ready.
+  const configured = authority ? Boolean(authority.credentialRef && authority.providerAccountId && authority.scope) : Boolean(value.credentialRef && value.accountId && value.scope);
+  const enabled = authority ? authority.policy.enabled : value.enabled;
+  const credentialAvailability = authority?.credentialAvailability ?? value.credentialAvailability ?? "unknown";
+  const providerIdentity = authority?.providerIdentity ?? value.providerIdentity ?? "unknown";
   const admitted = credentialAvailability === "available" && providerIdentity === "admitted";
-  const health = !configured || !value.enabled ? "unconfigured" : requiresAdmission && !admitted ? "setup-required" : (value.health === "unconfigured" ? "ready" : value.health);
-  return { connector, ...(value.connectionId ? { connectionId: value.connectionId } : {}), configured, enabled: value.enabled, health, credentialAvailability, providerIdentity, ...(value.accountId ? { accountId: value.accountId } : {}), ...(value.scope ? { scope: value.scope } : {}), ...(value.destination ? { destination: value.destination } : {}), ...(value.lastRunAt ? { lastRunAt: value.lastRunAt } : {}), ...(value.lastError ? { lastError: value.lastError } : {}), remaining: value.remaining, pending: value.pending.length, paidBudgetCents: value.paidBudgetCents, allowWrites: value.allowWrites, recurringApproved: value.recurringApproved, paidAccessApproved: value.paidAccessApproved, ...(value.assessmentPilot ? { assessmentPilot: value.assessmentPilot } : {}), ...(value.assessmentApprovals ? { assessmentApprovals: value.assessmentApprovals } : {}) };
+  const ownerHealth = authority?.health;
+  const projectedOwnerHealth = ownerHealth === "disabled" || ownerHealth === "disconnected" ? "unconfigured" : ownerHealth;
+  const health = !configured || !enabled ? "unconfigured" : projectedOwnerHealth && projectedOwnerHealth !== "ready" ? projectedOwnerHealth : !admitted && authority ? "setup-required" : (value.health === "unconfigured" ? "ready" : value.health);
+  const accountId = authority?.providerAccountId ?? value.accountId;
+  const scope = authority?.scope ?? value.scope;
+  const policy = authority?.policy;
+  return { connector, ...(authority?.id ?? value.connectionId ? { connectionId: authority?.id ?? value.connectionId } : {}), configured, enabled, health, credentialAvailability, providerIdentity, ...(accountId ? { accountId } : {}), ...(scope ? { scope } : {}), ...(value.destination ? { destination: value.destination } : {}), ...(value.lastRunAt ? { lastRunAt: value.lastRunAt } : {}), ...(value.lastError ? { lastError: value.lastError } : {}), remaining: value.remaining, pending: value.pending.length, paidBudgetCents: policy?.paidBudgetCents ?? value.paidBudgetCents, allowWrites: policy?.allowWrites ?? value.allowWrites, recurringApproved: policy?.recurringApproved ?? value.recurringApproved, paidAccessApproved: policy?.paidAccessApproved ?? value.paidAccessApproved, ...(value.assessmentPilot ? { assessmentPilot: value.assessmentPilot } : {}), ...(value.assessmentApprovals ? { assessmentApprovals: value.assessmentApprovals } : {}) };
 }
 function parseCollection(item: RaindropItemDTO): string | undefined {
   if (!item.collection || typeof item.collection !== "object") return undefined;
@@ -208,11 +215,11 @@ export class KnowledgeConnectorExtension {
     });
   }
 
-  private async connectionFor(connectionId: string | undefined, connector: Connector, required: boolean): Promise<ConnectionInstance | undefined> {
+  private async connectionFor(connectionId: string | undefined, connector: Connector, required: boolean, allowDisconnected = false): Promise<ConnectionInstance | undefined> {
     if (!this.options.connections) return undefined;
     if (!connectionId) { if (required) throw new GatewayError("invalid_request", "Connector operations require a connectionId"); return undefined; }
     const instance = await this.options.connections.resolveInstance(connectionId);
-    if (instance.definitionId !== `knowledge.${connector}` || instance.health === "disconnected") throw new GatewayError("conflict", "Connection instance is unavailable for this connector");
+    if (instance.definitionId !== `knowledge.${connector}` || instance.health === "disconnected" && !allowDisconnected) throw new GatewayError("conflict", "Connection instance is unavailable for this connector");
     return instance;
   }
 
@@ -221,12 +228,14 @@ export class KnowledgeConnectorExtension {
     return this.store.withConnectorContext(connectionId, task);
   }
 
-  private async recordAdmission(state: KnowledgeConnectorState, credentialAvailability: "available" | "unavailable" | "unknown", providerIdentity: "admitted" | "mismatch" | "unknown", commandId: string): Promise<void> {
-    await this.store.updateConnectorState(command(commandId, "admission"), state.connector, value => ({ ...(value ?? state), credentialAvailability, providerIdentity }));
+  private async recordAdmission(state: KnowledgeConnectorState, credentialAvailability: "available" | "unavailable" | "unknown", providerIdentity: "admitted" | "mismatch" | "unknown", commandId: string, expectedSetupRevision?: number): Promise<void> {
     if (this.options.connections && state.connectionId) {
       const instance = await this.options.connections.resolveInstance(state.connectionId);
-      await this.options.connections.recordProviderObservation(state.connectionId, instance.setupRevision, { credentialAvailability, providerIdentity });
+      if (expectedSetupRevision !== undefined && instance.setupRevision !== expectedSetupRevision) throw new GatewayError("conflict", "Connection setup changed during provider admission");
+      await this.options.connections.recordProviderObservation(state.connectionId, expectedSetupRevision ?? instance.setupRevision, { credentialAvailability, providerIdentity });
+      return;
     }
+    await this.store.updateConnectorState(command(commandId, "admission"), state.connector, value => ({ ...(value ?? state), credentialAvailability, providerIdentity }));
   }
 
   async invoke(action: KnowledgeAction, signal?: AbortSignal): Promise<unknown> {
@@ -235,7 +244,7 @@ export class KnowledgeConnectorExtension {
     if (action.operation === "knowledge.raindrop.read") return this.lane("raindrop", request.connectionId).run(() => this.withConnection("raindrop", request.connectionId, () => this.readRaindrop(action.request, signal)));
     if (action.operation === "knowledge.connector.configure") return this.lane(action.request.connector, request.connectionId).run(() => this.withConnection(action.request.connector, request.connectionId, () => this.configure(action.request)));
     if (action.operation === "knowledge.connector.assessment.approve") return this.lane("raindrop", request.connectionId).run(() => this.withConnection("raindrop", request.connectionId, () => this.approveAssessment(action.request)));
-    if (action.operation === "knowledge.connector.status") return this.withConnection(action.request.connector, request.connectionId, async () => stateStatus(await this.store.connectorState(action.request.connector, request.connectionId), action.request.connector, Boolean(this.options.connections)));
+    if (action.operation === "knowledge.connector.status") return this.store.withConnectorContext(request.connectionId, async () => stateStatus(await this.store.connectorState(action.request.connector, request.connectionId), action.request.connector, await this.connectionFor(request.connectionId, action.request.connector, Boolean(this.options.connections), true)));
     if (action.operation === "knowledge.connector.run") return this.lane(action.request.connector, request.connectionId).run(() => this.withConnection(action.request.connector, request.connectionId, () => this.run(action.request, signal)));
     if (action.operation === "knowledge.raindrop.intake") return this.lane("raindrop", request.connectionId).run(() => this.withConnection("raindrop", request.connectionId, () => this.intake(action.request, signal)));
     throw bad("Unsupported knowledge connector operation");
@@ -357,11 +366,12 @@ export class KnowledgeConnectorExtension {
     const current = await this.store.connectorState(request.connector);
     if (request.credentialRef === undefined) this.assertCredentialNamespace(request.connector, current?.credentialRef);
     const base = current ?? (authority ? { ...initial(request.connector), enabled: authority.policy.enabled, accountId: authority.providerAccountId, ...(authority.scope ? { scope: authority.scope } : {}), credentialRef: authority.credentialRef, allowWrites: authority.policy.allowWrites, paidAccessApproved: authority.policy.paidAccessApproved, paidBudgetCents: authority.policy.paidBudgetCents, recurringApproved: authority.policy.recurringApproved } : initial(request.connector));
-    const identityChanged = Boolean(current && ((request.accountId !== undefined && request.accountId !== current.accountId) || (request.scope !== undefined && request.scope !== current.scope) || (request.credentialRef !== undefined && request.credentialRef !== current.credentialRef)));
+    const ownerIdentityChanged = Boolean(authority && current && (authority.providerAccountId !== current.accountId || authority.scope !== current.scope || authority.credentialRef !== current.credentialRef));
+    const identityChanged = Boolean(current && (ownerIdentityChanged || (request.accountId !== undefined && request.accountId !== current.accountId) || (request.scope !== undefined && request.scope !== current.scope) || (request.credentialRef !== undefined && request.credentialRef !== current.credentialRef)));
     if (identityChanged && (current?.pendingRemote || current?.assessmentPilot || (current?.assessmentApprovals?.length ?? 0) > 0 || Object.keys(current?.assessmentAttempts ?? {}).length > 0)) throw new GatewayError("conflict", "Connector identity cannot change while an approved pilot or remote effect is active");
-    const nextAccountId = request.accountId ?? current?.accountId;
-    const nextScope = request.scope ?? current?.scope;
-    const nextCredentialRef = request.credentialRef ?? current?.credentialRef;
+    const nextAccountId = request.accountId ?? authority?.providerAccountId ?? current?.accountId;
+    const nextScope = request.scope ?? authority?.scope ?? current?.scope;
+    const nextCredentialRef = request.credentialRef ?? authority?.credentialRef ?? current?.credentialRef;
     const nextDestination = request.destination ?? current?.destination;
     const next: KnowledgeConnectorState = identityChanged ? {
       ...initial(request.connector), enabled: request.enabled,
@@ -374,12 +384,16 @@ export class KnowledgeConnectorExtension {
       health: request.enabled && Boolean(nextCredentialRef && nextAccountId && nextScope) ? "ready" : "unconfigured",
     } : { ...base, enabled: request.enabled, ...(request.accountId !== undefined ? { accountId: request.accountId } : {}), ...(request.scope !== undefined ? { scope: request.scope } : {}), ...(request.destination !== undefined ? { destination: request.destination } : {}), ...(request.credentialRef !== undefined ? { credentialRef: request.credentialRef } : {}), allowWrites: request.allowWrites ?? current?.allowWrites ?? false, paidAccessApproved: request.paidAccessApproved ?? current?.paidAccessApproved ?? false, paidBudgetCents: request.paidBudgetCents ?? current?.paidBudgetCents ?? 0, recurringApproved: request.recurringApproved ?? current?.recurringApproved ?? false, health: request.enabled && (request.credentialRef ?? current?.credentialRef) && (request.accountId ?? current?.accountId) && (request.scope ?? current?.scope) ? "ready" : "unconfigured" };
     delete next.lastError;
+    let currentAuthority = authority;
     if (this.options.connections) {
       const policy = authority!.policy;
       await this.options.connections.execute({ kind: "policy.update", commandId: command(request.commandId, "connection-policy"), instanceId: authority!.id, policy: { enabled: request.enabled, allowWrites: request.allowWrites ?? policy.allowWrites, paidAccessApproved: request.paidAccessApproved ?? policy.paidAccessApproved, paidBudgetCents: request.paidBudgetCents ?? policy.paidBudgetCents, recurringApproved: request.recurringApproved ?? policy.recurringApproved } });
+      currentAuthority = await this.options.connections.resolveInstance(authority!.id);
+      delete next.credentialAvailability;
+      delete next.providerIdentity;
     }
     const saved = await this.store.updateConnectorState(request.commandId, request.connector, () => next);
-    return stateStatus(saved, request.connector);
+    return stateStatus(saved, request.connector, currentAuthority);
   }
 
   private async approveAssessment(request: KnowledgeAssessmentApprovalRequest): Promise<KnowledgeConnectorStatus> {
@@ -598,8 +612,10 @@ export class KnowledgeConnectorExtension {
   }
 
   private async run(request: KnowledgeConnectorRunRequest, externalSignal?: AbortSignal): Promise<Record<string, unknown>> {
-    const connector = request.connector; const current = await this.store.connectorState(connector);
+    const connector = request.connector; const authority = await this.connectionFor(request.connectionId, connector, Boolean(this.options.connections)); const current = await this.store.connectorState(connector);
     if (!current?.enabled || !current.credentialRef || !current.accountId || !current.scope) throw new GatewayError("unsupported", `Knowledge ${connector} connector is not configured`);
+    if (authority && (!authority.policy.enabled || authority.health === "disconnected" || authority.providerAccountId !== current.accountId || authority.scope !== current.scope || authority.credentialRef !== current.credentialRef)) throw new GatewayError("conflict", "Connector configuration is not admitted by the current connection instance");
+    const expectedSetupRevision = authority?.setupRevision;
     this.assertCredentialNamespace(connector, current.credentialRef);
     if (connector === "raindrop" && !/^\d+$/.test(current.accountId)) throw new GatewayError("invalid_request", "Raindrop accountId must be the numeric user _id");
     // X access requires a host-qualified account price and an explicit user
@@ -624,10 +640,14 @@ export class KnowledgeConnectorExtension {
       if (reconciled?.pendingRemote) throw new GatewayError("conflict", "Connector has an unresolved remote effect");
     }
     const token = await this.options.credentials.read(current.credentialRef);
-    if (!token) { await this.recordAdmission(current, "unavailable", "unknown", request.commandId); await this.store.updateConnectorState(command(request.commandId, "auth"), connector, state => ({ ...(state ?? current), health: "auth-error", lastError: "Credential reference is unavailable", lastRunAt: this.now() })); throw new GatewayError("unsupported", "Connector credential is unavailable"); }
+    if (!token) { await this.recordAdmission(current, "unavailable", "unknown", request.commandId, expectedSetupRevision); await this.store.updateConnectorState(command(request.commandId, "auth"), connector, state => ({ ...(state ?? current), health: "auth-error", lastError: "Credential reference is unavailable", lastRunAt: this.now() })); throw new GatewayError("unsupported", "Connector credential is unavailable"); }
     const assertCurrentAuthority = async (): Promise<void> => {
       const live = await this.store.connectorState(connector);
       if (!live?.enabled || live.accountId !== current.accountId || live.scope !== current.scope || live.credentialRef !== current.credentialRef) throw new GatewayError("conflict", "Connector configuration changed during provider discovery");
+      if (this.options.connections && request.connectionId) {
+        const liveAuthority = await this.connectionFor(request.connectionId, connector, true);
+        if (!authority || !liveAuthority || liveAuthority.setupRevision !== expectedSetupRevision || liveAuthority.policy.enabled !== true || liveAuthority.providerAccountId !== current.accountId || liveAuthority.scope !== current.scope || liveAuthority.credentialRef !== current.credentialRef) throw new GatewayError("conflict", "Connection admission changed during provider discovery");
+      }
     };
     const currentToken = async (): Promise<string> => {
       const live = await this.store.connectorState(connector);
@@ -662,7 +682,7 @@ export class KnowledgeConnectorExtension {
       // source URL capture policy.
       if (connector === "raindrop") {
         await this.verifyRaindropAccount(current, currentToken, signal, beforeProviderAttempt);
-        await this.recordAdmission(current, "available", "admitted", request.commandId);
+        await this.recordAdmission(current, "available", "admitted", request.commandId, expectedSetupRevision);
       }
       const discovered = await this.discover(request.commandId, connector, current, currentToken, limit, signal, xPricing?.maxAttempts, beforeProviderAttempt);
       let state = await this.store.connectorState(connector) ?? current;

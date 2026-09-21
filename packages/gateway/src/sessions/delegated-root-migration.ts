@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
-import { chmod, lstat, mkdir, opendir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, opendir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { readdirSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 const MAX_ENTRIES = 20_000;
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 512 * 1024 * 1024;
-const MARKER_VERSION = 1;
+const MARKER_VERSION = 2;
 const RUN_STATES = new Set(["queued", "running", "pending", "detached", "paused"]);
 const TERMINAL_PROOF = new Set(["observed"]);
 
@@ -22,21 +22,34 @@ export interface DelegatedRootMigrationStageOptions extends DelegatedRootMigrati
   readonly acknowledgeBackup: boolean;
 }
 export interface DelegatedRootEntryManifest {
+  readonly source: string;
   readonly path: string;
   readonly bytes: number;
   readonly mode: number;
   readonly uid: number;
+  /** Digest of the unchanged source bytes. */
   readonly digest: string;
+  /** Digest of the staged bytes after approved provider-root rewriting. */
   readonly stagedDigest: string;
 }
+export interface DelegatedRootDirectoryManifest {
+  readonly source?: string;
+  readonly path: string;
+  readonly mode: number;
+  readonly uid: number;
+}
 interface DelegatedRootMarker {
-  readonly version: 1;
+  readonly version: 2;
   readonly operationID: string;
   readonly sources: readonly string[];
   readonly destination: string;
   readonly staging: string;
   readonly retired: readonly string[];
   readonly entries: readonly DelegatedRootEntryManifest[];
+  /** Exact staged directory inventory, including the staging root at path "". */
+  readonly directories: readonly DelegatedRootDirectoryManifest[];
+  /** Source directory metadata is kept separate from the rewritten staged tree. */
+  readonly sourceDirectories: readonly DelegatedRootDirectoryManifest[];
   readonly phase: "staged" | "source-retired" | "published";
 }
 export interface DelegatedRootInventory {
@@ -109,13 +122,18 @@ function absoluteStrings(value: unknown, result: Set<string>): void {
 async function readJson(path: string): Promise<unknown | undefined> {
   try { return JSON.parse(await readFile(path, "utf8")); } catch { return undefined; }
 }
-async function walk(root: string): Promise<Array<{ relativePath: string; absolutePath: string; bytes: number; mode: number; uid: number }>> {
-  const rows: Array<{ relativePath: string; absolutePath: string; bytes: number; mode: number; uid: number }> = [];
+interface TreeFile { relativePath: string; absolutePath: string; bytes: number; mode: number; uid: number; }
+interface TreeDirectory { relativePath: string; absolutePath: string; mode: number; uid: number; }
+interface TreeInventory { files: TreeFile[]; directories: TreeDirectory[]; }
+async function walk(root: string): Promise<TreeInventory> {
+  const files: TreeFile[] = [];
+  const directories: TreeDirectory[] = [];
   let total = 0;
   let examined = 0;
   async function visit(current: string): Promise<void> {
     const directory = await lstat(current);
     if (directory.isSymbolicLink() || !directory.isDirectory() || !privateMode(directory.mode)) fail(`delegated tree contains an unsafe directory: ${current}`);
+    directories.push({ relativePath: relative(root, current), absolutePath: current, mode: directory.mode & 0o7777, uid: directory.uid });
     const handle = await opendir(current);
     for await (const entry of handle) {
       if (++examined > MAX_ENTRIES) fail("delegated artifact tree exceeds the entry bound");
@@ -123,17 +141,17 @@ async function walk(root: string): Promise<Array<{ relativePath: string; absolut
       const childStat = await lstat(child);
       if (childStat.isSymbolicLink()) fail(`delegated tree contains a symlink: ${child}`);
       if (childStat.isDirectory()) { await visit(child); continue; }
-      if (!childStat.isFile() || childStat.nlink !== 1 || !privateMode(childStat.mode)) fail(`delegated artifact is not a private regular file: ${child}`);
+      if (!childStat.isFile() || childStat.nlink !== 1 || !privateMode(childStat.mode)) fail(`delegated artifact is not a private owner-only regular file: ${child}`);
       if (basename(child) === "session.jsonl") fail(`canonical transcript is inside delegated provider root and cannot be cut over: ${child}`);
       if (childStat.size > MAX_FILE_BYTES || (total += childStat.size) > MAX_TOTAL_BYTES) fail("delegated artifact tree exceeds the bounded size");
-      rows.push({ relativePath: relative(root, child), absolutePath: child, bytes: childStat.size, mode: childStat.mode & 0o7777, uid: childStat.uid });
+      files.push({ relativePath: relative(root, child), absolutePath: child, bytes: childStat.size, mode: childStat.mode & 0o7777, uid: childStat.uid });
     }
   }
   try { await visit(root); } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { files: [], directories: [] };
     throw error;
   }
-  return rows;
+  return { files, directories };
 }
 
 function rewritten(bytes: Buffer, sourceRoots: readonly string[], destination: string): Buffer {
@@ -151,7 +169,8 @@ function rewritten(bytes: Buffer, sourceRoots: readonly string[], destination: s
 async function inventoryRoot(rootInput: string, allRoots: readonly string[]): Promise<DelegatedRootInventory> {
   const root = absolute(rootInput, "legacy root");
   await ownerDirectory(root, "legacy root");
-  const files = await walk(root);
+  const inventory = await walk(root);
+  const files = inventory.files;
   const references = new Set<string>();
   for (const file of files) {
     if (!/\.jsonl?$/u.test(file.relativePath)) continue;
@@ -213,7 +232,7 @@ export async function preflightDelegatedRootCutover(options: DelegatedRootMigrat
   const inventories = await Promise.all(roots.map(root => inventoryRoot(root, roots)));
   const retained = inventories.filter(item => item.entries > 0);
   let destinationEntries: Array<{ relativePath: string }> = [];
-  try { destinationEntries = (await walk(destinationRoot)).map(file => ({ relativePath: file.relativePath })); } catch (error) { if (!(error instanceof DelegatedRootMigrationError) || !error.message.includes("missing")) throw error; }
+  try { destinationEntries = (await walk(destinationRoot)).files.map(file => ({ relativePath: file.relativePath })); } catch (error) { if (!(error instanceof DelegatedRootMigrationError) || !error.message.includes("missing")) throw error; }
   if (retained.length && destinationEntries.length) return { status: "conflict", destinationRoot, roots: inventories, changesMade: false };
   if (inventories.some(item => item.activeRuns.length || item.resumabilityRefusals.length)) {
     return { status: "conflict", destinationRoot, roots: inventories, changesMade: false };
@@ -230,16 +249,30 @@ async function markerRead(stagingInput: string): Promise<DelegatedRootMarker> {
   const marker = value as Partial<DelegatedRootMarker>;
   if (marker.version !== MARKER_VERSION || typeof marker.operationID !== "string" || !Array.isArray(marker.sources)
     || typeof marker.destination !== "string" || typeof marker.staging !== "string" || !Array.isArray(marker.retired)
-    || !Array.isArray(marker.entries) || !["staged", "source-retired", "published"].includes(marker.phase ?? "")
+    || !Array.isArray(marker.entries) || !Array.isArray(marker.directories) || !Array.isArray(marker.sourceDirectories)
+    || !["staged", "source-retired", "published"].includes(marker.phase ?? "")
     || resolve(marker.staging) !== staging) fail("migration marker is malformed");
   return marker as DelegatedRootMarker;
 }
-async function copyTree(sources: readonly string[], staging: string, destinationRoot: string): Promise<DelegatedRootEntryManifest[]> {
+async function copyTree(sources: readonly string[], staging: string, destinationRoot: string): Promise<{ manifests: DelegatedRootEntryManifest[]; directories: DelegatedRootDirectoryManifest[] }> {
   const manifests: DelegatedRootEntryManifest[] = [];
   const occupied = new Set<string>();
+  const directories: DelegatedRootDirectoryManifest[] = [];
+  const directoryModes = new Map<string, { mode: number; uid: number }>();
   for (const source of sources) {
-    const files = await walk(source);
-    for (const file of files) {
+    const inventory = await walk(source);
+    for (const directory of inventory.directories) {
+      const path = directory.relativePath;
+      const prior = directoryModes.get(path);
+      if (prior && (prior.mode !== directory.mode || prior.uid !== directory.uid)) fail(`delegated directory metadata collision during staging: ${path}`);
+      if (!prior) {
+        directoryModes.set(path, { mode: directory.mode, uid: directory.uid });
+        directories.push({ source, path, mode: directory.mode, uid: directory.uid });
+      }
+      await mkdir(join(staging, path), { recursive: true, mode: directory.mode });
+      await chmod(join(staging, path), directory.mode);
+    }
+    for (const file of inventory.files) {
       const path = file.relativePath;
       if (occupied.has(path)) fail(`delegated artifact path collision during staging: ${path}`);
       occupied.add(path);
@@ -249,11 +282,11 @@ async function copyTree(sources: readonly string[], staging: string, destination
       const bytes = rewritten(original, sources, destinationRoot);
       await writeFile(destination, bytes, { flag: "wx", mode: file.mode });
       await chmod(destination, file.mode);
-      manifests.push({ path, bytes: original.byteLength, mode: file.mode, uid: file.uid,
+      manifests.push({ source, path, bytes: original.byteLength, mode: file.mode, uid: file.uid,
         digest: createHash("sha256").update(original).digest("hex"), stagedDigest: createHash("sha256").update(bytes).digest("hex") });
     }
   }
-  return manifests;
+  return { manifests, directories };
 }
 
 export async function stageDelegatedRootCutover(options: DelegatedRootMigrationStageOptions): Promise<DelegatedRootMarker> {
@@ -271,25 +304,111 @@ export async function stageDelegatedRootCutover(options: DelegatedRootMigrationS
   const sources = preflight.roots.filter(root => root.entries > 0).map(root => root.root);
   const operationID = randomUUID();
   const retired = sources.map(source => `${source}.retired-${operationID}`);
-  const marker: DelegatedRootMarker = { version: 1, operationID, sources, destination, staging, retired, entries: [], phase: "staged" };
+  const marker: DelegatedRootMarker = { version: 2, operationID, sources, destination, staging, retired, entries: [], directories: [], sourceDirectories: [], phase: "staged" };
   await writeFile(markerPath(staging), `${JSON.stringify(marker)}\n`, { flag: "wx", mode: 0o600 });
-  try {
-    const entries = await copyTree(sources, staging, destination);
-    const completed = { ...marker, entries };
-    await writeFile(markerPath(staging), `${JSON.stringify(completed)}\n`, { flag: "w", mode: 0o600 });
-    return completed;
-  } catch (error) { throw error; }
+  const copied = await copyTree(sources, staging, destination);
+  const sourceDirectories: DelegatedRootDirectoryManifest[] = [];
+  for (const source of sources) {
+    const inventory = await walk(source);
+    sourceDirectories.push(...inventory.directories.map(directory => ({ source, path: directory.relativePath, mode: directory.mode, uid: directory.uid })));
+  }
+  const completed = { ...marker, entries: copied.manifests, directories: copied.directories, sourceDirectories };
+  await writeFile(markerPath(staging), `${JSON.stringify(completed)}\n`, { flag: "w", mode: 0o600 });
+  return completed;
 }
 
+function safeManifestPath(path: string, label: string, allowRoot = false): void {
+  if ((!allowRoot && !path) || isAbsolute(path) || path === ".." || path.startsWith(`..${sep}`)) fail(`${label} contains an unsafe relative path`);
+}
+async function verifySourceRoot(marker: DelegatedRootMarker, index: number): Promise<void> {
+  const sourceRoot = marker.sources[index] ?? fail("delegated source manifest is malformed");
+  const source = sourceRoot;
+  const inventory = await walk(sourceRoot);
+  const files = marker.entries.filter(entry => entry.source === source);
+  const directories = marker.sourceDirectories.filter(entry => entry.source === source);
+  if (new Set(files.map(entry => entry.path)).size !== files.length || new Set(directories.map(entry => entry.path)).size !== directories.length) fail("delegated source manifest contains duplicate paths");
+  if (files.length !== inventory.files.length || directories.length !== inventory.directories.length) fail(`delegated source inventory changed: ${source}`);
+  for (const file of inventory.files) {
+    const entry = files.find(candidate => candidate.path === file.relativePath);
+    if (!entry || entry.bytes !== file.bytes || entry.mode !== file.mode || entry.uid !== file.uid
+      || entry.digest !== createHash("sha256").update(await readFile(file.absolutePath)).digest("hex")) fail(`delegated source changed: ${source}/${file.relativePath}`);
+  }
+  for (const directory of inventory.directories) {
+    const entry = directories.find(candidate => candidate.path === directory.relativePath);
+    if (!entry || entry.mode !== directory.mode || entry.uid !== directory.uid) fail(`delegated source directory changed: ${source}/${directory.relativePath}`);
+  }
+}
+async function verifySourceTree(marker: DelegatedRootMarker): Promise<void> {
+  for (let index = 0; index < marker.sources.length; index += 1) await verifySourceRoot(marker, index);
+}
+async function verifyStagedContents(marker: DelegatedRootMarker): Promise<void> {
+  const inventory = await walk(marker.staging);
+  if (new Set(marker.entries.map(entry => entry.path)).size !== marker.entries.length || new Set(marker.directories.map(entry => entry.path)).size !== marker.directories.length) fail("staged delegated manifest contains duplicate paths");
+  if (inventory.files.length !== marker.entries.length || inventory.directories.length !== marker.directories.length) fail("staged delegated inventory contains missing or extra entries");
+  for (const directory of inventory.directories) {
+    safeManifestPath(directory.relativePath, "staged directory manifest", true);
+    const expected = marker.directories.find(candidate => candidate.path === directory.relativePath);
+    if (!expected || expected.mode !== directory.mode || expected.uid !== directory.uid) fail(`staged delegated directory changed: ${directory.relativePath}`);
+  }
+  for (const entry of marker.entries) {
+    if (!marker.sources.includes(entry.source)) fail("staged file manifest references an unlisted source");
+    safeManifestPath(entry.path, "staged file manifest");
+    const file = inventory.files.find(candidate => candidate.relativePath === entry.path);
+    const stagedFile = file ?? fail(`staged delegated artifact is missing: ${entry.path}`);
+    const metadata = await regular(stagedFile.absolutePath, `staged delegated artifact ${entry.path}`);
+    const digest = createHash("sha256").update(await readFile(stagedFile.absolutePath)).digest("hex");
+    if (metadata.bytes !== stagedFile.bytes || metadata.mode !== entry.mode || metadata.uid !== entry.uid || digest !== entry.stagedDigest) fail(`staged delegated artifact changed: ${entry.path}`);
+  }
+}
 async function verifyStaged(marker: DelegatedRootMarker): Promise<void> {
   if (marker.phase !== "staged") fail("delegated migration has already started publication");
   await assertMissing(marker.destination, "destination root");
-  for (const entry of marker.entries) {
-    const path = join(marker.staging, entry.path);
-    const metadata = await regular(path, `staged delegated artifact ${entry.path}`);
-    const digest = createHash("sha256").update(await readFile(path)).digest("hex");
-    if (metadata.mode !== entry.mode || metadata.uid !== entry.uid || digest !== entry.stagedDigest) fail(`staged delegated artifact changed: ${entry.path}`);
+  await verifySourceTree(marker);
+  await verifyStagedContents(marker);
+}
+async function verifyRetiredTree(marker: DelegatedRootMarker, index: number): Promise<void> {
+  const retiredRoot = marker.retired[index] ?? fail("delegated retirement manifest is malformed");
+  const sourceRoot = marker.sources[index] ?? fail("delegated retirement manifest is malformed");
+  const root = retiredRoot;
+  const source = sourceRoot;
+  const inventory = await walk(retiredRoot);
+  const expectedFiles = marker.entries.filter(entry => entry.source === source);
+  const expectedDirectories = marker.sourceDirectories.filter(entry => entry.source === source);
+  if (new Set(expectedFiles.map(entry => entry.path)).size !== expectedFiles.length || new Set(expectedDirectories.map(entry => entry.path)).size !== expectedDirectories.length) fail("retired delegated manifest contains duplicate paths");
+  if (inventory.files.length !== expectedFiles.length || inventory.directories.length !== expectedDirectories.length) fail(`retired delegated inventory changed: ${root}`);
+  for (const file of inventory.files) {
+    const entry = expectedFiles.find(candidate => candidate.path === file.relativePath);
+    if (!entry || entry.bytes !== file.bytes || entry.mode !== file.mode || entry.uid !== file.uid
+      || entry.digest !== createHash("sha256").update(await readFile(file.absolutePath)).digest("hex")) fail(`retired delegated artifact changed: ${root}/${file.relativePath}`);
   }
+  for (const directory of inventory.directories) {
+    const entry = expectedDirectories.find(candidate => candidate.path === directory.relativePath);
+    if (!entry || entry.mode !== directory.mode || entry.uid !== directory.uid) fail(`retired delegated directory changed: ${root}/${directory.relativePath}`);
+  }
+}
+async function verifyPublishedTree(marker: DelegatedRootMarker): Promise<void> {
+  const inventory = await walk(marker.destination);
+  if (new Set(marker.entries.map(entry => entry.path)).size !== marker.entries.length || new Set(marker.directories.map(entry => entry.path)).size !== marker.directories.length) fail("published delegated manifest contains duplicate paths");
+  if (inventory.files.length !== marker.entries.length || inventory.directories.length !== marker.directories.length) fail("published delegated inventory contains missing or extra entries");
+  for (const directory of inventory.directories) {
+    const expected = marker.directories.find(candidate => candidate.path === directory.relativePath);
+    if (!expected || expected.mode !== directory.mode || expected.uid !== directory.uid) fail(`published delegated directory changed: ${directory.relativePath}`);
+  }
+  for (const entry of marker.entries) {
+    const file = inventory.files.find(candidate => candidate.relativePath === entry.path);
+    if (!file || entry.uid !== file.uid || entry.mode !== file.mode || entry.stagedDigest !== createHash("sha256").update(await readFile(file.absolutePath)).digest("hex")) fail(`published delegated artifact changed: ${entry.path}`);
+  }
+}
+async function ensureDestinationParent(destination: string): Promise<void> {
+  const parent = dirname(destination);
+  await mkdir(parent, { recursive: true, mode: 0o700 });
+  let resolvedParent = "";
+  try {
+    resolvedParent = await realpath(parent);
+    const resolvedAncestor = await realpath(dirname(parent));
+    if (resolvedParent !== join(resolvedAncestor, basename(parent))) fail("delegated destination parent resolves through a substitution");
+  } catch { fail("delegated destination parent cannot be inspected safely"); }
+  await ownerDirectory(parent, "delegated destination parent");
 }
 async function replaceMarker(marker: DelegatedRootMarker): Promise<void> {
   await writeFile(markerPath(marker.staging), `${JSON.stringify(marker)}\n`, { flag: "w", mode: 0o600 });
@@ -299,6 +418,9 @@ export async function verifyDelegatedRootCutover(staging: string): Promise<Deleg
 }
 export async function publishDelegatedRootCutover(staging: string): Promise<DelegatedRootMarker> {
   const marker = await markerRead(staging); await verifyStaged(marker);
+  // The parent is checked before journaling retirement, so a missing or
+  // substituted destination cannot leave sources retired with nowhere to publish.
+  await ensureDestinationParent(marker.destination);
   // Record the publication phase before the first source rename. If the
   // process dies between roots, recovery can finish the exact remaining
   // renames instead of mistaking a partially retired set for corruption.
@@ -313,12 +435,13 @@ export async function publishDelegatedRootCutover(staging: string): Promise<Dele
   }
   await rename(marker.staging, marker.destination);
   const published = { ...retiringMarker, phase: "published" as const };
+  await verifyPublishedTree(published);
   await writeFile(markerPath(marker.staging), `${JSON.stringify(published)}\n`, { flag: "w", mode: 0o600 });
   return published;
 }
 export async function recoverDelegatedRootCutover(staging: string): Promise<{ readonly action: "none" | "finish-publication" | "conflict"; readonly marker: DelegatedRootMarker }> {
   const marker = await markerRead(staging);
-  if (marker.phase === "published") return { action: "none", marker };
+  if (marker.phase === "published") { await verifyPublishedTree(marker); return { action: "none", marker }; }
   const destinationExists = await lstat(marker.destination).then(() => true).catch(() => false);
   const stagingExists = await lstat(marker.staging).then(() => true).catch(() => false);
   const sourceStates = await Promise.all(marker.sources.map(source => lstat(source).then(() => true).catch(() => false)));
@@ -326,18 +449,22 @@ export async function recoverDelegatedRootCutover(staging: string): Promise<{ re
     const published = await publishDelegatedRootCutover(staging); return { action: "finish-publication", marker: published };
   }
   if (marker.phase === "source-retired" && !destinationExists && stagingExists) {
+    await verifyStagedContents(marker);
+    await ensureDestinationParent(marker.destination);
     for (let index = 0; index < marker.sources.length; index += 1) {
       const sourceExists = await lstat(marker.sources[index]!).then(() => true).catch(() => false);
       const retiredExists = await lstat(marker.retired[index]!).then(() => true).catch(() => false);
       if (sourceExists && retiredExists) return { action: "conflict", marker };
-      if (sourceExists) { await assertMissing(marker.retired[index]!, "retired legacy root"); await rename(marker.sources[index]!, marker.retired[index]!); }
+      if (sourceExists) { await verifySourceRoot(marker, index); await assertMissing(marker.retired[index]!, "retired legacy root"); await rename(marker.sources[index]!, marker.retired[index]!); }
       else if (!retiredExists) return { action: "conflict", marker };
+      await verifyRetiredTree(marker, index);
     }
     await rename(marker.staging, marker.destination);
-    const published = { ...marker, phase: "published" as const }; await writeFile(markerPath(marker.staging), `${JSON.stringify(published)}\n`, { flag: "w", mode: 0o600 });
+    const published = { ...marker, phase: "published" as const }; await verifyPublishedTree(published); await writeFile(markerPath(marker.staging), `${JSON.stringify(published)}\n`, { flag: "w", mode: 0o600 });
     return { action: "finish-publication", marker: published };
   }
   if (marker.phase === "source-retired" && destinationExists && !stagingExists) {
+    await verifyPublishedTree(marker);
     const published = { ...marker, phase: "published" as const }; await replaceMarker(published); return { action: "none", marker: published };
   }
   return { action: "conflict", marker };
