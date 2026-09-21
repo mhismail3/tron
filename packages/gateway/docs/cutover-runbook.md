@@ -128,8 +128,10 @@ angle-bracket values with paths from preflight, and do not invent flags.
    evidence. Its 51-item case retains a full ten-item cohort, a partial head,
    and effect-before-response recovery; its 51-item all-partial case crosses
    the provider's 50-item API boundary and asserts page 1 discovery without a
-   second full capture/assessment corpus. Run it without changing its
-   per-test deadline or global worker/pool settings:
+   second full capture/assessment corpus. Test synchronization must observe
+   provider admission and join accepted drain completion, not infer either
+   from elapsed time or an intermediate persisted record. Run it without
+   changing its per-test deadline or global worker/pool settings:
 
    ```bash
    cd packages/gateway

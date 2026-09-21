@@ -399,12 +399,18 @@ describe("NotificationGrantStore and NotificationService", () => {
     let clock = Date.parse("2026-01-01T00:00:00.000Z");
     const { store, service, relay } = await fixture(["in_progress", "accepted_by_apns"], () => clock);
     await service.upsertGrant(grant);
+    const drains = vi.spyOn(service, "drain");
     await service.enqueue({
       sessionId: "session-in-progress", sourceId: "tool-in-progress", kind: "explicit", message: "hello",
     });
-    await vi.waitFor(async () => expect((await store.snapshot()).pending[0]?.targets[0]).toMatchObject({
+    // The pending write precedes drain retirement. Join the actual enqueue-owned
+    // drain before advancing time; an overlapping drain intentionally does no work.
+    expect(drains).toHaveBeenCalledTimes(1);
+    await drains.mock.results[0]!.value;
+    drains.mockRestore();
+    expect((await store.snapshot()).pending[0]?.targets[0]).toMatchObject({
       outcome: "retryable", attempts: 1,
-    }));
+    });
     const requestId = relay.sent[0].requestId;
     clock += 6_000;
     await service.drain();
