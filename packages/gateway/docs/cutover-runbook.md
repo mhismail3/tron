@@ -10,10 +10,9 @@ app replacement, and cleanup.
 ## 0. Approved source and prerequisites
 
 Before a maintenance window, record the exact reviewed feature-branch commit
-in the change record. For this implementation the source must include the B2
-cutover implementation and its tests; do not activate the earlier
-`68d568cac` or `9355d50ed` revisions, which predate this runbook revision.
-Record the final value with:
+in the change record. The B2 implementation source commit for this run is
+`2f3e1f9e5`; do not activate the earlier `68d568cac` or `9355d50ed` revisions,
+which predate this cutover implementation. Record the final value with:
 
 ```bash
 git rev-parse HEAD
