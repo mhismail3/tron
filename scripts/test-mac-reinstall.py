@@ -201,6 +201,24 @@ class BundledSelectionTests(Fixture, unittest.TestCase):
 
 
 class ReinstallTests(Fixture, unittest.TestCase):
+    @unittest.skipUnless(sys.platform == 'darwin', 'Darwin OS copy attribution')
+    def test_replacement_checks_copy_metadata_and_exact_source_attribution(self):
+        real_xattrs = reinstall.xattr_digests
+        source_provenance = ['a' * 64]
+        def attributed(path):
+            actual = real_xattrs(path)
+            actual['com.apple.provenance'] = ('b' * 64 if Path(path).is_relative_to(self.workflow.store)
+                                            else source_provenance[0])
+            return actual
+        with patch.object(reinstall, 'xattr_digests', side_effect=attributed):
+            self.run_workflow(app=self.app, confirm_offline=True)
+            (self.installed / 'identity').write_text('new')
+            self.run_workflow(confirm_offline=True)
+            self.assertEqual(self.workflow.receipt['phase'], 'awaiting-resume')
+            source_provenance[0] = 'c' * 64
+            with self.assertRaisesRegex(reinstall.Stop, 'source-changed'):
+                self.run_workflow(confirm_offline=True)
+
     def test_replacement_retry_rejects_damaged_backup_before_advancing(self):
         self.run_workflow(app=self.app, confirm_offline=True)
         (self.installed / 'identity').write_text('new')
@@ -496,6 +514,55 @@ class FilesystemTests(unittest.TestCase):
         with self.assertRaisesRegex(reinstall.Stop, 'backup-collision'):
             reinstall.copy_tree(source, dest, reinstall.tree_manifest(source), scratch)
         self.assertEqual(list(outside.iterdir()), [])
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'Darwin link metadata contract')
+    def test_private_copy_preserves_nondefault_link_modes_without_touching_targets(self):
+        source, dest, scratch = [self.root / value for value in ('source', 'dest', 'scratch')]
+        source.mkdir(mode=0o700)
+        scratch.mkdir(mode=0o700)
+        outside = self.root / 'outside'
+        outside.write_bytes(b'unchanged external target')
+        outside.chmod(0o400)
+        (source / 'external').symlink_to(outside)
+        (source / 'dangling').symlink_to('missing')
+        os.chmod(source / 'external', 0o755, follow_symlinks=False)
+        os.chmod(source / 'dangling', 0o711, follow_symlinks=False)
+        expected = reinstall.tree_manifest(source)
+        previous = os.umask(0o077)
+        try:
+            reinstall.copy_tree(source, dest, expected, scratch)
+        finally:
+            os.umask(previous)
+        self.assertEqual((dest / 'external').lstat().st_mode & 0o777, 0o755)
+        self.assertEqual((dest / 'dangling').lstat().st_mode & 0o777, 0o711)
+        self.assertEqual(outside.stat().st_mode & 0o777, 0o400)
+        self.assertEqual(outside.read_bytes(), b'unchanged external target')
+        self.assertFalse((dest / 'missing').exists())
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'Darwin OS copy attribution')
+    def test_copy_accepts_new_provenance_but_rejects_other_xattrs_and_source_drift(self):
+        source, dest, scratch = [self.root / value for value in ('source', 'dest', 'scratch')]
+        source.mkdir(mode=0o700)
+        scratch.mkdir(mode=0o700)
+        (source / 'data').write_bytes(b'fixture')
+        real_xattrs = reinstall.xattr_digests
+        source_provenance = ['a' * 64]
+        def attributed(path):
+            actual = real_xattrs(path)
+            actual['com.apple.provenance'] = source_provenance[0] if Path(path).is_relative_to(source) else 'b' * 64
+            return actual
+        with patch.object(reinstall, 'xattr_digests', side_effect=attributed):
+            expected = reinstall.tree_manifest(source)
+            reinstall.copy_tree(source, dest, expected, scratch)
+            reinstall.copy_tree(source, dest, expected, scratch)
+            self.assertEqual((dest / 'data').read_bytes(), b'fixture')
+            subprocess.run(['/usr/bin/xattr', '-w', 'com.tron.fixture', 'changed', dest / 'data'], check=True)
+            with self.assertRaisesRegex(reinstall.Stop, 'backup-corrupt'):
+                reinstall.copy_tree(source, dest, expected, scratch)
+            subprocess.run(['/usr/bin/xattr', '-d', 'com.tron.fixture', dest / 'data'], check=True)
+            source_provenance[0] = 'c' * 64
+            with self.assertRaisesRegex(reinstall.Stop, 'source-changed'):
+                reinstall.copy_tree(source, dest, expected, scratch)
 
     def test_special_file_refused(self):
         os.mkfifo(self.root / 'fifo')

@@ -241,6 +241,25 @@ def manifest_digest(manifest):
     return hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
+def copied_entry_matches(actual, expected):
+    if sys.platform != 'darwin':
+        return actual == expected
+    # macOS assigns the copying process's provenance even when copyfile succeeds
+    # at copying all xattrs. Do not forge/remove that OS-owned attribution. Only
+    # copies allow this difference; source and atomic-retirement evidence stays exact.
+    def portable(entry):
+        return {**entry, 'xattrs': {name: value for name, value in entry['xattrs'].items()
+                                  if name != 'com.apple.provenance'}}
+    return portable(actual) == portable(expected)
+
+
+def copied_tree_matches(actual, expected):
+    if actual is None or expected is None:
+        return actual is expected
+    return actual.keys() == expected.keys() and all(
+        copied_entry_matches(actual[name], item) for name, item in expected.items())
+
+
 def sync_tree(root, manifest):
     # Receipt durability must not get ahead of the copied file data/metadata.
     for name, item in manifest.items():
@@ -261,6 +280,10 @@ def copy_metadata(source, destination, data=False):
         flags = 7 | (8 if data else 0) | (1 << 18) | (1 << 19)
         if LIBC.copyfile(os.fsencode(source), os.fsencode(destination), None, flags):
             raise OSError(ctypes.get_errno(), 'copyfile failed')
+        if source.is_symlink():
+            # COPYFILE_STAT does not preserve a link's own mode on macOS. Never
+            # follow the target: it may be missing or outside the backed-up tree.
+            os.chmod(destination, stat.S_IMODE(source.lstat().st_mode), follow_symlinks=False)
     else:
         if data:
             shutil.copyfile(source, destination, follow_symlinks=False)
@@ -275,7 +298,8 @@ def copy_tree(source, destination, expected, scratch):
             require(name in expected and item['type'] == expected[name]['type'],
                     'backup-collision: unexpected entry in partial backup; preserve for review')
             if item['type'] != 'dir':
-                require(item == expected[name], 'backup-corrupt: partial backup entry differs; preserve for review')
+                require(copied_entry_matches(item, expected[name]),
+                        'backup-corrupt: partial backup entry differs; preserve for review')
     else:
         actual = {}
     for name, item in expected.items():
@@ -309,7 +333,8 @@ def copy_tree(source, destination, expected, scratch):
         if item['type'] == 'dir':
             copy_metadata(source / name, destination / name)
     require(tree_manifest(source) == expected, 'source-changed: backup source changed; do not proceed')
-    require(tree_manifest(destination) == expected, 'backup-mismatch: copied bytes or metadata differ')
+    require(copied_tree_matches(tree_manifest(destination), expected),
+            'backup-mismatch: copied bytes or metadata differ')
     sync_tree(destination, expected)
 
 
@@ -582,7 +607,7 @@ class Reinstall:
             expected = read_json(self.operation / f'{name}.json')
             require(manifest_digest(expected) == self.receipt['components'][name], 'manifest-corrupt: evidence changed')
             backup = self.operation / 'backups' / name
-            require((tree_manifest(backup) if exists(backup) else None) == expected,
+            require(copied_tree_matches(tree_manifest(backup) if exists(backup) else None, expected),
                     f'backup-mismatch: {name}; preserve operation and repair backup before proceeding')
 
     def backup(self):

@@ -116,6 +116,11 @@ browser/native configuration needed for restoration. Include a manifest of
 bytes, modes, owners, digests, and source revisions. Validate that the backup
 can be read in an isolated restore fixture. Do not export or copy Keychain
 secret values; record only the credential-store dependency and opaque refs.
+On macOS, preserve the observed source `com.apple.provenance` in the manifest,
+but allow the OS to assign copies their own attribution as documented by the
+[reinstall copy contract](../../mac-app/docs/development.md). Do not remove or
+forge it. File bytes, owners, modes (including links), ACLs and all other xattrs
+must match; live-source and atomic-retirement inventories stay exact.
 Do not proceed without a protected backup and proven restoration of the
 non-secret stores.
 

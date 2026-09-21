@@ -510,7 +510,14 @@ the old app, machine-group file and separately owned default browser config
 (including explicit absence). The command never reads Keychain stores or copies
 browser profiles/cookies. POSIX modes, ACLs, extended attributes, file contents
 and symbolic-link text are checked; special files and unsafe root links stop
-preparation. Owner-only maintenance directories protect backup contents; do not
+preparation. A copied tree may have different `com.apple.provenance` values:
+macOS assigns the copying process's attribution even when `copyfile` reports
+successful metadata preservation. The helper leaves that OS-owned attribute
+alone and retains its observed source digest in the inventory. This is the only
+copy-comparison exception; ACLs, link modes, quarantine and every other xattr
+must still match. Source-stability and atomic-retirement comparisons remain
+exact, including provenance. Link modes are applied without following targets.
+Owner-only maintenance directories protect backup contents; do not
 upload them or raw manifests/settings. External state referenced by custom
 settings or browser overrides requires its own operator-managed backup.
 
