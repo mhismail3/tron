@@ -46,6 +46,7 @@ const toolParameters = Type.Object({
   sourceId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
   url: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
   publicPostLookup: Type.Optional(Type.Boolean()),
+  publicPostCoverage: Type.Optional(Type.Union([Type.Literal("root"), Type.Literal("conversation"), Type.Literal("thread")])),
   title: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   scope: Type.Optional(Type.Union([Type.Literal("personal"), Type.Literal("research")])),
   noteBody: Type.Optional(Type.String({ maxLength: 100_000 })),
@@ -459,14 +460,16 @@ export class KnowledgeService {
       }
       case "x": {
         if (!parameters.url) throw new GatewayError("invalid_request", "Public X reads require url");
-        const result = await this.runOwned("public X read", ownedSignal => readPublicXPost(parameters.url!, { signal: ownedSignal }), signal);
+        const result = await this.runOwned("public X read", ownedSignal => parameters.publicPostCoverage
+          ? readPublicXPost(parameters.url!, { signal: ownedSignal }, { coverage: parameters.publicPostCoverage })
+          : readPublicXPost(parameters.url!, { signal: ownedSignal }), signal);
         const text = JSON.stringify(result);
         if (Buffer.byteLength(text, "utf8") > 128_000) throw new GatewayError("invalid_request", "X response exceeds the read tool bound; use captureSource with publicPostLookup and then bounded readObject");
         return { text, details: result };
       }
       case "captureSource": {
         if (!parameters.commandId || !parameters.url || !parameters.scope) throw new GatewayError("invalid_request", "Source capture requires commandId, url, and scope");
-        const result = await this.invoke({ operation: "knowledge.source.capture", request: { commandId: parameters.commandId, url: parameters.url, scope: parameters.scope, ...(parameters.publicPostLookup === undefined ? {} : { publicPostLookup: parameters.publicPostLookup }), ...(parameters.title ? { title: parameters.title } : {}) } }, signal);
+        const result = await this.invoke({ operation: "knowledge.source.capture", request: { commandId: parameters.commandId, url: parameters.url, scope: parameters.scope, ...(parameters.publicPostLookup === undefined ? {} : { publicPostLookup: parameters.publicPostLookup }), ...(parameters.publicPostCoverage ? { publicPostCoverage: parameters.publicPostCoverage } : {}), ...(parameters.title ? { title: parameters.title } : {}) } }, signal);
         const record = result && typeof result === "object" && "record" in result ? (result as { record?: import("./knowledge-contract.js").KnowledgeRecord }).record : undefined;
         return { text: record ? `${record.id} (source): ${recordLabel(record).slice(0, 4_000)}` : "Source capture completed.", details: result };
       }

@@ -10,7 +10,7 @@ import type {
 } from "./knowledge-contract.js";
 import { KnowledgeStore, type KnowledgeMutationResult } from "./knowledge-store.js";
 import { awaitAbortableWithSettlement } from "./model-await.js";
-import { isPublicXEmbedUrl, lookupPublicXPost, normalizePublicLinkedUrl, xPostIdentity, type XPublicPost } from "./x-public-post.js";
+import { isPublicXEmbedUrl, lookupPublicXPost, normalizePublicLinkedUrl, xPostIdentity, type XPublicCoverage, type XPublicLookupOptions, type XPublicPost } from "./x-public-post.js";
 
 export const SOURCE_CAPTURE_USER_AGENT = "Tron/0.1 (public-source-capture)";
 export const SOURCE_CAPTURE_LIMITS = {
@@ -29,8 +29,10 @@ export interface SourceCaptureInput {
   url: string;
   scope: KnowledgeScope;
   title?: string;
-  /** Explicit permission to disclose this public post ID to FxTwitter. */
+  /** Explicit permission to disclose this public post ID to public providers. */
   publicPostLookup?: boolean;
+  /** Explicitly requested bounded coverage; this bypasses complete-root reuse. */
+  publicPostCoverage?: XPublicCoverage;
   sourcePublishedAt?: string;
   collectionId?: string;
   annotations?: SourceContent["annotations"];
@@ -205,16 +207,19 @@ function joinBytes(chunks: Uint8Array[], length: number): Uint8Array {
   return result;
 }
 
-function extractReadable(bytes: Uint8Array, mediaType: string | undefined, maxChars: number): { text: string; truncated: boolean } | undefined {
+function extractReadable(bytes: Uint8Array, mediaType: string | undefined, maxChars: number): { text: string; truncated: boolean; quality?: "partial" } | undefined {
   const normalized = (mediaType ?? "").split(";", 1)[0]!.trim().toLowerCase();
   if (!(normalized.startsWith("text/") || ["application/xhtml+xml", "application/json", "application/xml", "application/ld+json"].includes(normalized))) return undefined;
   let text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+  const originalHtml = text;
   if (normalized === "text/html" || normalized === "application/xhtml+xml") {
     text = text.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ").replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ").replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, " ").replace(/<!--([\s\S]*?)-->/g, " ").replace(/<[^>]*>/g, " ");
     text = text.replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&#39;/g, "'").replace(/&quot;/gi, '"');
   }
   const normalizedText = text.replace(/[\t\r ]+/g, " ").replace(/\n\s*\n+/g, "\n\n").trim();
-  return normalizedText ? { text: normalizedText.slice(0, maxChars), truncated: normalizedText.length > maxChars } : undefined;
+  if (!normalizedText) return undefined;
+  const appShell = (normalized === "text/html" || normalized === "application/xhtml+xml") && normalizedText.length < 1_000 && (/<(?:div|main|body)[^>]+(?:id|class)\s*=\s*["']?[^\s"'>]*(?:app|root|next|svelte|react)\b/i.test(originalHtml) || /\b(?:enable javascript|javascript required|loading\.\.\.|please wait)\b/i.test(originalHtml));
+  return { text: normalizedText.slice(0, maxChars), truncated: normalizedText.length > maxChars, ...(appShell ? { quality: "partial" as const } : {}) };
 }
 
 function titleFrom(bytes: Uint8Array, mediaType: string | undefined): string | undefined {
@@ -266,7 +271,7 @@ async function fetchSafe(inputUrl: string, options: { fetcher?: SourceFetch; res
 
 /** Read-only X hydration shares capture's DNS-pinned, bounded transport. No
  * credentials, paid API, browser actions, or persistence are implicit. */
-export async function readPublicXPost(url: string, options: Pick<SourceCaptureOptions, "fetcher" | "resolveHost" | "signal"> = {}): Promise<XPublicPost> {
+export async function readPublicXPost(url: string, options: Pick<SourceCaptureOptions, "fetcher" | "resolveHost" | "signal"> = {}, lookupOptions: XPublicLookupOptions = {}): Promise<XPublicPost> {
   const signal = AbortSignal.any([AbortSignal.timeout(15_000), ...(options.signal ? [options.signal] : [])]);
   return lookupPublicXPost(url, async (endpoint, parentSignal) => {
     const attemptSignal = AbortSignal.any([parentSignal, AbortSignal.timeout(5_000)]);
@@ -274,7 +279,7 @@ export async function readPublicXPost(url: string, options: Pick<SourceCaptureOp
     const retryAfter = fetched.response?.headers.get("retry-after");
     const rateLimitReset = fetched.response?.headers.get("x-rate-limit-reset");
     return { status: fetched.response?.status ?? 0, ...(fetched.bytes ? { body: new TextDecoder().decode(fetched.bytes) } : {}), truncated: fetched.truncated, ...(retryAfter ? { retryAfter } : {}), ...(rateLimitReset ? { rateLimitReset } : {}) };
-  }, signal);
+  }, signal, lookupOptions);
 }
 
 async function allSourceRecords(store: KnowledgeStore): Promise<Array<KnowledgeRecord & { kind: "source" }>> {
@@ -410,8 +415,8 @@ function sourceDraft(input: SourceCaptureInput, content: SourceContent, evidence
 /**
  * A public X response may name substantive outbound targets. Capture those
  * targets through this same source owner, but never turn provider adjacency into
- * a thread: reply enumeration needs verified same-author/thread identity and is
- * left to the bounded browser fallback when the public response omits it.
+ * a thread: only the reader's verified numeric author/parent selection can
+ * supply continuation provenance; omitted or ambiguous replies remain commentary.
  */
 async function captureLinkedPublicSources(
   store: KnowledgeStore,
@@ -422,14 +427,18 @@ async function captureLinkedPublicSources(
 ): Promise<{ record: KnowledgeRecord & { kind: "source" }; failures: string[] }> {
   let currentRoot = root;
   const failures: string[] = [];
-  const links = (publicPost.linkedUrls ?? []).map(normalizePublicLinkedUrl).filter((value): value is string => Boolean(value)).slice(0, 8);
-  for (const [index, targetUrl] of links.entries()) {
+  const linked = (publicPost.linkedReferences ?? (publicPost.linkedUrls ?? []).map(url => ({ url, postId: publicPost.id, postUrl: publicPost.url, role: "root" as const })))
+    .map(reference => ({ ...reference, url: normalizePublicLinkedUrl(reference.url) }))
+    .filter((reference): reference is typeof reference & { url: string } => Boolean(reference.url))
+    .slice(0, 8);
+  for (const [index, reference] of linked.entries()) {
+    const targetUrl = reference.url;
     try {
       const target = await captureSource(store, {
-        commandId: childCommand(input.commandId, `linked:${index}`),
+        commandId: childCommand(input.commandId, `linked:${reference.postId}:${index}`),
         url: targetUrl,
         scope: input.scope,
-        annotations: [{ text: "Bounded target discovered in public X provider entities; author thread membership was not inferred." }],
+        annotations: [{ text: `Bounded target declared by X post/reply ${reference.postId}; thread membership was verified only for the selected parent chain.`, locator: reference.postUrl }],
       }, { ...(options.fetcher ? { fetcher: options.fetcher } : {}), ...(options.resolveHost ? { resolveHost: options.resolveHost } : {}), ...(options.limits ? { limits: options.limits } : {}), ...(options.signal ? { signal: options.signal } : {}) });
       let targetRecord = target.record;
       const rootRelation = { type: "related" as const, recordId: targetRecord.id, revisionId: targetRecord.revisionId };
@@ -449,7 +458,7 @@ async function captureLinkedPublicSources(
       let targetCaptureReason = targetRecord.content.captureReason;
       if (githubUi) targetCaptureReason = appendCaptureReason(targetCaptureReason, "GitHub UI capture is partial; repository and file completeness are not established.");
       if (boundedOrigins.omitted > 0) targetCaptureReason = appendCaptureReason(targetCaptureReason, `Referral provenance bound reached; ${boundedOrigins.omitted} new origin(s) were not added.`);
-      const targetProvenance = { ...targetRecord.provenance, evidence: mergeEvidence(targetRecord.provenance.evidence, { recordId: currentRoot.id, revisionId: currentRoot.revisionId, locator: targetUrl }) };
+      const targetProvenance = { ...targetRecord.provenance, evidence: mergeEvidence(targetRecord.provenance.evidence, { recordId: currentRoot.id, revisionId: currentRoot.revisionId, locator: reference.postUrl }) };
       const targetRelations = mergeRelation(targetRecord.relations, { type: "related" as const, recordId: currentRoot.id, revisionId: currentRoot.revisionId });
       const targetContent: SourceContent = {
         ...targetRecord.content,
@@ -494,14 +503,17 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
     throw invalid("Invalid source capture limits");
   }
   if (input.publicPostLookup !== undefined && typeof input.publicPostLookup !== "boolean") throw invalid("publicPostLookup must be a boolean");
+  if (input.publicPostCoverage !== undefined && !["root", "conversation", "thread"].includes(input.publicPostCoverage)) throw invalid("publicPostCoverage is invalid");
   const sourceUrl = assertSafeUrl(input.publicPostLookup ? xPostIdentity(input.url).url : input.url);
   const initialConfig = await store.config();
   if (options.signal?.aborted) throw invalid("Source capture was cancelled");
   const existing = await allSourceRecords(store);
   if (options.signal?.aborted) throw invalid("Source capture was cancelled");
   const normalized = normalizedUrl(sourceUrl.toString());
-  const duplicate = existing.find(record => record.scope === input.scope && record.content.captureDisposition === "complete" && sourceMatches(record, input, sourceUrl.toString(), normalized));
-  const retryTarget = existing.find(record => record.scope === input.scope && record.content.captureDisposition !== "complete" && sourceMatches(record, input, sourceUrl.toString(), normalized));
+  const refreshRequested = input.publicPostLookup === true && input.publicPostCoverage !== undefined && input.publicPostCoverage !== "root";
+  const refreshTarget = refreshRequested ? existing.find(record => record.scope === input.scope && sourceMatches(record, input, sourceUrl.toString(), normalized)) : undefined;
+  const duplicate = refreshTarget ? undefined : existing.find(record => record.scope === input.scope && record.content.captureDisposition === "complete" && sourceMatches(record, input, sourceUrl.toString(), normalized));
+  const retryTarget = refreshTarget ?? existing.find(record => record.scope === input.scope && record.content.captureDisposition !== "complete" && sourceMatches(record, input, sourceUrl.toString(), normalized));
   if (duplicate) {
     const kind = input.origin ?? "manual";
     const origins = duplicate.content.origins ?? (duplicate.content.origin ? [{ kind: duplicate.content.origin, capturedAt: duplicate.content.capturedAt }] : []);
@@ -526,8 +538,11 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
   let publicPost: XPublicPost | undefined;
   try {
     if (input.publicPostLookup) {
-      publicPost = await readPublicXPost(sourceUrl.toString(), { ...(fetcher ? { fetcher } : {}), resolveHost, signal: operationController.signal });
-      const raw = publicPost.raw ? new TextEncoder().encode(publicPost.raw) : undefined;
+      publicPost = input.publicPostCoverage
+        ? await readPublicXPost(sourceUrl.toString(), { ...(fetcher ? { fetcher } : {}), resolveHost, signal: operationController.signal }, { coverage: input.publicPostCoverage })
+        : await readPublicXPost(sourceUrl.toString(), { ...(fetcher ? { fetcher } : {}), resolveHost, signal: operationController.signal });
+      const rawEvidence = publicPost.rawPages?.length ? JSON.stringify({ provider: publicPost.provider, pages: publicPost.rawPages }) : publicPost.raw;
+      const raw = rawEvidence ? new TextEncoder().encode(rawEvidence) : undefined;
       fetched = { finalUrl: sourceUrl.toString(), truncated: Boolean(raw && raw.byteLength > limits.maxBytes), ...(raw ? { bytes: raw.slice(0, limits.maxBytes), mediaType: "application/json" } : {}), disposition: publicPost.disposition };
     } else {
       fetched = await fetchSafe(sourceUrl.toString(), { ...(fetcher ? { fetcher } : {}), resolveHost, signal: operationController.signal, limits });
@@ -561,7 +576,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
   const bytes = fetched.bytes;
   const mediaType = fetched.mediaType;
   const readable = publicPost ? (publicPost.text ? { text: publicPost.text.slice(0, limits.maxReadableChars), truncated: publicPost.text.length > limits.maxReadableChars } : undefined) : bytes && bytes.byteLength ? extractReadable(bytes, mediaType, limits.maxReadableChars) : undefined;
-  const disposition: SourceContent["captureDisposition"] = publicPost && (fetched.truncated || readable?.truncated) ? "partial" : fetched.disposition ?? (bytes && bytes.byteLength > 0 ? (readable === undefined ? "metadata-only" : fetched.quality === "partial" || fetched.truncated || readable.truncated ? "partial" : "complete") : "metadata-only");
+  const disposition: SourceContent["captureDisposition"] = publicPost && (fetched.truncated || readable?.truncated) ? "partial" : fetched.disposition ?? (bytes && bytes.byteLength > 0 ? (readable === undefined ? "metadata-only" : fetched.quality === "partial" || readable.quality === "partial" || fetched.truncated || readable.truncated ? "partial" : "complete") : "metadata-only");
   let object: KnowledgeObjectRef | undefined;
   if (operationController.signal.aborted) throw invalid("Source capture was cancelled");
   if (bytes && bytes.byteLength > 0) {
@@ -586,10 +601,12 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
     catch (error) { cleanup(); throw error; }
   }
   const kind = input.origin ?? "manual";
+  const providerCaptureReason = publicPost ? `${publicPost.endpoint ? `Public provider: ${redactSourceUrl(publicPost.endpoint)}. ` : ""}${publicPost.limitations.join(" ")} Attempts: ${publicPost.attempts.map(attempt => `${attempt.provider}:${attempt.outcome}${attempt.status !== undefined ? ` status=${attempt.status}` : ""}${attempt.retryAt ? ` (retry after ${attempt.retryAt})` : ""}`).join(", ")}` : undefined;
+  const captureReason = readable?.quality === "partial" ? appendCaptureReason(providerCaptureReason, "Linked HTML appears to be a bounded app shell; substantive article coverage was not established.") : providerCaptureReason;
   const content: SourceContent = {
     title: input.title?.trim() || publicPost?.title || titleFrom(bytes ?? new Uint8Array(), mediaType) || sourceUrl.hostname,
     uri: fetched.finalUrl,
-    ...(publicPost ? { captureReason: `${publicPost.endpoint ? `Public provider: ${redactSourceUrl(publicPost.endpoint)}. ` : ""}${publicPost.limitations.join(" ")} Attempts: ${publicPost.attempts.map(attempt => `${attempt.provider}:${attempt.outcome}${attempt.status !== undefined ? ` status=${attempt.status}` : ""}${attempt.retryAt ? ` (retry after ${attempt.retryAt})` : ""}`).join(", ")}` } : {}),
+    ...(captureReason ? { captureReason } : {}),
     ...(publicPost?.linkedUrls ? { linkedUrls: publicPost.linkedUrls } : {}),
     ...(readable ? { text: readable.text } : {}), ...(object ? { object } : {}), ...(mediaType ? { mediaType } : {}),
     captureDisposition: disposition, ...(input.annotations ? { annotations: input.annotations } : {}), capturedAt,

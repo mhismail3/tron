@@ -427,6 +427,8 @@ export interface KnowledgeSourceURLCaptureRequest {
   title?: string;
   /** Disclose this public X post ID to the free public lookup providers. */
   publicPostLookup?: boolean;
+  /** Explicit bounded thread/conversation refresh; root reuse never short-circuits it. */
+  publicPostCoverage?: "root" | "conversation" | "thread";
   annotations?: SourceContent["annotations"];
   identity?: SourceIdentity;
   origin?: SourceOriginKind;
@@ -832,9 +834,9 @@ function validateKindContent(kind: KnowledgeRecordKind, value: unknown): void {
         boundedString(value, "linked source URL", 4_096);
         try {
           const url = new URL(value);
-          if (url.protocol !== "https:" || url.username || url.password) throw new Error();
+          if (!(url.protocol === "https:" || url.protocol === "http:") || url.username || url.password || url.port) throw new Error();
           for (const key of url.searchParams.keys()) if (/^(?:token|api[_-]?key|key|secret|password|passwd|auth|signature|sig|access[_-]?token|credential|session)$/i.test(key)) throw new Error();
-        } catch { throw new Error("Linked source URL must be an https URL without credentials"); }
+        } catch { throw new Error("Linked source URL must be an http(s) URL without credentials"); }
       }
     }
     if (content.annotations !== undefined) {
