@@ -571,11 +571,13 @@ reinstall helper owns `<operation-id>/receipt.json`, source manifests,
 rewrite completed receipts, or use symlinks to conceal relocated stores.
 
 For a coordinated migration, prepare the app checkpoint first to obtain the
-operation directory. The maintainer places the separately verified **pre-write**
-backup, isolated restore evidence and journals under that operation's
-`pre-cutover/pre-migration/`, before publishing migrations. Keep it distinct from
-the helper's **post-write** `backups/`. Register and verify a completed archive
-without reopening `active.json`:
+operation ID. Before publishing migrations, the maintainer prepares the separately
+verified **pre-write** backup, isolated restore evidence and journals in a private
+`~/.tron-maintenance/pre-cutover-<operation-id>/` staging root, with the checkpoint
+under its `pre-migration/` directory. Keep it distinct from the helper's **post-write**
+`<operation-id>/backups/`. After the operation is verified and finished, register
+and move the staging root to `<operation-id>/pre-cutover/` without reopening
+`active.json` (an existing external recovery root can use the same command):
 
 ```bash
 scripts/tron mac reinstall --recovery-relocate \
@@ -587,8 +589,14 @@ scripts/tron mac reinstall --recovery-verify \
 
 The archive command exclusively renames the complete root, refuses collisions,
 and resumes an interrupted rename without copying or merging. It verifies the
-stored closure digest, recorded ownership and checkpoint manifests/evidence only;
-it does not inspect live homes, stop writers or publish migrations. The historical
+stored closure digest and actual pre-migration backups, isolated restore fixture,
+post-migration backups and retired payloads against their original evidence.
+Pre-migration owner maps verify original UID/GID; the older post-migration
+manifests lack owner maps, so registration records current ownership for later
+integrity checks without claiming historical UID/GID proof. Original source
+manifest digests stay exact; copied data admits only the existing Darwin
+copy-provenance exception. It does not inspect live homes, stop writers or
+publish migrations. The historical
 cutover `verify-publications.py` is not an operational verifier and must not be
 executed against current state. Use the owning migration tool's
 required same-filesystem staging location; do not relocate live staging or

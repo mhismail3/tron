@@ -483,7 +483,7 @@ def _archive_entry(path, root, relative):
     else:
         item.update(type='dir')
     digest_item = dict(item)
-    if relative == '.':
+    if relative == '.' and sys.platform == 'darwin':
         digest_item['xattrs'] = {k: v for k, v in item['xattrs'].items()
                                  if k != 'com.apple.provenance'}
     return item, digest_item
@@ -500,12 +500,13 @@ def archive_fingerprint(root, copy_provenance=False):
     count = 0
     root_entry = None
 
-    def visit(path, relative):
+    def visit(path, relative, depth=0):
         nonlocal count, root_entry
         count += 1
-        require(count <= MAX_ARCHIVE_ENTRIES, 'archive-inventory-limit: recovery tree exceeds bounds')
+        require(count <= MAX_ARCHIVE_ENTRIES and depth <= 128,
+                'archive-inventory-limit: recovery tree exceeds bounds')
         item, digest_item = _archive_entry(path, root, relative)
-        if copy_provenance:
+        if copy_provenance and sys.platform == 'darwin':
             digest_item['xattrs'] = {k: v for k, v in item['xattrs'].items()
                                      if k != 'com.apple.provenance'}
         if relative == '.':
@@ -515,7 +516,7 @@ def archive_fingerprint(root, copy_provenance=False):
         digest.update(b'\n')
         if item['type'] == 'dir':
             for child in sorted(path.iterdir(), key=lambda value: value.name):
-                visit(child, relative + '/' + child.name if relative != '.' else child.name)
+                visit(child, relative + '/' + child.name if relative != '.' else child.name, depth + 1)
 
     visit(root, '.')
     return {'entries': count, 'sha256': digest.hexdigest(), 'rootXattrs': root_entry['xattrs']}
@@ -593,8 +594,12 @@ def _verify_recorded_components(root):
              'delegated-temp', 'old-app', 'browser-project-config', 'browser-global-config')
     result = {}
     for name in names:
+        print(f'Checking pre-migration component: {name}', file=sys.stderr, flush=True)
         result[name] = _verify_recorded_manifest(pre / 'manifests' / (name + '.json'),
                                                   pre / 'backups' / name)
+    require({p.name for p in (pre / 'backups').iterdir()} ==
+            {name for name, proof in result.items() if not proof['absent']},
+            'archive-manifest: unexpected backup component')
     return result
 
 
@@ -610,30 +615,50 @@ def _verify_restore_fixture(root):
                     'archive-restore: backup/restore component presence differs')
             result[name] = None
             continue
+        print(f'Checking isolated restore component: {name}', file=sys.stderr, flush=True)
         expected = archive_fingerprint(backup, copy_provenance=True)
         actual = archive_fingerprint(restored, copy_provenance=True)
         require(expected['entries'] == actual['entries'] and expected['sha256'] == actual['sha256'],
                 'archive-restore: isolated fixture differs from backup')
         result[name] = {'entries': expected['entries'], 'sha256': expected['sha256']}
+    require({p.name for p in (pre / 'restore-fixture').iterdir()} ==
+            {name for name, proof in result.items() if proof is not None},
+            'archive-restore: unexpected restore component')
     return result
 
 
 def _verify_post_components(operation, receipt):
+    private_dir(operation / 'backups')
     result = {}
-    for name, expected_digest in receipt.get('components', {}).items():
+    for name, expected_digest in receipt['components'].items():
+        print(f'Checking post-migration component: {name}', file=sys.stderr, flush=True)
         path = operation / 'backups' / name
+        recorded = read_json(operation / (name + '.json'))
+        require(manifest_digest(recorded) == expected_digest,
+                'archive-post: recorded manifest digest mismatch')
         manifest = None if not exists(path) else tree_manifest(path)
-        require(manifest_digest(manifest) == expected_digest,
+        # Receipt digests identify source manifests, not Darwin's copied xattrs.
+        require(copied_tree_matches(manifest, recorded),
                 'archive-post: recorded component digest mismatch')
         closure = None if manifest is None else archive_fingerprint(path)
         result[name] = {'receiptDigest': expected_digest, 'closure': closure}
+    require({p.name for p in (operation / 'backups').iterdir()} ==
+            {name for name in receipt['components'] if result[name]['closure'] is not None},
+            'archive-post: unexpected backup component')
     selection = receipt.get('bundledSelection')
     retired = operation / 'retired-stable-payloads'
     if selection is not None:
-        require(isinstance(selection, dict) and isinstance(selection.get('manifestDigest'), str),
+        require(isinstance(selection, dict) and selection.get('phase') == 'selected'
+                and isinstance(selection.get('manifestDigest'), str),
                 'archive-post: invalid bundled selection evidence')
-        require(exists(retired), 'archive-post: retired payload store is absent')
+        recorded = read_json(operation / 'stable-selection.json')
+        require(manifest_digest(recorded) == selection['manifestDigest'],
+                'archive-post: retired manifest digest mismatch')
+        require(exists(retired) and retired_channel_matches(tree_manifest(retired), recorded),
+                'archive-post: retired payload evidence differs')
         result['retired-stable-payloads'] = archive_fingerprint(retired)
+    else:
+        require(not exists(retired), 'archive-post: unrecorded retired payload store')
     return result
 
 
@@ -658,20 +683,22 @@ def _verify_checkpoint_evidence(root):
 class RecoveryArchive:
     """Archive-only registration for a completed maintenance operation."""
     def __init__(self, home, operation_id):
-        require(re.fullmatch(r'[0-9a-fA-F-]{36}', operation_id), 'archive-operation: invalid operation id')
+        require(str(uuid.UUID(operation_id)) == operation_id, 'archive-operation: invalid operation id')
         self.home = safe_path(home)
         self.store = private_dir(self.home / '.tron-maintenance')
         self.operation = private_dir(self.store / operation_id)
         self.operation_id = operation_id
         self.receipt = read_json(self.operation / 'receipt.json')
+        require(isinstance(self.receipt, dict), 'archive-operation: invalid receipt')
+        self.receipt_digest = digest_file(self.operation / 'receipt.json')
         components = self.receipt.get('components')
         require(self.receipt.get('schema') == 1 and self.receipt.get('kind') == 'reinstall'
                 and self.receipt.get('id') == operation_id
                 and self.receipt.get('phase') == 'verified'
                 and self.receipt.get('home') == str(self.home)
                 and isinstance(self.receipt.get('sourceRevision'), str)
-                and isinstance(components, dict)
-                and all(isinstance(name, str) and re.fullmatch(r'[A-Za-z0-9._-]{1,128}', name)
+                and isinstance(components, dict) and bool(components)
+                and all(isinstance(name, str) and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', name)
                         and isinstance(value, str) and re.fullmatch(r'[0-9a-f]{64}', value)
                         for name, value in components.items()),
                 'archive-operation: expected completed verified operation')
@@ -684,6 +711,10 @@ class RecoveryArchive:
         if not exists(self.descriptor_path):
             return None
         descriptor = read_json(self.descriptor_path)
+        require(isinstance(descriptor, dict), 'archive-descriptor: invalid descriptor')
+        require(descriptor.get('receiptDigest') == self.receipt_digest ==
+                digest_file(self.operation / 'receipt.json'),
+                'archive-descriptor: completed receipt changed')
         require(descriptor.get('schema') == RECOVERY_SCHEMA and
                 descriptor.get('kind') == 'tron-recovery-bundle' and
                 descriptor.get('operationId') == self.operation_id,
@@ -709,6 +740,11 @@ class RecoveryArchive:
         descriptor = self._descriptor()
         require(descriptor is not None, 'archive-descriptor: relocation has not been registered')
         require(exists(self.destination), 'archive-checkpoint: destination is absent')
+        destination_info = private_dir(self.destination).lstat()
+        require((destination_info.st_dev, destination_info.st_ino) ==
+                (descriptor['sourceDevice'], descriptor['sourceInode']),
+                'archive-checkpoint: destination identity changed')
+        print('Hashing centralized recovery archive…', file=sys.stderr, flush=True)
         fingerprint = archive_fingerprint(self.destination)
         require(fingerprint['entries'] == descriptor['entries'] and
                 fingerprint['sha256'] == descriptor['archiveDigest'],
@@ -732,8 +768,9 @@ class RecoveryArchive:
 
     def relocate(self, source):
         source = safe_path(source)
-        require(source != self.destination and source.name != '.tron-maintenance',
-                'archive-source: invalid source')
+        require(source != self.destination and source not in self.operation.parents
+                and self.operation not in source.parents and source != self.operation,
+                'archive-source: source overlaps the maintenance operation')
         descriptor = self._descriptor()
         if descriptor is None:
             require(exists(source), 'archive-source: source is absent')
@@ -742,6 +779,7 @@ class RecoveryArchive:
                     'archive-source: source and destination must share a filesystem')
             require(not exists(self.destination), 'archive-collision: destination already exists')
             checkpoint = _verify_checkpoint_evidence(source)
+            print('Hashing pre-cutover evidence before registration…', file=sys.stderr, flush=True)
             fingerprint = archive_fingerprint(source)
             post = _verify_post_components(self.operation, self.receipt)
             descriptor = {
@@ -753,6 +791,7 @@ class RecoveryArchive:
                 'entries': fingerprint['entries'], 'archiveDigest': fingerprint['sha256'],
                 'sourceRootXattrs': fingerprint['rootXattrs'], 'checkpoint': checkpoint,
                 'post': post, 'sourceRevision': self.receipt.get('sourceRevision'),
+                'receiptDigest': self.receipt_digest,
             }
             write_json(self.descriptor_path, descriptor)
         else:
@@ -770,6 +809,7 @@ class RecoveryArchive:
             return self.verify()
         if exists(source):
             source = private_dir(source)
+            print('Rechecking frozen archive before exclusive rename…', file=sys.stderr, flush=True)
             fingerprint = archive_fingerprint(source)
             require(fingerprint['entries'] == descriptor['entries'] and
                     fingerprint['sha256'] == descriptor['archiveDigest'],
@@ -1108,6 +1148,7 @@ def main(workflow=Reinstall, arguments=None):
         require(not (args.recovery_verify and args.recovery_relocate),
                 'arguments: choose one recovery archive action')
         if recovery_action:
+            require(workflow is Reinstall, 'arguments: recovery commands belong to mac reinstall')
             require(not any((args.app, args.confirm_offline, args.select_bundled_offline,
                              args.status, args.verify, args.finish)),
                     'arguments: recovery action cannot be combined with reinstall options')
@@ -1138,7 +1179,10 @@ def main(workflow=Reinstall, arguments=None):
         print(f'STOP: {message}', file=sys.stderr)
         return 2
     except KeyboardInterrupt:
-        print('Interrupted; operation preserved. Re-run the same command after confirming writers remain offline.', file=sys.stderr)
+        message = ('Interrupted; archive intent preserved. Re-run the same recovery command; no service transition is needed.'
+                   if args.recovery_verify or args.recovery_relocate else
+                   'Interrupted; operation preserved. Re-run the same command after confirming writers remain offline.')
+        print(message, file=sys.stderr)
         return 130
 
 

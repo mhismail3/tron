@@ -107,11 +107,13 @@ source revisions. A disconnected client is not proof of quiescence.
 
 ## 3. Protected backup (before first write)
 
-Use the operation directory created by the app-preparation checkpoint in step 4.1
-as the recovery location: `~/.tron-maintenance/<operation-id>/pre-cutover/pre-migration/`.
-The complete pre-cutover evidence root is registered with the archive-only
-recovery command after migrations finish; its historical source path remains in
-original journals but is never required by current verification.
+Use the operation ID created by the app-preparation checkpoint in step 4.1 to
+prepare a private `~/.tron-maintenance/pre-cutover-<operation-id>/` staging root,
+with backup and restore evidence under `pre-migration/`. Once the maintenance
+operation is verified and finished, the archive-only recovery command registers
+and moves the complete staging root to `<operation-id>/pre-cutover/` in the same
+store. Original journals retain historical paths; current archive verification
+does not use them to inspect live state or depend on the former location.
 Do not create another backup root in a checkout, Workspace or Downloads. This
 pre-write checkpoint remains separately owned and verified; it is not one of the
 reinstall helper's post-write `backups/` components. Follow the

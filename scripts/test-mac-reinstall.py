@@ -83,11 +83,14 @@ class RecoveryArchiveTests(unittest.TestCase):
             'schema': 1, 'id': self.operation_id, 'kind': 'reinstall',
             'phase': 'verified', 'home': str(reinstall.safe_path(self.home)), 'sourceRevision': 'fixture-revision',
         })
+        (self.operation / 'backups').mkdir(mode=0o700)
         post_backup = self.operation / 'backups' / 'fixture-component'
-        post_backup.mkdir(parents=True, mode=0o700)
+        post_backup.mkdir(mode=0o700)
         (post_backup / 'state').write_text('post fixture\n')
         receipt = reinstall.read_json(self.operation / 'receipt.json')
-        receipt['components'] = {'fixture-component': reinstall.manifest_digest(reinstall.tree_manifest(post_backup))}
+        recorded = reinstall.tree_manifest(post_backup)
+        receipt['components'] = {'fixture-component': reinstall.manifest_digest(recorded)}
+        reinstall.write_json(self.operation / 'fixture-component.json', recorded)
         reinstall.write_json(self.operation / 'receipt.json', receipt)
         self.source = self.root / 'pre-cutover-source'
         self.source.mkdir(mode=0o700)
@@ -121,14 +124,18 @@ class RecoveryArchiveTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
 
     def test_relocate_and_verify_is_archive_only(self):
-        result = self.archive.relocate(self.source)
-        self.assertEqual(result['phase'], 'verified')
-        self.assertFalse(self.source.exists())
-        self.assertTrue(self.archive.destination.is_dir())
-        (self.home / 'live-home').mkdir()
-        self.assertEqual(self.archive.verify()['entries'], result['entries'])
-        self.assertFalse((self.operation / 'active.json').exists())
-        self.assertEqual(reinstall.read_json(self.operation / 'receipt.json')['phase'], 'verified')
+        receipt_bytes = (self.operation / 'receipt.json').read_bytes()
+        evidence_bytes = (self.source / 'pre-migration/verified.json').read_bytes()
+        with patch.object(reinstall.MacPlatform, 'offline', side_effect=AssertionError('live probe')):
+            result = self.archive.relocate(self.source)
+            self.assertEqual(result['phase'], 'verified')
+            self.assertFalse(self.source.exists())
+            self.assertTrue(self.archive.destination.is_dir())
+            (self.home / '.tron').write_text('not a readable live-home directory')
+            self.assertEqual(self.archive.verify()['entries'], result['entries'])
+        self.assertFalse((self.store / 'active.json').exists())
+        self.assertEqual((self.operation / 'receipt.json').read_bytes(), receipt_bytes)
+        self.assertEqual((self.archive.destination / 'pre-migration/verified.json').read_bytes(), evidence_bytes)
 
     def test_tampering_fails_without_reading_live_home(self):
         self.archive.relocate(self.source)
@@ -192,6 +199,106 @@ class RecoveryArchiveTests(unittest.TestCase):
         with self.assertRaisesRegex(reinstall.Stop, 'archive-collision: destination already exists'):
             self.archive.relocate(self.source)
         self.assertFalse((self.operation / 'recovery.json').exists())
+
+    def test_completed_receipt_cannot_change_after_registration(self):
+        self.archive.relocate(self.source)
+        receipt = reinstall.read_json(self.operation / 'receipt.json')
+        receipt['sourceRevision'] = 'different-source'
+        reinstall.write_json(self.operation / 'receipt.json', receipt)
+        archive = reinstall.RecoveryArchive(self.home, self.operation_id)
+        with self.assertRaisesRegex(reinstall.Stop, 'completed receipt changed'):
+            archive.verify()
+
+    def test_post_manifest_tampering_is_rejected_before_rename(self):
+        reinstall.write_json(self.operation / 'fixture-component.json', {})
+        with self.assertRaisesRegex(reinstall.Stop, 'recorded manifest digest mismatch'):
+            self.archive.relocate(self.source)
+        self.assertTrue(self.source.exists())
+        self.assertFalse(self.archive.destination.exists())
+
+    def test_retired_payload_must_match_historical_manifest(self):
+        retired = self.operation / 'retired-stable-payloads'
+        retired.mkdir(mode=0o700)
+        (retired / 'payload').write_text('original')
+        proof = reinstall.tree_manifest(retired)
+        reinstall.write_json(self.operation / 'stable-selection.json', proof)
+        receipt = reinstall.read_json(self.operation / 'receipt.json')
+        receipt['bundledSelection'] = {'phase': 'selected', 'manifestDigest': reinstall.manifest_digest(proof)}
+        reinstall.write_json(self.operation / 'receipt.json', receipt)
+        archive = reinstall.RecoveryArchive(self.home, self.operation_id)
+        (retired / 'payload').write_text('corrupt')
+        with self.assertRaisesRegex(reinstall.Stop, 'retired payload evidence differs'):
+            archive.relocate(self.source)
+        self.assertTrue(self.source.exists())
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'Darwin copy attribution exception')
+    def test_post_copy_provenance_differs_without_weakening_other_metadata(self):
+        path = self.operation / 'backups/fixture-component'
+        proof = reinstall.read_json(self.operation / 'fixture-component.json')
+        proof['state']['xattrs']['com.apple.provenance'] = 'source-attribution'
+        reinstall.write_json(self.operation / 'fixture-component.json', proof)
+        receipt = reinstall.read_json(self.operation / 'receipt.json')
+        receipt['components']['fixture-component'] = reinstall.manifest_digest(proof)
+        reinstall.write_json(self.operation / 'receipt.json', receipt)
+        read_xattrs = reinstall.xattr_digests
+        def copied_xattrs(p):
+            actual = read_xattrs(p)
+            if p == path / 'state':
+                actual['com.apple.provenance'] = 'copy-attribution'
+            return actual
+        with patch.object(reinstall, 'xattr_digests', side_effect=copied_xattrs):
+            reinstall._verify_post_components(self.operation, receipt)
+            (path / 'state').chmod(0o700)
+            with self.assertRaisesRegex(reinstall.Stop, 'recorded component digest mismatch'):
+                reinstall._verify_post_components(self.operation, receipt)
+
+    def test_invalid_component_paths_and_active_operation_are_rejected(self):
+        receipt = reinstall.read_json(self.operation / 'receipt.json')
+        receipt['components']['..'] = '0' * 64
+        reinstall.write_json(self.operation / 'receipt.json', receipt)
+        with self.assertRaisesRegex(reinstall.Stop, 'expected completed verified operation'):
+            reinstall.RecoveryArchive(self.home, self.operation_id)
+        del receipt['components']['..']
+        reinstall.write_json(self.operation / 'receipt.json', receipt)
+        reinstall.write_json(self.store / 'active.json', {'id': self.operation_id})
+        with self.assertRaisesRegex(reinstall.Stop, 'active maintenance operation'):
+            reinstall.RecoveryArchive(self.home, self.operation_id)
+
+    def test_owner_mode_extra_entries_and_restore_corruption_block_enrollment(self):
+        machine = self.source / 'pre-migration/backups/machine-id-legacy'
+        proof_path = self.source / 'pre-migration/manifests/machine-id-legacy.json'
+        proof = reinstall.read_json(proof_path)
+        proof['owners']['.']['gid'] += 1
+        reinstall.write_json(proof_path, proof)
+        with self.assertRaisesRegex(reinstall.Stop, 'recorded owner differs'):
+            self.archive.relocate(self.source)
+        proof['owners']['.']['gid'] -= 1
+        reinstall.write_json(proof_path, proof)
+        machine.chmod(0o644)
+        with self.assertRaisesRegex(reinstall.Stop, 'recorded entry differs'):
+            self.archive.relocate(self.source)
+        machine.chmod(0o600)
+        extra = self.source / 'pre-migration/backups/unrecorded'
+        extra.write_text('extra')
+        with self.assertRaisesRegex(reinstall.Stop, 'unexpected backup component'):
+            self.archive.relocate(self.source)
+        extra.unlink()
+        (self.source / 'pre-migration/restore-fixture/machine-id-legacy').write_text('wrong restore')
+        with self.assertRaisesRegex(reinstall.Stop, 'isolated fixture differs'):
+            self.archive.relocate(self.source)
+        self.assertTrue(self.source.exists())
+        self.assertFalse((self.operation / 'recovery.json').exists())
+
+    def test_depth_and_symlinked_roots_are_bounded(self):
+        with patch.object(reinstall, 'MAX_ARCHIVE_ENTRIES', 1):
+            with self.assertRaisesRegex(reinstall.Stop, 'archive-inventory-limit'):
+                reinstall.archive_fingerprint(self.source)
+        link = self.root / 'source-link'
+        link.symlink_to(self.source)
+        with self.assertRaisesRegex(reinstall.Stop, 'unsafe-path'):
+            self.archive.relocate(link)
+        with self.assertRaisesRegex(reinstall.Stop, 'overlaps the maintenance operation'):
+            self.archive.relocate(self.home)
 
     def test_manifest_symlinked_ancestor_is_rejected(self):
         component = self.root / 'component'
