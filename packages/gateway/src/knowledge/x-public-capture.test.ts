@@ -41,6 +41,48 @@ describe("X public v2 capture ownership", () => {
     const target = records.find(record => record.id !== result.record.id)!;
     expect(target.content.captureDisposition).toBe("partial"); expect(target.content.captureReason).toContain("app shell");
   });
+  it("retains the root and records a linked credential-redirect stop without weakening safety", async () => {
+    const store = await fixture();
+    const root = JSON.stringify({ code: 200, status: { id: "123456789", text: "Root text remains", author: { id: "42" }, replying_to: null, raw_text: { facets: [{ type: "url", replacement: "https://example.test/guide" }] } }, thread: [], replies: [], cursor: {} });
+    const fetcher = vi.fn(async (url: string | URL) => String(url).includes("api.fxtwitter.com")
+      ? new Response(root, { headers: { "content-type": "application/json" } })
+      : new Response(null, { status: 302, headers: { location: "https://example.test/guide?token=secret" } }));
+    const result = await capture.captureSource(store, { ...request, publicPostCoverage: "root" }, { ...options, fetcher });
+    expect(result.record.content.text).toBe("Root text remains");
+    expect(result.record.content.captureReason).toContain("credential-query redirect rejected");
+    expect((await store.list({ kind: "source", includePending: true, includeArchived: true })).records).toHaveLength(1);
+    expect(fetcher.mock.calls.map(([url]) => String(url))).not.toContain("https://example.test/guide?token=secret");
+  });
+
+  it("retains the root and records bounded redirect exhaustion for a linked target", async () => {
+    const store = await fixture();
+    const root = JSON.stringify({ code: 200, status: { id: "123456789", text: "Root text remains", author: { id: "42" }, replying_to: null, raw_text: { facets: [{ type: "url", replacement: "https://example.test/guide" }] } }, thread: [], replies: [], cursor: {} });
+    const fetcher = vi.fn(async (url: string | URL) => {
+      if (String(url).includes("api.fxtwitter.com")) return new Response(root, { headers: { "content-type": "application/json" } });
+      const current = new URL(String(url)); const hop = Number(current.pathname.split("-").at(-1) ?? "0") + 1;
+      return new Response(null, { status: 302, headers: { location: `https://example.test/guide-${hop}` } });
+    });
+    const result = await capture.captureSource(store, { ...request, publicPostCoverage: "root" }, { ...options, fetcher });
+    expect(result.record.content.text).toBe("Root text remains");
+    expect(result.record.content.captureReason).toContain("redirect limit exceeded");
+    expect((await store.list({ kind: "source", includePending: true, includeArchived: true })).records).toHaveLength(1);
+  });
+
+  it("does not swallow a linked child store conflict after root persistence", async () => {
+    const store = await fixture();
+    const root = JSON.stringify({ code: 200, status: { id: "123456789", text: "Root text remains", author: { id: "42" }, replying_to: null, raw_text: { facets: [{ type: "url", replacement: "https://example.test/guide" }] } }, thread: [], replies: [], cursor: {} });
+    const fetcher = vi.fn(async (url: string | URL) => String(url).includes("api.fxtwitter.com") ? new Response(root, { headers: { "content-type": "application/json" } }) : new Response("Underlying guide", { headers: { "content-type": "text/plain" } }));
+    const write = store.captureSource.bind(store);
+    vi.spyOn(store, "captureSource").mockImplementation(async request => {
+      if (request.commandId.includes(":linked:")) throw new Error("Source revision is stale or unavailable");
+      return write(request);
+    });
+    await expect(capture.captureSource(store, { ...request, publicPostCoverage: "root" }, { ...options, fetcher })).rejects.toThrow(/stale/);
+    const records = (await store.list({ kind: "source", includePending: true, includeArchived: true })).records;
+    expect(records).toHaveLength(1);
+    expect(records[0]?.kind === "source" && records[0].content.text).toBe("Root text remains");
+  });
+
   it("captures http linked targets with exact continuation evidence", async () => {
     const store = await fixture();
     const root = JSON.stringify({ code: 200, status: { id: "123456789", text: "Root", author: { id: "42" }, replying_to: null, raw_text: { facets: [] } }, thread: [], replies: [{ id: "2", text: "Continuation http://example.test/guide", author: { id: "42" }, replying_to: { status: "123456789" }, raw_text: { facets: [{ type: "url", replacement: "http://example.test/guide" }] } }], cursor: {} });

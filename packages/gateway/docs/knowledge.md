@@ -294,10 +294,16 @@ The retained object contains original provider bytes; readable text contains the
 root post, not author bios and engagement metadata. Provider-declared outbound
 `http` and `https` URLs are bounded and, for explicit capture, are passed through
 the same source owner as separate canonical Sources; redirects are validated per
-hop without invented HTTPS upgrades. Each target is related to the referring post
-and receives evidence plus the original connector origin; target deduplication
-preserves distinct origins. Redirects receive per-hop DNS/SSRF checks, and target
-failures remain explicit partial/inaccessible/failed/reference evidence. Linked
+hop without invented HTTPS upgrades. After a validated redirect, the final URI is
+matched within the requested scope and an existing canonical Source is updated or
+returned in place; origins are not used as aliases, so referring-post provenance
+cannot conflate targets. Each target is related to the referring post and receives
+evidence plus the original connector origin; target deduplication preserves
+distinct origins. Redirects receive per-hop DNS/SSRF checks, and target failures
+remain explicit partial/inaccessible/failed/reference evidence. If linked traversal
+hits its redirect or credential-query bound after the root is retained, the root
+keeps its text and records the bounded linked-target gap; store conflicts and
+cancellation are not swallowed. Linked
 GitHub UI pages are downgraded to partial because a page/file view cannot certify
 repository or file completeness. Tiny HTML app shells are also downgraded to
 partial; a title, loading marker, or JavaScript-only shell is not substantive
@@ -332,10 +338,12 @@ its existing explicit spending gates are unchanged.
 
 Focused regressions: `x-public-post.test.ts` covers identity, URL isolation,
 malformed/mismatched/truncated responses, fallback, partial content, cancellation,
-and safe transport; `x-public-capture.test.ts` covers raw evidence, opt-in, canonical URL
-identity deduplication, retry envelope preservation, linked-source relations and
-origin bounds, GitHub UI partial coverage, command-id bounds, and actual agent
-routing.
+and safe transport; `source-capture.test.ts` covers final-URI redirect reconciliation
+across aliases/scopes and partial targets, conflicting canonical records, repeat and
+concurrent publication semantics, and envelope preservation. `x-public-capture.test.ts`
+covers raw evidence, opt-in, canonical URL identity deduplication, retry envelope
+preservation, linked-source relations and origin bounds, bounded linked-target
+failures, GitHub UI partial coverage, command-id bounds, and actual agent routing.
 Browser login, private history coverage, Article/thread completeness, and provider
 availability are live validation requirements, not conclusions from fixture tests.
 New Gateway tool behavior requires a manual maintainer update; agents never

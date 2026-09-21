@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { KnowledgeStore } from "./knowledge-store.js";
@@ -70,6 +71,69 @@ describe("safe source capture", () => {
     const duplicate = await captureSource(store, { commandId: command("capture-two"), url: "https://example.com/article", scope: "research" }, { fetcher, resolveHost: publicResolver });
     expect(duplicate.duplicate).toBe(true);
     expect((await store.list({ kind: "source" })).records).toHaveLength(1);
+  });
+
+  it("reconciles redirect aliases to an existing canonical source without inspecting referral origins", async () => {
+    const { store } = await fixture();
+    const requested: string[] = [];
+    const fetcher = async (url: URL) => {
+      requested.push(url.toString());
+      if (["http://example.com/old-guide", "http://example.com/legacy-guide"].includes(url.toString())) return new Response(null, { status: 301, headers: { location: "https://example.com/new-guide" } });
+      return new Response("canonical guide", { headers: { "content-type": "text/plain" } });
+    };
+    const canonical = await captureSource(store, { commandId: command("canonical"), url: "https://example.com/new-guide", scope: "research", identity: { provider: "fixture", accountId: "account-1", itemId: "canonical" } }, { fetcher, resolveHost: publicResolver });
+    const admitted = await store.setSourceAdmission({ commandId: command("canonical-admit"), recordId: canonical.record.id, expectedRevision: canonical.record.revisionId, status: "retained", reason: "fixture retention" });
+    const alias = await captureSource(store, { commandId: command("old-guide"), url: "http://example.com/old-guide", scope: "research", annotations: [{ text: "declared alias", locator: "fixture" }] }, { fetcher, resolveHost: publicResolver });
+    expect(alias.record.id).toBe(canonical.record.id);
+    expect(alias.duplicate).toBe(true);
+    expect(alias.record.content.admission).toEqual(admitted.record.content.admission);
+    expect(alias.record.content.object?.hash).toBe(canonical.record.content.object?.hash);
+    expect(alias.record.content.origins?.some(origin => origin.uri === "http://example.com/old-guide")).toBe(true);
+    expect(alias.record.content.annotations).toContainEqual({ text: "declared alias", locator: "fixture" });
+    expect(requested).toEqual(["https://example.com/new-guide", "http://example.com/old-guide", "https://example.com/new-guide"]);
+    const repeated = await captureSource(store, { commandId: command("old-guide-repeat"), url: "http://example.com/legacy-guide", scope: "research" }, { fetcher, resolveHost: publicResolver });
+    expect(repeated.record.id).toBe(canonical.record.id);
+    expect(repeated.duplicate).toBe(true);
+    expect((await store.list({ kind: "source", scope: "research", includeArchived: true, includePending: true })).records).toHaveLength(1);
+  });
+
+  it("serializes concurrent redirect aliases at the source publication owner", async () => {
+    const { store } = await fixture();
+    const fetcher = async (url: URL) => {
+      await new Promise(resolve => setTimeout(resolve, 10));
+      if (["https://example.com/alias-a", "https://example.com/alias-b"].includes(url.toString())) return new Response(null, { status: 302, headers: { location: "https://example.com/canonical" } });
+      return new Response("concurrent canonical", { headers: { "content-type": "text/plain" } });
+    };
+    const [first, second] = await Promise.all([
+      captureSource(store, { commandId: command("concurrent-a"), url: "https://example.com/alias-a", scope: "research" }, { fetcher, resolveHost: publicResolver }),
+      captureSource(store, { commandId: command("concurrent-b"), url: "https://example.com/alias-b", scope: "research" }, { fetcher, resolveHost: publicResolver }),
+    ]);
+    expect(first.record.id).toBe(second.record.id);
+    expect((await store.list({ kind: "source", includeArchived: true, includePending: true })).records).toHaveLength(1);
+  });
+
+  it("upgrades an existing partial redirect target in place and preserves its envelope", async () => {
+    const { store } = await fixture();
+    const partial = await captureSource(store, { commandId: command("partial-target"), url: "https://example.com/new-guide", scope: "research", identity: { provider: "fixture", accountId: "account-1", itemId: "partial" } }, { fetcher: async () => new Response("short", { headers: { "content-type": "text/plain" } }), resolveHost: publicResolver, limits: { maxBytes: 3 } });
+    const admitted = await store.setSourceAdmission({ commandId: command("partial-admit"), recordId: partial.record.id, expectedRevision: partial.record.revisionId, status: "retained", reason: "fixture retention" });
+    const alias = await captureSource(store, { commandId: command("partial-alias"), url: "https://example.com/old-guide", scope: "research" }, { fetcher: async (url: URL) => url.toString() === "https://example.com/old-guide" ? new Response(null, { status: 302, headers: { location: "https://example.com/new-guide" } }) : new Response("recovered canonical guide", { headers: { "content-type": "text/plain" } }), resolveHost: publicResolver });
+    expect(alias.record.id).toBe(partial.record.id);
+    expect(alias.record.content.captureDisposition).toBe("complete");
+    expect(alias.record.content.admission).toEqual(admitted.record.content.admission);
+    expect(alias.record.content.text).toBe("recovered canonical guide");
+    expect(alias.record.content.origins?.some(origin => origin.uri === "https://example.com/old-guide")).toBe(true);
+    expect((await store.list({ kind: "source", includeArchived: true, includePending: true })).records).toHaveLength(1);
+  });
+
+  it("keeps redirect matching within scope and rejects ambiguous canonical duplicates", async () => {
+    const { store } = await fixture();
+    const fetcher = async (url: URL) => url.toString() === "https://example.com/old" ? new Response(null, { status: 301, headers: { location: "https://example.com/new" } }) : new Response("new", { headers: { "content-type": "text/plain" } });
+    const personal = await captureSource(store, { commandId: command("personal-target"), url: "https://example.com/new", scope: "personal" }, { fetcher, resolveHost: publicResolver });
+    const research = await captureSource(store, { commandId: command("research-alias"), url: "https://example.com/old", scope: "research" }, { fetcher, resolveHost: publicResolver });
+    expect(research.record.id).not.toBe(personal.record.id);
+    const conflicting = await store.captureSource({ commandId: command("conflicting-target"), record: { ...personal.record, id: randomUUID(), createdAt: new Date().toISOString() } });
+    expect(conflicting.record.id).not.toBe(personal.record.id);
+    await expect(captureSource(store, { commandId: command("ambiguous-alias"), url: "https://example.com/old-2", scope: "personal" }, { fetcher: async (url: URL) => url.toString() === "https://example.com/old-2" ? new Response(null, { status: 302, headers: { location: "https://example.com/new" } }) : new Response("new", { headers: { "content-type": "text/plain" } }), resolveHost: publicResolver })).rejects.toThrow(/Multiple sources match/);
   });
 
   it("records destination safety failures without fetching the forbidden hop, while preserving SSRF defenses", async () => {
