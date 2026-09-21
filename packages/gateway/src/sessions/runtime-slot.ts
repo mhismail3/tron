@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { historyPage, historyEntry, type HistoryCursor } from "./history.js";
 import {
   DELEGATED_PROVIDER_TOOL_NAME,
+  DELEGATED_SUPERVISOR_TOOL_NAME,
   delegatedArtifactPathAllowed,
   delegatedProviderOrigin,
   isInstalledDelegatedTool,
@@ -4308,7 +4309,9 @@ export class RuntimeSlot {
       // otherwise arbitrary tool results must not claim an artifact run.
       const toolCallId = typeof message.toolCallId === "string" ? message.toolCallId : undefined;
       const toolName = typeof message.toolName === "string" ? message.toolName : undefined;
-      if (!toolCallId || !toolName || !this.extensionToolOrigin(toolName)) continue;
+      // Supervisor receipts reference the target run; they never launch or own
+      // it. Counting a reply as a second owner blocks its terminal artifact.
+      if (!toolCallId || !toolName || toolName === DELEGATED_SUPERVISOR_TOOL_NAME || !this.extensionToolOrigin(toolName)) continue;
       const details = message.details !== null && typeof message.details === "object" && !Array.isArray(message.details)
         ? message.details as Record<string, unknown>
         : undefined;
@@ -4674,7 +4677,9 @@ export class RuntimeSlot {
     completedAt?: string,
     durationMs?: number,
   ): ExtensionRunActivity | undefined {
-    if (!extensionOrigin) return undefined;
+    // The native supervisor is ordinary control-tool activity, not a new
+    // delegated execution, even when its receipt includes the target runId.
+    if (!extensionOrigin || toolName === DELEGATED_SUPERVISOR_TOOL_NAME) return undefined;
     const current = this.extensionActivities.get(toolCallId);
     const foregroundSubagentOwner = this.isForegroundSubagentTool(toolName, extensionOrigin);
     const admittedForegroundSubagent = foregroundSubagentOwner && hasForegroundSubagentRunActivity(value);

@@ -4704,6 +4704,83 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(discovered.mock.calls[0]?.[0]).toMatch(/async-subagent-runs[\\/]late-active-run$/u);
   });
 
+  it("reconciles the launch owner after a supervisor reply references the same run", async () => {
+    const fixture = await coldFixture("supervisor-reply-ownership");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const manager = (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } }).runtime.session.sessionManager;
+    const runId = "supervisor-target-run";
+    const toolCallId = "subagent-launch-call";
+    const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", runId);
+    await mkdir(asyncDir, { recursive: true });
+    vi.spyOn(slot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
+      .mockReturnValue({ source: "pi-subagents" });
+    manager.appendMessage({
+      role: "toolResult", toolCallId, toolName: "subagent",
+      content: [{ type: "text", text: "launched" }],
+      details: { runId, asyncId: runId, asyncDir, mode: "single", results: [] },
+      isError: false, timestamp: Date.now(),
+    });
+    const startedAt = Date.now() - 1_000;
+    await writeFile(join(asyncDir, "status.json"), JSON.stringify({
+      lifecycleArtifactVersion: 3, runId, state: "running", startedAt, lastUpdate: Date.now(),
+    }));
+    const internal = slot as unknown as {
+      extensionActivities: Map<string, ExtensionRunActivity>;
+      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
+      updateExtensionActivity: (...args: unknown[]) => unknown;
+    };
+    const started = new Date(startedAt).toISOString();
+    internal.extensionActivities.set(toolCallId, {
+      id: toolCallId, activityId: "supervisor-launch-activity", runId, toolCallId,
+      source: { source: "pi-subagents" }, title: "worker", status: "running",
+      startedAt: started, updatedAt: started, children: [],
+      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: started },
+    });
+    internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
+    expect(slot.isDrainBusy).toBe(true);
+
+    // This is the native supervisor's actual receipt shape. Its runId is a
+    // reference, not another launch, and must not poison canonical ownership.
+    const reply = { content: [{ type: "text" as const, text: "Replied" }], details: { replyTo: "request-1", runId, agent: "worker" } };
+    manager.appendMessage({
+      role: "toolResult", toolCallId: "supervisor-reply-call", toolName: "subagent_supervisor",
+      ...reply, isError: false, timestamp: Date.now(),
+    });
+    const now = new Date().toISOString();
+    expect(internal.updateExtensionActivity("supervisor-reply-call", "subagent_supervisor",
+      { source: "pi-subagents" }, "completed", now, now, reply, now)).toBeUndefined();
+
+    await writeFile(join(asyncDir, "status.json"), JSON.stringify({
+      lifecycleArtifactVersion: 3, runId, state: "complete", startedAt, lastUpdate: Date.now(), endedAt: Date.now(),
+    }));
+    await slot.discoverExtensionArtifact(asyncDir);
+    expect(slot.snapshot().extensionActivities).toMatchObject([{ toolCallId, lifecycle: { state: "completed" } }]);
+    expect(slot.snapshot().extensionActivities).toHaveLength(1);
+    await fixture.registry.waitUntilIdle();
+    expect(slot.isDrainBusy).toBe(false);
+  });
+
+  it("still rejects distinct genuine launch owners for the same delegated run", async () => {
+    const fixture = await coldFixture("duplicate-real-launch-ownership");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const internal = slot as unknown as {
+      runtime: { session: { sessionManager: SessionManager } };
+      extensionToolOrigin: (name: string) => { source: string } | undefined;
+      canonicalExtensionRunFacts: () => Map<string, { ambiguous: boolean; toolCallId?: string }>;
+    };
+    vi.spyOn(internal, "extensionToolOrigin").mockReturnValue({ source: "pi-subagents" });
+    for (const toolCallId of ["first-launch", "second-launch"]) {
+      internal.runtime.session.sessionManager.appendMessage({
+        role: "toolResult", toolCallId, toolName: "subagent",
+        content: [{ type: "text", text: "launched" }],
+        details: { runId: "duplicate-run", asyncId: "duplicate-run", results: [] },
+        isError: false, timestamp: Date.now(),
+      });
+    }
+    expect(internal.canonicalExtensionRunFacts().get("duplicate-run")).toMatchObject({ ambiguous: true });
+    expect(internal.canonicalExtensionRunFacts().get("duplicate-run")?.toolCallId).toBeUndefined();
+  });
+
   it("fails closed on a stale running artifact after canonical completion", async () => {
     const fixture = await coldFixture("stale-subagent-artifact");
     fixture.manager.appendMessage({
