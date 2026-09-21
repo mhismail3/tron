@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { performance as nodePerformance } from "node:perf_hooks";
 import { sealBrowserToolReference } from "../display/browser-tool-reference.js";
-import { existsSync } from "node:fs";
+import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
+import { appendFileSync, existsSync } from "node:fs";
 import { appendFile, copyFile, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -25,6 +26,7 @@ import { RuntimeRegistry } from "./runtime-registry.js";
 import { invocationReceipts } from "./invocation-receipts.js";
 import { KnowledgeStore } from "../knowledge/knowledge-store.js";
 import { KnowledgeService } from "../knowledge/knowledge-service.js";
+import { observationEntriesDigest, type KnowledgeObservationService } from "../knowledge/knowledge-observation.js";
 import { RunMarkerCompletionConflictError, type RunMarkerStore } from "./run-markers.js";
 import { toolSegmentId } from "./projection.js";
 import { pngDimensions } from "../../test-fixtures/pi-sdk/computer-use-image.js";
@@ -52,6 +54,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     nested?: boolean;
     name?: string;
     maximumLiveRuntimes?: number;
+    catalogDiscoveryLimits?: { maximumRetainedBytes: number };
     workRegistry?: GatewayWorkRegistry;
     phaseObserver?: (phase: "catalog-warming" | "attention-recovery") => void;
     sessionListChanged?: () => void;
@@ -81,6 +84,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
       maximumLiveRuntimes: options.maximumLiveRuntimes,
+      catalogDiscoveryLimits: options.catalogDiscoveryLimits,
       workRegistry: options.workRegistry,
       modelRuntimeFactory: runtimeFactory,
       trust: new TrustService(agentDir),
@@ -1009,6 +1013,112 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect((await registry.catalog("all")).sessions.map((session) => session.id).sort()).toEqual([
       childSession.getSessionId(), directSession.getSessionId(),
     ].sort());
+  });
+
+  it("bounds cold catalog previews without changing canonical prompts or names", async () => {
+    const fixture = await coldFixture("large-catalog-preview", {
+      catalogDiscoveryLimits: { maximumRetainedBytes: 8_192 },
+    });
+    const prompt = "😀漢字".repeat(5_000);
+    const name = "Long session 😀 ".repeat(1_000);
+    fixture.manager.appendMessage({ role: "user", content: prompt, timestamp: Date.now() });
+    fixture.manager.appendSessionInfo(name);
+    const before = await readFile(fixture.sessionFile, "utf8");
+    const row = (await fixture.registry.catalog("all")).sessions[0]!;
+    expect(Buffer.byteLength(row.firstMessage)).toBeLessThanOrEqual(1_024);
+    expect(Buffer.byteLength(row.name!)).toBeLessThanOrEqual(1_024);
+    expect(row.firstMessage.endsWith("…")).toBe(true);
+    expect(row.firstMessage).not.toContain("\uFFFD");
+    expect(prompt.startsWith(row.firstMessage.slice(0, -1))).toBe(true);
+    expect(await readFile(fixture.sessionFile, "utf8")).toBe(before);
+    expect(before).toContain(prompt);
+    expect(before).toContain(name.trim());
+  });
+
+  it("initializes storage without requiring catalog presentation metadata", async () => {
+    const fixture = await coldFixture("storage-without-catalog-preview", {
+      catalogDiscoveryLimits: { maximumRetainedBytes: 1 },
+    });
+    const store = (fixture.registry as unknown as { displayArtifacts: DisplayArtifactStore }).displayArtifacts;
+    await store.initialize();
+    await writeFile(join(fixture.cwd, "retained.txt"), "retained display artifact");
+    const display = await store.ingest(fixture.cwd, "retained.txt", fixture.manager.getSessionId());
+    await expect(fixture.registry.catalog("all")).rejects.toMatchObject({ code: "busy" });
+    await expect(fixture.registry.initializeBlobStorage()).resolves.toBeUndefined();
+    const displayLease = await store.acquire(display.id, fixture.manager.getSessionId());
+    try {
+      expect((await collectStream(displayLease.stream)).toString()).toBe("retained display artifact");
+    } finally { await displayLease.release(); }
+    // Only a subsequent successful membership cut can authorize orphan removal.
+    await fixture.registry.maintainDisplayArtifacts(new Set());
+    await expect(store.acquire(display.id, fixture.manager.getSessionId())).rejects.toMatchObject({ code: "not_found" });
+    // Storage and an exact canonical session remain usable even when the
+    // aggregate presentation catalog cannot be materialized.
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const artifact = await slot.export("jsonl");
+    const lease = await fixture.registry.acquireBlob(artifact.blobId);
+    try {
+      expect((await collectStream(lease.stream)).toString()).toContain("storage-without-catalog-preview");
+    } finally { await lease.release(); }
+  });
+
+  it.each(["exact", "duplicate", "incomplete", "changed"])("recovers pending Knowledge observations from %s header evidence without a warmed catalog", async (mode) => {
+    const fixture = await coldFixture("knowledge-header-recovery", {
+      catalogDiscoveryLimits: { maximumRetainedBytes: 1 },
+    });
+    const sessionId = fixture.manager.getSessionId();
+    const invocationId = randomUUID();
+    const common = { version: 1 as const, invocationId, operationId: randomUUID(), sessionId,
+      source: "plain" as const, createdAt: "2026-01-01T00:00:00.000Z" };
+    fixture.manager.appendCustomEntry(INVOCATION_RECEIPT_TYPE, makeInvocationReceipt({ ...common,
+      receiptId: randomUUID(), receiptKind: "start", sequence: 1, lifecycle: "staged",
+      origin: { kind: "user", title: "User", confidence: "boundary" },
+    }));
+    const entryId = fixture.manager.appendMessage({ role: "user", content: "Retain this exact observation", timestamp: Date.now() });
+    fixture.manager.appendCustomEntry(INVOCATION_RECEIPT_TYPE, makeInvocationReceipt({ ...common,
+      receiptId: randomUUID(), receiptKind: "terminal", sequence: 2, lifecycle: "completed",
+    }));
+    const entries = fixture.manager.getBranch().filter(entry => entry.id === entryId);
+    const store = new KnowledgeStore(fixture.registry.knowledgeWorkspace());
+    const initial = await store.config();
+    const config = await store.configure("enable-recovery-session", {
+      ...initial, eligibility: { ...initial.eligibility, sessionIds: [sessionId] },
+    });
+    await store.setCoverage({ commandId: "seed-recovery-cut", expectedConfigRevision: config.revision,
+      coverage: { id: "recovery-cut", disposition: "pending", groupRevisionIds: [], range: {
+        sessionId, fromEntryId: entryId, toEntryId: entryId, entryIds: [entryId],
+        entryDigest: observationEntriesDigest(entries), invocationIds: [invocationId],
+      } },
+    });
+    const admit = vi.fn();
+    fixture.registry.setKnowledgeService(new KnowledgeService(store, { admit } as unknown as KnowledgeObservationService));
+    await fixture.registry.initializeBlobStorage();
+    if (mode === "duplicate") await copyFile(fixture.sessionFile, join(dirname(fixture.sessionFile), "duplicate.jsonl"));
+    if (mode === "incomplete") await writeFile(join(dirname(fixture.sessionFile), "incomplete.jsonl"), "");
+    if (mode === "changed") {
+      const open = SessionManager.open;
+      vi.spyOn(SessionManager, "open").mockImplementation((...args) => {
+        const manager = open(...args);
+        appendFileSync(fixture.sessionFile, "\n");
+        return manager;
+      });
+    }
+    const unavailable = vi.spyOn(store, "setCoverage");
+    await fixture.registry.recoverKnowledgeObservation();
+    if (mode === "exact") {
+      expect(admit).toHaveBeenCalledExactlyOnceWith({ sessionId, entries, outcome: "completed", invocationId, invocationIds: [invocationId] });
+      expect(unavailable).not.toHaveBeenCalled();
+    } else {
+      expect(admit).not.toHaveBeenCalled();
+      if (mode === "duplicate") expect(unavailable).toHaveBeenCalledWith(expect.objectContaining({
+        coverage: expect.objectContaining({ disposition: "unavailable", reason: "canonical-session-identity-ambiguous" }),
+      }));
+      else {
+        expect(unavailable).not.toHaveBeenCalled();
+        expect(await store.pendingObservationCoverage()).toHaveLength(1);
+      }
+    }
+    expect(fixture.runtimeFactory).not.toHaveBeenCalled();
   });
 
   it("bounds discovered session count and bytes before normalization", async () => {

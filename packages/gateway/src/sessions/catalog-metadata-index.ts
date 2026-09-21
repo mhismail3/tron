@@ -6,6 +6,7 @@ import { AsyncMutex } from "../util/async-mutex.js";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { SessionCreationOrigin } from "../protocol/types.js";
 import { userFacingPromptPreview } from "./resource-invocation.js";
+import { boundedSummaryText, MAX_SUMMARY_TEXT_BYTES } from "./summary-text.js";
 
 export const CATALOG_METADATA_INDEX_VERSION = 2 as const;
 export const CATALOG_METADATA_INDEX_MAX_BYTES = 8 * 1_024 * 1_024;
@@ -40,7 +41,7 @@ export interface CatalogMetadataAccumulator {
 
 export function applyCatalogMetadataEntry(target: CatalogMetadataAccumulator, entry: Record<string, unknown>): void {
   if (entry.type === "session_info" && (typeof entry.name === "string" || entry.name === null)) {
-    target.name = typeof entry.name === "string" ? entry.name.trim() || undefined : undefined;
+    target.name = typeof entry.name === "string" ? boundedSummaryText(entry.name.trim()) || undefined : undefined;
     return;
   }
   if (entry.type !== "message") return;
@@ -57,7 +58,7 @@ export function applyCatalogMetadataEntry(target: CatalogMetadataAccumulator, en
         .filter((part): part is Record<string, unknown> => !!part && typeof part === "object" && !Array.isArray(part))
         .filter((part) => part.type === "text" && typeof part.text === "string")
         .map((part) => part.text as string).join(" ") : "";
-    if (text) target.firstMessage = userFacingPromptPreview(text);
+    if (text) target.firstMessage = boundedSummaryText(userFacingPromptPreview(text));
   }
   const timestamp = typeof message.timestamp === "number"
     ? message.timestamp
@@ -289,6 +290,8 @@ export class CatalogMetadataIndex {
         || after.size !== before.size || after.mtimeMs !== before.mtimeMs) return undefined;
       return {
         ...summary,
+        firstMessage: boundedSummaryText(summary.firstMessage),
+        ...(summary.name !== undefined ? { name: boundedSummaryText(summary.name) } : {}),
         path: canonical,
         fileIdentity: `${after.dev}:${after.ino}`,
         size: after.size,
@@ -418,8 +421,10 @@ export class CatalogMetadataIndex {
       && (value.creationOrigin === undefined || (
         value.parentSessionPath === undefined && validCreationOrigin(value.creationOrigin)
       ))
-      && (value.name === undefined || validString(value.name, 1_024))
-      && validString(value.firstMessage, 64 * 1_024) && validString(value.createdAt, 128)
+      && (value.name === undefined || (validString(value.name, MAX_SUMMARY_TEXT_BYTES)
+        && Buffer.byteLength(value.name) <= MAX_SUMMARY_TEXT_BYTES))
+      && validString(value.firstMessage, MAX_SUMMARY_TEXT_BYTES)
+      && Buffer.byteLength(value.firstMessage) <= MAX_SUMMARY_TEXT_BYTES && validString(value.createdAt, 128)
       && validString(value.updatedAt, 128) && Number.isFinite(Date.parse(value.createdAt))
       && Number.isFinite(Date.parse(value.updatedAt)) && validString(value.fileIdentity, 128)
       && Number.isSafeInteger(value.messageCount) && value.messageCount! >= 0

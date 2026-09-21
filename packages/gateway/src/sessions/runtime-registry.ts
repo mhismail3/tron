@@ -592,6 +592,12 @@ export class RuntimeRegistry {
     const pending = await knowledge.pendingObservationCoverage(100).catch(() => []);
     const config = await knowledge.store.config().catch(() => undefined);
     if (!config) return;
+    // Recovery owns its canonical membership read; storage initialization is
+    // not a presentation-catalog warmup. Incomplete evidence cannot turn a
+    // durable pending cut into a claim that its session disappeared.
+    const recoveryEvidence = pending.length > 0
+      ? await this.sharedCatalogStructureEvidence().catch(() => undefined)
+      : undefined;
     for (const coverage of pending) {
       const markUnavailable = async (reason: string): Promise<void> => {
         await knowledge.store.setCoverage({
@@ -613,10 +619,21 @@ export class RuntimeRegistry {
         // Read the admitted canonical file without constructing a live slot.
         // This keeps recovery useful after restart while avoiding foreground
         // ownership, model/session initialization, or a second runtime.
-        const candidates = this.catalogStructuralIndex?.allInfos.filter(info => info.id === coverage.range.sessionId) ?? [];
+        if (!recoveryEvidence?.complete || recoveryEvidence.unstableCanonicalFiles) continue;
+        const candidates = [...recoveryEvidence.identitiesByPath]
+          .filter(([, identity]) => identity.id === coverage.range.sessionId)
+          .map(([path, identity]) => ({ path, ...identity }));
         if (candidates.length !== 1) { await markUnavailable(candidates.length === 0 ? "canonical-session-unavailable" : "canonical-session-identity-ambiguous"); continue; }
+        const candidate = candidates[0]!;
         let manager: SessionManager;
-        try { manager = SessionManager.open(candidates[0]!.path, this.sessionDirectoryFor(candidates[0]!.cwd)); } catch { await markUnavailable("canonical-session-read-failed"); continue; }
+        try {
+          manager = SessionManager.open(candidate.path, this.sessionDirectoryFor(candidate.cwd));
+          const current = await lstat(candidate.path);
+          if (!current.isFile() || current.isSymbolicLink()
+            || `${current.dev}:${current.ino}` !== candidate.fileIdentity
+            || current.size !== candidate.size || current.mtimeMs !== candidate.mtimeMs
+            || manager.getSessionId() !== candidate.id || manager.getCwd() !== candidate.cwd) continue;
+        } catch { await markUnavailable("canonical-session-read-failed"); continue; }
         canonicalEntries = manager.getHeader() ? [manager.getHeader()!, ...manager.getBranch()] : [];
         branch = canonicalEntries.slice(1);
         const anchor = await this.resolveForkBoundary(manager).catch(() => undefined);
@@ -658,11 +675,13 @@ export class RuntimeRegistry {
   }
 
   async initializeBlobStorage(): Promise<void> {
-    const liveSessionIDs = new Set((await this.list("all")).map((session) => session.id));
+    // Loading durable storage must not require transcript-wide presentation
+    // metadata. Preserve owners here; the maintenance pass prunes orphans only
+    // after it obtains a complete catalog. A failed catalog is never absence.
     await Promise.all([
       this.blobs.initialize(),
       this.exports.initialize(),
-      this.displayArtifacts.initialize(liveSessionIDs),
+      this.displayArtifacts.initialize(),
     ]);
     await Promise.all([...this.slots.values()].map((slot) => slot.reconcileDisplayArtifactOwnership()));
   }
