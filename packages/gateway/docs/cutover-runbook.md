@@ -1,8 +1,11 @@
 # Tron integrations cutover runbook (operator-owned)
 
 This is the one ordered operator runbook for the machine-internal, delegated,
-Mac wizard, and integration-state cutovers. Owner docs linked below define
-schemas and invariants; they do not provide alternate operator sequences.
+Mac wizard-state, and integration-state cutovers. Owner docs linked below
+define schemas and invariants; they do not provide alternate operator
+sequences. General Mac agent-home recovery is separate and is not part of this
+refactor cutover; see the [agent-home runbook](../../mac-app/docs/agent-home-cutover.md)
+only when that independently approved recovery is required.
 Agents may prepare source/build artifacts and synthetic fixtures only. A user or
 maintainer must perform quiescence, backup, publication, Gateway activation,
 app replacement, and cleanup.
@@ -35,15 +38,18 @@ The migration helpers are:
   and `scripts/tron internal-migrate`;
 - delegated provider tree and references: this runbook and
   `scripts/tron delegated-migrate`;
-- Mac agent-home/wizard state: the [Mac cutover runbook](../../mac-app/docs/agent-home-cutover.md);
+- Mac wizard state: the [Mac wizard-state cutover](../../mac-app/docs/wizard-state-cutover.md)
+  and `scripts/tron wizard-migrate`;
 - Knowledge/ConnectionOwner catalog: [`connections.md`](connections.md) and
   `scripts/tron connection-migrate`.
 
 ## 1. Read-only preflight and writer inventory
 
-Resolve paths without expanding symlinks or guessing homes. The stable and
+Resolve paths without expanding symlinks or guessing homes. The Stable and
 Debug homes are intentionally distinct for state, but the machine-group
-identity is shared at each home’s approved internal path. Inventory all writers
+identity is shared at the canonical `<userHome>/.tron/internal/machine-group-id`
+path for both profiles. An explicit approved override remains authoritative.
+Inventory all writers
 before any stage operation: Stable Gateway, Debug Gateway, Mac wrapper and
 wizard, iOS clients, browser/native adapters and profiles (external and not
 copied), `pi-subagents` delegated runners, Automation scheduler/executor,
@@ -60,8 +66,6 @@ user-approved home. Include:
 scripts/tron internal-migrate preflight --source <legacy-machine-id> --destination <tronHome>/internal/machine-group-id
 scripts/tron delegated-migrate preflight --destination-root <tronHome>/internal/subagents --legacy-root <tmp-provider-root> [--legacy-root <project>]
 scripts/tron connection-migrate preflight --tron-home <tronHome>
-scripts/tron agent-home-preflight --source <old-agent-home> --destination <new-agent-home>
-scripts/tron agent-home-cutover --status
 ```
 
 The delegated inventory must account for every provider directory/file,
@@ -146,9 +150,16 @@ angle-bracket values with paths from preflight, and do not invent flags.
    before completing or refusing the operation. Re-running `recover` after a
    verified publication is a no-op; it does not trust the journal as proof of
    bytes.
-3. Stage/verify the Mac agent-home and versioned wizard-key record using its
-   owner runbook. `.onboarded` remains completion authority; malformed/newer
-   wizard data is not reset.
+3. Stage/verify/publish the Mac wizard-state record with the exact commands
+   in [Mac wizard-state cutover](../../mac-app/docs/wizard-state-cutover.md).
+   Use an explicit Stable/Debug profile and home; the helper reads only
+   `tron.mac.wizardStep` through `/usr/bin/defaults`, refuses malformed/newer
+   data, conflicts, unsafe paths and links, and retains private rollback
+   evidence. `.onboarded` remains completion authority and is never changed.
+   If publication is interrupted, `verify` must refuse the ambiguous
+   destination; use the owner’s explicit `recover --staging <staging>` only
+   after its digest/source proof passes.
+   General agent-home migration is not a step in this cutover.
 4. Prepare/stage/verify/publish the Knowledge catalog and ConnectionOwner
    authority through the production `TronWorkspace` and catalog-control paths.
    Preserve records, source counts, checkpoints, pending identities, cohorts,
@@ -190,7 +201,9 @@ Immediately verify, without secrets or broad scans:
 - historical terminal delegated runs, retained resumable records, completion,
   admission, recovery, cancellation and cleanup work from the new provider
   root; private references point only to the new root;
-- wizard progress survives relaunch and `.onboarded` remains authoritative;
+- the published wizard record is consumed by `WizardState`, wizard progress
+  survives relaunch with cold-resume clamping, and `.onboarded` remains
+  authoritative;
 - Knowledge source/record counts, catalog revisions, checkpoints, receipts,
   pending work and remote-effect uncertainty are unchanged;
 - two same-provider connection accounts remain isolated through setup, reads,

@@ -78,7 +78,12 @@ final class WizardState {
         let shouldWrite: Bool
         switch persisted {
         case .absent:
-            shouldWrite = true
+            // An absent record is deliberate during cutover: the operator may
+            // still need to stage the retired UserDefaults key. Do not create
+            // a Welcome record on startup and thereby erase resumable legacy
+            // progress before that manual migration runs. Explicit recovery
+            // overrides and navigation persist through the normal writer.
+            shouldWrite = initialStep != nil
         case .valid(let step):
             shouldWrite = initialStep != nil || selected != step
         case .invalid:

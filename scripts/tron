@@ -27,6 +27,9 @@ Commands:
   agent-home-cutover --app <Release.app> [--confirm-offline|--verify|--status]
                                     One-time offline cutover; manual app activation
                                     See --help for reviewed pre-helper bootstrap
+  wizard-migrate <stage|verify|publish|recover|cleanup> ...
+                                    Manually stage the legacy Mac wizard key
+                                    into internal/mac/wizard-state.json
   chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]
                                     Attach terminal chat to the Gateway-owned runtime
   ci [check|test|all]               Validate the gateway and repository policy
@@ -97,6 +100,9 @@ case "$cmd" in
     ;;
   agent-home-cutover)
     exec python3 "$ROOT/scripts/tron_agent_home_cutover.py" "$@"
+    ;;
+  wizard-migrate)
+    exec python3 "$ROOT/scripts/tron_wizard_migration.py" "$@"
     ;;
   chat)
     (cd "$GATEWAY" && npm run build >/dev/null)

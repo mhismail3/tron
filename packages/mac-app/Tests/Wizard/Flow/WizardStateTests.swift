@@ -13,13 +13,24 @@ struct WizardStateTests {
         })
     }
 
-    @Test("fresh state starts at welcome without a durable record")
+    @Test("fresh state starts at welcome without creating a cutover record")
     func freshStarts() {
         let (url, cleanup) = Self.isolatedURL(); defer { cleanup() }
         let state = WizardState(stateURL: url)
         #expect(state.step == .welcome)
         #expect(state.persistenceFailure == nil)
         #expect(state.installOutcome == nil)
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+    }
+
+    @Test("an absent record remains absent until explicit navigation")
+    func absentRecordIsNotOverwritten() {
+        let (url, cleanup) = Self.isolatedURL(); defer { cleanup() }
+        let state = WizardState(stateURL: url)
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+        state.advance()
+        #expect(FileManager.default.fileExists(atPath: url.path))
+        #expect(state.step == .tailscale)
     }
 
     @Test("step changes publish a versioned private file and revive")
