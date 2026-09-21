@@ -7,13 +7,20 @@ import Testing
 @Suite("WizardInstallation")
 @MainActor
 struct WizardInstallationTests {
+    private static func isolatedStateURL() -> (URL, () -> Void) {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("tron-wizard-install-\(UUID().uuidString)", isDirectory: true)
+        return (root.appendingPathComponent("internal/mac/wizard-state.json"), {
+            try? FileManager.default.removeItem(at: root)
+        })
+    }
+
     @Test("accepted install survives cancelled view waiter and navigation without duplicate admission")
     func acceptedLifetime() async throws {
         let root = TestTempDir.make()
         defer { TestTempDir.cleanup(root) }
-        let (defaults, cleanup) = WizardStateTests.isolatedDefaults()
+        let (stateURL, cleanup) = Self.isolatedStateURL()
         defer { cleanup() }
-        let state = WizardState(defaults: defaults, initialStep: .install)
+        let state = WizardState(stateURL: stateURL, initialStep: .install)
         let manager = MockLaunchAgentManager()
         manager.loadOutcome = .alreadyLoaded
         var setup = try makeSetup(root: root, manager: manager)
@@ -55,9 +62,9 @@ struct WizardInstallationTests {
     func busyObservation() async throws {
         let root = TestTempDir.make()
         defer { TestTempDir.cleanup(root) }
-        let (defaults, cleanup) = WizardStateTests.isolatedDefaults()
+        let (stateURL, cleanup) = Self.isolatedStateURL()
         defer { cleanup() }
-        let state = WizardState(defaults: defaults, initialStep: .install)
+        let state = WizardState(stateURL: stateURL, initialStep: .install)
         var setup = try makeSetup(root: root, manager: MockLaunchAgentManager())
         setup.validateBundledHelper = { "synthetic failure" }
         let changes = OSAllocatedUnfairLock(initialState: 0)
@@ -78,9 +85,9 @@ struct WizardInstallationTests {
     func ownerRetirement() async throws {
         let root = TestTempDir.make()
         defer { TestTempDir.cleanup(root) }
-        let (defaults, cleanup) = WizardStateTests.isolatedDefaults()
+        let (stateURL, cleanup) = Self.isolatedStateURL()
         defer { cleanup() }
-        var state: WizardState? = WizardState(defaults: defaults, initialStep: .install)
+        var state: WizardState? = WizardState(stateURL: stateURL, initialStep: .install)
         weak var owner = state
         var setup = try makeSetup(root: root, manager: MockLaunchAgentManager())
         let gate = WizardGate()
@@ -100,9 +107,9 @@ struct WizardInstallationTests {
     func firstFailure(stage: String) async throws {
         let root = TestTempDir.make()
         defer { TestTempDir.cleanup(root) }
-        let (defaults, cleanup) = WizardStateTests.isolatedDefaults()
+        let (stateURL, cleanup) = Self.isolatedStateURL()
         defer { cleanup() }
-        let state = WizardState(defaults: defaults, initialStep: .install)
+        let state = WizardState(stateURL: stateURL, initialStep: .install)
         let manager = MockLaunchAgentManager()
         var setup = try makeSetup(root: root, manager: manager)
         setup.pingServer = { _ in Issue.record("Failure reached ping"); return .success(ServerPingInfo(version: "fixture", gatewayChannel: "stable")) }
@@ -139,9 +146,9 @@ struct WizardInstallationTests {
     func explicitRetry() async throws {
         let root = TestTempDir.make()
         defer { TestTempDir.cleanup(root) }
-        let (defaults, cleanup) = WizardStateTests.isolatedDefaults()
+        let (stateURL, cleanup) = Self.isolatedStateURL()
         defer { cleanup() }
-        let state = WizardState(defaults: defaults, initialStep: .install)
+        let state = WizardState(stateURL: stateURL, initialStep: .install)
         let manager = MockLaunchAgentManager()
         var setup = try makeSetup(root: root, manager: manager)
         setup.validateBundledHelper = { "synthetic failure" }
@@ -163,9 +170,9 @@ struct WizardInstallationTests {
     func staleDiscovery(finishInstallFirst: Bool) async throws {
         let root = TestTempDir.make()
         defer { TestTempDir.cleanup(root) }
-        let (defaults, cleanup) = WizardStateTests.isolatedDefaults()
+        let (stateURL, cleanup) = Self.isolatedStateURL()
         defer { cleanup() }
-        let state = WizardState(defaults: defaults, initialStep: .install)
+        let state = WizardState(stateURL: stateURL, initialStep: .install)
         var setup = try makeSetup(root: root, manager: MockLaunchAgentManager())
         let discovery = WizardGate()
         let validation = WizardGate()
@@ -195,9 +202,9 @@ struct WizardInstallationTests {
 
     @Test("cancelled discovery cannot publish, but a fresh observation can")
     func cancelledDiscovery() async {
-        let (defaults, cleanup) = WizardStateTests.isolatedDefaults()
+        let (stateURL, cleanup) = Self.isolatedStateURL()
         defer { cleanup() }
-        let state = WizardState(defaults: defaults)
+        let state = WizardState(stateURL: stateURL)
         let gate = WizardGate()
         let watchdog = watch([gate])
         defer { watchdog.cancel() }

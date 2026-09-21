@@ -66,12 +66,25 @@ struct WizardStateTests {
         #expect(state.step == .pairingInfo)
     }
 
-    @Test("malformed and newer records fail closed to welcome")
+    @Test("malformed and newer records fail closed without being overwritten")
     func malformedRecord() throws {
         let (url, cleanup) = Self.isolatedURL(); defer { cleanup() }
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data(#"{"version":99,"step":"install"}"#.utf8).write(to: url)
+        let original = Data(#"{"version":99,"step":"install","future":true}"#.utf8)
+        try original.write(to: url)
         #expect(WizardState(stateURL: url).step == .welcome)
+        #expect(try Data(contentsOf: url) == original)
+    }
+
+    @Test("a malformed record is replaced only by an explicit initial step")
+    func explicitInitialStepMayReplaceInvalidRecord() throws {
+        let (url, cleanup) = Self.isolatedURL(); defer { cleanup() }
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(#"{"version":99,"step":"install"}"#.utf8).write(to: url)
+        #expect(WizardState(stateURL: url, initialStep: .welcome).step == .welcome)
+        let object = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
+        #expect(object?["version"] as? Int == WizardState.stateFileVersion)
+        #expect(object?["step"] as? String == WizardStep.welcome.rawValue)
     }
 }
 

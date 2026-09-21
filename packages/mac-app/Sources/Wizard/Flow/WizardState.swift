@@ -54,19 +54,37 @@ final class WizardState {
 
     var pairingPayload: PairingPayload?
 
-    init(stateURL: URL = Self.defaultStateURL, initialStep: WizardStep? = nil) {
+    init(stateURL: URL = WizardState.defaultStateURL, initialStep: WizardStep? = nil) {
         self.stateURL = stateURL
-        let persisted = Self.readStep(from: stateURL)
+        let persisted = Self.readRecord(from: stateURL)
+        let persistedStep: WizardStep?
+        if case let .valid(step) = persisted {
+            persistedStep = step
+        } else {
+            persistedStep = nil
+        }
         let selected: WizardStep
         if let initialStep {
             selected = initialStep
-        } else if let persisted, Self.isSafeToResume(persisted) {
-            selected = persisted
+        } else if let persistedStep, Self.isSafeToResume(persistedStep) {
+            selected = persistedStep
         } else {
             selected = .welcome
         }
         self.step = selected
-        if initialStep != nil || persisted == nil || selected != persisted {
+        // An unknown/newer record is owned by a future wrapper and must remain
+        // intact. Only a deliberate initial-step override or a known record
+        // that needs the cold-start clamp may replace it.
+        let shouldWrite: Bool
+        switch persisted {
+        case .absent:
+            shouldWrite = true
+        case .valid(let step):
+            shouldWrite = initialStep != nil || selected != step
+        case .invalid:
+            shouldWrite = initialStep != nil
+        }
+        if shouldWrite {
             do {
                 try Self.write(step: selected, to: stateURL)
             } catch {
@@ -75,10 +93,16 @@ final class WizardState {
         }
     }
 
-    private static func readStep(from url: URL) -> WizardStep? {
+    private enum PersistedRecord {
+        case absent
+        case valid(WizardStep)
+        case invalid
+    }
+
+    private static func readRecord(from url: URL) -> PersistedRecord {
         let fileManager = FileManager.default
-        guard fileManager.fileExists(atPath: url.path),
-              (try? fileManager.destinationOfSymbolicLink(atPath: url.path)) == nil,
+        guard fileManager.fileExists(atPath: url.path) else { return .absent }
+        guard (try? fileManager.destinationOfSymbolicLink(atPath: url.path)) == nil,
               let attributes = try? fileManager.attributesOfItem(atPath: url.path),
               let size = attributes[.size] as? NSNumber, size.intValue <= 64 * 1024,
               let permissions = attributes[.posixPermissions] as? NSNumber,
@@ -86,8 +110,9 @@ final class WizardState {
               let data = try? Data(contentsOf: url),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               object["version"] as? Int == stateFileVersion,
-              let raw = object["step"] as? String else { return nil }
-        return WizardStep(rawValue: raw)
+              let raw = object["step"] as? String,
+              let step = WizardStep(rawValue: raw) else { return .invalid }
+        return .valid(step)
     }
 
     private static func write(step: WizardStep, to url: URL) throws {

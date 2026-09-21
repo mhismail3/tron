@@ -26,7 +26,7 @@ struct PresentationRequestFenceTests {
             return .unauthorized
         }
 
-        let state = WizardState(defaults: UserDefaults(suiteName: "tron-pairing-fence-\(UUID().uuidString)")!)
+        let state = WizardState(stateURL: temporaryDirectory.appendingPathComponent("internal/mac/wizard-state.json"))
         let originalPayload = PairingPayload(host: "100.64.0.1", port: 9848, code: "test-code", label: "Test Mac")
         state.pairingPayload = originalPayload
         let hostingView = NSHostingView(rootView: PairingInfoStep(state: state)
@@ -75,8 +75,7 @@ struct PresentationRequestFenceTests {
         setup.readEnrollmentCode = { "replacement-code" }
         setup.probeTailscale = { .signedIn(address: "100.64.0.2") }
 
-        let defaults = UserDefaults(suiteName: "tron-pairing-replacement-\(UUID().uuidString)")!
-        let state = WizardState(defaults: defaults)
+        let state = WizardState(stateURL: temporaryDirectory.appendingPathComponent("internal/mac/wizard-state.json"))
         state.pairingPayload = PairingPayload(host: "100.64.0.1", port: 9848, code: "old-code", label: "Old")
         let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 640, height: 440),
                               styleMask: [.borderless], backing: .buffered, defer: false)

@@ -175,10 +175,10 @@ nor replay it. `InstallStep` renders that shared progress and owns only disposab
 status presentation. Its status ping carries an exact latest-request fence through
 cancellation, including late success and failure, so a remounted step cannot
 publish an older result. Progress is durably published as a versioned owner-only
-record at `internal/mac/wizard-state.json`; malformed/newer records restart at
-Welcome and visible write failures never silently reset or mirror progress in
-`UserDefaults`. Completion remains authoritative only after `.onboarded` is
-written. This is not a durable installation queue across wrapper termination. Failures stop later stages; retry remains an
+record at `internal/mac/wizard-state.json`; malformed/newer records fail closed
+at Welcome and remain untouched until an explicit user-directed step override.
+Visible write failures never silently reset or mirror progress in `UserDefaults`.
+Completion remains authoritative only after `.onboarded` is written. This is not a durable installation queue across wrapper termination. Failures stop later stages; retry remains an
 explicit user action against fresh validation and ServiceManagement state.
 
 Entry discovery is asynchronous presentation, not installation authority. It is
