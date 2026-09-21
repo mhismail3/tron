@@ -57,7 +57,10 @@ evidence. If a process stops after destination creation but before journal
 publication, `verify` refuses to guess; `recover` re-reads the exact key and
 marks the operation published only after matching the staged digest and
 identity proof. It does not modify
-`internal/run/.onboarded` or remove the old preference.
+`internal/run/.onboarded` or remove the old preference. The completion marker
+may retain historical `0644` permissions: it is read-only evidence, must be
+user-owned and must not permit group/other writes. Wizard records and journals
+remain private. Migration never changes the marker’s bytes or permissions.
 
 Do not run `defaults` as a substitute for this command or delete the old key as
 part of staging. After activation and verified cold resume, a maintainer may

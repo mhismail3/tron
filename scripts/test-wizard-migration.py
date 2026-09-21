@@ -128,12 +128,30 @@ class WizardMigrationTests(unittest.TestCase):
         os.chmod(marker.parent.parent, 0o700)
         os.chmod(marker.parent, 0o700)
         marker.write_bytes(b"done")
-        os.chmod(marker, 0o600)
+        os.chmod(marker, 0o644)
+        before_stat = marker.stat()
         before = marker.read_bytes()
         result = MIGRATION.stage("stable", self.home, self.staging, runner=self.defaults_fixture)
         self.assertTrue(result["onboarded"])
         MIGRATION.publish(self.staging, runner=self.defaults_fixture)
         self.assertEqual(marker.read_bytes(), before)
+        after_stat = marker.stat()
+        for field in ("st_ino", "st_mode", "st_uid", "st_gid", "st_mtime_ns", "st_ctime_ns"):
+            self.assertEqual(getattr(after_stat, field), getattr(before_stat, field))
+
+    def test_shared_writable_onboarded_marker_and_readable_state_are_refused(self):
+        marker = self.home / "internal/run/.onboarded"
+        marker.parent.mkdir(parents=True, mode=0o700)
+        os.chmod(marker.parent.parent, 0o700)
+        marker.write_bytes(b"done")
+        os.chmod(marker, 0o664)
+        with self.assertRaises(MIGRATION.MigrationError):
+            MIGRATION.stage("stable", self.home, self.staging, runner=self.defaults_fixture)
+        state = self.root / "wizard-state.json"
+        state.write_bytes(MIGRATION.record_bytes("install"))
+        os.chmod(state, 0o644)
+        with self.assertRaises(MIGRATION.MigrationError):
+            MIGRATION.read_record(state)
 
     def test_cleanup_refuses_published_rollback_evidence(self):
         MIGRATION.stage("stable", self.home, self.staging, runner=self.defaults_fixture)

@@ -80,7 +80,7 @@ def secure_directory(path, create=False):
         fail(f"directory is not private and user-owned: {path}")
 
 
-def secure_file(path, required=False):
+def secure_file(path, required=False, *, allow_shared_read=False):
     path = Path(path)
     reject_symlinks(path)
     info = lstat(path)
@@ -88,8 +88,9 @@ def secure_file(path, required=False):
         if required:
             fail(f"missing required file: {path}")
         return None
-    if not path.is_file() or info.st_uid != os.getuid() or info.st_mode & 0o077:
-        fail(f"file is not private and user-owned: {path}")
+    forbidden_mode = 0o7133 if allow_shared_read else 0o077
+    if not path.is_file() or info.st_uid != os.getuid() or info.st_mode & forbidden_mode:
+        fail(f"file has unsafe permissions or ownership: {path}")
     if info.st_size > MAX_RECORD_BYTES:
         fail(f"file is oversized: {path}")
     return info
@@ -233,7 +234,9 @@ def stage(profile, home, staging, runner=None):
             read_record(destination)  # report malformed/newer/invalid distinctly
             fail(f"WizardState destination already exists; refusing conflict: {destination}")
         marker = home / "internal" / "run" / ".onboarded"
-        marker_info = secure_file(marker)
+        # The non-secret completion sentinel historically uses the app umask.
+        # Observe owned, non-writable-by-others bytes without chmodding evidence.
+        marker_info = secure_file(marker, allow_shared_read=True)
         marker_digest = file_digest(marker) if marker_info is not None else None
         record_path = staging / "wizard-state.json"
         atomic_write(record_path, record_bytes(step))
