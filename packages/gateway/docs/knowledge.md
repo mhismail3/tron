@@ -252,61 +252,74 @@ still apply, and invalid chunk metadata fails closed.
 
 The read-only agent `knowledge` action `x` accepts one HTTPS X/Twitter post
 `url`. It does not require or read connector credentials. Public lookup explicitly
-discloses the numeric post ID to FxTwitter, with X's public syndication endpoint
-as the single fallback. No caller query, cookie, authorization header, paid API,
-or browser session is forwarded. The syndication `token` is a deterministic
-public embed value derived from the ID, not an account credential; only that exact
-host/path/computed value is exempted from URL credential-query rejection.
+discloses the numeric post ID to FxEmbed's supported v2 conversation endpoint,
+with X's public syndication endpoint as an independent root-only fallback. No
+caller query, cookie, authorization header, paid API, or browser session is
+forwarded. The syndication `token` is a deterministic public embed value derived
+from the ID, not an account credential; only that exact host/path/computed value
+is exempted from URL credential-query rejection.
 
-`x-public-post.ts` owns identity validation, provider parsing, and ordered
-fallback; the source owner supplies DNS-pinned HTTP, public-destination checks,
-2 MB body bounds, zero redirects, a 15-second total deadline, and 5-second attempt
-deadlines. Each provider is tried once. The DNS-pinned transport sends only the
-bounded descriptive `Tron/0.1 (public-source-capture)` User-Agent (no cookies or
-authorization); this is required by the public providers and is not identity
-impersonation. A 429 is reported, never immediately retried at that provider;
+`x-public-post.ts` owns identity validation, FxEmbed v2 conversation/thread
+parsing, bounded cursor selection, and ordered fallback; the source owner
+supplies DNS-pinned HTTP, public-destination checks, 2 MB per-page body bounds,
+8 pages, 256 items, 8 MB retained raw-page bound, zero provider redirects, a
+15-second total deadline, and 5-second attempt deadlines. Each page/provider is
+tried once. The DNS-pinned transport sends only the bounded descriptive
+`Tron/0.1 (public-source-capture)` User-Agent (no cookies or authorization); this
+is required by the public providers and is not identity impersonation. A 429 is
+reported with an honest stop reason, never immediately retried at that provider;
 another explicit run must respect its cooldown.
 HTTP success alone is not success: expected root ID, JSON shape, and nonempty
 bounded text must match. Errors are sanitized, cancellation stops fallback, and
 an unavailable result is not a claim of deletion or an empty bookmark library.
 Tool output over 128 KB fails instead of truncating source fields.
 
-Results contain provider/endpoint, canonical X ID/URL, root-post text, bounded
-provider-declared outbound URLs, exact raw provider JSON, attempt outcomes (with
-sanitized HTTP status diagnostics), and limitations. Ordinary short-post text may
-be complete **only for the root text**; threads and linked pages are outside its
-coverage. Long posts, Articles, quotes, and media remain partial until separately
-verified. Syndication is always partial. A usable partial FxTwitter response is
-not discarded in favor of a weaker preview. Article previews are never certified
-as bodies, and media URLs are not downloaded content or transcripts.
+Results contain provider/endpoint, canonical X ID/URL, root-post text, selected
+same-author continuations, excluded commentary, explicit numeric parent
+provenance, bounded provider-declared outbound URLs, exact bounded raw provider
+pages, attempt outcomes, stop reasons, and limitations. `publicPostCoverage` may
+request `root`, `conversation`, or `thread`; thread is an ancestor chain and
+conversation is provider enumeration. Continuations require numeric author
+identity plus an explicit parent chain from the requested post. Same-author
+replies to commenters are not publication continuations. Cursor exhaustion is
+not proof deleted or hidden posts do not exist. Long posts, Articles, quotes,
+and media remain partial until separately verified. Syndication is always
+partial. A usable partial v2 response is not discarded in favor of a weaker
+preview.
 
 `captureSource` / `knowledge.source.capture` accepts `publicPostLookup: true` to
 explicitly opt a single public post into this lookup and the existing canonical
 source store. Without it ordinary capture does not contact mirror providers.
 The retained object contains original provider bytes; readable text contains the
 root post, not author bios and engagement metadata. Provider-declared outbound
-URLs are bounded and, for explicit capture, are passed through the same source
-owner as separate canonical Sources. Each target is related to the referring post
+`http` and `https` URLs are bounded and, for explicit capture, are passed through
+the same source owner as separate canonical Sources; redirects are validated per
+hop without invented HTTPS upgrades. Each target is related to the referring post
 and receives evidence plus the original connector origin; target deduplication
 preserves distinct origins. Redirects receive per-hop DNS/SSRF checks, and target
 failures remain explicit partial/inaccessible/failed/reference evidence. Linked
 GitHub UI pages are downgraded to partial because a page/file view cannot certify
-repository or file completeness. Canonical URI is
+repository or file completeness. Tiny HTML app shells are also downgraded to
+partial; a title, loading marker, or JavaScript-only shell is not substantive
+article extraction. Canonical URI is
 `https://x.com/i/web/status/{id}`, while `captureReason` records provider, attempt
 outcomes, and coverage limits. Existing scope/revision/deduplication, retention,
 object-reading, and capture bounds remain authoritative. A retry matched by the
 X numeric identity or canonical username/i-web alias updates that same source
 revision envelope, preserving admission, provenance, relations, provider
 representations, retention, and better prior bytes when the new provider attempt
-fails. This is not permission for paid assessment or a new Raindrop intake policy.
+fails. An explicit non-root `publicPostCoverage` refresh follows the same-record
+revision path rather than creating a duplicate Source. This is not permission for
+paid assessment or a new Raindrop intake policy.
 
-Public providers currently do not enumerate a trustworthy bounded set of
-same-author immediate replies for every post. The reader therefore never infers
-thread membership from adjacency or scrapes recommendations. Browser fallback
-must verify author identity and reply/thread relationship before adding substantive
-continuations; inaccessible linked content stays partial/reference-only (and
-other transport failures remain failed). Synthesis
-must cite the substantive linked Source separately from X author commentary.
+FxEmbed v2 can enumerate bounded replies and unroll the requested endpoint's
+ancestors, but neither is universal coverage. The reader never infers thread
+membership from adjacency, ranking, arbitrary commenters, or bios. Browser
+fallback must verify author identity and every reply/thread relationship before
+adding substantive continuations; inaccessible linked content stays
+partial/reference-only (and other transport failures remain failed). Each linked
+Source keeps exact referring POST/REPLY evidence, and synthesis must cite that
+Source separately from X author commentary.
 
 Private bookmark discovery remains separate and supervised through the approved
 `agent_browser` profile. The [X skill](../../../.agents/skills/tron-x/SKILL.md)

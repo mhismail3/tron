@@ -1,6 +1,6 @@
 ---
 name: tron-x
-description: Read public X posts with FxTwitter-first free lookup and bounded fallbacks; discover private bookmarks only through the user-approved signed-in browser.
+description: Read public X posts with FxEmbed v2 bounded coverage and an independent syndication fallback; discover private bookmarks only through the user-approved signed-in browser.
 ---
 
 # X posts and bookmarks
@@ -18,8 +18,10 @@ Prefer the first-party read-only operation:
 {"action":"x","url":"https://x.com/example/status/123456789"}
 ```
 
-It calls FxTwitter once, then X's public syndication endpoint once if the first
-response is unavailable, malformed, mismatched, oversized, or rate-limited.
+It calls FxEmbed's supported v2 conversation endpoint (or its explicit bounded
+thread endpoint), then X's public syndication endpoint once only when the first
+v2 response cannot establish the requested identity. Conversation pagination is
+bounded by pages, items, body bytes, cursors, and the operation deadline.
 It uses no API key, account cookies, paid X API, or browser login. Requesting this
 lookup discloses the post ID to those public services. Do not send known protected
 posts or a private bookmark list there without permission; use the approved
@@ -27,15 +29,16 @@ browser for protected content. URLs must be HTTPS X/Twitter post permalinks.
 Tracking queries and author spelling are not sent to providers.
 
 The result includes canonical X URL/ID, selected provider/endpoint, exact raw
-provider JSON, extracted root-post text, bounded provider-declared outbound URLs,
-attempt outcomes, and limitations. Preserve those qualifications in analysis.
-`complete` means ordinary root-post text, **not** the thread, linked article, or
-media. Long posts, Articles, quotes, and media are conservatively partial pending
+bounded provider JSON per page, extracted root-post text, selected same-author
+continuations with explicit parent provenance, excluded commentary, bounded
+provider-declared outbound URLs, attempt outcomes, stop reasons, and limitations.
+`complete` means the requested root scope only; conversation cursor exhaustion is
+provider-enumeration scope, not proof that deleted or hidden posts cannot exist. Long posts, Articles, quotes, and media are conservatively partial pending
 browser verification. A syndication response is always partial. Explicit source
 capture may retain each bounded external target as its own canonical Source,
 relating it to the referring post and preserving connector provenance; redirects
 remain subject to per-hop SSRF checks. GitHub UI targets remain partial because a
-page/file view does not certify repository or file completeness. Inspect raw JSON
+page/file view does not certify repository or file completeness. Tiny HTML app shells and loading-only pages remain partial, not substantive article bodies. Inspect raw JSON
 for links and nested
 context, never promote a preview/title to an Article body or a video URL to a
 transcript.
@@ -70,7 +73,7 @@ Do not rebuild/restart it. Use the already installed generic tools for a bounded
 read (not an equivalent canonical source capture):
 
 ```json
-{"url":"https://api.fxtwitter.com/status/123456789","mode":"raw"}
+{"url":"https://api.fxtwitter.com/2/conversation/123456789","mode":"raw"}
 ```
 
 Call `fetch_content`, then `get_search_content` using its responseId. Verify
@@ -115,15 +118,17 @@ state. Never inspect unrelated profiles or copy their secrets to gain access.
    relations back to the referring post; it must not treat them as thread members
    or replace bookmark provenance. Never bulk-import before the bounded pilot
    verifies identity, page traversal, content, and rerun behavior.
-6. Public source endpoints do not reliably enumerate same-author immediate replies.
-   Do not infer a thread from feed adjacency, scrape arbitrary replies or
-   recommendations, or claim link completeness. For missing or partial content,
-   navigate to the original X permalink in the approved browser. Verify post and
-   author identity plus each reply/thread relationship, expand long content through
-   actual controls, and extract the Article body or author reply chain only as far
-   as verified. Prefer X-generated detail responses when available; otherwise
-   label DOM extraction as such. Missing article endings, reply pagination,
-   embedded posts, or media remain explicit.
+6. FxEmbed v2 can enumerate bounded conversation replies and unroll a requested
+   endpoint's ancestors. Select publication continuations only when numeric author
+   identity and every explicit parent link establish a same-author chain from the
+   requested post. Same-author replies to commenters, unrelated commenters, and
+   feed adjacency are commentary, not continuations. Cursor exhaustion is not
+   universal coverage; missing parents, rate limits, invalid pages, and bounds are
+   explicit stop reasons. For missing or partial content, navigate to the original
+   X permalink in the approved browser. Verify post and author identity plus each
+   reply/thread relationship, expand long content through actual controls, and
+   extract the Article body or author reply chain only as far as verified. Missing
+   article endings, media, or linked-page extraction remain explicit.
 
 Browser discovery is supervised, best-effort, and not an unattended synchronization
 service. Login expiry/private API changes require attention. Do not delete saved
@@ -132,9 +137,10 @@ change settings, purchase credits, install an extension, or schedule recurrence.
 
 ## Validation and ownership
 
-Owning code: `packages/gateway/src/knowledge/x-public-post.ts` (public parsing and
-fallback), `source-capture.ts` (safe network/raw evidence), `knowledge-service.ts`
-(agent routing). Contract and regression details: `packages/gateway/docs/knowledge.md`.
+Owning code: `packages/gateway/src/knowledge/x-public-post.ts` (FxEmbed v2
+conversation/thread parsing and independent fallback), `source-capture.ts` (safe
+network/raw evidence), `knowledge-service.ts` (agent routing). Contract and
+regression details: `packages/gateway/docs/knowledge.md`.
 Live account discovery, Article bodies, and thread completeness must be validated
 on the user's account; synthetic tests and two public post reads do not prove them.
 
