@@ -346,7 +346,7 @@ available; this does not count as satisfying semantic search.
 The helper is a stateless bounded vector capability. It is not a session store,
 indexer, scheduler, worker framework or Gateway authority. Add a macOS executable
 source/target (exact names to be finalized during implementation, e.g.
-`packages/mac-app/Sources/SearchEmbedding/SessionSearchEmbeddingMain.swift` and
+`packages/mac-app/Sources/Search/NaturalLanguageEmbeddingHelper.swift` and
 `TronSearchEmbedding` target) that:
 
 - reads newline-delimited JSON requests from stdin and writes one bounded JSON
@@ -522,9 +522,9 @@ Add focused Gateway modules/tests (names may follow repository conventions):
 
 - `packages/gateway/src/sessions/session-search-contract.ts` — bounded DTOs,
   query/scope/coverage/status admission, anchor identity and stable comparator;
-- `packages/gateway/src/sessions/session-search-tokenizer.ts` — deterministic
+- proposed `session-search-tokenizer.ts` — deterministic
   Unicode terms, phrases, identifiers, trigrams and canonical snippet rules;
-- `packages/gateway/src/sessions/session-search-branch.ts` or shared helpers —
+- proposed `session-search-branch.ts` or shared helpers —
   parse JSONL using pinned `parseSessionEntries` plus
   `branchFromParsedSession()`; test malformed/cycle/missing-parent cases;
 - `session-search-contract.test.ts`, `session-search-tokenizer.test.ts`, and

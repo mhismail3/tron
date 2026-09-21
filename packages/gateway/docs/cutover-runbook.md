@@ -63,7 +63,7 @@ Run every owner preflight in no-write mode against an isolated or explicitly
 user-approved home. Include:
 
 ```bash
-scripts/tron internal-migrate preflight --source <legacy-machine-id> --destination <tronHome>/internal/machine-group-id
+scripts/tron internal-migrate preflight --source <legacy-machine-id> --destination <shared-machine-id> --staging <private-machine-id-staging>
 scripts/tron delegated-migrate preflight --destination-root <tronHome>/internal/subagents --legacy-root <tmp-provider-root> [--legacy-root <project>]
 scripts/tron connection-migrate preflight --tron-home <tronHome>
 ```
