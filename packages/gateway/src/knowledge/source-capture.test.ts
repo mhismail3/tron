@@ -94,6 +94,8 @@ describe("safe source capture", () => {
     const repeated = await captureSource(store, { commandId: command("old-guide-repeat"), url: "http://example.com/legacy-guide", scope: "research" }, { fetcher, resolveHost: publicResolver });
     expect(repeated.record.id).toBe(canonical.record.id);
     expect(repeated.duplicate).toBe(true);
+    const repeatedAgain = await captureSource(store, { commandId: command("old-guide-repeat-again"), url: "http://example.com/legacy-guide", scope: "research" }, { fetcher, resolveHost: publicResolver });
+    expect(repeatedAgain.record.content.origins?.length).toBe(repeated.record.content.origins?.length);
     expect((await store.list({ kind: "source", scope: "research", includeArchived: true, includePending: true })).records).toHaveLength(1);
   });
 
@@ -112,6 +114,17 @@ describe("safe source capture", () => {
     expect((await store.list({ kind: "source", includeArchived: true, includePending: true })).records).toHaveLength(1);
   });
 
+  it("does not poison later callers when an earlier fetch blocks and a queued caller cancels", async () => {
+    const { store } = await fixture();
+    const blocked = captureSource(store, { commandId: command("blocked-first"), url: "https://example.com/blocked", scope: "research" }, { fetcher: async () => new Response(new ReadableStream<Uint8Array>({ start() {} }), { headers: { "content-type": "text/plain" } }), resolveHost: publicResolver, limits: { timeoutMs: 100 } }).then(() => undefined, error => error as Error);
+    const cancelledController = new AbortController(); cancelledController.abort(new Error("cancelled second"));
+    const cancelled = captureSource(store, { commandId: command("cancelled-second"), url: "https://example.com/cancelled", scope: "research" }, { signal: cancelledController.signal, fetcher: async () => new Response("must not fetch"), resolveHost: publicResolver }).then(() => undefined, error => error as Error);
+    const healthy = captureSource(store, { commandId: command("healthy-third"), url: "https://example.com/healthy", scope: "research" }, { fetcher: async () => new Response("healthy", { headers: { "content-type": "text/plain" } }), resolveHost: publicResolver });
+    expect((await blocked)?.message).toMatch(/timed out|cancelled/);
+    expect((await cancelled)?.message).toMatch(/cancel/i);
+    await expect(healthy).resolves.toMatchObject({ record: { content: { text: "healthy" } } });
+  });
+
   it("upgrades an existing partial redirect target in place and preserves its envelope", async () => {
     const { store } = await fixture();
     const partial = await captureSource(store, { commandId: command("partial-target"), url: "https://example.com/new-guide", scope: "research", identity: { provider: "fixture", accountId: "account-1", itemId: "partial" } }, { fetcher: async () => new Response("short", { headers: { "content-type": "text/plain" } }), resolveHost: publicResolver, limits: { maxBytes: 3 } });
@@ -125,6 +138,41 @@ describe("safe source capture", () => {
     expect((await store.list({ kind: "source", includeArchived: true, includePending: true })).records).toHaveLength(1);
   });
 
+  it("preserves archived, pending, and suppressed final ownership without recreating visible sources", async () => {
+    const { store } = await fixture();
+    const fetcher = async (url: URL) => ["https://example.com/archived-alias", "https://example.com/pending-alias", "https://example.com/suppressed-alias"].includes(url.toString())
+      ? new Response(null, { status: 302, headers: { location: "https://example.com/canonical" } })
+      : new Response("canonical", { headers: { "content-type": "text/plain" } });
+    const canonical = await captureSource(store, { commandId: command("ownership-seed"), url: "https://example.com/canonical", scope: "research" }, { fetcher, resolveHost: publicResolver });
+    const archived = await store.setSourceAdmission({ commandId: command("ownership-archive"), recordId: canonical.record.id, expectedRevision: canonical.record.revisionId, status: "archived", reason: "fixture archive" });
+    const archivedAlias = await captureSource(store, { commandId: command("ownership-archived-alias"), url: "https://example.com/archived-alias", scope: "research" }, { fetcher, resolveHost: publicResolver });
+    expect(archivedAlias.record.id).toBe(canonical.record.id); expect(archivedAlias.record.content.admission).toEqual(archived.record.content.admission);
+    const pending = await store.setSourceAdmission({ commandId: command("ownership-pending"), recordId: archivedAlias.record.id, expectedRevision: archivedAlias.record.revisionId, status: "pending", reason: "fixture pending" });
+    const pendingAlias = await captureSource(store, { commandId: command("ownership-pending-alias"), url: "https://example.com/pending-alias", scope: "research" }, { fetcher, resolveHost: publicResolver });
+    expect(pendingAlias.record.id).toBe(canonical.record.id); expect(pendingAlias.record.content.admission).toEqual(pending.record.content.admission);
+    const excluded = await store.setExclusion(command("ownership-suppress"), canonical.record.id, true, pendingAlias.record.revisionId, "fixture suppression");
+    const suppressedAlias = await captureSource(store, { commandId: command("ownership-suppressed-alias"), url: "https://example.com/suppressed-alias", scope: "research" }, { fetcher, resolveHost: publicResolver });
+    expect(suppressedAlias.record.id).toBe(canonical.record.id);
+    expect((await store.list({ kind: "source", scope: "research" })).records).toHaveLength(0);
+    expect((await store.list({ kind: "source", scope: "research", includeSuppressed: true, includeArchived: true, includePending: true })).records).toHaveLength(1);
+    expect(excluded.excluded).toBe(true);
+  });
+
+  it("fails before mutation when canonical provenance or annotations are already saturated", async () => {
+    const { store } = await fixture();
+    const fetcher = async (url: URL) => url.toString() === "https://example.com/alias" ? new Response(null, { status: 302, headers: { location: "https://example.com/canonical" } }) : new Response("canonical", { headers: { "content-type": "text/plain" } });
+    const seed = await captureSource(store, { commandId: command("saturated-seed"), url: "https://example.com/canonical", scope: "research" }, { fetcher, resolveHost: publicResolver });
+    const saturated = await store.captureSource({ commandId: command("saturated-origins"), expectedRevision: seed.record.revisionId, record: { ...seed.record, content: { ...seed.record.content, origins: Array.from({ length: 20 }, (_, index) => ({ kind: "manual", capturedAt: seed.record.content.capturedAt, uri: `https://fixture.example/origin-${index}` })) } } });
+    await expect(captureSource(store, { commandId: command("saturated-origin-alias"), url: "https://example.com/alias", scope: "research" }, { fetcher, resolveHost: publicResolver })).rejects.toThrow(/provenance bound/);
+    expect((await store.read(seed.record.id, saturated.record.revisionId, true, true, true))?.revisionId).toBe(saturated.record.revisionId);
+
+    const second = await fixture();
+    const annotatedSeed = await captureSource(second.store, { commandId: command("saturated-annotation-seed"), url: "https://example.com/canonical", scope: "research" }, { fetcher, resolveHost: publicResolver });
+    const annotated = await second.store.captureSource({ commandId: command("saturated-annotations"), expectedRevision: annotatedSeed.record.revisionId, record: { ...annotatedSeed.record, content: { ...annotatedSeed.record.content, annotations: Array.from({ length: 200 }, (_, index) => ({ text: `annotation-${index}`, locator: "fixture" })) } } });
+    await expect(captureSource(second.store, { commandId: command("saturated-annotation-alias"), url: "https://example.com/alias", scope: "research", annotations: [{ text: "new annotation", locator: "fixture" }] }, { fetcher, resolveHost: publicResolver })).rejects.toThrow(/annotation bound/);
+    expect((await second.store.read(annotatedSeed.record.id, annotated.record.revisionId, true, true, true))?.revisionId).toBe(annotated.record.revisionId);
+  });
+
   it("keeps redirect matching within scope and rejects ambiguous canonical duplicates", async () => {
     const { store } = await fixture();
     const fetcher = async (url: URL) => url.toString() === "https://example.com/old" ? new Response(null, { status: 301, headers: { location: "https://example.com/new" } }) : new Response("new", { headers: { "content-type": "text/plain" } });
@@ -133,6 +181,7 @@ describe("safe source capture", () => {
     expect(research.record.id).not.toBe(personal.record.id);
     const conflicting = await store.captureSource({ commandId: command("conflicting-target"), record: { ...personal.record, id: randomUUID(), createdAt: new Date().toISOString() } });
     expect(conflicting.record.id).not.toBe(personal.record.id);
+    await expect(captureSource(store, { commandId: command("ambiguous-direct"), url: "https://example.com/new", scope: "personal" }, { fetcher, resolveHost: publicResolver })).rejects.toThrow(/Multiple sources/);
     await expect(captureSource(store, { commandId: command("ambiguous-alias"), url: "https://example.com/old-2", scope: "personal" }, { fetcher: async (url: URL) => url.toString() === "https://example.com/old-2" ? new Response(null, { status: 302, headers: { location: "https://example.com/new" } }) : new Response("new", { headers: { "content-type": "text/plain" } }), resolveHost: publicResolver })).rejects.toThrow(/Multiple sources match/);
   });
 

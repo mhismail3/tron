@@ -58,7 +58,7 @@ type RecordHead = LegacyRecordHead & {
 type Suppression = { excluded: boolean; forgotten: boolean; reason?: string; updatedAt: string };
 type ScopeExclusion = { sessionId?: string; branchId?: string; projectId?: string; excluded: boolean; reason?: string; updatedAt: string };
 type PendingRecordCleanup = { recordId: string; revisionId: string };
-type SourceRecordWriteRequest = { commandId: string; expectedRevision?: string; record: KnowledgeRecordDraft & { kind: "source" }; signal?: AbortSignal };
+type SourceRecordWriteRequest = { commandId: string; expectedRevision?: string; canonicalUri?: string; record: KnowledgeRecordDraft & { kind: "source" }; signal?: AbortSignal };
 export interface KnowledgeImportCheckpoint {
   planHash: string;
   plannedRecordIds: string[];
@@ -132,6 +132,20 @@ export interface KnowledgeForgetResult { forgotten: true; recordId: string; stat
 export interface KnowledgeReconcileResult { removedObjects: string[]; pendingObjects: string[]; stateRevision: number; }
 
 function conflict(message: string): GatewayError { return new GatewayError("conflict", message); }
+function normalizedSourceUri(value: string): string {
+  const url = new URL(value); url.hash = ""; url.hostname = url.hostname.toLowerCase();
+  if ((url.protocol === "https:" && url.port === "443") || (url.protocol === "http:" && url.port === "80")) url.port = "";
+  return url.toString();
+}
+function mergeSourceAttribution(existing: KnowledgeRecord & { kind: "source" }, incoming: KnowledgeRecordDraft & { kind: "source" }): KnowledgeRecordDraft & { kind: "source" } {
+  const origins = [...(existing.content.origins ?? [])];
+  for (const origin of incoming.content.origins ?? []) if (!origins.some(previous => previous.kind === origin.kind && previous.uri === origin.uri && JSON.stringify(previous.identity) === JSON.stringify(origin.identity))) origins.push(origin);
+  if (origins.length > 20) throw conflict("Source redirect provenance bound would discard existing origins");
+  const annotations = [...(existing.content.annotations ?? [])];
+  for (const annotation of incoming.content.annotations ?? []) if (!annotations.some(previous => previous.text === annotation.text && previous.locator === annotation.locator)) annotations.push(annotation);
+  if (annotations.length > 200) throw conflict("Source redirect annotation bound would discard existing annotations");
+  return { kind: "source", id: existing.id, createdAt: existing.createdAt, scope: existing.scope, provenance: existing.provenance, relations: existing.relations, ...(existing.temporal ? { temporal: existing.temporal } : {}), content: { ...existing.content, ...(origins.length ? { origins } : {}), ...(annotations.length ? { annotations } : {}) } };
+}
 function invalid(message: string): GatewayError { return new GatewayError("invalid_request", message); }
 function requestHash(operation: string, request: unknown): string { return createHash("sha256").update(operation).update("\0").update(JSON.stringify(request)).digest("hex"); }
 function now(): string { return new Date().toISOString(); }
@@ -911,7 +925,28 @@ export class KnowledgeStore {
   }
   async captureSource(request: SourceRecordWriteRequest): Promise<KnowledgeMutationResult> {
     const { signal, ...receiptRequest } = request;
-    return this.mutate("knowledge.source.record-write", request.commandId, receiptRequest, async (state, paths) => this.putRecord(state, paths, request.record as KnowledgeRecordDraft, request.expectedRevision), undefined, signal);
+    const { canonicalUri } = request;
+    return this.mutate("knowledge.source.record-write", request.commandId, receiptRequest, async (state, paths) => {
+      if (canonicalUri) {
+        const normalized = normalizedSourceUri(canonicalUri);
+        const matches: Array<KnowledgeRecord & { kind: "source" }> = [];
+        for (const id of state.records.keys()) {
+          const current = await this.currentRecord(state, paths, id);
+          if (current?.kind === "source" && current.scope === request.record.scope && current.content.uri && normalizedSourceUri(current.content.uri) === normalized) matches.push(current);
+        }
+        if (matches.length > 1) throw conflict("Multiple sources match the validated redirect target");
+        const existing = matches[0];
+        if (existing && existing.id !== request.record.id) {
+          if (existing.content.captureDisposition === "complete") {
+            const merged = mergeSourceAttribution(existing, request.record);
+            if (JSON.stringify(merged.content) !== JSON.stringify(existing.content)) return this.putRecord(state, paths, merged, existing.revisionId);
+            return { record: existing, stateRevision: state.stateRevision + 1 };
+          }
+          throw conflict("Redirect target changed while source capture was publishing");
+        }
+      }
+      return this.putRecord(state, paths, request.record as KnowledgeRecordDraft, request.expectedRevision);
+    }, undefined, signal);
   }
   async createNote(request: KnowledgeNoteMutationRequest & { recordId?: never }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.create", request.commandId, request, async (state, paths) => this.putRecord(state, paths, request.record)); }
   async updateNote(request: KnowledgeNoteMutationRequest & { recordId: string }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.update", request.commandId, request, async (state, paths) => { const current = await this.currentRecord(state, paths, request.recordId); if (!current || current.kind !== "note") throw conflict("Knowledge note does not exist"); if (request.expectedRevision !== current.revisionId) throw conflict("Knowledge note revision is stale"); return this.putRecord(state, paths, { ...request.record, id: request.recordId, createdAt: current.createdAt }, request.expectedRevision); }); }

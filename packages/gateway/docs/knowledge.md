@@ -294,10 +294,13 @@ The retained object contains original provider bytes; readable text contains the
 root post, not author bios and engagement metadata. Provider-declared outbound
 `http` and `https` URLs are bounded and, for explicit capture, are passed through
 the same source owner as separate canonical Sources; redirects are validated per
-hop without invented HTTPS upgrades. After a validated redirect, the final URI is
-matched within the requested scope and an existing canonical Source is updated or
-returned in place; origins are not used as aliases, so referring-post provenance
-cannot conflate targets. Each target is related to the referring post and receives
+hop without invented HTTPS upgrades. After a validated redirect, the final URI is matched within the requested scope
+and the KnowledgeStore mutation atomically rechecks that identity before updating
+or returning an existing canonical Source in place; origins are not used as
+aliases, so referring-post provenance cannot conflate targets. The owner scans
+suppressed, archived, and pending records too, so a hidden final owner is updated
+in place rather than silently recreated as visible content. This relies on the
+one-live-Gateway owner invariant, not an additional cross-process lock. Each target is related to the referring post and receives
 evidence plus the original connector origin; target deduplication preserves
 distinct origins. Redirects receive per-hop DNS/SSRF checks, and target failures
 remain explicit partial/inaccessible/failed/reference evidence. If linked traversal

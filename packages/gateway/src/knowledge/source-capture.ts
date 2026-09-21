@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { lookup } from "node:dns/promises";
@@ -282,27 +282,11 @@ export async function readPublicXPost(url: string, options: Pick<SourceCaptureOp
   }, signal, lookupOptions);
 }
 
-const publicationTails = new WeakMap<KnowledgeStore, Promise<void>>();
-
-/** Serialize the final source identity check with its owner write. Fetching
- * remains concurrent, but two redirect aliases cannot both publish a new
- * canonical Source after observing the same pre-publication catalog. */
-async function acquirePublication(store: KnowledgeStore): Promise<() => void> {
-  const previous = publicationTails.get(store) ?? Promise.resolve();
-  let finish!: () => void;
-  const current = new Promise<void>(resolve => { finish = resolve; });
-  const queued = previous.then(() => current);
-  publicationTails.set(store, queued);
-  await previous;
-  let released = false;
-  return () => { if (!released) { released = true; finish(); if (publicationTails.get(store) === queued) publicationTails.delete(store); } };
-}
-
 async function allSourceRecords(store: KnowledgeStore): Promise<Array<KnowledgeRecord & { kind: "source" }>> {
   const result: Array<KnowledgeRecord & { kind: "source" }> = [];
   let cursor: string | undefined;
   do {
-    const page = await store.list({ kind: "source", includeSuppressed: false, includeArchived: true, includePending: true, limit: 100, ...(cursor ? { cursor } : {}) });
+    const page = await store.list({ kind: "source", includeSuppressed: true, includeArchived: true, includePending: true, limit: 100, ...(cursor ? { cursor } : {}) });
     result.push(...page.records.filter((record): record is KnowledgeRecord & { kind: "source" } => record.kind === "source"));
     if (page.incomplete) throw new Error("Source deduplication scan is incomplete; retry after reducing the canonical corpus");
     cursor = page.nextCursor;
@@ -330,16 +314,6 @@ function sourceMatches(record: KnowledgeRecord & { kind: "source" }, input: Sour
  * may not identify this linked target. */
 function finalUrlMatches(record: KnowledgeRecord & { kind: "source" }, scope: KnowledgeScope, finalUrl: string): boolean {
   return record.scope === scope && record.content.uri !== undefined && normalizedUrl(record.content.uri) === normalizedUrl(finalUrl);
-}
-
-function mergeCaptureAttribution(existing: SourceContent, input: SourceCaptureInput, sourceUrl: string, capturedAt: string): SourceContent {
-  const kind = input.origin ?? "manual";
-  const origins = existing.origins ?? (existing.origin ? [{ kind: existing.origin, capturedAt: existing.capturedAt, ...(existing.uri ? { uri: existing.uri } : {}) }] : []);
-  const additions = [sourceUrl, ...(existing.uri && existing.uri !== sourceUrl ? [existing.uri] : [])]
-    .filter(uri => !origins.some(origin => origin.kind === kind && origin.uri === uri && JSON.stringify(origin.identity) === JSON.stringify(input.identity)))
-    .map(uri => ({ kind, capturedAt, uri, ...(input.identity ? { identity: input.identity } : {}) }));
-  const annotations = input.annotations ? [...(existing.annotations ?? []), ...input.annotations.filter(annotation => !(existing.annotations ?? []).some(previous => previous.text === annotation.text && previous.locator === annotation.locator))] : existing.annotations;
-  return { ...existing, ...(additions.length ? { origins: [...origins, ...additions].slice(-20) } : {}), ...(annotations ? { annotations } : {}) };
 }
 
 function finalTarget(records: Array<KnowledgeRecord & { kind: "source" }>, input: SourceCaptureInput, finalUrl: string): KnowledgeRecord & { kind: "source" } | undefined {
@@ -559,9 +533,12 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
   if (options.signal?.aborted) throw invalid("Source capture was cancelled");
   const normalized = normalizedUrl(sourceUrl.toString());
   const refreshRequested = input.publicPostLookup === true && input.publicPostCoverage !== undefined && input.publicPostCoverage !== "root";
-  const refreshTarget = refreshRequested ? existing.find(record => record.scope === input.scope && sourceMatches(record, input, sourceUrl.toString(), normalized)) : undefined;
-  const duplicate = refreshTarget ? undefined : existing.find(record => record.scope === input.scope && record.content.captureDisposition === "complete" && sourceMatches(record, input, sourceUrl.toString(), normalized));
-  let retryTarget = refreshTarget ?? existing.find(record => record.scope === input.scope && record.content.captureDisposition !== "complete" && sourceMatches(record, input, sourceUrl.toString(), normalized));
+  const requestedMatches = existing.filter(record => record.scope === input.scope && sourceMatches(record, input, sourceUrl.toString(), normalized));
+  if (requestedMatches.length > 1) throw invalid("Multiple sources match the requested source identity");
+  const requestedTarget = requestedMatches[0];
+  const refreshTarget = refreshRequested ? requestedTarget : undefined;
+  const duplicate = refreshTarget ? undefined : requestedTarget?.content.captureDisposition === "complete" ? requestedTarget : undefined;
+  let retryTarget = refreshTarget ?? (requestedTarget && requestedTarget.content.captureDisposition !== "complete" ? requestedTarget : undefined);
   if (duplicate) {
     const kind = input.origin ?? "manual";
     const origins = duplicate.content.origins ?? (duplicate.content.origin ? [{ kind: duplicate.content.origin, capturedAt: duplicate.content.capturedAt }] : []);
@@ -626,35 +603,27 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
   const readable = publicPost ? (publicPost.text ? { text: publicPost.text.slice(0, limits.maxReadableChars), truncated: publicPost.text.length > limits.maxReadableChars } : undefined) : bytes && bytes.byteLength ? extractReadable(bytes, mediaType, limits.maxReadableChars) : undefined;
   const disposition: SourceContent["captureDisposition"] = publicPost && (fetched.truncated || readable?.truncated) ? "partial" : fetched.disposition ?? (bytes && bytes.byteLength > 0 ? (readable === undefined ? "metadata-only" : fetched.quality === "partial" || readable.quality === "partial" || fetched.truncated || readable.truncated ? "partial" : "complete") : "metadata-only");
   // A redirect can reveal an existing canonical target that was not discoverable
-  // from the requested alias. Re-scan after fetch so this check observes a
-  // preceding serialized caller, and match only the validated final URI.
-  const releasePublication = await acquirePublication(store);
-  let sourceRecord: KnowledgeRecord & { kind: "source" };
-  let result: KnowledgeMutationResult;
-  try {
+  // from the requested alias. Re-scan after fetch so the owner receives the
+  // best known revision; the final-URI check is repeated atomically by the
+  // KnowledgeStore mutation.
   existing = await allSourceRecords(store);
   if (operationController.signal.aborted) { cleanup(); throw invalid("Source capture was cancelled"); }
   const initialRetryTarget = retryTarget;
   const resolvedTarget = finalTarget(existing, input, fetched.finalUrl);
   if (resolvedTarget) {
-    retryTarget = resolvedTarget;
-    if (resolvedTarget.content.captureDisposition === "complete" && !(refreshRequested && resolvedTarget.id === initialRetryTarget?.id)) {
-      const mergedContent = mergeCaptureAttribution(resolvedTarget.content, input, sourceUrl.toString(), capturedAt);
-      const changed = JSON.stringify(mergedContent) !== JSON.stringify(resolvedTarget.content);
-      if (!changed) { cleanup(); return { record: resolvedTarget, duplicate: true, fetched: true }; }
-      const merged = await store.captureSource({ commandId: input.commandId, expectedRevision: resolvedTarget.revisionId, ...(options.signal ? { signal: options.signal } : {}), record: { kind: "source", id: resolvedTarget.id, createdAt: resolvedTarget.createdAt, scope: resolvedTarget.scope, provenance: resolvedTarget.provenance, relations: resolvedTarget.relations, ...(resolvedTarget.temporal ? { temporal: resolvedTarget.temporal } : {}), content: mergedContent } });
-      if (merged.record.kind !== "source") { cleanup(); throw new Error("Source redirect deduplication returned a non-source record"); }
-      cleanup(); return { record: merged.record, duplicate: true, fetched: true };
-    }
+    retryTarget = resolvedTarget.content.captureDisposition === "complete" && !(refreshRequested && resolvedTarget.id === initialRetryTarget?.id) ? undefined : resolvedTarget;
   }
   let object: KnowledgeObjectRef | undefined;
+  let sourceRecord: KnowledgeRecord & { kind: "source" };
+  let result: KnowledgeMutationResult;
+  let publicationDraftId: string | undefined;
   if (operationController.signal.aborted) throw invalid("Source capture was cancelled");
   if (bytes && bytes.byteLength > 0) {
     const contentHash = createHash("sha256").update(bytes).digest("hex");
     // A matching incomplete source owns this hydration even when another
     // complete source has identical bytes; otherwise a rerun could switch
     // record identity and lose its admission/provenance envelope.
-    const contentDuplicate = retryTarget ? undefined : existing.find(record => record.scope === input.scope && record.content.captureDisposition === "complete" && record.content.object?.hash === contentHash);
+    const contentDuplicate = retryTarget || resolvedTarget ? undefined : existing.find(record => record.scope === input.scope && record.content.captureDisposition === "complete" && record.content.object?.hash === contentHash);
     if (contentDuplicate) {
       const kind = input.origin ?? "manual";
       const origins = contentDuplicate.content.origins ?? (contentDuplicate.content.origin ? [{ kind: contentDuplicate.content.origin, capturedAt: contentDuplicate.content.capturedAt, ...(contentDuplicate.content.uri ? { uri: contentDuplicate.content.uri } : {}) }] : []);
@@ -682,12 +651,12 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
     captureDisposition: disposition, ...(input.annotations ? { annotations: input.annotations } : {}), capturedAt,
     origin: kind, origins: [...(retryTarget?.content.origins ?? []), ...sourceOrigin(kind, capturedAt, { uri: fetched.finalUrl, ...(input.identity ? { identity: input.identity } : {}) }), ...(fetched.finalUrl !== sourceUrl.toString() ? [{ kind, capturedAt, uri: sourceUrl.toString(), ...(input.identity ? { identity: input.identity } : {}) }] : [])], ...(input.identity ? { identity: input.identity } : {}), ...(input.collectionId ? { collectionId: input.collectionId } : {}), ...(input.sourcePublishedAt ? { sourcePublishedAt: input.sourcePublishedAt } : {}),
   };
-  const request = { commandId: input.commandId, ...(input.expectedRevision ? { expectedRevision: input.expectedRevision } : retryTarget ? { expectedRevision: retryTarget.revisionId } : {}), record: retryTarget ? retrySourceDraft(retryTarget, content) : sourceDraft(input, content) };
-  try { result = await store.captureSource({ ...request, signal: operationController.signal }); }
+  const request = { commandId: input.commandId, ...(input.expectedRevision ? { expectedRevision: input.expectedRevision } : retryTarget ? { expectedRevision: retryTarget.revisionId } : {}), record: retryTarget ? retrySourceDraft(retryTarget, content) : { ...sourceDraft(input, content), id: randomUUID() } };
+  publicationDraftId = request.record.id;
+  try { result = await store.captureSource({ ...request, canonicalUri: fetched.finalUrl, signal: operationController.signal }); }
   catch (error) { cleanup(); throw error; }
   if (result.record.kind !== "source") { cleanup(); throw new Error("Source capture returned a non-source record"); }
   sourceRecord = result.record;
-  } finally { releasePublication(); }
   try {
     if (publicPost?.linkedUrls?.length) {
       const linked = await captureLinkedPublicSources(store, sourceRecord, input, publicPost, { ...options, signal: operationController.signal });
@@ -737,7 +706,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
     } catch (error) { assessmentError = error instanceof Error ? error.message : "Source assessment failed"; }
   }
   clearTimeout(deadlineTimer); options.signal?.removeEventListener("abort", relayAbort);
-  return { record: sourceRecord, duplicate: false, fetched: true, ...(assessmentError ? { assessmentError } : {}) };
+  return { record: sourceRecord, duplicate: publicationDraftId !== undefined && sourceRecord.id !== publicationDraftId, fetched: true, ...(assessmentError ? { assessmentError } : {}) };
 }
 
 /** Remote acknowledgements require a retained raw object and readable bytes;
