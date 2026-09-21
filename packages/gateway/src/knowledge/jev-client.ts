@@ -1,4 +1,5 @@
 import type { ConnectorCredentialStore } from "./connector-credentials.js";
+import { requestFixedHost } from "./fixed-host-transport.js";
 
 export const JEV_ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 export const JEV_DEFAULT_MODEL = "jev-1.13.0";
@@ -101,24 +102,12 @@ function validateRequest(request: JevDecisionRequest, model: string): string {
   if (Buffer.byteLength(body, "utf8") > JEV_MAX_BODY_BYTES) throw new Error("Jev request exceeds its explicit bound");
   return body;
 }
-async function boundedResponse(response: Response): Promise<string> {
-  if (!response.body) return "";
-  const reader = response.body.getReader(); const chunks: Uint8Array[] = []; let total = 0;
-  try {
-    for (;;) {
-      const next = await reader.read(); if (next.done) break; if (!next.value) continue;
-      total += next.value.byteLength;
-      if (total > JEV_MAX_RESPONSE_BYTES) { await reader.cancel(); throw new Error("Jev response exceeded its bounded body limit"); }
-      chunks.push(next.value);
-    }
-  } finally { reader.releaseLock(); }
-  const bytes = new Uint8Array(total); let offset = 0;
-  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  return new TextDecoder().decode(bytes);
-}
 async function defaultHTTP(input: string, init: Parameters<JevHTTP>[1]): Promise<JevHTTPResponse> {
-  const response = await fetch(input, { method: init.method, headers: init.headers, body: init.body, redirect: "error", signal: AbortSignal.any([init.signal, AbortSignal.timeout(20_000)]) });
-  return { status: response.status, body: await boundedResponse(response) };
+  const response = await requestFixedHost(input, {
+    method: init.method, headers: init.headers, body: init.body, signal: init.signal,
+    allowedHosts: ["api.typesafe.ai"], timeoutMs: 20_000, maxBodyBytes: JEV_MAX_RESPONSE_BYTES,
+  });
+  return { status: response.status, body: response.body };
 }
 function assertActive(signal: AbortSignal): void { if (signal.aborted) throw new Error("Jev evaluation cancelled"); }
 

@@ -343,7 +343,11 @@ cannot report an enabled complete connector as unconfigured. Raindrop discovery,
 intake, remote moves, and receipt reconciliation verify the configured numeric
 account fence before relying on provider data or clearing an uncertain effect.
 Reconciliation accepts the owning operation signal; cancellation leaves
-`pendingRemote` durable and never retries an uncertain PUT.
+`pendingRemote` durable and never retries an uncertain PUT. Raindrop, X, and Jev
+share a typed fixed-host HTTPS transport for no-redirect requests, deadlines,
+and bounded response bodies; endpoint construction, retry policy, credential
+admission, paid reservation, and effect receipts remain adapter-owned. Public
+source capture stays on its separate arbitrary-URL DNS/SSRF/pinning transport.
 
 ## Read-only Raindrop access
 

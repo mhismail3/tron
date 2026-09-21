@@ -24,6 +24,45 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertEqual(captured?.1.objectValue?.count, 2)
     }
 
+    @MainActor
+    func testAcceptedConnectorMutationCarriesExactConnectionAndSettlesAfterOwnerResponse() async throws {
+        let socket = ScriptedGatewaySocket()
+        let gateway = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory, clock: .continuous)
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))
+        let lifecycle = GatewayLifecycleCoordinator(
+            client: gateway, profiles: GatewayProfileStore(defaults: defaults), clock: .continuous,
+            reconnectDelayPolicy: .standard, uuidSource: .random, pairer: GatewayPairer(),
+            pairingCommit: { _, _ in }, profileTokenLookup: { _ in nil }
+        )
+        let executor = ConfirmedMutationExecutor(client: gateway, lifecycle: lifecycle, clock: .continuous, performanceSignposts: RecordingPerformanceSignposts())
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+        try await lifecycle.connectHosted(profile: GatewayProfile(id: "fixture", label: "Fixture", host: "gateway.test", port: 9847, machineId: "machine", deviceId: "device"), token: "token")
+        let client = KnowledgeRPCClient(request: { method, parameters, timeout in
+            try await gateway.requestValue(method, parameters, timeout: timeout)
+        }, mutationExecutor: executor, uuidSource: UUIDSource(next: { UUID(uuidString: "00000000-0000-4000-8000-000000000001")! }))
+        let task = Task { try await client.runConnector("raindrop", connectionID: "account-two", dryRun: true, limit: 10) }
+        var request: JSONValue?
+        var requestID: String?
+        for _ in 0..<100 {
+            for frame in await socket.sentFrames() {
+                if let value = try? JSONDecoder.gateway.decode(JSONValue.self, from: frame), value.objectValue?["method"]?.stringValue == "knowledge.connector.run" {
+                    request = value; requestID = value.objectValue?["id"]?.stringValue; break
+                }
+            }
+            if request != nil { break }
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        let admittedRequest = try XCTUnwrap(request)
+        let id = try XCTUnwrap(requestID)
+        XCTAssertEqual(admittedRequest.objectValue?["params"]?.objectValue?["connectionId"], .string("account-two"))
+        XCTAssertEqual(admittedRequest.objectValue?["params"]?.objectValue?["connector"], .string("raindrop"))
+        XCTAssertEqual(admittedRequest.objectValue?["params"]?.objectValue?["commandId"], .string("00000000-0000-4000-8000-000000000001"))
+        await socket.enqueue(try! JSONEncoder.gateway.encode(JSONValue.object(["type": .string("response"), "id": .string(id), "ok": .bool(true), "result": .object(["dryRun": .bool(true), "connector": .string("raindrop"), "discovered": .number(0), "captured": .number(0), "pending": .number(0), "remaining": .number(0), "health": .string("ready"), "partial": .number(0), "error": .null])])) )
+        let result = try await task.value
+        XCTAssertEqual(result.connector, "raindrop")
+        XCTAssertTrue(result.dryRun)
+    }
+
     func testConnectorStatusKeepsConnectionIdentityAndDoesNotTreatSetupAsReady() throws {
         let data = Data(#"{"connector":"raindrop","connectionId":"account-two","configured":true,"enabled":true,"health":"setup-required","credentialAvailability":"unknown","providerIdentity":"unknown","accountId":"202","scope":"0","lastRunAt":null,"lastError":null,"remaining":0,"pending":0,"paidBudgetCents":0,"allowWrites":false,"recurringApproved":false,"paidAccessApproved":false}"#.utf8)
         let status = try JSONDecoder().decode(KnowledgeConnectorStatus.self, from: data)

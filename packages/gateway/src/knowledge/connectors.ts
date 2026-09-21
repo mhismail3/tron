@@ -11,6 +11,7 @@ import { currentInvocationContext } from "../extensions/owner-attribution.js";
 import { jevInputDigest, jevProfileVersion, JEV_MODEL } from "./jev-assessment.js";
 import type { ConnectionOwner } from "../integrations/connection-owner.js";
 import type { ConnectionInstance } from "../integrations/connection-contract.js";
+import { FixedHostBodyTooLarge, requestFixedHost } from "./fixed-host-transport.js";
 
 const MAX_PAGE = 50;
 const MAX_ITEMS = 200;
@@ -57,21 +58,11 @@ function url(value: unknown): string | undefined { if (typeof value !== "string"
 function retryable(status: number): boolean { return status === 408 || status === 425 || status === 429 || status >= 500; }
 function authFailure(status: number): boolean { return status === 401 || status === 403; }
 
-class ConnectorBodyTooLarge extends Error { constructor() { super("Connector response exceeded its bounded body limit"); } }
-
-async function boundedResponseText(response: Response): Promise<string> {
-  if (!response.body) return "";
-  const reader = response.body.getReader(); const chunks: Uint8Array[] = []; let total = 0;
-  try {
-    for (;;) { const next = await reader.read(); if (next.done) break; if (!next.value) continue; const remaining = BODY_LIMIT - total; if (next.value.byteLength > remaining) { await reader.cancel(); throw new ConnectorBodyTooLarge(); } chunks.push(next.value); total += next.value.byteLength; if (total === BODY_LIMIT) { const extra = await reader.read(); if (!extra.done) { await reader.cancel(); throw new ConnectorBodyTooLarge(); } break; } }
-  } finally { reader.releaseLock(); }
-  const bytes = new Uint8Array(total); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  return new TextDecoder().decode(bytes);
-}
 async function defaultHTTP(input: string, init: { method?: "GET" | "PUT" | "POST" | "DELETE"; headers: Record<string, string>; body?: string; signal: AbortSignal }): Promise<ConnectorHTTPResponse> {
-  const timeout = AbortSignal.timeout(15_000); const signal = AbortSignal.any([init.signal, timeout]);
-  const response = await fetch(input, { method: init.method ?? "GET", headers: init.headers, ...(init.body !== undefined ? { body: init.body } : {}), redirect: "error", signal });
-  return { status: response.status, headers: response.headers, body: await boundedResponseText(response) };
+  return requestFixedHost(input, {
+    method: init.method ?? "GET", headers: init.headers, ...(init.body === undefined ? {} : { body: init.body }), signal: init.signal,
+    allowedHosts: ["api.raindrop.io", "api.x.com"], timeoutMs: 15_000, maxBodyBytes: BODY_LIMIT,
+  });
 }
 
 async function requestJson(http: ConnectorHTTP, endpoint: string, token: string | (() => Promise<string>), options: { method?: "GET" | "PUT" | "POST" | "DELETE"; body?: unknown; sleep: (milliseconds: number) => Promise<void>; signal: AbortSignal; maxAttempts?: number; beforeAttempt?: () => Promise<void> }): Promise<{ status: number; value: any; headers: Headers }> {
@@ -87,7 +78,7 @@ async function requestJson(http: ConnectorHTTP, endpoint: string, token: string 
     try {
       result = await http(endpoint, { ...(options.method ? { method: options.method } : {}), headers: { authorization: `Bearer ${attemptToken}`, accept: "application/json", ...(options.body !== undefined ? { "content-type": "application/json" } : {}) }, ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}), signal: options.signal });
     } catch (error) {
-      if (options.signal.aborted || error instanceof ConnectorBodyTooLarge) throw error;
+      if (options.signal.aborted) throw error;
       if (!retrySafe || attempt === maxAttempts) throw new ConnectorNetworkError(error);
       await options.sleep(Math.max(50, 100 * 2 ** (attempt - 1)));
       continue;
@@ -346,7 +337,7 @@ export class KnowledgeConnectorExtension {
       return result;
     } catch (error) {
       if (error instanceof GatewayError) throw error;
-      if (error instanceof ConnectorBodyTooLarge) throw new GatewayError("invalid_request", "Raindrop metadata exceeded 2 MB; reduce perpage or request narrower pages");
+      if (error instanceof FixedHostBodyTooLarge) throw new GatewayError("invalid_request", "Raindrop metadata exceeded 2 MB; reduce perpage or request narrower pages");
       if (error instanceof ConnectorAPIError || error instanceof ConnectorShapeError) throw new GatewayError("internal", "Raindrop returned an unusable response", true);
       if (error instanceof ConnectorHTTPError && authFailure(error.status)) throw new GatewayError("unsupported", "Raindrop authentication failed");
       if (error instanceof ConnectorHTTPError && error.status === 429) throw new GatewayError("internal", "Raindrop rate limit reached; retry after the provider reset", true);

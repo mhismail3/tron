@@ -130,6 +130,22 @@ describe("Mac-owned MCP adapter", () => {
     await expect(adapter.extensionFactories("session", "host")).rejects.toThrow(/bounded size|connection failed/i);
   });
 
+  it("rejects colliding attributed tool names instead of replacing one supplier", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-mcp-collision-"));
+    cleanup.push(() => rm(root, { recursive: true, force: true }));
+    const fixture = await rpcServer(message => {
+      if (message.method === "initialize") return { protocolVersion: "2025-11-25", capabilities: { tools: {} }, serverInfo: { name: "fixture", version: "1" } };
+      if (message.method === "tools/list") return { tools: [
+        { name: "same", inputSchema: { type: "object" }, annotations: { readOnlyHint: true } },
+        { name: "same", inputSchema: { type: "object" }, annotations: { readOnlyHint: true } },
+      ] };
+      return undefined;
+    });
+    cleanup.push(() => new Promise<void>(resolve => fixture.server.close(() => resolve())));
+    const { adapter } = await setupConnection(root, { transport: "http", endpoint: fixture.endpoint }, "collision");
+    await expect(adapter.extensionFactories("session", "host")).rejects.toThrow(/collision/);
+  });
+
   it("rejects write-capable MCP admission when the owner write policy is disabled", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-mcp-policy-"));
     cleanup.push(() => rm(root, { recursive: true, force: true }));
