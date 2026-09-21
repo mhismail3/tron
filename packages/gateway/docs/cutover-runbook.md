@@ -108,14 +108,18 @@ source revisions. A disconnected client is not proof of quiescence.
 ## 3. Protected backup (before first write)
 
 Use the operation directory created by the app-preparation checkpoint in step 4.1
-as the recovery location: `~/.tron-maintenance/<operation-id>/pre-migration/`.
+as the recovery location: `~/.tron-maintenance/<operation-id>/pre-cutover/pre-migration/`.
+The complete pre-cutover evidence root is registered with the archive-only
+recovery command after migrations finish; its historical source path remains in
+original journals but is never required by current verification.
 Do not create another backup root in a checkout, Workspace or Downloads. This
 pre-write checkpoint remains separately owned and verified; it is not one of the
 reinstall helper's post-write `backups/` components. Follow the
 [local recovery location and retention contract](../../mac-app/docs/development.md#local-recovery-location-and-retention).
-Keep existing path-bound historical checkpoints unchanged until relocation is
-independently verified; this convention does not authorize another migration or
-rewrite of their journals.
+Keep original historical journals unchanged during relocation; archive-only
+registration preserves their observed paths while verification resolves all
+current paths relative to the registered operation root. It does not authorize
+another migration or a source-state rewrite.
 
 The user/maintainer creates and verifies one consistent, protected backup of
 all related stores: both Tron homes and internal files, Pi agent/session JSONL,

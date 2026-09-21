@@ -464,6 +464,326 @@ class MacPlatform:
                     'custom-agent-authority: loaded job has a path override; verify its owner before proceeding')
 
 
+MAX_ARCHIVE_ENTRIES = 4_000_000
+RECOVERY_SCHEMA = 1
+RECOVERY_RELATIVE_ROOT = Path('pre-cutover')
+
+
+def _archive_entry(path, root, relative):
+    info = path.lstat()
+    require(stat.S_ISLNK(info.st_mode) or stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode),
+            'archive-special-file: sockets/devices/FIFOs are not supported')
+    require(info.st_uid in (os.getuid(), 0), 'archive-foreign-owner: review recovery tree ownership')
+    item = {'mode': stat.S_IMODE(info.st_mode), 'uid': info.st_uid, 'gid': info.st_gid,
+            'acl': acl_digest(path), 'xattrs': xattr_digests(path)}
+    if stat.S_ISLNK(info.st_mode):
+        item.update(type='link', target=os.readlink(path))
+    elif stat.S_ISREG(info.st_mode):
+        item.update(type='file', size=info.st_size, sha256=digest_file(path))
+    else:
+        item.update(type='dir')
+    digest_item = dict(item)
+    if relative == '.':
+        digest_item['xattrs'] = {k: v for k, v in item['xattrs'].items()
+                                 if k != 'com.apple.provenance'}
+    return item, digest_item
+
+
+def archive_fingerprint(root, copy_provenance=False):
+    """Stream a bounded archive closure digest without retaining its tree."""
+    root = safe_path(root)
+    root_info = root.lstat()
+    require((stat.S_ISDIR(root_info.st_mode) or stat.S_ISREG(root_info.st_mode))
+            and root_info.st_uid in (os.getuid(), 0),
+            'archive-root: expected an owned regular file or directory')
+    digest = hashlib.sha256()
+    count = 0
+    root_entry = None
+
+    def visit(path, relative):
+        nonlocal count, root_entry
+        count += 1
+        require(count <= MAX_ARCHIVE_ENTRIES, 'archive-inventory-limit: recovery tree exceeds bounds')
+        item, digest_item = _archive_entry(path, root, relative)
+        if copy_provenance:
+            digest_item['xattrs'] = {k: v for k, v in item['xattrs'].items()
+                                     if k != 'com.apple.provenance'}
+        if relative == '.':
+            root_entry = item
+        digest.update(json.dumps({'path': relative, 'entry': digest_item}, sort_keys=True,
+                                 separators=(',', ':')).encode())
+        digest.update(b'\n')
+        if item['type'] == 'dir':
+            for child in sorted(path.iterdir(), key=lambda value: value.name):
+                visit(child, relative + '/' + child.name if relative != '.' else child.name)
+
+    visit(root, '.')
+    return {'entries': count, 'sha256': digest.hexdigest(), 'rootXattrs': root_entry['xattrs']}
+
+
+def _safe_relative(value):
+    path = Path(value)
+    require(not path.is_absolute() and str(path) not in ('', '.'), 'archive-path: expected relative path')
+    require('..' not in path.parts and path.parts[0] not in ('', '.'), 'archive-path: traversal rejected')
+    return path
+
+
+def _archive_paths(root):
+    stack = [(root, '.')]
+    while stack:
+        path, relative = stack.pop()
+        yield path, relative
+        if path.is_dir() and not path.is_symlink():
+            children = sorted(path.iterdir(), key=lambda value: value.name, reverse=True)
+            stack.extend((child, relative + '/' + child.name if relative != '.' else child.name)
+                         for child in children)
+
+
+def _safe_archive_child(root, relative):
+    if relative == '.':
+        return root
+    relative_path = _safe_relative(relative)
+    current = root
+    for part in relative_path.parts[:-1]:
+        current = current / part
+        info = current.lstat()
+        require(stat.S_ISDIR(info.st_mode) and not stat.S_ISLNK(info.st_mode),
+                'archive-manifest: symlinked ancestor rejected')
+    return root / relative_path
+
+
+def _verify_recorded_manifest(manifest_path, backup_path):
+    raw = read_json(manifest_path)
+    if raw is None:
+        require(not exists(backup_path), 'archive-manifest: absent source was copied')
+        return {'entries': 0, 'absent': True}
+    require(isinstance(raw, dict) and isinstance(raw.get('tree'), dict)
+            and isinstance(raw.get('owners'), dict), 'archive-manifest: invalid manifest')
+    expected = raw['tree']
+    owners = raw['owners']
+    require(exists(backup_path), 'archive-manifest: recorded backup is absent')
+    backup_path = safe_path(backup_path)
+    backup_info = backup_path.lstat()
+    require((stat.S_ISDIR(backup_info.st_mode) or stat.S_ISREG(backup_info.st_mode))
+            and backup_info.st_uid in (os.getuid(), 0),
+            'archive-manifest: unsafe backup component')
+    for relative, expected_entry in expected.items():
+        actual_path = _safe_archive_child(backup_path, relative)
+        require(exists(actual_path), 'archive-manifest: recorded entry is absent')
+        actual, _ = _archive_entry(actual_path, backup_path, relative)
+        actual = {key: value for key, value in actual.items() if key not in ('uid', 'gid')}
+        require(copied_entry_matches(actual, expected_entry),
+                'archive-manifest: recorded entry differs')
+        owner = owners.get(relative)
+        require(isinstance(owner, dict) and actual_path.lstat().st_uid == owner.get('uid')
+                and actual_path.lstat().st_gid == owner.get('gid'),
+                'archive-manifest: recorded owner differs')
+    actual_count = 0
+    expected_names = set(expected)
+    for _, relative in _archive_paths(backup_path):
+        actual_count += 1
+        require(relative in expected_names, 'archive-manifest: unexpected entry present')
+    require(actual_count == len(expected), 'archive-manifest: entry count differs')
+    return {'entries': actual_count, 'absent': False}
+
+
+def _verify_recorded_components(root):
+    pre = root / 'pre-migration'
+    names = ('delegated-project', 'machine-id-legacy', 'stable', 'debug',
+             'delegated-temp', 'old-app', 'browser-project-config', 'browser-global-config')
+    result = {}
+    for name in names:
+        result[name] = _verify_recorded_manifest(pre / 'manifests' / (name + '.json'),
+                                                  pre / 'backups' / name)
+    return result
+
+
+def _verify_restore_fixture(root):
+    pre = root / 'pre-migration'
+    result = {}
+    for name in ('delegated-project', 'machine-id-legacy', 'stable', 'debug',
+                 'delegated-temp', 'old-app', 'browser-project-config', 'browser-global-config'):
+        backup = pre / 'backups' / name
+        restored = pre / 'restore-fixture' / name
+        if not exists(backup) or not exists(restored):
+            require(not exists(backup) and not exists(restored),
+                    'archive-restore: backup/restore component presence differs')
+            result[name] = None
+            continue
+        expected = archive_fingerprint(backup, copy_provenance=True)
+        actual = archive_fingerprint(restored, copy_provenance=True)
+        require(expected['entries'] == actual['entries'] and expected['sha256'] == actual['sha256'],
+                'archive-restore: isolated fixture differs from backup')
+        result[name] = {'entries': expected['entries'], 'sha256': expected['sha256']}
+    return result
+
+
+def _verify_post_components(operation, receipt):
+    result = {}
+    for name, expected_digest in receipt.get('components', {}).items():
+        path = operation / 'backups' / name
+        manifest = None if not exists(path) else tree_manifest(path)
+        require(manifest_digest(manifest) == expected_digest,
+                'archive-post: recorded component digest mismatch')
+        closure = None if manifest is None else archive_fingerprint(path)
+        result[name] = {'receiptDigest': expected_digest, 'closure': closure}
+    selection = receipt.get('bundledSelection')
+    retired = operation / 'retired-stable-payloads'
+    if selection is not None:
+        require(isinstance(selection, dict) and isinstance(selection.get('manifestDigest'), str),
+                'archive-post: invalid bundled selection evidence')
+        require(exists(retired), 'archive-post: retired payload store is absent')
+        result['retired-stable-payloads'] = archive_fingerprint(retired)
+    return result
+
+
+def _verify_checkpoint_evidence(root):
+    pre = root / 'pre-migration'
+    verified = read_json(pre / 'verified.json')
+    require(isinstance(verified, dict), 'archive-checkpoint: invalid verification evidence')
+    require(verified.get('isolatedRestoreMatches') is True,
+            'archive-checkpoint: isolated restore evidence is not accepted')
+    for relative in ('backups', 'restore-fixture', 'manifests'):
+        private_dir(pre / relative)
+    evidence = pre / 'data-verified-pending-groups.json'
+    expected = verified.get('dataEvidenceSha256')
+    require(isinstance(expected, str) and re.fullmatch(r'[0-9a-f]{64}', expected),
+            'archive-checkpoint: evidence digest missing')
+    require(digest_file(evidence) == expected, 'archive-checkpoint: evidence digest mismatch')
+    return {'verified': True, 'dataEvidence': str(evidence.relative_to(root)),
+            'dataEvidenceSha256': expected, 'components': _verify_recorded_components(root),
+            'restoreFixture': _verify_restore_fixture(root)}
+
+
+class RecoveryArchive:
+    """Archive-only registration for a completed maintenance operation."""
+    def __init__(self, home, operation_id):
+        require(re.fullmatch(r'[0-9a-fA-F-]{36}', operation_id), 'archive-operation: invalid operation id')
+        self.home = safe_path(home)
+        self.store = private_dir(self.home / '.tron-maintenance')
+        self.operation = private_dir(self.store / operation_id)
+        self.operation_id = operation_id
+        self.receipt = read_json(self.operation / 'receipt.json')
+        components = self.receipt.get('components')
+        require(self.receipt.get('schema') == 1 and self.receipt.get('kind') == 'reinstall'
+                and self.receipt.get('id') == operation_id
+                and self.receipt.get('phase') == 'verified'
+                and self.receipt.get('home') == str(self.home)
+                and isinstance(self.receipt.get('sourceRevision'), str)
+                and isinstance(components, dict)
+                and all(isinstance(name, str) and re.fullmatch(r'[A-Za-z0-9._-]{1,128}', name)
+                        and isinstance(value, str) and re.fullmatch(r'[0-9a-f]{64}', value)
+                        for name, value in components.items()),
+                'archive-operation: expected completed verified operation')
+        require(not exists(self.store / 'active.json'),
+                'archive-operation: active maintenance operation exists')
+        self.descriptor_path = self.operation / 'recovery.json'
+        self.destination = self.operation / RECOVERY_RELATIVE_ROOT
+
+    def _descriptor(self):
+        if not exists(self.descriptor_path):
+            return None
+        descriptor = read_json(self.descriptor_path)
+        require(descriptor.get('schema') == RECOVERY_SCHEMA and
+                descriptor.get('kind') == 'tron-recovery-bundle' and
+                descriptor.get('operationId') == self.operation_id,
+                'archive-descriptor: invalid or mismatched descriptor')
+        require(descriptor.get('destination') == str(RECOVERY_RELATIVE_ROOT),
+                'archive-descriptor: unexpected destination')
+        require(descriptor.get('phase') in ('prepared', 'verified') and
+                isinstance(descriptor.get('historicalSource'), str) and
+                Path(descriptor['historicalSource']).is_absolute() and
+                isinstance(descriptor.get('sourceDevice'), int) and
+                isinstance(descriptor.get('sourceInode'), int) and
+                isinstance(descriptor.get('entries'), int) and
+                1 <= descriptor['entries'] <= MAX_ARCHIVE_ENTRIES and
+                re.fullmatch(r'[0-9a-f]{64}', str(descriptor.get('archiveDigest', ''))) and
+                isinstance(descriptor.get('sourceRootXattrs'), dict) and
+                isinstance(descriptor.get('checkpoint'), dict) and
+                isinstance(descriptor.get('post'), dict) and
+                isinstance(descriptor.get('sourceRevision'), str),
+                'archive-descriptor: incomplete integrity fields')
+        return descriptor
+
+    def verify(self):
+        descriptor = self._descriptor()
+        require(descriptor is not None, 'archive-descriptor: relocation has not been registered')
+        require(exists(self.destination), 'archive-checkpoint: destination is absent')
+        fingerprint = archive_fingerprint(self.destination)
+        require(fingerprint['entries'] == descriptor['entries'] and
+                fingerprint['sha256'] == descriptor['archiveDigest'],
+                'archive-checkpoint: archive closure digest mismatch')
+        source_xattrs = descriptor.get('sourceRootXattrs', {})
+        current_xattrs = fingerprint['rootXattrs']
+        changed_xattrs = set(source_xattrs) ^ set(current_xattrs)
+        require(changed_xattrs <= {'com.apple.provenance'},
+                'archive-checkpoint: root metadata changed outside provenance')
+        for name in set(source_xattrs) & set(current_xattrs) - {'com.apple.provenance'}:
+            require(source_xattrs[name] == current_xattrs[name],
+                    'archive-checkpoint: root metadata changed')
+        checkpoint = _verify_checkpoint_evidence(self.destination)
+        require(descriptor.get('checkpoint') == checkpoint,
+                'archive-checkpoint: checkpoint evidence changed')
+        post = _verify_post_components(self.operation, self.receipt)
+        require(descriptor.get('post') == post, 'archive-post: retained snapshot changed')
+        return {'operationId': self.operation_id, 'phase': 'verified',
+                'destination': str(self.destination), 'entries': fingerprint['entries'],
+                'archiveDigest': fingerprint['sha256'], 'checkpoint': checkpoint}
+
+    def relocate(self, source):
+        source = safe_path(source)
+        require(source != self.destination and source.name != '.tron-maintenance',
+                'archive-source: invalid source')
+        descriptor = self._descriptor()
+        if descriptor is None:
+            require(exists(source), 'archive-source: source is absent')
+            source = private_dir(source)
+            require(source.stat().st_dev == self.operation.stat().st_dev,
+                    'archive-source: source and destination must share a filesystem')
+            require(not exists(self.destination), 'archive-collision: destination already exists')
+            checkpoint = _verify_checkpoint_evidence(source)
+            fingerprint = archive_fingerprint(source)
+            post = _verify_post_components(self.operation, self.receipt)
+            descriptor = {
+                'schema': RECOVERY_SCHEMA, 'kind': 'tron-recovery-bundle',
+                'operationId': self.operation_id, 'phase': 'prepared',
+                'destination': str(RECOVERY_RELATIVE_ROOT),
+                'historicalSource': str(source), 'sourceDevice': source.stat().st_dev,
+                'sourceInode': source.stat().st_ino,
+                'entries': fingerprint['entries'], 'archiveDigest': fingerprint['sha256'],
+                'sourceRootXattrs': fingerprint['rootXattrs'], 'checkpoint': checkpoint,
+                'post': post, 'sourceRevision': self.receipt.get('sourceRevision'),
+            }
+            write_json(self.descriptor_path, descriptor)
+        else:
+            require(str(source) == descriptor['historicalSource'],
+                    'archive-source: resume source differs from recorded source')
+            if exists(source):
+                source_info = source.lstat()
+                require(source_info.st_dev == descriptor['sourceDevice'] and
+                        source_info.st_ino == descriptor['sourceInode'],
+                        'archive-source: resume source identity changed')
+        if exists(source) and exists(self.destination):
+            raise Stop('archive-collision: source and destination both exist; inspect without merging')
+        if descriptor['phase'] == 'verified':
+            require(not exists(source), 'archive-collision: verified destination has a source present')
+            return self.verify()
+        if exists(source):
+            source = private_dir(source)
+            fingerprint = archive_fingerprint(source)
+            require(fingerprint['entries'] == descriptor['entries'] and
+                    fingerprint['sha256'] == descriptor['archiveDigest'],
+                    'archive-source: source changed after intent was recorded')
+            rename_exclusive(source, self.destination)
+        else:
+            require(exists(self.destination), 'archive-resume: source and destination are both absent')
+        result = self.verify()
+        descriptor['phase'] = 'verified'
+        descriptor['verified'] = result
+        write_json(self.descriptor_path, descriptor)
+        return result
+
+
 class Reinstall:
     kind = 'reinstall'
     phases = ('awaiting-offline', 'backing-up', 'awaiting-replacement', 'awaiting-resume', 'verified')
@@ -769,6 +1089,12 @@ def parser(description=__doc__, confirmation_options=None):
     result.add_argument('--status', action='store_true', help='show the saved checkpoint')
     result.add_argument('--verify', action='store_true', help='verify user-installed and resumed app')
     result.add_argument('--finish', action='store_true', help='archive verified operation; retain all backups')
+    result.add_argument('--recovery-verify', action='store_true',
+                        help='read-only verify a registered completed recovery archive')
+    result.add_argument('--recovery-relocate', action='store_true',
+                        help='register and exclusively relocate a completed recovery archive')
+    result.add_argument('--operation-id', help='completed maintenance operation id for archive commands')
+    result.add_argument('--source', type=Path, help='existing recovery archive root for --recovery-relocate')
     return result
 
 
@@ -778,6 +1104,26 @@ def main(workflow=Reinstall, arguments=None):
         require(sys.platform == 'darwin' and os.getuid() != 0, 'platform: run as the logged-in macOS user, without sudo')
         home = safe_path(pwd.getpwuid(os.getuid()).pw_dir)
         require(safe_path(Path.home()) == home, 'home-override: run from the logged-in user environment; no state changed')
+        recovery_action = args.recovery_verify or args.recovery_relocate
+        require(not (args.recovery_verify and args.recovery_relocate),
+                'arguments: choose one recovery archive action')
+        if recovery_action:
+            require(not any((args.app, args.confirm_offline, args.select_bundled_offline,
+                             args.status, args.verify, args.finish)),
+                    'arguments: recovery action cannot be combined with reinstall options')
+            require(args.operation_id is not None, 'arguments: recovery archive requires --operation-id')
+            store = private_dir(home / '.tron-maintenance')
+            with exclusive(store):
+                archive = RecoveryArchive(home, args.operation_id)
+                if args.recovery_verify:
+                    require(args.source is None, 'arguments: --source is only valid with --recovery-relocate')
+                    print(json.dumps(archive.verify(), indent=2, sort_keys=True))
+                else:
+                    require(args.source is not None, 'arguments: --recovery-relocate requires --source')
+                    print(json.dumps(archive.relocate(args.source), indent=2, sort_keys=True))
+            return 0
+        require(args.operation_id is None and args.source is None,
+                'arguments: archive options require a recovery action')
         workflow(home, MacPlatform(home)).run(args)
         return 0
     except (Stop, OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired) as error:

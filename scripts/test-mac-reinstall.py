@@ -68,6 +68,140 @@ launchctl() {
                             self.assertIn(label, result.stdout)
 
 
+class RecoveryArchiveTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.home = self.root / 'home'
+        self.home.mkdir(mode=0o700)
+        self.store = self.home / '.tron-maintenance'
+        self.store.mkdir(mode=0o700)
+        self.operation_id = 'b7e87994-9ef6-4726-a98e-b91edcd8c1ff'
+        self.operation = self.store / self.operation_id
+        self.operation.mkdir(mode=0o700)
+        reinstall.write_json(self.operation / 'receipt.json', {
+            'schema': 1, 'id': self.operation_id, 'kind': 'reinstall',
+            'phase': 'verified', 'home': str(reinstall.safe_path(self.home)), 'sourceRevision': 'fixture-revision',
+        })
+        post_backup = self.operation / 'backups' / 'fixture-component'
+        post_backup.mkdir(parents=True, mode=0o700)
+        (post_backup / 'state').write_text('post fixture\n')
+        receipt = reinstall.read_json(self.operation / 'receipt.json')
+        receipt['components'] = {'fixture-component': reinstall.manifest_digest(reinstall.tree_manifest(post_backup))}
+        reinstall.write_json(self.operation / 'receipt.json', receipt)
+        self.source = self.root / 'pre-cutover-source'
+        self.source.mkdir(mode=0o700)
+        pre = self.source / 'pre-migration'
+        pre.mkdir(mode=0o700)
+        for name in ('backups', 'restore-fixture', 'manifests'):
+            (pre / name).mkdir(mode=0o700)
+        evidence = pre / 'data-verified-pending-groups.json'
+        evidence.write_text('{"fixture":true}\n')
+        os.chmod(evidence, 0o600)
+        import hashlib
+        digest = hashlib.sha256(evidence.read_bytes()).hexdigest()
+        reinstall.write_json(pre / 'verified.json', {
+            'isolatedRestoreMatches': True, 'dataEvidenceSha256': digest,
+        })
+        for name in ('delegated-project', 'machine-id-legacy', 'stable', 'debug',
+                     'delegated-temp', 'old-app', 'browser-project-config', 'browser-global-config'):
+            reinstall.write_json(pre / 'manifests' / (name + '.json'), None)
+        machine = pre / 'backups' / 'machine-id-legacy'
+        machine.write_text('fixture identity\n')
+        os.chmod(machine, 0o600)
+        restored_machine = pre / 'restore-fixture' / 'machine-id-legacy'
+        restored_machine.write_text('fixture identity\n')
+        os.chmod(restored_machine, 0o600)
+        reinstall.write_json(pre / 'manifests' / 'machine-id-legacy.json', {
+            'owners': {'.': {'uid': os.getuid(), 'gid': machine.lstat().st_gid}},
+            'tree': reinstall.tree_manifest(machine),
+        })
+        (self.source / 'completion.md').write_text('historical evidence\n')
+        self.archive = reinstall.RecoveryArchive(self.home, self.operation_id)
+        self.addCleanup(self.temp.cleanup)
+
+    def test_relocate_and_verify_is_archive_only(self):
+        result = self.archive.relocate(self.source)
+        self.assertEqual(result['phase'], 'verified')
+        self.assertFalse(self.source.exists())
+        self.assertTrue(self.archive.destination.is_dir())
+        (self.home / 'live-home').mkdir()
+        self.assertEqual(self.archive.verify()['entries'], result['entries'])
+        self.assertFalse((self.operation / 'active.json').exists())
+        self.assertEqual(reinstall.read_json(self.operation / 'receipt.json')['phase'], 'verified')
+
+    def test_tampering_fails_without_reading_live_home(self):
+        self.archive.relocate(self.source)
+        (self.archive.destination / 'completion.md').write_text('tampered\n')
+        with self.assertRaisesRegex(reinstall.Stop, 'archive-checkpoint: archive closure digest mismatch'):
+            self.archive.verify()
+
+    def test_interrupted_after_rename_resumes_without_copy_or_merge(self):
+        real_rename = reinstall.rename_exclusive
+        def rename_then_interrupt(source, destination):
+            real_rename(source, destination)
+            raise OSError(5, 'fixture interruption after rename')
+        with patch.object(reinstall, 'rename_exclusive', side_effect=rename_then_interrupt):
+            with self.assertRaises(OSError):
+                self.archive.relocate(self.source)
+        self.assertFalse(self.source.exists())
+        self.assertTrue(self.archive.destination.exists())
+        result = self.archive.relocate(self.source)
+        self.assertEqual(result['phase'], 'verified')
+
+    def test_wrong_source_cannot_resume_recorded_operation(self):
+        with patch.object(reinstall, 'rename_exclusive', side_effect=OSError(5, 'fixture interruption')):
+            with self.assertRaises(OSError):
+                self.archive.relocate(self.source)
+        wrong = self.root / 'other-source'
+        wrong.mkdir(mode=0o700)
+        with self.assertRaisesRegex(reinstall.Stop, 'resume source differs'):
+            self.archive.relocate(wrong)
+
+    def test_tampered_restore_or_post_checkpoint_fails(self):
+        self.archive.relocate(self.source)
+        (self.archive.destination / 'pre-migration/restore-fixture/machine-id-legacy').write_text('tampered\n')
+        with self.assertRaisesRegex(reinstall.Stop, 'archive-checkpoint: archive closure digest mismatch'):
+            self.archive.verify()
+        (self.archive.destination / 'pre-migration/restore-fixture/machine-id-legacy').write_text('fixture identity\n')
+        (self.operation / 'backups/fixture-component/state').write_text('tampered\n')
+        with self.assertRaisesRegex(reinstall.Stop, 'archive-post: recorded component digest mismatch'):
+            self.archive.verify()
+
+    def test_interrupted_rename_resumes_without_copy_or_merge(self):
+        with patch.object(reinstall, 'rename_exclusive', side_effect=OSError(5, 'fixture interruption')):
+            with self.assertRaises(OSError):
+                self.archive.relocate(self.source)
+        descriptor = reinstall.read_json(self.operation / 'recovery.json')
+        self.assertEqual(descriptor['phase'], 'prepared')
+        self.assertTrue(self.source.exists())
+        result = self.archive.relocate(self.source)
+        self.assertEqual(result['phase'], 'verified')
+        self.assertFalse(self.source.exists())
+
+    def test_both_roots_present_refuses_merge(self):
+        with patch.object(reinstall, 'rename_exclusive', side_effect=OSError(5, 'fixture interruption')):
+            with self.assertRaises(OSError):
+                self.archive.relocate(self.source)
+        self.archive.destination.mkdir(mode=0o700)
+        with self.assertRaisesRegex(reinstall.Stop, 'archive-collision: source and destination both exist'):
+            self.archive.relocate(self.source)
+
+    def test_destination_collision_is_rejected_before_descriptor(self):
+        self.archive.destination.mkdir(mode=0o700)
+        with self.assertRaisesRegex(reinstall.Stop, 'archive-collision: destination already exists'):
+            self.archive.relocate(self.source)
+        self.assertFalse((self.operation / 'recovery.json').exists())
+
+    def test_manifest_symlinked_ancestor_is_rejected(self):
+        component = self.root / 'component'
+        component.mkdir(mode=0o700)
+        (component / 'link').symlink_to(self.root)
+        with self.assertRaisesRegex(reinstall.Stop, 'symlinked ancestor'):
+            reinstall._safe_archive_child(component, 'link/secret')
+
+
+
 class Platform:
     def __init__(self, installed):
         self.installed = installed
