@@ -250,15 +250,19 @@ host/path/computed value is exempted from URL credential-query rejection.
 `x-public-post.ts` owns identity validation, provider parsing, and ordered
 fallback; the source owner supplies DNS-pinned HTTP, public-destination checks,
 2 MB body bounds, zero redirects, a 15-second total deadline, and 5-second attempt
-deadlines. Each provider is tried once. A 429 is reported, never immediately
-retried at that provider; another explicit run must respect its cooldown.
+deadlines. Each provider is tried once. The DNS-pinned transport sends only the
+bounded descriptive `Tron/0.1 (public-source-capture)` User-Agent (no cookies or
+authorization); this is required by the public providers and is not identity
+impersonation. A 429 is reported, never immediately retried at that provider;
+another explicit run must respect its cooldown.
 HTTP success alone is not success: expected root ID, JSON shape, and nonempty
 bounded text must match. Errors are sanitized, cancellation stops fallback, and
 an unavailable result is not a claim of deletion or an empty bookmark library.
 Tool output over 128 KB fails instead of truncating source fields.
 
-Results contain provider/endpoint, canonical X ID/URL, root-post text, exact raw
-provider JSON, attempt outcomes, and limitations. Ordinary short-post text may
+Results contain provider/endpoint, canonical X ID/URL, root-post text, bounded
+provider-declared outbound URLs, exact raw provider JSON, attempt outcomes (with
+sanitized HTTP status diagnostics), and limitations. Ordinary short-post text may
 be complete **only for the root text**; threads and linked pages are outside its
 coverage. Long posts, Articles, quotes, and media remain partial until separately
 verified. Syndication is always partial. A usable partial FxTwitter response is
@@ -269,11 +273,27 @@ as bodies, and media URLs are not downloaded content or transcripts.
 explicitly opt a single public post into this lookup and the existing canonical
 source store. Without it ordinary capture does not contact mirror providers.
 The retained object contains original provider bytes; readable text contains the
-root post, not author bios and engagement metadata. Canonical URI is
+root post, not author bios and engagement metadata. Provider-declared outbound
+URLs are bounded and, for explicit capture, are passed through the same source
+owner as separate canonical Sources. Each target is related to the referring post
+and receives evidence plus the original connector origin; target deduplication
+preserves distinct origins. Redirects receive per-hop DNS/SSRF checks, and target
+failures remain explicit partial/inaccessible/failed/reference evidence. Canonical URI is
 `https://x.com/i/web/status/{id}`, while `captureReason` records provider, attempt
 outcomes, and coverage limits. Existing scope/revision/deduplication, retention,
-object-reading, and capture bounds remain authoritative. This is not permission
-for paid assessment or a new Raindrop intake policy.
+object-reading, and capture bounds remain authoritative. A retry matched by the
+X numeric identity or canonical username/i-web alias updates that same source
+revision envelope, preserving admission, provenance, relations, provider
+representations, retention, and better prior bytes when the new provider attempt
+fails. This is not permission for paid assessment or a new Raindrop intake policy.
+
+Public providers currently do not enumerate a trustworthy bounded set of
+same-author immediate replies for every post. The reader therefore never infers
+thread membership from adjacency or scrapes recommendations. Browser fallback
+must verify author identity and reply/thread relationship before adding substantive
+continuations; inaccessible linked content stays partial/reference-only (and
+other transport failures remain failed). Synthesis
+must cite the substantive linked Source separately from X author commentary.
 
 Private bookmark discovery remains separate and supervised through the approved
 `agent_browser` profile. The [X skill](../../../.agents/skills/tron-x/SKILL.md)

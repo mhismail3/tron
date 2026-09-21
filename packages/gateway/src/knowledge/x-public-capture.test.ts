@@ -30,10 +30,59 @@ describe("X public lookup ownership", () => {
     expect(duplicate.duplicate).toBe(true);
     expect(duplicate.record.id).toBe(result.record.id);
   });
+  it("captures bounded external targets as separate sources with referring-post evidence", async () => {
+    const store = await fixture();
+    const root = JSON.stringify({ code: 200, tweet: { id: "123456789", text: "Read the underlying guide", is_note_tweet: false, author: { screen_name: "synthetic" }, entities: { urls: [{ expanded_url: "https://docs.example.test/guide" }] } } });
+    const fetcher = vi.fn(async (url: string | URL) => String(url).includes("api.fxtwitter.com")
+      ? new Response(root, { headers: { "content-type": "application/json" } })
+      : new Response("Underlying guide evidence", { headers: { "content-type": "text/plain" } }));
+    const result = await capture.captureSource(store, request, { ...options, fetcher });
+    const records = (await store.list({ kind: "source", includePending: true, includeArchived: true, limit: 10 })).records.filter(record => record.kind === "source");
+    expect(records).toHaveLength(2);
+    expect(result.record.content.linkedUrls).toEqual(["https://docs.example.test/guide"]);
+    const target = records.find(record => record.id !== result.record.id);
+    expect(target?.content.text).toBe("Underlying guide evidence");
+    expect(target?.provenance.evidence).toContainEqual(expect.objectContaining({ recordId: result.record.id }));
+    expect(result.record.relations).toContainEqual(expect.objectContaining({ type: "related", recordId: target?.id }));
+  });
   it("does not contact FxTwitter without explicit lookup permission", async () => {
     const store = await fixture(); const seen: string[] = [];
     await capture.captureSource(store, { ...request, publicPostLookup: false }, { resolveHost: options.resolveHost, fetcher: async url => { seen.push(String(url)); return new Response(null, { status: 403 }); } });
     expect(seen).toEqual([request.url]);
+  });
+  it("retains bounded provider HTTP diagnostics on an inaccessible capture", async () => {
+    const store = await fixture();
+    const result = await capture.captureSource(store, request, { ...options, fetcher: async (url: string | URL) => new Response(null, { status: String(url).includes("fxtwitter") ? 401 : 400 }) });
+    expect(result.record.content.captureDisposition).toBe("inaccessible");
+    expect(result.record.content.captureReason).toContain("fxtwitter:unavailable status=401");
+    expect(result.record.content.captureReason).toContain("x-syndication:unavailable status=400");
+  });
+  it("preserves the existing identity, admission, provenance, relations, and representations across failed and successful hydration", async () => {
+    const store = await fixture();
+    const retainedBytes = await store.putObject(new TextEncoder().encode("better retained evidence"), "text/plain");
+    const providerBytes = await store.putObject(new TextEncoder().encode("provider metadata"), "application/json");
+    const seeded = await store.captureSource({ commandId: "seed-x-reference", record: {
+      kind: "source", scope: "research", provenance: { actor: "connector", source: "raindrop:synthetic-account:synthetic-item", evidence: [{ recordId: "evidence-record", revisionId: "1234567890abcdef" }] },
+      relations: [{ type: "related", recordId: "related-record" }], content: {
+        title: "Saved X reference", uri: "https://x.com/synthetic/status/123456789", text: "better retained evidence", object: retainedBytes,
+        representations: [{ kind: "provider-api", object: providerBytes, mediaType: "application/json" }], captureDisposition: "reference-only", capturedAt: "2026-01-01T00:00:00.000Z",
+        origin: "connector", origins: [{ kind: "connector", capturedAt: "2026-01-01T00:00:00.000Z", uri: "https://x.com/i/web/status/123456789", identity: { provider: "raindrop", accountId: "synthetic-account", itemId: "synthetic-item" } }], identity: { provider: "raindrop", accountId: "synthetic-account", itemId: "synthetic-item" }, admission: { status: "retained", reason: "user admission", decidedAt: "2026-01-01T00:00:00.000Z" }, retention: { sensitivity: "public", evidenceAvailable: true },
+      },
+    }, });
+    const failed = await capture.captureSource(store, { ...request, commandId: "x-hydrate-failed" }, { resolveHost: options.resolveHost, fetcher: async (url: string | URL) => new Response(null, { status: String(url).includes("fxtwitter") ? 401 : 400 }) });
+    expect(failed.record.id).toBe(seeded.record.id);
+    expect(failed.record.content).toMatchObject({ captureDisposition: "reference-only", text: "better retained evidence", object: retainedBytes, identity: { provider: "raindrop" }, admission: { status: "retained" }, retention: { sensitivity: "public" } });
+    expect(failed.record.provenance).toEqual(seeded.record.provenance);
+    expect(failed.record.relations).toEqual(seeded.record.relations);
+    expect(failed.record.content.representations).toEqual(seeded.record.content.representations);
+    const rawSuccess = JSON.stringify({ code: 200, tweet: { id: "123456789", text: "Fresh verified root", is_note_tweet: false, author: { screen_name: "synthetic" } } });
+    const success = await capture.captureSource(store, { ...request, commandId: "x-hydrate-success" }, { resolveHost: options.resolveHost, fetcher: async () => new Response(rawSuccess, { headers: { "content-type": "application/json" } }) });
+    expect(success.record.id).toBe(seeded.record.id);
+    expect(success.record.content.text).toBe("Fresh verified root");
+    expect(success.record.content.admission?.status).toBe("retained");
+    expect(success.record.content.representations).toEqual(seeded.record.content.representations);
+    expect(success.record.provenance).toEqual(seeded.record.provenance);
+    expect((await store.list({ kind: "source", includePending: true, includeArchived: true, limit: 10 })).records).toHaveLength(1);
   });
   it("retries failed capture in the same record and preserves incomplete content honestly", async () => {
     const store = await fixture();

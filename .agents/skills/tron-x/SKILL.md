@@ -27,12 +27,16 @@ browser for protected content. URLs must be HTTPS X/Twitter post permalinks.
 Tracking queries and author spelling are not sent to providers.
 
 The result includes canonical X URL/ID, selected provider/endpoint, exact raw
-provider JSON, extracted root-post text, attempt outcomes, and limitations.
-Preserve those qualifications in analysis. `complete` means ordinary root-post
-text, **not** the thread, linked article, or media. Long posts, Articles, quotes,
-and media are conservatively partial pending browser verification. A syndication
-response is always partial. Inspect raw JSON for links and nested context, never
-promote a preview/title to an Article body or a video URL to a transcript.
+provider JSON, extracted root-post text, bounded provider-declared outbound URLs,
+attempt outcomes, and limitations. Preserve those qualifications in analysis.
+`complete` means ordinary root-post text, **not** the thread, linked article, or
+media. Long posts, Articles, quotes, and media are conservatively partial pending
+browser verification. A syndication response is always partial. Explicit source
+capture may retain each bounded external target as its own canonical Source,
+relating it to the referring post and preserving connector provenance; redirects
+remain subject to per-hop SSRF checks. Inspect raw JSON for links and nested
+context, never promote a preview/title to an Article body or a video URL to a
+transcript.
 
 Requests share a 15-second operation deadline and 5-second attempt deadlines;
 bodies are limited to 2 MB, no redirects are followed, and output beyond 128 KB
@@ -48,8 +52,11 @@ explicit request; repeated failures require browser/user attention, not loops.
 
 This explicitly opts into public lookup and retains the raw provider response in
 the existing source store with root-post text, canonical X URI, provider/coverage
-reason, and normal revision/deduplication semantics. Read the returned source
-using `read`, and its raw object via `readObject` with exact source ID/revision,
+reason, and normal revision/deduplication semantics. A rerun matches the same X
+numeric identity across username and `i/web` aliases and preserves admission,
+provenance, provider representations, relations, and better prior evidence when
+hydration fails. Read the returned source using `read`, and its raw object via
+`readObject` with exact source ID/revision,
 object hash/media type/byte count and returned offsets. Never submit invented
 source text as fetched evidence. Partial records remain partial; the existing
 Raindrop intake must not acknowledge/move an item solely because a mirror worked.
@@ -101,13 +108,20 @@ state. Never inspect unrelated profiles or copy their secrets to gain access.
    from the visible timeline/head if a cursor is stale; don't replay guessed raw
    requests. Confirm selected older bookmark IDs before claiming historical coverage.
 5. Hydrate public IDs with `knowledge action=x`, sequentially, keeping bookmark
-   membership separate from content/provider evidence. Never bulk-import before
-   the bounded pilot verifies identity, page traversal, content, and rerun behavior.
-6. For missing or partial content, navigate to the original X permalink. Check
-   post identity, expand long content through the actual controls, and extract the
-   Article body or author reply chain only as far as verified. Prefer X-generated
-   detail responses when available; otherwise label DOM extraction as such. Missing
-   article endings, reply pagination, embedded posts, or media remain explicit.
+   membership separate from content/provider evidence. Explicit source capture may
+   retain provider-declared outbound targets as distinct Sources with evidence and
+   relations back to the referring post; it must not treat them as thread members
+   or replace bookmark provenance. Never bulk-import before the bounded pilot
+   verifies identity, page traversal, content, and rerun behavior.
+6. Public source endpoints do not reliably enumerate same-author immediate replies.
+   Do not infer a thread from feed adjacency, scrape arbitrary replies or
+   recommendations, or claim link completeness. For missing or partial content,
+   navigate to the original X permalink in the approved browser. Verify post and
+   author identity plus each reply/thread relationship, expand long content through
+   actual controls, and extract the Article body or author reply chain only as far
+   as verified. Prefer X-generated detail responses when available; otherwise
+   label DOM extraction as such. Missing article endings, reply pagination,
+   embedded posts, or media remain explicit.
 
 Browser discovery is supervised, best-effort, and not an unattended synchronization
 service. Login expiry/private API changes require attention. Do not delete saved

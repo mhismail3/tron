@@ -29,6 +29,19 @@ describe("public X hydration", () => {
     expect(get.mock.calls[1]?.[0]).toBe(`https://cdn.syndication.twimg.com/tweet-result?id=123456789&lang=en&token=${xEmbedToken("123456789")}`);
     expect(result.attempts).toHaveLength(2);
   });
+  it("retains bounded HTTP status diagnostics instead of collapsing provider failures", async () => {
+    const get = vi.fn().mockResolvedValueOnce({ status: 401 }).mockResolvedValueOnce({ status: 400 });
+    const result = await lookupPublicXPost(url, get, signal());
+    expect(result.attempts).toEqual([{ provider: "fxtwitter", outcome: "unavailable", status: 401 }, { provider: "x-syndication", outcome: "unavailable", status: 400 }]);
+    expect(JSON.stringify(result)).not.toContain("Authorization");
+  });
+  it("extracts only bounded credential-safe provider URLs, not X media or arbitrary text", async () => {
+    const oversized = `https://oversized.example.test/${"a".repeat(5_000)}`;
+    const body = fx({ entities: { urls: [{ expanded_url: "https://docs.example.test/guide#intro" }, { expanded_url: "https://x.com/other/status/987" }, { expanded_url: "https://docs.example.test/private?token=synthetic" }, { expanded_url: oversized }] }, raw_text: { facets: [{ replacement: "https://repo.example.test/project" }] } });
+    const result = await lookupPublicXPost(url, vi.fn(async () => ({ status: 200, body })), signal());
+    expect(result.linkedUrls).toEqual(["https://docs.example.test/guide", "https://repo.example.test/project"]);
+    expect(result.limitations.join(" ")).toContain("separate safe source capture");
+  });
   it.each([{ media: { videos: [] } }, { article: { title: "Article", preview_text: "not full" } }, { quote: { id: "987", text: "quote" } }, { is_note_tweet: true }])("keeps richer Fx evidence but labels unverified coverage %j", async extra => {
     const get = vi.fn(async () => ({ status: 200, body: fx(extra) }));
     const result = await lookupPublicXPost(url, get, signal());
@@ -58,9 +71,17 @@ describe("public X hydration", () => {
     await expect(lookupPublicXPost(url, get, controller.signal)).rejects.toThrow();
     expect(get).toHaveBeenCalledTimes(1);
   });
+  it("uses the provider-required descriptive User-Agent without auth or browser cookies", async () => {
+    const fetcher = vi.fn(async (_url: string | URL, init?: RequestInit) => init?.headers && (init.headers as Record<string, string>)["user-agent"]
+      ? new Response(fx(), { headers: { "content-type": "application/json" } })
+      : new Response(JSON.stringify({ error: "missing User-Agent" }), { status: 401 }));
+    const result = await readPublicXPost(url, { fetcher, resolveHost: async () => ["93.184.216.34"] });
+    expect(result.provider).toBe("fxtwitter");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
   it("uses the safe transport with no redirects, auth headers, or browser cookies", async () => {
     const fetcher = vi.fn(async (_url: string | URL, init?: RequestInit) => {
-      expect(init?.headers).toBeUndefined();
+      expect(init?.headers).toEqual({ "user-agent": "Tron/0.1 (public-source-capture)" });
       expect(init?.redirect).toBe("manual");
       return new Response(fx(), { headers: { "content-type": "application/json" } });
     });
