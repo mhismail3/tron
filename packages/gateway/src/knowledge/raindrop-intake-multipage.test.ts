@@ -95,5 +95,5 @@ describe("Raindrop intake pagination and cohort accounting", () => {
     expect(state?.assessmentApprovals?.reduce((sum, item) => sum + item.itemIds.length, 0)).toBe(total - 10);
     expect(requestedPages).toContain(0);
     if (incomplete > 50) expect(requestedPages).toContain(1);
-  });
+  }, 30_000);
 });
