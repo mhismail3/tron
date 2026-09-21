@@ -427,9 +427,16 @@ when both the launcher and live PID have rejected it in favor of the signed
 bundled payload. If Debug is present, it also
 requires one lifecycle snapshot whose live supervisor and child PID/start
 identities, sole 9848 listener, selected manifest, command, and authenticated
-identity all agree. Debug absence is informational; loaded legacy Debug or
-Preview services are collisions. The verifier checks both signed runtimes and
-aliases on every Mac, but executes only the host-native runtime. The bundled
+identity all agree. Debug absence is informational; loaded legacy Debug,
+Preview or Stable dev-takeover services are collisions. Preview/dev-takeover
+plists left in `~/Library/LaunchAgents` also fail verification, even when unloaded:
+login could relaunch a retired owner against Stable's home and port. The maintainer
+must retire the exact legacy service and its login plist; the verifier never unloads
+services or removes files. A healthy current listener does not clear that gate.
+The collision regression runs in `scripts/test-mac-reinstall.py`. The offline
+checkpoint also refuses the loaded dev-takeover job, even without a listener.
+The verifier checks both signed runtimes and aliases on every Mac, but executes
+only the host-native runtime. The bundled
 foreign-architecture runtime is validated statically; this avoids false
 failures when Rosetta is unavailable or when translated Node cannot obtain its
 JIT permissions. If the required menu-bar controls are unavailable, stop for a

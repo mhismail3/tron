@@ -428,7 +428,7 @@ class MacPlatform:
             require(not value.strip(), 'custom-configuration: launchd override requires a reviewed owner decision')
         command(['/bin/launchctl', 'print', f'gui/{os.getuid()}'], 'launchd-probe', timeout=15)
         for label in ('com.tron.server', 'com.tron.server.dev', 'com.tron.server.preview',
-                      'com.tron.gateway.dev', 'com.tron.mac.native-host'):
+                      'com.tron.server.dev-takeover', 'com.tron.gateway.dev', 'com.tron.mac.native-host'):
             result = subprocess.run(['/bin/launchctl', 'print', f'gui/{os.getuid()}/{label}'],
                                     capture_output=True, timeout=15)
             if result.returncode == 0:

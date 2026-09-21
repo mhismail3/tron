@@ -29,6 +29,45 @@ def lock_child(root, connection):
         connection.close()
 
 
+class LegacyLaunchAgentVerificationTests(unittest.TestCase):
+    def test_loaded_or_login_persisted_legacy_owners_refuse_verification(self):
+        # Execute the verifier's collision boundary with an injected read-only
+        # launchctl, not a second implementation of its admission policy.
+        source = (reinstall.REPO / 'scripts/verify-mac-install.sh').read_text()
+        boundary = source.split('# Release must never own a second service identity.', 1)[1].split('\nobserve_debug() {', 1)[0]
+        boundary = '# Release must never own a second service identity.' + boundary
+        with tempfile.TemporaryDirectory() as root:
+            home = Path(root)
+            agents = home / 'Library/LaunchAgents'
+            agents.mkdir(parents=True)
+            for label in ('com.tron.server.preview', 'com.tron.server.dev-takeover'):
+                for state in ('absent', 'loaded-idle', 'plist-only', 'dangling-plist'):
+                    with self.subTest(label=label, state=state):
+                        plist = agents / (label + '.plist')
+                        if state == 'plist-only':
+                            plist.write_text('fixture')
+                        elif state == 'dangling-plist':
+                            plist.symlink_to(home / 'missing')
+                        script = '''
+failures=0
+UID_VALUE=501
+pass() { :; }
+fail() { echo "$1"; failures=$((failures + 1)); }
+launchctl() {
+  [[ "$1" == print && "$2" == "gui/501/$LOADED_LABEL" ]] || return 1
+  echo 'state = not running'
+}
+''' + boundary + '\nexit "$failures"\n'
+                        result = subprocess.run(['/bin/bash', '-c', script], text=True, capture_output=True,
+                                                env={**os.environ, 'HOME': str(home),
+                                                     'LOADED_LABEL': label if state == 'loaded-idle' else ''})
+                        if plist.exists() or plist.is_symlink():
+                            plist.unlink()
+                        self.assertEqual(result.returncode, 0 if state == 'absent' else 1, result.stderr)
+                        if state != 'absent':
+                            self.assertIn(label, result.stdout)
+
+
 class Platform:
     def __init__(self, installed):
         self.installed = installed
@@ -710,7 +749,7 @@ class PlatformProbeTests(unittest.TestCase):
 
     def test_each_loaded_owner_blocks_even_without_port(self):
         for label in ('com.tron.server', 'com.tron.server.dev', 'com.tron.server.preview',
-                      'com.tron.gateway.dev', 'com.tron.mac.native-host'):
+                      'com.tron.server.dev-takeover', 'com.tron.gateway.dev', 'com.tron.mac.native-host'):
             self.loaded = label
             with self.assertRaisesRegex(reinstall.Stop, 'service-loaded'):
                 self.offline()

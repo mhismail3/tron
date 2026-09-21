@@ -422,12 +422,17 @@ PY
 
 check_owner com.tron.server 9847 "$HOME/.tron" "Tron Agent" stable ""
 
-# Release must never own a second service identity.
-if launchctl print "gui/$UID_VALUE/com.tron.server.preview" >/dev/null 2>&1; then
-  fail "stray Release-owned com.tron.server.preview is loaded"
-else
-  pass "no stray com.tron.server.preview registration is loaded"
-fi
+# Release must never own a second service identity. A dormant takeover can
+# reclaim Stable's home/port at login even when today's listener is healthy.
+for legacy_label in com.tron.server.preview com.tron.server.dev-takeover; do
+  if launchctl print "gui/$UID_VALUE/$legacy_label" >/dev/null 2>&1; then
+    fail "legacy $legacy_label is loaded; maintainer retirement required"
+  elif [[ -e "$HOME/Library/LaunchAgents/$legacy_label.plist" || -L "$HOME/Library/LaunchAgents/$legacy_label.plist" ]]; then
+    fail "legacy $legacy_label login plist remains; maintainer retirement required"
+  else
+    pass "no legacy $legacy_label registration or login plist"
+  fi
+done
 
 observe_debug() {
   local legacy_output listener_pids listener_pid lifecycle lifecycle_state expected_port expected_home
