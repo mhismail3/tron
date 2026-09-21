@@ -5,6 +5,29 @@ import XCTest
 
 final class TronSmokeUITests: XCTestCase {
     @MainActor
+    func testIntegrationDestinationsHaveOneDoneButtonThroughSettings() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-tron-settings-navigation-fixture"]
+        for title in ["Connected Services", "MCP Servers"] {
+            app.launch()
+            let destination = app.buttons[title]
+            XCTAssertTrue(destination.waitForExistence(timeout: 5))
+            for _ in 0..<3 where !destination.isHittable { app.swipeUp() }
+            XCTAssertTrue(destination.isHittable)
+            destination.tap()
+            let done = app.buttons.matching(NSPredicate(format: "label == %@", "Done"))
+            XCTAssertTrue(done.firstMatch.waitForExistence(timeout: 3))
+            XCTAssertEqual(done.allElementsBoundByIndex.filter(\.isHittable).count, 1,
+                           "Only the progressive settings shell owns dismissal")
+            keepScreenshot(named: "settings-\(title)-single-done-light")
+            done.allElementsBoundByIndex.first(where: \.isHittable)?.tap()
+            XCTAssertTrue(app.buttons["Runtime Behavior"].waitForExistence(timeout: 3))
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testRuntimeBehaviorThinkingSliderOpensAfterDefaultsConsolidation() {
         continueAfterFailure = false
         let app = XCUIApplication()

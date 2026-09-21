@@ -175,6 +175,13 @@ function bounded(value: unknown, label: string, maximum: number): asserts value 
   if (typeof value !== "string" || value.length < 1 || value.length > maximum || /[\u0000-\u001f\u007f]/.test(value)) throw new Error(`${label} is invalid`);
 }
 
+/** Optional provider metadata never participates in account authorization. */
+export function normalizeProviderDisplayName(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const label = value.trim();
+  return label.length > 0 && label.length <= 320 && !/[\u0000-\u001f\u007f]/.test(label) ? label : undefined;
+}
+
 export function validateConnectionPolicy(value: unknown): asserts value is ConnectionPolicy {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Connection policy is invalid");
   const policy = value as Record<string, unknown>;
@@ -204,7 +211,7 @@ export function validateConnectionInstance(value: unknown): asserts value is Con
   bounded(item.providerAccountId, "Provider account", 256); if (item.scope !== undefined) bounded(item.scope, "Connection scope", 512);
   assertCredentialReference(item.credentialRef); validateConnectionPolicy(item.policy);
   if (item.credentialAvailability !== undefined && !["available", "unavailable", "unknown"].includes(item.credentialAvailability as string) || item.providerIdentity !== undefined && !["admitted", "mismatch", "unknown"].includes(item.providerIdentity as string)) throw new Error("Connection admission observation is invalid");
-  if (item.providerDisplayName !== undefined) bounded(item.providerDisplayName, "Provider display name", 320);
+  if (item.providerDisplayName !== undefined && normalizeProviderDisplayName(item.providerDisplayName) !== item.providerDisplayName) throw new Error("Provider display name is invalid");
   if (item.configuration !== undefined) {
     if (item.implementation !== "mcp") throw new Error("Only MCP instances may contain transport configuration");
     validateMcpConnectionConfiguration(item.configuration);

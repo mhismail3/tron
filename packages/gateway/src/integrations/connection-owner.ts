@@ -24,6 +24,7 @@ import {
   assertDefinitionId,
   assertCredentialReference,
   connectionRequestHash,
+  normalizeProviderDisplayName,
   validateConnectionInstance,
   validateConnectionPolicy,
   validateConnectionState,
@@ -75,9 +76,6 @@ function now(): string { return new Date().toISOString(); }
 function initialState(): ConnectionOwnerState { return { schemaVersion: CONNECTION_STATE_SCHEMA_VERSION, stateRevision: 0, instances: {}, setupOperations: {}, receipts: {} }; }
 function statePath(tronHome: string): string { return join(tronHome, ...CONNECTION_STATE_RELATIVE_PATH); }
 function copy<T>(value: T): T { return structuredClone(value); }
-function boundedProviderDisplayName(value: string): boolean {
-  return value.length >= 1 && value.length <= 320 && !/[\u0000-\u001f\u007f]/.test(value);
-}
 
 function capabilityAvailability(
   capability: IntegrationDefinition["capabilities"][number],
@@ -192,9 +190,7 @@ export class ConnectionOwner {
       if (!["available", "unavailable", "unknown"].includes(observation.credentialAvailability) || !["admitted", "mismatch", "unknown"].includes(observation.providerIdentity)) throw invalid("Provider admission observation is invalid");
       const admittedDisplayName = observation.credentialAvailability === "available"
         && observation.providerIdentity === "admitted"
-        && observation.providerDisplayName !== undefined
-        && boundedProviderDisplayName(observation.providerDisplayName)
-        ? observation.providerDisplayName
+        ? normalizeProviderDisplayName(observation.providerDisplayName)
         : undefined;
       instance.credentialAvailability = observation.credentialAvailability;
       instance.providerIdentity = observation.providerIdentity;

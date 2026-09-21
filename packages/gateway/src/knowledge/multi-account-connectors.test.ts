@@ -22,13 +22,13 @@ it("derives readiness from the current owner across policy reset, disconnect, an
   const extension = new KnowledgeConnectorExtension(store, {
     connections: owner,
     credentials: new InMemoryConnectorCredentialStore(new Map([["connector:raindrop:one", "token-one"], ["connector:raindrop:two", "token-two"]])),
-    http: async (url, init) => { calls += 1; return url.endsWith("/user") ? response({ user: { _id: init.headers.authorization === "Bearer token-two" ? 202 : 101, email: { malformed: true }, username: "fixture-user" } }) : response({ items: [] }); },
+    http: async (url, init) => { calls += 1; return url.endsWith("/user") ? response({ user: { _id: init.headers.authorization === "Bearer token-two" ? 202 : 101, email: { malformed: true }, username: { malformed: true }, fullName: "Fixture User" } }) : response({ items: [] }); },
     sleep: async () => {},
   });
   const configure = (commandId: string) => extension.invoke({ operation: "knowledge.connector.configure", request: { commandId, connector: "raindrop", connectionId: "account", enabled: true } });
   await configure("configure-readiness-0001");
   await extension.invoke({ operation: "knowledge.connector.run", request: { commandId: "admit-readiness-0001", connector: "raindrop", connectionId: "account", dryRun: true, limit: 1 } });
-  expect((await owner.snapshot()).instances.find(item => item.id === "account")).toMatchObject({ providerDisplayName: "fixture-user" });
+  expect((await owner.snapshot()).instances.find(item => item.id === "account")).toMatchObject({ providerDisplayName: "Fixture User" });
   await configure("reset-readiness-0001");
   await expect(extension.invoke({ operation: "knowledge.connector.status", request: { connector: "raindrop", connectionId: "account" } })).resolves.toMatchObject({ health: "setup-required", credentialAvailability: "unknown", providerIdentity: "unknown" });
   await extension.invoke({ operation: "knowledge.connector.run", request: { commandId: "readmit-readiness-0001", connector: "raindrop", connectionId: "account", dryRun: true, limit: 1 } });
@@ -41,6 +41,40 @@ it("derives readiness from the current owner across policy reset, disconnect, an
   await owner.execute({ kind: "setup.complete", commandId: "complete-resetup-0001", operationId: reSetup.operationId, instanceId: "account", providerAccountId: "202", scope: "0", credentialRef: "connector:raindrop:two", policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } });
   await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: "configure-resetup-0001", connector: "raindrop", connectionId: "account", enabled: true } });
   await expect(extension.invoke({ operation: "knowledge.connector.status", request: { connector: "raindrop", connectionId: "account" } })).resolves.toMatchObject({ accountId: "202", health: "setup-required", credentialAvailability: "unknown", providerIdentity: "unknown" });
+});
+
+it.each(["alias-only", "401-user", "403-discovery", "missing-token"])("clears verified display identity after %s without confusing it with account authority", async failure => {
+  const root = await mkdtemp(join(tmpdir(), "tron-account-label-")); roots.push(root);
+  const owner = new ConnectionOwner(root);
+  const setup = await owner.execute({ kind: "setup.begin", commandId: "begin-display-0001", instanceId: "account", definitionId: "knowledge.raindrop", method: "token" }) as { operationId: string };
+  await owner.execute({ kind: "setup.complete", commandId: "complete-display-0001", operationId: setup.operationId, instanceId: "account", providerAccountId: "101", scope: "0", credentialRef: "connector:raindrop:display", policy: { enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false } });
+  let broken = false, credentialReads = 0;
+  const extension = new KnowledgeConnectorExtension(new KnowledgeStore(new TronWorkspace(root)), {
+    connections: owner,
+    credentials: { read: async () => broken && failure === "missing-token" && ++credentialReads > 1 ? undefined : "fixture-token" },
+    http: async url => {
+      if (broken && failure === "401-user" && url.endsWith("/user")) return { ...response({}), status: 401 };
+      if (broken && failure === "403-discovery" && !url.endsWith("/user")) return { ...response({}), status: 403 };
+      return url.endsWith("/user") ? response({ user: { ...(broken && failure === "alias-only" ? { id: 101 } : { _id: 101 }), email: "fixture@example.test" } }) : response({ items: [] });
+    }, sleep: async () => {},
+  });
+  await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: "configure-display-0001", connector: "raindrop", connectionId: "account", enabled: true } });
+  // Ordinary authenticated reads enrich the projection; no import/sweep is
+  // needed to learn an account label, and no additional provider call is made.
+  await extension.invoke({ operation: "knowledge.raindrop.read", request: { connectionId: "account", read: { operation: "user" } } });
+  expect((await owner.snapshot()).instances[0]).toMatchObject({ providerAccountId: "101", providerDisplayName: "fixture@example.test", health: "ready" });
+  broken = true;
+  await expect(extension.invoke({ operation: "knowledge.connector.run", request: { commandId: "failed-display-0001", connector: "raindrop", connectionId: "account", dryRun: true, limit: 1 } })).rejects.toThrow();
+  const failed = (await owner.snapshot()).instances[0];
+  expect(failed.providerDisplayName).toBeUndefined();
+  expect(failed.health).toBe("auth-error");
+  expect(failed.providerIdentity).toBe(failure === "alias-only" ? "mismatch" : "unknown");
+  broken = false;
+  await extension.invoke({ operation: "knowledge.raindrop.read", request: { connectionId: "account", read: { operation: "user" } } });
+  expect((await owner.snapshot()).instances[0].providerDisplayName).toBe("fixture@example.test");
+  broken = true;
+  await expect(extension.invoke({ operation: "knowledge.raindrop.read", request: { connectionId: "account", read: { operation: "bookmarks" } } })).rejects.toThrow();
+  expect((await owner.snapshot()).instances[0].providerDisplayName).toBeUndefined();
 });
 
 it("runs same-provider accounts against separate refs, identity fences, checkpoints, and receipts", async () => {

@@ -34,6 +34,13 @@ final class SettingsLayoutStyleTests: XCTestCase {
             attach(image(host), name: "settings-redesign-mcp-dark")
         }
         try await withHost(
+            PackagesSettingsView(projectCWD: nil)
+                .environment(model).tronPresentation().tronSettingsLayout(),
+            size: CGSize(width: 440, height: 900), scheme: .light
+        ) { host in
+            attach(image(host), name: "settings-resource-glass-light")
+        }
+        try await withHost(
             PackagesSettingsView(projectCWD: "/fixture/project")
                 .environment(model)
                 .tronPresentation()
@@ -54,20 +61,22 @@ final class SettingsLayoutStyleTests: XCTestCase {
         await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
         do {
             try await model.connectHostedGateway(profile: GatewayProfile(id: "profile", label: "Fixture Mac", host: "gateway.test", port: 9847, machineId: "machine", deviceId: "device"), token: "fixture-token")
-            try await withHost(IntegrationsSettingsView(surface: .connectedServices)
-                .environment(model).tronPresentation().tronSettingsLayout(),
-                size: CGSize(width: 440, height: 900), scheme: .dark) { host in
-                let read = try await request(socket, count: 2)
-                XCTAssertEqual(read.method, "connections.list")
-                let value = try JSONDecoder.gateway.decode(JSONValue.self, from: Data(#"""
-                {"definitions":[{"schemaVersion":1,"id":"knowledge.raindrop","implementation":"knowledge-connector","displayName":"Raindrop","setupMethods":["token"],"capabilities":[{"id":"read","displayName":"Read bookmarks","effects":["read"],"supported":true}]}],
-                "instances":[{"id":"fixture-account","definitionId":"knowledge.raindrop","implementation":"knowledge-connector","providerAccountId":"Research account","credentialConfigured":true,"credentialAvailability":"available","providerIdentity":"admitted","policy":{"enabled":true,"allowWrites":false,"paidAccessApproved":false,"paidBudgetCents":0,"recurringApproved":false},"health":"ready","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","setupRevision":1}],
-                "capabilities":[{"id":"read","availability":"available","effects":["read"],"definitionId":"knowledge.raindrop","connectionId":"fixture-account","provenance":{"owner":"connection","definitionId":"knowledge.raindrop","connectionId":"fixture-account"}}],"setupOperations":[],"stateRevision":1}
-                """#.utf8))
-                await socket.enqueue(try reply(read.id, value))
-                try await Task.sleep(for: .milliseconds(100))
-                host.view.layoutIfNeeded()
-                attach(image(host), name: "connected-services-account-fixture-dark")
+            for (index, scheme) in [ColorScheme.light, .dark].enumerated() {
+                try await withHost(IntegrationsSettingsView(surface: .connectedServices)
+                    .environment(model).tronPresentation().tronSettingsLayout(),
+                    size: CGSize(width: 440, height: 900), scheme: scheme) { host in
+                    let read = try await request(socket, count: index + 2)
+                    XCTAssertEqual(read.method, "connections.list")
+                    let value = try JSONDecoder.gateway.decode(JSONValue.self, from: Data(#"""
+                    {"definitions":[{"schemaVersion":1,"id":"knowledge.raindrop","implementation":"knowledge-connector","displayName":"Raindrop","setupMethods":["token"],"capabilities":[{"id":"read","displayName":"Read bookmarks","effects":["read"],"supported":true}]}],
+                    "instances":[{"id":"fixture-account","definitionId":"knowledge.raindrop","implementation":"knowledge-connector","providerAccountId":"101","providerDisplayName":"fixture@example.test","credentialConfigured":true,"credentialAvailability":"available","providerIdentity":"admitted","policy":{"enabled":true,"allowWrites":false,"paidAccessApproved":false,"paidBudgetCents":0,"recurringApproved":false},"health":"ready","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","setupRevision":1}],
+                    "capabilities":[{"id":"read","availability":"available","effects":["read"],"definitionId":"knowledge.raindrop","connectionId":"fixture-account","provenance":{"owner":"connection","definitionId":"knowledge.raindrop","connectionId":"fixture-account"}}],"setupOperations":[],"stateRevision":1}
+                    """#.utf8))
+                    await socket.enqueue(try reply(read.id, value))
+                    try await Task.sleep(for: .milliseconds(100))
+                    host.view.layoutIfNeeded()
+                    attach(image(host), name: "connected-services-account-fixture-\(scheme)")
+                }
             }
         } catch {
             await model.teardown(); await client.close(); try? FileManager.default.removeItem(at: root)
@@ -82,12 +91,14 @@ final class SettingsLayoutStyleTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let model = AppModel(client: client, cache: SnapshotCache(root: root))
         do {
-            try await withHost(NavigationStack { RuntimeBehaviorSettingsView(projectCWD: nil) }
-                .environment(model).tronPresentation().tronSettingsLayout().tronSettingsVisualTheme(accent: .tronPurple),
-                size: CGSize(width: 440, height: 900), scheme: .dark) { host in
-                // Interaction is exercised by the HOSTED_TEST UI journey; this
-                // native layout fixture does not expose a complete AX tree.
-                attach(image(host), name: "runtime-behavior-inline-defaults-dark")
+            for scheme in [ColorScheme.light, .dark] {
+                try await withHost(NavigationStack { RuntimeBehaviorSettingsView(projectCWD: nil) }
+                    .environment(model).tronPresentation().tronSettingsLayout().tronSettingsVisualTheme(accent: .tronPurple),
+                    size: CGSize(width: 440, height: 900), scheme: scheme) { host in
+                    // Interaction is exercised by the HOSTED_TEST UI journey; this
+                    // native layout fixture does not expose a complete AX tree.
+                    attach(image(host), name: "runtime-behavior-inline-defaults-\(scheme)")
+                }
             }
         } catch {
             await model.teardown(); await client.close(); try? FileManager.default.removeItem(at: root)

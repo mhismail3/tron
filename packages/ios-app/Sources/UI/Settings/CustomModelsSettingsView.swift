@@ -187,7 +187,7 @@ struct CustomModelsSettingsView: View {
                         TronTextSettingRow(icon: "network", title: "Base URL", value: editedProviderBinding(provider.baseURL, providerID: providerID), keyboard: .URL)
                     }
                 }
-                TronSettingsGroup("Models", detail: "One model ID per line. These appear in model selection.", accent: .tronBlue, surfaceStyle: .glass) {
+                TronSettingsGroup("Models", detail: "One model ID per line. These appear in model selection.", accent: .tronBlue, surfaceStyle: .uncontained) {
                     TextField("Model IDs", text: editedProviderBinding(provider.models, providerID: providerID), axis: .vertical)
                         .lineLimit(2...8).textInputAutocapitalization(.never).autocorrectionDisabled()
                         .tronField(monospaced: true, surfaceTint: Color.tronBlue.opacity(0.15), border: Color.tronBlue.opacity(0.30))
