@@ -60,7 +60,10 @@ accents, accessibility sizing, and search routing.
 ## Knowledge dashboard
 
 The dashboard opens on **Chronicle**, the observation timeline. The top-level **Library**
-area contains **Sources** and **Syntheses** as nested sections; notes are treated as
+area contains **Sources** and **Syntheses** as nested sections. Both navigation levels use
+`TronSegmentedControl`, matching Manage Session → Workspace's custom glass tabs and
+40-point minimum height, with the Knowledge accent and readable text color—not native
+segmented pickers. Notes are treated as
 syntheses only when their canonical role is `synthesis`, never relabeled from their source
 or manual-note identity. Pending
 intake and archived sources live behind a separate **Intake & archive** control and are

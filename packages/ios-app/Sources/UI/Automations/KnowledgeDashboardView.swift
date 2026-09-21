@@ -263,22 +263,28 @@ struct KnowledgeDashboardView: View {
 
     private var libraryPicker: some View {
         VStack(alignment: .leading, spacing: TronSpacing.sm) {
-            Picker("Knowledge area", selection: $area) {
-                Text("Chronicle").tag(KnowledgeDashboardArea.chronicle)
-                Text("Library").tag(KnowledgeDashboardArea.library)
-            }
-            .pickerStyle(.segmented)
-            .tint(Color.tronKnowledge)
+            TronSegmentedControl(
+                options: [(label: "Chronicle", value: KnowledgeDashboardArea.chronicle),
+                          (label: "Library", value: KnowledgeDashboardArea.library)],
+                selection: $area,
+                accent: .tronKnowledge,
+                foreground: .tronKnowledgeText,
+                minimumHeight: 40
+            )
+            .accessibilityElement(children: .contain)
             .accessibilityLabel("Knowledge area")
             if area == .library {
-                Picker("Library section", selection: Binding(
-                    get: { section == .syntheses ? .syntheses : .sources },
-                    set: { section = $0 }
-                )) {
-                    ForEach(librarySections.filter { $0 != .chronicle }) { value in Text(value.title).tag(value) }
-                }
-                .pickerStyle(.segmented)
-                .tint(Color.tronKnowledge)
+                TronSegmentedControl(
+                    options: librarySections.filter { $0 != .chronicle }.map { (label: $0.title, value: $0) },
+                    selection: Binding(
+                        get: { section == .syntheses ? .syntheses : .sources },
+                        set: { section = $0 }
+                    ),
+                    accent: .tronKnowledge,
+                    foreground: .tronKnowledgeText,
+                    minimumHeight: 40
+                )
+                .accessibilityElement(children: .contain)
                 .accessibilityLabel("Library section")
                 if section == .syntheses {
                     TronSettingsCaption("Syntheses are stored as notes. This view filters the current note page because the Gateway has no synthesis-list operation.")

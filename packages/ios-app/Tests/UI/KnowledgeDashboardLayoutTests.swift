@@ -363,18 +363,22 @@ private struct HostedKnowledgeDashboardFixture: View {
                     Text("Synthetic hosted fixture · not live Gateway data")
                         .font(TronTypography.caption)
                         .foregroundStyle(Color.tronTextMuted)
-                    Picker("Knowledge area", selection: .constant("library")) {
-                        Text("Chronicle").tag("chronicle")
-                        Text("Library").tag("library")
-                    }
-                    .pickerStyle(.segmented)
-                    .tint(Color.tronKnowledge)
-                    Picker("Library section", selection: .constant(section == .sources ? "sources" : "syntheses")) {
-                        Text("Sources").tag("sources")
-                        Text("Syntheses").tag("syntheses")
-                    }
-                    .pickerStyle(.segmented)
-                    .tint(Color.tronKnowledge)
+                    TronSegmentedControl(
+                        options: [(label: "Chronicle", value: KnowledgeDashboardArea.chronicle),
+                                  (label: "Library", value: KnowledgeDashboardArea.library)],
+                        selection: .constant(.library),
+                        accent: .tronKnowledge,
+                        foreground: .tronKnowledgeText,
+                        minimumHeight: 40
+                    )
+                    TronSegmentedControl(
+                        options: [(label: "Sources", value: KnowledgeDashboardSection.sources),
+                                  (label: "Syntheses", value: KnowledgeDashboardSection.syntheses)],
+                        selection: .constant(section == .sources ? KnowledgeDashboardSection.sources : .syntheses),
+                        accent: .tronKnowledge,
+                        foreground: .tronKnowledgeText,
+                        minimumHeight: 40
+                    )
                     if section == .sources {
                         Text("Sources").font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronKnowledge)
                         ForEach(records) { record in KnowledgeRecordRow(record: record) }
