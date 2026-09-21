@@ -31,7 +31,8 @@ instance.
 
 ## Prepared state migration
 
-`connection-migration.ts` contains an explicit, write-free plan builder for
+The operator sequence is the single [integrations cutover runbook](cutover-runbook.md);
+this section is the owner contract only. `connection-migration.ts` contains an explicit, write-free plan builder for
 the production Knowledge `state.json` plus catalog-control shape (including
 catalog receipts). It extracts account/ref/policy into the connection owner
 while preserving provider state (checkpoints, pending identities, cohorts,

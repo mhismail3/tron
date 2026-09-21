@@ -147,3 +147,16 @@ source before exposing the destination; recovery reports ambiguity rather than
 choosing an authority. Gateway startup never invokes this tool or silently
 regenerates identity. The command prepares state only; app replacement, Gateway
 activation and retirement of live paths remain manual operator actions.
+
+## Explicit delegated-provider root cutover
+
+The pinned `pi-subagents` provider reads `PI_SUBAGENTS_TEMP_ROOT` before its
+module initializes and derives its provider-owned trees from that root. Gateway
+startup sets `<tronHome>/internal/subagents` only after a read-only inventory
+proves no retained provider tree remains outside it. If retained artifacts are
+found, startup fails with a migration-required diagnostic; it never silently
+adopts a new root. The complete ordered command sequence, backup/quiescence,
+reference and recovery checks, activation boundary, and GO/NO-GO checklist are
+in the single [integrations cutover runbook](cutover-runbook.md). The delegated
+owner contract and synthetic tests are in `delegated-root-migration.ts`; this
+file intentionally does not duplicate its operator procedure.
