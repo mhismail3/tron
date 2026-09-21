@@ -238,7 +238,7 @@ struct ConnectionsSettingsView: View {
             .presentationDragIndicator(.hidden)
             .presentationContentInteraction(.resizes)
         }
-        .task(id: "\(model.profileRevision):\(presentationActivity.allowsPresentationPublication)") {
+        .task(id: "\(model.profileRevision):\(model.deviceCatalogRevision):\(presentationActivity.allowsPresentationPublication)") {
             guard presentationActivity.allowsPresentationPublication else { return }
             await reload()
         }

@@ -18,9 +18,12 @@ interface LocalAuthDocument {
 /** Internal credential-bearing record. Never expose this over RPC or auth context. */
 export interface DeviceRecord {
   id: string;
+  /** Pairing-time fallback name; mutable labels and observations are separate. */
   name: string;
   tokenHash: string;
   createdAt: string;
+  customLabel?: string;
+  observedName?: string;
 }
 
 export interface DeviceIdentity {
@@ -28,12 +31,20 @@ export interface DeviceIdentity {
   deviceId: string;
 }
 
-export type DeviceListEntry = Omit<DeviceRecord, "tokenHash">;
+export interface DeviceListEntry {
+  id: string;
+  /** Effective display name: custom label, observed Mac name, then pairing name. */
+  name: string;
+  createdAt: string;
+  customLabel?: string;
+}
 
 export const MAXIMUM_PAIRED_DEVICES = 256;
 const MAXIMUM_DEVICE_DOCUMENT_BYTES = 1 * 1_024 * 1_024;
 const MAXIMUM_LOCAL_AUTH_DOCUMENT_BYTES = 4 * 1_024;
 const MAXIMUM_ENROLLMENT_DOCUMENT_BYTES = 16 * 1_024;
+const MAXIMUM_DEVICE_NAME_BYTES = 320;
+const MAXIMUM_CUSTOM_LABEL_BYTES = 320;
 
 interface DeviceDocument {
   version: 1;
@@ -70,6 +81,24 @@ function equalHash(token: string, encoded: string): boolean {
   if (!expected) return false;
   const actual = tokenHash(token);
   return timingSafeEqual(actual, expected);
+}
+
+function isCustomLabel(value: unknown): value is string {
+  return typeof value === "string"
+    && value.trim().length > 0
+    && Buffer.byteLength(value) <= MAXIMUM_CUSTOM_LABEL_BYTES
+    && !/[\p{Cc}\p{Cf}]/u.test(value);
+}
+
+function isObservedName(value: unknown): value is string {
+  return typeof value === "string"
+    && value.trim().length > 0
+    && Buffer.byteLength(value) <= MAXIMUM_DEVICE_NAME_BYTES
+    && !/[\p{Cc}\p{Cf}]/u.test(value);
+}
+
+function effectiveName(device: DeviceRecord): string {
+  return device.customLabel ?? device.observedName ?? device.name;
 }
 
 function makeToken(): string {
@@ -179,11 +208,16 @@ export class DeviceStore {
       const legacy = device as DeviceRecord & { lastSeenAt?: unknown };
       if (!device || typeof device !== "object" || Array.isArray(device)
         || !hasOnlyKeys(device as unknown as Record<string, unknown>, [
-          "id", "name", "tokenHash", "createdAt", ...(legacy.lastSeenAt === undefined ? [] : ["lastSeenAt"]),
+          "id", "name", "tokenHash", "createdAt",
+          ...(device.customLabel === undefined ? [] : ["customLabel"]),
+          ...(device.observedName === undefined ? [] : ["observedName"]),
+          ...(legacy.lastSeenAt === undefined ? [] : ["lastSeenAt"]),
         ])
         || typeof device.id !== "string" || device.id.length === 0 || Buffer.byteLength(device.id) > 100
-        || typeof device.name !== "string" || device.name.length === 0 || Buffer.byteLength(device.name) > 320
+        || typeof device.name !== "string" || device.name.trim().length === 0 || Buffer.byteLength(device.name) > MAXIMUM_DEVICE_NAME_BYTES
         || /[\u0000-\u001f\u007f]/.test(device.name)
+        || (device.customLabel !== undefined && !isCustomLabel(device.customLabel))
+        || (device.observedName !== undefined && !isObservedName(device.observedName))
         || typeof device.tokenHash !== "string" || canonicalTokenHash(device.tokenHash) === null
         || typeof device.createdAt !== "string" || !isGatewayTimestamp(device.createdAt)
         || (legacy.lastSeenAt !== undefined && (typeof legacy.lastSeenAt !== "string" || !isGatewayTimestamp(legacy.lastSeenAt)))
@@ -197,7 +231,11 @@ export class DeviceStore {
     // of the current in-memory or persisted projection.
     return {
       version: 1,
-      devices: document.devices.map(({ id, name, tokenHash, createdAt }) => ({ id, name, tokenHash, createdAt })),
+      devices: document.devices.map(({ id, name, tokenHash, createdAt, customLabel, observedName }) => ({
+        id, name, tokenHash, createdAt,
+        ...(customLabel === undefined ? {} : { customLabel }),
+        ...(observedName === undefined ? {} : { observedName }),
+      })),
     };
   }
 
@@ -329,7 +367,57 @@ export class DeviceStore {
 
   async listDevices(): Promise<DeviceListEntry[]> {
     const document = await this.readDevices();
-    return document.devices.map(({ tokenHash: _tokenHash, ...device }) => device);
+    return document.devices.map((device) => ({
+      id: device.id,
+      name: effectiveName(device),
+      createdAt: device.createdAt,
+      ...(device.customLabel === undefined ? {} : { customLabel: device.customLabel }),
+    }));
+  }
+
+  async setCustomLabel(deviceId: string, label: string | null): Promise<DeviceListEntry | undefined> {
+    if (label !== null && !isCustomLabel(label)) {
+      throw new GatewayError("invalid_request", "Device label must contain visible text within 320 bytes");
+    }
+    return this.mutex.run(async () => {
+      const document = await this.readDevices();
+      const index = document.devices.findIndex((device) => device.id === deviceId);
+      if (index < 0) return undefined;
+      const current = document.devices[index]!;
+      const next: DeviceRecord = label === null
+        ? (() => {
+            const { customLabel: _customLabel, ...withoutLabel } = current;
+            return withoutLabel;
+          })()
+        : { ...current, customLabel: label.trim() };
+      const devices = document.devices.slice();
+      devices[index] = next;
+      await durableAtomicWriteJson(this.devicePath, { version: 1, devices });
+      return {
+        id: next.id,
+        name: effectiveName(next),
+        createdAt: next.createdAt,
+        ...(next.customLabel === undefined ? {} : { customLabel: next.customLabel }),
+      };
+    });
+  }
+
+  async updateObservedName(deviceId: string, observedName: string): Promise<boolean> {
+    // A cosmetic observation cannot invalidate an otherwise admitted install.
+    // Keep the last known label when platform metadata is empty or unsafe.
+    if (!isObservedName(observedName)) return false;
+    return this.mutex.run(async () => {
+      const document = await this.readDevices();
+      const index = document.devices.findIndex((device) => device.id === deviceId);
+      if (index < 0) return false;
+      const current = document.devices[index]!;
+      if (current.observedName === observedName.trim()) return false;
+      const next = { ...current, observedName: observedName.trim() };
+      const devices = document.devices.slice();
+      devices[index] = next;
+      await durableAtomicWriteJson(this.devicePath, { version: 1, devices });
+      return true;
+    });
   }
 
   /** Revalidate an admitted device identity without projecting bearer material. */

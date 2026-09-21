@@ -96,7 +96,7 @@ enum GatewayDiagnosticTopicAdmission {
         "system.stopping", "notification.inbox.changed", "auth.prompt", "auth.event",
         "auth.completed", "automation.changed", "settings.changed", "trust.changed",
         "providers.changed", "packages.changed", "packages.progress", "packages.completed",
-        "models.customChanged", "terminal.output", "terminal.exit"
+        "models.customChanged", "devices.changed", "terminal.output", "terminal.exit"
     ]
 
     static func admit(_ topic: String) -> String {
@@ -361,6 +361,7 @@ actor GatewayEventHub {
         case .none where delivery.event.topic == "session.listChanged": return "\(prefix)listChanged"
         case .none where delivery.event.topic == "notification.inbox.changed": return "\(prefix)notificationInboxChanged"
         case .none where delivery.event.topic == "knowledge.changed": return "\(prefix)knowledgeChanged"
+        case .none where delivery.event.topic == "devices.changed": return "\(prefix)devicesChanged"
         case .automationChanged: return "\(prefix)automationChanged"
         default: return nil
         }

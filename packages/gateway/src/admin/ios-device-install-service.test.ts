@@ -282,10 +282,14 @@ describe("IosDeviceInstallService", () => {
       config: { machineId: "machine", machineGroupID: "group", machineName: "Mac", tronHome },
       updateService: new GatewayUpdateService({ tronHome, updater: update }),
       iosDeviceInstallService: service,
-      devices: { hasDevice: async (deviceId: string) => deviceId === "device-alpha" },
+      devices: {
+        hasDevice: async (deviceId: string) => deviceId === "device-alpha",
+        updateObservedName: async () => undefined,
+      },
       receipts: {
         execute: async (_identity: string, _method: string, _commandId: string, operation: () => Promise<unknown>) => operation(),
       },
+      broadcast: () => {},
     } as unknown as GatewayServiceDependencies);
     const client: ClientContext = {
       id: "phone", identity: "device-alpha", isLocal: false,

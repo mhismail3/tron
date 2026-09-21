@@ -522,6 +522,7 @@ export class IosDeviceInstallService {
     deviceIdValue: unknown,
     commandIdValue: unknown,
     buildModeValue: unknown,
+    observeName?: (name: string) => Promise<void>,
   ): Promise<{ accepted: true; commandId: string; state: string; buildMode: IosDeviceInstallBuildMode }> {
     this.requireUsable();
     const deviceId = admitDeviceId(deviceIdValue);
@@ -567,6 +568,9 @@ export class IosDeviceInstallService {
         }
         await removeIfExists(activePath(this.options.tronHome));
       }
+      // Publish only the exact connected target admitted by this discovery.
+      // The Gateway caller holds the paired-device lane through this callback.
+      await observeName?.(currentTarget.name);
       const startedAt = new Date().toISOString();
       const status: IosDeviceInstallStatus = {
         schema: 2,
