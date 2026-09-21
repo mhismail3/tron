@@ -1,4 +1,4 @@
-import { chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
@@ -37,6 +37,34 @@ async function retainedRun(root: string, state: "complete" | "running" = "comple
 }
 
 describe("delegated provider root cutover", () => {
+  it("verifies, publishes and recovers a directory-heavy provider journal larger than 256 KiB", async () => {
+    const root = await fixture("tron-large-delegated-journal-");
+    const value = options(root);
+    await retainedRun(value.legacyRoots[0]!);
+    for (let index = 0; index < 512; index += 1) {
+      await mkdir(join(value.legacyRoots[0]!, `${index}-${"d".repeat(180)}`), { mode: 0o700 });
+    }
+    const before = await readFile(join(value.legacyRoots[0]!, "async-subagent-runs", "run-1", "events.jsonl"));
+    const marker = await stageDelegatedRootCutover(value);
+    expect((await lstat(`${value.staging}.tron-delegated-cutover.json`)).size).toBeGreaterThan(256 * 1024);
+    await verifyDelegatedRootCutover(value.staging);
+    await publishDelegatedRootCutover(value.staging);
+    expect(await readFile(join(marker.retired[0]!, "async-subagent-runs", "run-1", "events.jsonl"))).toEqual(before);
+    expect((await recoverDelegatedRootCutover(value.staging)).action).toBe("none");
+    await expect(lstat(value.legacyRoots[0]!)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("refuses a journal beyond the existing bounded file size before retiring source data", async () => {
+    const root = await fixture("tron-oversized-delegated-journal-");
+    const value = options(root);
+    await retainedRun(value.legacyRoots[0]!);
+    await stageDelegatedRootCutover(value);
+    await truncate(`${value.staging}.tron-delegated-cutover.json`, 64 * 1024 * 1024 + 1);
+    await expect(publishDelegatedRootCutover(value.staging)).rejects.toThrow(/bounded migration size/);
+    expect(await lstat(value.legacyRoots[0]!)).toBeTruthy();
+    await expect(lstat(value.destinationRoot)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("refuses an unknown provider lifecycle version or run state", async () => {
     const root = await fixture("tron-unknown-provider-state-");
     const value = options(root);

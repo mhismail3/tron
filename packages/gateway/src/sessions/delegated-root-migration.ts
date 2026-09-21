@@ -271,8 +271,9 @@ export async function preflightDelegatedRootCutover(options: DelegatedRootMigrat
 async function markerRead(stagingInput: string): Promise<DelegatedRootMarker> {
   const staging = absolute(stagingInput, "staging");
   const path = markerPath(staging);
-  const metadata = await regular(path, "migration marker");
-  if (metadata.bytes > 256 * 1024) fail("migration marker is oversized");
+  // Directory manifests can exceed 256 KiB within the admitted tree bounds.
+  // Use the same bounded file size on journal reads and writes.
+  await regular(path, "migration marker");
   let value: unknown; try { value = JSON.parse(await readFile(path, "utf8")); } catch { fail("migration marker is malformed"); }
   const marker = value as Partial<DelegatedRootMarker>;
   if (marker.version !== MARKER_VERSION || typeof marker.operationID !== "string" || !Array.isArray(marker.sources)
@@ -441,6 +442,7 @@ async function ensureDestinationParent(destination: string): Promise<void> {
   await ownerDirectory(parent, "delegated destination parent");
 }
 async function replaceMarker(marker: DelegatedRootMarker): Promise<void> {
+  if (Buffer.byteLength(`${JSON.stringify(marker, null, 2)}\n`) > MAX_FILE_BYTES) fail("migration marker exceeds the bounded migration size");
   await durableAtomicWriteJson(markerPath(marker.staging), marker, 0o600);
 }
 export async function verifyDelegatedRootCutover(staging: string): Promise<DelegatedRootMarker> {

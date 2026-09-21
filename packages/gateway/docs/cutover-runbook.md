@@ -203,7 +203,10 @@ Stage/verify delegated roots with
 `--acknowledge-quiescence --acknowledge-backup`. The helper preserves provider
 directory layout and terminal artifacts, rewrites only exact old provider-root
 references in provider artifacts, never canonical transcript JSONL, and records
-source/staged digests plus file and directory metadata. The exact commands are:
+source/staged digests plus file and directory metadata. Journals use the same
+64 MiB read/write bound as migration files; directory-heavy inventories can
+legitimately exceed 256 KiB. A completed stage must pass `verify` before any
+source is retired. The exact commands are:
 
 ```bash
 scripts/tron delegated-migrate stage \
@@ -211,8 +214,8 @@ scripts/tron delegated-migrate stage \
   --legacy-root <legacy-provider-root> \
   --staging <private-delegated-staging> \
   --acknowledge-quiescence --acknowledge-backup
-scripts/tron delegated-migrate verify --staging <private-delegated-staging>
-scripts/tron delegated-migrate publish --staging <private-delegated-staging>
+scripts/tron delegated-migrate verify --destination-root <stable-tron-home>/internal/subagents --staging <private-delegated-staging>
+scripts/tron delegated-migrate publish --destination-root <stable-tron-home>/internal/subagents --staging <private-delegated-staging>
 ```
 
 Include one `--legacy-root` for every admitted legacy root reported by
@@ -240,7 +243,7 @@ preflight. Run the exact focused owner regression before an operator cutover:
    Publish retires each legacy root only after source and staging verification,
    then exposes `<tronHome>/internal/subagents`; verify the new root’s private
    permissions and that no old root remains writable. If publication stops
-   after the journal enters `source-retired`, run `recover --staging <staging>`;
+   after the journal enters `source-retired`, run `recover --destination-root <tronHome>/internal/subagents --staging <staging>`;
    recovery revalidates staged bytes, retained roots, and the published tree
    before completing or refusing the operation. Re-running `recover` after a
    verified publication is a no-op; it does not trust the journal as proof of
