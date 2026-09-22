@@ -115,9 +115,6 @@ struct RuntimeBehaviorSettingsView: View {
     @State private var scope: SettingsScope = .global
     @State private var draft = RuntimeBehaviorDraft()
     @State private var drafts = ScopedSettingsDraftStore<RuntimeBehaviorDraft>()
-    @State private var refreshingCatalog = false
-    @State private var catalogRefreshGeneration = 0
-    @State private var catalogError: String?
     @State private var loadGeneration = 0
     @State private var sliderPresentation = ConfigurationSliderPresentation()
 
@@ -243,11 +240,6 @@ struct RuntimeBehaviorSettingsView: View {
         .tronConfigurationSliderHost(sliderPresentation)
         .environment(\.configurationSliderSignposts, model.performanceSignpostsForCapture)
         .tronNavigationTitle("Runtime Behavior")
-        .onChange(of: catalogTarget) { _, _ in invalidateCatalogRefresh() }
-        .onChange(of: model.knowledgePresentationIdentity) { _, _ in invalidateCatalogRefresh() }
-        .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
-            if !active { invalidateCatalogRefresh() }
-        }
         .tronSettingsAutosave(draft: $draft, store: $drafts, initial: RuntimeBehaviorDraft())
         .task(id: PresentationActivityTaskID(
             source: RuntimeBehaviorLoadID(
@@ -303,15 +295,6 @@ struct RuntimeBehaviorSettingsView: View {
                     }
                 }
             }
-            TronSettingsRow(icon: "list.bullet.rectangle", title: "Model Catalog", subtitle: modelCatalogSummary, accent: .tronPurple) {
-                Button { Task { await refreshModelCatalog() } } label: {
-                    TronInlineActionLabel("Refresh", icon: "arrow.clockwise", isWorking: refreshingCatalog, accent: .tronPurple)
-                }
-                .buttonStyle(.plain)
-                .disabled(refreshingCatalog)
-            }
-            .tronGlassSurface(accent: .tronPurple, tintOpacity: 0.14)
-            if let catalogError { TronSettingsNotice(message: catalogError, accent: .tronError) }
         }
     }
 
@@ -332,12 +315,6 @@ struct RuntimeBehaviorSettingsView: View {
 
     private var selectedContextWindowLimits: ContextWindowLimits? {
         selectedModelSummary?.contextWindowLimits?.withMinimum(draft.contextWindowMinimum)
-    }
-
-    private var modelCatalogSummary: String {
-        guard model.providerCatalog(for: catalogTarget) != nil else { return "Catalog not loaded" }
-        let count = availableModels.count
-        return "\(count) model\(count == 1 ? "" : "s") currently available"
     }
 
     private var scopeGroup: some View {
@@ -410,36 +387,6 @@ struct RuntimeBehaviorSettingsView: View {
             get: { editing.wrappedValue.modelContextWindows[modelSummary.ref.contextWindowKey] },
             set: { value in editing.update { $0.modelContextWindows[modelSummary.ref.contextWindowKey] = value } }
         )
-    }
-
-    private func invalidateCatalogRefresh() {
-        catalogRefreshGeneration &+= 1
-        refreshingCatalog = false
-        catalogError = nil
-    }
-
-    private func refreshModelCatalog() async {
-        guard presentationActivity.allowsPresentationPublication, !refreshingCatalog else { return }
-        catalogRefreshGeneration &+= 1
-        let ticket = catalogRefreshGeneration
-        let identity = model.knowledgePresentationIdentity
-        let target = catalogTarget
-        refreshingCatalog = true
-        catalogError = nil
-        func admits() -> Bool {
-            IntegrationPresentationAdmission.admits(
-                presentationActive: presentationActivity.allowsPresentationPublication,
-                currentIdentity: model.knowledgePresentationIdentity, requestedIdentity: identity,
-                currentRequest: catalogRefreshGeneration, requestedRequest: ticket
-            ) && catalogTarget == target
-        }
-        defer { if admits() { refreshingCatalog = false } }
-        do {
-            try await model.refreshModelCatalog(target: target, force: true)
-        } catch is CancellationError {
-        } catch {
-            if admits() { catalogError = error.localizedDescription }
-        }
     }
 
     private func selectScope(_ newScope: SettingsScope) {

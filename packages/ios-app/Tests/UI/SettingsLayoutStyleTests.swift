@@ -121,6 +121,12 @@ final class SettingsLayoutStyleTests: XCTestCase {
                     // native layout fixture does not expose a complete AX tree.
                     attach(image(host), name: "runtime-behavior-inline-defaults-\(scheme)")
                 }
+                try await withHost(NavigationStack { ProvidersSettingsView(sessionID: nil) }
+                    .environment(model).tronPresentation().tronSettingsLayout().tronSettingsVisualTheme(accent: .tronEmerald),
+                    size: CGSize(width: 440, height: 900), scheme: scheme) { host in
+                    // The catalog row remains first even before provider data arrives.
+                    attach(image(host), name: "providers-model-catalog-first-\(scheme)")
+                }
             }
         } catch {
             await model.teardown(); await client.close(); try? FileManager.default.removeItem(at: root)

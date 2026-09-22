@@ -642,7 +642,7 @@ a supported configured row reserves its usage line with an animated skeleton and
 summary instead of growing mid-load; a failed read retires that skeleton rather than leaving it pending, and
 a Gateway without the flag reserves nothing. Configured rows are
 whole-row Details links; unconfigured rows retain their Connect action and automatic single-method setup. Both actions
-use the shared compact settings-pill treatment, and usage appears beneath the connection subtitle in the leading provider text stack when present. The Providers sheet owns one rounded Configured container and one rounded Available container, with standard dividers between rows; standalone onboarding rows retain their own surface.
+use the shared compact settings-pill treatment, and usage appears beneath the connection subtitle in the leading provider text stack when present. The Providers sheet starts with Model Catalog (available-model count and explicit forced Refresh) above its rounded Configured and Available containers. The catalog row uses the Providers accent and the exact global/session provider target, with presentation/identity/request fences for refresh results; Runtime Behavior keeps model defaults but no separate catalog action. Provider containers use standard dividers between rows; standalone onboarding rows retain their own surface.
 Usage is an account projection only: it never represents session context or local token totals, and a missing capability
 leaves connection controls usable without issuing a failed usage RPC. Foreground/display refresh and explicit
 Refresh are the only refresh triggers; profile or presentation retirement fences all late reads.

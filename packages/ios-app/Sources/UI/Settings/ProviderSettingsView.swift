@@ -12,6 +12,9 @@ struct ProvidersSettingsView: View {
     @State private var loadGeneration = 0
     @State private var manualReloadGeneration = 0
     @State private var usageController = ProviderUsageReadController()
+    @State private var refreshingCatalog = false
+    @State private var catalogRefreshGeneration = 0
+    @State private var catalogError: String?
 
     private var target: ProviderCatalogTarget {
         sessionID.map(ProviderCatalogTarget.session(id:)) ?? .global
@@ -20,6 +23,9 @@ struct ProvidersSettingsView: View {
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(spacing: 6) {
+                modelCatalogRow
+                    .padding(.bottom, TronSpacing.section)
+                if let catalogError { TronSettingsNotice(message: catalogError, accent: .tronError) }
                 if loading && providers.isEmpty {
                     TronLoadingState(label: "Loading providers…", accent: .tronEmerald)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -72,6 +78,8 @@ struct ProvidersSettingsView: View {
                   target == self.target else { return }
             await loadUsage(for: target)
         }
+        .onChange(of: target) { _, _ in invalidateCatalogRefresh() }
+        .onChange(of: model.knowledgePresentationIdentity) { _, _ in invalidateCatalogRefresh() }
         .onChange(of: model.profileRevision) { _, _ in
             usageController.begin(clear: true)
         }
@@ -84,8 +92,56 @@ struct ProvidersSettingsView: View {
                 // Retire its request, but keep same-target snapshots mounted so
                 // the provider row's usage line remains visually continuous.
                 usageController.begin()
+                invalidateCatalogRefresh()
                 return
             }
+        }
+    }
+
+    private var modelCatalogRow: some View {
+        TronSettingsRow(icon: "list.bullet.rectangle", title: "Model Catalog", subtitle: modelCatalogSummary, accent: .tronEmerald) {
+            Button { Task { await refreshModelCatalog() } } label: {
+                TronInlineActionLabel("Refresh", icon: "arrow.clockwise", isWorking: refreshingCatalog, accent: .tronEmerald)
+            }
+            .buttonStyle(.plain)
+            .disabled(refreshingCatalog)
+        }
+        .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.14)
+    }
+
+    private var modelCatalogSummary: String {
+        guard let catalog = model.providerCatalog(for: target) else { return "Catalog not loaded" }
+        let count = catalog.models.filter(\.available).count
+        return "\(count) model\(count == 1 ? "" : "s") currently available"
+    }
+
+    private func invalidateCatalogRefresh() {
+        catalogRefreshGeneration &+= 1
+        refreshingCatalog = false
+        catalogError = nil
+    }
+
+    private func refreshModelCatalog() async {
+        guard presentationActivity.allowsPresentationPublication, !refreshingCatalog else { return }
+        catalogRefreshGeneration &+= 1
+        let ticket = catalogRefreshGeneration
+        let identity = model.knowledgePresentationIdentity
+        let requestedTarget = target
+        refreshingCatalog = true
+        catalogError = nil
+        func admits() -> Bool {
+            !Task.isCancelled && IntegrationPresentationAdmission.admits(
+                presentationActive: presentationActivity.allowsPresentationPublication,
+                currentIdentity: model.knowledgePresentationIdentity, requestedIdentity: identity,
+                currentRequest: catalogRefreshGeneration, requestedRequest: ticket
+            ) && target == requestedTarget
+        }
+        defer { if admits() { refreshingCatalog = false } }
+        do {
+            try await model.refreshModelCatalog(target: requestedTarget, force: true)
+        } catch is CancellationError {
+        } catch {
+            if admits() { catalogError = error.localizedDescription }
         }
     }
 
