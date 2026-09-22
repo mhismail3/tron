@@ -1,3 +1,4 @@
+import { ProcessTranscriptLeaseStore } from "../transport/process-transcript-leases.js";
 import { randomUUID } from "node:crypto";
 import { performance as nodePerformance } from "node:perf_hooks";
 import { sealBrowserToolReference } from "../display/browser-tool-reference.js";
@@ -2382,6 +2383,88 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
   });
 
+  it("lets user discovery finish while an all-scope scan remains blocked and fails", async () => {
+    const fixture = await coldFixture("scope-failure-isolation");
+    const internals = fixture.registry as any;
+    const original = internals.sessionInfos.bind(internals);
+    let enter!: () => void, release!: () => void;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    const scanner = vi.spyOn(internals, "sessionInfos").mockImplementation(async scope => {
+      if (scope === "all") { enter(); await blocked; throw new Error("child-only instability"); }
+      return original(scope);
+    });
+    const all = fixture.registry.catalog("all").catch(error => error);
+    try {
+      await entered;
+      let published = false;
+      const users = Promise.all([fixture.registry.catalog("user"), fixture.registry.catalog("user")])
+        .then(results => { published = true; return results; });
+      void users.catch(() => {}); // Observe the joined failure in negative controls too.
+      await vi.waitFor(() => expect(published).toBe(true));
+      for (const result of await users) expect(result.sessions.map(row => row.id)).toEqual([fixture.manager.getSessionId()]);
+      expect(scanner.mock.calls.map(call => call[0])).toEqual(["all", "user"]);
+      release();
+      expect(await all).toMatchObject({ message: "child-only instability" });
+    } finally { release(); await all; scanner.mockRestore(); }
+  });
+
+  it("retires viewer capacity during one shared catalog wait without multiplying physical scans", async () => {
+    const fixture = await coldFixture("viewer-cancel-catalog");
+    const internals = fixture.registry as any;
+    const original = internals.catalogStructureEvidence.bind(internals);
+    let release!: () => void;
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    let scanSettled = false;
+    const scanner = vi.spyOn(internals, "catalogStructureEvidence").mockImplementation(async () => {
+      await blocked;
+      try { return await original(); } finally { scanSettled = true; }
+    });
+    const viewers = new ProcessTranscriptLeaseStore(fixture.registry);
+    try {
+      for (let index = 0; index < 6; index++) {
+        const viewerId = `viewer-${index}`;
+        let settled = false;
+        const opening = viewers.open("client", fixture.manager.getSessionId(), "process", "child", "run", undefined, vi.fn(), undefined,
+          { viewerId, parentSubscriptionToken: "parent-token" }).catch(error => { settled = true; return error; });
+        await vi.waitFor(() => expect(scanner).toHaveBeenCalledTimes(1));
+        expect(viewers.closeOwned("client", viewerId)).toBe(true);
+        await vi.waitFor(() => expect(settled).toBe(true));
+        expect(await opening).toMatchObject({ code: "conflict" });
+      }
+      expect(scanner).toHaveBeenCalledTimes(1);
+    } finally {
+      release();
+      await vi.waitFor(() => expect(scanSettled).toBe(true));
+      viewers.releaseClient("client"); scanner.mockRestore();
+    }
+  });
+
+  it("publishes child reference availability only after exact binding becomes authoritative", async () => {
+    const fixture = await coldFixture("binding-availability");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const timestamp = new Date().toISOString();
+    const activity: ExtensionRunActivity = {
+      id: "tool", toolCallId: "tool", runId: "run", source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous",
+      status: "running", startedAt: timestamp, updatedAt: timestamp,
+      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: timestamp },
+      children: [
+        { id: "worker", producerId: "worker", label: "worker", status: "running", lifecycle: "running", childSessionRef: "child" },
+        { id: "other", producerId: "other", label: "other", status: "running", lifecycle: "running", childSessionRef: "child" },
+      ],
+    };
+    const internals = slot as any;
+    internals.syncSubagentProcesses(activity);
+    const waiting = slot.snapshot().processActivities!.find(row => row.title === "worker")!;
+    expect(waiting.childSessionRef).toBeUndefined();
+    activity.children.pop();
+    activity.lifecycle!.sequence = 2;
+    internals.syncSubagentProcesses(activity);
+    const ready = slot.snapshot().processActivities!.find(row => row.processId === waiting.processId)!;
+    expect(ready.childSessionRef).toBe("child");
+    expect(slot.processChildSessionBinding(ready.processId)).toMatchObject({ ref: "child", producerId: "worker" });
+  });
+
   it("serializes an all-scope materialization behind an active user flight", async () => {
     const fixture = await coldFixture("catalog-flight-ownership");
     const parentFile = fixture.manager.getSessionFile()!;
@@ -2471,43 +2554,6 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(removed.generation).not.toBe(added.generation);
     expect((await fixture.registry.catalog("user")).sessions.map((session) => session.id))
       .not.toContain(second.getSessionId());
-  });
-
-  it("makes user reads join an active all-scope flight without a parallel scan", async () => {
-    const fixture = await coldFixture("catalog-all-flight-head-of-line");
-    const parentFile = fixture.manager.getSessionFile()!;
-    const forksDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
-    await mkdir(forksDirectory, { recursive: true });
-    const child = SessionManager.forkFrom(parentFile, fixture.cwd, forksDirectory);
-    child.appendMessage(fauxAssistantMessage("slow all-scope fixture"));
-    const internals = fixture.registry as unknown as {
-      sessionInfos: (scope?: "user" | "all") => Promise<unknown[]>;
-    };
-    const original = internals.sessionInfos.bind(fixture.registry);
-    let entered!: () => void;
-    let release!: () => void;
-    const enteredScan = new Promise<void>((resolve) => { entered = resolve; });
-    const barrier = new Promise<void>((resolve) => { release = resolve; });
-    let userFinished = false;
-    const scanner = vi.spyOn(internals, "sessionInfos").mockImplementation(async (scope) => {
-      entered();
-      await barrier;
-      return original(scope);
-    });
-    try {
-      const all = fixture.registry.catalog("all");
-      await enteredScan;
-      const user = fixture.registry.catalog("user").then(() => { userFinished = true; });
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      expect(userFinished).toBe(false);
-      expect(scanner).toHaveBeenCalledTimes(1);
-      release();
-      await Promise.all([all, user]);
-      expect(scanner).toHaveBeenCalledTimes(1);
-    } finally {
-      release();
-      scanner.mockRestore();
-    }
   });
 
   it("bounds validation reads and retained acquisition evidence before publication", async () => {
@@ -3986,7 +4032,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     };
     internal.extensionActivities.set(toolCallId, {
       id: toolCallId, activityId: "retry-activity", runId, toolCallId,
-      source: { source: "pi-subagents" }, title: "Subagents", mode: "asynchronous", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", mode: "asynchronous", status: "running",
       startedAt, updatedAt: startedAt, children: [],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
     });
@@ -4030,7 +4076,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const startedAt = new Date(Date.now() - 60_000).toISOString();
     const activity: ExtensionRunActivity = {
       id: toolCallId, activityId: "missing-activity", runId, toolCallId,
-      source: { source: "pi-subagents" }, title: "Subagents", mode: "asynchronous", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", mode: "asynchronous", status: "running",
       startedAt, updatedAt: startedAt,
       children: [{ id: "child", producerId: "child", label: "worker", status: "running", lifecycle: "running" }],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
@@ -4092,7 +4138,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     };
     internal.extensionActivities.set(toolCallId, {
       id: toolCallId, activityId: "delayed-workflow-activity", runId: rootRunId, toolCallId,
-      source: { source: "pi-subagents" }, title: "Subagents", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
       startedAt, updatedAt: startedAt, children: [],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
     });
@@ -4145,7 +4191,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     };
     internal.extensionActivities.set(toolCallId, {
       id: toolCallId, activityId, runId, toolCallId,
-      source: { source: "pi-subagents" }, title: "Subagents", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
       startedAt, updatedAt: startedAt, children: [],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
     });
@@ -4310,7 +4356,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     };
     internal.extensionActivities.set(toolCallId, {
       id: toolCallId, activityId: "async-single-activity", runId: asyncRunId, toolCallId,
-      source: { source: "pi-subagents" }, title: "Subagents", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
       startedAt, updatedAt: startedAt, children: [],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
     });
@@ -4392,7 +4438,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const startedAt = new Date(Date.now() - 1_000).toISOString();
     const activity: ExtensionRunActivity = {
       id: "workflow-tool", activityId: "workflow-activity", runId: rootRunId, toolCallId: "workflow-tool",
-      source: { source: "pi-subagents" }, title: "Subagents", mode: "workflow", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", mode: "workflow", status: "running",
       startedAt, updatedAt: startedAt,
       children: [{ id: producerId, producerId, label: "worker", status: "running", lifecycle: "running" }],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
@@ -4422,7 +4468,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const startedAt = new Date(Date.now() - 1_000).toISOString();
     const activity: ExtensionRunActivity = {
       id: "ambiguous-tool", activityId: "ambiguous-activity", runId: "ambiguous-run", toolCallId: "ambiguous-tool",
-      source: { source: "pi-subagents" }, title: "Subagents", mode: "workflow", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", mode: "workflow", status: "running",
       startedAt, updatedAt: startedAt,
       children: ["first", "second"].map((producerId) => ({
         id: producerId, producerId, label: producerId, status: "running" as const,
@@ -4456,7 +4502,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     };
     internal.extensionActivities.set("fork-tool", {
       id: "fork-tool", activityId: "fork-activity", runId: "fork-run", toolCallId: "fork-tool",
-      source: { source: "pi-subagents" }, title: "Subagents", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
       startedAt, updatedAt: startedAt, children: [],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
     });
@@ -4504,7 +4550,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     };
     internal.extensionActivities.set("single-tool", {
       id: "single-tool", activityId: "single-activity", runId: "single-run", toolCallId: "single-tool",
-      source: { source: "pi-subagents" }, title: "Subagents", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
       startedAt, updatedAt: startedAt, children: [],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
     });
@@ -4570,7 +4616,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const startedAt = new Date().toISOString();
     const activity: ExtensionRunActivity = {
       id: "tool", activityId: "activity", runId: "expected-run", toolCallId: "tool",
-      source: { source: "pi-subagents" }, title: "Subagents", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
       startedAt, updatedAt: startedAt,
       children: [{ id: "artifact-child", label: "worker", status: "running" }],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
@@ -4601,7 +4647,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const startedAt = new Date().toISOString();
     const activity: ExtensionRunActivity = {
       id: "tool", activityId: "activity", runId: "expected-run", toolCallId: "tool",
-      source: { source: "pi-subagents" }, title: "Subagents", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
       startedAt, updatedAt: startedAt,
       children: [{ id: "child-run", label: "worker", status: "running" }],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },

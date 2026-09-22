@@ -1925,15 +1925,24 @@ export class RuntimeSlot {
   }
 
   private syncSubagentProcesses(activity: ExtensionRunActivity): void {
-    const projected = subagentProcessesFromActivity(this.id, activity);
+    const candidates = subagentProcessesFromActivity(this.id, activity);
+    const bindings = new Map(candidates.flatMap(process => {
+      const binding = this.childSessionBindingFromActivity(process.processId, activity);
+      return binding ? [[process.processId, binding] as const] : [];
+    }));
+    // A visible ref is an availability transition, not an unverified producer
+    // hint. Keep process identity stable while exact ownership becomes known.
+    const projected = candidates.map(process => {
+      if (bindings.has(process.processId)) return process;
+      const { childSessionRef: _unbound, ...unbound } = process;
+      return unbound;
+    });
     for (const processId of this.processIDsByToolCall.get(activity.toolCallId) ?? []) {
       this.childSessionBindings.delete(processId);
     }
     this.replaceProcessesForToolCall(activity.toolCallId, projected);
-    for (const process of projected) {
-      if (!this.processActivities.has(process.processId)) continue;
-      const binding = this.childSessionBindingFromActivity(process.processId, activity);
-      if (binding) this.childSessionBindings.set(process.processId, binding);
+    for (const [processId, binding] of bindings) {
+      if (this.processActivities.has(processId)) this.childSessionBindings.set(processId, binding);
     }
   }
 

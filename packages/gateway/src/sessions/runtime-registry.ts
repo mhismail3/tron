@@ -164,6 +164,7 @@ async function readOpenedSessionHeader(
 async function readOpenedSessionEntries(
   handle: Awaited<ReturnType<typeof open>>,
   byteCount: number,
+  signal?: AbortSignal,
 ): Promise<import("@earendil-works/pi-coding-agent").FileEntry[] | undefined> {
   if (!Number.isSafeInteger(byteCount) || byteCount < 0) return undefined;
   if (byteCount > MAX_READ_ONLY_SUBAGENT_SESSION_BYTES) {
@@ -175,10 +176,12 @@ async function readOpenedSessionEntries(
   const bytes = Buffer.alloc(byteCount);
   let offset = 0;
   while (offset < bytes.length) {
-    const read = await handle.read(bytes, offset, bytes.length - offset, offset);
+    signal?.throwIfAborted();
+    const read = await handle.read(bytes, offset, Math.min(64 * 1024, bytes.length - offset), offset);
     if (read.bytesRead <= 0) return undefined;
     offset += read.bytesRead;
   }
+  signal?.throwIfAborted();
   try { return parseSessionEntries(bytes.toString("utf8")); }
   catch { return undefined; }
 }
@@ -428,13 +431,12 @@ export class RuntimeRegistry {
     automationId: string;
   }>();
   private readonly mutex = new AsyncMutex();
-  /** Shares one authoritative materialization across concurrent callers. The
-   * promise is disposable; canonical evidence still gates every publication.
-   * An all-scope flight can also satisfy a user-scope caller, while an all-scope
-   * caller waits for (rather than overlaps) an existing user flight. */
-  private catalogMaterializationPromise: Promise<Awaited<ReturnType<RuntimeRegistry["materializeCatalogSnapshot"]>>> | undefined;
-  private catalogMaterializationScope: "user" | "all" | undefined;
-  private catalogMaterializationGeneration: string | undefined;
+  /** One disposable flight per admission scope. All-scope work may wait for a
+   * user cut, but a dashboard never inherits child-only delay or failure. */
+  private readonly catalogMaterializations = new Map<"user" | "all", {
+    generation: string;
+    promise: Promise<Awaited<ReturnType<RuntimeRegistry["materializeCatalogSnapshot"]>>>;
+  }>();
   /** One bounded structural walk can serve catalog and acquisition callers.
    * `refresh` is reserved for a post-materialization stability check. */
   private catalogEvidencePromise: Promise<CatalogStructureEvidence> | undefined;
@@ -1008,7 +1010,7 @@ export class RuntimeRegistry {
       });
       if (result) return result;
     }
-    throw new GatewayError("busy", "Session catalog changed while updating attention", true);
+    throw new GatewayError("busy", "Session catalog changed while updating attention", true, undefined, "catalog_changed");
   }
 
   /** Resolve the inherited transition at runtime bind time. The result is a
@@ -1132,7 +1134,7 @@ export class RuntimeRegistry {
   }
 
   private catalogCapacityExceeded(): never {
-    throw new GatewayError("busy", "Session catalog discovery exceeds its bounded capacity", true);
+    throw new GatewayError("busy", "Session catalog discovery exceeds its bounded capacity", true, undefined, "catalog_capacity");
   }
 
   private invalidateCatalogAdmission(): void {
@@ -1904,28 +1906,21 @@ export class RuntimeRegistry {
     scope: "user" | "all",
   ): Promise<Awaited<ReturnType<RuntimeRegistry["materializeCatalogSnapshot"]>>> {
     const generation = `${this.catalogStructuralGeneration}:${this.catalogAcquisitionInvalidationGeneration}`;
-    const active = this.catalogMaterializationPromise;
+    const active = this.catalogMaterializations.get(scope);
     if (active) {
-      // The full result contains the user result, so it is safe to share in
-      // that direction. A generation change invalidates the result even while
-      // it is in flight; wait for it to retire before starting the fresh cut so
-      // retries cannot overlap another recursive walk.
-      if (this.catalogMaterializationGeneration === generation
-        && (this.catalogMaterializationScope === "all" || scope === "user")) return active;
-      try { await active; } catch { /* the waiting caller starts the required attempt */ }
+      if (active.generation === generation) return active.promise;
+      try { await active.promise; } catch { /* the successor owns its outcome */ }
       return this.sharedCatalogMaterialization(scope);
     }
-
+    const user = scope === "all" ? this.catalogMaterializations.get("user") : undefined;
+    if (user) {
+      try { await user.promise; } catch { /* all-scope admission remains independent */ }
+      return this.sharedCatalogMaterialization(scope);
+    }
     const operation = this.materializeCatalogSnapshot(scope);
-    this.catalogMaterializationPromise = operation;
-    this.catalogMaterializationScope = scope;
-    this.catalogMaterializationGeneration = generation;
+    this.catalogMaterializations.set(scope, { generation, promise: operation });
     void operation.finally(() => {
-      if (this.catalogMaterializationPromise === operation) {
-        this.catalogMaterializationPromise = undefined;
-        this.catalogMaterializationScope = undefined;
-        this.catalogMaterializationGeneration = undefined;
-      }
+      if (this.catalogMaterializations.get(scope)?.promise === operation) this.catalogMaterializations.delete(scope);
     }).catch(() => {});
     return operation;
   }
@@ -2067,7 +2062,7 @@ export class RuntimeRegistry {
     }
     if (!materialized.stable) {
       await this.catalogAcquisitionMutex.run(() => { this.catalogAcquisitionAdmission = undefined; });
-      throw new GatewayError("busy", "Session catalog changed during discovery", true);
+      throw new GatewayError("busy", "Session catalog changed during discovery", true, undefined, "catalog_changed");
     }
 
     const admitted = await this.publishCatalogAcquisition(
@@ -2077,7 +2072,7 @@ export class RuntimeRegistry {
     if (materialized.invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration
         || materialized.structuralGeneration !== this.catalogStructuralGeneration) {
       if (admitted) this.catalogAcquisitionAdmission = undefined;
-      throw new GatewayError("busy", "Session catalog changed during publication", true);
+      throw new GatewayError("busy", "Session catalog changed during publication", true, undefined, "catalog_changed");
     }
     const index: CatalogStructuralIndex = {
       scope,
@@ -2403,7 +2398,7 @@ export class RuntimeRegistry {
     evidence: CatalogStructureEvidence,
   ): Promise<CatalogAcquisitionResolution> {
     if (!evidence.complete) {
-      throw new GatewayError("busy", "Session catalog headers could not be validated", true);
+      throw new GatewayError("busy", "Session catalog headers could not be validated", true, undefined, "catalog_headers_unavailable");
     }
     const identities = [...evidence.identitiesByPath].map(([path, identity]) => ({ path, ...identity }));
     const counts = new Map<string, number>();
@@ -2474,7 +2469,7 @@ export class RuntimeRegistry {
         this.catalogAcquisitionAdmission = { ...resolution, invalidationGeneration };
         return resolution;
       }
-      throw new GatewayError("busy", "Session catalog changed during acquisition", true);
+      throw new GatewayError("busy", "Session catalog changed during acquisition", true, undefined, "catalog_changed");
     });
     if (lightweight) return lightweight;
     return this.fallbackCatalogAcquisition();
@@ -2525,7 +2520,7 @@ export class RuntimeRegistry {
         };
       }
     }
-    throw new GatewayError("busy", "Session catalog changed during acquisition", true);
+    throw new GatewayError("busy", "Session catalog changed during acquisition", true, undefined, "catalog_changed");
   }
 
   private buildCatalogPageSeeds(
@@ -2624,7 +2619,7 @@ export class RuntimeRegistry {
   private createCatalogPageSource(generation: string, listRevision: number, seeds: readonly CatalogPageSeed[]): CatalogPageSource {
     const uniqueIDs = new Set(seeds.map((seed) => seed.id));
     if (uniqueIDs.size !== seeds.length) {
-      throw new GatewayError("busy", "Session catalog identity is ambiguous", true);
+      throw new GatewayError("busy", "Session catalog identity is ambiguous", true, undefined, "catalog_identity_ambiguous");
     }
     const compactByteEstimate = Buffer.byteLength(generation) + 64 + seeds.reduce((total, seed) => total
       + Buffer.byteLength(seed.id) + Buffer.byteLength(seed.cwd) + Buffer.byteLength(seed.kind)
@@ -2818,11 +2813,13 @@ export class RuntimeRegistry {
     expectedParentSessionId: string,
     expectedProcessId: string,
     expectedRunId: string,
+    signal?: AbortSignal,
   ): Promise<ReadOnlySubagentAdmission> {
     assertProcessSessionRef(childSessionRef);
-    const acquisition = await this.catalogAcquisition();
+    const acquisition = await abortableRead(signal, () => this.catalogAcquisition());
     this.requireUnambiguousSessionId(expectedParentSessionId, acquisition.ambiguousIDs);
     this.requireUnambiguousSessionId(childSessionRef, acquisition.ambiguousIDs);
+    signal?.throwIfAborted();
     const parentSlot = this.slots.get(expectedParentSessionId);
     const binding = parentSlot?.processChildSessionBinding(expectedProcessId);
     const expectedParentPath = parentSlot?.sessionFile;
@@ -2851,6 +2848,7 @@ export class RuntimeRegistry {
         binding.producerId,
         binding.sessionOwnerId,
       );
+      signal?.throwIfAborted();
       if (!admitted) continue;
       if (entry) {
         if (!entry.structuralSubagent
@@ -2874,6 +2872,7 @@ export class RuntimeRegistry {
     before?: number,
     expectedNextEntryId?: string,
     expectedFileIdentity?: string,
+    signal?: AbortSignal,
   ): Promise<TranscriptPage & { revision: string; fileIdentity: string }> {
     const admitted = await this.resolveReadOnlySubagentPath(
       childSessionRef,
@@ -2881,12 +2880,14 @@ export class RuntimeRegistry {
       expectedParentSessionId,
       expectedProcessId,
       expectedRunId,
+      signal,
     );
     if (admitted.path !== path || (expectedFileIdentity !== undefined && admitted.fileIdentity !== expectedFileIdentity)) {
       throw new GatewayError("conflict", "Subagent session file was replaced", true);
     }
     const handle = await open(admitted.path, "r");
     try {
+      signal?.throwIfAborted();
       const metadata = await handle.stat();
       const fileIdentity = `${metadata.dev}:${metadata.ino}`;
       if (!metadata.isFile() || fileIdentity !== admitted.fileIdentity) {
@@ -2902,7 +2903,8 @@ export class RuntimeRegistry {
       // Parse the already-open descriptor. Opening the path again here would
       // allow replace/read/swap-back to project a different inode while the
       // final path metadata appeared unchanged.
-      const childEntries = await readOpenedSessionEntries(handle, metadata.size);
+      const childEntries = await readOpenedSessionEntries(handle, metadata.size, signal);
+      signal?.throwIfAborted();
       const parsed = childEntries ? branchFromParsedSession(childEntries) : undefined;
       if (!parsed || parsed.sessionId !== childSessionRef) {
         throw new GatewayError("conflict", "Subagent session identity changed", true);
@@ -2942,6 +2944,7 @@ export class RuntimeRegistry {
         || afterHandle.size < metadata.size || sameSizeMutation) {
         throw new GatewayError("busy", "Subagent session changed during projection", true);
       }
+      signal?.throwIfAborted();
       const confirmedHeader = await readOpenedSessionHeader(handle, afterHandle.size);
       if (!confirmedHeader || confirmedHeader.sessionId !== childSessionRef
         || confirmedHeader.parentSession !== parsed.parentSession) {
@@ -3162,23 +3165,23 @@ export class RuntimeRegistry {
         const invalidationGeneration = acquisition.fallbackInvalidationGeneration;
         if (invalidationGeneration === undefined
           || invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration) {
-          throw new GatewayError("busy", "Session catalog changed while opening the session", true);
+          throw new GatewayError("busy", "Session catalog changed while opening the session", true, undefined, "catalog_changed");
         }
         const finalEvidence = await this.sharedCatalogStructureEvidence(true);
         const finalInfos = this.withCatalogEvidence(await this.sessionInfos(), finalEvidence);
         if (invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration
           || this.sdkCatalogIdentityFingerprint(finalInfos) !== acquisition.fallbackIdentityFingerprint) {
-          throw new GatewayError("busy", "Session catalog changed while opening the session", true);
+          throw new GatewayError("busy", "Session catalog changed while opening the session", true, undefined, "catalog_changed");
         }
       } else {
         const validated = await this.sharedCatalogStructureEvidence(true);
         if (!validated.complete || validated.digest !== acquisition.structureDigest
           || validated.unstableCanonicalPaths?.has(canonicalPath)) {
-          throw new GatewayError("busy", "Session catalog changed while opening the session", true);
+          throw new GatewayError("busy", "Session catalog changed while opening the session", true, undefined, "catalog_changed");
         }
       }
       if (selectedAcquisitionGeneration !== this.catalogAcquisitionInvalidationGeneration) {
-        throw new GatewayError("busy", "Session catalog changed while opening the session", true);
+        throw new GatewayError("busy", "Session catalog changed while opening the session", true, undefined, "catalog_changed");
       }
       slot = await this.timedStage(
         "session.open.runtime",
@@ -3408,7 +3411,7 @@ export class RuntimeRegistry {
     // cannot make a stale user admission destructive.
     const evidence = await this.catalogStructureEvidence();
     if (!evidence.complete || evidence.digest !== admittedStructureDigest) {
-      throw new GatewayError("busy", "Session catalog changed before deletion", true);
+      throw new GatewayError("busy", "Session catalog changed before deletion", true, undefined, "catalog_changed");
     }
     const acquisition = await this.buildCatalogAcquisition(evidence);
     const entry = acquisition.entriesByID.get(expectedSessionId);

@@ -1,3 +1,4 @@
+import { abortableRead } from "../util/abortable-read.js";
 import { performance } from "node:perf_hooks";
 import type { AuthType } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -1095,8 +1096,9 @@ export class GatewayService {
           client.id, sessionId, viewerId, parentSubscriptionToken, client.signal,
         );
         try {
-          const slot = await this.openedSlot(client, { ...params, sessionId });
+          const slot = await abortableRead(reservation.signal, () => this.openedSlot(client, { ...params, sessionId }));
           await slot.reconcileProcessChildSessionBinding(processId);
+          reservation.signal.throwIfAborted();
           const binding = slot.processChildSessionBinding(processId);
           if (!binding?.runId) throw new GatewayError("not_found", "Subagent session ownership is unavailable");
           const live = slot.processChildSessionPath(processId);

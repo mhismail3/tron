@@ -12,6 +12,7 @@ export interface LogRecord {
   method?: string;
   outcome?: string;
   code?: string;
+  reason?: string;
   durationMs?: number;
 }
 
@@ -48,7 +49,7 @@ export class GatewayLogger {
     this.loadPersisted();
   }
 
-  log(level: LogRecord["level"], message: string, metadata: { event?: string; source?: string; requestID?: string; method?: string; outcome?: string; code?: string; durationMs?: number } = {}): void {
+  log(level: LogRecord["level"], message: string, metadata: { event?: string; source?: string; requestID?: string; method?: string; outcome?: string; code?: string; reason?: string; durationMs?: number } = {}): void {
     const record: LogRecord = {
       timestamp: new Date().toISOString(),
       level,
@@ -58,6 +59,7 @@ export class GatewayLogger {
       ...(metadata.requestID ? { requestID: boundedDiagnosticID(metadata.requestID) } : {}),
       ...(metadata.method ? { method: boundedMessage(metadata.method).slice(0, 160) } : {}),
       ...(metadata.outcome ? { outcome: boundedMessage(metadata.outcome).slice(0, 64) } : {}),
+      ...(metadata.reason ? { reason: boundedDiagnosticID(metadata.reason).slice(0, 64) } : {}),
       ...(metadata.code ? { code: boundedMessage(metadata.code).slice(0, 64) } : {}),
       ...(metadata.durationMs !== undefined ? { durationMs: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(metadata.durationMs))) } : {}),
     };
@@ -92,6 +94,7 @@ export class GatewayLogger {
               ...(typeof value.requestID === "string" ? { requestID: boundedDiagnosticID(value.requestID) } : {}),
               ...(typeof value.method === "string" ? { method: boundedMessage(value.method).slice(0, 160) } : {}),
               ...(typeof value.outcome === "string" ? { outcome: boundedMessage(value.outcome).slice(0, 64) } : {}),
+              ...(typeof value.reason === "string" ? { reason: boundedDiagnosticID(value.reason).slice(0, 64) } : {}),
               ...(typeof value.code === "string" ? { code: boundedMessage(value.code).slice(0, 64) } : {}),
               ...(typeof value.durationMs === "number" ? { durationMs: Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.round(value.durationMs))) } : {}),
             });

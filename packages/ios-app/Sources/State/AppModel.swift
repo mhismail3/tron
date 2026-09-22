@@ -2547,7 +2547,8 @@ final class AppModel {
                     "version=\($0.gatewayVersion) channel=\($0.gatewayChannel) runtime=\($0.runtimeEpoch ?? "unknown") sourceRevision=\($0.sourceRevision ?? "unknown")"
                 } ?? "unknown")
             }),
-            sourceStatuses: sourceStatuses
+            sourceStatuses: sourceStatuses,
+            appSourceRevision: IOSBuildIdentity.sourceRevision()
         )
     }
 

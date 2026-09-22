@@ -3,6 +3,29 @@ import Testing
 @testable import TronMobile
 
 struct GatewayLogExportTests {
+    @Test("built app carries a validated source identity independently of Gateway metadata")
+    func bundledSourceIdentity() {
+        #expect(IOSBuildIdentity.sourceRevision() != nil)
+    }
+
+    @Test("structured RPC correlation survives decoding and export without arbitrary data")
+    func structuredCorrelation() throws {
+        let data = Data(#"{"timestamp":"2026-01-01T00:00:00Z","level":"error","message":"RPC failed","method":"session.processTranscript.open","requestID":"request-7","code":"busy","reason":"viewer_capacity","outcome":"failure","durationMs":1542,"params":{"prompt":"private-prompt"}}"#.utf8)
+        let row = try JSONDecoder().decode(GatewayLogRecord.self, from: data)
+        var metadata = GatewayLogCaptureMetadata.empty
+        metadata.appSourceRevision = String(repeating: "a", count: 40) + "-dirty"
+        let exported = GatewayLogExport.text(records: [GatewayProfileLogRecord(profileID: "fixture", profileLabel: "fixture", record: row)], metadata: metadata)
+        for field in ["method=session.processTranscript.open", "requestID=request-7", "code=busy", "reason=viewer_capacity", "outcome=failure", "durationMs=1542", "appSourceRevision=" + String(repeating: "a", count: 40) + "-dirty"] {
+            #expect(exported.contains(field))
+        }
+        #expect(!exported.contains("private-prompt"))
+        let concurrent = try JSONDecoder().decode(GatewayLogRecord.self, from: Data(String(decoding: data, as: UTF8.self).replacingOccurrences(of: "request-7", with: "request-8").utf8))
+        #expect(row.id != concurrent.id)
+        let unsafe = GatewayLogRecord(timestamp: "now", level: "error", message: "safe", method: "/Users/private/path", requestID: String(repeating: "x", count: 161), code: "line\nbreak", durationMs: -1)
+        let rejected = GatewayLogExport.text(records: [GatewayProfileLogRecord(profileID: "fixture", profileLabel: "fixture", record: unsafe)], metadata: .empty)
+        for field in ["method=", "requestID=", "code=", "durationMs=", "/Users/private"] { #expect(!rejected.contains(field)) }
+    }
+
     @Test("share availability explains empty, loading, and unsupported states")
     func shareAvailability() {
         #expect(GatewayLogShareAvailability.resolve(

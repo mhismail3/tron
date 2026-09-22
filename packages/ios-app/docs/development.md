@@ -1607,3 +1607,7 @@ The app declares local-network and camera usage. Voice input remains available
 through system-keyboard dictation; the app does not currently own microphone or
 speech-recognition capture. Provider credentials must never be placed in fixtures,
 defaults, logs, or UserDefaults.
+
+### Diagnostic source identity
+
+The app build stamps `TronBuildIdentity.json` into its signed resources with the source commit and dirty state. Logs Share uses that app identity independently of the connected Gateway revision. Export retains only bounded RPC method/request IDs, outcome, code, fixed admission reason, and duration; it never serializes request parameters or arbitrary error details. Missing build identity is reported as unknown.

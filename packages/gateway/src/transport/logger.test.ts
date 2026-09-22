@@ -11,6 +11,17 @@ afterEach(() => {
 });
 
 describe("GatewayLogger", () => {
+  it("retains safe RPC correlation and distinct admission reasons across restart", () => {
+    const directory = mkdtempSync(join(tmpdir(), "tron-logs-"));
+    temporaryDirectories.push(directory);
+    const path = join(directory, "gateway.jsonl");
+    const logger = new GatewayLogger(path);
+    logger.log("error", "RPC failed", { event: "rpc.error", method: "session.processTranscript.open",
+      requestID: "request-7", code: "busy", reason: "viewer_capacity", outcome: "failure", durationMs: 1542 });
+    expect(new GatewayLogger(path).recent(1)[0]).toMatchObject({ method: "session.processTranscript.open",
+      requestID: "request-7", code: "busy", reason: "viewer_capacity", outcome: "failure", durationMs: 1542 });
+  });
+
   it("retains bounded structured request attribution without logging payloads", () => {
     const logger = new GatewayLogger();
     logger.log("warning", "RPC session.list completed", {
