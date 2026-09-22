@@ -524,12 +524,12 @@ struct ProjectResourceDetailSheet: View {
                     )
                 } else if detail != nil {
                     Text("This resource has no body content.")
-                        .font(TronTypography.bodySM)
+                        .font(TronTypography.secondaryDescription)
                         .foregroundStyle(Color.tronTextSecondary)
                 } else if let loadError {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(loadError)
-                            .font(TronTypography.bodySM)
+                            .font(TronTypography.secondaryDescription)
                             .foregroundStyle(Color.tronTextSecondary)
                         Button("Try Again", systemImage: "arrow.clockwise") { loadRevision &+= 1 }
                             .font(TronTypography.buttonSM)
@@ -537,7 +537,7 @@ struct ProjectResourceDetailSheet: View {
                     }
                 } else if selection.commandInfo == nil {
                     Text("This resource does not expose body content.")
-                        .font(TronTypography.bodySM)
+                        .font(TronTypography.secondaryDescription)
                         .foregroundStyle(Color.tronTextSecondary)
                 } else {
                     TronLoadingState(label: "Loading resource content…", accent: accent)
