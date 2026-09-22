@@ -644,6 +644,21 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(catalog).not.toHaveBeenCalled();
   });
 
+  it("acknowledges attention for a live persisted session without walking catalog headers", async () => {
+    const fixture = await coldFixture("attention-live-owner");
+    const sessionId = fixture.manager.getSessionId();
+    const slot = await fixture.registry.acquire(sessionId);
+    expect(slot.persistedSessionFile).toBeDefined();
+    const evidence = vi.spyOn(fixture.registry as any, "catalogStructureEvidence");
+    await expect(fixture.registry.setAttention(sessionId, true)).resolves.toMatchObject({ isUnread: true });
+    await expect(fixture.registry.setAttention(sessionId, false, 0)).resolves.toMatchObject({ isUnread: false });
+    expect(evidence).not.toHaveBeenCalled();
+
+    // Once the runtime owner is gone, membership again requires catalog proof.
+    await fixture.registry.delete(sessionId);
+    await expect(fixture.registry.setAttention(sessionId, true)).rejects.toMatchObject({ code: "not_found" });
+  });
+
   it("merges a suspended attention write into latest summary facts and cannot race deletion", async () => {
     const fixture = await coldFixture("attention-races");
     const sessionId = fixture.manager.getSessionId();
@@ -2000,6 +2015,33 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       } finally {
         admission.mockRestore();
       }
+    }
+  });
+
+  it("opens a cold session while unrelated catalog files appear in the admission gap", async () => {
+    const fixture = await coldFixture("unrelated-open-churn");
+    await fixture.registry.catalog("all");
+    const internals = fixture.registry as unknown as { catalogAcquisition: () => Promise<unknown> };
+    const original = internals.catalogAcquisition.bind(fixture.registry);
+    const admission = vi.spyOn(internals, "catalogAcquisition").mockImplementation(async () => {
+      const acquired = await original();
+      // An active parent's subagent writes a new delegated child, and another
+      // client creates an unrelated session, before this open validates.
+      const childDirectory = join(fixture.agentDir, "sessions", "active-parent", "worker", "run-0");
+      await mkdir(childDirectory, { recursive: true });
+      await writeFile(join(fixture.agentDir, "sessions", "active-parent.jsonl"), `${JSON.stringify({
+        type: "session", version: 3, id: "active-parent", timestamp: new Date().toISOString(), cwd: fixture.cwd,
+      })}\n`);
+      await writeFile(join(childDirectory, "session.jsonl"), `${JSON.stringify({
+        type: "session", version: 3, id: "active-child", timestamp: new Date().toISOString(), cwd: fixture.cwd,
+      })}\n`);
+      return acquired;
+    });
+    try {
+      expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id).toBe(fixture.manager.getSessionId());
+      expect(fixture.runtimeFactory).toHaveBeenCalledTimes(1);
+    } finally {
+      admission.mockRestore();
     }
   });
 

@@ -687,6 +687,72 @@ describe("WebSocket connection and outbound capacity", () => {
     },
   );
 
+  it("supersedes an identity's least recently active socket instead of rejecting its reconnect", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-server-supersede-"));
+    const sockets: WebSocket[] = [];
+    let gateway: GatewayServer | undefined;
+    cleanups.push(async () => {
+      for (const socket of sockets) if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
+      await bounded(gateway?.close() ?? Promise.resolve(), "supersede fixture close");
+      await rm(root, { recursive: true, force: true });
+    });
+    const devices = new DeviceStore(root, "machine");
+    await devices.initialize();
+    const phone = await devices.pair((await devices.ensureEnrollment()).code, "Phone");
+    const port = await unusedPort();
+    const logger = { log: vi.fn() };
+    gateway = new GatewayServer({
+      host: "127.0.0.1",
+      port,
+      maxFrameBytes: 16_384,
+      maximumConnections: 8,
+      maximumConnectionsPerIdentity: 2,
+      devices,
+      uploads: {} as any,
+      sessions: { unsubscribeClient: vi.fn() } as any,
+      auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
+      service: {
+        info: () => ({ protocolVersion: 5 }),
+        terminalBelongsToSession: () => false,
+        releaseClient: vi.fn(),
+        invoke: async () => ({ ok: true }),
+      } as any,
+      logger: logger as any,
+    });
+    await gateway.listen();
+    const connect = async (label: string) => {
+      const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${phone.token}` } });
+      sockets.push(socket);
+      const frames: any[] = [];
+      socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
+      socket.on("error", () => {});
+      await bounded(new Promise<void>((resolve, reject) => {
+        socket.once("open", () => resolve());
+        socket.once("unexpected-response", () => reject(new Error(`${label} was rejected`)));
+      }), `${label} open`);
+      socket.send(JSON.stringify({ type: "hello", protocolVersion: 5, clientRole: "mobile" }));
+      await bounded(waitUntil(() => frames.some((frame) => frame.type === "hello")), `${label} hello`);
+      return { socket, frames };
+    };
+
+    const active = await connect("active");
+    const stale = await connect("stale");
+    const staleClosed = new Promise<number>((resolve) => stale.socket.once("close", (code) => resolve(code)));
+    // The older socket is the more recently active one; admission must retire
+    // by activity rather than connection age.
+    active.socket.send(JSON.stringify({ type: "request", id: "progress", method: "test.progress", params: {} }));
+    await bounded(waitUntil(() => active.frames.some((frame) => frame.id === "progress")), "active progress");
+
+    const replacement = await connect("replacement");
+    expect(await bounded(staleClosed, "stale supersession")).toBe(4000);
+    expect(active.socket.readyState).toBe(WebSocket.OPEN);
+    expect(replacement.socket.readyState).toBe(WebSocket.OPEN);
+    expect(logger.log.mock.calls.filter((call) => call[2]?.event === "connection.superseded")).toHaveLength(1);
+    expect(logger.log.mock.calls.some((call) => call[2]?.event === "connection.capacity")).toBe(false);
+    replacement.socket.send(JSON.stringify({ type: "request", id: "usable", method: "test.usable", params: {} }));
+    await bounded(waitUntil(() => replacement.frames.some((frame) => frame.id === "usable" && frame.ok)), "replacement request");
+  });
+
   it("admits same-turn ordered bursts, rejects connection overflow, and closes byte-oversized output", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-server-capacity-"));
     let gateway: GatewayServer | undefined;
@@ -697,6 +763,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
     const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const paired = await devices.pair((await devices.ensureEnrollment()).code, "Phone");
     const port = await unusedPort();
     const logger = { log: vi.fn() };
     const service = {
@@ -728,7 +795,8 @@ describe("WebSocket connection and outbound capacity", () => {
     first.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
     await waitUntil(() => frames.some((frame) => frame.type === "hello"));
 
-    const rejected = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
+    // Global capacity never displaces another identity's live connection.
+    const rejected = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${paired.token}` } });
     const rejectedStatus = await new Promise<number>((resolve, reject) => {
       rejected.once("unexpected-response", (_request, response) => {
         response.resume();
@@ -737,6 +805,7 @@ describe("WebSocket connection and outbound capacity", () => {
       rejected.once("error", reject);
     });
     expect(rejectedStatus).toBe(503);
+    expect(first.readyState).toBe(WebSocket.OPEN);
 
     for (let sequence = 1; sequence <= 64; sequence += 1) {
       gateway.broadcast("test.event", { sequence });

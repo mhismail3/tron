@@ -1842,7 +1842,11 @@ across eight projects through child-file churn and repeated client reentry.
 
 Catalog acquisition generations share one physical predecessor and coalesce its
 successor after settlement, including failure. Invalidations cannot multiply
-concurrent discovery work. Every opened header descriptor closes even if its
+concurrent discovery work. A live persisted `RuntimeSlot` proves membership for
+attention reads and writes, as it does for `acquire`, so acknowledging an open
+chat never walks catalog headers. A cold open's final validation fences only
+the target: exactly one unchanged canonical claimant for its ID. Unrelated
+catalog churn, such as files created by active subagents, cannot fail the open. Every opened header descriptor closes even if its
 initial tail probe fails. Upload and display orphan maintenance resolve canonical
 session membership inside their respective serialized ownership lanes, after
 previous claims/grants commit; discovery failure preserves ownership rather than

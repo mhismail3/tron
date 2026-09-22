@@ -930,21 +930,29 @@ export class RuntimeRegistry {
   }
 
   private async resolveAttentionAdmission(sessionId: string): Promise<{
-    acquisition: CatalogAcquisitionResolution;
     generation: number;
     entry?: CatalogAcquisitionEntry;
     liveOnlySlot?: RuntimeSlot;
+    persistedSlot?: RuntimeSlot;
   }> {
+    // A live persisted slot owns its canonical file, which is the same
+    // membership proof `acquire` accepts. Opening a chat acknowledges attention
+    // immediately, so this must not cost a whole-catalog header walk.
+    const persistedSlot = this.slots.get(sessionId);
+    if (persistedSlot && !persistedSlot.isDisposed && persistedSlot.persistedSessionFile !== undefined
+      && !this.ambiguousSessionIds.has(sessionId)) {
+      return { generation: this.catalogAcquisitionInvalidationGeneration, persistedSlot };
+    }
     const acquisition = await this.timedStage("attention.resolve", () => this.catalogAcquisition());
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
     const entry = acquisition.entriesByID.get(sessionId);
-    if (entry) return { acquisition, generation: this.catalogAcquisitionInvalidationGeneration, entry };
+    if (entry) return { generation: this.catalogAcquisitionInvalidationGeneration, entry };
     // Empty sessions are visible before their first canonical append. Their
     // exact runtime owner is a valid attention target until it is persisted or
     // disposed; a disk claimant would already be quarantined above.
     const liveOnlySlot = this.slots.get(sessionId);
     if (liveOnlySlot && !liveOnlySlot.isDisposed && liveOnlySlot.persistedSessionFile === undefined) {
-      return { acquisition, generation: this.catalogAcquisitionInvalidationGeneration, liveOnlySlot };
+      return { generation: this.catalogAcquisitionInvalidationGeneration, liveOnlySlot };
     }
     throw new GatewayError("not_found", "Tron session was not found");
   }
@@ -965,7 +973,12 @@ export class RuntimeRegistry {
         const currentEntry = current?.entriesByID.get(sessionId);
         const currentLiveOnly = this.slots.get(sessionId);
         const admittedEntry = admission.entry;
-        if (admission.generation !== this.catalogAcquisitionInvalidationGeneration
+        if (admission.persistedSlot !== undefined) {
+          // Runtime ownership, not unrelated catalog churn, fences this commit.
+          if (currentLiveOnly !== admission.persistedSlot || currentLiveOnly.isDisposed
+            || currentLiveOnly.persistedSessionFile === undefined
+            || this.ambiguousSessionIds.has(sessionId)) return undefined;
+        } else if (admission.generation !== this.catalogAcquisitionInvalidationGeneration
           || current !== undefined && admittedEntry !== undefined && (
             currentEntry === undefined
             || currentEntry.path !== admittedEntry.path
@@ -3181,8 +3194,15 @@ export class RuntimeRegistry {
           throw new GatewayError("busy", "Session catalog changed while opening the session", true, undefined, "catalog_changed");
         }
       } else {
+        // Fence this session's own identity: exactly one unchanged canonical
+        // claimant. Unrelated churn (active subagents create child files
+        // continuously) must not make every cold open fail as catalog_changed.
         const validated = await this.sharedCatalogStructureEvidence(true);
-        if (!validated.complete || validated.digest !== acquisition.structureDigest
+        const claimants = [...validated.identitiesByPath].filter(([, identity]) => identity.id === sessionId);
+        const [claimedPath, claimed] = claimants[0] ?? [];
+        if (!validated.complete || claimants.length !== 1
+          || claimedPath === undefined || resolve(claimedPath) !== canonicalPath
+          || (entry.fileIdentity !== undefined && claimed?.fileIdentity !== entry.fileIdentity)
           || validated.unstableCanonicalPaths?.has(canonicalPath)) {
           throw new GatewayError("busy", "Session catalog changed while opening the session", true, undefined, "catalog_changed");
         }

@@ -23,6 +23,8 @@ import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 // IDs are stale control paths and may safely require a fresh session.open.
 export const MAXIMUM_REKEYED_SESSION_IDS = 64;
 export const MAXIMUM_UNANSWERED_HEARTBEATS = 3;
+/** Application-defined close code for a socket replaced by its own identity. */
+export const SUPERSEDED_CLOSE_CODE = 4000;
 
 function diagnosticRequestID(value: string): string {
   return value.replace(/[^A-Za-z0-9._:-]/gu, "_").slice(0, 160);
@@ -1161,12 +1163,34 @@ export class GatewayServer {
         const identity = authenticated.kind === "local" ? "local-wrapper" : authenticated.deviceId;
         const maximumConnections = this.options.maximumConnections ?? 32;
         const maximumPerIdentity = this.options.maximumConnectionsPerIdentity ?? 4;
-        const identityConnections = [...this.clients.values()].filter((client) => client.identity === identity).length;
-        if (this.clients.size >= maximumConnections || identityConnections >= maximumPerIdentity) {
-          this.options.logger.log("warning", `Rejected socket upgrade at connection capacity (connections=${this.clients.size} maximumConnections=${maximumConnections} identityConnections=${identityConnections} maximumPerIdentity=${maximumPerIdentity})`, { event: "connection.capacity", source: "transport" });
+        // A closing connection has already retired its work and is terminated
+        // within one second; it is not live capacity.
+        const live = [...this.clients.values()].filter((client) => !client.closeInitiated);
+        const identityConnections = live
+          .filter((client) => client.identity === identity)
+          .sort((left, right) => (left.lastInboundAt ?? left.admittedAt) - (right.lastInboundAt ?? right.admittedAt));
+        // A roaming or suspended phone leaves half-open sockets that heartbeat
+        // reaping only retires after minutes. The same authenticated identity
+        // opening a new socket is stronger evidence than those stale epochs, so
+        // the newest connection supersedes that identity's least recently active
+        // ones instead of locking the device out. Other identities are never
+        // displaced: global capacity still rejects them.
+        let superseded = 0;
+        while (superseded < identityConnections.length
+          && (identityConnections.length - superseded >= maximumPerIdentity
+            || live.length - superseded >= maximumConnections)) {
+          superseded += 1;
+        }
+        if (live.length - superseded >= maximumConnections) {
+          this.options.logger.log("warning", `Rejected socket upgrade at connection capacity (connections=${live.length} maximumConnections=${maximumConnections} identityConnections=${identityConnections.length} maximumPerIdentity=${maximumPerIdentity})`, { event: "connection.capacity", source: "transport" });
           socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
           socket.destroy();
           return false;
+        }
+        const supersededAt = performance.now();
+        for (const client of identityConnections.slice(0, superseded)) {
+          this.options.logger.log("warning", `Superseding client ${client.id} with a newer connection from the same identity (lastInboundAgeMs=${progressAge(client.lastInboundAt, supersededAt)} identityConnections=${identityConnections.length} maximumPerIdentity=${maximumPerIdentity})`, { event: "connection.superseded", source: "transport" });
+          this.closeFailedConnection(client, SUPERSEDED_CLOSE_CODE, "superseded by a newer connection");
         }
         this.sockets.handleUpgrade(request, socket, head, (webSocket) => {
           this.admit(webSocket, identity, authenticated.kind === "local");

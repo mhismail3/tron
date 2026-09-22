@@ -12,6 +12,13 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   either limit loses request/subscription admission immediately; a one-second
   forced-close deadline bounds a stalled close handshake. Other peers and
   accepted domain commands continue independently.
+- **WebSocket admission:** live sockets cap at 32 globally and 4 per
+  authenticated identity. A roaming or suspended phone leaves half-open sockets
+  that heartbeat reaping retires only after three missed 25-second intervals,
+  so a new socket from the same identity supersedes that identity's least
+  recently active sockets (close code 4000, `connection.superseded`) instead of
+  locking the device out with 503. Other identities are never displaced;
+  global capacity still rejects them. Closing sockets are not live capacity.
 - **Projection:** the wire ceiling remains 1 MiB, with a shared 32,768 JSON-value
   node ceiling for local and mobile clients. Transcript pages reserve 24,000
   nodes and snapshots 30,000; dense detail is compacted without editing canonical
@@ -100,6 +107,7 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
 | `event_overflow` with topic, count/byte limit, oldest age and dequeue timing | Mobile consumer pressure. Trace what held the consumer, including synchronization reads; do not merely enlarge the queue. |
 | `connection.outbound-capacity` | Actual server queue count/byte pressure. Inspect high-water marks, `wsBufferedBytes`, next-frame bytes and process memory. |
 | `connection.capacity` / `http.request-capacity` / `http.connection-capacity` | Inspect the named global, identity, address or connection bound and retiring owners; one physical socket is not one request. |
+| `connection.superseded` | The same identity reconnected while at its socket cap. Its logged `lastInboundAgeMs` shows how stale the replaced socket was; repeated supersession of fresh sockets suggests a client owning more concurrent sockets than the cap. |
 | `http.authentication-timeout` | A pending upgrade exceeded its authentication deadline. The callback is fenced and its cancellable credential wait is retired. |
 | `closeCode` / `httpStatusCode` / `platformCode` | Separate facts, never interchangeable numbers. HTTP 401/403 stop automatic admission; 503 is retryable capacity/unavailability. URLSession may report 1005/1006 rather than expose the peer's exact close frame; that absence must remain explicit. |
 | `connection.projection-rejected` | A producer violated the projection contract. Narrow/reproduce that producer instead of reconnecting the whole service indefinitely. |
