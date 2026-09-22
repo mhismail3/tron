@@ -399,6 +399,7 @@ export class GatewayService {
       case "knowledge.config":
       case "knowledge.observation.dismiss":
       case "knowledge.source.capture":
+      case "knowledge.source.preview.refresh":
       case "knowledge.source.triage":
       case "knowledge.source.admission":
       case "knowledge.note.create":

@@ -5,14 +5,14 @@ import type { KnowledgeAction, KnowledgeConfig, KnowledgeListRequest, KnowledgeR
 import type { KnowledgeStore } from "./knowledge-store.js";
 import { KnowledgeObservationService, type ObservationSettlement } from "./knowledge-observation.js";
 import { awaitAbortableWithSettlement } from "./model-await.js";
-import { captureSource, readPublicXPost, type SourceAssessmentModel } from "./source-capture.js";
+import { captureSource, readPublicXPost, refreshSourcePreview, type SourceAssessmentModel } from "./source-capture.js";
 import { triageSource } from "./source-triage.js";
 import { GatewayError, asUncertainOutcome } from "../errors.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 import { currentInvocationContext } from "../extensions/owner-attribution.js";
 
 const toolParameters = Type.Object({
-  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("triageSource"), Type.Literal("restoreSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorSweep"), Type.Literal("x"), Type.Literal("raindrop"), Type.Literal("raindropIntake"), Type.Literal("synthesis")]),
+  action: Type.Union([Type.Literal("search"), Type.Literal("recall"), Type.Literal("read"), Type.Literal("readObject"), Type.Literal("list"), Type.Literal("captureSource"), Type.Literal("refreshPreview"), Type.Literal("triageSource"), Type.Literal("restoreSource"), Type.Literal("createNote"), Type.Literal("updateNote"), Type.Literal("connectorSweep"), Type.Literal("x"), Type.Literal("raindrop"), Type.Literal("raindropIntake"), Type.Literal("synthesis")]),
   query: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
   commandId: Type.Optional(Type.String({ minLength: 8, maxLength: 160 })),
   connector: Type.Optional(Type.Union([Type.Literal("raindrop"), Type.Literal("x")])),
@@ -293,6 +293,9 @@ export class KnowledgeService {
       case "knowledge.read": return this.store.read(action.request.id, action.request.revisionId, action.request.includeSuppressed, action.request.includeArchived, action.request.includePending);
       case "knowledge.search": return this.store.search(action.request);
       case "knowledge.recall": return this.store.recall(action.request);
+      case "knowledge.source.preview.refresh": {
+        return this.runOwned("source preview refresh", (signal, retirements) => refreshSourcePreview(this.store, action.request, { signal, retirements }), signal);
+      }
       case "knowledge.source.capture": {
         const config = await this.store.config();
         // Free public hydration is capture only. Paid assessment is a separate
@@ -466,6 +469,11 @@ export class KnowledgeService {
         const text = JSON.stringify(result);
         if (Buffer.byteLength(text, "utf8") > 128_000) throw new GatewayError("invalid_request", "X response exceeds the read tool bound; use captureSource with publicPostLookup and then bounded readObject");
         return { text, details: result };
+      }
+      case "refreshPreview": {
+        if (!parameters.commandId || !parameters.sourceId || !parameters.revisionId) throw new GatewayError("invalid_request", "Preview refresh requires commandId, sourceId, and revisionId");
+        const result = await this.invoke({ operation: "knowledge.source.preview.refresh", request: { commandId: parameters.commandId, sourceId: parameters.sourceId, expectedRevision: parameters.revisionId } }, signal);
+        return { text: `Preview refresh ${result && typeof result === "object" && "status" in result ? String(result.status) : "completed"}.`, details: result };
       }
       case "captureSource": {
         if (!parameters.commandId || !parameters.url || !parameters.scope) throw new GatewayError("invalid_request", "Source capture requires commandId, url, and scope");

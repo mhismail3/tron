@@ -70,6 +70,17 @@ source text as fetched evidence. Partial records remain partial; the existing
 Raindrop intake must not acknowledge/move an item solely because a mirror worked.
 This skill does not approve paid assessment, remote writes, or recurring work.
 
+### Refreshing an existing source thumbnail
+
+Use the owning mutation `knowledge.source.preview.refresh` only for an exact
+existing source: `{commandId, sourceId, expectedRevision}`. It captures one
+bounded JPEG/PNG/WebP preview from validated HTML metadata or an X Article cover,
+without re-ingesting the source, fetching linked targets, assessing, changing
+admission, or creating a duplicate. Results are `updated`, `unchanged`,
+`no-image`, or `unavailable` with an explicit reason. A source that already has
+a preview is not fetched again; missing or failed previews never erase a prior
+image. Reconcile an uncertain command outcome before retrying it.
+
 ### If the running Gateway does not yet expose `action=x`
 
 Do not rebuild/restart it. Use the already installed generic tools for a bounded

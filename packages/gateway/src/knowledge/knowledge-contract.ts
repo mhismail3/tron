@@ -443,6 +443,19 @@ export interface KnowledgeSourceURLCaptureRequest {
  * source/import implementations and are not part of the Gateway action. */
 export type KnowledgeSourceCaptureRequest = KnowledgeSourceURLCaptureRequest;
 
+export interface KnowledgeSourcePreviewRefreshRequest {
+  commandId: string;
+  sourceId: string;
+  expectedRevision: string;
+}
+export interface KnowledgeSourcePreviewRefreshResult {
+  sourceId: string;
+  expectedRevision: string;
+  status: "updated" | "unchanged" | "no-image" | "unavailable";
+  reason: string;
+  record?: KnowledgeRecord;
+}
+
 export interface KnowledgeNoteMutationRequest {
   commandId: string;
   /** Set only by the trusted native explicit-confirmation owner. */
@@ -666,6 +679,7 @@ export type KnowledgeAction =
   | { operation: "knowledge.search"; request: KnowledgeSearchRequest }
   | { operation: "knowledge.recall"; request: KnowledgeRecallRequest }
   | { operation: "knowledge.source.capture"; request: KnowledgeSourceCaptureRequest }
+  | { operation: "knowledge.source.preview.refresh"; request: KnowledgeSourcePreviewRefreshRequest }
   | { operation: "knowledge.note.create"; request: KnowledgeNoteMutationRequest & { recordId?: never } }
   | { operation: "knowledge.note.update"; request: KnowledgeNoteMutationRequest & { recordId: string } }
   | { operation: "knowledge.reflect"; request: KnowledgeReflectRequest }

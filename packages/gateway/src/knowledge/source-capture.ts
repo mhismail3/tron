@@ -6,7 +6,7 @@ import { isIP } from "node:net";
 import type {
   KnowledgeEvidenceRef, KnowledgeObjectRef, KnowledgeRecord, KnowledgeRecordDraft,
   KnowledgeScope, SourceAssessment, SourceContent,
-  SourceIdentity, SourceOrigin, SourceOriginKind,
+  SourceIdentity, SourceOrigin, SourceOriginKind, KnowledgeSourcePreviewRefreshResult,
 } from "./knowledge-contract.js";
 import { KnowledgeStore, type KnowledgeMutationResult } from "./knowledge-store.js";
 import { awaitAbortableWithSettlement } from "./model-await.js";
@@ -302,15 +302,79 @@ function previewURL(bytes: Uint8Array, base: string): string | undefined {
   if (!match?.[1]) return undefined;
   try { const candidate = new URL(match[1], base); assertSafeUrl(candidate.toString()); return candidate.toString(); } catch { return undefined; }
 }
-async function optionalPreview(store: KnowledgeStore, bytes: Uint8Array | undefined, mediaType: string | undefined, base: string, options: { fetcher?: SourceFetch; resolveHost: ResolveHost; signal: AbortSignal }, declaredURL?: string): Promise<KnowledgeObjectRef | undefined> {
-  if (!declaredURL && (!bytes || !mediaType?.toLowerCase()?.split(";")[0]?.trim().includes("html"))) return undefined;
-  const url = declaredURL ?? (bytes ? previewURL(bytes, base) : undefined); if (!url) return undefined;
+type PreviewAttempt = { reference?: KnowledgeObjectRef; reason: string };
+async function fetchPreview(store: KnowledgeStore, bytes: Uint8Array | undefined, mediaType: string | undefined, base: string, options: { fetcher?: SourceFetch; resolveHost: ResolveHost; signal: AbortSignal }, declaredURL?: string): Promise<PreviewAttempt> {
+  if (!declaredURL && (!bytes || !mediaType?.toLowerCase()?.split(";")[0]?.trim().includes("html"))) return { reason: "No safe preview metadata was present." };
+  const url = declaredURL ?? (bytes ? previewURL(bytes, base) : undefined); if (!url) return { reason: "The source did not declare a preview image." };
   try {
     const fetched = await fetchSafe(url, { ...(options.fetcher ? { fetcher: options.fetcher } : {}), resolveHost: options.resolveHost, signal: options.signal, limits: { ...SOURCE_CAPTURE_LIMITS, maxBytes: PREVIEW_MAX_BYTES, maxRedirects: 2 } });
+    if (fetched.disposition === "inaccessible") return { reason: "The preview host was inaccessible; no image was changed." };
+    if (fetched.disposition === "failed") return { reason: "The preview host returned an unsuccessful response; no image was changed." };
     const type = fetched.mediaType?.toLowerCase()?.split(";")[0]?.trim();
-    if (!fetched.bytes || !type || !PREVIEW_MEDIA_TYPES.has(type) || fetched.truncated || fetched.bytes.byteLength > PREVIEW_MAX_BYTES || !validPreviewBytes(fetched.bytes, type)) return undefined;
-    return await store.putObject(fetched.bytes, type);
-  } catch { return undefined; }
+    if (!fetched.bytes) return { reason: "The preview response contained no bytes." };
+    if (fetched.truncated || fetched.bytes.byteLength > PREVIEW_MAX_BYTES) return { reason: "The preview exceeded the 512 KB safety limit." };
+    if (!type || !PREVIEW_MEDIA_TYPES.has(type)) return { reason: "The preview was not JPEG, PNG, or WebP." };
+    if (!validPreviewBytes(fetched.bytes, type)) return { reason: "The preview MIME type did not match its image signature." };
+    return { reference: await store.putObject(fetched.bytes, type), reason: "A bounded preview image was captured." };
+  } catch (error) {
+    if (options.signal.aborted) throw error;
+    return { reason: error instanceof Error ? `Preview safety or network check failed: ${error.message.slice(0, 180)}.` : "Preview safety or network check failed; no image was changed." };
+  }
+}
+async function optionalPreview(store: KnowledgeStore, bytes: Uint8Array | undefined, mediaType: string | undefined, base: string, options: { fetcher?: SourceFetch; resolveHost: ResolveHost; signal: AbortSignal }, declaredURL?: string): Promise<KnowledgeObjectRef | undefined> {
+  return (await fetchPreview(store, bytes, mediaType, base, options, declaredURL)).reference;
+}
+
+export async function refreshSourcePreview(store: KnowledgeStore, request: { commandId: string; sourceId: string; expectedRevision: string }, options: SourceCaptureOptions = {}): Promise<KnowledgeSourcePreviewRefreshResult> {
+  const signal = options.signal ?? new AbortController().signal;
+  const unavailable = (reason: string): KnowledgeSourcePreviewRefreshResult => ({ sourceId: request.sourceId, expectedRevision: request.expectedRevision, status: "unavailable", reason });
+  if (signal.aborted) throw new Error("Source preview refresh was cancelled");
+  const initial = await store.read(request.sourceId, request.expectedRevision, false, true, true);
+  const latest = await store.read(request.sourceId, undefined, false, true, true);
+  if (!initial || !latest || initial.kind !== "source" || latest.kind !== "source") return unavailable("Source is unavailable, excluded, or forgotten.");
+  if (latest.revisionId !== request.expectedRevision) {
+    if (latest.content.preview) return { sourceId: request.sourceId, expectedRevision: request.expectedRevision, status: "unchanged", reason: "A newer revision already has a preview; no fetch was replayed.", record: latest };
+    return unavailable("Source revision changed before preview refresh; no image was published.");
+  }
+  if (latest.content.admission?.status === "archived") return unavailable("Archived sources are not refreshed.");
+  if (latest.content.admission?.status === "pending") return unavailable("Pending sources are not refreshed until admission.");
+  if (latest.content.preview) return { sourceId: request.sourceId, expectedRevision: request.expectedRevision, status: "unchanged", reason: "A preview already exists; no fetch was replayed.", record: latest };
+  const uri = latest.content.uri;
+  if (!uri) return unavailable("Source has no safe URL for preview refresh.");
+  const controller = AbortSignal.any([signal, AbortSignal.timeout(SOURCE_CAPTURE_LIMITS.timeoutMs)]);
+  let attempt: PreviewAttempt;
+  try {
+    const isX = (() => { try { xPostIdentity(uri); return true; } catch { return false; } })();
+    if (isX) {
+      const post = await readPublicXPost(uri, { resolveHost: options.resolveHost ?? defaultResolveHost, ...(options.fetcher ? { fetcher: options.fetcher } : {}), signal: controller });
+      attempt = await fetchPreview(store, undefined, undefined, uri, { resolveHost: options.resolveHost ?? defaultResolveHost, ...(options.fetcher ? { fetcher: options.fetcher } : {}), signal: controller }, post.article?.coverURL);
+      if (!post.article?.coverURL && !attempt.reference) attempt = { reason: "The public X response did not provide a safe Article cover image." };
+    } else {
+      let bytes: Uint8Array | undefined;
+      const type = latest.content.object?.mediaType?.toLowerCase() ?? "";
+      if (latest.content.object && (type === "text/html" || type === "application/xhtml+xml")) {
+        bytes = (await store.readObject(latest.content.object, { recordId: latest.id, revisionId: latest.revisionId })) ?? undefined;
+      }
+      if (!bytes) {
+        const fetched = await fetchSafe(uri, { ...(options.fetcher ? { fetcher: options.fetcher } : {}), resolveHost: options.resolveHost ?? defaultResolveHost, signal: controller, limits: SOURCE_CAPTURE_LIMITS });
+        attempt = await fetchPreview(store, fetched.bytes, fetched.mediaType, fetched.finalUrl, { resolveHost: options.resolveHost ?? defaultResolveHost, ...(options.fetcher ? { fetcher: options.fetcher } : {}), signal: controller });
+      } else {
+        const base = latest.content.origins?.find(origin => origin.uri && origin.uri !== uri)?.uri ?? uri;
+        attempt = await fetchPreview(store, bytes, latest.content.object?.mediaType, base, { resolveHost: options.resolveHost ?? defaultResolveHost, ...(options.fetcher ? { fetcher: options.fetcher } : {}), signal: controller });
+      }
+    }
+  } catch (error) {
+    if (controller.aborted) throw error;
+    return unavailable(error instanceof Error ? `${error.message.slice(0, 220)}; no image was changed.` : "Preview lookup failed; no image was changed.");
+  }
+  if (controller.aborted) throw new Error("Source preview refresh was cancelled");
+  const current = await store.read(request.sourceId, undefined, false, true, true);
+  if (!current || current.kind !== "source" || current.revisionId !== request.expectedRevision) return unavailable("Source changed or became unavailable before preview publication.");
+  if (!attempt.reference) return { sourceId: request.sourceId, expectedRevision: request.expectedRevision, status: current.content.preview ? "unchanged" : "no-image", reason: attempt.reason, record: current };
+  if (current.content.preview?.hash === attempt.reference.hash && current.content.preview.bytes === attempt.reference.bytes && current.content.preview.mediaType === attempt.reference.mediaType) return { sourceId: request.sourceId, expectedRevision: request.expectedRevision, status: "unchanged", reason: "Preview image is unchanged; no new source revision was created.", record: current };
+  const published = await store.captureSource({ commandId: request.commandId, expectedRevision: current.revisionId, signal, record: { kind: "source", id: current.id, createdAt: current.createdAt, scope: current.scope, provenance: current.provenance, relations: current.relations, ...(current.temporal ? { temporal: current.temporal } : {}), content: { ...current.content, preview: attempt.reference } } });
+  if (published.record.kind !== "source") throw new Error("Preview refresh returned a non-source record");
+  return { sourceId: request.sourceId, expectedRevision: request.expectedRevision, status: "updated", reason: "A bounded preview image was published without changing source content or admission.", record: published.record };
 }
 
 async function allSourceRecords(store: KnowledgeStore): Promise<Array<KnowledgeRecord & { kind: "source" }>> {

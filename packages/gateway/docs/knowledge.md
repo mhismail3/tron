@@ -252,6 +252,18 @@ and script/style-free extraction. The readable extraction limit is applied from 
 operation enters this owner; callers do not publish fetched text directly.
 URL diagnostics are redacted.
 
+`knowledge.source.preview.refresh` is the explicit thumbnail-only owner path.
+It accepts `{commandId, sourceId, expectedRevision}` and refreshes only a
+missing preview on that exact admitted source. It may reuse an exact retained
+HTML object or perform the same bounded safe fetch; X sources use one bounded
+public root lookup to obtain an Article cover. It never captures linked targets,
+invokes assessment, changes title/body/object/relations/admission, or creates a
+new source. It returns `updated`, `unchanged`, `no-image`, or `unavailable` with
+a bounded reason. Hidden, archived, pending, stale, cancelled, unsafe, invalid,
+oversized, and non-image results do not delete an existing preview. A repeated
+command or source that already has a preview performs no provider fetch; callers
+must reconcile uncertain outcomes before retrying.
+
 `knowledge.source.triage` reads persisted current interests and publishes a
 separate source derivative only after the retained source is available.
 

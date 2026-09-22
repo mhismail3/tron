@@ -156,7 +156,8 @@ function articleEvidence(post: Record<string, any>): XPublicArticle | undefined 
     if (text.length > remaining) { limitations.push("Article body exceeded the bounded readable-text limit."); break; }
   }
   const links = articleEntityLinks(article);
-  const coverCandidate = object(article.cover_media)?.media_url_https ?? object(article.cover_media)?.media_url ?? object(article.cover_media)?.url;
+  const cover = object(article.cover_media); const coverInfo = object(cover?.media_info);
+  const coverCandidate = cover?.media_url_https ?? cover?.media_url ?? cover?.url ?? coverInfo?.original_img_url ?? object(coverInfo?.original_img)?.url;
   const coverURL = normalizePublicLinkedUrl(coverCandidate);
   if (links.malformed) limitations.push("Some Article link metadata was malformed or unreferenced; only block-referenced safe links were retained.");
   if (links.truncated) limitations.push("Article-declared links exceeded the bounded retained-link limit.");

@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { KnowledgeStore } from "./knowledge-store.js";
-import { captureSource, isPrivateAddress } from "./source-capture.js";
+import { captureSource, isPrivateAddress, refreshSourcePreview } from "./source-capture.js";
 import { createSemanticNote, correctSemanticNote, readCitedSourceObject, supersedeSemanticNote, updateSemanticNote } from "./semantic-notes.js";
 
 const homes: string[] = [];
@@ -19,6 +19,66 @@ afterEach(async () => { await Promise.all(homes.splice(0).map(home => rm(home, {
 const publicResolver = async () => ["93.184.216.34"];
 
 describe("safe source capture", () => {
+  it("refreshes a complete source preview in place while preserving its envelope", async () => {
+    const { store } = await fixture();
+    const original = await store.captureSource({ commandId: command("preview-source"), record: {
+      kind: "source", scope: "research", provenance: { actor: "user", source: "fixture", evidence: [] }, relations: [],
+      content: { title: "Preview article", uri: "https://example.com/article", text: "Saved body", captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z", origin: "manual", admission: { status: "retained", reason: "fixture", decidedAt: "2026-01-01T00:00:00Z" }, retention: { sensitivity: "public", evidenceAvailable: true } },
+    }});
+    const before = original.record;
+    const jpg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    const fetcher = vi.fn(async (url: URL) => url.toString() === "https://example.com/article"
+      ? new Response('<html><head><meta property="og:image" content="https://cdn.example.com/cover.jpg"></head></html>', { headers: { "content-type": "text/html" } })
+      : new Response(jpg, { headers: { "content-type": "image/jpeg" } }));
+    const result = await refreshSourcePreview(store, { commandId: command("preview-refresh"), sourceId: before.id, expectedRevision: before.revisionId }, { fetcher, resolveHost: publicResolver });
+    expect(result.status).toBe("updated");
+    expect(result.record?.id).toBe(before.id);
+    const after = await store.read(before.id, undefined, false, true, true);
+    expect(after?.content.preview).toMatchObject({ mediaType: "image/jpeg", bytes: jpg.byteLength });
+    expect(after?.content.title).toBe(before.content.title);
+    expect(after?.content.text).toBe(before.content.text);
+    expect(after?.content.object).toEqual(before.content.object);
+    expect(after?.content.admission).toEqual(before.content.admission);
+    expect(after?.content.retention).toEqual(before.content.retention);
+    expect(after?.relations).toEqual(before.relations);
+    const previewBytes = await store.readObject(after!.content.preview!, { recordId: after!.id, revisionId: after!.revisionId });
+    expect(Buffer.from(previewBytes ?? [])).toEqual(Buffer.from(jpg));
+    expect((await store.list({ kind: "source", includeArchived: true, includePending: true })).records).toHaveLength(1);
+    const second = await refreshSourcePreview(store, { commandId: command("preview-refresh-again"), sourceId: before.id, expectedRevision: after!.revisionId }, { fetcher, resolveHost: publicResolver });
+    expect(second.status).toBe("unchanged");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses the bounded public X Article cover without linked-target capture", async () => {
+    const { store } = await fixture();
+    const source = await store.captureSource({ commandId: command("x-preview-source"), record: {
+      kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [],
+      content: { title: "X source", uri: "https://x.com/example/status/1234567890123456789", text: "Saved X text", captureDisposition: "partial", capturedAt: "2026-01-01T00:00:00Z", origin: "manual", admission: { status: "retained", decidedAt: "2026-01-01T00:00:00Z" } },
+    }});
+    const jpg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    const fetcher = vi.fn(async (url: URL) => url.toString().startsWith("https://api.fxtwitter.com/")
+      ? new Response(JSON.stringify({ code: 200, status: { id: "1234567890123456789", text: "", author: { id: "42" }, article: { id: "1234567890123456790", title: "Article", content: { blocks: [{ text: "Body" }] }, cover_media: { media_info: { original_img_url: "https://cdn.example.com/x-cover.jpg" } } } }, thread: [], replies: [] }), { headers: { "content-type": "application/json" } })
+      : new Response(jpg, { headers: { "content-type": "image/jpeg" } }));
+    const result = await refreshSourcePreview(store, { commandId: command("x-preview-refresh"), sourceId: source.record.id, expectedRevision: source.record.revisionId }, { fetcher, resolveHost: publicResolver });
+    expect(result.status).toBe("updated");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect((await store.read(source.record.id, undefined, false, true, true))?.content.preview?.mediaType).toBe("image/jpeg");
+    expect((await store.list({ kind: "source", includeArchived: true, includePending: true })).records).toHaveLength(1);
+  });
+
+  it("keeps an existing preview when the new image is invalid or unavailable", async () => {
+    const { store } = await fixture();
+    const jpg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    const preview = await store.putObject(jpg, "image/jpeg");
+    const original = await store.captureSource({ commandId: command("existing-preview"), record: {
+      kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [],
+      content: { title: "Existing", uri: "https://example.com/existing", text: "body", captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z", origin: "manual", preview, admission: { status: "retained", decidedAt: "2026-01-01T00:00:00Z" } },
+    }});
+    const result = await refreshSourcePreview(store, { commandId: command("invalid-preview"), sourceId: original.record.id, expectedRevision: original.record.revisionId }, { fetcher: async (url: URL) => url.toString() === "https://example.com/existing" ? new Response('<meta property="og:image" content="https://cdn.example.com/bad"></meta>', { headers: { "content-type": "text/html" } }) : new Response("not image", { headers: { "content-type": "text/plain" } }), resolveHost: publicResolver });
+    expect(["unchanged", "no-image"]).toContain(result.status);
+    expect((await store.read(original.record.id, undefined, false, true, true))?.content.preview).toEqual(preview);
+  });
+
   it("rejects hexadecimal IPv4-mapped private IPv6 destinations", () => {
     expect(isPrivateAddress("::ffff:7f00:1")).toBe(true);
     expect(isPrivateAddress("::ffff:c0a8:101")).toBe(true);

@@ -70,6 +70,8 @@ describe("KnowledgeService integration", () => {
       assessment: { summary: "Useful source", evidenceDigest },
       admission: { status: "retained", decidedAt: "2026-01-01T00:00:00Z", reason: "User saved this source" },
     });
+    const preview = await service.invoke({ operation: "knowledge.source.preview.refresh", request: { commandId: "service-preview-refresh", sourceId: source.record.id, expectedRevision: (await store.read(source.record.id))!.revisionId } });
+    expect(preview).toMatchObject({ status: "unavailable", reason: expect.stringContaining("no safe URL") });
   });
 
   it("rejects reflection queued behind a configuration change", async () => {
