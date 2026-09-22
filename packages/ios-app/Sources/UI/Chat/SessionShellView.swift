@@ -31,6 +31,12 @@ enum PushNavigationFailureAdmission {
 }
 
 enum PushNavigationPresentationPolicy {
+    /// Push taps are global to the shell, so their destination must mount under
+    /// the Sessions dashboard even when another dashboard owns the visible
+    /// surface. Without this transition, `presentedSession` is retained but no
+    /// navigation destination exists to consume it.
+    static let destinationDashboard: DashboardMode = .sessions
+
     static func retainsCurrent(presentedRouteID: String?, targetRouteID: String) -> Bool {
         presentedRouteID == targetRouteID
     }
@@ -595,6 +601,11 @@ struct SessionShellView: View {
             try Task.checkCancellation()
             guard model.pushNavigationRequest?.id == request.id,
                   model.ownsNavigationRoute(route) else { return }
+            // The route is mounted by the Sessions dashboard. Switching the
+            // dashboard here also retires any Knowledge/Automation sheets;
+            // merely setting `presentedSession` leaves that route pending until
+            // the user manually selects Sessions.
+            dashboardMode = PushNavigationPresentationPolicy.destinationDashboard
             withAnimation(reduceMotion ? nil : .smooth(duration: 0.24)) {
                 present(route)
             }

@@ -310,6 +310,11 @@ struct PushNotificationCoordinatorTests {
         try? FileManager.default.removeItem(at: cacheRoot)
     }
 
+    @Test("push navigation always targets the Sessions dashboard")
+    func pushNavigationTargetsSessionsDashboard() {
+        #expect(PushNavigationPresentationPolicy.destinationDashboard == .sessions)
+    }
+
     @Test("same-route notification navigation retains the mounted presentation")
     func sameRouteRetainsPresentation() {
         #expect(PushNavigationPresentationPolicy.retainsCurrent(
