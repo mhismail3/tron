@@ -42,6 +42,22 @@ describe("session transcript paging", () => {
       expect(JSON.stringify(replay)).not.toContain("private fixture");
     } finally { await workspace.dispose(); await rm(root, { recursive: true, force: true }); }
   });
+  it("replays thumbnail refresh receipts without rerunning a no-image operation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-service-preview-receipt-"));
+    const workspace = new TronWorkspace(root);
+    try {
+      const store = new KnowledgeStore(workspace);
+      const source = await store.captureSource({ commandId: "preview-receipt-source", record: { kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "No preview", text: "body", captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z", origin: "manual" } } });
+      const service = new GatewayService({ config: { tronHome: root }, sessions: {}, receipts: new CommandReceiptStore(root), knowledge: new KnowledgeService(store, { admit() {}, dispose() {} }), updateService: {}, iosDeviceInstallService: {}, gitWorktrees: {}, workspaceInspector: {}, providerUsage: {} } as unknown as GatewayServiceDependencies);
+      const request = { commandId: "preview-receipt-command", sourceId: source.record.id, expectedRevision: source.record.revisionId };
+      const first = await service.invoke(client, "knowledge.source.preview.refresh", request);
+      const second = await service.invoke(client, "knowledge.source.preview.refresh", request);
+      expect(second).toEqual(first);
+      expect(first).toMatchObject({ status: "unavailable", reason: "Source has no safe URL for preview refresh." });
+      expect((await store.read(source.record.id))?.revisionId).toBe(source.record.revisionId);
+    } finally { await workspace.dispose(); await rm(root, { recursive: true, force: true }); }
+  });
+
   it("publishes durable self-revocation before install cleanup and preserves idempotence", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-service-revoke-"));
     let releaseCleanup: (() => void) | undefined;

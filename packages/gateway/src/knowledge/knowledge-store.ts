@@ -59,6 +59,7 @@ type Suppression = { excluded: boolean; forgotten: boolean; reason?: string; upd
 type ScopeExclusion = { sessionId?: string; branchId?: string; projectId?: string; excluded: boolean; reason?: string; updatedAt: string };
 type PendingRecordCleanup = { recordId: string; revisionId: string };
 type SourceRecordWriteRequest = { commandId: string; expectedRevision?: string; canonicalUri?: string; record: KnowledgeRecordDraft & { kind: "source" }; signal?: AbortSignal };
+type SourcePreviewWriteRequest = { commandId: string; recordId: string; expectedRevision: string; preview: KnowledgeObjectRef; signal?: AbortSignal };
 export interface KnowledgeImportCheckpoint {
   planHash: string;
   plannedRecordIds: string[];
@@ -947,6 +948,18 @@ export class KnowledgeStore {
         }
       }
       return this.putRecord(state, paths, request.record as KnowledgeRecordDraft, request.expectedRevision);
+    }, undefined, signal);
+  }
+  async publishSourcePreview(request: SourcePreviewWriteRequest): Promise<KnowledgeMutationResult> {
+    const { signal, ...receiptRequest } = request;
+    return this.mutate("knowledge.source.preview.refresh", request.commandId, receiptRequest, async (state, paths) => {
+      const head = state.records.get(request.recordId);
+      if (!head || head.latestRevisionId !== request.expectedRevision) throw conflict("Source revision is stale or unavailable");
+      const current = await this.currentRecord(state, paths, request.recordId);
+      if (!current || current.kind !== "source") throw conflict("Source revision is unavailable");
+      if (this.recordExcluded(state, current) || this.recordArchived(current) || this.recordPending(current)) throw conflict("Source is unavailable for preview refresh");
+      if (current.content.preview?.hash === request.preview.hash && current.content.preview.bytes === request.preview.bytes && current.content.preview.mediaType === request.preview.mediaType) return { record: current, stateRevision: state.stateRevision + 1 };
+      return this.putRecord(state, paths, { kind: "source", id: current.id, createdAt: current.createdAt, scope: current.scope, provenance: current.provenance, relations: current.relations, ...(current.temporal ? { temporal: current.temporal } : {}), content: { ...current.content, preview: request.preview } }, request.expectedRevision);
     }, undefined, signal);
   }
   async createNote(request: KnowledgeNoteMutationRequest & { recordId?: never }): Promise<KnowledgeMutationResult> { return this.mutate("knowledge.note.create", request.commandId, request, async (state, paths) => this.putRecord(state, paths, request.record)); }

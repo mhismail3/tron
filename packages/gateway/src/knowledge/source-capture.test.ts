@@ -49,6 +49,21 @@ describe("safe source capture", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  it("resolves retained HTML previews against the canonical source URI, not referral origins", async () => {
+    const { store } = await fixture();
+    const html = Buffer.from('<html><head><meta property="og:image" content="../cover.png"></head></html>');
+    const object = await store.putObject(html, "text/html");
+    const source = await store.captureSource({ commandId: command("relative-preview-source"), record: {
+      kind: "source", scope: "research", provenance: { actor: "connector", source: "fixture", evidence: [] }, relations: [],
+      content: { title: "Canonical page", uri: "https://site.test/path/page.html", text: "body", object, captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z", origin: "connector", origins: [{ kind: "connector", capturedAt: "2026-01-01T00:00:00Z", uri: "https://x.com/example/status/1234567890123456789" }], admission: { status: "retained", decidedAt: "2026-01-01T00:00:00Z" } },
+    }});
+    const image = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+    const requested: string[] = [];
+    const result = await refreshSourcePreview(store, { commandId: command("relative-preview-refresh"), sourceId: source.record.id, expectedRevision: source.record.revisionId }, { fetcher: async (url: URL) => { requested.push(url.toString()); return new Response(image, { headers: { "content-type": "image/png" } }); }, resolveHost: publicResolver });
+    expect(result.status).toBe("updated");
+    expect(requested).toEqual(["https://site.test/cover.png"]);
+  });
+
   it("uses the bounded public X Article cover without linked-target capture", async () => {
     const { store } = await fixture();
     const source = await store.captureSource({ commandId: command("x-preview-source"), record: {
@@ -64,6 +79,50 @@ describe("safe source capture", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect((await store.read(source.record.id, undefined, false, true, true))?.content.preview?.mediaType).toBe("image/jpeg");
     expect((await store.list({ kind: "source", includeArchived: true, includePending: true })).records).toHaveLength(1);
+  });
+
+  it("fences exclusion that arrives between final read and atomic publication", async () => {
+    const { store } = await fixture();
+    const source = await store.captureSource({ commandId: command("race-source"), record: { kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "Race", uri: "https://example.com/race", text: "body", captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z", origin: "manual" } } });
+    const image = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    const publish = store.publishSourcePreview.bind(store);
+    vi.spyOn(store, "publishSourcePreview").mockImplementation(async request => { await store.setExclusion(command("race-exclude"), source.record.id, true, source.record.revisionId, "race"); return publish(request); });
+    await expect(refreshSourcePreview(store, { commandId: command("race-refresh"), sourceId: source.record.id, expectedRevision: source.record.revisionId }, { fetcher: async (url: URL) => url.toString() === "https://example.com/race" ? new Response('<meta property="og:image" content="https://cdn.example.com/race.jpg">', { headers: { "content-type": "text/html" } }) : new Response(image, { headers: { "content-type": "image/jpeg" } }), resolveHost: publicResolver })).rejects.toThrow(/unavailable|excluded/i);
+    const after = await store.read(source.record.id, undefined, true, true, true);
+    expect(after?.revisionId).toBe(source.record.revisionId);
+    expect(after?.content.preview).toBeUndefined();
+  });
+
+  it.each(["pending", "archived"] as const)("checks %s policy before stale-preview reuse", async status => {
+    const { store } = await fixture();
+    const preview = await store.putObject(new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0]), "image/jpeg");
+    const source = await store.captureSource({ commandId: command(`policy-${status}`), record: { kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "Policy", uri: "https://example.com/policy", text: "body", captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z", origin: "manual", preview, admission: { status, decidedAt: "2026-01-01T00:00:00Z" } } } });
+    const newer = await store.captureSource({ commandId: command(`policy-newer-${status}`), expectedRevision: source.record.revisionId, record: { ...source.record, content: { ...source.record.content, title: "Newer" } } as never });
+    const result = await refreshSourcePreview(store, { commandId: command(`policy-refresh-${status}`), sourceId: source.record.id, expectedRevision: source.record.revisionId }, { fetcher: async () => { throw new Error("must not fetch"); }, resolveHost: publicResolver });
+    expect(result.status).toBe("unavailable");
+    expect(result.reason).toContain(status === "pending" ? "Pending" : "Archived");
+    expect(newer.record.content.preview).toEqual(preview);
+  });
+
+  it("redacts unsafe preview failures instead of echoing credential-bearing URLs", async () => {
+    const { store } = await fixture();
+    const source = await store.captureSource({ commandId: command("redact-source"), record: { kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "Redact", uri: "https://example.com/redact", text: "body", captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z", origin: "manual" } } });
+    const result = await refreshSourcePreview(store, { commandId: command("redact-refresh"), sourceId: source.record.id, expectedRevision: source.record.revisionId }, { fetcher: async (url: URL) => url.toString() === "https://example.com/redact" ? new Response('<meta property="og:image" content="https://cdn.example.com/redact.jpg">', { headers: { "content-type": "text/html" } }) : new Response(null, { status: 302, headers: { location: "https://cdn.example.com/image.jpg?token=secret" } }), resolveHost: publicResolver });
+    expect(result.status).toBe("no-image");
+    expect(result.reason).not.toContain("secret");
+    expect(result.reason).not.toContain("cdn.example.com");
+  });
+
+  it("does not publish when cancellation arrives at the publication boundary", async () => {
+    const { store } = await fixture();
+    const source = await store.captureSource({ commandId: command("cancel-source"), record: { kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "Cancel", uri: "https://example.com/cancel", text: "body", captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z", origin: "manual" } } });
+    const image = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    const publish = store.publishSourcePreview.bind(store);
+    vi.spyOn(store, "publishSourcePreview").mockImplementation(async request => { request.signal?.throwIfAborted(); const controller = new AbortController(); controller.abort(new Error("cancel publication")); return publish({ ...request, signal: controller.signal }); });
+    await expect(refreshSourcePreview(store, { commandId: command("cancel-refresh"), sourceId: source.record.id, expectedRevision: source.record.revisionId }, { fetcher: async (url: URL) => url.toString() === "https://example.com/cancel" ? new Response('<meta property="og:image" content="https://cdn.example.com/cancel.jpg">', { headers: { "content-type": "text/html" } }) : new Response(image, { headers: { "content-type": "image/jpeg" } }), resolveHost: publicResolver })).rejects.toThrow(/cancel/i);
+    const after = await store.read(source.record.id, undefined, true, true, true);
+    expect(after?.revisionId).toBe(source.record.revisionId);
+    expect(after?.content.preview).toBeUndefined();
   });
 
   it("keeps an existing preview when the new image is invalid or unavailable", async () => {
