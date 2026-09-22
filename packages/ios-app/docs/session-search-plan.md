@@ -65,7 +65,8 @@ retain exact anchor navigation for message matches. Keyboard dismissal does not
 clear an active query; only the explicit close or downward search dismissal does
 so. Search chrome has no rectangular backing: only the individual capsule and
 44-point circular controls carry glass, in both light and dark appearance. Options
-and close symbols use 20-point semibold system icons for legibility. Empty, offline, cancelled, and partial coverage states are explicit.
+and close symbols use `TronTypography.buttonSM`, matching the Manage Session
+toolbar controls rather than a custom icon size. Empty, offline, cancelled, and partial coverage states are explicit.
 When remote ranking is consented but unavailable or over budget, the UI keeps
 lexical results marked ready while showing the remote-ranking failure as a
 secondary status.
