@@ -282,6 +282,28 @@ describe("safe source capture", () => {
   });
 });
 
+describe("preview capture", () => {
+  it("retains a safe bounded OpenGraph image without failing the source when absent", async () => {
+    const { store } = await fixture();
+    const html = '<html><head><meta property="og:image" content="https://example.com/preview.png"></head><body>Readable</body></html>';
+    const fetcher = vi.fn(async (url: URL) => url.toString() === "https://example.com/preview.png"
+      ? new Response(new Uint8Array([137, 80, 78, 71]), { headers: { "content-type": "image/png" } })
+      : new Response(html, { headers: { "content-type": "text/html" } }));
+    const result = await captureSource(store, { commandId: command("preview"), url: "https://example.com/article", scope: "research" }, { fetcher, resolveHost: publicResolver });
+    expect(result.record.content.preview?.mediaType).toBe("image/png");
+    expect(result.record.content.object).toBeDefined();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects unsafe or unsupported preview responses without failing capture", async () => {
+    const { store } = await fixture();
+    const html = '<meta property="og:image" content="file:///private/image.png">';
+    const result = await captureSource(store, { commandId: command("preview-unsafe"), url: "https://example.com/article", scope: "research" }, { fetcher: async () => new Response(html, { headers: { "content-type": "text/html" } }), resolveHost: publicResolver });
+    expect(result.record.content.preview).toBeUndefined();
+    expect(result.record.content.captureDisposition).not.toBe("failed");
+  });
+});
+
 describe("semantic notes", () => {
   it("preserves field evidence, corrections, contrary evidence, and supersession", async () => {
     const { store } = await fixture();

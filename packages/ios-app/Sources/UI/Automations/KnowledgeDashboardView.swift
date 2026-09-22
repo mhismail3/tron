@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum KnowledgeDashboardArea: String, CaseIterable, Identifiable {
     case chronicle
@@ -336,7 +337,9 @@ struct KnowledgeDashboardView: View {
                 Button {
                     selected = record
                     selectedIdentity = model.knowledgePresentationIdentity
-                } label: { KnowledgeRecordRow(record: record) }
+                } label: { KnowledgeRecordRow(record: record, previewLoader: { reference, record in
+                        try? await model.knowledge.readObject(reference, recordID: record.id, revisionID: record.revisionId)
+                    }) }
                     .buttonStyle(.plain)
             }
             if KnowledgeCatalogPagePolicy.offersContinuation(nextCursor: nextCursor, loadingMore: loadingMore) {
@@ -556,7 +559,13 @@ struct KnowledgeDashboardView: View {
 /// should fit on a phone screen, so the row keeps one type step below the
 /// detail sheet and only the statement's leading lines.
 struct KnowledgeRecordRow: View {
+    typealias PreviewLoader = @Sendable (KnowledgeObjectRef, KnowledgeRecord) async -> KnowledgeObjectRead?
     let record: KnowledgeRecord
+    let previewLoader: PreviewLoader?
+
+    init(record: KnowledgeRecord, previewLoader: PreviewLoader? = nil) {
+        self.record = record; self.previewLoader = previewLoader
+    }
 
     var body: some View {
         Group {
@@ -564,7 +573,7 @@ struct KnowledgeRecordRow: View {
                 KnowledgeObservationStatement(presentation: observation, preview: true)
                     .accessibilityElement(children: .combine)
             } else if case .source(let source) = record.content {
-                KnowledgeSourceRow(source: source)
+                KnowledgeSourceRow(record: record, source: source, previewLoader: previewLoader)
                     .accessibilityElement(children: .combine)
             } else {
                 otherRecord
@@ -629,12 +638,23 @@ struct KnowledgeSourceThumbnail: View {
 }
 
 struct KnowledgeSourceRow: View {
+    let record: KnowledgeRecord
     let source: KnowledgeSourceContent
+    let previewLoader: KnowledgeRecordRow.PreviewLoader?
+    @State private var previewImage: UIImage?
 
     var body: some View {
         HStack(alignment: .top, spacing: TronSpacing.md) {
-            KnowledgeSourceThumbnail(source: source, size: 64)
-                .accessibilityHidden(true)
+            if let previewImage {
+                Image(uiImage: previewImage)
+                    .resizable().scaledToFill()
+                    .frame(width: 64, height: 64)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .accessibilityLabel("Preview for \(source.title)")
+            } else {
+                KnowledgeSourceThumbnail(source: source, size: 64)
+                    .accessibilityHidden(true)
+            }
             VStack(alignment: .leading, spacing: TronSpacing.xs) {
                 Text(source.title)
                     .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
@@ -658,6 +678,13 @@ struct KnowledgeSourceRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityHint("Opens source details")
+        .task(id: source.preview?.hash) {
+            guard let reference = source.preview, previewImage == nil, let previewLoader else { return }
+            guard let response = await previewLoader(reference, record),
+                  let data = Data(base64Encoded: response.base64),
+                  data.count <= 512_000, let image = UIImage(data: data) else { return }
+            previewImage = image
+        }
     }
 }
 
@@ -968,9 +995,12 @@ struct KnowledgeDetailView: View {
                     VStack(alignment: .leading, spacing: TronSpacing.sm) {
                         Text("No summary yet")
                             .font(TronTypography.bodySM.bold())
-                        Text("No summary is generated automatically. Use Assess with current interests from the actions menu when you want an explicit interpretation.")
+                        Text("No summary is generated automatically. Generate one from the saved evidence when you want an explicit interpretation.")
                             .font(TronTypography.secondaryDescription)
                             .foregroundStyle(Color.tronTextSecondary)
+                        Button("Generate summary", systemImage: "sparkles") { triage() }
+                            .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
+                            .disabled(mutationInFlight)
                     }
                     .padding(14)
                 }

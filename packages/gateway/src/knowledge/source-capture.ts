@@ -282,6 +282,26 @@ export async function readPublicXPost(url: string, options: Pick<SourceCaptureOp
   }, signal, lookupOptions);
 }
 
+const PREVIEW_MAX_BYTES = 512_000;
+const PREVIEW_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+function previewURL(bytes: Uint8Array, base: string): string | undefined {
+  const html = new TextDecoder().decode(bytes);
+  const match = html.match(/<meta[^>]+(?:property|name)=["'](?:og:image|twitter:image)["'][^>]+content=["']([^"']+)["'][^>]*>/i)
+    ?? html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["'](?:og:image|twitter:image)["'][^>]*>/i);
+  if (!match?.[1]) return undefined;
+  try { const candidate = new URL(match[1], base); assertSafeUrl(candidate.toString()); return candidate.toString(); } catch { return undefined; }
+}
+async function optionalPreview(store: KnowledgeStore, bytes: Uint8Array | undefined, mediaType: string | undefined, base: string, options: { fetcher?: SourceFetch; resolveHost: ResolveHost; signal: AbortSignal }): Promise<KnowledgeObjectRef | undefined> {
+  if (!bytes || !mediaType?.toLowerCase()?.split(";")[0]?.trim().includes("html")) return undefined;
+  const url = previewURL(bytes, base); if (!url) return undefined;
+  try {
+    const fetched = await fetchSafe(url, { ...(options.fetcher ? { fetcher: options.fetcher } : {}), resolveHost: options.resolveHost, signal: options.signal, limits: { ...SOURCE_CAPTURE_LIMITS, maxBytes: PREVIEW_MAX_BYTES, maxRedirects: 2 } });
+    const type = fetched.mediaType?.toLowerCase()?.split(";")[0]?.trim();
+    if (!fetched.bytes || !type || !PREVIEW_MEDIA_TYPES.has(type) || fetched.truncated) return undefined;
+    return await store.putObject(fetched.bytes, type);
+  } catch { return undefined; }
+}
+
 async function allSourceRecords(store: KnowledgeStore): Promise<Array<KnowledgeRecord & { kind: "source" }>> {
   const result: Array<KnowledgeRecord & { kind: "source" }> = [];
   let cursor: string | undefined;
@@ -600,6 +620,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
   const capturedAt = timestamp(now);
   const bytes = fetched.bytes;
   const mediaType = fetched.mediaType;
+  const preview = await optionalPreview(store, bytes, mediaType, fetched.finalUrl, { ...(fetcher ? { fetcher } : {}), resolveHost, signal: operationController.signal });
   const publicReadable = publicPost?.readableText ?? publicPost?.text;
   const readable = publicPost ? (publicReadable ? { text: publicReadable.slice(0, limits.maxReadableChars), truncated: publicReadable.length > limits.maxReadableChars } : undefined) : bytes && bytes.byteLength ? extractReadable(bytes, mediaType, limits.maxReadableChars) : undefined;
   const disposition: SourceContent["captureDisposition"] = publicPost && (fetched.truncated || readable?.truncated) ? "partial" : fetched.disposition ?? (bytes && bytes.byteLength > 0 ? (readable === undefined ? "metadata-only" : fetched.quality === "partial" || readable.quality === "partial" || fetched.truncated || readable.truncated ? "partial" : "complete") : "metadata-only");
@@ -648,7 +669,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
     uri: fetched.finalUrl,
     ...(captureReason ? { captureReason } : {}),
     ...(publicPost?.linkedUrls ? { linkedUrls: publicPost.linkedUrls } : {}),
-    ...(readable ? { text: readable.text } : {}), ...(object ? { object } : {}), ...(mediaType ? { mediaType } : {}),
+    ...(readable ? { text: readable.text } : {}), ...(object ? { object } : {}), ...(preview ? { preview } : {}), ...(mediaType ? { mediaType } : {}),
     captureDisposition: disposition, ...(input.annotations ? { annotations: input.annotations } : {}), capturedAt,
     origin: kind, origins: [...(retryTarget?.content.origins ?? []), ...sourceOrigin(kind, capturedAt, { uri: fetched.finalUrl, ...(input.identity ? { identity: input.identity } : {}) }), ...(fetched.finalUrl !== sourceUrl.toString() ? [{ kind, capturedAt, uri: sourceUrl.toString(), ...(input.identity ? { identity: input.identity } : {}) }] : [])], ...(input.identity ? { identity: input.identity } : {}), ...(input.collectionId ? { collectionId: input.collectionId } : {}), ...(input.sourcePublishedAt ? { sourcePublishedAt: input.sourcePublishedAt } : {}),
   };

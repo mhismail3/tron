@@ -320,6 +320,7 @@ function recordObjectRefs(record: KnowledgeRecord): KnowledgeObjectRef[] {
   if (record.kind !== "source") return [];
   return [
     ...(record.content.object ? [record.content.object] : []),
+    ...(record.content.preview ? [record.content.preview] : []),
     ...(record.content.representations ?? []).map(item => item.object),
   ];
 }

@@ -145,6 +145,8 @@ export interface SourceContent {
   text?: string;
   /** Immutable original bytes, when captured. */
   object?: KnowledgeObjectRef;
+  /** Optional bounded OpenGraph/provider preview image; never required for capture. */
+  preview?: KnowledgeObjectRef;
   /** Additional retained representations never replace the captured object. */
   representations?: SourceRepresentation[];
   mediaType?: string;
