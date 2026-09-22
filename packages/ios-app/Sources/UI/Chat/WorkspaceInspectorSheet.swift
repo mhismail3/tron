@@ -581,20 +581,10 @@ struct WorkspaceInspectorSheet: View {
                         commitRow(row)
                     }
                     if owner.historyCursor != nil {
-                        Button {
+                        TronPaginationButton(label: "Load Earlier", loadingLabel: "Loading…", icon: "arrow.up", isLoading: owner.loadingHistory, accent: .tronSessionTeal) {
                             Task { await owner.loadHistory(service: model.workspaceInspection, sessionID: sessionID, append: true) }
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "clock.arrow.circlepath")
-                                Text("Load Earlier")
-                            }
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronSessionTeal)
-                            .frame(maxWidth: .infinity, minHeight: 44)
                         }
-                        .buttonStyle(.plain)
-                        .disabled(owner.loadingHistory)
-                        .glassEffect(.regular.tint(Color.tronSessionTeal.opacity(0.12)).interactive(), in: .capsule)
+                        .frame(maxWidth: .infinity, minHeight: 44)
                         .padding(.top, 12)
                     }
                 }

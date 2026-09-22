@@ -147,18 +147,20 @@ skip, not a deleted gap or a session exclusion. A covered parent must not suppre
 correction callback: the callback checks the originating Knowledge presentation identity while the
 managed child owns presentation publication.
 
-Observation has one explicit **Observe all Tron sessions** on/off control. The Observation sheet
-does not enumerate conversations or projects, and leaves the configured observer model and interests
-with their existing owners; enabling the control explicitly persists `allSessions` and applies to
+Observation has one explicit **Observe all Tron sessions** on/off control. The separate Observation
+preferences item owns the configured observer model and interests; the Observation sheet
+does not enumerate conversations or projects; enabling the control explicitly persists `allSessions` and applies to
 future primary Tron conversations only. Exclusions remain authoritative, delegated transcripts stay
 out of scope, and no past turns are backfilled. The control requires
 `knowledge-global-observation.v1`; without it, show update guidance and reject global configuration
 before sending a mutation.
 
-Paged dashboard and evidence-reader continuations use the shared compact pull-style
-`TronPaginationButton`, with the owning surface accent, loading state, and accessibility label
-supplied by each caller. This keeps Load more controls visually consistent with Chat's Load earlier
-pill without changing cursor ownership or generic retry actions.
+Paged dashboard, evidence-reader, workspace-history, subagent-history, and transcript continuations
+use the shared compact pull-style `TronPaginationButton`, with the owning surface accent, loading
+state, and accessibility label supplied by each caller. This keeps Load more/Load earlier controls
+visually consistent with Chat's pull pill without changing cursor ownership or generic retry actions.
+Knowledge source visibility uses a server-side `sourceAdmission` partition before paging, so Archived
+and Pending do not consume retained rows from the first page; search uses the same authority.
 
 ## Automations dashboard
 

@@ -25,6 +25,7 @@ enum KnowledgeDashboardSection: String, CaseIterable, Identifiable {
 
 enum KnowledgeDashboardMenuItem: String, CaseIterable {
     case observationConfiguration = "Observation configuration"
+    case observationPreferences = "Observation preferences"
     case needsAttention = "Needs attention"
     case chronicleInfo = "Chronicle info"
     case captureURL = "Capture URL"
@@ -33,6 +34,7 @@ enum KnowledgeDashboardMenuItem: String, CaseIterable {
     var symbol: String {
         switch self {
         case .observationConfiguration: "eye"
+        case .observationPreferences: "slider.horizontal.2.square"
         case .needsAttention: "exclamationmark.triangle"
         case .chronicleInfo: "info.circle"
         case .captureURL: "link.badge.plus"
@@ -47,7 +49,7 @@ enum KnowledgeDashboardMenuPolicy {
     }
 
     static func settingsItems(for area: KnowledgeDashboardArea) -> [KnowledgeDashboardMenuItem] {
-        [.observationConfiguration, .needsAttention, .chronicleInfo]
+        [.observationConfiguration, .observationPreferences, .needsAttention, .chronicleInfo]
     }
 
     static let creationItems: [KnowledgeDashboardMenuItem] = [.captureURL, .newNote]
@@ -76,6 +78,14 @@ enum KnowledgeCatalogRequestPolicy {
     }
     static func includesArchived(section: KnowledgeDashboardSection, visibility: KnowledgeSourceVisibility) -> Bool {
         section == .sources && visibility.requestIncludesArchived
+    }
+    static func sourceAdmission(section: KnowledgeDashboardSection, visibility: KnowledgeSourceVisibility) -> KnowledgeSourceAdmission? {
+        guard section == .sources else { return nil }
+        switch visibility {
+        case .saved: return nil
+        case .pending: return .pending
+        case .archived: return .archived
+        }
     }
 }
 
@@ -179,6 +189,7 @@ struct KnowledgeDashboardView: View {
     @State private var chronicleInfoSheet = false
     @State private var loadGeneration = 0
     @State private var configSheet = false
+    @State private var observationPreferencesSheet = false
     @State private var captureSheet = false
     @State private var noteSheet = false
     @State private var showingFilters = false
@@ -269,6 +280,9 @@ struct KnowledgeDashboardView: View {
         .tronManagedSheet(isPresented: $configSheet, identity: "knowledge.configuration") {
             KnowledgeConfigurationView().environment(model)
         }
+        .tronManagedSheet(isPresented: $observationPreferencesSheet, identity: "knowledge.observation-preferences") {
+            KnowledgeObservationPreferencesView().environment(model)
+        }
         .tronManagedSheet(isPresented: $captureSheet, identity: "knowledge.capture") {
             KnowledgeCaptureView { captureSheet = false; await reload() }.environment(model)
         }
@@ -296,6 +310,7 @@ struct KnowledgeDashboardView: View {
             { [self] in
                 switch item {
                 case .observationConfiguration: configSheet = true
+                case .observationPreferences: observationPreferencesSheet = true
                 case .needsAttention: openCoverageDetail()
                 case .chronicleInfo: chronicleInfoSheet = true
                 case .captureURL: captureSheet = true
@@ -473,9 +488,9 @@ struct KnowledgeDashboardView: View {
             async let loadedStatus = model.knowledge.status()
             var response: KnowledgeListResponse
             if requestedSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                response = try await model.knowledge.list(kind: requestedKind, scope: requestedScope, includeArchived: KnowledgeCatalogRequestPolicy.includesArchived(section: requestedSection, visibility: requestedVisibility), includePending: KnowledgeCatalogRequestPolicy.includesPending(section: requestedSection, visibility: requestedVisibility), limit: 50)
+                response = try await model.knowledge.list(kind: requestedKind, scope: requestedScope, includeArchived: KnowledgeCatalogRequestPolicy.includesArchived(section: requestedSection, visibility: requestedVisibility), includePending: KnowledgeCatalogRequestPolicy.includesPending(section: requestedSection, visibility: requestedVisibility), sourceAdmission: KnowledgeCatalogRequestPolicy.sourceAdmission(section: requestedSection, visibility: requestedVisibility), limit: 50)
             } else {
-                let found = try await model.knowledge.search(query: requestedSearch, kind: requestedKind, scope: requestedScope, includeArchived: KnowledgeCatalogRequestPolicy.includesArchived(section: requestedSection, visibility: requestedVisibility), includePending: KnowledgeCatalogRequestPolicy.includesPending(section: requestedSection, visibility: requestedVisibility), limit: 50)
+                let found = try await model.knowledge.search(query: requestedSearch, kind: requestedKind, scope: requestedScope, includeArchived: KnowledgeCatalogRequestPolicy.includesArchived(section: requestedSection, visibility: requestedVisibility), includePending: KnowledgeCatalogRequestPolicy.includesPending(section: requestedSection, visibility: requestedVisibility), sourceAdmission: KnowledgeCatalogRequestPolicy.sourceAdmission(section: requestedSection, visibility: requestedVisibility), limit: 50)
                 response = KnowledgeListResponse(records: found.hits.map { $0.record }, nextCursor: nil, stateRevision: found.stateRevision)
             }
             response = KnowledgeListResponse(records: KnowledgeCatalogPagePolicy.visibleRecords(response.records, in: requestedSection, sourceVisibility: requestedVisibility), nextCursor: response.nextCursor, stateRevision: response.stateRevision)
@@ -512,7 +527,7 @@ struct KnowledgeDashboardView: View {
             guard generation == loadGeneration, KnowledgeCatalogRequestFence.accepts(requestedKey, current: requestKey()),
                   activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
             do {
-                let page = try await model.knowledge.list(kind: requestedKind ?? requestedSection.kind, scope: requestedScope, includeArchived: KnowledgeCatalogRequestPolicy.includesArchived(section: requestedSection, visibility: requestedVisibility), includePending: KnowledgeCatalogRequestPolicy.includesPending(section: requestedSection, visibility: requestedVisibility), cursor: cursor, limit: 50)
+                let page = try await model.knowledge.list(kind: requestedKind ?? requestedSection.kind, scope: requestedScope, includeArchived: KnowledgeCatalogRequestPolicy.includesArchived(section: requestedSection, visibility: requestedVisibility), includePending: KnowledgeCatalogRequestPolicy.includesPending(section: requestedSection, visibility: requestedVisibility), sourceAdmission: KnowledgeCatalogRequestPolicy.sourceAdmission(section: requestedSection, visibility: requestedVisibility), cursor: cursor, limit: 50)
                 let visiblePage = KnowledgeListResponse(records: KnowledgeCatalogPagePolicy.visibleRecords(page.records, in: requestedSection, sourceVisibility: requestedVisibility), nextCursor: page.nextCursor, stateRevision: page.stateRevision)
                 guard generation == loadGeneration, KnowledgeCatalogRequestFence.accepts(requestedKey, current: requestKey()),
                       activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity,
@@ -1594,15 +1609,88 @@ struct KnowledgeConfigurationView: View {
     private func save() {
         guard !saving, var config else { return }
         guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == (identity ?? model.knowledgePresentationIdentity) else { error = "Gateway changed; reopen configuration."; return }
-        if config.observation.enabled && !supportsGlobalObservation { error = "Update this Gateway before enabling all-session observation."; return }
+        if config.observation.enabled && !KnowledgeObservationConfigurationPolicy.admitsEnable(hasModel: config.observation.model != nil, supportsGlobalObservation: supportsGlobalObservation) {
+            error = config.observation.model == nil ? "Choose a model in Observation preferences before enabling observation." : "Update this Gateway before enabling all-session observation."
+            return
+        }
         saving = true
-        if config.observation.enabled { config.eligibility.allSessions = true }
+        config = KnowledgeObservationConfigurationPolicy.applyingGlobalGrant(config, enabled: config.observation.enabled)
         let requestIdentity = identity ?? model.knowledgePresentationIdentity
         Task { @MainActor in
             guard model.knowledgePresentationIdentity == requestIdentity else { return }
             do { _ = try await model.knowledge.configure(config, capabilities: model.gatewayInfo?.capabilities ?? []); guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; saving = false; dismiss() }
             catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { saving = false }; return }
             catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; saving = false; self.error = error.localizedDescription }
+        }
+    }
+}
+
+struct KnowledgeObservationPreferencesView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var activity
+    @Environment(\.dismiss) private var dismiss
+    @State private var config: KnowledgeConfig?
+    @State private var chosenModel: ModelRef?
+    @State private var interestsText = ""
+    @State private var saving = false
+    @State private var error: String?
+    @State private var identity: KnowledgePresentationIdentity?
+
+    var body: some View {
+        KnowledgeFormSheet(title: "Observation preferences", isWorking: saving, actionDisabled: config == nil, onAction: save) {
+            if config == nil && error == nil { TronLoadingState(label: "Loading configuration…") }
+            TronSettingsGroup("Observer", accent: .tronKnowledge) {
+                TronSelectionSheetRow(icon: "cpu", title: "Model", value: chosenModel?.id ?? "Choose", accent: .tronKnowledge) {
+                    ModelPicker(selection: $chosenModel, models: model.providerCatalog(for: .global)?.models.filter(\.available) ?? [])
+                        .tronNavigationTitle("Observation model", accent: .tronKnowledge)
+                        .presentationDetents([.large])
+                }
+            }
+            .disabled(config == nil)
+            .tronSettingsCaption("The model is used for future eligible turns; earlier turns are not backfilled.")
+            TronSettingsGroup("Current interests", accent: .tronKnowledge, surfaceStyle: .uncontained) {
+                TextEditor(text: $interestsText).frame(minHeight: 120).tronTextEditor()
+                    .accessibilityLabel("Current interests")
+            }
+            .tronSettingsCaption("One interest per line, up to 50. Interests guide source triage and do not enable observation.")
+            if let error { TronSettingsNotice(message: error, accent: .tronError) }
+        }
+        .task { await load() }
+    }
+
+    private func load() async {
+        let requestIdentity = model.knowledgePresentationIdentity
+        do {
+            let loaded = try await model.knowledge.status()
+            guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity, requestIdentity.profileID != nil else { return }
+            identity = requestIdentity
+            config = loaded.config
+            interestsText = loaded.config.currentInterests.joined(separator: "\\n")
+            if let value = loaded.config.observation.model {
+                let parts = value.split(separator: "/", maxSplits: 1).map(String.init)
+                if parts.count == 2 { chosenModel = ModelRef(provider: parts[0], id: parts[1]) }
+            }
+        } catch {
+            guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func save() {
+        guard !saving, var config else { return }
+        let requestIdentity = identity ?? model.knowledgePresentationIdentity
+        guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { error = "Gateway changed; reopen preferences."; return }
+        guard let chosenModel else { error = "Choose a model before saving observation preferences."; return }
+        saving = true
+        config.observation.model = chosenModel.contextWindowKey
+        config.currentInterests = interestsText.split(whereSeparator: \.isNewline).map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }.prefix(50).map { String($0.prefix(500)) }
+        Task { @MainActor in
+            do {
+                _ = try await model.knowledge.configure(config, capabilities: model.gatewayInfo?.capabilities ?? [])
+                guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
+                saving = false; dismiss()
+            } catch is CancellationError { saving = false }
+            catch { guard model.knowledgePresentationIdentity == requestIdentity else { return }; saving = false; self.error = error.localizedDescription }
         }
     }
 }

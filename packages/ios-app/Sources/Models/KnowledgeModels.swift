@@ -341,6 +341,20 @@ struct KnowledgeEligibility: Codable, Hashable, Sendable {
     var sessionIds: [String]; var projectIds: [String]; var excludedSessionIds: [String]; var excludedProjectIds: [String]
 }
 struct KnowledgeObservationLimits: Codable, Hashable, Sendable { var enabled: Bool; var model: String?; var maxInputChars: Int; var maxOutputChars: Int; var timeoutMs: Int; var maxAttempts: Int }
+
+enum KnowledgeObservationConfigurationPolicy {
+    static func admitsEnable(hasModel: Bool, supportsGlobalObservation: Bool) -> Bool {
+        hasModel && supportsGlobalObservation
+    }
+
+    static func applyingGlobalGrant(_ config: KnowledgeConfig, enabled: Bool) -> KnowledgeConfig {
+        var next = config
+        next.observation.enabled = enabled
+        if enabled { next.eligibility.allSessions = true }
+        return next
+    }
+}
+
 struct KnowledgeConfig: Codable, Hashable, Sendable {
     let schemaVersion: Int; var revision: Int; var eligibility: KnowledgeEligibility; var observation: KnowledgeObservationLimits; var maximumSearchResults: Int; var currentInterests: [String]
 }
@@ -374,10 +388,10 @@ struct KnowledgeImportResult: Codable, Hashable, Sendable { let operation: Strin
 struct KnowledgeTriageResult: Codable, Hashable, Sendable { let source: KnowledgeRecord; let assessment: KnowledgeSourceAssessment }
 
 struct KnowledgeListRequest: Encodable, Sendable {
-    let kind: KnowledgeRecordKind?; let scope: KnowledgeScope?; let includeSuppressed: Bool; let includeArchived: Bool?; let includePending: Bool?; let cursor: String?; let limit: Int
+    let kind: KnowledgeRecordKind?; let scope: KnowledgeScope?; let includeSuppressed: Bool; let includeArchived: Bool?; let includePending: Bool?; let sourceAdmission: KnowledgeSourceAdmission?; let cursor: String?; let limit: Int
 }
 struct KnowledgeSearchRequest: Encodable, Sendable {
-    let query: String; let kind: KnowledgeRecordKind?; let scope: KnowledgeScope?; let includeArchived: Bool?; let includePending: Bool?; let limit: Int
+    let query: String; let kind: KnowledgeRecordKind?; let scope: KnowledgeScope?; let includeArchived: Bool?; let includePending: Bool?; let sourceAdmission: KnowledgeSourceAdmission?; let limit: Int
 }
 struct KnowledgeRecallRequest: Encodable, Sendable { let query: String?; let sessionId: String?; let entryId: String?; let scope: KnowledgeScope?; let limit: Int }
 

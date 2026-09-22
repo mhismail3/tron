@@ -147,6 +147,23 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertNil(try JSONValue.encode(eligibility).objectValue?["allSessions"])
     }
 
+    func testObservationEnableRequiresExistingModelAndGlobalAdmissionWithoutLoadMutation() {
+        XCTAssertFalse(KnowledgeObservationConfigurationPolicy.admitsEnable(hasModel: false, supportsGlobalObservation: true))
+        XCTAssertFalse(KnowledgeObservationConfigurationPolicy.admitsEnable(hasModel: true, supportsGlobalObservation: false))
+        XCTAssertTrue(KnowledgeObservationConfigurationPolicy.admitsEnable(hasModel: true, supportsGlobalObservation: true))
+        var config = KnowledgeConfig(schemaVersion: 1, revision: 4,
+                                     eligibility: KnowledgeEligibility(allSessions: nil, sessionIds: ["selected"], projectIds: ["project"], excludedSessionIds: ["excluded"], excludedProjectIds: []),
+                                     observation: KnowledgeObservationLimits(enabled: false, model: "provider/model", maxInputChars: 1_000, maxOutputChars: 100, timeoutMs: 1_000, maxAttempts: 1),
+                                     maximumSearchResults: 50, currentInterests: ["interest"])
+        let loaded = config
+        config = KnowledgeObservationConfigurationPolicy.applyingGlobalGrant(config, enabled: true)
+        XCTAssertNil(loaded.eligibility.allSessions)
+        XCTAssertEqual(config.eligibility.allSessions, true)
+        XCTAssertEqual(config.eligibility.sessionIds, ["selected"])
+        XCTAssertEqual(config.eligibility.excludedSessionIds, ["excluded"])
+        XCTAssertTrue(config.observation.enabled)
+    }
+
     @MainActor
     func testGlobalConfigurationCannotBeSentToAGatewayWithoutGlobalAdmission() async {
         var requests = 0
@@ -245,9 +262,10 @@ final class KnowledgeModelsTests: XCTestCase {
         let page = try await client.list(limit: 100)
         XCTAssertEqual(page.nextCursor, "page-2")
         XCTAssertEqual(requests.first?.0, "knowledge.list")
-        _ = try await client.list(kind: .source, includeArchived: true, includePending: true, limit: 50)
+        _ = try await client.list(kind: .source, includeArchived: true, includePending: true, sourceAdmission: .archived, limit: 50)
         XCTAssertEqual(requests.last?.1.objectValue?["includeArchived"], .bool(true))
         XCTAssertEqual(requests.last?.1.objectValue?["includePending"], .bool(true))
+        XCTAssertEqual(requests.last?.1.objectValue?["sourceAdmission"], .string("archived"))
         let object = KnowledgeObjectRef(hash: hash, mediaType: "text/plain", bytes: 12)
         let archivedResult = try await client.readObject(object, recordID: "source-1", revisionID: "revision-1", includeArchived: true, offset: 0)
         XCTAssertNotNil(archivedResult)
@@ -517,7 +535,7 @@ final class KnowledgeModelsTests: XCTestCase {
     func testKnowledgeMenusUseOneSettingsSubmenuAndKeepCreationActionsSeparate() {
         XCTAssertEqual(KnowledgeDashboardMenuPolicy.settingsTitle(for: .chronicle), "Knowledge settings")
         XCTAssertEqual(KnowledgeDashboardMenuPolicy.settingsTitle(for: .library), "Knowledge settings")
-        let settings = ["Observation configuration", "Needs attention", "Chronicle info"]
+        let settings = ["Observation configuration", "Observation preferences", "Needs attention", "Chronicle info"]
         XCTAssertEqual(KnowledgeDashboardMenuPolicy.settingsItems(for: .chronicle).map(\.rawValue), settings)
         XCTAssertEqual(KnowledgeDashboardMenuPolicy.settingsItems(for: .library).map(\.rawValue), settings)
         XCTAssertEqual(KnowledgeDashboardMenuPolicy.creationItems.map(\.rawValue), ["Capture URL", "New note"])

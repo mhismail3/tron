@@ -780,7 +780,7 @@ export class KnowledgeStore {
       // retained view must never be replayed against pending or archived
       // projection state, where skipped rows can otherwise make pagination
       // appear stalled or omit the first admitted row.
-      const scope = JSON.stringify([request.kind ?? null, request.scope ?? null, request.includeSuppressed === true, request.includeArchived === true, request.includePending === true]);
+      const scope = JSON.stringify([request.kind ?? null, request.scope ?? null, request.includeSuppressed === true, request.includeArchived === true, request.includePending === true, request.sourceAdmission ?? null]);
       const filter = this.catalogFilter(request);
       if (request.cursor) {
         const cursor = readListCursor(request.cursor, scope);
@@ -792,6 +792,7 @@ export class KnowledgeStore {
       for (const { key: id, value: head } of state.catalog?.scan<RecordHead>("records", filter.clauses.join(" AND "), filter.parameters, "json_extract(value, '$.sortAt') DESC, key") ?? []) {
         const record = await this.readRecord(paths, id, head.latestRevisionId);
         if (this.recordHardErased(state, record) || (!request.includeSuppressed && this.recordExcluded(state, record)) || (!request.includeArchived && this.recordArchived(record)) || (!request.includePending && this.recordPending(record))) continue;
+        if (request.sourceAdmission !== undefined && (record.kind !== "source" || record.content.admission?.status !== request.sourceAdmission)) continue;
         if (records.length >= limit || !budget.admit(record)) { nextCursor = listCursor(scope, last!); break; }
         records.push(record); last = { id, sortAt: head.sortAt };
       }
@@ -841,6 +842,7 @@ export class KnowledgeStore {
       for (const { key: id } of state.catalog?.scan<RecordHead>("records", filter.clauses.join(" AND "), filter.parameters, `${scoreSQL} DESC, json_extract(value, '$.sortAt') DESC, key`) ?? []) {
         const record = await this.currentRecord(state, paths, id);
         if (!record || this.recordExcluded(state, record) || (!request.includeArchived && this.recordArchived(record)) || (!request.includePending && this.recordPending(record))) continue;
+        if (request.sourceAdmission !== undefined && (record.kind !== "source" || record.content.admission?.status !== request.sourceAdmission)) continue;
         if (hits.length >= limit) break;
         const matchedFields: string[] = []; let score = 0;
         for (const [field, value] of searchableFields(record)) {

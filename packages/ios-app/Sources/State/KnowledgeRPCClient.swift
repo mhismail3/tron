@@ -58,12 +58,12 @@ final class KnowledgeRPCClient {
         guard value.coverage.id == cut.id, value.coverage.range == cut.range, value.coverage.disposition == .excluded else { throw invalidResponse() }
         return value
     }
-    func list(kind: KnowledgeRecordKind? = nil, scope: KnowledgeScope? = nil, includeArchived: Bool = false, includePending: Bool = false, cursor: String? = nil, limit: Int = 50) async throws -> KnowledgeListResponse {
-        let value: KnowledgeListResponse = try await request("knowledge.list", KnowledgeListRequest(kind: kind, scope: scope, includeSuppressed: false, includeArchived: includeArchived ? true : nil, includePending: includePending ? true : nil, cursor: cursor, limit: min(100, max(1, limit))))
+    func list(kind: KnowledgeRecordKind? = nil, scope: KnowledgeScope? = nil, includeArchived: Bool = false, includePending: Bool = false, sourceAdmission: KnowledgeSourceAdmission? = nil, cursor: String? = nil, limit: Int = 50) async throws -> KnowledgeListResponse {
+        let value: KnowledgeListResponse = try await request("knowledge.list", KnowledgeListRequest(kind: kind, scope: scope, includeSuppressed: false, includeArchived: includeArchived ? true : nil, includePending: includePending ? true : nil, sourceAdmission: sourceAdmission, cursor: cursor, limit: min(100, max(1, limit))))
         guard value.records.count <= 100 else { throw invalidResponse() }; return value
     }
-    func search(query: String, kind: KnowledgeRecordKind? = nil, scope: KnowledgeScope? = nil, includeArchived: Bool = false, includePending: Bool = false, limit: Int = 50) async throws -> KnowledgeSearchResponse {
-        let value: KnowledgeSearchResponse = try await request("knowledge.search", KnowledgeSearchRequest(query: String(query.prefix(500)), kind: kind, scope: scope, includeArchived: includeArchived ? true : nil, includePending: includePending ? true : nil, limit: min(100, max(1, limit))))
+    func search(query: String, kind: KnowledgeRecordKind? = nil, scope: KnowledgeScope? = nil, includeArchived: Bool = false, includePending: Bool = false, sourceAdmission: KnowledgeSourceAdmission? = nil, limit: Int = 50) async throws -> KnowledgeSearchResponse {
+        let value: KnowledgeSearchResponse = try await request("knowledge.search", KnowledgeSearchRequest(query: String(query.prefix(500)), kind: kind, scope: scope, includeArchived: includeArchived ? true : nil, includePending: includePending ? true : nil, sourceAdmission: sourceAdmission, limit: min(100, max(1, limit))))
         guard value.hits.count <= 100, value.indexState == "canonical" else { throw invalidResponse() }; return value
     }
     func recall(query: String? = nil, sessionID: String? = nil, entryID: String? = nil, scope: KnowledgeScope? = nil, limit: Int = 20) async throws -> KnowledgeRecallResponse {

@@ -2755,7 +2755,7 @@ struct ChatView: View {
     }
 
     private func earlierMessagesChip(installed: InstalledChatTranscript) -> some View {
-        Button {
+        TronPaginationButton(label: "Load earlier messages", loadingLabel: "Loading earlier…", icon: "arrow.up", isLoading: isLoadingEarlierMessages, isEnabled: scrollCoordinator.canRequestHistoryPage, accent: .tronAccentText) {
             guard !isLoadingEarlierMessages,
                   scrollCoordinator.canRequestHistoryPage,
                   let presentationGeneration = sessionPresentation.modelPresentationGeneration,
@@ -2793,29 +2793,8 @@ struct ChatView: View {
                     self.intakeLatestTranscriptProjectionIfNeeded()
                 }
             )
-        } label: {
-            HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
-                ChatCompactPillLeadingIcon(
-                    icon: "arrow.up",
-                    accent: .tronAccentText,
-                    showsProgress: isLoadingEarlierMessages
-                )
-                Text(
-                    isLoadingEarlierMessages
-                        ? "Loading earlier…"
-                        : "Load earlier messages"
-                )
-            }
-            .chatTranscriptPill()
         }
-        .buttonStyle(.plain)
-        .disabled(isLoadingEarlierMessages || !scrollCoordinator.canRequestHistoryPage)
         .frame(maxWidth: .infinity, minHeight: 44)
-        .accessibilityLabel(
-            isLoadingEarlierMessages
-                ? "Loading earlier messages"
-                : "Load earlier messages"
-        )
         .overlay(alignment: .bottom) {
             if case let .failed(message) = model.transcriptLoadState {
                 Text(message)

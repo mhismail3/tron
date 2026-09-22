@@ -129,15 +129,11 @@ struct ProcessHistorySheet: View {
                 }
 
                 if store.nextCursor != nil, store.status != .conflict {
-                    Button {
+                    TronPaginationButton(label: "Load More", loadingLabel: "Loading…", icon: "arrow.down", isLoading: store.status == .loading, accent: .tronSubagent) {
                         store.loadNext(sessionID: sessionID, presentationGeneration: generation)
-                    } label: {
-                        TronInlineActionLabel("Load More", accent: .tronSubagent)
                     }
-                    .buttonStyle(.plain)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
-                    .disabled(store.status == .loading)
                 }
             }
             .padding(18)
@@ -718,28 +714,11 @@ struct ReadOnlySubagentSessionSheet: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if store.transcriptStart > 0 {
-                    Button {
+                    TronPaginationButton(label: "Load earlier messages", loadingLabel: "Loading earlier…", icon: "arrow.up", isLoading: store.status == .loadingEarlier, isEnabled: store.canLoadEarlier, accent: ChatNotificationTone.subagent.primaryColor) {
                         store.loadEarlier()
-                    } label: {
-                        HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
-                            ChatCompactPillLeadingIcon(
-                                icon: "arrow.up",
-                                accent: ChatNotificationTone.subagent.primaryColor,
-                                showsProgress: store.status == .loadingEarlier
-                            )
-                            Text(store.status == .loadingEarlier
-                                ? "Loading earlier…"
-                                : "Load earlier messages")
-                        }
-                        .chatTranscriptPill(tone: .subagent)
                     }
-                    .buttonStyle(.plain)
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
-                    .disabled(!store.canLoadEarlier)
-                    .accessibilityLabel(store.status == .loadingEarlier
-                        ? "Loading earlier messages"
-                        : "Load earlier messages")
                 }
                 if store.presentation.timeline.items.isEmpty {
                     let isActive = store.liveActivity?.lifecycle.state.isActive == true

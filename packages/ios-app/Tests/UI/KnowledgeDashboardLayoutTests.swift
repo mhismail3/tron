@@ -61,6 +61,21 @@ final class KnowledgeDashboardLayoutTests: XCTestCase {
         }
     }
 
+    func testSharedPaginationButtonUsesPullStyleAccessibilityAndLoadingState() async throws {
+        try await withHost(TronPaginationButton(label: "Load more", loadingLabel: "Loading…", icon: "arrow.down", isLoading: false, accent: .tronKnowledge, action: {}).frame(width: 260), size: CGSize(width: 300, height: 80)) { host in
+            Self.attach(host.view, named: "shared-pagination-load-more", to: self)
+            let elements = Self.accessibilityElements(in: host.view)
+            guard !elements.isEmpty else { throw XCTSkip("Hosted SwiftUI accessibility tree unavailable in this simulator runtime") }
+            XCTAssertTrue(elements.contains { $0.label == "Load more" })
+        }
+        try await withHost(TronPaginationButton(label: "Load more", loadingLabel: "Loading…", icon: "arrow.down", isLoading: true, accent: .tronKnowledge, action: {}).frame(width: 260), size: CGSize(width: 300, height: 80)) { host in
+            Self.attach(host.view, named: "shared-pagination-loading", to: self)
+            let elements = Self.accessibilityElements(in: host.view)
+            guard !elements.isEmpty else { throw XCTSkip("Hosted SwiftUI accessibility tree unavailable in this simulator runtime") }
+            XCTAssertTrue(elements.contains { $0.label == "Loading…" })
+        }
+    }
+
     func testFullDashboardFixtureShowsLibrarySourcesAndSynthesesContinuation() async throws {
         let sources = [
             Self.sourceRecord(title: "Partial fixture source", disposition: .partial),

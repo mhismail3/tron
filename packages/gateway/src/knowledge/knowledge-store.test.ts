@@ -107,6 +107,10 @@ describe("KnowledgeStore", () => {
     const next = await store.list({ kind: "source", includeArchived: true, cursor: page.nextCursor, limit: 1 });
     expect(next.records.map(record => record.id)).toContain(archived.record.id);
     expect(next.records.map(record => record.id)).not.toContain(second.record.id);
+    const archivedPartition = await store.list({ kind: "source", includeArchived: true, sourceAdmission: "archived", limit: 1 });
+    expect(archivedPartition.records.map(record => record.id)).toEqual([archived.record.id]);
+    const archivedSearch = await store.search({ query: "First", kind: "source", includeArchived: true, sourceAdmission: "archived", limit: 1 });
+    expect(archivedSearch.hits.map(hit => hit.record.id)).toEqual([archived.record.id]);
     await expect(store.list({ kind: "source", includePending: true, cursor: page.nextCursor, limit: 1 })).rejects.toThrow(/cursor/i);
   });
 

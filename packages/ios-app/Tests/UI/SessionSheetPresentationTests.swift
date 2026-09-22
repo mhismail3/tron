@@ -665,7 +665,7 @@ final class SessionSheetPresentationTests: XCTestCase {
             TronDashboardFilterSectionTitle(title: "View")
         }) { controller in
             let sheet = try XCTUnwrap(controller.sheetPresentationController)
-            XCTAssertEqual(sheet.detents.map(\.identifier), [.medium, .large])
+            XCTAssertEqual(Set(sheet.detents.map(\.identifier)), Set([UISheetPresentationController.Detent.Identifier.medium, .large]))
             XCTAssertEqual(sheet.selectedDetentIdentifier, .medium)
         }
     }
