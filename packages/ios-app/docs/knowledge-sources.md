@@ -21,6 +21,9 @@ never automatically invokes triage or a paid model. **Generate summary** is an
 explicit action using the existing assessment owner; it updates only the derived
 assessment and does not change admission, archive state, or bookmark membership.
 Summaries are interpretation, not replacements for immutable captured evidence.
+Assessment usage prices are fractional cents (`Double`), matching the Gateway's
+numeric contract; token counts remain integers. The native RPC regression decodes
+a full source page containing both a preview and sub-cent assessment usage.
 New assessments carry an `evidenceDigest` of Gateway `JSON.stringify({title, text})`.
 iOS reproduces those UTF-8 bytes without Foundation's default slash escaping.
 A mismatch with the current title/text withholds the obsolete summary; metadata

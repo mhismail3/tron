@@ -11,6 +11,37 @@ private actor CoverageTestRecorder {
 
 final class KnowledgeModelsTests: XCTestCase {
     @MainActor
+    func testSourcePageWithPreviewAndFractionalAssessmentCostDecodesThroughRPC() async throws {
+        // Prices are numbers, not integer cents. One assessed source must not reject the whole page.
+        for cost in [0.0, 1.0, 0.0125, 0.0000001] {
+            let wire = """
+            {"records":[{"schemaVersion":1,"id":"source-fixture","revisionId":"revision-fixture",
+            "kind":"source","scope":"research","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z",
+            "provenance":{"actor":"user","evidence":[]},"relations":[],
+            "content":{"title":"Synthetic article","uri":"https://example.test/article","text":"Saved evidence",
+            "captureDisposition":"complete","capturedAt":"2026-01-01T00:00:00Z",
+            "preview":{"hash":"\(String(repeating: "a", count: 64))","mediaType":"image/png","bytes":128},
+            "assessment":{"summary":"Synthetic summary","evidenceQuality":"high","freshness":"current",
+            "generatedAt":"2026-01-01T00:00:00Z","usage":{"inputTokens":123,"outputTokens":45,
+            "estimatedCostCents":\(cost),"pricing":"synthetic-test-pricing"}}}}],"nextCursor":"next-page","stateRevision":2}
+            """
+            let payload = try JSONDecoder().decode(JSONValue.self, from: Data(wire.utf8))
+            let client = KnowledgeRPCClient(request: { method, _, _ in
+                XCTAssertEqual(method, "knowledge.list")
+                return payload
+            })
+            let page = try await client.list(kind: .source, limit: 50)
+            XCTAssertEqual(page.records.count, 1)
+            XCTAssertEqual(page.nextCursor, "next-page")
+            guard case .source(let source) = page.records[0].content else { return XCTFail("Expected source") }
+            XCTAssertEqual(source.assessment?.usage?.estimatedCostCents, cost)
+            XCTAssertEqual(source.preview?.mediaType, "image/png")
+            let roundTrip = try JSONDecoder().decode(KnowledgeListResponse.self, from: JSONEncoder().encode(page))
+            XCTAssertEqual(roundTrip, page)
+        }
+    }
+
+    @MainActor
     func testConnectorStatusCarriesExactConnectionRoute() async throws {
         var captured: (String, JSONValue)?
         let client = KnowledgeRPCClient(request: { method, params, _ in

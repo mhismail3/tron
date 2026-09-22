@@ -259,7 +259,8 @@ enum KnowledgeEvidenceQuality: String, Codable, Sendable { case high, medium, lo
 enum KnowledgeFreshness: String, Codable, Sendable { case current, aging, stale, unknown }
 enum KnowledgeSourceAdmission: String, Codable, Hashable, Sendable { case pending, retained, archived }
 struct KnowledgeSourceAssessmentUsage: Codable, Hashable, Sendable {
-    let inputTokens: Int; let outputTokens: Int; let estimatedCostCents: Int; let pricing: String
+    // Assessment pricing may be a fraction of one cent; match the Gateway number contract.
+    let inputTokens: Int; let outputTokens: Int; let estimatedCostCents: Double; let pricing: String
 }
 struct KnowledgeSourceAssessment: Codable, Hashable, Sendable {
     let summary: String; let contribution: String?; let whyItMatters: String?; let evidenceQuality: KnowledgeEvidenceQuality; let freshness: KnowledgeFreshness; let possibleUse: String?; let generatedAt: String; let model: String?; let recommendation: KnowledgeSourceAdmission?; let confidence: Double?; let profileVersion: String?; let rubricVersion: String?
