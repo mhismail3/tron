@@ -1390,6 +1390,7 @@ export class GatewayServer {
         (terminalId, ownerSessionId) => this.options.service.terminalBelongsToSession(terminalId, ownerSessionId),
       );
       this.options.sessions.unsubscribe(connection.id, sessionId);
+      this.options.service.releaseSessionProcessTranscripts?.(sessionId, connection.id, token);
       return true;
     };
     const revokeSynchronization = (sessionId: string, synchronization: ActiveSessionSynchronization): boolean => {
@@ -1418,6 +1419,7 @@ export class GatewayServer {
         (terminalId, ownerSessionId) => this.options.service.terminalBelongsToSession(terminalId, ownerSessionId),
       );
       this.options.sessions.unsubscribe(connection.id, sessionId);
+      this.options.service.releaseSessionProcessTranscripts?.(sessionId, connection.id, token);
       return true;
     };
     const revokePresentationOwners = (exceptSessionID: string): void => {
@@ -1584,6 +1586,7 @@ export class GatewayServer {
         detachTerminal: (terminalId) => connection.terminals.delete(terminalId),
         ownsTerminal: (terminalId) => connection.terminals.has(terminalId) || admittedTerminalIds.has(terminalId),
         isSubscribed: (sessionId) => connection.subscriptionTokens.has(sessionId) || admittedSubscriptionIds.has(sessionId),
+        subscriptionToken: (sessionId) => connection.subscriptionTokens.get(resolveSessionId(sessionId)),
         isRevoked: () => connection.revoked,
         revokeDevice: (deviceId) => this.disconnectDevice(deviceId, {
           connectionId: connection.id,

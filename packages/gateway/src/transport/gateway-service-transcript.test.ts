@@ -194,7 +194,7 @@ describe("session transcript paging", () => {
     expect(capabilities).toEqual(expect.arrayContaining([
       "process-activity.v1",
       "process-history.v1",
-      "process-transcript.v1",
+      "process-transcript.v2",
       "process-transcript-abort.v1",
       "uploads-status.v2",
       "session-export.v2",

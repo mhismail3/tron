@@ -2065,7 +2065,7 @@ child-session ID so historical transcript authorization does not depend on an un
 cache; they continue to omit paths, task text, and output.
 
 The companion `process-history.v1` capability advertises canonical history reads.
-The `process-transcript.v1` capability authorizes `session.processTranscript.open`,
+The `process-transcript.v2` capability authorizes `session.processTranscript.open`,
 `.page`, and `.close` through the exact parent process-to-child relationship. The separate
 `process-transcript-abort.v1` capability authorizes only
 `session.processTranscript.abort`: the Gateway requires the caller's exact live lease,

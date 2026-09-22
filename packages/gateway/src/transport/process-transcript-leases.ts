@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { watch, type FSWatcher } from "node:fs";
 import type { JsonValue, ProcessTranscriptLease } from "../protocol/types.js";
 import { GatewayError } from "../errors.js";
@@ -14,6 +13,7 @@ type Lease = {
   id: string;
   clientId: string;
   parentSessionId: string;
+  parentSubscriptionToken?: string;
   processId: string;
   childSessionRef: string;
   runId: string;
@@ -37,10 +37,59 @@ type Lease = {
  * binding before asking the already-owned parent runtime to stop that process. */
 export class ProcessTranscriptLeaseStore {
   private readonly leases = new Map<string, Lease>();
+  private readonly pendingOpens = new Map<string, { clientId: string; parentSessionId: string; parentSubscriptionToken: string; retired: boolean }>();
   private readonly openingByClient = new Map<string, number>();
   private readonly openingByClientSession = new Map<string, Map<string, number>>();
 
   constructor(private readonly sessions: RuntimeRegistry) {}
+
+  reserveOpen(
+    clientId: string,
+    parentSessionId: string,
+    viewerId: string,
+    parentSubscriptionToken: string,
+    signal?: AbortSignal,
+  ): {
+    open: (processId: string, childSessionRef: string, runId: string, preferredPath: string | undefined,
+      notify: (topic: string, sessionId: string, payload: JsonValue) => void,
+      abortAuthority?: { expectedOperationId?: string }) => Promise<ProcessTranscriptLease>;
+    retire: () => void;
+    release: () => void;
+  } {
+    if (viewerId.length === 0 || viewerId.length > 256 || parentSubscriptionToken.length === 0) {
+      throw new GatewayError("invalid_request", "Invalid subagent viewer identity");
+    }
+    if (signal?.aborted) {
+      throw new GatewayError("conflict", "Subagent viewer opening was retired", true);
+    }
+    if (this.pendingOpens.has(viewerId) || this.leases.has(viewerId)) {
+      throw new GatewayError("conflict", "Subagent viewer identity is already in use", true);
+    }
+    const releaseOpening = this.reserveOpening(clientId, parentSessionId);
+    const pending = { clientId, parentSessionId, parentSubscriptionToken, retired: false };
+    this.pendingOpens.set(viewerId, pending);
+    const retire = () => {
+      pending.retired = true;
+      if (this.pendingOpens.get(viewerId) === pending) this.closeOwned(clientId, viewerId, "viewer retired");
+    };
+    signal?.addEventListener("abort", retire, { once: true });
+    let released = false;
+    return {
+      open: async (processId, childSessionRef, runId, preferredPath, notify, abortAuthority) =>
+        this.openReserved(
+          clientId, parentSessionId, processId, childSessionRef, runId,
+          preferredPath, notify, abortAuthority, viewerId, parentSubscriptionToken, pending,
+        ),
+      retire,
+      release: () => {
+        if (released) return;
+        released = true;
+        signal?.removeEventListener("abort", retire);
+        this.pendingOpens.delete(viewerId);
+        releaseOpening();
+      },
+    };
+  }
 
   async open(
     clientId: string,
@@ -50,16 +99,16 @@ export class ProcessTranscriptLeaseStore {
     runId: string,
     preferredPath: string | undefined,
     notify: (topic: string, sessionId: string, payload: JsonValue) => void,
-    abortAuthority?: { expectedOperationId?: string },
+    abortAuthority: { expectedOperationId?: string } | undefined,
+    options: { viewerId: string; parentSubscriptionToken: string; signal?: AbortSignal },
   ): Promise<ProcessTranscriptLease> {
-    const releaseOpening = this.reserveOpening(clientId, parentSessionId);
+    const reservation = this.reserveOpen(
+      clientId, parentSessionId, options.viewerId, options.parentSubscriptionToken, options.signal,
+    );
     try {
-      return await this.openReserved(
-        clientId, parentSessionId, processId, childSessionRef, runId,
-        preferredPath, notify, abortAuthority,
-      );
+      return await reservation.open(processId, childSessionRef, runId, preferredPath, notify, abortAuthority);
     } finally {
-      releaseOpening();
+      reservation.release();
     }
   }
 
@@ -71,12 +120,22 @@ export class ProcessTranscriptLeaseStore {
     runId: string,
     preferredPath: string | undefined,
     notify: (topic: string, sessionId: string, payload: JsonValue) => void,
-    abortAuthority?: { expectedOperationId?: string },
+    abortAuthority: { expectedOperationId?: string } | undefined,
+    viewerId: string,
+    parentSubscriptionToken: string,
+    pending: { clientId: string; parentSessionId: string; parentSubscriptionToken: string; retired: boolean },
   ): Promise<ProcessTranscriptLease> {
+    const ensureOpen = (): void => {
+      if (pending.retired || this.pendingOpens.get(viewerId) !== pending) {
+        throw new GatewayError("conflict", "Subagent viewer opening was retired", true);
+      }
+    };
+    ensureOpen();
     const admission = await this.sessions.resolveReadOnlySubagentPath(
       childSessionRef, preferredPath, parentSessionId, processId, runId,
     );
-    const id = randomUUID();
+    ensureOpen();
+    const id = viewerId;
     let changedDuringOpen = false;
     let watcher: FSWatcher;
     try {
@@ -84,11 +143,26 @@ export class ProcessTranscriptLeaseStore {
       // the map, callbacks latch a dirty bit so an append in the open window
       // cannot disappear between baseline capture and ownership publication.
       watcher = watch(admission.path, { persistent: false }, () => {
-        if (this.leases.has(id)) this.scheduleInvalidation(id);
-        else changedDuringOpen = true;
+        if (this.leases.get(id)?.watcher === watcher) this.scheduleInvalidation(id);
+        else if (this.pendingOpens.get(id) === pending) changedDuringOpen = true;
+      });
+      // Install the error fence before the baseline read. A failed watcher
+      // retires the pending owner instead of leaving an opening without an
+      // observer or allowing a late response to publish it.
+      watcher.on("error", () => {
+        pending.retired = true;
+        if (this.pendingOpens.get(id) === pending || this.leases.get(id)?.watcher === watcher) {
+          this.closeOwned(clientId, id, "observer closed");
+        }
       });
     } catch {
       throw new GatewayError("conflict", "Subagent session cannot be observed", true);
+    }
+    try {
+      ensureOpen();
+    } catch (error) {
+      watcher.close();
+      throw error;
     }
     let page: Awaited<ReturnType<RuntimeRegistry["readOnlySubagentTranscriptPage"]>>;
     try {
@@ -100,12 +174,21 @@ export class ProcessTranscriptLeaseStore {
       watcher.close();
       throw error;
     }
-    const timeout = setTimeout(() => this.closeOwned(clientId, id), LEASE_TIMEOUT_MS);
+    try {
+      ensureOpen();
+    } catch (error) {
+      watcher.close();
+      throw error;
+    }
+    const timeout = setTimeout(() => {
+      if (this.leases.get(id) === lease) this.closeOwned(clientId, id, "viewer expired");
+    }, LEASE_TIMEOUT_MS);
     timeout.unref();
     const lease: Lease = {
       id,
       clientId,
       parentSessionId,
+      ...(parentSubscriptionToken === undefined ? {} : { parentSubscriptionToken }),
       processId,
       childSessionRef,
       runId,
@@ -122,7 +205,6 @@ export class ProcessTranscriptLeaseStore {
       notify,
       pageMutex: new AsyncMutex(),
     };
-    watcher.on("error", () => this.closeOwned(clientId, id, "observer closed"));
     this.leases.set(id, lease);
     if (changedDuringOpen) this.scheduleInvalidation(id);
     return {
@@ -182,6 +264,9 @@ export class ProcessTranscriptLeaseStore {
         }
         throw error;
       }
+      if (this.leases.get(leaseId) !== admittedLease) {
+        throw new GatewayError("not_found", "Subagent transcript lease is unavailable");
+      }
       lease.revision = page.revision;
       if (lease.pendingRevision === pendingAtStart) delete lease.pendingRevision;
       return {
@@ -228,8 +313,13 @@ export class ProcessTranscriptLeaseStore {
   }
 
   closeOwned(clientId: string, leaseId: string, reason?: string): boolean {
+    const pending = this.pendingOpens.get(leaseId);
+    const ownedPending = pending?.clientId === clientId;
+    if (ownedPending) pending.retired = true;
+    // Publication precedes reservation release. Retire both states during that
+    // handoff, rather than returning early and leaving the published watcher live.
     const lease = this.leases.get(leaseId);
-    if (!lease || lease.clientId !== clientId) return false;
+    if (!lease || lease.clientId !== clientId) return ownedPending;
     this.leases.delete(leaseId);
     if (lease.invalidationTimer) clearTimeout(lease.invalidationTimer);
     clearTimeout(lease.timeout);
@@ -244,20 +334,31 @@ export class ProcessTranscriptLeaseStore {
   }
 
   releaseClient(clientId: string): void {
+    for (const pending of this.pendingOpens.values()) {
+      if (pending.clientId === clientId) pending.retired = true;
+    }
     for (const lease of [...this.leases.values()]) {
       if (lease.clientId === clientId) this.closeOwned(clientId, lease.id);
     }
   }
 
-  releaseParent(clientId: string, parentSessionId: string): void {
+  releaseParent(clientId: string, parentSessionId: string, parentSubscriptionToken?: string): void {
+    for (const pending of this.pendingOpens.values()) {
+      if (pending.clientId === clientId && pending.parentSessionId === parentSessionId
+        && (parentSubscriptionToken === undefined || pending.parentSubscriptionToken === parentSubscriptionToken)) pending.retired = true;
+    }
     for (const lease of [...this.leases.values()]) {
-      if (lease.clientId === clientId && lease.parentSessionId === parentSessionId) {
+      if (lease.clientId === clientId && lease.parentSessionId === parentSessionId
+        && (parentSubscriptionToken === undefined || lease.parentSubscriptionToken === parentSubscriptionToken)) {
         this.closeOwned(clientId, lease.id);
       }
     }
   }
 
   releaseSession(parentSessionId: string): void {
+    for (const pending of this.pendingOpens.values()) {
+      if (pending.parentSessionId === parentSessionId) pending.retired = true;
+    }
     for (const lease of [...this.leases.values()]) {
       if (lease.parentSessionId === parentSessionId) this.closeOwned(lease.clientId, lease.id);
     }
@@ -307,7 +408,7 @@ export class ProcessTranscriptLeaseStore {
     if (!lease || lease.invalidationTimer) return;
     lease.invalidationTimer = setTimeout(() => {
       lease.invalidationTimer = undefined;
-      void this.invalidate(leaseId);
+      if (this.leases.get(leaseId) === lease) void this.invalidate(leaseId);
     }, INVALIDATION_DEBOUNCE_MS);
     lease.invalidationTimer.unref();
   }
@@ -329,6 +430,7 @@ export class ProcessTranscriptLeaseStore {
           undefined,
           lease.fileIdentity,
         );
+        if (this.leases.get(leaseId) !== admittedLease) return;
         if (page.revision === lease.revision || page.revision === lease.pendingRevision) return;
         lease.pendingRevision = page.revision;
         lease.notify("session.processTranscript.changed", lease.parentSessionId, {

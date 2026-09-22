@@ -120,7 +120,9 @@ export function parseExtensionLifecycleProjectionHeader(bytes: Uint8Array): unkn
 }
 
 const lifecycleProjectionStates = new Set(["queued", "running", "complete", "failed", "partial", "paused", "stopped", "rejected"]);
-const lifecycleProjectionNodeKeys = new Set(["id", "kind", "label", "state", "startedAt", "updatedAt", "endedAt", "sessionFile", "sessionOwnerId", "activity", "hostStep", "children"]);
+// runId/workflowKey are private producer-header identity fields. They never
+// widen the public snapshot; id/workflowKey remains the stable workflow row key.
+const lifecycleProjectionNodeKeys = new Set(["id", "runId", "workflowKey", "kind", "label", "state", "startedAt", "updatedAt", "endedAt", "sessionFile", "sessionOwnerId", "activity", "hostStep", "children"]);
 const lifecycleProjectionActivityKeys = new Set(["state", "currentTool", "lastActivityAt", "currentToolStartedAt", "turnCount", "toolCount"]);
 const lifecycleProjectionHostKeys = new Set(["kind", "provider", "role", "state", "verdict", "reasonCode", "detail", "target", "stale", "report"]);
 
@@ -165,6 +167,8 @@ function validProjectionNode(value: unknown, depth: number, runId: string, root:
   const node = record(value);
   if (!node || [...Object.keys(node)].some((key) => !lifecycleProjectionNodeKeys.has(key))) return false;
   if (!boundedProjectionString(node.id, 160, true) || !boundedProjectionString(node.label, 160, true)
+    || (node.runId !== undefined && !boundedProjectionString(node.runId, 256, true, 256))
+    || (node.workflowKey !== undefined && !boundedProjectionString(node.workflowKey, 160, true))
     || typeof node.kind !== "string" || !["subagent", "workflow", "step", "host-step"].includes(node.kind)
     || typeof node.state !== "string" || !lifecycleProjectionStates.has(node.state)
     || !boundedProjectionTime(node.startedAt) || !boundedProjectionTime(node.updatedAt) || !boundedProjectionTime(node.endedAt)
@@ -172,7 +176,7 @@ function validProjectionNode(value: unknown, depth: number, runId: string, root:
     || (node.sessionOwnerId !== undefined && !boundedProjectionString(node.sessionOwnerId, 256, true, 256))
     || (node.activity !== undefined && !validProjectionActivity(node.activity))
     || (node.hostStep !== undefined && (node.kind !== "host-step" || !validProjectionHost(node.hostStep)))) return false;
-  if (root && (node.id !== runId || (node.kind !== "subagent" && node.kind !== "workflow")
+  if (root && ((node.runId ?? node.id) !== runId || (node.kind !== "subagent" && node.kind !== "workflow")
     || node.startedAt === undefined || node.updatedAt === undefined)) return false;
   if (node.kind === "host-step" && node.hostStep === undefined) return false;
   // Child completion may be reported without a child-local end timestamp;
@@ -223,9 +227,12 @@ export function lifecycleProjectionArtifact(projection: ExtensionLifecycleProjec
     const node = record(value);
     if (!node) return value;
     const nodeActivity = record(node.activity);
+    const workflowKey = typeof node.workflowKey === "string" ? node.workflowKey : node.id;
+    const executionRunId = typeof node.runId === "string" ? node.runId : node.id;
     return {
-      id: node.id,
-      runId: node.id,
+      id: workflowKey,
+      workflowKey,
+      runId: executionRunId,
       agent: node.label,
       state: node.state,
       status: node.state,
@@ -670,6 +677,8 @@ function child(
   const lastActivityAt = isoTime(progress?.lastActivityAt ?? source.lastActivityAt ?? sourceActivity?.lastActivityAt ?? source.updatedAt);
   const currentTool = text(progress?.currentTool ?? source.currentTool ?? sourceActivity?.currentTool, 256);
   const currentToolStartedAt = isoTime(progress?.currentToolStartedAt ?? source.currentToolStartedAt ?? sourceActivity?.currentToolStartedAt);
+  const startedAt = isoTime(progress?.startedAt ?? source.startedAt);
+  const endedAt = isoTime(progress?.endedAt ?? source.endedAt);
   const currentPath = displayPath(progress?.currentPath ?? source.currentPath ?? sourceActivity?.currentPath);
   const model = text(progress?.model ?? source.model ?? sourceActivity?.model, 256);
   const thinking = text(progress?.thinking ?? source.thinking ?? sourceActivity?.thinking, 64);
@@ -716,6 +725,8 @@ function child(
     ...(lastActivityAt ? { lastActivityAt } : {}),
     ...(currentTool ? { currentTool } : {}),
     ...(currentToolStartedAt ? { currentToolStartedAt } : {}),
+    ...(startedAt ? { startedAt } : {}),
+    ...(endedAt ? { endedAt } : {}),
     ...(currentPath ? { currentPath } : {}),
     ...(model ? { model } : {}),
     ...(thinking ? { thinking } : {}),

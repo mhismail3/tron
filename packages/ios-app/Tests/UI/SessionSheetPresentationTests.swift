@@ -1717,9 +1717,9 @@ final class SessionSheetPresentationTests: XCTestCase {
         for texts in [[], ["The worker completed the requested review."], longTranscript] {
             let gateway = ProcessSheetGatewayFixture()
             try await withModel(client: gateway.client) { model in
-                try await gateway.connect(model: model)
+                try await gateway.connect(model: model, capabilities: [SessionProcessAdmissionPolicy.transcriptCapability])
                 let snapshot = try SessionScenarioBuilder(seed: 8_920).openingTail(targetEncodedBytes: 4_096)
-                model.installHostedAuthoritativeSnapshot(snapshot)
+                model.installHostedSubscribedSnapshot(snapshot)
                 let response = Task {
                     try await gateway.respond(at: 1, method: "session.processTranscript.open",
                         result: ProcessSheetGatewayFixture.transcript(texts: texts))

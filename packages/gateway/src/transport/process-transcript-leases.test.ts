@@ -16,7 +16,35 @@ function admission(path: string) {
   return { path, fileIdentity: "1:1" };
 }
 
+async function openLease(store: ProcessTranscriptLeaseStore, ...args: any[]) {
+  const final = args.at(-1);
+  const hasOptions = final && typeof final === "object" && typeof final.viewerId === "string";
+  if (hasOptions) return store.open(...args as any);
+  const options = { viewerId: `viewer-${String(args[2])}`, parentSubscriptionToken: "token-1" };
+  return args.length === 7
+    ? store.open(...args, undefined, options)
+    : store.open(...args, options);
+}
+
 describe("ProcessTranscriptLeaseStore", () => {
+  it("retires a published viewer before its opening reservation is released", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-process-handoff-"));
+    roots.push(root);
+    const path = join(root, "child.jsonl");
+    await writeFile(path, "{}\n");
+    const store = new ProcessTranscriptLeaseStore({
+      resolveReadOnlySubagentPath: vi.fn(async () => admission(path)),
+      readOnlySubagentTranscriptPage: vi.fn(async () => page("revision-1")),
+    } as unknown as RuntimeRegistry);
+    const pending = store.reserveOpen("client", "parent", "viewer", "token");
+    const notify = vi.fn();
+    try {
+      await pending.open("process", "child", "run", undefined, notify);
+      pending.retire();
+      await expect(store.page("client", "viewer")).rejects.toMatchObject({ code: "not_found" });
+      expect(notify).toHaveBeenCalledWith("session.processTranscript.changed", "parent", expect.objectContaining({ leaseId: "viewer", closed: true }));
+    } finally { pending.release(); store.releaseClient("client"); }
+  });
   it("keeps leases connection-owned and closes them explicitly", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-process-lease-"));
     roots.push(root);
@@ -29,7 +57,7 @@ describe("ProcessTranscriptLeaseStore", () => {
     const store = new ProcessTranscriptLeaseStore(sessions);
     const notify = vi.fn();
 
-    const opened = await store.open("client-1", "parent-1", "process-1", "child-1", "run-1", undefined, notify);
+    const opened = await openLease(store, "client-1", "parent-1", "process-1", "child-1", "run-1", undefined, notify);
     expect(opened).toMatchObject({
       processId: "process-1", childSessionRef: "child-1", canAbort: false, revision: "revision-1",
     });
@@ -57,7 +85,7 @@ describe("ProcessTranscriptLeaseStore", () => {
       readOnlySubagentTranscriptPage: vi.fn(async () => page(`revision-${++reads}`, 1, "1:1", boundary)),
     } as unknown as RuntimeRegistry;
     const store = new ProcessTranscriptLeaseStore(sessions);
-    const opened = await store.open("client-1", "parent-1", "process-1", "child-1", "run-1", undefined, vi.fn());
+    const opened = await openLease(store, "client-1", "parent-1", "process-1", "child-1", "run-1", undefined, vi.fn());
     expect(opened.page.forkBoundary).toEqual(boundary);
     await expect(store.page("client-1", opened.leaseId, undefined, undefined, "revision-1"))
       .resolves.toMatchObject({ revision: "revision-2", forkBoundary: boundary });
@@ -76,7 +104,7 @@ describe("ProcessTranscriptLeaseStore", () => {
       acquire: vi.fn(async () => ({ abortSubagentProcess })),
     } as unknown as RuntimeRegistry;
     const store = new ProcessTranscriptLeaseStore(sessions);
-    const opened = await store.open(
+    const opened = await openLease(store,
       "client-1", "parent-1", "process-1", "child-1", "run-1", undefined, vi.fn(),
       { expectedOperationId: "operation-1" },
     );
@@ -115,7 +143,7 @@ describe("ProcessTranscriptLeaseStore", () => {
       }),
     } as unknown as RuntimeRegistry;
     const store = new ProcessTranscriptLeaseStore(sessions);
-    const opened = await store.open(
+    const opened = await openLease(store,
       "client-1", "parent-1", "process-1", "child-1", "run-1", undefined, vi.fn(),
     );
     const first = store.page("client-1", opened.leaseId, undefined, undefined, "revision-1");
@@ -150,7 +178,7 @@ describe("ProcessTranscriptLeaseStore", () => {
     } as unknown as RuntimeRegistry;
     const notify = vi.fn();
     const store = new ProcessTranscriptLeaseStore(sessions);
-    const opened = await store.open(
+    const opened = await openLease(store,
       "client-1", "parent-1", "process-1", "child-1", "run-1", undefined, notify,
     );
     const requestedPage = store.page(
@@ -179,8 +207,28 @@ describe("ProcessTranscriptLeaseStore", () => {
       readOnlySubagentTranscriptPage: vi.fn(async () => page("revision-1")),
     } as unknown as RuntimeRegistry;
     const store = new ProcessTranscriptLeaseStore(sessions);
-    const opened = await store.open("client-1", "parent-1", "process-1", "child-1", "run-1", undefined, vi.fn());
+    const opened = await openLease(store, "client-1", "parent-1", "process-1", "child-1", "run-1", undefined, vi.fn());
     store.releaseParent("client-1", "parent-1");
+    await expect(store.page("client-1", opened.leaseId)).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("does not let an old parent token retire a replacement viewer", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-process-parent-token-"));
+    roots.push(root);
+    const path = join(root, "child.jsonl");
+    await writeFile(path, "{}\n");
+    const sessions = {
+      resolveReadOnlySubagentPath: vi.fn(async () => admission(path)),
+      readOnlySubagentTranscriptPage: vi.fn(async () => page("revision-1")),
+    } as unknown as RuntimeRegistry;
+    const store = new ProcessTranscriptLeaseStore(sessions);
+    const opened = await openLease(store,
+      "client-1", "parent-1", "process-1", "child-1", "run-1", undefined, vi.fn(), undefined,
+      { viewerId: "viewer-1", parentSubscriptionToken: "new-token" },
+    );
+    store.releaseParent("client-1", "parent-1", "old-token");
+    await expect(store.page("client-1", opened.leaseId)).resolves.toMatchObject({ revision: "revision-1" });
+    store.releaseParent("client-1", "parent-1", "new-token");
     await expect(store.page("client-1", opened.leaseId)).rejects.toMatchObject({ code: "not_found" });
   });
 
@@ -196,7 +244,7 @@ describe("ProcessTranscriptLeaseStore", () => {
     } as unknown as RuntimeRegistry;
     const store = new ProcessTranscriptLeaseStore(sessions);
     const notify = vi.fn();
-    const opened = await store.open("client-1", "parent-1", "process-1", "child-1", "run-1", undefined, notify);
+    const opened = await openLease(store, "client-1", "parent-1", "process-1", "child-1", "run-1", undefined, notify);
     revision = "revision-2";
     await writeFile(path, "{\"changed\":true}\n");
     await vi.waitFor(() => expect(notify).toHaveBeenCalledWith(
@@ -234,7 +282,7 @@ describe("ProcessTranscriptLeaseStore", () => {
     } as unknown as RuntimeRegistry;
     const store = new ProcessTranscriptLeaseStore(sessions);
     const notify = vi.fn();
-    const opened = await store.open(
+    const opened = await openLease(store,
       "client-1", "parent-1", "process-1", "child-1", "run-1", undefined, notify,
     );
     await vi.waitFor(() => expect(notify).toHaveBeenCalledWith(
@@ -260,7 +308,7 @@ describe("ProcessTranscriptLeaseStore", () => {
     } as unknown as RuntimeRegistry;
     const store = new ProcessTranscriptLeaseStore(sessions);
     const notify = vi.fn();
-    const opened = await store.open("client-1", "parent-1", "process-1", "child-1", "run-1", undefined, notify);
+    const opened = await openLease(store, "client-1", "parent-1", "process-1", "child-1", "run-1", undefined, notify);
     replaced = true;
     await writeFile(path, "{\"replaced\":true}\n");
     await vi.waitFor(() => expect(notify).toHaveBeenCalledWith(
@@ -283,12 +331,52 @@ describe("ProcessTranscriptLeaseStore", () => {
     vi.useFakeTimers();
     try {
       const store = new ProcessTranscriptLeaseStore(sessions);
-      const opened = await store.open("client-1", "parent-1", "process-1", "child-1", "run-1", undefined, vi.fn());
+      const opened = await openLease(store, "client-1", "parent-1", "process-1", "child-1", "run-1", undefined, vi.fn());
       await vi.advanceTimersByTimeAsync(30 * 60_000);
       await expect(store.page("client-1", opened.leaseId)).rejects.toMatchObject({ code: "not_found" });
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("rejects an already-aborted viewer reservation without consuming capacity", async () => {
+    const sessions = {} as unknown as RuntimeRegistry;
+    const store = new ProcessTranscriptLeaseStore(sessions);
+    const controller = new AbortController();
+    controller.abort();
+    expect(() => store.reserveOpen("client-1", "parent-1", "viewer-1", "token-1", controller.signal))
+      .toThrowError(/retired/u);
+  });
+
+  it("retires a canceled open before a late admission response can publish a lease", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-process-open-cancel-"));
+    roots.push(root);
+    const path = join(root, "child.jsonl");
+    await writeFile(path, "{}\n");
+    let releaseAdmission: (() => void) | undefined;
+    const admission = new Promise<void>((resolve) => { releaseAdmission = resolve; });
+    const sessions = {
+      resolveReadOnlySubagentPath: vi.fn(async () => {
+        await admission;
+        return { path, fileIdentity: "1:1" };
+      }),
+      readOnlySubagentTranscriptPage: vi.fn(async () => page("revision-1")),
+    } as unknown as RuntimeRegistry;
+    const store = new ProcessTranscriptLeaseStore(sessions);
+    const controller = new AbortController();
+    const opening = openLease(store,
+      "client-1", "parent-1", "process-1", "child-1", "run-1", undefined, vi.fn(), undefined,
+      { viewerId: "viewer-1", parentSubscriptionToken: "token-1", signal: controller.signal },
+    );
+    await vi.waitFor(() => expect(sessions.resolveReadOnlySubagentPath).toHaveBeenCalled());
+    controller.abort();
+    releaseAdmission?.();
+    await expect(opening).rejects.toMatchObject({ code: "conflict", retryable: true });
+    expect(sessions.readOnlySubagentTranscriptPage).not.toHaveBeenCalled();
+    await expect(openLease(store,
+      "client-1", "parent-1", "process-2", "child-2", "run-1", undefined, vi.fn(), undefined,
+      { viewerId: "viewer-1", parentSubscriptionToken: "token-1" },
+    )).resolves.toMatchObject({ leaseId: "viewer-1" });
   });
 
   it("reserves capacity while concurrent child viewers are opening", async () => {
@@ -306,10 +394,10 @@ describe("ProcessTranscriptLeaseStore", () => {
       readOnlySubagentTranscriptPage: vi.fn(async () => page("revision-1")),
     } as unknown as RuntimeRegistry;
     const store = new ProcessTranscriptLeaseStore(sessions);
-    const first = store.open("client-1", "parent-1", "process-1", "child-1", "run-1", undefined, vi.fn());
-    const second = store.open("client-1", "parent-1", "process-2", "child-2", "run-1", undefined, vi.fn());
+    const first = openLease(store, "client-1", "parent-1", "process-1", "child-1", "run-1", undefined, vi.fn());
+    const second = openLease(store, "client-1", "parent-1", "process-2", "child-2", "run-1", undefined, vi.fn());
     await vi.waitFor(() => expect(sessions.resolveReadOnlySubagentPath).toHaveBeenCalledTimes(2));
-    await expect(store.open(
+    await expect(openLease(store,
       "client-1", "parent-1", "process-3", "child-3", "run-1", undefined, vi.fn(),
     )).rejects.toMatchObject({ code: "busy", retryable: true });
     releaseAdmissions?.();
@@ -332,11 +420,11 @@ describe("ProcessTranscriptLeaseStore", () => {
       readOnlySubagentTranscriptPage: vi.fn(async () => page("revision-1")),
     } as unknown as RuntimeRegistry;
     const store = new ProcessTranscriptLeaseStore(sessions);
-    const openings = Array.from({ length: 8 }, (_, index) => store.open(
+    const openings = Array.from({ length: 8 }, (_, index) => openLease(store,
       "client-1", `parent-${index}`, `process-${index}`, `child-${index}`, "run-1", undefined, vi.fn(),
     ));
     await vi.waitFor(() => expect(sessions.resolveReadOnlySubagentPath).toHaveBeenCalledTimes(8));
-    await expect(store.open(
+    await expect(openLease(store,
       "client-1", "parent-9", "process-9", "child-9", "run-1", undefined, vi.fn(),
     )).rejects.toMatchObject({ code: "busy", retryable: true });
     releaseAdmissions?.();
@@ -354,9 +442,9 @@ describe("ProcessTranscriptLeaseStore", () => {
       readOnlySubagentTranscriptPage: vi.fn(async () => page("revision-1")),
     } as unknown as RuntimeRegistry;
     const store = new ProcessTranscriptLeaseStore(sessions);
-    const first = await store.open("client-1", "parent-1", "process-1", "child-1", "run-1", undefined, vi.fn());
-    await store.open("client-1", "parent-1", "process-2", "child-2", "run-1", undefined, vi.fn());
-    await expect(store.open("client-1", "parent-1", "process-3", "child-3", "run-1", undefined, vi.fn()))
+    const first = await openLease(store, "client-1", "parent-1", "process-1", "child-1", "run-1", undefined, vi.fn());
+    await openLease(store, "client-1", "parent-1", "process-2", "child-2", "run-1", undefined, vi.fn());
+    await expect(openLease(store, "client-1", "parent-1", "process-3", "child-3", "run-1", undefined, vi.fn()))
       .rejects.toMatchObject({ code: "busy", retryable: true });
     store.releaseClient("client-1");
     await expect(store.page("client-1", first.leaseId)).rejects.toMatchObject({ code: "not_found" });

@@ -397,6 +397,9 @@ export interface ExtensionRunChild {
   /** Optional resolved child model metadata read from canonical producer status. */
   model?: string;
   thinking?: string;
+  /** Producer-authored child timing; never inherited from the parent duration. */
+  startedAt?: string;
+  endedAt?: string;
   toolCount?: number;
   turnCount?: number;
   durationMs?: number;

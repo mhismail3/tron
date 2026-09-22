@@ -4,6 +4,25 @@ Status: Implemented with focused Gateway/iOS validation complete. Physical-devic
 acceptance against the current committed Gateway remains pending; a user or maintainer
 must initiate the required Gateway rebuild before running the acceptance sequence below.
 
+## Coordinated read-only viewer lease contract
+
+A mounted viewer allocates an opaque viewer ID before
+`session.processTranscript.open` and sends the exact parent `subscriptionToken`.
+Gateway advertises and iOS requires `process-transcript.v2`; Gateway installs
+connection-, parent-token-, and viewer-owned pending state before opening the
+parent slot or reconciling child binding. Cancellation, disconnect, timeout,
+parent replacement, and stale close retire that exact pending owner. The watcher
+remains the canonical child observer and emits lease-scoped invalidation or
+explicit expiry/closure events. iOS retains the opening connection admission,
+serializes prepend and append reads in one store lane, and preserves visible
+content during retryable busy or partial-write recovery. A late or malformed open
+response may retire only the preallocated viewer on its original connection;
+it cannot close an ID supplied by an invalid response or reconnect merely to
+send cleanup. Direct invalidation sinks preserve every delivered event, including
+invalidation during opening or a historical prepend. Both inline chat rows and
+the activity sheet use the mounted process presentation's monotonic timing anchors.
+Gateway and iOS artifacts must be updated together.
+
 ## Product contract
 
 Tron presents one session-level subagent activity affordance for structured delegated
@@ -126,7 +145,7 @@ or duplicate rows, and keeps history as a disposable presentation store.
 
 ## Read-only child sessions
 
-`process-transcript.v1` opens a connection-owned lease through the exact live parent
+`process-transcript.v2` opens a connection-owned lease through the exact live parent
 process/tool/run/producer binding. It never calls `RuntimeRegistry.acquire`, creates a
 second runtime, or exposes Stop/Kill/Retry/mutation methods.
 

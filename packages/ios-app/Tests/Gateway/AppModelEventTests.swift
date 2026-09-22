@@ -984,8 +984,14 @@ struct AppModelEventTests {
             return
         }
         #expect(prepared.revision == "revision-2")
+        var received: [ProcessTranscriptChanged] = []
+        let sink = model.registerProcessTranscriptInvalidationSink { received.append($0) }
         await model.handle(changed)
-        #expect(model.processTranscriptInvalidation?.leaseId == "lease-1")
+        await model.handle(changed)
+        #expect(received.map(\.leaseId) == ["lease-1", "lease-1"])
+        model.removeProcessTranscriptInvalidationSink(sink)
+        await model.handle(changed)
+        #expect(received.count == 2)
 
         let closed = GatewayEvent(
             type: "event",

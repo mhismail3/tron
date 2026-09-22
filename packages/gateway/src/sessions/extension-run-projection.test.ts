@@ -33,6 +33,18 @@ describe("lifecycleProjection header", () => {
     expect(lifecycleProjectionArtifact(projection).steps[0]).toMatchObject({ hostStep: { provider: "github" } });
   });
 
+  it("preserves explicit execution identity separately from the workflow row key", () => {
+    const explicit = {
+      ...projection,
+      runId: "execution-run",
+      root: { ...projection.root, id: "workflow-key", workflowKey: "workflow-key", runId: "execution-run" },
+    };
+    expect(inspectExtensionLifecycleProjection(explicit)).toEqual(explicit);
+    expect(lifecycleProjectionArtifact(explicit).steps).toHaveLength(1);
+    expect(lifecycleProjectionArtifact(explicit)).toMatchObject({ runId: "execution-run", mode: "workflow" });
+    expect(lifecycleProjectionArtifact(explicit).lifecycleProjection).toMatchObject({ runId: "execution-run" });
+  });
+
   it("accepts producer-sized Unicode fields without confusing characters with bytes", () => {
     const label = "é".repeat(160);
     const unicodeProjection = {

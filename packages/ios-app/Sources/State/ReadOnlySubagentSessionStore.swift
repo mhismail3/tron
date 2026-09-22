@@ -159,16 +159,22 @@ final class ReadOnlySubagentSessionStore {
     private var textPreparationTask: Task<Void, Never>?
     private var bindingRetryAttempts = 0
     private var pendingRefreshRevision: String?
+    private var busyRecoveryTask: Task<Void, Never>?
+    private var busyRecoveryAttempts = 0
 
     private static let maximumBindingRetryAttempts = 2
+    private static let maximumBusyRecoveryAttempts = 3
 
     private(set) var status: Status = .idle
     private(set) var parentSessionID: String?
+    private(set) var parentSubscriptionToken: String?
     private(set) var processID: String?
     private var selectedToolCallID: String?
     private var selectedRunID: String?
     private(set) var presentationGeneration: Int?
     private(set) var leaseID: String?
+    private var openingViewerID: String?
+    private var viewerConnectionAdmission: GatewayConnectionAdmission?
     private(set) var childSessionRef: String?
     private(set) var canAbort = false
     private(set) var revision: String?
@@ -190,15 +196,18 @@ final class ReadOnlySubagentSessionStore {
         parentSessionID: String,
         processID: String,
         presentationGeneration: Int,
+        parentSubscriptionToken: String,
         activity: SessionProcessActivity? = nil
     ) {
         bindingRetryAttempts = 0
+        busyRecoveryAttempts = 0
         selectedToolCallID = activity?.processId == processID ? activity?.toolCallId : nil
         selectedRunID = activity?.processId == processID ? activity?.runId : nil
         startOpen(
             parentSessionID: parentSessionID,
             processID: processID,
             presentationGeneration: presentationGeneration,
+            parentSubscriptionToken: parentSubscriptionToken,
             activity: activity
         )
     }
@@ -207,12 +216,20 @@ final class ReadOnlySubagentSessionStore {
         parentSessionID: String,
         processID: String,
         presentationGeneration: Int,
+        parentSubscriptionToken: String,
         activity: SessionProcessActivity?
     ) {
         retire(sendClose: true)
         generation &+= 1
         let ownedGeneration = generation
+        // Allocate the opaque identity before the request is sent. The Gateway
+        // installs this exact pending owner before its first await, so a late
+        // response can only complete or retire this viewer.
+        let viewerID = UUID().uuidString
+        openingViewerID = viewerID
+        let admittedParentSubscriptionToken = parentSubscriptionToken
         self.parentSessionID = parentSessionID
+        self.parentSubscriptionToken = admittedParentSubscriptionToken
         self.processID = processID
         self.presentationGeneration = presentationGeneration
         if let activity,
@@ -226,18 +243,31 @@ final class ReadOnlySubagentSessionStore {
                 guard let self, self.generation == ownedGeneration else { return }
                 self.openTask = nil
             } }
+            let connectionAdmission = await client.activeConnectionAdmission()
             do {
-                // The RPC is the capability authority. Avoid waiting on a separate
-                // system.info projection before opening the latency-sensitive sheet;
-                // older Gateways return a bounded unsupported response directly.
-                struct Params: Encodable { let sessionId, processId: String }
+                // The negotiated v2 capability is the authority. Capture it
+                // from the existing hello admission; do not issue a second
+                // system.info read before opening the latency-sensitive sheet.
+                guard (await client.info?.capabilities.contains(SessionProcessAdmissionPolicy.transcriptCapability)) == true else {
+                    await MainActor.run { [weak self] in
+                        guard let self, self.generation == ownedGeneration else { return }
+                        self.status = .unavailable
+                    }
+                    return
+                }
+                await MainActor.run { [weak self] in
+                    guard let self, self.generation == ownedGeneration else { return }
+                    self.viewerConnectionAdmission = connectionAdmission
+                }
+                struct Params: Encodable { let sessionId, processId, viewerId, subscriptionToken: String }
                 let response: ProcessTranscriptOpenResponse = try await client.request(
                     "session.processTranscript.open",
-                    Params(sessionId: parentSessionID, processId: processID),
-                    timeout: .seconds(15)
+                    Params(sessionId: parentSessionID, processId: processID, viewerId: viewerID, subscriptionToken: admittedParentSubscriptionToken),
+                    timeout: .seconds(15),
+                    expectedConnection: connectionAdmission
                 )
                 guard !Task.isCancelled else {
-                    Self.closeDetached(client: client, leaseID: response.leaseId)
+                    Self.closeDetached(client: client, leaseID: viewerID, connectionAdmission: connectionAdmission)
                     return
                 }
                 await MainActor.run { [weak self] in
@@ -245,13 +275,19 @@ final class ReadOnlySubagentSessionStore {
                           self.generation == ownedGeneration,
                           self.parentSessionID == parentSessionID,
                           self.processID == processID,
-                          self.presentationGeneration == presentationGeneration,
-                          response.processId == processID,
+                          self.presentationGeneration == presentationGeneration else {
+                        Self.closeDetached(client: client, leaseID: viewerID, connectionAdmission: connectionAdmission)
+                        return
+                    }
+                    guard response.processId == processID,
+                          response.leaseId == viewerID,
                           Self.admits(response) else {
-                        Self.closeDetached(client: client, leaseID: response.leaseId)
+                        self.status = .failed("The Gateway returned an invalid subagent viewer lease.")
+                        Self.closeDetached(client: client, leaseID: viewerID, connectionAdmission: connectionAdmission)
                         return
                     }
                     self.leaseID = response.leaseId
+                    self.openingViewerID = nil
                     self.childSessionRef = response.childSessionRef
                     self.canAbort = response.canAbort == true
                     self.revision = response.revision
@@ -259,17 +295,30 @@ final class ReadOnlySubagentSessionStore {
                         self.leaseID = nil
                         self.canAbort = false
                         self.status = .failed("The canonical subagent transcript is inconsistent.")
-                        Self.closeDetached(client: client, leaseID: response.leaseId)
+                        Self.closeDetached(client: client, leaseID: viewerID, connectionAdmission: connectionAdmission)
                         return
                     }
                     self.status = .open
+                    self.refreshNewestPageIfNeeded()
                 }
             } catch is CancellationError {
+                Self.closeDetached(client: client, leaseID: viewerID, connectionAdmission: connectionAdmission)
+                return
+            } catch is GatewayPossiblySentError {
+                Self.closeDetached(client: client, leaseID: viewerID, connectionAdmission: connectionAdmission)
+                await MainActor.run { [weak self] in
+                    guard let self, self.generation == ownedGeneration else { return }
+                    self.status = .unavailable
+                }
                 return
             } catch {
                 await MainActor.run { [weak self] in
                     guard let self, self.generation == ownedGeneration else { return }
                     if let failure = error as? GatewayFailure,
+                       failure.code == "busy", failure.retryable {
+                        self.status = .waiting
+                        self.scheduleBusyRecovery(for: .opening, generation: ownedGeneration)
+                    } else if let failure = error as? GatewayFailure,
                        ["not_found", "unavailable"].contains(failure.code),
                        self.liveActivity?.lifecycle.state.isActive == true {
                         // Active subagents can publish their child binding after the
@@ -295,6 +344,7 @@ final class ReadOnlySubagentSessionStore {
     func loadEarlier() {
         guard pageTask == nil, status == .open, let leaseID, let revision, transcriptStart > 0 else { return }
         let ownedGeneration = generation
+        guard let connectionAdmission = viewerConnectionAdmission else { return }
         let before = transcriptStart
         let expectedNext = items.first?.id ?? nextEntryID
         let existingIDs = Set(items.map(\.id))
@@ -303,6 +353,7 @@ final class ReadOnlySubagentSessionStore {
             defer { Task { @MainActor [weak self] in
                 guard let self, self.generation == ownedGeneration else { return }
                 self.pageTask = nil
+                self.refreshNewestPageIfNeeded()
             } }
             do {
                 struct Params: Encodable {
@@ -315,7 +366,7 @@ final class ReadOnlySubagentSessionStore {
                     "session.processTranscript.page",
                     Params(leaseId: leaseID, before: before,
                            expectedNextEntryId: expectedNext, expectedRevision: revision),
-                    timeout: .seconds(15)
+                    timeout: .seconds(15), expectedConnection: connectionAdmission
                 )
                 guard !Task.isCancelled else { return }
                 await MainActor.run { [weak self] in
@@ -342,14 +393,23 @@ final class ReadOnlySubagentSessionStore {
                         return
                     }
                     self.prepareText()
+                    self.busyRecoveryAttempts = 0
                     self.status = .open
                 }
             } catch is CancellationError {
                 return
+            } catch is GatewayPossiblySentError {
+                guard let self, self.generation == ownedGeneration else { return }
+                self.status = .open
+                return
             } catch {
                 await MainActor.run { [weak self] in
                     guard let self, self.generation == ownedGeneration else { return }
-                    if let failure = error as? GatewayFailure, failure.code == "conflict" {
+                    if let failure = error as? GatewayFailure,
+                       failure.code == "busy", failure.retryable {
+                        self.status = .open
+                        self.scheduleBusyRecovery(for: .earlier, generation: ownedGeneration)
+                    } else if let failure = error as? GatewayFailure, failure.code == "conflict" {
                         self.reopenCanonicalTail(ownedGeneration: ownedGeneration)
                     } else {
                         self.status = .failed(error.localizedDescription)
@@ -360,26 +420,70 @@ final class ReadOnlySubagentSessionStore {
     }
 
     func invalidate(_ change: ProcessTranscriptChanged) {
-        guard change.leaseId == leaseID else { return }
+        let ownsLiveLease = change.leaseId == leaseID
+        let ownsOpening = change.leaseId == openingViewerID
+        guard ownsLiveLease || ownsOpening else { return }
         if change.closed == true {
-            retire(sendClose: false)
-            status = .unavailable
+            if ownsOpening && !ownsLiveLease {
+                openTask?.cancel(); openTask = nil
+                openingViewerID = nil
+                status = .unavailable
+            } else {
+                retire(sendClose: false)
+                status = .unavailable
+            }
             return
         }
-        guard let changedRevision = change.revision, changedRevision != revision else { return }
+        guard let changedRevision = change.revision else { return }
+        // A watcher can announce a dirty baseline before the open response is
+        // installed. Retain that intent and refresh immediately after install.
+        guard changedRevision != revision else { return }
         pendingRefreshRevision = changedRevision
-        pageTask?.cancel()
-        pageTask = nil
+        // Prepend owns its read lane. An append coalesces a refresh intent but
+        // must not cancel a user's in-flight historical page.
         refreshNewestPageIfNeeded()
     }
 
+    private enum BusyRecoveryIntent { case opening, earlier, newest }
+
+    private func scheduleBusyRecovery(for intent: BusyRecoveryIntent, generation ownedGeneration: Int) {
+        guard busyRecoveryTask == nil,
+              busyRecoveryAttempts < Self.maximumBusyRecoveryAttempts else { return }
+        busyRecoveryAttempts += 1
+        let delay = Duration.milliseconds(150 * busyRecoveryAttempts)
+        busyRecoveryTask = Task { [weak self] in
+            do { try await Task.sleep(for: delay) } catch { return }
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                guard let self, self.generation == ownedGeneration else { return }
+                self.busyRecoveryTask = nil
+                switch intent {
+                case .opening:
+                    guard let parent = self.parentSessionID, let process = self.processID,
+                          let presentation = self.presentationGeneration,
+                          let token = self.parentSubscriptionToken else { return }
+                    self.startOpen(parentSessionID: parent, processID: process,
+                                   presentationGeneration: presentation,
+                                   parentSubscriptionToken: token, activity: self.liveActivity)
+                case .earlier:
+                    self.loadEarlier()
+                case .newest:
+                    self.refreshNewestPageIfNeeded()
+                }
+            }
+        }
+    }
+
     private func refreshNewestPageIfNeeded() {
-        guard refreshTask == nil,
+        // The store is the single read owner. Historical prepend wins its lane;
+        // the dirty revision remains coalesced until that response settles.
+        guard pageTask == nil, refreshTask == nil,
               let targetRevision = pendingRefreshRevision,
               targetRevision != revision,
               let leaseID,
               let expectedRevision = revision else { return }
         let ownedGeneration = generation
+        guard let connectionAdmission = viewerConnectionAdmission else { return }
         status = .reconnecting
         refreshTask = Task { [weak self, client] in
             struct Params: Encodable {
@@ -390,7 +494,7 @@ final class ReadOnlySubagentSessionStore {
                 let response: ProcessTranscriptPageResponse = try await client.request(
                     "session.processTranscript.page",
                     Params(leaseId: leaseID, expectedRevision: expectedRevision),
-                    timeout: .seconds(15)
+                    timeout: .seconds(15), expectedConnection: connectionAdmission
                 )
                 guard !Task.isCancelled else { return }
                 await MainActor.run { [weak self] in
@@ -398,10 +502,17 @@ final class ReadOnlySubagentSessionStore {
                           self.generation == ownedGeneration,
                           self.leaseID == leaseID else { return }
                     guard let page = response.page,
-                          self.revision == expectedRevision,
-                          response.revision != expectedRevision else {
+                          self.revision == expectedRevision else {
                         self.refreshTask = nil
-                        self.status = .reconnecting
+                        self.status = .failed("The canonical subagent transcript is invalid.")
+                        return
+                    }
+                    // A defensive same-revision response is a settled no-op,
+                    // not a request that may leave the mounted viewer waiting.
+                    guard response.revision != expectedRevision else {
+                        self.refreshTask = nil
+                        self.pendingRefreshRevision = nil
+                        self.status = .open
                         return
                     }
                     let merged = ReadOnlyProcessTranscriptMerge.refreshing(
@@ -423,6 +534,7 @@ final class ReadOnlySubagentSessionStore {
                         return
                     }
                     self.prepareText()
+                    self.busyRecoveryAttempts = 0
                     if self.pendingRefreshRevision == targetRevision
                         || self.pendingRefreshRevision == response.revision {
                         self.pendingRefreshRevision = nil
@@ -433,11 +545,24 @@ final class ReadOnlySubagentSessionStore {
                 }
             } catch is CancellationError {
                 return
+            } catch is GatewayPossiblySentError {
+                await MainActor.run { [weak self] in
+                    guard let self, self.generation == ownedGeneration else { return }
+                    self.refreshTask = nil
+                    // Keep the last authoritative page mounted while a
+                    // possibly-sent disposable read is reconciled by the next
+                    // invalidation or reconnect.
+                    self.status = .open
+                }
             } catch {
                 await MainActor.run { [weak self] in
                     guard let self, self.generation == ownedGeneration else { return }
                     self.refreshTask = nil
-                    if let failure = error as? GatewayFailure, failure.code == "conflict" {
+                    if let failure = error as? GatewayFailure,
+                              failure.code == "busy", failure.retryable {
+                        self.status = .open
+                        self.scheduleBusyRecovery(for: .newest, generation: ownedGeneration)
+                    } else if let failure = error as? GatewayFailure, failure.code == "conflict" {
                         self.reopenCanonicalTail(ownedGeneration: ownedGeneration)
                     } else if let failure = error as? GatewayFailure,
                               ["not_found", "unavailable", "unsupported"].contains(failure.code) {
@@ -454,12 +579,14 @@ final class ReadOnlySubagentSessionStore {
         guard generation == ownedGeneration,
               let parentSessionID,
               let processID,
+              let parentSubscriptionToken,
               let presentationGeneration else { return }
         let activity = liveActivity
         open(
             parentSessionID: parentSessionID,
             processID: processID,
             presentationGeneration: presentationGeneration,
+            parentSubscriptionToken: parentSubscriptionToken,
             activity: activity
         )
     }
@@ -491,11 +618,12 @@ final class ReadOnlySubagentSessionStore {
             bindingRetryAttempts = 0
             bindingRetryTask?.cancel()
             bindingRetryTask = nil
-            if let parentSessionID, let presentationGeneration {
+            if let parentSessionID, let parentSubscriptionToken, let presentationGeneration {
                 startOpen(
                     parentSessionID: parentSessionID,
                     processID: activity.processId,
                     presentationGeneration: presentationGeneration,
+                    parentSubscriptionToken: parentSubscriptionToken,
                     activity: activity
                 )
             }
@@ -513,11 +641,13 @@ final class ReadOnlySubagentSessionStore {
             if activity.lifecycle.state.isActive {
                 scheduleBindingRetry(activity: activity, delay: .zero)
             } else if let parentSessionID,
+                      let parentSubscriptionToken,
                       let presentationGeneration {
                 open(
                     parentSessionID: parentSessionID,
                     processID: processID,
                     presentationGeneration: presentationGeneration,
+                    parentSubscriptionToken: parentSubscriptionToken,
                     activity: activity
                 )
             }
@@ -534,10 +664,15 @@ final class ReadOnlySubagentSessionStore {
               activity.lifecycle.state.isActive,
               let parentSessionID,
               let processID,
+              let parentSubscriptionToken,
               let presentationGeneration else {
+            // A live process may publish its binding after any bounded retry
+            // window. Remain truthful about pending availability and let the
+            // authoritative activity delta or a later retry recover the viewer;
+            // retry exhaustion is not a terminal read failure.
             if bindingRetryAttempts >= Self.maximumBindingRetryAttempts,
                activity.childSessionRef != nil {
-                status = .failed("The live subagent session is not ready yet. Try opening it again.")
+                status = .waiting
             }
             return
         }
@@ -559,6 +694,7 @@ final class ReadOnlySubagentSessionStore {
                     parentSessionID: parentSessionID,
                     processID: processID,
                     presentationGeneration: presentationGeneration,
+                    parentSubscriptionToken: parentSubscriptionToken,
                     activity: currentActivity
                 )
             }
@@ -574,20 +710,26 @@ final class ReadOnlySubagentSessionStore {
 
     private func retire(sendClose: Bool) {
         let oldLease = leaseID
+        let oldOpeningViewer = openingViewerID
+        let oldConnection = viewerConnectionAdmission
         generation &+= 1
         openTask?.cancel(); openTask = nil
         pageTask?.cancel(); pageTask = nil
         refreshTask?.cancel(); refreshTask = nil
         bindingRetryTask?.cancel(); bindingRetryTask = nil
+        busyRecoveryTask?.cancel(); busyRecoveryTask = nil
         textPreparationTask?.cancel(); textPreparationTask = nil
         textPreparationGeneration &+= 1
         pendingRefreshRevision = nil
-        leaseID = nil; childSessionRef = nil; canAbort = false; revision = nil
+        leaseID = nil; openingViewerID = nil; viewerConnectionAdmission = nil; childSessionRef = nil; parentSubscriptionToken = nil; canAbort = false; revision = nil
         items.removeAll(); presentation = .empty; preparedText = .empty
         transcriptStart = 0; transcriptTotal = 0
         nextEntryID = nil; leafEntryID = nil; forkBoundary = nil; liveActivity = nil
         status = .idle
-        if sendClose, let oldLease { Self.closeDetached(client: client, leaseID: oldLease) }
+        if sendClose {
+            if let oldLease { Self.closeDetached(client: client, leaseID: oldLease, connectionAdmission: oldConnection) }
+            if let oldOpeningViewer { Self.closeDetached(client: client, leaseID: oldOpeningViewer, connectionAdmission: oldConnection) }
+        }
     }
 
     private func install(_ page: ProcessTranscriptPage) -> Bool {
@@ -644,12 +786,14 @@ final class ReadOnlySubagentSessionStore {
             && !response.revision.isEmpty && response.revision.utf8.count <= 256
     }
 
-    nonisolated private static func closeDetached(client: GatewayClient, leaseID: String) {
+    nonisolated private static func closeDetached(client: GatewayClient, leaseID: String, connectionAdmission: GatewayConnectionAdmission?) {
+        guard let connectionAdmission else { return }
         Task {
             struct Params: Encodable { let leaseId: String }
             struct Response: Decodable { let closed: Bool }
             let _: Response? = try? await client.request(
-                "session.processTranscript.close", Params(leaseId: leaseID), timeout: .seconds(5)
+                "session.processTranscript.close", Params(leaseId: leaseID), timeout: .seconds(5),
+                expectedConnection: connectionAdmission
             )
         }
     }

@@ -16,7 +16,7 @@ import { PROCESS_ACTIVITY_RECENT_MS } from "./process-activity-recency.js";
 
 export const PROCESS_ACTIVITY_CAPABILITY = "process-activity.v1";
 export const PROCESS_ACTIVITY_HISTORY_CAPABILITY = "process-history.v1";
-export const PROCESS_TRANSCRIPT_CAPABILITY = "process-transcript.v1";
+export const PROCESS_TRANSCRIPT_CAPABILITY = "process-transcript.v2";
 export const PROCESS_TRANSCRIPT_ABORT_CAPABILITY = "process-transcript-abort.v1";
 export const MAX_PROCESS_ACTIVITY_COUNT = 32;
 export const MAX_PROCESS_ACTIVITY_BYTES = 256 * 1_024;
@@ -167,12 +167,13 @@ function childRows(
       ? "unknown"
       : parentIsTerminal && !terminalStates.has(reportedState) ? parentState : reportedState;
     const terminalAt = terminalStates.has(state)
-      ? parentIsTerminal
-        ? activity.lifecycle?.terminalAt ?? activity.completedAt
-        : activity.lifecycle?.observedAt ?? activity.updatedAt
+      ? child.endedAt
+        ?? (parentIsTerminal ? activity.lifecycle?.terminalAt ?? activity.completedAt : activity.lifecycle?.observedAt ?? activity.updatedAt)
       : undefined;
     const output = processOutput(child.output);
-    const durationMs = boundedDurationMs(child.durationMs ?? activity.durationMs, activity.startedAt, terminalAt);
+    // Child timing is producer-authored. Never substitute the aggregate
+    // parent's duration: parallel children have independent lifetimes.
+    const durationMs = boundedDurationMs(child.durationMs, child.startedAt, child.endedAt ?? terminalAt);
     const executable = exactChildId !== undefined && (
       !(child.children?.length)
       || child.childSessionRef !== undefined
@@ -198,7 +199,7 @@ function childRows(
         ...(terminalAt ? { terminalAt, recentUntil: new Date(Date.parse(terminalAt) + PROCESS_ACTIVITY_RECENT_MS).toISOString() } : {}),
       },
       visibility: terminalAt ? "recent" : state === "unknown" ? "unknown" : "active",
-      startedAt: activity.startedAt,
+      startedAt: child.startedAt ?? activity.startedAt,
       ...(durationMs === undefined ? {} : { durationMs }),
       title: utf8Prefix(child.label, 512).value,
       ...(child.currentTool ? { currentTool: utf8Prefix(child.currentTool, 2_048).value } : {}),

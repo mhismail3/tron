@@ -245,7 +245,7 @@ final class AppModel {
     private(set) var pushNavigationRequest: PushNavigationRequest?
     /// Lease-scoped invalidation for a mounted read-only subagent transcript.
     /// This does not participate in the parent session event cursor.
-    private(set) var processTranscriptInvalidation: ProcessTranscriptChanged?
+    private var processTranscriptInvalidationSinks: [UUID: (ProcessTranscriptChanged) -> Void] = [:]
     var actionablePushNavigationRequest: PushNavigationRequest? {
         guard didStart, sceneAllowsCatalogRefresh, pushNavigationActivationReady else { return nil }
         return pushNavigationRequest
@@ -897,6 +897,21 @@ final class AppModel {
 
     func presentationTarget(for sessionID: String) -> SessionPresentationTarget? {
         sessionPresentation.presentationTarget(for: sessionID)
+    }
+
+    func presentationSubscriptionToken(for sessionID: String) -> String? {
+        sessionPresentation.installedSubscriptionToken(for: sessionID)
+    }
+
+    @discardableResult
+    func registerProcessTranscriptInvalidationSink(_ sink: @escaping (ProcessTranscriptChanged) -> Void) -> UUID {
+        let id = UUID()
+        processTranscriptInvalidationSinks[id] = sink
+        return id
+    }
+
+    func removeProcessTranscriptInvalidationSink(_ id: UUID) {
+        processTranscriptInvalidationSinks.removeValue(forKey: id)
     }
 
     func ownsPresentation(_ target: SessionPresentationTarget) -> Bool {
@@ -4121,7 +4136,7 @@ final class AppModel {
             )
         case "session.processTranscript.changed":
             if case .processTranscriptChanged(let changed) = event.preparation {
-                processTranscriptInvalidation = changed
+                for sink in processTranscriptInvalidationSinks.values { sink(changed) }
             }
         case "terminal.output", "terminal.exit":
             guard let connectionID = gatewayConnectionID,

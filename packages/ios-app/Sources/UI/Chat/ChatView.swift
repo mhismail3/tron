@@ -183,7 +183,9 @@ struct ChatView: View {
             activityPresented: activityPresentationBinding,
             extensionContent: extensionRetainedContent,
             omittedExtensionContentCount: omittedExtensionContentCount,
-            processActivities: selectedAuthoritativeSnapshot?.processActivities ?? [],
+            // Process rows come from the mounted SessionPresentation owner,
+            // not a raw snapshot read that can bypass its anchor retention.
+            processActivities: model.sessionProcessPresentation(for: sessionID)?.activities ?? [],
             interaction: interactionBinding,
             onInteractionClosed: closeInteractionPresentation,
             filesPresented: attachmentPresentationBinding(for: .files),
@@ -2829,7 +2831,7 @@ struct ChatView: View {
         ChatComposerView(
             sessionFacts: visibleSessionFacts,
             processOverview: selectedAuthoritativeSnapshot?.processOverview,
-            processActivities: selectedAuthoritativeSnapshot?.processActivities,
+            processActivities: model.sessionProcessPresentation(for: sessionID)?.activities,
             extensionRetainedContent: extensionRetainedContent,
             pendingAttachments: pendingAttachments,
             selectedResource: selectedComposerResource,

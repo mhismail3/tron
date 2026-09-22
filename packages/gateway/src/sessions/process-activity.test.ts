@@ -48,6 +48,16 @@ const subagent: ExtensionRunActivity = {
 };
 
 describe("session process projection", () => {
+  it("uses child execution times instead of the workflow parent's elapsed interval", () => {
+    const rows = subagentProcessesFromActivity("session", {
+      ...subagent,
+      durationMs: 60_000,
+      children: [{ ...subagent.children[0]!, durationMs: undefined,
+        startedAt: "2026-01-01T00:00:30.000Z", endedAt: "2026-01-01T00:00:35.000Z" }],
+    });
+    expect(rows[0]).toMatchObject({ startedAt: "2026-01-01T00:00:30.000Z", durationMs: 5_000,
+      lifecycle: { terminalAt: "2026-01-01T00:00:35.000Z" } });
+  });
   it("routes exact active subagent stop ownership and rejects terminal or unfenced work", () => {
     const running: ExtensionRunActivity = {
       ...subagent,
@@ -353,7 +363,6 @@ describe("session process projection", () => {
     expect(history.map((row) => row.kind)).toEqual(["subagent"]);
     expect(history[0]).toMatchObject({
       childSessionRef: "child-session-1",
-      durationMs: 2_000,
       visibility: "historical",
     });
 

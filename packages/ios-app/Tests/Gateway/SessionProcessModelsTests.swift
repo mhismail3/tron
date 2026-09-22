@@ -4,6 +4,11 @@ import Testing
 
 @Suite("Session process models")
 struct SessionProcessModelsTests {
+    @Test("read-only viewer requires the negotiated v2 transcript capability")
+    func transcriptCapabilityIsV2() {
+        #expect(SessionProcessAdmissionPolicy.transcriptCapability == "process-transcript.v2")
+    }
+
     @Test("legacy command shapes validate but only subagents enter presentation")
     func wireShapes() throws {
         let command = try JSONDecoder.gateway.decode(SessionProcessActivity.self, from: Data(#"""

@@ -543,6 +543,7 @@ struct ReadOnlySubagentSessionSheet: View {
     @State private var isNearTail = true
     @State private var detent: PresentationDetent = .medium
     @State private var stopRequested = false
+    @State private var invalidationSinkID: UUID?
 
     private let tailID = "read-only-subagent-tail"
 
@@ -584,23 +585,32 @@ struct ReadOnlySubagentSessionSheet: View {
         .tronSettingsVisualTheme(accent: .tronSubagent)
         .task(id: openIdentity) {
             guard model.connectionState == .connected,
-                  let target = model.presentationTarget(for: parentSessionID) else { return }
+                  let target = model.presentationTarget(for: parentSessionID),
+                  let subscriptionToken = model.presentationSubscriptionToken(for: parentSessionID) else { return }
             if store == nil { store = ReadOnlySubagentSessionStore(client: model.client) }
+            if invalidationSinkID == nil, let mountedStore = store {
+                invalidationSinkID = model.registerProcessTranscriptInvalidationSink { [weak mountedStore] change in
+                    mountedStore?.invalidate(change)
+                }
+            }
             store?.open(
                 parentSessionID: parentSessionID,
                 processID: process.processId,
                 presentationGeneration: target.generation,
+                parentSubscriptionToken: subscriptionToken,
                 activity: mountedActivity ?? process
             )
-        }
-        .onChange(of: model.processTranscriptInvalidation) { _, change in
-            guard let change else { return }
-            store?.invalidate(change)
         }
         .onChange(of: mountedActivity) { _, activity in
             store?.updateLiveActivity(activity)
         }
-        .onDisappear { store?.close() }
+        .onDisappear {
+            store?.close()
+            if let invalidationSinkID {
+                model.removeProcessTranscriptInvalidationSink(invalidationSinkID)
+                self.invalidationSinkID = nil
+            }
+        }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.hidden)

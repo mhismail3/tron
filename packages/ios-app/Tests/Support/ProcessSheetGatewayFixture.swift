@@ -40,6 +40,13 @@ final class ProcessSheetGatewayFixture {
         guard request.objectValue?["method"]?.stringValue == method, let id = request.objectValue?["id"]?.stringValue else {
             throw GatewayFailure(code: "invalid_fixture_request", message: "Expected \(method)", retryable: false, details: nil)
         }
+        var result = result
+        if method == "session.processTranscript.open",
+           var object = result.objectValue, object["leaseId"]?.stringValue == "lease-worker",
+           let viewerID = request.objectValue?["params"]?.objectValue?["viewerId"]?.stringValue {
+            object["leaseId"] = .string(viewerID)
+            result = .object(object)
+        }
         await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
             "type": .string("response"), "id": .string(id), "ok": .bool(true), "result": result,
         ])))

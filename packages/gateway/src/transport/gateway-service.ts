@@ -206,6 +206,8 @@ export interface ClientContext {
   isSubscribed(sessionId: string): boolean;
   isRevoked(): boolean;
   revokeDevice(deviceId: string): void;
+  /** Current exact subscription token for a connection-owned presentation. */
+  subscriptionToken?(sessionId: string): string | undefined;
   /** Direct connection-local event delivery for opaque read-only leases. */
   sendEvent?(topic: string, sessionId: string, payload: JsonValue): void;
 }
@@ -287,8 +289,12 @@ export class GatewayService {
     this.processTranscriptLeases.releaseClient(clientID);
   }
 
-  releaseSessionProcessTranscripts(sessionID: string): void {
-    this.processTranscriptLeases.releaseSession(sessionID);
+  releaseSessionProcessTranscripts(sessionID: string, clientID?: string, subscriptionToken?: string): void {
+    if (clientID !== undefined) {
+      this.processTranscriptLeases.releaseParent(clientID, sessionID, subscriptionToken);
+    } else {
+      this.processTranscriptLeases.releaseSession(sessionID);
+    }
   }
 
   /**
@@ -1043,33 +1049,42 @@ export class GatewayService {
         return safeJson({ activity });
       }
       case "session.processTranscript.open": {
-        const slot = await this.openedSlot(client, params);
-        if (!client.sendEvent) throw new GatewayError("unsupported", "This connection cannot observe subagent transcripts");
+        const sessionId = string(params.sessionId, "sessionId", { max: 200 });
         const processId = string(params.processId, "processId", { max: 256 });
-        await slot.reconcileProcessChildSessionBinding(processId);
-        const binding = slot.processChildSessionBinding(processId);
-        if (!binding?.runId) throw new GatewayError("not_found", "Subagent session ownership is unavailable");
-        const live = slot.processChildSessionPath(processId);
-        const abortAuthority = slot.processSubagentAbortAuthority(processId, binding.runId);
+        const viewerId = string(params.viewerId, "viewerId", { max: 256 });
+        const parentSubscriptionToken = string(params.subscriptionToken, "subscriptionToken", { max: 256 });
+        if (!client.sendEvent) throw new GatewayError("unsupported", "This connection cannot observe subagent transcripts");
         this.requireObserverAdmission(client);
-        const lease = await this.processTranscriptLeases.open(
-          client.id,
-          slot.id,
-          processId,
-          binding.ref,
-          binding.runId,
-          live?.path,
-          client.sendEvent,
-          abortAuthority,
-        );
-        if (client.isRevoked()) {
-          this.processTranscriptLeases.releaseClient(client.id);
-          throw new GatewayError("unauthenticated", "This device is no longer authorized");
+        if (client.subscriptionToken?.(sessionId) !== parentSubscriptionToken) {
+          throw new GatewayError("conflict", "Parent session presentation is not current", true);
         }
-        return safeJson(lease);
+        // Install connection/viewer ownership before openedSlot, reconciliation,
+        // or any other await. Disconnect and cancellation therefore retire the
+        // exact pending viewer instead of allowing a late open to orphan it.
+        const reservation = this.processTranscriptLeases.reserveOpen(
+          client.id, sessionId, viewerId, parentSubscriptionToken, client.signal,
+        );
+        try {
+          const slot = await this.openedSlot(client, { ...params, sessionId });
+          await slot.reconcileProcessChildSessionBinding(processId);
+          const binding = slot.processChildSessionBinding(processId);
+          if (!binding?.runId) throw new GatewayError("not_found", "Subagent session ownership is unavailable");
+          const live = slot.processChildSessionPath(processId);
+          const abortAuthority = slot.processSubagentAbortAuthority(processId, binding.runId);
+          const lease = await reservation.open(
+            processId, binding.ref, binding.runId, live?.path, client.sendEvent, abortAuthority,
+          );
+          if (client.isRevoked()) {
+            reservation.retire();
+            throw new GatewayError("unauthenticated", "This device is no longer authorized");
+          }
+          return safeJson(lease);
+        } finally {
+          reservation.release();
+        }
       }
       case "session.processTranscript.page": {
-        const leaseId = string(params.leaseId, "leaseId", { max: 200 });
+        const leaseId = string(params.leaseId, "leaseId", { max: 256 });
         const before = params.before === undefined ? undefined : integer(params.before, "before", 0, Number.MAX_SAFE_INTEGER);
         const expectedNextEntryId = optionalString(params.expectedNextEntryId, "expectedNextEntryId", 200);
         const expectedRevision = optionalString(params.expectedRevision, "expectedRevision", 64);
@@ -1083,19 +1098,20 @@ export class GatewayService {
       }
       case "session.processTranscript.abort":
         return this.mutation(client, method, params, async () => {
-          const leaseId = string(params.leaseId, "leaseId", { max: 200 });
+          const leaseId = string(params.leaseId, "leaseId", { max: 256 });
           await this.processTranscriptLeases.abortOwned(client.id, leaseId);
           return { aborted: true };
         }, true);
       case "session.processTranscript.close": {
-        const leaseId = string(params.leaseId, "leaseId", { max: 200 });
+        const leaseId = string(params.leaseId, "leaseId", { max: 256 });
         return { closed: this.processTranscriptLeases.closeOwned(client.id, leaseId) };
       }
       case "session.close": {
         const sessionId = string(params.sessionId, "sessionId", { max: 200 });
         const subscriptionToken = string(params.subscriptionToken, "subscriptionToken", { max: 200 });
-        this.processTranscriptLeases.releaseParent(client.id, sessionId);
-        return { closed: client.unsubscribe(sessionId, subscriptionToken) };
+        const closed = client.unsubscribe(sessionId, subscriptionToken);
+        if (closed) this.processTranscriptLeases.releaseParent(client.id, sessionId, subscriptionToken);
+        return { closed };
       }
       case "session.delete":
         return this.mutation(client, method, params, async () => {
