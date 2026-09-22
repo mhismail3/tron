@@ -417,13 +417,14 @@ private struct HostedKnowledgeDashboardFixture: View {
                             }
                         }
                     case .info:
-                        Text("Chronicle info").font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronKnowledge)
-                        KnowledgeInfoStat(title: "Observed", value: 367)
-                        KnowledgeInfoStat(title: "Empty", value: 3)
-                        KnowledgeInfoStat(title: "Excluded", value: 27)
-                        KnowledgeInfoStat(title: "Pending", value: 0)
-                        KnowledgeInfoStat(title: "Failed", value: 1)
-                        KnowledgeInfoStat(title: "Unavailable", value: 15)
+                        TronMetadataTable(title: "Chronicle info", accent: .tronKnowledge, rows: [
+                            TronMetadataTableRow(id: "observed", title: "Observed", value: 367.formatted(.number)),
+                            TronMetadataTableRow(id: "empty", title: "Empty", value: 3.formatted(.number)),
+                            TronMetadataTableRow(id: "excluded", title: "Excluded", value: 27.formatted(.number)),
+                            TronMetadataTableRow(id: "pending", title: "Pending", value: 0.formatted(.number)),
+                            TronMetadataTableRow(id: "failed", title: "Failed", value: 1.formatted(.number)),
+                            TronMetadataTableRow(id: "unavailable", title: "Unavailable", value: 15.formatted(.number)),
+                        ])
                     }
                 }
                 .padding(.horizontal, 20)

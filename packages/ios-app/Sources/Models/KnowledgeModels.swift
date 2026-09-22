@@ -104,7 +104,7 @@ final class KnowledgeCoveragePresentationStore {
             if ticket == generation { loading = false }
         }
         catch {
-            guard ticket == generation, isCurrent() else { return }
+            guard !Task.isCancelled, ticket == generation, isCurrent() else { return }
             self.error = error.localizedDescription; loading = false
         }
     }
@@ -161,7 +161,7 @@ final class KnowledgeLinkedRecordReaderStore {
             if ticket == generation, generation == ownerGeneration { loading = false }
         }
         catch {
-            guard ticket == generation, generation == ownerGeneration, isCurrent() else { return }
+            guard !Task.isCancelled, ticket == generation, generation == ownerGeneration, isCurrent() else { return }
             loading = false; self.error = error.localizedDescription
         }
     }
@@ -232,7 +232,7 @@ final class KnowledgeObjectReaderStore {
             if generation == ownerGeneration, activeKey == key, states[key]?.generation == ticket { states[key]?.loading = false }
         }
         catch {
-            guard generation == ownerGeneration, isCurrent(), activeKey == key, states[key]?.generation == ticket else { return }
+            guard !Task.isCancelled, generation == ownerGeneration, isCurrent(), activeKey == key, states[key]?.generation == ticket else { return }
             states[key]?.loading = false; states[key]?.error = error.localizedDescription
         }
     }

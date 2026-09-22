@@ -90,7 +90,7 @@ struct PairedDeviceDetailView: View {
                 } label: {
                     Image(systemName: "pencil")
                         .font(TronTypography.buttonSM)
-                        .foregroundStyle(Color.tronPurple)
+                        .foregroundStyle(Color.tronEmerald)
                 }
                 .disabled(!labelSupported || savingLabel)
                 .accessibilityLabel("Rename Device")
