@@ -361,7 +361,6 @@ interface CatalogAcquisitionResolution {
   entriesByID: ReadonlyMap<string, CatalogAcquisitionEntry>;
   ambiguousIDs: ReadonlySet<string>;
   structureDigest: string;
-  indexedStructuralGeneration?: number;
   fallbackIdentityFingerprint?: string;
   fallbackInvalidationGeneration?: number;
 }
@@ -404,6 +403,7 @@ interface CatalogPageSource {
 }
 
 interface CatalogStructuralIndex {
+  scope: "user" | "all";
   allInfos: readonly CatalogSessionInfo[];
   ambiguousDiskIDs: ReadonlySet<string>;
   structureDigest: string;
@@ -1191,17 +1191,22 @@ export class RuntimeRegistry {
     }
   }
 
-  private async validatedStructuralIndex(): Promise<CatalogStructuralIndex | undefined> {
+  private async validatedStructuralIndex(scope: "user" | "all" = "all"): Promise<CatalogStructuralIndex | undefined> {
     const index = this.catalogStructuralIndex;
-    if (!index || index.structuralGeneration !== this.catalogStructuralGeneration) return undefined;
+    if (!index || index.structuralGeneration !== this.catalogStructuralGeneration
+      || (scope === "all" && index.scope === "user")) return undefined;
     const structuralGeneration = this.catalogStructuralGeneration;
     const evidence = await this.sharedCatalogStructureEvidence(true);
     if (this.catalogStructuralIndex === index
         && structuralGeneration === this.catalogStructuralGeneration
         && evidence.complete
         && evidence.digest === index.structureDigest
-        && evidence.factsDigest === index.factsDigest) return index;
-    if (this.catalogStructuralIndex === index) this.invalidateCatalogAcquisition();
+        && this.catalogFactsDigest(evidence, index.scope) === index.factsDigest) return index;
+    // Metadata freshness cannot revoke a concurrent identity-only acquisition.
+    if (this.catalogStructuralIndex === index) {
+      this.catalogStructuralIndex = undefined;
+      this.catalogProjectionGeneration += 1;
+    }
     return undefined;
   }
 
@@ -1223,10 +1228,11 @@ export class RuntimeRegistry {
     this.invalidateCatalogAdmission();
     this.catalogStructuralGeneration += 1;
     this.catalogStructuralIndex = {
+      scope: index.scope,
       allInfos: remaining,
       ambiguousDiskIDs: this.diskAmbiguousSessionIDs(remaining),
       structureDigest: evidence.digest,
-      factsDigest: evidence.factsDigest,
+      factsDigest: this.catalogFactsDigest(evidence, index.scope),
       structuralGeneration: this.catalogStructuralGeneration,
       invalidationGeneration: this.catalogAcquisitionInvalidationGeneration,
     };
@@ -1417,11 +1423,9 @@ export class RuntimeRegistry {
     }
     const finalByte = Buffer.alloc(1);
     const finalRead = await handle.read(finalByte, 0, 1, opened.size - 1);
-    if (finalRead.bytesRead !== 1 || finalByte[0] !== 0x0a) {
-      refundBytes(firstReadLength);
-      await handle.close();
-      return { unstable: true };
-    }
+    // A stable header remains identity evidence while this file has a partial
+    // tail. Transcript/catalog readers separately enforce their selected scope.
+    const incompleteTail = finalRead.bytesRead !== 1 || finalByte[0] !== 0x0a;
     const buffer = Buffer.allocUnsafe(maximumBytes);
     const parseHeader = (line: Buffer): CatalogHeaderIdentity | undefined => {
       if (line.length === 0 || !line.toString("utf8").trim()) return undefined;
@@ -1475,14 +1479,14 @@ export class RuntimeRegistry {
           if (lineStart >= bytesReadTotal) return {};
           const identity = parseHeader(buffer.subarray(lineStart, bytesReadTotal));
           const stable = await stableIdentity(identity);
-          return stable ? { identity: stable } : {};
+          return stable ? { identity: stable, ...(incompleteTail ? { unstable: true } : {}) } : {};
         }
         bytesReadTotal += bytesRead;
         const newline = buffer.indexOf(0x0a, lineStart);
         if (newline >= 0 && newline < bytesReadTotal) {
           const identity = parseHeader(buffer.subarray(lineStart, newline));
           const stable = await stableIdentity(identity);
-          return stable ? { identity: stable } : {};
+          return stable ? { identity: stable, ...(incompleteTail ? { unstable: true } : {}) } : {};
         }
       }
       return {};
@@ -1597,6 +1601,20 @@ export class RuntimeRegistry {
 
   async list(scope: "user" | "all" = "user"): Promise<SessionSummary[]> {
     return (await this.catalog(scope)).sessions;
+  }
+
+  /** Artifact retention needs membership, never transcript metadata. Ambiguous
+   * canonical IDs still retain their data; incomplete evidence cannot authorize
+   * orphan collection. Live-only slots also retain their staged artifacts. */
+  async sessionIDsForStorageMaintenance(): Promise<ReadonlySet<string>> {
+    const generation = this.catalogAcquisitionInvalidationGeneration;
+    const evidence = await this.sharedCatalogStructureEvidence();
+    if (!evidence.complete || generation !== this.catalogAcquisitionInvalidationGeneration) {
+      throw new GatewayError("busy", "Session membership could not be validated for storage maintenance", true);
+    }
+    const ids = new Set([...evidence.identitiesByPath.values()].map(identity => identity.id));
+    for (const slot of this.slots.values()) if (!slot.isDisposed) ids.add(slot.id);
+    return ids;
   }
 
   async requireResolvedAutomationWorkspace(cwd: string): Promise<string> {
@@ -1749,8 +1767,8 @@ export class RuntimeRegistry {
     runtimeGeneration?: string;
     leafEntryId?: string;
   }> {
-    const catalog = await this.catalog("user");
-    const info = this.catalogStructuralIndex?.allInfos.find(candidate => candidate.id === sessionId);
+    const catalog = await this.catalogSnapshot("user");
+    const info = catalog.infos.find(candidate => candidate.id === sessionId);
     if (!info || !catalog.sessions.some(session => session.id === sessionId)) throw new GatewayError("not_found", "Session is not available for search");
     const slot = this.slots.get(sessionId);
     if (slot) {
@@ -1860,13 +1878,19 @@ export class RuntimeRegistry {
     return operation;
   }
 
-  private sharedCatalogStructureEvidence(refresh = false): Promise<CatalogStructureEvidence> {
+  private async sharedCatalogStructureEvidence(refresh = false): Promise<CatalogStructureEvidence> {
     const generationKey = `${this.catalogStructuralGeneration}:${this.catalogAcquisitionInvalidationGeneration}`;
-    const key = refresh ? `${generationKey}:refresh:${++this.catalogEvidenceRefresh}` : generationKey;
-    if (this.catalogEvidencePromise && this.catalogEvidenceKey === key) return this.catalogEvidencePromise;
+    const active = this.catalogEvidencePromise;
+    if (active) {
+      if (!refresh && this.catalogEvidenceKey === generationKey) return active;
+      // A post-read check must begin after its caller's read. Concurrent post-read
+      // callers share the successor walk, rather than each starting another one.
+      try { await active; } catch { /* a fresh cut owns its own outcome */ }
+      return this.sharedCatalogStructureEvidence();
+    }
     const operation = this.catalogStructureEvidence();
     this.catalogEvidencePromise = operation;
-    this.catalogEvidenceKey = key;
+    this.catalogEvidenceKey = generationKey;
     void operation.finally(() => {
       if (this.catalogEvidencePromise === operation) {
         this.catalogEvidencePromise = undefined;
@@ -1906,12 +1930,12 @@ export class RuntimeRegistry {
     return operation;
   }
 
-  private async loadDurableCatalogIndex(): Promise<void> {
+  private async loadDurableCatalogIndex(scope: "user" | "all" = "all"): Promise<void> {
     const structuralGeneration = this.catalogStructuralGeneration;
     const invalidationGeneration = this.catalogAcquisitionInvalidationGeneration;
     const before = await this.sharedCatalogStructureEvidence();
     if (!before.complete) return;
-    const candidates = [...before.identitiesByPath].map(([path, identity]) => ({
+    const candidates = [...this.catalogIdentitiesForScope(before, scope)].map(([path, identity]) => ({
       path, id: identity.id, cwd: identity.cwd, fileIdentity: identity.fileIdentity,
       size: identity.size, mtimeMs: identity.mtimeMs,
     }));
@@ -1936,7 +1960,7 @@ export class RuntimeRegistry {
     );
     if (!rows) return;
     const after = await this.sharedCatalogStructureEvidence(true);
-    const rowsMatchAfterFacts = rows.length === after.identitiesByPath.size
+    const rowsMatchAfterFacts = rows.length === this.catalogIdentitiesForScope(after, scope).length
       && rows.every((row) => {
         const identity = after.identitiesByPath.get(resolve(row.path));
         const liveOwner = identity !== undefined && this.isLiveRuntimeOwnedPath(resolve(row.path), row.id);
@@ -1966,10 +1990,11 @@ export class RuntimeRegistry {
       fileIdentity: row.fileIdentity,
     }));
     this.catalogStructuralIndex = {
+      scope,
       allInfos: infos,
-      ambiguousDiskIDs: this.diskAmbiguousSessionIDs(infos),
+      ambiguousDiskIDs: this.diskAmbiguousSessionIDsFromEvidence(after),
       structureDigest: before.digest,
-      factsDigest: after.factsDigest,
+      factsDigest: this.catalogFactsDigest(after, scope),
       structuralGeneration,
       invalidationGeneration,
     };
@@ -2015,17 +2040,17 @@ export class RuntimeRegistry {
     listRevision: number;
     structureDigest: string;
   }> {
-    let cached = await this.validatedStructuralIndex();
+    let cached = await this.validatedStructuralIndex(scope);
     if (!cached) {
-      await this.loadDurableCatalogIndex();
-      cached = await this.validatedStructuralIndex();
+      await this.loadDurableCatalogIndex(scope);
+      cached = await this.validatedStructuralIndex(scope);
     }
     if (cached) {
       const ambiguousIDs = this.dynamicAmbiguousSessionIDs(cached);
       const infos = cached.allInfos.filter((session) => !ambiguousIDs.has(session.id));
       // Reconciled sidecar rows can change membership just like a full scan.
       // Publish their identity before returning the matching structural revision.
-      this.updateCatalogIdentity(cached.allInfos, ambiguousIDs);
+      this.updateCatalogIdentity(cached.allInfos, ambiguousIDs, cached.scope);
       return {
         infos: [...infos],
         ambiguousIDs,
@@ -2055,34 +2080,33 @@ export class RuntimeRegistry {
       throw new GatewayError("busy", "Session catalog changed during publication", true);
     }
     const index: CatalogStructuralIndex = {
+      scope,
       allInfos: materialized.allInfos,
       ambiguousDiskIDs: materialized.ambiguousDiskIDs,
       structureDigest: materialized.after.digest,
-      factsDigest: materialized.after.factsDigest,
+      factsDigest: this.catalogFactsDigest(materialized.after, scope),
       structuralGeneration: materialized.structuralGeneration,
       invalidationGeneration: materialized.invalidationGeneration,
     };
-    // A user cut can still be exact when the structural evidence contains no
-    // delegated session paths. In that case it is safe to retain as the
-    // process-wide index; otherwise the omitted delegated rows must force an
-    // all-scope materialization before indexing.
+    // Only a complete cut may replace the on-disk all-scope acceleration.
+    // The in-memory index records its scope so user cuts remain reusable.
     const indexIsExact = materialized.after.complete
       && materialized.after.identitiesByPath.size === materialized.allInfos.length
       && materialized.allInfos.every((info) => {
         const identity = materialized.after.identitiesByPath.get(resolve(info.path));
         return identity?.id === info.id && resolve(identity.cwd || process.cwd()) === resolve(info.cwd);
       });
-    this.catalogStructuralIndex = indexIsExact ? index : undefined;
+    // Keep the admitted user cut in the same bounded index. Its scope prevents
+    // acquisition/all-scope callers from mistaking omitted children for absence.
+    if (indexIsExact) {
+      index.scope = "all";
+      index.factsDigest = materialized.after.factsDigest;
+    }
+    this.catalogStructuralIndex = materialized.after.complete ? index : undefined;
     const ambiguousIDs = scope === "user"
       ? this.diskAmbiguousSessionIDsFromEvidence(materialized.after)
       : this.dynamicAmbiguousSessionIDs(index);
     const infos = index.allInfos.filter((session) => !ambiguousIDs.has(session.id));
-    if (indexIsExact && admitted && this.catalogAcquisitionAdmission) {
-      this.catalogAcquisitionAdmission = {
-        ...this.catalogAcquisitionAdmission,
-        indexedStructuralGeneration: index.structuralGeneration,
-      };
-    }
     // No await may separate the final generation confirmation from publication
     // of catalog identity and its matching revision. User cuts update only the
     // non-delegated membership fingerprint; all-scope cuts update full identity
@@ -2090,9 +2114,8 @@ export class RuntimeRegistry {
     // fails closed.
     if (scope === "all") this.updateCatalogIdentity(materialized.allInfos, ambiguousIDs, "all");
     else {
-      // The partial user cut owns user membership/revision, while its complete
-      // header evidence still owns duplicate-ID quarantine. It is not eligible
-      // to populate the all-scope structural index below.
+      // The partial user cut owns user membership/revision; whole-tree header
+      // evidence still owns duplicate-ID quarantine.
       this.updateCatalogIdentity(materialized.allInfos, ambiguousIDs, "user");
     }
     if (indexIsExact) {
@@ -2155,22 +2178,38 @@ export class RuntimeRegistry {
     };
   }
 
+  private catalogIdentitiesForScope(evidence: CatalogStructureEvidence, scope: "user" | "all") {
+    const identities = [...evidence.identitiesByPath];
+    if (scope === "all") return identities;
+    let root: string;
+    try { root = realpathSync(this.catalogDirectory()); }
+    catch { root = resolve(this.catalogDirectory()); }
+    return identities.filter(([path]) => this.delegatedTopologyParentPath(path, root) === undefined);
+  }
+
+  private catalogFactsDigest(evidence: CatalogStructureEvidence, scope: "user" | "all"): string {
+    if (scope === "all") return evidence.factsDigest;
+    const facts = this.catalogIdentitiesForScope(evidence, scope).map(([path, value]) => {
+      const live = this.isLiveRuntimeOwnedPath(path, value.id);
+      return [path, value.id, value.cwd, value.fileIdentity,
+        live ? "live-append" : value.size, live ? "live-append" : value.mtimeMs];
+    });
+    return createHash("sha256").update(JSON.stringify(facts)).digest("base64url");
+  }
+
   private catalogEvidenceMatchesScope(
     before: CatalogStructureEvidence,
     after: CatalogStructureEvidence,
     scope: "user" | "all",
   ): boolean {
     if (scope === "all") return before.digest === after.digest && before.factsDigest === after.factsDigest;
-    let catalogRoot: string;
-    try { catalogRoot = realpathSync(this.catalogDirectory()); }
-    catch { catalogRoot = resolve(this.catalogDirectory()); }
-    const identity = (evidence: CatalogStructureEvidence) => [...evidence.identitiesByPath]
-      .filter(([path]) => this.delegatedTopologyParentPath(path, catalogRoot) === undefined)
+    const identity = (evidence: CatalogStructureEvidence) => this.catalogIdentitiesForScope(evidence, scope)
       .map(([path, value]) => [
         path, value.id, value.cwd, value.fileIdentity, value.parentSessionPath ?? "",
       ].join("\\0"))
       .sort();
-    return JSON.stringify(identity(before)) === JSON.stringify(identity(after));
+    return JSON.stringify(identity(before)) === JSON.stringify(identity(after))
+      && this.catalogFactsDigest(before, scope) === this.catalogFactsDigest(after, scope);
   }
 
   private hasRelevantUnstableFiles(
@@ -2418,47 +2457,6 @@ export class RuntimeRegistry {
   }
 
   private async resolveCatalogAcquisition(): Promise<CatalogAcquisitionResolution> {
-    const candidateIndex = this.catalogStructuralIndex;
-    const cachedIndex = candidateIndex?.structuralGeneration === this.catalogStructuralGeneration
-      ? candidateIndex : undefined;
-    const cachedAdmission = this.catalogAcquisitionAdmission;
-    if (cachedAdmission?.invalidationGeneration === this.catalogAcquisitionInvalidationGeneration
-        && cachedIndex) {
-      const validated = await this.validatedStructuralIndex();
-      if (validated) {
-        return {
-          ...cachedAdmission,
-          indexedStructuralGeneration: cachedIndex.structuralGeneration,
-        };
-      }
-    }
-    if (cachedIndex && cachedIndex.structuralGeneration === this.catalogStructuralGeneration) {
-      const indexed = await this.catalogAcquisitionMutex.run(async () => {
-        const invalidationGeneration = this.catalogAcquisitionInvalidationGeneration;
-        const structuralGeneration = this.catalogStructuralGeneration;
-        const current = this.catalogAcquisitionAdmission;
-        if (current?.invalidationGeneration === invalidationGeneration) return current;
-        const ambiguousIDs = this.dynamicAmbiguousSessionIDs(cachedIndex);
-        const resolution = await this.buildCatalogAcquisitionFromSessions(
-          cachedIndex.allInfos.filter((session) => !ambiguousIDs.has(session.id)),
-          ambiguousIDs,
-          cachedIndex.structureDigest,
-        );
-        if (invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration
-            || structuralGeneration !== this.catalogStructuralGeneration) {
-          throw new GatewayError("busy", "Session catalog changed during acquisition", true);
-        }
-        const admission: CatalogAcquisitionAdmission = {
-          ...resolution,
-          indexedStructuralGeneration: structuralGeneration,
-          invalidationGeneration,
-        };
-        this.catalogAcquisitionAdmission = admission;
-        return admission;
-      });
-      return indexed;
-    }
-
     const lightweight = await this.catalogAcquisitionMutex.run(async () => {
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const invalidationGeneration = this.catalogAcquisitionInvalidationGeneration;
@@ -3135,6 +3133,18 @@ export class RuntimeRegistry {
       if (await this.projectTrustReloading(entry.canonicalCwd)) {
         throw new GatewayError("busy", "Project trust is being reconfigured", true);
       }
+      // The SDK repairs incomplete tails on open. Reject an in-progress append
+      // before handing this exact file to it; unrelated child tails do not block
+      // header-only catalog acquisition.
+      const header = await this.readCatalogHeader(
+        canonicalPath, this.catalogDiscoveryLimits().maximumHeaderBytesPerFile,
+        () => true, () => {},
+      );
+      if (header.unstable) throw new GatewayError("busy", "Session append is still in progress", true);
+      if (header.identity?.id !== entry.id
+        || (entry.fileIdentity !== undefined && header.identity.fileIdentity !== entry.fileIdentity)) {
+        throw new GatewayError("conflict", "Tron session identity changed after catalog discovery", true);
+      }
       let manager: SessionManager;
       try {
         manager = await this.timedStage(
@@ -3148,17 +3158,7 @@ export class RuntimeRegistry {
         || resolve(manager.getCwd()) !== entry.canonicalCwd) {
         throw new GatewayError("conflict", "Tron session identity changed after catalog discovery", true);
       }
-      if (acquisition.indexedStructuralGeneration !== undefined) {
-        const indexed = this.catalogStructuralIndex;
-        const validated = await this.sharedCatalogStructureEvidence(true);
-        if (acquisition.indexedStructuralGeneration !== this.catalogStructuralGeneration
-            || indexed?.structuralGeneration !== acquisition.indexedStructuralGeneration
-            || !validated.complete
-            || validated.digest !== indexed.structureDigest) {
-          if (this.catalogStructuralIndex === indexed) this.invalidateCatalogAcquisition();
-          throw new GatewayError("busy", "Session catalog changed while opening the session", true);
-        }
-      } else if (acquisition.fallbackIdentityFingerprint !== undefined) {
+      if (acquisition.fallbackIdentityFingerprint !== undefined) {
         const invalidationGeneration = acquisition.fallbackInvalidationGeneration;
         if (invalidationGeneration === undefined
           || invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration) {
@@ -3171,8 +3171,9 @@ export class RuntimeRegistry {
           throw new GatewayError("busy", "Session catalog changed while opening the session", true);
         }
       } else {
-        const validated = await this.catalogStructureEvidence();
-        if (validated.digest !== acquisition.structureDigest) {
+        const validated = await this.sharedCatalogStructureEvidence(true);
+        if (!validated.complete || validated.digest !== acquisition.structureDigest
+          || validated.unstableCanonicalPaths?.has(canonicalPath)) {
           throw new GatewayError("busy", "Session catalog changed while opening the session", true);
         }
       }

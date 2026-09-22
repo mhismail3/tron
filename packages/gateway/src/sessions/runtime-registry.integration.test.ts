@@ -122,9 +122,9 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
 
   it("rejects malformed or incomplete cold JSONL before branch projection", async () => {
     const fixture = await coldFixture("strict-search-jsonl");
-    await fixture.registry.catalog("user");
+    const admitted = await (fixture.registry as any).catalogSnapshot("user");
     await appendFile(fixture.sessionFile, "{}\\n");
-    vi.spyOn(fixture.registry, "catalog").mockResolvedValue({ sessions: [{ id: fixture.manager.getSessionId() }] as any, listRevision: 1 });
+    vi.spyOn(fixture.registry as any, "catalogSnapshot").mockResolvedValue(admitted);
     await expect(fixture.registry.readSearchCut(fixture.manager.getSessionId())).rejects.toMatchObject({ code: "invalid_request" });
     await appendFile(fixture.sessionFile, "{}");
     await expect(fixture.registry.readSearchCut(fixture.manager.getSessionId())).rejects.toMatchObject({ code: "invalid_request" });
@@ -2202,6 +2202,154 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     } finally {
       mutateDuringDiscovery = false;
     }
+  });
+
+  it("retains user catalog and search admission while parallel delegated sessions append", async () => {
+    const fixture = await coldFixture("user-index-parallel-children");
+    const parentFile = fixture.manager.getSessionFile()!;
+    const forks = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
+    await mkdir(forks, { recursive: true });
+    const children = Array.from({ length: 3 }, () => SessionManager.forkFrom(parentFile, fixture.cwd, forks));
+    children.forEach(child => child.appendMessage(fauxAssistantMessage("child starts")));
+    const internals = fixture.registry as any;
+    const scanner = vi.spyOn(internals, "sessionInfos");
+    const parentID = fixture.manager.getSessionId();
+    try {
+      expect((await fixture.registry.catalog("user")).sessions.map(row => row.id)).toEqual([parentID]);
+      expect(scanner).toHaveBeenCalledTimes(1);
+      children.forEach(child => child.appendMessage(fauxAssistantMessage("parallel child progress")));
+      const live = await fixture.registry.create(fixture.cwd);
+      const results = await Promise.all([
+        fixture.registry.catalog("user"), fixture.registry.catalog("user"), fixture.registry.readSearchCut(parentID),
+      ]);
+      for (const result of results.slice(0, 2) as Awaited<ReturnType<RuntimeRegistry["catalog"]>>[]) {
+        expect(result.sessions.map(row => row.id)).toEqual(expect.arrayContaining([parentID, live.id]));
+        expect(result.sessions).toHaveLength(2);
+      }
+      expect(results[2]).toMatchObject({ summary: { id: parentID } });
+      expect(scanner).toHaveBeenCalledTimes(1);
+      // A partial acceleration must never hide children from administration.
+      const all = await fixture.registry.catalog("all");
+      expect(all.sessions.map(row => row.id)).toEqual(expect.arrayContaining(children.map(child => child.getSessionId())));
+    } finally { scanner.mockRestore(); }
+  });
+
+  it("isolates an unfinished child append from unrelated catalog and cold-open reads", async () => {
+    const fixture = await coldFixture("partial-child-isolation");
+    const parentFile = fixture.manager.getSessionFile()!;
+    const parallel = SessionManager.create(fixture.cwd, dirname(parentFile));
+    parallel.appendMessage(fauxAssistantMessage("parallel parent"));
+    const forks = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
+    await mkdir(forks, { recursive: true });
+    const child = SessionManager.forkFrom(parentFile, fixture.cwd, forks);
+    child.appendMessage(fauxAssistantMessage("persisted child"));
+    await appendFile(child.getSessionFile()!, '{"type":"message"');
+    const internals = fixture.registry as any;
+    const fallback = vi.spyOn(internals, "fallbackCatalogAcquisition");
+    try {
+      const parentID = fixture.manager.getSessionId();
+      const first = await fixture.registry.catalog("user");
+      expect(first.sessions.map(row => row.id).sort()).toEqual([parentID, parallel.getSessionId()].sort());
+      const opened = await Promise.all([fixture.registry.acquire(parentID), fixture.registry.acquire(parallel.getSessionId())]);
+      expect(opened.map(slot => slot.id)).toEqual([parentID, parallel.getSessionId()]);
+      expect(fallback).not.toHaveBeenCalled();
+      await expect(fixture.registry.catalog("all")).rejects.toMatchObject({ code: "busy", retryable: true });
+      // A selected incomplete user file still fails closed at the owning read.
+      const other = SessionManager.create(fixture.cwd, dirname(parentFile));
+      other.appendMessage(fauxAssistantMessage("other parent"));
+      await appendFile(other.getSessionFile()!, '{"type":"message"');
+      const incomplete = await readFile(other.getSessionFile()!, "utf8");
+      await expect(fixture.registry.acquire(other.getSessionId()).then(slot => slot.id)).rejects.toMatchObject({ code: "busy", retryable: true });
+      expect(await readFile(other.getSessionFile()!, "utf8")).toBe(incomplete);
+    } finally { fallback.mockRestore(); }
+  });
+
+  it("refreshes user metadata and duplicate quarantine after a scoped cut is warm", async () => {
+    const fixture = await coldFixture("scoped-index-refresh");
+    const parentFile = fixture.manager.getSessionFile()!;
+    const forks = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
+    await mkdir(forks, { recursive: true });
+    const child = SessionManager.forkFrom(parentFile, fixture.cwd, forks);
+    child.appendMessage(fauxAssistantMessage("child"));
+    const parentID = fixture.manager.getSessionId();
+    const initialPage = await fixture.registry.pageSource("user");
+    fixture.manager.appendSessionInfo("Updated canonical name");
+    const refreshedPage = await fixture.registry.pageSource("user");
+    expect(refreshedPage).not.toBe(initialPage);
+    expect((await refreshedPage.page(0, 500)).find(row => row.id === parentID)?.name).toBe("Updated canonical name");
+    await copyFile(parentFile, join(forks, "duplicate.jsonl"));
+    expect((await fixture.registry.catalog("user")).sessions.some(row => row.id === parentID)).toBe(false);
+    await expect(fixture.registry.acquire(parentID)).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("retains persisted, ambiguous, and live-only artifact owners without reading transcript metadata", async () => {
+    const fixture = await coldFixture("maintenance-header-membership");
+    const parentFile = fixture.manager.getSessionFile()!;
+    const forks = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
+    await mkdir(forks, { recursive: true });
+    const child = SessionManager.forkFrom(parentFile, fixture.cwd, forks);
+    child.appendMessage(fauxAssistantMessage("child"));
+    await appendFile(child.getSessionFile()!, '{"type":"message"');
+    await copyFile(parentFile, join(forks, "ambiguous.jsonl"));
+    const live = await fixture.registry.create(fixture.cwd);
+    const internals = fixture.registry as any;
+    const metadata = vi.spyOn(internals, "sessionInfos").mockImplementation(() => {
+      throw new Error("storage maintenance must not read transcripts");
+    });
+    try {
+      const ids = await fixture.registry.sessionIDsForStorageMaintenance();
+      expect([...ids].sort()).toEqual([fixture.manager.getSessionId(), child.getSessionId(), live.id].sort());
+      expect(metadata).not.toHaveBeenCalled();
+      await writeFile(join(dirname(parentFile), "incomplete-header.jsonl"), "{}");
+      await expect(fixture.registry.sessionIDsForStorageMaintenance()).rejects.toMatchObject({ code: "busy", retryable: true });
+    } finally { metadata.mockRestore(); }
+  });
+
+  it("shares one successor header walk across concurrent post-read validations", async () => {
+    const fixture = await coldFixture("header-walk-sharing");
+    const internals = fixture.registry as any;
+    const original = internals.catalogStructureEvidence.bind(internals);
+    let entered!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    let active = 0;
+    let maximumActive = 0;
+    const scanner = vi.spyOn(internals, "catalogStructureEvidence").mockImplementation(async () => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      try {
+        if (scanner.mock.calls.length === 1) { entered(); await barrier; }
+        return await original();
+      } finally { active -= 1; }
+    });
+    try {
+      const first = internals.sharedCatalogStructureEvidence();
+      await started;
+      const refreshes = Array.from({ length: 8 }, () => internals.sharedCatalogStructureEvidence(true));
+      const ordinary = internals.sharedCatalogStructureEvidence();
+      release();
+      const results = await Promise.all([first, ordinary, ...refreshes]);
+      expect(results.every(value => value.complete)).toBe(true);
+      expect(scanner).toHaveBeenCalledTimes(2);
+      expect(maximumActive).toBe(1);
+      expect(results[0]).toBe(results[1]);
+      expect(results.slice(2).every(value => value === results[2])).toBe(true);
+    } finally { release(); scanner.mockRestore(); }
+  });
+
+  it("keeps cold acquisition independent of mutable catalog metadata", async () => {
+    const fixture = await coldFixture("header-only-acquisition");
+    await fixture.registry.catalog("all");
+    const internals = fixture.registry as any;
+    const metadata = vi.spyOn(internals, "validatedStructuralIndex").mockImplementation(() => {
+      throw new Error("acquisition must not depend on dashboard metadata");
+    });
+    try {
+      const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+      expect(slot.id).toBe(fixture.manager.getSessionId());
+      expect(metadata).not.toHaveBeenCalled();
+    } finally { metadata.mockRestore(); }
   });
 
   it("scans only canonical user metadata for a user catalog and reserves all-scope indexing", async () => {
