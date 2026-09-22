@@ -17,7 +17,8 @@ struct PairedDeviceDetailView: View {
     @State private var confirmingInstall = false
     @State private var fastDebugRebuild = true
     @State private var confirmingRevoke = false
-    @State private var draftLabel: String
+    @State private var renameText: String = ""
+    @State private var showingRename = false
     @State private var displayedName: String
     @State private var savingLabel = false
     @State private var savedLabel: String
@@ -26,7 +27,6 @@ struct PairedDeviceDetailView: View {
 
     init(authorized: GatewayAuthorizedDevice) {
         self.authorized = authorized
-        _draftLabel = State(initialValue: authorized.device.customLabel ?? "")
         _displayedName = State(initialValue: authorized.device.name)
         _savedLabel = State(initialValue: authorized.device.customLabel ?? "")
     }
@@ -53,9 +53,9 @@ struct PairedDeviceDetailView: View {
         serverConnected && model.gatewayInfo?.capabilities.contains("device-label.v1") == true
     }
 
-    private var labelValid: Bool {
-        draftLabel.utf8.count <= PairedDeviceCatalogPolicy.maximumNameBytes
-            && draftLabel.unicodeScalars.allSatisfy { !CharacterSet.controlCharacters.contains($0) }
+    private func labelValid(_ value: String) -> Bool {
+        value.utf8.count <= PairedDeviceCatalogPolicy.maximumNameBytes
+            && value.unicodeScalars.allSatisfy { !CharacterSet.controlCharacters.contains($0) }
     }
 
     private var installConfigured: Bool {
@@ -68,7 +68,6 @@ struct PairedDeviceDetailView: View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
                 deviceGroup
-                if labelSupported { deviceLabelGroup }
                 if usesServer {
                     installationGroup
                 } else {
@@ -82,6 +81,21 @@ struct PairedDeviceDetailView: View {
         .tronScrollEdgeChrome()
         .tronNavigationTitle(displayedName, accent: .tronPurple)
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    // Seed each presentation from the latest authoritative label;
+                    // cancelling the shared alert must not retain an abandoned edit.
+                    renameText = savedLabel
+                    showingRename = true
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(TronTypography.buttonSM)
+                        .foregroundStyle(Color.tronPurple)
+                }
+                .disabled(!labelSupported || savingLabel)
+                .accessibilityLabel("Rename Device")
+                .accessibilityIdentifier("device-rename")
+            }
             ToolbarItem(placement: .confirmationAction) {
                 Button { dismiss() } label: {
                     Image(systemName: "checkmark")
@@ -91,6 +105,23 @@ struct PairedDeviceDetailView: View {
                 .accessibilityLabel("Done")
             }
         }
+        .tronTextEntryAlert(
+            "Rename Device",
+            isPresented: $showingRename,
+            text: $renameText,
+            placeholder: "Name (blank uses default)",
+            allowsEmpty: true,
+            validation: { labelValid($0) }
+        ) { value in
+            // Capture the accepted value before the managed system presentation
+            // retires this surface; the mutation owner continues independently.
+            let acceptedLabel = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            Task { await saveLabel(acceptedLabel) }
+        }
+        .tronManagedSystemPresentation(
+            isPresented: $showingRename,
+            identity: "settings.device.\(authorized.id).rename"
+        )
         .task(id: PresentationActivityTaskID(
             source: "\(authorized.id):\(serverConnected):\(model.foregroundReconciliationGeneration):\(scenePhase == .active)",
             presentationActive: presentationActivity.allowsPresentationPublication
@@ -198,37 +229,6 @@ struct PairedDeviceDetailView: View {
                     detail: authorized.profileLabel,
                     accent: .tronPurple
                 )
-            }
-        }
-    }
-
-    private var deviceLabelGroup: some View {
-        TronSettingsGroup("Device Name", detail: "A custom label overrides the name last observed by the Mac. Clear it to restore the default name.", accent: .tronPurple) {
-            VStack(spacing: 10) {
-                TextField("Custom label", text: $draftLabel)
-                    .textInputAutocapitalization(.words)
-                    .autocorrectionDisabled()
-                    .disabled(savingLabel)
-                    .accessibilityIdentifier("device.customLabel")
-                    .tronField(
-                        monospaced: false,
-                        compact: true,
-                        dense: true,
-                        surfaceTint: Color.tronPurple.opacity(0.14),
-                        border: Color.tronPurple.opacity(0.42)
-                    )
-                Button {
-                    Task { await saveLabel() }
-                } label: {
-                    HStack(spacing: 8) {
-                        if savingLabel { TronPulseLoadingIndicator(accent: .tronPurple, size: 16) }
-                        Text(draftLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Use Default Name" : "Save Custom Label")
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(TronActionButtonStyle(role: .standard))
-                .disabled(savingLabel || !labelValid)
-                .accessibilityIdentifier("device.saveLabel")
             }
         }
     }
@@ -460,7 +460,6 @@ struct PairedDeviceDetailView: View {
             let updated = try await model.loadAuthorizedDevice(for: authorized)
             guard generation == labelReadGeneration, admitsReadResult else { return }
             displayedName = updated.name
-            if !savingLabel && draftLabel == savedLabel { draftLabel = updated.customLabel ?? "" }
             savedLabel = updated.customLabel ?? ""
         } catch is CancellationError {
             return
@@ -470,15 +469,15 @@ struct PairedDeviceDetailView: View {
         }
     }
 
-    private func saveLabel() async {
-        guard !savingLabel, labelSupported, labelValid else { return }
+    private func saveLabel(_ value: String) async {
+        guard !savingLabel, labelSupported, labelValid(value) else { return }
         labelReadGeneration &+= 1
         let generation = labelPresentationGeneration
         savingLabel = true
         // This flag belongs to the accepted mutation, not a disposable read.
         // Covering the sheet must not admit a second concurrent save.
         defer { savingLabel = false }
-        let normalized = draftLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             let updated = try await model.setAuthorizedDeviceLabel(
                 for: authorized,
@@ -486,7 +485,7 @@ struct PairedDeviceDetailView: View {
             )
             guard generation == labelPresentationGeneration, admitsReadResult else { return }
             displayedName = updated.name
-            draftLabel = updated.customLabel ?? ""
+            renameText = updated.customLabel ?? ""
             savedLabel = updated.customLabel ?? ""
         } catch is CancellationError {
             return

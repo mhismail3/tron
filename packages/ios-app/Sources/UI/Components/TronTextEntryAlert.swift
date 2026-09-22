@@ -1,6 +1,13 @@
 import SwiftUI
 import UIKit
 
+enum TronTextEntryAlertAdmission {
+    static func admits(_ value: String, allowsEmpty: Bool, validation: (String) -> Bool) -> Bool {
+        (allowsEmpty || !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            && validation(value)
+    }
+}
+
 /// Native single-line text-entry alert with a stable trailing clear control.
 /// UIKit owns horizontal text scrolling, so long values move beneath the
 /// fixed clear button instead of displacing it.
@@ -11,6 +18,8 @@ struct TronTextEntryAlertModifier: ViewModifier {
     @Binding var isPresented: Bool
     let confirmTitle: String
     let cancelTitle: String
+    let allowsEmpty: Bool
+    let validation: (String) -> Bool
     let onConfirm: (String) -> Void
 
     func body(content: Content) -> some View {
@@ -22,6 +31,8 @@ struct TronTextEntryAlertModifier: ViewModifier {
                 isPresented: $isPresented,
                 confirmTitle: confirmTitle,
                 cancelTitle: cancelTitle,
+                allowsEmpty: allowsEmpty,
+                validation: validation,
                 onConfirm: onConfirm
             )
             .frame(width: 0, height: 0)
@@ -38,6 +49,8 @@ extension View {
         placeholder: String,
         confirmTitle: String = "Save",
         cancelTitle: String = "Cancel",
+        allowsEmpty: Bool = false,
+        validation: @escaping (String) -> Bool = { _ in true },
         onConfirm: @escaping (String) -> Void
     ) -> some View {
         modifier(TronTextEntryAlertModifier(
@@ -47,6 +60,8 @@ extension View {
             isPresented: isPresented,
             confirmTitle: confirmTitle,
             cancelTitle: cancelTitle,
+            allowsEmpty: allowsEmpty,
+            validation: validation,
             onConfirm: onConfirm
         ))
     }
@@ -59,6 +74,8 @@ private struct TronTextEntryAlertPresenter: UIViewControllerRepresentable {
     @Binding var isPresented: Bool
     let confirmTitle: String
     let cancelTitle: String
+    let allowsEmpty: Bool
+    let validation: (String) -> Bool
     let onConfirm: (String) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -185,7 +202,8 @@ private struct TronTextEntryAlertPresenter: UIViewControllerRepresentable {
         }
 
         private func admitted(_ value: String) -> Bool {
-            !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            guard let configuration else { return false }
+            return TronTextEntryAlertAdmission.admits(value, allowsEmpty: configuration.allowsEmpty, validation: configuration.validation)
         }
 
         private func retireAlert() {
