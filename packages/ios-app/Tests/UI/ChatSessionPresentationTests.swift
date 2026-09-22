@@ -212,6 +212,12 @@ struct ChatSessionPresentationTests {
         ) != ChatOpeningSurfaceTaskID(surfaceActive: true, openingTaskRevision: before))
     }
 
+    @Test("opening keeps an installed projection visible while native positioning settles")
+    func openingSurfaceProjectionPolicy() {
+        #expect(ChatOpeningSurfacePolicy.showsMountedProjection(hasInstalledProjection: true))
+        #expect(!ChatOpeningSurfacePolicy.showsMountedProjection(hasInstalledProjection: false))
+    }
+
     @Test("uncover waits for a covered opening and then retries only when still needed")
     func coveredOpeningResumePolicy() {
         #expect(ChatOpeningSurfacePolicy.action(

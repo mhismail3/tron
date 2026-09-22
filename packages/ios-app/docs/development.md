@@ -924,8 +924,7 @@ catch-up staging. Semantic prepend settlement instead waits passively
 for exact epoch-qualified row callbacks and requires a strictly newer callback after
 each correction. First-ready timing cannot end before the exact initial transcript
 projection installs and its frame resumes. Automatic live intake remains coalesced until current non-lifted
-marker/geometry evidence settles the opening target, the exact release callback is consumed, and the visible entrance completes. The external presentation retains one covered frame at zero opacity/eight-point visual offset, then crossfades the opening surface into the settled transcript while the same lease excludes repair, paging, submission, and projection changes through the first ready frame. Missing physical proof
-fails behind the opening surface instead of exposing a displaced view and repairing it afterward. `ChatTranscriptPresentationStoreTests` use a
+marker/geometry evidence settles the opening target, the exact release callback is consumed, and the visible entrance completes. Before that proof, an installed projection remains visible beneath a noninteractive loading indicator; only the pre-projection state is opaque. This keeps a real transcript visible while native layout settles without admitting scrolling, repair, paging, submission, or live projection changes. The same lease excludes those mutations through the first ready frame, and missing physical proof fails with the already-mounted transcript still available for diagnosis rather than making a loaded session look empty. `ChatTranscriptPresentationStoreTests` use a
 watchdog-bounded synchronous `HOSTED_TEST`-only work gate immediately before the real production
 kernel to prove serial off-main work, same-tag coalescing, newest-wins and A→B→A admission,
 paging-tag distinction, monotonic reset retirement, session/runtime scope rejection, MainActor
