@@ -2109,6 +2109,50 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
+    @Test("a retired layout frame cannot strand its successor opening sample")
+    func openingFrameRearmsAfterLayoutReplacement() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualViewportFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            defer { coordinator.cancel() }
+            let positioning = Task {
+                await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom", physicalTargetID: "transcript-bottom")
+            }
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            let command = try await coordinator.hostedNextCommand()
+            #expect(coordinator.commandApplied(command))
+            coordinator.physicalTerminalRowObserved(layoutEpoch: coordinator.layoutEpoch)
+            coordinator.geometryChanged(previous: .zero, current: bottom)
+            coordinator.semanticFrameChanged(renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
+                                             frame: CGRect(x: 0, y: 388, width: 100, height: 12))
+            #expect(await positioning.value)
+            coordinator.openingRevealCompleted()
+            let settlement = Task { await coordinator.waitForOpeningTailSettlement() }
+            for _ in 0..<20 { await Task.yield() }
+            let oldFrameCount = frames.requestCount
+            coordinator.projectionInstalled()
+            coordinator.physicalTerminalRowObserved(layoutEpoch: coordinator.layoutEpoch)
+            coordinator.semanticFrameChanged(renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
+                                             frame: CGRect(x: 0, y: 388, width: 100, height: 12))
+            // This callback belongs to the previous layout. It must retire its
+            // task handle and schedule fresh proof, not leave a non-nil dead task.
+            frames.releaseNext()
+            for _ in 0..<20 { await Task.yield() }
+            try #require(frames.requestCount > oldFrameCount)
+            #expect(coordinator.targetReleaseGeneration == 0)
+            for _ in 0..<4 where coordinator.targetReleaseGeneration == 0 {
+                frames.releaseNext()
+                for _ in 0..<20 { await Task.yield() }
+            }
+            try #require(coordinator.targetReleaseGeneration == 1)
+            #expect(coordinator.consumeTargetRelease())
+            #expect(await settlement.value == .settled)
+            coordinator.completeVisibleOpeningReveal()
+            #expect(coordinator.admitsSubmission)
+        }
+    }
+
     @Test("streaming tail updates still release opening without keyboard geometry")
     func streamingTailUpdatesDoNotStarveOpeningSettlement() async throws {
         try await withTestWatchdog { @MainActor in

@@ -1817,9 +1817,9 @@ final class ChatScrollCoordinator {
             case .positioning(var value):
                 // A ScrollPosition command can be applied against SwiftUI's
                 // estimated pre-measurement geometry. Do not reveal from that
-                // stale sample: once the target crossed the native boundary,
-                // require one newer semantic marker and geometry sample. The
-                // pending-command case remains allowed to clear a command when
+                // stale sample: require a newer marker and either new geometry
+                // or the exact post-application frame with unchanged geometry.
+                // The pending-command case may still clear a command when
                 // proof arrived before delayed native application.
                 let commandWasApplied = value.commandToken != nil
                     && appliedTargetCommandToken == value.commandToken
@@ -1898,6 +1898,10 @@ final class ChatScrollCoordinator {
                       self.openingTailPhase.context?.token == token,
                       self.openingTailPhase.context?.presentation == admittedPresentation else { return }
                 self.openingTailFrameTask = nil
+                guard self.layoutEpoch == admittedLayoutEpoch else {
+                    self.scheduleOpeningTailFrame()
+                    return
+                }
                 self.clearOpeningTailSettlement(
                     ifToken: token,
                     ifPresentation: admittedPresentation,
@@ -1909,6 +1913,12 @@ final class ChatScrollCoordinator {
                   self.openingTailPhase.context?.token == token,
                   self.openingTailPhase.context?.presentation == admittedPresentation else { return }
             self.openingTailFrameTask = nil
+            // Retire the old frame before re-arming for the successor layout.
+            // Leaving a completed task installed would suppress its next sample.
+            guard self.layoutEpoch == admittedLayoutEpoch else {
+                self.scheduleOpeningTailFrame()
+                return
+            }
             if case .positioning(var value) = self.openingTailPhase,
                let commandToken = value.commandToken,
                self.appliedTargetCommandToken == commandToken,
@@ -1921,13 +1931,19 @@ final class ChatScrollCoordinator {
                 value.postApplicationFrameProof = .init(
                     commandToken: commandToken,
                     presentation: value.presentation,
-                    layoutEpoch: self.layoutEpoch
+                    layoutEpoch: admittedLayoutEpoch
                 )
                 self.openingTailPhase = .positioning(value)
             }
+            self.evaluateOpeningTailIfPossible(
+                allowsUnrealizedTailCommand: true,
+                schedulesPositionedFrame: false
+            )
             if case .positioning(var value) = self.openingTailPhase,
                let commandToken = value.commandToken,
-               self.command?.token != commandToken {
+               self.command?.token != commandToken,
+               self.appliedTargetCommandToken != commandToken
+                    || !self.openingTailViewportIsPhysicallySettled {
                 let fresh = self.semanticFrameRevision > (value.commandSemanticRevision ?? self.semanticFrameRevision)
                     || self.geometryRevision > (value.commandGeometryRevision ?? self.geometryRevision)
                 if fresh,
