@@ -313,7 +313,7 @@ struct SessionTreeSheet: View {
                     }
                 }
                 Text("Activity across all branches, newest first. Tap an entry for full content; use its menu to continue, fork or bookmark.")
-                    .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
+                    .font(TronTypography.bodySM).foregroundStyle(Color.tronTextSecondary)
             }
         }
         .padding(.leading, 12)
@@ -399,7 +399,7 @@ struct SessionHistoryPagingControls: View {
                 .foregroundStyle(Color.tronTextSecondary)
                 .contentTransition(.opacity)
                 .accessibilityIdentifier("history-range-\(location)")
-                .font(TronTypography.secondaryDescription)
+                .font(TronTypography.bodySM)
                 .multilineTextAlignment(.trailing)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .trailing)
@@ -441,7 +441,7 @@ struct SessionHistoryRow: View {
         HStack(spacing: 8) {
             Button(action: select) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(row.title).font(TronTypography.bodySM.weight(.semibold)).foregroundStyle(Color.tronTextPrimary).lineLimit(3)
+                    Text(row.title).font(TronTypography.body.weight(.semibold)).foregroundStyle(Color.tronTextPrimary).lineLimit(3)
                     ViewThatFits(in: .horizontal) {
                         HStack(spacing: 7) { badges; Text(row.timestamp) }
                         VStack(alignment: .leading, spacing: 4) { badges; Text(row.timestamp) }

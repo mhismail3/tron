@@ -77,6 +77,23 @@ final class KnowledgeDashboardLayoutTests: XCTestCase {
         }
     }
 
+    func testContextualDashboardSurfacesRenderSingleTopRowAndContextOptions() async throws {
+        let observations = Self.previewStatements.prefix(4).map { Self.observationRecord(statement: $0) }
+        let sources = [Self.sourceRecord(title: "Context fixture source")]
+        try await withHost(Self.hosted(HostedKnowledgeDashboardFixture(section: .sources, records: observations, surface: .chronicle)), size: CGSize(width: 390, height: 844), scheme: .dark) { host in
+            Self.attach(host.view, named: "knowledge-dashboard-chronicle-clean-dark", to: self)
+        }
+        try await withHost(Self.hosted(HostedKnowledgeDashboardFixture(section: .sources, records: sources, surface: .library)), size: CGSize(width: 390, height: 844), scheme: .dark) { host in
+            Self.attach(host.view, named: "knowledge-dashboard-library-clean-dark", to: self)
+        }
+        try await withHost(Self.hosted(HostedKnowledgeDashboardFixture(section: .sources, records: sources, surface: .filters)), size: CGSize(width: 390, height: 844), scheme: .dark) { host in
+            Self.attach(host.view, named: "knowledge-dashboard-library-filters-dark", to: self)
+        }
+        try await withHost(Self.hosted(HostedKnowledgeDashboardFixture(section: .sources, records: [], surface: .info)), size: CGSize(width: 390, height: 844), scheme: .light) { host in
+            Self.attach(host.view, named: "knowledge-dashboard-chronicle-info-light", to: self)
+        }
+    }
+
     func testSourceRowsAndDetailsRenderAcrossThemesAndNarrowWidth() async throws {
         let source = Self.sourceRecord()
         let width: CGFloat = 320
@@ -101,10 +118,6 @@ final class KnowledgeDashboardLayoutTests: XCTestCase {
 
     func testCoverageOverviewIsInformationalAndOpensTheDetailSheet() async throws {
         let overview = Self.overview()
-        XCTAssertLessThanOrEqual(Self.intrinsicHeight(overview, width: 402),
-                                 KnowledgeDashboardLayout.coverageSectionReservedHeight,
-                                 "The overview must fit the height the dashboard reserves for it")
-
         try await withHost(Self.hosted(overview), size: CGSize(width: 402, height: 200)) { host in
             let elements = Self.accessibilityElements(in: host.view)
             guard !elements.isEmpty else { throw XCTSkip("Hosted SwiftUI accessibility tree unavailable in this simulator runtime") }
@@ -350,8 +363,10 @@ final class KnowledgeDashboardLayoutTests: XCTestCase {
 #if HOSTED_TEST
 private struct HostedKnowledgeDashboardFixture: View {
     enum Section { case sources, syntheses }
+    enum Surface { case chronicle, library, filters, info }
     let section: Section
     let records: [KnowledgeRecord]
+    var surface: Surface = .library
     @State private var header = DashboardHeaderState()
 
     var body: some View {
@@ -370,27 +385,45 @@ private struct HostedKnowledgeDashboardFixture: View {
                     TronSegmentedControl(
                         options: [(label: "Chronicle", value: KnowledgeDashboardArea.chronicle),
                                   (label: "Library", value: KnowledgeDashboardArea.library)],
-                        selection: .constant(.library),
+                        selection: .constant(surface == .chronicle ? .chronicle : .library),
                         accent: .tronKnowledge,
                         foreground: .tronKnowledgeText,
                         minimumHeight: 40
                     )
-                    TronSegmentedControl(
-                        options: [(label: "Sources", value: KnowledgeDashboardSection.sources),
-                                  (label: "Syntheses", value: KnowledgeDashboardSection.syntheses)],
-                        selection: .constant(section == .sources ? KnowledgeDashboardSection.sources : .syntheses),
-                        accent: .tronKnowledge,
-                        foreground: .tronKnowledgeText,
-                        minimumHeight: 40
-                    )
-                    if section == .sources {
-                        Text("Sources").font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronKnowledge)
+                    switch surface {
+                    case .chronicle:
+                        Text("Chronicle").font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronKnowledge)
                         ForEach(records) { record in KnowledgeRecordRow(record: record) }
-                    } else {
-                        TronPlaceholderState(title: "No matching Syntheses", detail: "This bounded note page has no synthesis-role notes.", icon: "square.stack.3d.up", accent: .tronKnowledge)
-                        Button("Load more") {}
-                            .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
-                            .frame(maxWidth: .infinity)
+                    case .library:
+                        if section == .sources {
+                            Text("Sources · Saved sources").font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronKnowledge)
+                            ForEach(records) { record in KnowledgeRecordRow(record: record) }
+                        } else {
+                            Text("Syntheses").font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronKnowledge)
+                            TronPlaceholderState(title: "No matching Syntheses", detail: "This bounded note page has no synthesis-role notes.", icon: "square.stack.3d.up", accent: .tronKnowledge)
+                            Button("Load more") {}
+                                .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
+                                .frame(maxWidth: .infinity)
+                        }
+                    case .filters:
+                        VStack(alignment: .leading, spacing: TronSpacing.sm) {
+                            Text("Library filters").font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronKnowledge)
+                            TronDashboardFilterSectionTitle(title: "Library view", detail: "Choose one library collection at a time.")
+                            TronDashboardFilterOption(title: "Sources", selected: true, accent: .tronKnowledge, inactiveAccent: .tronSlate) {}
+                            TronDashboardFilterOption(title: "Syntheses", selected: false, accent: .tronKnowledge, inactiveAccent: .tronSlate) {}
+                            TronDashboardFilterSectionTitle(title: "Source visibility", detail: "Choose the saved, waiting, or archived sources you want to browse.")
+                            ForEach(KnowledgeSourceVisibility.allCases) { value in
+                                TronDashboardFilterOption(title: value.title, selected: value == .saved, accent: .tronKnowledge, inactiveAccent: .tronSlate) {}
+                            }
+                        }
+                    case .info:
+                        Text("Chronicle info").font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronKnowledge)
+                        KnowledgeInfoStat(title: "Observed", value: 367)
+                        KnowledgeInfoStat(title: "Empty", value: 3)
+                        KnowledgeInfoStat(title: "Excluded", value: 27)
+                        KnowledgeInfoStat(title: "Pending", value: 0)
+                        KnowledgeInfoStat(title: "Failed", value: 1)
+                        KnowledgeInfoStat(title: "Unavailable", value: 15)
                     }
                 }
                 .padding(.horizontal, 20)

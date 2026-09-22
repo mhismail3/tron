@@ -1,4 +1,12 @@
-# Knowledge Sources presentation
+# Knowledge dashboard presentation
+
+The dashboard has one top-level segmented row: **Chronicle** and **Library**.
+Chronicle's observations, coverage attention list, and bounded coverage stats are
+opened from its logo menu. Library chooses **Sources** or **Syntheses** and source
+visibility (saved, pending, or archived) from its filter sheet; those choices are
+mutually exclusive and never mutate canonical admission.
+
+## Knowledge Sources presentation
 
 The Sources library is a user-facing reading surface, not a storage inspector.
 Rows show a title, optional assessment summary, domain/type, and a bounded

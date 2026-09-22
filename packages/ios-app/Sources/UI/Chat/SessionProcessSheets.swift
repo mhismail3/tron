@@ -148,7 +148,7 @@ struct ProcessHistorySheet: View {
     @ViewBuilder
     private func section(_ title: String, _ processes: [SessionProcessActivity]) -> some View {
         Text(title)
-            .font(TronTypography.caption)
+            .font(TronTypography.sheetSectionHeader)
             .foregroundStyle(Color.tronTextMuted)
             .padding(.top, 4)
             .accessibilityAddTraits(.isHeader)
@@ -252,10 +252,10 @@ struct SessionProcessRow: View {
             if let metadata {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("DETAILS")
-                        .font(TronTypography.caption)
+                        .font(TronTypography.sheetSectionHeader)
                         .foregroundStyle(Color.tronTextMuted)
                     Text(metadata)
-                        .font(TronTypography.code(size: TronTypography.sizeBodySM, weight: .medium))
+                        .font(TronTypography.secondaryDescription)
                         .foregroundStyle(Color.tronTextSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -264,7 +264,7 @@ struct SessionProcessRow: View {
             if currentAction != nil || outputPreview != nil {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(outputLabel)
-                        .font(TronTypography.caption)
+                        .font(TronTypography.sheetSectionHeader)
                         .foregroundStyle(process.lifecycle.state == .running ? cardAccent : Color.tronTextMuted)
                     if let currentAction { activityLabel(currentAction) }
                     if let outputPreview {
@@ -306,7 +306,7 @@ struct SessionProcessRow: View {
 
     private func activityLabel(_ text: String) -> some View {
         Label(text, systemImage: "hammer")
-            .font(TronTypography.code(size: TronTypography.sizeBody2, weight: .medium))
+            .font(TronTypography.secondaryDescription)
             .foregroundStyle(Color.tronTextSecondary)
             .lineLimit(1)
     }
