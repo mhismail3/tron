@@ -761,11 +761,13 @@ export class UploadStore {
   /** Runs bounded maintenance without weakening canonical attachment ownership.
    * Startup rebuilds physical truth once. Later passes use the rebuildable
    * index, so retained history is never reparsed every ten minutes. */
-  async maintain(liveSessionIds?: ReadonlySet<string>): Promise<UploadCapacityStatus> {
+  async maintain(resolveLiveSessionIds?: () => Promise<ReadonlySet<string>>): Promise<UploadCapacityStatus> {
     return this.serialize(async () => {
       const bodyDirectory = await this.ensureBodyDirectory();
       await this.cleanupStagedUploads(bodyDirectory);
       await this.cleanupImportDirectory();
+      // Membership must follow earlier accepted claims in this storage lane.
+      const liveSessionIds = await resolveLiveSessionIds?.();
       const inventory = this.inventoryInitialized
         ? await this.reconcileIndexedOwnership(liveSessionIds)
         : await this.rebuildInventory(liveSessionIds);

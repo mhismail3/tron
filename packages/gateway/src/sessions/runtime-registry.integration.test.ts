@@ -1,8 +1,10 @@
 import { ProcessTranscriptLeaseStore } from "../transport/process-transcript-leases.js";
+import { DEFAULT_MAX_LIVE_RUNTIMES } from "../config.js";
 import { randomUUID } from "node:crypto";
 import { performance as nodePerformance } from "node:perf_hooks";
 import { sealBrowserToolReference } from "../display/browser-tool-reference.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
+import * as fsPromises from "node:fs/promises";
 import { appendFileSync, existsSync } from "node:fs";
 import { appendFile, copyFile, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -203,7 +205,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
 
   it("owns one exact live session for a workspace Automation operation", async () => {
     const changed = vi.fn();
-    const fixture = await coldFixture("automation-exact-session", { sessionListChanged: changed });
+    const fixture = await coldFixture("automation-exact-session", { sessionListChanged: changed, maximumLiveRuntimes: 1 });
     const sessionId = "20000000-0000-4000-8000-000000000010";
     const operationId = "automation:20000000-0000-4000-8000-000000000011";
     const automationId = "20000000-0000-4000-8000-000000000013";
@@ -217,13 +219,17 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(first.slot.id).toBe(sessionId);
     expect((await fixture.registry.list("user")).find((session) => session.id === sessionId))
       .toMatchObject({ creationOrigin: { kind: "automation", automationId } });
+    // Replaying the exact owner at capacity must not evict that owner first.
+    (first.slot as unknown as { sessionManager: SessionManager }).sessionManager
+      .appendMessage(fauxAssistantMessage("persisted automation"));
+    first.release();
     const second = await fixture.registry.createAutomationSession(
       fixture.cwd,
       sessionId,
       operationId,
       automationId,
     );
-    expect(second.slot).toBe(first.slot);
+    expect(second.slot === first.slot).toBe(true);
     await expect(fixture.registry.createAutomationSession(
       fixture.cwd,
       sessionId,
@@ -232,7 +238,6 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     )).rejects.toMatchObject({ code: "conflict" });
 
     second.release();
-    first.release();
     expect(changed).toHaveBeenCalled();
   });
 
@@ -1063,7 +1068,9 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       expect((await collectStream(displayLease.stream)).toString()).toBe("retained display artifact");
     } finally { await displayLease.release(); }
     // Only a subsequent successful membership cut can authorize orphan removal.
-    await fixture.registry.maintainDisplayArtifacts(new Set());
+    const membership = vi.spyOn(fixture.registry, "sessionIDsForStorageMaintenance").mockResolvedValueOnce(new Set());
+    await fixture.registry.maintainDisplayArtifacts();
+    membership.mockRestore();
     await expect(store.acquire(display.id, fixture.manager.getSessionId())).rejects.toMatchObject({ code: "not_found" });
     // Storage and an exact canonical session remain usable even when the
     // aggregate presentation catalog cannot be materialized.
@@ -1661,6 +1668,31 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     } finally {
       evidenceSpy.mockRestore();
     }
+  });
+
+  it("reclaims reloadable idle runtimes under pressure while protecting visible sessions and drafts", async () => {
+    const fixture = await coldFixture("idle-capacity-reclamation", { maximumLiveRuntimes: 3 });
+    const first = await fixture.registry.acquire(fixture.manager.getSessionId());
+    fixture.registry.subscribe("phone", first.id);
+    const secondManager = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+    secondManager.appendMessage(fauxAssistantMessage("reloadable idle"));
+    const second = await fixture.registry.acquire(secondManager.getSessionId());
+    const draft = await fixture.registry.create(fixture.cwd);
+    const thirdManager = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+    thirdManager.appendMessage(fauxAssistantMessage("new visible selection"));
+    const third = await fixture.registry.acquire(thirdManager.getSessionId());
+    expect(second.isDisposed).toBe(true);
+    expect(first.isDisposed).toBe(false);
+    expect(draft.isDisposed).toBe(false);
+    expect(third.id).toBe(thirdManager.getSessionId());
+    const retain = third.retainLease();
+    try { await expect(fixture.registry.acquire(secondManager.getSessionId())).rejects.toMatchObject({ code: "busy" }); }
+    finally { retain(); }
+    const reopened = await fixture.registry.acquire(secondManager.getSessionId());
+    expect(reopened).not.toBe(second);
+    expect(JSON.stringify(reopened.snapshot().transcript)).toContain("reloadable idle");
+    expect(third.isDisposed).toBe(true);
+    expect(draft.isDisposed).toBe(false);
   });
 
   it("deduplicates same-session starts and starts distinct sessions concurrently", async () => {
@@ -2383,6 +2415,31 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
   });
 
+  it("coalesces acquisition successors across invalidations until prior physical work settles", async () => {
+    const fixture = await coldFixture("acquisition-successor-ownership");
+    const internal = fixture.registry as any;
+    const original = internal.resolveCatalogAcquisition.bind(internal);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const resolve = vi.spyOn(internal, "resolveCatalogAcquisition").mockImplementation(async () => {
+      if (resolve.mock.calls.length === 1) { await gate; throw new Error("retired cut"); }
+      return original();
+    });
+    const requests = [internal.catalogAcquisition().catch((error: unknown) => error)];
+    try {
+      internal.invalidateCatalogAdmission();
+      requests.push(internal.catalogAcquisition().catch((error: unknown) => error));
+      internal.invalidateCatalogAdmission();
+      requests.push(internal.catalogAcquisition().catch((error: unknown) => error));
+      expect(resolve).toHaveBeenCalledTimes(1);
+      release();
+      const results = await Promise.all(requests);
+      expect(results[0]).toMatchObject({ message: "retired cut" });
+      for (const result of results.slice(1)) expect(result.entriesByID.has(fixture.manager.getSessionId())).toBe(true);
+      expect(resolve).toHaveBeenCalledTimes(2);
+    } finally { release(); await Promise.all(requests); resolve.mockRestore(); }
+  });
+
   it("lets user discovery finish while an all-scope scan remains blocked and fails", async () => {
     const fixture = await coldFixture("scope-failure-isolation");
     const internals = fixture.registry as any;
@@ -2830,6 +2887,39 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect((await registry.list("user")).map((session) => session.id)).not.toContain(childId);
   }, 30_000);
 
+  it("closes the catalog header handle when the tail probe fails", async () => {
+    const fixture = await coldFixture("header-read-failure");
+    const probePath = join(fixture.root, "isolated-header.jsonl");
+    await copyFile(fixture.manager.getSessionFile()!, probePath);
+    const handle = await fsPromises.open(probePath, "r");
+    const identity = await handle.stat();
+    const originalRead = handle.read;
+    const failure = new Error("injected tail read failure");
+    let failedHandle: typeof handle | undefined;
+    const read = vi.spyOn(Object.getPrototypeOf(handle), "read").mockImplementation(async function (this: typeof handle, ...args: any[]) {
+      const current = await this.stat();
+      if (current.dev === identity.dev && current.ino === identity.ino) {
+        failedHandle = this;
+        throw failure;
+      }
+      return originalRead.apply(this, args as any);
+    });
+    const internals = fixture.registry as unknown as {
+      readCatalogHeader: (path: string, maximumBytes: number, reserve: () => boolean, refund: () => void) => Promise<unknown>;
+    };
+    try {
+      await expect(internals.readCatalogHeader(probePath, 1024, () => true, () => {}))
+        .rejects.toBe(failure);
+      expect(failedHandle).toBeDefined();
+      await expect(failedHandle!.stat()).rejects.toMatchObject({ code: "EBADF" });
+    } finally {
+      read.mockRestore();
+      await handle.close();
+      await failedHandle?.close();
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
   it("reserves a deterministic aggregate header-read budget across concurrent readers", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-catalog-strict-header-budget-"));
     const agentDir = join(root, "agent");
@@ -3091,6 +3181,79 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(repaired.sessions.filter((session) => session.id === slot.id)).toHaveLength(1);
     expect((await registry.acquire(slot.id)).id).toBe(slot.id);
   });
+
+  it("keeps 128 parallel parent runs discoverable through child churn and repeated client reentry", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-scale-qualification-"));
+    const agentDir = join(root, "agent");
+    const projects = Array.from({ length: 8 }, (_, index) => join(root, `project-${index}`));
+    await Promise.all(projects.map(cwd => mkdir(cwd, { recursive: true })));
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    const managers: SessionManager[] = [];
+    const children: SessionManager[] = [];
+    for (let index = 0; index < 128; index++) {
+      const cwd = projects[index % projects.length]!;
+      const directory = join(agentDir, "sessions", `project-${index % projects.length}`);
+      await mkdir(directory, { recursive: true });
+      const manager = SessionManager.create(cwd, directory);
+      manager.appendMessage(fauxAssistantMessage(`parent-${index}`));
+      managers.push(manager);
+      const forks = join(directory, basename(manager.getSessionFile()!, ".jsonl"), "forks");
+      await mkdir(forks, { recursive: true });
+      for (let child = 0; child < 3; child++) {
+        const fork = SessionManager.forkFrom(manager.getSessionFile()!, cwd, forks);
+        fork.appendMessage(fauxAssistantMessage(`child-${index}-${child}`));
+        children.push(fork);
+      }
+    }
+    let release!: () => void;
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    const faux = fauxProvider({ provider: "tron-scale-test", tokensPerSecond: 100_000 });
+    faux.setResponses(managers.map((_, index) => async () => { await barrier; return fauxAssistantMessage(`complete-${index}`); }));
+    const runtimeFactory = vi.fn(async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider);
+      return runtime;
+    });
+    const registry = new RuntimeRegistry({ agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
+      maximumLiveRuntimes: DEFAULT_MAX_LIVE_RUNTIMES, modelRuntimeFactory: runtimeFactory,
+      trust: new TrustService(agentDir), broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {} });
+    registries.push(registry);
+    let acquisitions: Promise<unknown>[] = [];
+    try {
+      await registry.initialize();
+      acquisitions = managers.flatMap(manager => [registry.acquire(manager.getSessionId()), registry.acquire(manager.getSessionId())]);
+      const acquired = await Promise.all(acquisitions) as Awaited<ReturnType<RuntimeRegistry["acquire"]>>[];
+      const slots = acquired.filter((_, index) => index % 2 === 0);
+      for (let index = 0; index < slots.length; index++) expect(acquired[index * 2 + 1]).toBe(slots[index]);
+      const model = faux.getModel();
+      await Promise.all(slots.map(async (slot, index) => { await slot.setModel(model.provider, model.id); await slot.prompt(`work-${index}`); }));
+      await vi.waitFor(() => expect(faux.state.callCount).toBe(128), { timeout: 10_000 });
+      expect(registry.activeSessionIds()).toHaveLength(128);
+      const expected = managers.map(manager => manager.getSessionId()).sort();
+      for (let wave = 0; wave < 3; wave++) {
+        for (const child of children) child.appendMessage(fauxAssistantMessage(`progress-${wave}`));
+        registry.unsubscribeClient("phone");
+        const catalogs = await Promise.all(Array.from({ length: 8 }, () => registry.catalog("user")));
+        for (const catalog of catalogs) expect(catalog.sessions.map(row => row.id).sort()).toEqual(expected);
+        for (let index = 0; index < slots.length; index++) {
+          const slot = slots[(index + wave) % slots.length]!;
+          registry.subscribe("phone", slot.id);
+          expect(await registry.acquire(slot.id)).toBe(slot);
+          expect(slot.snapshot().sessionId).toBe(slot.id);
+          registry.unsubscribeClient("phone");
+        }
+        expect(registry.activeSessionIds()).toHaveLength(128);
+        expect(runtimeFactory).toHaveBeenCalledTimes(128);
+      }
+      release();
+      await registry.waitUntilIdle();
+      expect(registry.activeSessionIds()).toHaveLength(0);
+      for (const slot of slots) expect(slot.snapshot().transcript.some(item => JSON.stringify(item).includes("complete-"))).toBe(true);
+    } finally {
+      release(); await Promise.allSettled(acquisitions); await registry.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 60_000);
 
   it("runs distinct sessions concurrently and keeps a run alive after its client disconnects", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-runtime-integration-"));

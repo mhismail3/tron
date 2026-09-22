@@ -187,7 +187,7 @@ final class ReadOnlySubagentSessionStore {
 
     init(client: GatewayClient) { self.client = client }
 
-    var canLoadEarlier: Bool { status == .open && transcriptStart > 0 }
+    var canLoadEarlier: Bool { status == .open && recoveryTask == nil && transcriptStart > 0 }
 
     func open(
         parentSessionID: String,
@@ -340,7 +340,7 @@ final class ReadOnlySubagentSessionStore {
     }
 
     func loadEarlier() {
-        guard pageTask == nil, status == .open, let leaseID, let revision, transcriptStart > 0 else { return }
+        guard pageTask == nil, recoveryTask == nil, status == .open, let leaseID, let revision, transcriptStart > 0 else { return }
         let ownedGeneration = generation
         guard let connectionAdmission = viewerConnectionAdmission else { return }
         let before = transcriptStart
@@ -478,7 +478,8 @@ final class ReadOnlySubagentSessionStore {
     private func refreshNewestPageIfNeeded() {
         // The store is the single read owner. Historical prepend wins its lane;
         // the dirty revision remains coalesced until that response settles.
-        guard pageTask == nil, refreshTask == nil,
+        // Invalidation cannot bypass scheduled recovery or a terminal failure.
+        guard status == .open, recoveryTask == nil, pageTask == nil, refreshTask == nil,
               let targetRevision = pendingRefreshRevision,
               targetRevision != revision,
               let leaseID,
@@ -512,8 +513,10 @@ final class ReadOnlySubagentSessionStore {
                     // not a request that may leave the mounted viewer waiting.
                     guard response.revision != expectedRevision else {
                         self.refreshTask = nil
-                        self.pendingRefreshRevision = nil
+                        if self.pendingRefreshRevision == targetRevision { self.pendingRefreshRevision = nil }
+                        self.recoveryAttempts = 0
                         self.status = .open
+                        self.refreshNewestPageIfNeeded()
                         return
                     }
                     let merged = ReadOnlyProcessTranscriptMerge.refreshing(

@@ -1827,6 +1827,27 @@ always has the user-visible **Compact Now** action as well.
 
 ## Session invariants
 
+Live parent runtime admission defaults to 128. Operators may set
+`TRON_GATEWAY_MAX_LIVE_RUNTIMES` to an integer from 1 through 1024; this is a
+resource ceiling, not a provider-throughput or hardware-capacity guarantee.
+Reservations count toward admission. At capacity, the existing eviction owner
+reclaims the oldest reloadable idle runtimes before admitting new work, without
+waiting for the normal ten-minute expiry. Active work, subscribed sessions,
+retained command leases, and unpersisted drafts remain protected. A repeated
+acquisition also protects its exact requested session from pressure eviction. Canonical JSONL
+is never evicted. Separate sessions run concurrently; child processes retain their
+own provider/resource admission limits and are not counted as parent runtimes.
+The registry integration suite qualifies 128 simultaneous synthetic parent runs
+across eight projects through child-file churn and repeated client reentry.
+
+Catalog acquisition generations share one physical predecessor and coalesce its
+successor after settlement, including failure. Invalidations cannot multiply
+concurrent discovery work. Every opened header descriptor closes even if its
+initial tail probe fails. Upload and display orphan maintenance resolve canonical
+session membership inside their respective serialized ownership lanes, after
+previous claims/grants commit; discovery failure preserves ownership rather than
+interpreting unavailable membership as an empty catalog.
+
 1. `RuntimeRegistry` owns at most one `RuntimeSlot` per session in this process.
 2. `RuntimeSlot` serializes mutations for its session. Different slots execute
    concurrently.

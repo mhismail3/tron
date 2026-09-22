@@ -35,6 +35,25 @@ async function fixture() {
 }
 
 describe("DisplayArtifactStore", () => {
+  it("captures orphan membership after queued grants and preserves owners on discovery failure", async () => {
+    const value = await fixture();
+    await writeFile(join(value.workspace, "retained.txt"), "durable");
+    const artifact = await value.store.ingest(value.workspace, "retained.txt", "session-a");
+    let release!: () => void;
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    const live = new Set(["session-a"]);
+    const earlier = (value.store as any).serialize(async () => { await barrier; live.add("new-session"); });
+    const grant = value.store.grant(artifact.id, "new-session", "session-a");
+    const maintained = value.store.maintain(async () => new Set(live));
+    try {
+      release(); await Promise.all([earlier, grant, maintained]);
+      await expect(value.store.maintain(async () => { throw new Error("membership unavailable"); })).rejects.toThrow("membership unavailable");
+      const lease = await value.store.acquire(artifact.id, "new-session");
+      try { expect((await collect(lease.stream)).toString()).toBe("durable"); }
+      finally { await lease.release(); }
+    } finally { release(); await Promise.allSettled([earlier, grant, maintained]); await rm(value.home, { recursive: true, force: true }); }
+  });
+
   it("reserves reader capacity before asynchronous validation and releases failed acquisitions", async () => {
     const value = await fixture();
     await writeFile(join(value.workspace, "read.txt"), "fixture");
@@ -81,7 +100,7 @@ describe("DisplayArtifactStore", () => {
       if (operation === "revoke") await value.store.revoke(artifact.id, "session-a");
       else if (operation === "reconcile") await value.store.reconcileSession("session-a", new Set());
       else if (operation === "remove") await value.store.removeSession("session-a");
-      else await value.store.maintain(new Set());
+      else await value.store.maintain(async () => new Set());
       expect(value.store.hasOwner(artifact.id, "session-a")).toBe(false);
       await expect(value.store.acquire(artifact.id, "session-a")).rejects.toMatchObject({ code: "not_found" });
       resume();
@@ -264,7 +283,7 @@ describe("DisplayArtifactStore", () => {
     });
     await restarted.initialize(new Set(["session-a"]));
     expect(restarted.hasOwner(artifact.id, "session-a")).toBe(true);
-    await restarted.maintain(new Set());
+    await restarted.maintain(async () => new Set());
     await expect(restarted.acquire(artifact.id, "session-a")).rejects.toMatchObject({ code: "not_found" });
   });
 });

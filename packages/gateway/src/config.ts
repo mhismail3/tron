@@ -52,6 +52,17 @@ function valueAfter(args: string[], name: string): string | undefined {
   return index >= 0 ? args[index + 1] : undefined;
 }
 
+export const DEFAULT_MAX_LIVE_RUNTIMES = 128;
+
+function parseRuntimeCapacity(raw: string | undefined): number {
+  if (raw === undefined) return DEFAULT_MAX_LIVE_RUNTIMES;
+  const value = Number(raw);
+  if (!/^[1-9][0-9]*$/u.test(raw) || !Number.isSafeInteger(value) || value > 1_024) {
+    throw new GatewayError("invalid_request", "TRON_GATEWAY_MAX_LIVE_RUNTIMES must be an integer from 1 to 1024");
+  }
+  return value;
+}
+
 function parsePort(raw: string | undefined): number {
   const port = Number(raw ?? "9847");
   if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
@@ -355,7 +366,7 @@ export async function loadConfig(
     maxConnections: 32,
     maxConnectionsPerIdentity: 4,
     maxSubscriptionsPerConnection: 64,
-    maxLiveRuntimes: 16,
+    maxLiveRuntimes: parseRuntimeCapacity(environment.TRON_GATEWAY_MAX_LIVE_RUNTIMES),
     maxOutboundBytes: 8 * 1_048_576,
     maxSynchronizationBytes: 2 * 1_048_576,
     ...(pushServiceOrigin ? { pushServiceOrigin } : {}),

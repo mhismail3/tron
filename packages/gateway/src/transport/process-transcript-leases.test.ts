@@ -27,6 +27,40 @@ async function openLease(store: ProcessTranscriptLeaseStore, ...args: any[]) {
 }
 
 describe("ProcessTranscriptLeaseStore", () => {
+  it("retains retired viewers' physical read capacity until their reads settle", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-process-read-retirement-"));
+    roots.push(root);
+    const path = join(root, "child.jsonl");
+    await writeFile(path, "{}\n");
+    let release!: () => void;
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    let blocked = false;
+    const sessions = {
+      resolveReadOnlySubagentPath: vi.fn(async () => admission(path)),
+      readOnlySubagentTranscriptPage: vi.fn(async () => { if (blocked) await barrier; return page("revision-1"); }),
+    } as unknown as RuntimeRegistry;
+    const store = new ProcessTranscriptLeaseStore(sessions);
+    const reads: Promise<unknown>[] = [];
+    let excess: ReturnType<ProcessTranscriptLeaseStore["reserveOpen"]> | undefined;
+    try {
+      for (const process of ["one", "two"]) {
+        blocked = false;
+        const lease = await openLease(store, "client", "parent", process, "child", "run", undefined, vi.fn());
+        blocked = true;
+        const count = vi.mocked(sessions.readOnlySubagentTranscriptPage).mock.calls.length;
+        reads.push(store.page("client", lease.leaseId).catch(error => error));
+        await vi.waitFor(() => expect(sessions.readOnlySubagentTranscriptPage).toHaveBeenCalledTimes(count + 1));
+        store.closeOwned("client", lease.leaseId);
+        store.closeOwned("client", lease.leaseId); // repeated close must not release physical ownership
+      }
+      expect(() => { excess = store.reserveOpen("client", "parent", "viewer-three", "token"); }).toThrow(/capacity/u);
+      release();
+      expect(await Promise.all(reads)).toEqual([expect.objectContaining({ code: "not_found" }), expect.objectContaining({ code: "not_found" })]);
+      const next = await openLease(store, "client", "parent", "four", "child", "run", undefined, vi.fn());
+      expect(next.processId).toBe("four");
+    } finally { release(); excess?.release(); await Promise.all(reads); store.releaseClient("client"); }
+  });
+
   it("retires a published viewer before its opening reservation is released", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-process-handoff-"));
     roots.push(root);
@@ -67,7 +101,7 @@ describe("ProcessTranscriptLeaseStore", () => {
     await expect(store.page("client-1", opened.leaseId, undefined, undefined, "stale")).rejects.toMatchObject({ code: "conflict" });
     await store.page("client-1", opened.leaseId);
     expect(sessions.readOnlySubagentTranscriptPage).toHaveBeenLastCalledWith(
-      "child-1", path, "parent-1", "process-1", "run-1", undefined, undefined, "1:1",
+      "child-1", path, "parent-1", "process-1", "run-1", undefined, undefined, "1:1", expect.any(AbortSignal),
     );
     expect(store.closeOwned("client-1", opened.leaseId)).toBe(true);
     await expect(store.page("client-1", opened.leaseId)).rejects.toMatchObject({ code: "not_found" });

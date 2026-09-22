@@ -470,10 +470,9 @@ await transport.listen(async () => {
 });
 const maintainStorage = async (): Promise<void> => {
   try {
-    const liveSessionIds = await sessions.sessionIDsForStorageMaintenance();
     const [status] = await Promise.all([
-      uploads.maintain(liveSessionIds),
-      sessions.maintainDisplayArtifacts(liveSessionIds),
+      uploads.maintain(() => sessions.sessionIDsForStorageMaintenance()),
+      sessions.maintainDisplayArtifacts(),
     ]);
     if (status.storagePressure !== uploadStoragePressure) {
       logger.log(

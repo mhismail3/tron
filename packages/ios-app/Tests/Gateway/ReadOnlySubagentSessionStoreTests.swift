@@ -44,6 +44,62 @@ struct ReadOnlySubagentSessionStoreTests {
         )
     }
 
+    @Test("invalidation cannot bypass an exhausted page recovery episode")
+    func invalidationRespectsRecoveryFailure() async throws {
+        let fixture = ProcessSheetGatewayFixture()
+        try await fixture.connect(capabilities: [SessionProcessAdmissionPolicy.transcriptCapability])
+        let store = ReadOnlySubagentSessionStore(client: fixture.client)
+        store.open(parentSessionID: "parent", processID: "worker", presentationGeneration: 1, parentSubscriptionToken: "parent-token")
+        try await fixture.respond(at: 1, method: "session.processTranscript.open", result: ProcessSheetGatewayFixture.transcript(texts: ["retained"]))
+        try await withTestWatchdog { @MainActor in
+            while store.status != .open { try await Task.sleep(for: .milliseconds(1)) }
+        }
+        let viewer = try #require(store.leaseID)
+        store.invalidate(ProcessTranscriptChanged(leaseId: viewer, processId: "worker", revision: "transcript-2", total: 2, leafEntryId: nil, closed: nil, reason: nil))
+        var index = 1
+        for _ in 0..<4 {
+            index = try await nextRequest(fixture, method: "session.processTranscript.page", after: index)
+            try await fail(fixture, at: index, code: "busy")
+        }
+        try await withTestWatchdog { @MainActor in
+            while store.status == .reconnecting { try await Task.sleep(for: .milliseconds(1)) }
+        }
+        for revision in ["transcript-3", "transcript-4"] {
+            store.invalidate(ProcessTranscriptChanged(leaseId: viewer, processId: "worker", revision: revision, total: 3, leafEntryId: nil, closed: nil, reason: nil))
+            if case .failed = store.status {} else { Issue.record("Invalidation restarted exhausted recovery") }
+        }
+        #expect(store.items.map(\.id) == ["entry-0"])
+        store.close(); await fixture.client.close()
+    }
+
+    @Test("a same-revision response cannot discard a newer invalidation received during its read")
+    func unchangedPagePreservesNewerInvalidation() async throws {
+        let fixture = ProcessSheetGatewayFixture()
+        try await fixture.connect(capabilities: [SessionProcessAdmissionPolicy.transcriptCapability])
+        let store = ReadOnlySubagentSessionStore(client: fixture.client)
+        store.open(parentSessionID: "parent", processID: "worker", presentationGeneration: 1, parentSubscriptionToken: "parent-token")
+        let transcript = try ProcessSheetGatewayFixture.transcript(texts: ["retained"])
+        try await fixture.respond(at: 1, method: "session.processTranscript.open", result: transcript)
+        try await withTestWatchdog { @MainActor in
+            while store.status != .open { try await Task.sleep(for: .milliseconds(1)) }
+        }
+        let viewer = try #require(store.leaseID)
+        store.invalidate(ProcessTranscriptChanged(leaseId: viewer, processId: "worker", revision: "transcript-2", total: 2, leafEntryId: nil, closed: nil, reason: nil))
+        let first = try await nextRequest(fixture, method: "session.processTranscript.page", after: 1)
+        store.invalidate(ProcessTranscriptChanged(leaseId: viewer, processId: "worker", revision: "transcript-3", total: 3, leafEntryId: nil, closed: nil, reason: nil))
+        var page = try #require(transcript.objectValue?["page"]?.objectValue)
+        page["revision"] = .string("transcript-1")
+        try await fixture.respond(at: first, method: "session.processTranscript.page", result: .object(page))
+        let second = try await nextRequest(fixture, method: "session.processTranscript.page", after: first)
+        page["revision"] = .string("transcript-3")
+        try await fixture.respond(at: second, method: "session.processTranscript.page", result: .object(page))
+        try await withTestWatchdog { @MainActor in
+            while store.status != .open { try await Task.sleep(for: .milliseconds(1)) }
+        }
+        #expect(store.revision == "transcript-3")
+        store.close(); await fixture.client.close()
+    }
+
     @Test("repeated completion updates cannot renew exhausted recovery; explicit retry can")
     func terminalUpdatesDoNotResetRecovery() async throws {
         let fixture = ProcessSheetGatewayFixture()

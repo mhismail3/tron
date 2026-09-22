@@ -722,8 +722,8 @@ export class RuntimeRegistry {
     await Promise.all([...this.slots.values()].map((slot) => slot.reconcileDisplayArtifactOwnership()));
   }
 
-  async maintainDisplayArtifacts(liveSessionIDs: ReadonlySet<string>): Promise<void> {
-    await this.displayArtifacts.maintain(liveSessionIDs);
+  async maintainDisplayArtifacts(): Promise<void> {
+    await this.displayArtifacts.maintain(() => this.sessionIDsForStorageMaintenance());
   }
 
   async removeDisplayArtifacts(sessionID: string): Promise<void> {
@@ -1423,47 +1423,47 @@ export class RuntimeRegistry {
       await handle.close();
       return {};
     }
-    const finalByte = Buffer.alloc(1);
-    const finalRead = await handle.read(finalByte, 0, 1, opened.size - 1);
-    // A stable header remains identity evidence while this file has a partial
-    // tail. Transcript/catalog readers separately enforce their selected scope.
-    const incompleteTail = finalRead.bytesRead !== 1 || finalByte[0] !== 0x0a;
-    const buffer = Buffer.allocUnsafe(maximumBytes);
-    const parseHeader = (line: Buffer): CatalogHeaderIdentity | undefined => {
-      if (line.length === 0 || !line.toString("utf8").trim()) return undefined;
-      let value: unknown;
-      try { value = JSON.parse(line.toString("utf8")); }
-      catch { return undefined; }
-      if (!value || typeof value !== "object") return undefined;
-      const record = value as Record<string, unknown>;
-      if (record.type !== "session" || typeof record.id !== "string") return undefined;
-      return {
-        id: record.id,
-        cwd: typeof record.cwd === "string" ? record.cwd : "",
-        fileIdentity,
-        size: opened.size,
-        mtimeMs: opened.mtimeMs,
-        ...(typeof record.parentSession === "string"
-          ? { parentSessionPath: record.parentSession }
-          : {}),
-      };
-    };
-    const stableIdentity = async (identity: CatalogHeaderIdentity | undefined): Promise<CatalogHeaderIdentity | undefined> => {
-      if (!identity) return undefined;
-      const after = await handle.stat();
-      const afterPath = await lstat(path);
-      const sameFile = after.isFile() && after.dev === opened.dev && after.ino === opened.ino
-        && afterPath.isFile() && !afterPath.isSymbolicLink()
-        && afterPath.dev === opened.dev && afterPath.ino === opened.ino;
-      const unchanged = after.size === opened.size && after.mtimeMs === opened.mtimeMs
-        && afterPath.size === opened.size && afterPath.mtimeMs === opened.mtimeMs;
-      const appendOnly = allowAppendOnlyLiveOwner
-        && this.isLiveRuntimeOwnedPath(path, identity.id)
-        && (after.size > opened.size || afterPath.size > opened.size);
-      if (!sameFile || (!unchanged && !appendOnly)) return undefined;
-      return identity;
-    };
     try {
+      const finalByte = Buffer.alloc(1);
+      const finalRead = await handle.read(finalByte, 0, 1, opened.size - 1);
+      // A stable header remains identity evidence while this file has a partial
+      // tail. Transcript/catalog readers separately enforce their selected scope.
+      const incompleteTail = finalRead.bytesRead !== 1 || finalByte[0] !== 0x0a;
+      const buffer = Buffer.allocUnsafe(maximumBytes);
+      const parseHeader = (line: Buffer): CatalogHeaderIdentity | undefined => {
+        if (line.length === 0 || !line.toString("utf8").trim()) return undefined;
+        let value: unknown;
+        try { value = JSON.parse(line.toString("utf8")); }
+        catch { return undefined; }
+        if (!value || typeof value !== "object") return undefined;
+        const record = value as Record<string, unknown>;
+        if (record.type !== "session" || typeof record.id !== "string") return undefined;
+        return {
+          id: record.id,
+          cwd: typeof record.cwd === "string" ? record.cwd : "",
+          fileIdentity,
+          size: opened.size,
+          mtimeMs: opened.mtimeMs,
+          ...(typeof record.parentSession === "string"
+            ? { parentSessionPath: record.parentSession }
+            : {}),
+        };
+      };
+      const stableIdentity = async (identity: CatalogHeaderIdentity | undefined): Promise<CatalogHeaderIdentity | undefined> => {
+        if (!identity) return undefined;
+        const after = await handle.stat();
+        const afterPath = await lstat(path);
+        const sameFile = after.isFile() && after.dev === opened.dev && after.ino === opened.ino
+          && afterPath.isFile() && !afterPath.isSymbolicLink()
+          && afterPath.dev === opened.dev && afterPath.ino === opened.ino;
+        const unchanged = after.size === opened.size && after.mtimeMs === opened.mtimeMs
+          && afterPath.size === opened.size && afterPath.mtimeMs === opened.mtimeMs;
+        const appendOnly = allowAppendOnlyLiveOwner
+          && this.isLiveRuntimeOwnedPath(path, identity.id)
+          && (after.size > opened.size || afterPath.size > opened.size);
+        if (!sameFile || (!unchanged && !appendOnly)) return undefined;
+        return identity;
+      };
       let bytesReadTotal = 0;
       let lineStart = 0;
       while (bytesReadTotal < maximumBytes) {
@@ -2429,8 +2429,12 @@ export class RuntimeRegistry {
 
   private async catalogAcquisition(): Promise<CatalogAcquisitionResolution> {
     const key = `${this.catalogStructuralGeneration}:${this.catalogAcquisitionInvalidationGeneration}`;
-    if (this.catalogAcquisitionPromise && this.catalogAcquisitionPromiseKey === key) {
-      return this.catalogAcquisitionPromise;
+    if (this.catalogAcquisitionPromise) {
+      if (this.catalogAcquisitionPromiseKey === key) return this.catalogAcquisitionPromise;
+      // A retired generation still owns its physical discovery. Join its
+      // settlement before admitting one successor, including fallback scans.
+      try { await this.catalogAcquisitionPromise; } catch { /* successor owns its outcome */ }
+      return this.catalogAcquisition();
     }
     const operation = this.resolveCatalogAcquisition();
     const settled = operation.then((value) => {
@@ -2692,6 +2696,7 @@ export class RuntimeRegistry {
         "automation.session.trust",
         () => this.options.trust.requireResolved(cwdInput),
       );
+      await this.evictIdle(true, sessionId);
       const existing = await this.mutex.run(() => {
         this.assertSlotAdmissionOpen();
         if (this.trustReloadProjects.has(trust.cwd)) {
@@ -2763,6 +2768,7 @@ export class RuntimeRegistry {
         "session.create.trust",
         () => this.options.trust.requireResolved(cwdInput),
       );
+      await this.evictIdle(true);
       await this.mutex.run(() => {
         this.assertSlotAdmissionOpen();
         if (this.trustReloadProjects.has(trust.cwd)) {
@@ -3084,6 +3090,7 @@ export class RuntimeRegistry {
     if (entry.structuralSubagent) {
       throw new GatewayError("conflict", "Subagent sessions are informational and remain owned by their originating runtime");
     }
+    await this.evictIdle(true, sessionId);
     const selectedAcquisitionGeneration = this.catalogAcquisitionInvalidationGeneration;
     const selected = await this.mutex.run(() => {
       let raced = this.slots.get(sessionId);
@@ -3229,6 +3236,7 @@ export class RuntimeRegistry {
     const finishAdmission = this.beginSlotAdmission();
     try {
       const trust = await this.options.trust.requireResolved(cwdInput);
+      await this.evictIdle(true);
       return await this.mutex.run(async () => {
         this.assertSlotAdmissionOpen();
         if (this.trustReloadProjects.has(trust.cwd)) {
@@ -3649,11 +3657,22 @@ export class RuntimeRegistry {
     }
   }
 
-  private async evictIdle(): Promise<void> {
-    const cutoff = Date.now() - this.options.idleRuntimeMs;
-    for (const [id, slot] of this.slots) {
+  private async evictIdle(forCapacity = false, requestedSessionID?: string): Promise<void> {
+    const maximum = this.options.maximumLiveRuntimes;
+    const needsCapacity = () => maximum !== undefined && this.slots.size + this.reservedSlotStarts >= maximum;
+    if (forCapacity && !needsCapacity()) return;
+    const cutoff = forCapacity ? Infinity : Date.now() - this.options.idleRuntimeMs;
+    const candidates = [...this.slots].sort(([, left], [, right]) => left.touchedAt - right.touchedAt);
+    for (const [id, slot] of candidates) {
+      if (forCapacity && !needsCapacity()) break;
+      // Reclaim only reloadable, unobserved idle runtimes under pressure.
+      // Unsent drafts keep their normal idle lifetime; runs/leases stay protected.
+      // A duplicate acquisition must preserve its own already-published slot.
+      const eligible = () => id !== requestedSessionID
+        && (!forCapacity || (needsCapacity() && slot.persistedSessionFile !== undefined))
+        && this.isIdleEvictionEligible(id, slot, cutoff);
       const selected = await this.mutex.run(() => {
-        if (!this.isIdleEvictionEligible(id, slot, cutoff)) return false;
+        if (this.idleEvictions.has(id) || !eligible()) return false;
         this.idleEvictions.set(id, { slot, committed: false });
         return true;
       });
@@ -3663,7 +3682,7 @@ export class RuntimeRegistry {
         if (eviction?.slot !== slot) continue;
         let removedLiveOnlySession = false;
         const disposal = slot.disposeIf(() => {
-          if (this.idleEvictions.get(id) !== eviction || !this.isIdleEvictionEligible(id, slot, cutoff)) return false;
+          if (this.idleEvictions.get(id) !== eviction || !eligible()) return false;
           eviction.committed = true;
           removedLiveOnlySession = slot.persistedSessionFile === undefined;
           return true;

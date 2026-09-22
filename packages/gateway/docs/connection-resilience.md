@@ -129,6 +129,14 @@ an actual over-node-budget frame through decoding, diagnostic capture and strict
 retirement. Native confirmed-mutation tests ensure an oversized command/status
 response cannot be mistaken for a failed command or authorize replay.
 
+Published subagent transcript leases retain their capacity reservation and exact
+identity until their physical read lane drains after close. Closing aborts queued
+reads and detaches watchers/timers immediately; an already running filesystem
+read remains accounted for until settlement. Delayed page/invalidation callbacks
+cannot publish into a successor lease. Repeated close is idempotent, and accepted
+stop commands retain their mutation owner. The lease regression verifies capacity
+remains occupied while retired physical reads are blocked.
+
 These boundaries are not a certification of unlimited sessions or browser
 processes. Cold SDK session opening still parses complete JSONL synchronously;
 runtime snapshots perform history-dependent derivations, and projecting large
