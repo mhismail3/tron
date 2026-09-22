@@ -372,9 +372,9 @@ Source keeps exact referring POST/REPLY evidence, and synthesis must cite that
 Source separately from X author commentary.
 
 Private bookmark discovery remains separate and supervised through the approved
-`agent_browser` profile. The [X skill](../../../.agents/skills/tron-x/SKILL.md)
-defines bounded enumeration, top-level bookmark membership, page checkpoints,
-identity/coverage validation, and signed-in browser fallback. There is no new
+`agent_browser` profile. The global `tron-x` skill provides bounded enumeration,
+top-level bookmark membership, page checkpoints, identity/coverage validation,
+and signed-in browser fallback when installed in Tron's user-level skills directory. There is no new
 cookie store, background sync, automatic browser login, or remote mutation.
 Never send known protected content to a public mirror without approval.
 The existing paid `connectorSweep` X path is not selected by this free reader;

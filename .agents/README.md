@@ -14,9 +14,6 @@ facts in the owning source and package docs, not copied into skills.
 | [tron-performance](skills/tron-performance/SKILL.md) | Profiling a demonstrated bottleneck or comparing alternatives under a frozen experiment |
 | [tron-ios](skills/tron-ios/SKILL.md) | Required routing for iOS build, test, simulator, device, signing, archive, and artifact work |
 | [tron-workspace-housekeeping](skills/tron-workspace-housekeeping/SKILL.md) | Evidence-based post-merge cleanup of branches, inactive worktrees, and stale Git metadata; protect active agents and unmerged work |
-| [tron-raindrop](skills/tron-raindrop/SKILL.md) | Bounded, read-only Raindrop bookmark and collection API access through the Mac credential owner |
-| [tron-jev](skills/tron-jev/SKILL.md) | Explicit bounded typed Jev decisions; not source retrieval or chat completion |
-| [tron-x](skills/tron-x/SKILL.md) | Free public X post lookup, explicit raw-evidence capture, and supervised authenticated bookmark discovery |
 
 For a broad investigation, start with code health and its coverage ledger. Use
 test confidence to evaluate the evidence, then performance only where a cost or
@@ -28,7 +25,12 @@ configuration changes follow their owning contributor/package runbooks.
 
 ## Maintaining guidance
 
-Keep skills under `.agents/skills/`, with a matching directory/frontmatter name,
+Capability-use guidance such as `tron-jev`, `tron-raindrop`, and `tron-x` belongs
+in Tron's user-level global skills directory, not this project catalog. Global
+skills use the existing resource loader and remain subject to tool availability,
+connector admission, and explicit permissions; do not keep project duplicates.
+
+Keep repository development skills under `.agents/skills/`, with a matching directory/frontmatter name,
 a concise description, and a link in the catalog above. Do not create parallel
 harness copies, compatibility aliases, or a separate skill for every subsystem.
 Add a procedure only when it answers a distinct recurring question. Upstream
