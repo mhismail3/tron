@@ -92,6 +92,10 @@ final class KnowledgeDashboardLayoutTests: XCTestCase {
             try await withHost(Self.hosted(detail), size: CGSize(width: width, height: 700), scheme: scheme) { host in
                 Self.attach(host.view, named: "knowledge-source-detail-\(label)-narrow", to: self)
             }
+            let reader = KnowledgeSavedTextReader(text: "Saved evidence page one. \(String(repeating: "Readable retained evidence. ", count: 700))", reference: nil, recordID: source.id, revisionID: source.revisionId, label: "saved text", readers: KnowledgeObjectReaderStore())
+            try await withHost(Self.hosted(reader), size: CGSize(width: width, height: 700), scheme: scheme) { host in
+                Self.attach(host.view, named: "knowledge-source-saved-reader-\(label)-narrow", to: self)
+            }
         }
     }
 
