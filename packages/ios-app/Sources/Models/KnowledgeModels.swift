@@ -381,7 +381,7 @@ extension KnowledgeRecord {
         switch content { case .source(let c): c.title; case .observation: "Observation"; case .note(let c): c.title }
     }
     var summary: String {
-        switch content { case .source(let c): c.text ?? KnowledgeSourcePresentationPolicy.coverageSummary(c); case .observation(let c): c.items.map { $0.text }.joined(separator: " "); case .note(let c): c.body ?? "" }
+        switch content { case .source(let c): KnowledgeSourcePresentationPolicy.summary(c) ?? ""; case .observation(let c): c.items.map { $0.text }.joined(separator: " "); case .note(let c): c.body ?? "" }
     }
 }
 
@@ -397,6 +397,25 @@ enum KnowledgeSourcePresentationPolicy {
     }
 
     static func domain(_ value: String?) -> String? { safeURL(value)?.host?.lowercased() }
+
+    static func summary(_ source: KnowledgeSourceContent) -> String? {
+        guard let value = source.assessment?.summary.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
+        return String(value.prefix(320))
+    }
+
+    static func sourceType(_ source: KnowledgeSourceContent) -> String? {
+        guard let host = domain(source.uri) else { return nil }
+        if host.contains("github") { return "Repository" }
+        if host.contains("x.com") || host.contains("twitter") { return "Post" }
+        if source.mediaType?.contains("pdf") == true { return "PDF" }
+        return "Web page"
+    }
+
+    static func thumbnailLetters(_ source: KnowledgeSourceContent) -> String {
+        let host = domain(source.uri) ?? source.title
+        let letters = host.split(whereSeparator: { !$0.isLetter }).prefix(2).compactMap { $0.first.map(String.init) }.joined()
+        return letters.isEmpty ? String(source.title.prefix(1)).uppercased() : letters.uppercased()
+    }
 
     static func coverageTitle(_ disposition: KnowledgeCaptureDisposition) -> String {
         switch disposition {

@@ -558,6 +558,9 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertEqual(KnowledgeSourcePresentationPolicy.coverageSummary(source), "Partial capture · example.com")
         let pending = KnowledgeSourceAdmissionState(status: .pending, reason: "Needs review", decidedAt: "2026-01-01T00:00:00Z", profileVersion: nil, rubricVersion: nil)
         XCTAssertEqual(KnowledgeSourcePresentationPolicy.admissionLabel(pending), "Pending intake")
+        XCTAssertNil(KnowledgeSourcePresentationPolicy.summary(source))
+        XCTAssertEqual(KnowledgeSourcePresentationPolicy.sourceType(source), "Web page")
+        XCTAssertEqual(KnowledgeSourcePresentationPolicy.thumbnailLetters(source), "EC")
     }
 
     func testSourceWireShapeDecodesCaptureReasonAndAssessmentMetadataWithoutInventingConfidence() throws {
@@ -569,6 +572,8 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertEqual(source.assessment?.coverage, "sampled")
         XCTAssertEqual(source.assessment?.classification, "reference")
         XCTAssertEqual(source.assessment?.usage?.inputTokens, 12)
+        XCTAssertEqual(KnowledgeSourcePresentationPolicy.summary(source), "Bounded review")
+        XCTAssertEqual(record.summary, "Bounded review")
         XCTAssertNil(source.assessment?.confidence, "Missing confidence must remain missing")
     }
 
