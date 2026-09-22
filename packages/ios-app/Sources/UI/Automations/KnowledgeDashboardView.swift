@@ -23,15 +23,33 @@ enum KnowledgeDashboardSection: String, CaseIterable, Identifiable {
     }
 }
 
+enum KnowledgeDashboardMenuItem: String, CaseIterable {
+    case observationConfiguration = "Observation configuration"
+    case needsAttention = "Needs attention"
+    case chronicleInfo = "Chronicle info"
+    case captureURL = "Capture URL"
+    case newNote = "New note"
+
+    var symbol: String {
+        switch self {
+        case .observationConfiguration: "eye"
+        case .needsAttention: "exclamationmark.triangle"
+        case .chronicleInfo: "info.circle"
+        case .captureURL: "link.badge.plus"
+        case .newNote: "note.text.badge.plus"
+        }
+    }
+}
+
 enum KnowledgeDashboardMenuPolicy {
     static func settingsTitle(for area: KnowledgeDashboardArea) -> String {
         area == .chronicle ? "Chronicle settings" : "Library settings"
     }
 
-    static func settingsActions(for area: KnowledgeDashboardArea) -> [String] {
+    static func settingsItems(for area: KnowledgeDashboardArea) -> [KnowledgeDashboardMenuItem] {
         area == .chronicle
-            ? ["Observation configuration", "Needs attention", "Chronicle info"]
-            : ["Capture URL", "New note"]
+            ? [.observationConfiguration, .needsAttention, .chronicleInfo]
+            : [.captureURL, .newNote]
     }
 }
 
@@ -142,23 +160,21 @@ struct KnowledgeDashboardView: View {
     let onOpenSession: @MainActor (String, String) -> Void
     @State private var records: [KnowledgeRecord] = []
     @State private var area: KnowledgeDashboardArea = .chronicle
-    @State private var section: KnowledgeDashboardSection = .chronicle
-    @State private var lastLibrarySection: KnowledgeDashboardSection = .sources
+    @State private var librarySelection: KnowledgeDashboardSection = .sources
     @State private var sourceVisibility: KnowledgeSourceVisibility = .saved
+    @State private var chronicleScope: KnowledgeScope?
+    @State private var libraryScope: KnowledgeScope?
     @State private var selected: KnowledgeRecord?
     @State private var selectedIdentity: KnowledgePresentationIdentity?
     @State private var pendingDetailAction: DetailAction?
     private enum DetailAction { case draft(KnowledgeRecord), session(String, String) }
     @State private var search = ""
-    @State private var scope: KnowledgeScope?
     @State private var loading = false
     @State private var error: String?
     @State private var nextCursor: String?
     @State private var loadingMore = false
     @State private var status: KnowledgeStatus?
     @State private var coverageStore = KnowledgeCoveragePresentationStore()
-    @State private var clearingCoverageID: String?
-    @State private var coverageMutationError: String?
     @State private var coverageSheet = false
     @State private var chronicleInfoSheet = false
     @State private var loadGeneration = 0
@@ -169,6 +185,9 @@ struct KnowledgeDashboardView: View {
     @State private var showingSearch = false
     @State private var dashboardHeader = DashboardHeaderState()
 
+    private var section: KnowledgeDashboardSection { area == .chronicle ? .chronicle : librarySelection }
+    private var scope: KnowledgeScope? { area == .chronicle ? chronicleScope : libraryScope }
+    private var activeSourceVisibility: KnowledgeSourceVisibility { section == .sources ? sourceVisibility : .saved }
     private var requestKind: KnowledgeRecordKind? { section.kind }
 
     private var filterSummary: String {
@@ -177,7 +196,7 @@ struct KnowledgeDashboardView: View {
     }
 
     private func requestKey() -> KnowledgeCatalogRequestKey {
-        KnowledgeCatalogRequestKey(section: section, kind: requestKind, scope: scope, search: search, sourceVisibility: sourceVisibility)
+        KnowledgeCatalogRequestKey(section: section, kind: requestKind, scope: scope, search: search, sourceVisibility: activeSourceVisibility)
     }
 
     var body: some View {
@@ -219,22 +238,11 @@ struct KnowledgeDashboardView: View {
                                  onOpenSession: { stageDetailAction(.session($0, $1)) })
                 .environment(model)
         }
-        .onChange(of: area) { _, value in
-            invalidateCatalogueRequests()
-            if value == .chronicle {
-                if section != .chronicle { lastLibrarySection = section }
-                section = .chronicle
-            } else {
-                section = lastLibrarySection
-            }
-        }
-        .onChange(of: section) { _, value in
-            invalidateCatalogueRequests()
-            area = value == .chronicle ? .chronicle : .library
-            if value != .chronicle { lastLibrarySection = value }
-        }
+        .onChange(of: area) { _, _ in invalidateCatalogueRequests() }
+        .onChange(of: librarySelection) { _, _ in invalidateCatalogueRequests() }
         .onChange(of: sourceVisibility) { _, _ in invalidateCatalogueRequests() }
-        .onChange(of: scope) { _, _ in invalidateCatalogueRequests() }
+        .onChange(of: chronicleScope) { _, _ in invalidateCatalogueRequests() }
+        .onChange(of: libraryScope) { _, _ in invalidateCatalogueRequests() }
         .onChange(of: search) { _, _ in invalidateCatalogueRequests() }
         .onChange(of: model.knowledgePresentationIdentity) { _, _ in
             // Retire both the visible page and any manually spawned page task;
@@ -242,7 +250,7 @@ struct KnowledgeDashboardView: View {
             loadGeneration += 1
             loadingMore = false
             coverageStore.reset()
-            clearingCoverageID = nil; coverageMutationError = nil; coverageSheet = false
+            coverageSheet = false
             records.removeAll(); selected = nil; selectedIdentity = nil; pendingDetailAction = nil
             nextCursor = nil; status = nil; error = nil
         }
@@ -264,7 +272,7 @@ struct KnowledgeDashboardView: View {
         .tronManagedSheet(isPresented: $noteSheet, identity: "knowledge.note") {
             KnowledgeNoteCreateView { noteSheet = false; await reload() }.environment(model)
         }
-        .task(id: "\(section.rawValue)/\(sourceVisibility.rawValue)/\(scope?.rawValue ?? "all")/\(search)/\(activity.allowsPresentationPublication)/\(model.knowledgePresentationIdentity.profileID ?? "none")/\(model.knowledgePresentationIdentity.lifecycleGeneration ?? -1)/\(model.knowledgePresentationIdentity.connectionID ?? -1)/\(model.knowledgeInvalidationRevision)") {
+        .task(id: "\(section.rawValue)/\(activeSourceVisibility.rawValue)/\(scope?.rawValue ?? "all")/\(search)/\(activity.allowsPresentationPublication)/\(model.knowledgePresentationIdentity.profileID ?? "none")/\(model.knowledgePresentationIdentity.lifecycleGeneration ?? -1)/\(model.knowledgePresentationIdentity.connectionID ?? -1)/\(model.knowledgeInvalidationRevision)") {
             guard activity.allowsPresentationPublication else { return }
             await reload()
         }
@@ -275,16 +283,17 @@ struct KnowledgeDashboardView: View {
     }
 
     private var dashboardMenuActions: DashboardMenuActions {
-        let settingsActions: [DashboardMenuAction] = area == .chronicle
-            ? [
-                .init(title: "Observation configuration", symbol: "eye", perform: { configSheet = true }),
-                .init(title: "Needs attention", symbol: "exclamationmark.triangle", perform: { coverageSheet = true }),
-                .init(title: "Chronicle info", symbol: "info.circle", perform: { chronicleInfoSheet = true }),
-            ]
-            : [
-                .init(title: "Capture URL", symbol: "link.badge.plus", perform: { captureSheet = true }),
-                .init(title: "New note", symbol: "note.text.badge.plus", perform: { noteSheet = true }),
-            ]
+        let settingsActions: [DashboardMenuAction] = KnowledgeDashboardMenuPolicy.settingsItems(for: area).map { item in
+            DashboardMenuAction(title: item.rawValue, symbol: item.symbol, perform: {
+                switch item {
+                case .observationConfiguration: configSheet = true
+                case .needsAttention: openCoverageDetail()
+                case .chronicleInfo: chronicleInfoSheet = true
+                case .captureURL: captureSheet = true
+                case .newNote: noteSheet = true
+                }
+            })
+        }
         return DashboardMenuActions(
             search: { showingSearch = true },
             filter: { showingFilters = true },
@@ -292,6 +301,16 @@ struct KnowledgeDashboardView: View {
             settingsMenu: .init(title: KnowledgeDashboardMenuPolicy.settingsTitle(for: area), symbol: "slider.horizontal.3", actions: settingsActions),
             creation: []
         )
+    }
+
+    private func selectSection(_ value: KnowledgeDashboardSection) {
+        guard value != .chronicle else { area = .chronicle; return }
+        librarySelection = value
+        area = .library
+    }
+
+    private func setActiveScope(_ value: KnowledgeScope?) {
+        if area == .chronicle { chronicleScope = value } else { libraryScope = value }
     }
 
     private func dismissSearch() {
@@ -376,11 +395,11 @@ struct KnowledgeDashboardView: View {
             if area == .library {
                 TronDashboardFilterSectionTitle(title: "Library view", detail: "Choose one library collection at a time.")
                 TronDashboardFilterOption(title: "Sources", selected: section == .sources, accent: .tronKnowledge,
-                                          inactiveAccent: .tronSlate) { section = .sources }
+                                          inactiveAccent: .tronSlate) { selectSection(.sources) }
                 TronDashboardFilterOption(title: "Syntheses", selected: section == .syntheses, accent: .tronKnowledge,
-                                          inactiveAccent: .tronSlate) { section = .syntheses }
+                                          inactiveAccent: .tronSlate) { selectSection(.syntheses) }
                 if section == .sources {
-                    TronDashboardFilterSectionTitle(title: "Source visibility", detail: "Admission is read from the canonical source record; these options do not mutate it.")
+                    TronDashboardFilterSectionTitle(title: "Source visibility", detail: "Choose the saved, waiting, or archived sources you want to browse.")
                     ForEach(KnowledgeSourceVisibility.allCases) { value in
                         TronDashboardFilterOption(title: value.title, selected: sourceVisibility == value, accent: .tronKnowledge,
                                                   inactiveAccent: .tronSlate) { sourceVisibility = value }
@@ -389,107 +408,27 @@ struct KnowledgeDashboardView: View {
             }
             TronDashboardFilterSectionTitle(title: "Scope", detail: "Narrow this dashboard without changing the collection.")
             TronDashboardFilterOption(title: "All scopes", selected: scope == nil, accent: .tronKnowledge,
-                                      inactiveAccent: .tronSlate) { scope = nil }
+                                      inactiveAccent: .tronSlate) { setActiveScope(nil) }
             ForEach(KnowledgeScope.allCases, id: \.self) { value in
                 TronDashboardFilterOption(title: value.label, selected: scope == value, accent: .tronKnowledge,
-                                          inactiveAccent: .tronSlate) { scope = value }
+                                          inactiveAccent: .tronSlate) { setActiveScope(value) }
             }
         }
     }
     private var chronicleInfoSheetView: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: TronSpacing.md) {
-                    if let status {
-                        Text("Observation coverage")
-                            .font(TronTypography.sheetSectionHeader)
-                            .foregroundStyle(Color.tronKnowledge)
-                        KnowledgeInfoStat(title: "Observed", value: status.coverage.observedCount)
-                        KnowledgeInfoStat(title: "Empty", value: status.coverage.emptyCount)
-                        KnowledgeInfoStat(title: "Excluded", value: status.coverage.excludedCount)
-                        KnowledgeInfoStat(title: "Pending", value: status.coverage.pendingCount)
-                        KnowledgeInfoStat(title: "Failed", value: status.coverage.failedCount)
-                        KnowledgeInfoStat(title: "Unavailable", value: status.coverage.unavailableCount)
-                        Text("Settled \(status.coverage.observedCount + status.coverage.emptyCount + status.coverage.excludedCount) · \(status.coverage.remainingCount) need attention")
-                            .font(TronTypography.caption)
-                            .foregroundStyle(Color.tronTextSecondary)
-                    } else if let error {
-                        TronPlaceholderState(title: "Chronicle info unavailable", detail: error, icon: "externaldrive.badge.xmark", accent: .tronKnowledge,
-                                             actionTitle: "Retry", action: { Task { await reload() } })
-                    } else {
-                        TronLoadingState(label: "Loading Chronicle info…", accent: .tronKnowledge)
-                    }
-                }
-                .padding(TronSpacing.section)
-            }
-            .tronNavigationTitle("Chronicle info", accent: .tronKnowledge)
-        }
+        KnowledgeChronicleInfoSheet()
+            .environment(model)
     }
 
     /// The coverage list lives in its own detail sheet so the dashboard card
     /// stays an informational overview.
-    @ViewBuilder private var coverageDetailSheet: some View {
-        if let status {
-            KnowledgeCoverageDetailSheet(
-                coverage: status.coverage,
-                cuts: coverageStore.cuts,
-                showsInitialLoading: coverageStore.showsInitialLoading,
-                loadingMore: coverageStore.loading,
-                canLoadMore: coverageStore.nextCursor != nil,
-                errorText: coverageStore.error,
-                mutationErrorText: coverageMutationError,
-                clearingCutID: clearingCoverageID,
-                allowsActions: activity.allowsPresentationPublication,
-                onOpenSession: { cut in stageCoverageNavigation(.session(cut.range.sessionId, cut.range.fromEntryId)) },
-                onClear: { clearCoverage($0) },
-                onLoadMore: loadMoreCoverage
-            )
-        } else if let error {
-            TronPlaceholderState(title: "Needs attention unavailable", detail: error,
-                                 icon: "externaldrive.badge.xmark", accent: .tronKnowledge,
-                                 actionTitle: "Retry", action: { Task { await reload() } })
-        } else {
-            TronLoadingState(label: "Loading attention…", accent: .tronKnowledge)
-        }
-    }
-
-    /// Coverage is read by disposition. An older Gateway cannot filter the
-    /// ledger, so the container reports that instead of listing the cuts that
-    /// happen to sit in the first settled page.
-    private var supportsCoverageFilter: Bool {
-        model.gatewayInfo?.capabilities.contains(KnowledgeRPCClient.coverageFilterCapability) == true
-    }
-
-    private func coverageRequest(cursor: String?) async throws -> KnowledgeCoveragePage {
-        try await model.knowledge.coverage(cursor: cursor, limit: 100,
-            dispositions: KnowledgeCoveragePresentationPolicy.attentionDispositions)
-    }
-
-    private func loadMoreCoverage() {
-        let identity = model.knowledgePresentationIdentity
-        Task { @MainActor in
-            await coverageStore.loadMore(identity: identity,
-                request: coverageRequest,
-                isCurrent: { activity.allowsPresentationPublication && model.knowledgePresentationIdentity == identity })
-        }
-    }
-
-    private func clearCoverage(_ cut: KnowledgeObservationCoverage) {
-        guard activity.allowsPresentationPublication, clearingCoverageID == nil else { return }
-        let identity = model.knowledgePresentationIdentity
-        clearingCoverageID = cut.id; coverageMutationError = nil
-        Task { @MainActor in
-            defer { if model.knowledgePresentationIdentity == identity { clearingCoverageID = nil } }
-            guard model.knowledgePresentationIdentity == identity else { return }
-            do {
-                _ = try await model.knowledge.dismissCoverage(cut, capabilities: model.gatewayInfo?.capabilities ?? [])
-                guard model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication else { return }
-                await reload()
-            } catch {
-                guard model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication else { return }
-                coverageMutationError = error.localizedDescription
-            }
-        }
+    private var coverageDetailSheet: some View {
+        KnowledgeCoverageSheetHost(
+            identity: model.knowledgePresentationIdentity,
+            store: coverageStore,
+            onOpenSession: { cut in stageCoverageNavigation(.session(cut.range.sessionId, cut.range.fromEntryId)) }
+        )
+        .environment(model)
     }
 
     private func invalidateCatalogueRequests() {
@@ -504,7 +443,7 @@ struct KnowledgeDashboardView: View {
         let requestedKind = requestKind
         let requestedScope = scope
         let requestedSearch = search
-        let requestedVisibility = sourceVisibility
+        let requestedVisibility = activeSourceVisibility
         let requestedKey = KnowledgeCatalogRequestKey(section: requestedSection, kind: requestedKind, scope: requestedScope, search: requestedSearch, sourceVisibility: requestedVisibility)
         guard activity.allowsPresentationPublication, identity.profileID != nil, identity.lifecycleGeneration != nil else { return }
         loading = true; error = nil
@@ -523,15 +462,6 @@ struct KnowledgeDashboardView: View {
             guard generation == loadGeneration, KnowledgeCatalogRequestFence.accepts(requestedKey, current: requestKey()),
                   activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
             records = response.records; nextCursor = response.nextCursor; status = currentStatus
-            // A Gateway that cannot filter coverage by disposition must not be
-            // asked for a page whose settled rows this container never lists.
-            if supportsCoverageFilter {
-                await coverageStore.load(identity: identity, expectedStateRevision: currentStatus.stateRevision ?? 0,
-                    request: coverageRequest,
-                    isCurrent: { generation == loadGeneration && activity.allowsPresentationPublication && model.knowledgePresentationIdentity == identity })
-            } else {
-                coverageStore.reset()
-            }
             guard generation == loadGeneration, KnowledgeCatalogRequestFence.accepts(requestedKey, current: requestKey()),
                   activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
         } catch is CancellationError { return } catch { guard generation == loadGeneration, KnowledgeCatalogRequestFence.accepts(requestedKey, current: requestKey()), activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }; self.error = error.localizedDescription }
@@ -544,7 +474,7 @@ struct KnowledgeDashboardView: View {
         let requestedKind = requestKind
         let requestedScope = scope
         let requestedSection = section
-        let requestedVisibility = sourceVisibility
+        let requestedVisibility = activeSourceVisibility
         let requestedKey = KnowledgeCatalogRequestKey(section: requestedSection, kind: requestedKind ?? requestedSection.kind, scope: requestedScope, search: query, sourceVisibility: requestedVisibility)
         let identity = model.knowledgePresentationIdentity
         Task { @MainActor in
@@ -600,7 +530,178 @@ struct KnowledgeDashboardView: View {
     }
 }
 
-private struct KnowledgeInfoStat: View {
+private struct KnowledgeChronicleInfoSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var activity
+    @State private var status: KnowledgeStatus?
+    @State private var error: String?
+    @State private var requestGeneration = 0
+
+    private var identity: KnowledgePresentationIdentity { model.knowledgePresentationIdentity }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: TronSpacing.md) {
+                    if let status {
+                        Text("Observation coverage")
+                            .font(TronTypography.sheetSectionHeader)
+                            .foregroundStyle(Color.tronKnowledge)
+                        KnowledgeInfoStat(title: "Observed", value: status.coverage.observedCount)
+                        KnowledgeInfoStat(title: "Empty", value: status.coverage.emptyCount)
+                        KnowledgeInfoStat(title: "Excluded", value: status.coverage.excludedCount)
+                        KnowledgeInfoStat(title: "Pending", value: status.coverage.pendingCount)
+                        KnowledgeInfoStat(title: "Failed", value: status.coverage.failedCount)
+                        KnowledgeInfoStat(title: "Unavailable", value: status.coverage.unavailableCount)
+                        Text("Settled \(status.coverage.observedCount + status.coverage.emptyCount + status.coverage.excludedCount) · \(status.coverage.remainingCount) need attention")
+                            .font(TronTypography.caption)
+                            .foregroundStyle(Color.tronTextSecondary)
+                    } else if let error {
+                        TronPlaceholderState(title: "Chronicle info unavailable", detail: error, icon: "externaldrive.badge.xmark", accent: .tronKnowledge,
+                                             actionTitle: "Retry", action: { requestGeneration &+= 1 })
+                    } else {
+                        TronLoadingState(label: "Loading Chronicle info…", accent: .tronKnowledge)
+                    }
+                }
+                .padding(TronSpacing.section)
+            }
+            .tronNavigationTitle("Chronicle info", accent: .tronKnowledge)
+        }
+        .task(id: "\(requestGeneration)/\(identity.profileID ?? "none")/\(identity.lifecycleGeneration ?? -1)/\(identity.connectionID ?? -1)") {
+            await load()
+        }
+        .onChange(of: identity) { _, _ in
+            status = nil
+            error = nil
+            requestGeneration &+= 1
+        }
+    }
+
+    @MainActor private func load() async {
+        guard activity.allowsPresentationPublication else { return }
+        let requestIdentity = identity
+        do {
+            let value = try await model.knowledge.status()
+            guard !Task.isCancelled, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
+            status = value
+            error = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
+            self.error = error.localizedDescription
+        }
+    }
+}
+
+private struct KnowledgeCoverageSheetHost: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var activity
+    let identity: KnowledgePresentationIdentity
+    let store: KnowledgeCoveragePresentationStore
+    let onOpenSession: (KnowledgeObservationCoverage) -> Void
+    @State private var status: KnowledgeStatus?
+    @State private var statusError: String?
+    @State private var requestGeneration = 0
+    @State private var mutationError: String?
+    @State private var clearingID: String?
+
+    var body: some View {
+        Group {
+            if let status {
+                KnowledgeCoverageDetailSheet(
+                    coverage: status.coverage,
+                    cuts: store.cuts,
+                    showsInitialLoading: store.showsInitialLoading,
+                    loadingMore: store.loading,
+                    canLoadMore: store.nextCursor != nil,
+                    errorText: store.error,
+                    mutationErrorText: mutationError,
+                    clearingCutID: clearingID,
+                    allowsActions: activity.allowsPresentationPublication,
+                    onOpenSession: onOpenSession,
+                    onClear: { clear($0) },
+                    onLoadMore: { loadMore() }
+                )
+            } else if let statusError {
+                TronPlaceholderState(title: "Needs attention unavailable", detail: statusError,
+                                     icon: "externaldrive.badge.xmark", accent: .tronKnowledge,
+                                     actionTitle: "Retry", action: { requestGeneration &+= 1 })
+            } else {
+                TronLoadingState(label: "Loading attention…", accent: .tronKnowledge)
+            }
+        }
+        .task(id: "\(requestGeneration)/\(identity.profileID ?? "none")/\(identity.lifecycleGeneration ?? -1)/\(identity.connectionID ?? -1)") {
+            await load()
+        }
+        .onChange(of: identity) { _, _ in
+            status = nil
+            statusError = nil
+            requestGeneration &+= 1
+            store.reset()
+        }
+    }
+
+    @MainActor private func load() async {
+        guard activity.allowsPresentationPublication else { return }
+        let requestIdentity = identity
+        do {
+            let value = try await model.knowledge.status()
+            guard !Task.isCancelled, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
+            status = value
+            statusError = nil
+            guard model.gatewayInfo?.capabilities.contains(KnowledgeRPCClient.coverageFilterCapability) == true else {
+                store.reset()
+                return
+            }
+            await store.load(identity: requestIdentity, expectedStateRevision: value.stateRevision ?? 0,
+                             request: { cursor in
+                                 try await model.knowledge.coverage(cursor: cursor, limit: 100,
+                                     dispositions: KnowledgeCoveragePresentationPolicy.attentionDispositions)
+                             },
+                             isCurrent: { !Task.isCancelled && activity.allowsPresentationPublication && model.knowledgePresentationIdentity == requestIdentity })
+        } catch is CancellationError {
+            return
+        } catch {
+            guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
+            statusError = error.localizedDescription
+        }
+    }
+
+    @MainActor private func loadMore() {
+        let requestIdentity = identity
+        Task { @MainActor in
+            await store.loadMore(identity: requestIdentity,
+                                 request: { cursor in
+                                     try await model.knowledge.coverage(cursor: cursor, limit: 100,
+                                         dispositions: KnowledgeCoveragePresentationPolicy.attentionDispositions)
+                                 },
+                                 isCurrent: { activity.allowsPresentationPublication && model.knowledgePresentationIdentity == requestIdentity })
+        }
+    }
+
+    @MainActor private func clear(_ cut: KnowledgeObservationCoverage) {
+        guard activity.allowsPresentationPublication, clearingID == nil else { return }
+        let requestIdentity = identity
+        clearingID = cut.id
+        mutationError = nil
+        Task { @MainActor in
+            defer { if model.knowledgePresentationIdentity == requestIdentity { clearingID = nil } }
+            do {
+                _ = try await model.knowledge.dismissCoverage(cut, capabilities: model.gatewayInfo?.capabilities ?? [])
+                guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }
+                requestGeneration &+= 1
+            } catch is CancellationError {
+                return
+            } catch {
+                guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }
+                mutationError = error.localizedDescription
+            }
+        }
+    }
+}
+
+struct KnowledgeInfoStat: View {
     let title: String
     let value: Int
 

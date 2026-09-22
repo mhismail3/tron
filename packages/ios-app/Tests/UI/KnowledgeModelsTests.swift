@@ -516,11 +516,11 @@ final class KnowledgeModelsTests: XCTestCase {
 
     func testContextualKnowledgeMenusRemoveGlobalMigrationAndConnectorActions() {
         XCTAssertEqual(KnowledgeDashboardMenuPolicy.settingsTitle(for: .chronicle), "Chronicle settings")
-        XCTAssertEqual(KnowledgeDashboardMenuPolicy.settingsActions(for: .chronicle), ["Observation configuration", "Needs attention", "Chronicle info"])
+        XCTAssertEqual(KnowledgeDashboardMenuPolicy.settingsItems(for: .chronicle).map(\.rawValue), ["Observation configuration", "Needs attention", "Chronicle info"])
         XCTAssertEqual(KnowledgeDashboardMenuPolicy.settingsTitle(for: .library), "Library settings")
-        XCTAssertEqual(KnowledgeDashboardMenuPolicy.settingsActions(for: .library), ["Capture URL", "New note"])
-        XCTAssertFalse(KnowledgeDashboardMenuPolicy.settingsActions(for: .chronicle).contains("Connectors"))
-        XCTAssertFalse(KnowledgeDashboardMenuPolicy.settingsActions(for: .chronicle).contains("Import legacy records"))
+        XCTAssertEqual(KnowledgeDashboardMenuPolicy.settingsItems(for: .library).map(\.rawValue), ["Capture URL", "New note"])
+        XCTAssertFalse(KnowledgeDashboardMenuPolicy.settingsItems(for: .chronicle).contains(.captureURL))
+        XCTAssertFalse(KnowledgeDashboardMenuPolicy.settingsItems(for: .chronicle).contains(.newNote))
     }
 
     func testKnowledgeDashboardKeepsOneTopLevelRowAndScopedLibraryVisibility() {
