@@ -2045,22 +2045,40 @@ struct ChatScrollCoordinatorTests {
         try await withTestWatchdog { @MainActor in
             let frames = ManualViewportFrameScheduler()
             let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            // The physical row is already mounted, but its marker is still
+            // below the current viewport. A lazy rematerialization can move
+            // that marker without changing ScrollGeometry; that marker-only
+            // callback must not certify the command's estimated layout.
+            coordinator.geometryChanged(previous: .zero, current: bottom)
+            coordinator.physicalTerminalRowObserved(layoutEpoch: coordinator.layoutEpoch)
+            coordinator.semanticFrameChanged(
+                renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 100, width: 100, height: 12)
+            )
+            var positioningResult: Bool?
             let positioning = Task {
-                await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom", physicalTargetID: "transcript-bottom")
+                let result = await coordinator.positionOpeningTail(
+                    targetRenderedID: "transcript-bottom", physicalTargetID: "transcript-bottom"
+                )
+                positioningResult = result
+                return result
             }
             await frames.waitForRequest(count: 1)
             frames.releaseNext()
             let command = try await coordinator.hostedNextCommand()
             #expect(coordinator.commandApplied(command))
-            // The sample that existed when ScrollPosition crossed the native
-            // boundary cannot certify its own estimated pre-measurement layout.
-            #expect(coordinator.targetReleaseGeneration == 0)
-            coordinator.physicalTerminalRowObserved(layoutEpoch: coordinator.layoutEpoch)
-            coordinator.geometryChanged(previous: .zero, current: bottom)
             coordinator.semanticFrameChanged(
                 renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
                 frame: CGRect(x: 0, y: 388, width: 100, height: 12)
             )
+            // This is fresh marker evidence, but the native geometry sample
+            // still predates command application. The old OR gate released
+            // here; the paired post-application gate must remain pending.
+            await Task.yield()
+            await Task.yield()
+            #expect(positioningResult == nil)
+            #expect(coordinator.targetReleaseGeneration == 0)
+            coordinator.geometryChanged(previous: bottom, current: bottom)
             #expect(await positioning.value)
             coordinator.cancel()
         }
