@@ -442,7 +442,6 @@ struct SessionShellView: View {
         // The search chrome is overlaid by DashboardChrome. Use an opaque
         // dashboard-colored backing so translucent result rows cannot show
         // through it while the list scrolls underneath.
-        .background(Color.tronBackground)
         .simultaneousGesture(
             DragGesture(minimumDistance: 16)
                 .onEnded { value in

@@ -77,7 +77,15 @@ final class DashboardChromeTests: XCTestCase {
     }
 
     func testSearchRetainsQueryAfterKeyboardDismissalAndCapturesResults() async throws {
-        try await withDashboard(style: .light) { host in
+        try await assertSearchChrome(style: .light)
+    }
+
+    func testDarkSearchChromeAndKeyboardDismissal() async throws {
+        try await assertSearchChrome(style: .dark)
+    }
+
+    private func assertSearchChrome(style: UIUserInterfaceStyle) async throws {
+        try await withDashboard(style: style) { host in
             let menu = try await self.menuButton(in: host.view)
             self.invoke(try self.action("Search", in: menu))
             try await self.waitUntil { self.views(UITextField.self, in: host.view).contains { $0.isFirstResponder } }
@@ -88,7 +96,7 @@ final class DashboardChromeTests: XCTestCase {
             host.view.endEditing(true)
             try await self.waitUntil { !field.isFirstResponder }
             XCTAssertEqual(field.text, "Review", "Dismissing the keyboard must not dismiss an active search")
-            try await self.attach(host.view, name: "session-search-results-after-keyboard-dismissal")
+            try await self.attach(host.view, name: "session-search-results-\(style == .dark ? "dark" : "light")")
         }
     }
 

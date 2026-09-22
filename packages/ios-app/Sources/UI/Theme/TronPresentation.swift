@@ -744,7 +744,7 @@ struct TronSearchBar: View {
             if let onOptions {
                 Button(action: onOptions) {
                     Image(systemName: "slider.horizontal.3")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(accent)
                         .frame(width: 44, height: 44)
                         .contentShape(Circle())
@@ -760,7 +760,7 @@ struct TronSearchBar: View {
                     onClose()
                 } label: {
                     Image(systemName: "xmark")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .heavy))
+                        .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(accent)
                         .frame(width: 44, height: 44)
                         .contentShape(Circle())

@@ -63,8 +63,9 @@ not restart an in-flight request. Results use the dashboard's standard compact
 emerald rows, show a short workspace name instead of a full local path, and
 retain exact anchor navigation for message matches. Keyboard dismissal does not
 clear an active query; only the explicit close or downward search dismissal does
-so. The search chrome has an opaque dashboard backing to prevent rows bleeding
-through it. Empty, offline, cancelled, and partial coverage states are explicit.
+so. Search chrome has no rectangular backing: only the individual capsule and
+44-point circular controls carry glass, in both light and dark appearance. Options
+and close symbols use 20-point semibold system icons for legibility. Empty, offline, cancelled, and partial coverage states are explicit.
 When remote ranking is consented but unavailable or over budget, the UI keeps
 lexical results marked ready while showing the remote-ranking failure as a
 secondary status.
