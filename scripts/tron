@@ -38,7 +38,10 @@ Commands:
   mac generate                      Regenerate macOS with pinned XcodeGen
   mac verify [--require-bundled]    Verify installed app, payload, LaunchAgent, and PID
   mac reinstall --app <Release.app> [--select-bundled-offline|--confirm-offline|--verify|--status]
-                                    Resumable local preparation; manual replacement
+  mac reinstall --recovery-relocate --operation-id <id> --source <root>
+  mac reinstall --recovery-verify --operation-id <id>
+                                    Resumable preparation or archive-only recovery
+                                    registration; app replacement remains manual
   version                           Print the canonical Tron version
 
 There is no deploy command. Production deployment is manual-only.

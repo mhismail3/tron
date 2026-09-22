@@ -1,6 +1,6 @@
 import SwiftUI
 
-private struct ChatMessageGrowthIdentity: Equatable {
+private struct ChatMessageGrowthIdentity: Equatable, Sendable {
     let partCount: Int
     let lastPartID: String?
     let textUTF16Length: Int

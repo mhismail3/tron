@@ -309,7 +309,7 @@ struct DisplayToolView: View {
     }
 
     private func activatePill() {
-        guard let display, !tool.error, !tool.isRunning, let sessionID else {
+        guard display != nil, !tool.error, !tool.isRunning, let sessionID else {
             onOpenTechnicalDetails()
             return
         }

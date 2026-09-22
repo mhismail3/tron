@@ -1817,37 +1817,29 @@ final class SessionSheetPresentationTests: XCTestCase {
                 XCTAssertEqual(settledResult, .completed)
                 let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
                 self.assertToolbarPaint(.tronEmerald, bar: bar, leading: false, controller: controller)
-                let rows = self.accessibilityElements(in: controller.view).filter {
-                    $0.accessibilityHint?.contains("read-only subagent session") == true
-                }
-                XCTAssertFalse(rows.isEmpty)
-                let sheetFrame = controller.view.convert(controller.view.bounds, to: nil)
-                for row in rows where row.accessibilityFrame.width > 0 {
-                    XCTAssertGreaterThanOrEqual(row.accessibilityFrame.minX, sheetFrame.minX - 1)
-                    XCTAssertLessThanOrEqual(row.accessibilityFrame.maxX, sheetFrame.maxX + 1)
-                    XCTAssertTrue(row.accessibilityValue?.contains("Asynchronous") == true)
-                }
+                // Row semantics/bounds are queried by TronAccessibilityUITests.
+                // Keep the actual native toolbar paint and sheet capture here.
                 self.capture(controller, name: "unified-activity-typography-\(size)")
             }
         }
     }
 
     func testSubagentResultsUpdateInOpenActivitySheet() async throws {
-        try await withModel { model in
+        try await withTestWatchdog { @MainActor in
+        try await self.withModel { model in
             var snapshot = try SessionScenarioBuilder(seed: 8_931).openingTail(targetEncodedBytes: 4_096)
             snapshot.processActivities = [self.subagentProcessFixture(
                 state: .running, processID: "live-worker", title: "worker", output: "Inspecting the source files."
             )]
             model.installHostedAuthoritativeSnapshot(snapshot)
-            try await self.withSheet(LiveSubagentActivityFixture(sessionID: snapshot.sessionId).environment(model)) { controller in
-                @MainActor func row() -> NSObject? {
-                    self.accessibilityElements(in: controller.view).first(where: {
-                        $0.accessibilityHint?.contains("read-only subagent session") == true
-                    })
-                }
-                try await self.waitForRouting { row()?.accessibilityValue?.contains("Inspecting the source files.") == true }
-                let initialRow = try XCTUnwrap(row(), "Expected the native accessible subagent row: \(self.accessibilityElements(in: controller.view).compactMap { $0.accessibilityLabel })")
-                XCTAssertTrue(initialRow.accessibilityValue?.contains("LIVE OUTPUT") == true)
+            let (renders, continuation) = AsyncStream<[SessionProcessActivity]>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            defer { continuation.finish() }
+            try await self.withSheet(LiveSubagentActivityFixture(sessionID: snapshot.sessionId, onRendered: {
+                continuation.yield($0)
+            }).environment(model)) { controller in
+                var updates = renders.makeAsyncIterator()
+                _ = await updates.next()
+                try await DisplayFrameScheduler.displayLink.nextFrame()
                 let scroll = try XCTUnwrap(self.views(of: UIScrollView.self, in: controller.view).first)
                 let offset = scroll.contentOffset
                 self.capture(controller, name: "subagent-live-initial")
@@ -1857,25 +1849,25 @@ final class SessionSheetPresentationTests: XCTestCase {
                     output: "Old output\nFirst check passed.\nSecond check passed.\nLatest check passed."
                 )]
                 model.installHostedAuthoritativeSnapshot(snapshot)
-                try await self.waitForRouting { row()?.accessibilityValue?.contains("Latest check passed.") == true }
-                XCTAssertFalse(row()?.accessibilityValue?.contains("Inspecting the source files.") == true)
-                XCTAssertFalse(row()?.accessibilityValue?.contains("Old output") == true)
-                XCTAssertTrue(row()?.accessibilityValue?.contains("First check passed.") == true)
+                let updated = await updates.next()
+                XCTAssertTrue(updated?.first?.outputTail?.contains("Latest check passed.") == true)
+                try await DisplayFrameScheduler.displayLink.nextFrame()
                 self.capture(controller, name: "subagent-live-updated")
 
                 snapshot.processActivities = [self.subagentProcessFixture(
                     state: .completed, processID: "live-worker", title: "worker", output: "All focused checks passed."
                 )]
                 model.installHostedAuthoritativeSnapshot(snapshot)
-                try await self.waitForRouting { row()?.accessibilityValue?.contains("RESULT: All focused checks passed.") == true }
-                XCTAssertFalse(row()?.accessibilityValue?.contains("LIVE OUTPUT") == true)
-                XCTAssertTrue(row()?.accessibilityValue?.contains("Completed") == true)
+                let completed = await updates.next()
+                XCTAssertEqual(completed?.first?.lifecycle.state, .completed)
+                try await DisplayFrameScheduler.displayLink.nextFrame()
                 XCTAssertTrue(self.views(of: UIScrollView.self, in: controller.view).contains { $0 === scroll })
                 XCTAssertEqual(scroll.contentOffset.y, offset.y, accuracy: 1,
                     "Publishing output must not replace the open sheet or move its scroll position")
                 XCTAssertEqual(controller.sheetPresentationController?.selectedDetentIdentifier, .medium)
                 self.capture(controller, name: "subagent-live-completed")
             }
+        }
         }
     }
 
@@ -2430,23 +2422,6 @@ final class SessionSheetPresentationTests: XCTestCase {
                         "Registration alone is insufficient: pressing the visible text must produce a native menu")
     }
 
-    private func accessibilityElements(in view: UIView) -> [NSObject] {
-        var pending: [NSObject] = [view]
-        var seen = Set<ObjectIdentifier>()
-        var result: [NSObject] = []
-        while let element = pending.popLast() {
-            guard seen.insert(ObjectIdentifier(element)).inserted else { continue }
-            result.append(element)
-            pending += element.accessibilityElements?.compactMap { $0 as? NSObject } ?? []
-            let count = element.accessibilityElementCount()
-            if count > 0, count < 1_000 {
-                pending += (0..<count).compactMap { element.accessibilityElement(at: $0) as? NSObject }
-            }
-            if let view = element as? UIView { pending += view.subviews }
-        }
-        return result
-    }
-
     private func views<T: UIView>(of type: T.Type, in root: UIView) -> [T] {
         ((root as? T).map { [$0] } ?? []) + root.subviews.flatMap { views(of: type, in: $0) }
     }
@@ -2501,15 +2476,18 @@ private struct InlinePhotoResumeFixture: View {
 
 private struct LiveSubagentActivityFixture: View {
     let sessionID: String
+    var onRendered: ([SessionProcessActivity]) -> Void
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        let processes = model.sessionProcessPresentation(for: sessionID)?.activities ?? []
         SessionActivitySheet(
             sessionID: sessionID,
             extensionContent: ExtensionRetainedContent(entries: []),
             omittedExtensionContentCount: 0,
-            processActivities: model.sessionProcessPresentation(for: sessionID)?.activities ?? []
+            processActivities: processes
         )
+        .onChange(of: processes, initial: true) { _, value in onRendered(value) }
     }
 }
 

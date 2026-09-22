@@ -39,6 +39,40 @@ final class SessionSearchTransportTests: XCTestCase {
         XCTAssertNotEqual(aggregate.profiles.first?.state, "offline")
     }
 
+    func testPolicyMutationsSerializeAndPreserveFinalIntent() async throws {
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        let defaultsName = "SessionSearchPolicyMutationQueueTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsName)!
+        let profile = GatewayProfile(id: "selected", label: "Selected", host: "gateway.test", port: 9847, machineId: "machine", deviceId: "device")
+        defaults.set(try JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
+        defaults.set(profile.id, forKey: "selectedGateway.v1")
+        let model = AppModel(client: client, profiles: GatewayProfileStore(defaults: defaults), cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: defaultsName)))
+        defer {
+            Task { @MainActor in await model.teardown(); await client.close(); defaults.removePersistentDomain(forName: defaultsName) }
+        }
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","session-search.v1"]}"#.utf8))
+        try await model.connectHostedGateway(profile: profile, token: "token")
+        let first = Task { try await model.setSessionSearchRemoteRanking(true, profileID: profile.id) }
+        let firstIndex = try await waitForRequest(method: "session.search.policy.set", on: socket)
+        let second = Task { try await model.setSessionSearchRemoteRanking(false, profileID: profile.id) }
+        await Task.yield()
+        let sentFrames = await socket.sentFrames()
+        let firstFrame = try XCTUnwrap(JSONDecoder.gateway.decode(JSONValue.self, from: sentFrames[firstIndex]).objectValue)
+        await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object(["type": .string("response"), "id": firstFrame["id"] ?? .null, "ok": .bool(true), "result": .object(["enabled": .bool(true), "perQueryMicroCents": .number(1), "dailyMicroCents": .number(2), "policyRevision": .number(1)])])))
+        let secondIndex = try await waitForRequest(method: "session.search.policy.set", on: socket, startingAt: firstIndex + 1)
+        let secondFrames = await socket.sentFrames()
+        let secondFrame = try XCTUnwrap(JSONDecoder.gateway.decode(JSONValue.self, from: secondFrames[secondIndex]).objectValue)
+        await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object(["type": .string("response"), "id": secondFrame["id"] ?? .null, "ok": .bool(true), "result": .object(["enabled": .bool(false), "perQueryMicroCents": .number(1), "dailyMicroCents": .number(2), "policyRevision": .number(2)])])))
+        let firstResult = try await first.value
+        let secondResult = try await second.value
+        XCTAssertTrue(firstResult.enabled)
+        XCTAssertFalse(secondResult.enabled)
+        XCTAssertFalse(model.sessionSearchConsent(for: profile.id))
+        XCTAssertEqual(firstFrame["params"]?.objectValue?["enabled"], .bool(true))
+        XCTAssertEqual(secondFrame["params"]?.objectValue?["enabled"], .bool(false))
+    }
+
     func testPolicyReadCannotOverwriteNewerToggleReceipt() async throws {
         let socket = ScriptedGatewaySocket()
         let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
@@ -98,9 +132,31 @@ final class SessionSearchTransportTests: XCTestCase {
         pool.retire()
     }
 
-    func testPolicyGetRestoresEnabledConsentAfterAdmission() async throws {
+    func testDashboardSummaryDoesNotTriggerPolicyRead() async throws {
         let socket = ScriptedGatewaySocket()
         let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        let defaultsName = "SessionSearchSummaryPolicyTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsName)!
+        let profile = GatewayProfile(id: "selected", label: "Selected", host: "gateway.test", port: 9847, machineId: "machine", deviceId: "device")
+        defaults.set(try JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
+        defaults.set(profile.id, forKey: "selectedGateway.v1")
+        let model = AppModel(client: client, profiles: GatewayProfileStore(defaults: defaults), cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: defaultsName)))
+        defer {
+            Task { @MainActor in await model.teardown(); await client.close(); defaults.removePersistentDomain(forName: defaultsName) }
+        }
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","session-search.v1"]}"#.utf8))
+        try await model.connectHostedGateway(profile: profile, token: "token")
+        model.dashboardPoolDidUpdate(profileID: profile.id, sessions: [], state: .connected)
+        model.dashboardPoolDidUpdate(profileID: profile.id, sessions: [], state: .connected)
+        try await Task.sleep(for: .milliseconds(100))
+        let methods = (try? await socket.sentFrames().compactMap { try JSONDecoder.gateway.decode(JSONValue.self, from: $0).objectValue?["method"]?.stringValue }) ?? []
+        XCTAssertFalse(methods.contains("session.search.policy.get"))
+    }
+
+    func testPolicyGetRestoresEnabledConsentAfterAdmission() async throws {
+        let socket = ScriptedGatewaySocket()
+        let replacement = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: [socket, replacement]).factory)
         let defaultsName = "SessionSearchPolicyRestoreTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: defaultsName)!
         let profile = GatewayProfile(id: "selected", label: "Selected", host: "gateway.test", port: 9847, machineId: "machine", deviceId: "device")
@@ -119,19 +175,32 @@ final class SessionSearchTransportTests: XCTestCase {
         ])))
         await restore.value
         XCTAssertTrue(model.sessionSearchConsent(for: profile.id))
+        model.dashboardPoolDidUpdate(profileID: profile.id, sessions: [], state: .offline)
+        XCTAssertTrue(model.sessionSearchConsent(for: profile.id), "A retired secondary cannot invalidate focused consent")
+        await replacement.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","session-search.v1"]}"#.utf8))
+        try await model.connectHostedGateway(profile: profile, token: "token")
+        XCTAssertFalse(model.sessionSearchConsent(for: profile.id), "Old connection consent cannot authorize remote disclosure")
+        let refreshed = Task { await model.restoreSessionSearchPolicy(profileID: profile.id) }
+        let replacementIndex = try await waitForRequest(method: "session.search.policy.get", on: replacement)
+        let replacementRequest = try JSONDecoder.gateway.decode(JSONValue.self, from: await replacement.sentFrames()[replacementIndex])
+        await replacement.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+            "type": .string("response"), "id": replacementRequest.objectValue?["id"] ?? .null, "ok": .bool(true),
+            "result": .object(["enabled": .bool(false), "perQueryMicroCents": .number(268_800), "dailyMicroCents": .number(2_688_000), "policyRevision": .number(4)]),
+        ])))
+        await refreshed.value
+        XCTAssertFalse(model.sessionSearchConsent(for: profile.id))
         await model.teardown(); await client.close(); defaults.removePersistentDomain(forName: defaultsName)
     }
 
-    private func waitForRequest(method: String, on socket: ScriptedGatewaySocket) async throws -> Int {
-        for _ in 0..<100 {
-            let frames = await socket.sentFrames()
-            for (index, frame) in frames.enumerated() {
-                if let object = try? JSONDecoder.gateway.decode(JSONValue.self, from: frame).objectValue,
-                   object["method"]?.stringValue == method { return index }
+    private func waitForRequest(method: String, on socket: ScriptedGatewaySocket, startingAt: Int = 0) async throws -> Int {
+        try await withTestWatchdog {
+            var index = startingAt
+            while true {
+                try await socket.waitUntilSent(count: index + 1)
+                let frame = await socket.sentFrames()[index]
+                if try JSONDecoder.gateway.decode(JSONValue.self, from: frame).objectValue?["method"]?.stringValue == method { return index }
+                index += 1
             }
-            try await Task.sleep(for: .milliseconds(20))
         }
-        let methods = (try? await socket.sentFrames().compactMap { try JSONDecoder.gateway.decode(JSONValue.self, from: $0).objectValue?["method"]?.stringValue }.joined(separator: ",")) ?? "<invalid>"
-        throw NSError(domain: "SessionSearchTransportTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Scripted Gateway did not receive \(method); sent=\(methods)"])
     }
 }

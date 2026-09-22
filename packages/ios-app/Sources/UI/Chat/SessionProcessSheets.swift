@@ -210,7 +210,8 @@ struct SessionProcessRow: View {
             .tronSettingsVisualTheme(accent: cardAccent)
             .buttonStyle(.plain)
             .contentShape(Rectangle())
-            .accessibilityElement(children: .ignore)
+            // Label the native Button itself. An extra accessibility grouping
+            // creates a non-button proxy and leaves a second actionable child.
             .accessibilityLabel(process.title)
             .accessibilityValue(accessibilityValue)
             .accessibilityHint(accessibilityHint)

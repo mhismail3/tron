@@ -54,19 +54,34 @@ final class ChatAttachmentStripTests: XCTestCase {
 
         // Sample actual composited pixels, not SwiftUI's final layout frames:
         // scaling the full-width strip preserves layout but moves its paint.
-        let firstInsertion = await capture(controller.view) { state.attachments = [first] }
+        let firstInsertion = await capture(
+            controller.view, state: state, expectedIDs: [first.id], transitionChannel: 0,
+            expectsMotion: !reduceMotion
+        ) { state.attachments = [first] }
         assertCentered(firstInsertion, channel: 0, center: 48, expectsMotion: !reduceMotion)
-        let secondInsertion = await capture(controller.view) { state.attachments = [first, second] }
+        let secondInsertion = await capture(
+            controller.view, state: state, expectedIDs: [first.id, second.id], transitionChannel: 1,
+            expectsMotion: !reduceMotion
+        ) { state.attachments = [first, second] }
         assertCentered(secondInsertion, channel: 1, center: 120, expectsMotion: !reduceMotion)
-        let secondRemoval = await capture(controller.view) { state.attachments = [first] }
+        let secondRemoval = await capture(
+            controller.view, state: state, expectedIDs: [first.id], transitionChannel: 1,
+            expectsMotion: !reduceMotion
+        ) { state.attachments = [first] }
         assertCentered(secondRemoval, channel: 1, center: 120, expectsMotion: !reduceMotion)
-        let lastRemoval = await capture(controller.view) { state.attachments = [] }
+        let lastRemoval = await capture(
+            controller.view, state: state, expectedIDs: [], transitionChannel: 0,
+            expectsMotion: !reduceMotion
+        ) { state.attachments = [] }
         assertCentered(lastRemoval, channel: 0, center: 48, expectsMotion: !reduceMotion)
         XCTAssertNil(lastRemoval.last?[0], "The last chip must disappear")
         XCTAssertEqual(state.stripHeight, 0, accuracy: 0.5, "No empty strip or spacing remains")
 
         // A new first chip reuses the same collection after removal.
-        let reinsertion = await capture(controller.view) { state.attachments = [first] }
+        let reinsertion = await capture(
+            controller.view, state: state, expectedIDs: [first.id], transitionChannel: 0,
+            expectsMotion: !reduceMotion
+        ) { state.attachments = [first] }
         assertCentered(reinsertion, channel: 0, center: 48, expectsMotion: !reduceMotion)
         await model.teardown()
     }
@@ -103,12 +118,44 @@ final class ChatAttachmentStripTests: XCTestCase {
         )
     }
 
-    private func capture(_ view: UIView, mutation: () -> Void) async -> [[Int: CGRect]] {
-        let finished = expectation(description: "Bounded attachment animation capture")
-        let recorder = AttachmentPaintRecorder(view: view) { finished.fulfill() }
+    private func capture(
+        _ view: UIView,
+        state: AttachmentStripFixtureState,
+        expectedIDs: [String],
+        transitionChannel: Int,
+        expectsMotion: Bool,
+        mutation: () -> Void
+    ) async -> [[Int: CGRect]] {
+        let committed = expectation(description: "Attachment state committed")
+        state.onAttachmentsCommitted = { ids in
+            if ids == expectedIDs {
+                state.onAttachmentsCommitted = nil
+                committed.fulfill()
+            }
+        }
+        defer { state.onAttachmentsCommitted = nil }
+
+        let finished = expectation(description: "Rendered attachment animation settled")
+        let recorder = AttachmentPaintRecorder(
+            view: view,
+            transitionChannel: transitionChannel,
+            expectedChannels: Set(0..<expectedIDs.count),
+            expectsMotion: expectsMotion,
+            terminalState: { expectedIDs.isEmpty ? state.stripHeight == 0 : true }
+        ) { finished.fulfill() }
+        let ready = expectation(description: "Pre-mutation attachment frame rendered")
+        recorder.onFirstFrame = { ready.fulfill() }
         recorder.start()
         defer { recorder.stop() }
+        // UIKit appearance is not a SwiftUI render-commit acknowledgement.
+        // Start from a painted baseline before requesting the next transition.
+        let readiness = await XCTWaiter.fulfillment(of: [ready], timeout: 2)
+        XCTAssertEqual(readiness, .completed)
         mutation()
+
+        let commitResult = await XCTWaiter.fulfillment(of: [committed], timeout: 2)
+        XCTAssertEqual(commitResult, .completed)
+        recorder.stateCommitted = commitResult == .completed
         let completion = await XCTWaiter.fulfillment(of: [finished], timeout: 2)
         XCTAssertEqual(completion, .completed)
         return recorder.samples
@@ -120,6 +167,7 @@ final class ChatAttachmentStripTests: XCTestCase {
 private final class AttachmentStripFixtureState {
     var attachments: [PendingAttachment] = []
     var stripHeight: CGFloat = -1
+    var onAttachmentsCommitted: (([String]) -> Void)?
 }
 
 private struct AttachmentStripFixture: View {
@@ -134,6 +182,9 @@ private struct AttachmentStripFixture: View {
                 onRemove: { id in state.attachments.removeAll { $0.id == id } }
             )
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { state.stripHeight = $0 }
+            .onChange(of: state.attachments.map(\.id)) { _, ids in
+                state.onAttachmentsCommitted?(ids)
+            }
             Spacer(minLength: 0)
         }
         .padding(.top, 20)
@@ -156,13 +207,31 @@ private final class AttachmentStripHostingController<Content: View>: UIHostingCo
 @MainActor
 private final class AttachmentPaintRecorder: NSObject {
     let view: UIView
+    let transitionChannel: Int
+    let expectedChannels: Set<Int>
+    let expectsMotion: Bool
+    let terminalState: () -> Bool
     let finished: () -> Void
     var samples: [[Int: CGRect]] = []
+    var stateCommitted = false
+    var onFirstFrame: (() -> Void)?
+    private var stableFrames = 0
+    private var observedIntermediateFrame = false
     private var displayLink: CADisplayLink?
-    private var startTime: CFTimeInterval?
 
-    init(view: UIView, finished: @escaping () -> Void) {
+    init(
+        view: UIView,
+        transitionChannel: Int,
+        expectedChannels: Set<Int>,
+        expectsMotion: Bool,
+        terminalState: @escaping () -> Bool,
+        finished: @escaping () -> Void
+    ) {
         self.view = view
+        self.transitionChannel = transitionChannel
+        self.expectedChannels = expectedChannels
+        self.expectsMotion = expectsMotion
+        self.terminalState = terminalState
         self.finished = finished
     }
 
@@ -176,16 +245,35 @@ private final class AttachmentPaintRecorder: NSObject {
     func stop() { displayLink?.invalidate(); displayLink = nil }
 
     @objc private func frame(_ link: CADisplayLink) {
-        if startTime == nil { startTime = link.timestamp }
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         let image = UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { _ in
             view.drawHierarchy(in: view.bounds, afterScreenUpdates: false)
         }
-        if let image = image.cgImage { samples.append(Self.coloredBounds(image)) }
-        if link.timestamp - (startTime ?? link.timestamp) >= 0.45 {
-            stop()
-            finished()
+        if let image = image.cgImage {
+            let sample = Self.coloredBounds(image)
+            samples.append(sample)
+            let ready = onFirstFrame
+            onFirstFrame = nil
+            ready?()
+            if let frame = sample[transitionChannel], frame.width > 12, frame.width < 60 {
+                observedIntermediateFrame = true
+            }
+            // Presence alone can acknowledge an insertion mid-animation, or
+            // acknowledge a removal while the outgoing chip is still painted.
+            let settled = Set(sample.keys) == expectedChannels
+                && sample.values.allSatisfy { $0.width >= 63 && $0.width <= 66 }
+                && terminalState()
+            if stateCommitted && settled && (!expectsMotion || observedIntermediateFrame) {
+                stableFrames += 1
+            } else {
+                stableFrames = 0
+            }
+            if stableFrames >= 2 {
+                stop()
+                finished()
+                return
+            }
         }
     }
 

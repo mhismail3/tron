@@ -12,6 +12,7 @@ struct GatewayRecoveryBudget: Sendable, Equatable {
     private(set) var nonRetryableStopped = false
     private(set) var connectedAt: ContinuousClock.Instant?
     private var connectedAttemptCharged = false
+    private var activeAutomaticAttempts: Set<UUID> = []
     private(set) var firstFailureCode: String?
     private(set) var recoveryEpisodeStartedAt: ContinuousClock.Instant?
     private(set) var recoveryActiveSince: ContinuousClock.Instant?
@@ -26,12 +27,24 @@ struct GatewayRecoveryBudget: Sendable, Equatable {
 
     // Every automatic entrypoint (including initial connect after navigation)
     // consumes the same allowance. Otherwise replacing a client bypasses it.
-    mutating func beginAutomaticAttempt() -> Bool {
+    mutating func beginAutomaticAttemptID() -> UUID? {
         guard !exhausted, !nonRetryableStopped, !episodeStopped, automaticAttempts < Self.maximumAutomaticAttempts else {
             exhausted = true
-            return false
+            return nil
         }
         automaticAttempts += 1
+        let id = UUID()
+        activeAutomaticAttempts.insert(id)
+        return id
+    }
+
+
+    /// Settles one admitted attempt. Only an intentional retirement may return
+    /// its charge. Repeated settlement cannot refund a successor's charge.
+    @discardableResult
+    mutating func settleAutomaticAttempt(_ id: UUID, intentionalRetirement: Bool) -> Bool {
+        guard activeAutomaticAttempts.remove(id) != nil else { return false }
+        if intentionalRetirement, automaticAttempts > 0 { automaticAttempts -= 1 }
         return true
     }
 
@@ -107,6 +120,7 @@ struct GatewayRecoveryBudget: Sendable, Equatable {
         waitingForPath = false
         connectedAt = instant
         connectedAttemptCharged = false
+        activeAutomaticAttempts.removeAll()
     }
 
     mutating func markConnectionRetired(at instant: ContinuousClock.Instant, stableProof: Bool) {
@@ -152,6 +166,7 @@ struct GatewayRecoveryBudget: Sendable, Equatable {
         fallbackVerificationUsed = false
         episodeStopped = false
         waitingForPath = false
+        activeAutomaticAttempts.removeAll()
     }
 }
 

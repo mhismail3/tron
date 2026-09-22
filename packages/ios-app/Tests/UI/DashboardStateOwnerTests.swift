@@ -517,6 +517,44 @@ struct DashboardStateOwnerTests {
     }
 
     @MainActor
+    @Test("secondary pre-hello retirement refunds exactly once and Retry preserves active catalog work")
+    func secondaryPreHelloRetirementAndActiveRefresh() async throws {
+        try await withTestWatchdog { @MainActor in
+            let remote = GatewayProfile(id: "remote", label: "Remote", host: "remote.test", port: 9847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device")
+            let sockets = (0..<5).map { _ in ScriptedGatewaySocket() }
+            let factory = ScriptedGatewaySocketFactory(sockets: sockets)
+            let allowance = GatewayRecoveryAllowanceStore()
+            let recorder = DashboardPoolRecorder()
+            let pool = DashboardGatewayConnectionPool(clientFactory: { GatewayClient(socketFactory: factory.factory) }, recoveryBudgets: allowance)
+            pool.delegate = recorder
+            do {
+                for index in 0..<4 {
+                    pool.reconcile(profiles: [remote], selectedProfileID: nil, token: { _ in "fixture" })
+                    try await sockets[index].waitUntilSent(count: 1)
+                    #expect(allowance[remote.id]?.automaticAttempts == 1)
+                    pool.retire()
+                    await pool.waitForRetirement()
+                    try await Self.waitUntil { allowance[remote.id]?.automaticAttempts == 0 }
+                    #expect(allowance[remote.id]?.firstFailureCode == nil)
+                }
+                await sockets[4].enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+                pool.reconcile(profiles: [remote], selectedProfileID: nil, token: { _ in "fixture" })
+                try await sockets[4].waitUntilSent(count: 2)
+                let list = try Self.requestFrame(await sockets[4].sentFrames()[1])
+                pool.retry(profileID: remote.id)
+                #expect(allowance[remote.id]?.automaticAttempts == 1)
+                await sockets[4].enqueue(Self.catalogResponse(id: list.id, sessions: [summary(revision: 1)], listRevision: 1))
+                try await recorder.waitForState(.connected, profileID: remote.id)
+                #expect(factory.requests.count == 5)
+                #expect(recorder.updates.last?.sessions.first?.summaryRevision == 1)
+            } catch { pool.retire(); await pool.waitForRetirement(); throw error }
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    @MainActor
     @Test("secondary path parking and terminal maintenance use exact wire allowance", arguments: [false, true])
     func secondaryPathAndMaintenanceBoundaries(maintenance: Bool) async throws {
         try await withTestWatchdog { @MainActor in

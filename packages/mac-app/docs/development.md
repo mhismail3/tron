@@ -565,19 +565,42 @@ temporary homes. CI runs both filesystem tests and the bundled-tool integration.
 
 Use `~/.tron-maintenance` as the single local recovery storage root, outside
 live `~/.tron` so snapshots cannot recursively include their own backups. The
-reinstall helper already owns `<operation-id>/receipt.json`, source manifests,
-`backups/` and any `retired-stable-payloads/`. Do not move these independently,
+reinstall helper owns `<operation-id>/receipt.json`, source manifests,
+`backups/` and any `retired-stable-payloads/`; archive registration owns
+`recovery.json` and `<operation-id>/pre-cutover/`. Do not move these independently,
 rewrite completed receipts, or use symlinks to conceal relocated stores.
 
 For a coordinated migration, prepare the app checkpoint first to obtain the
-operation directory. The maintainer places the separately verified **pre-write**
-backup, isolated restore evidence and journals under that operation's
-`pre-migration/`, before publishing migrations. Keep it distinct from the helper's
-**post-write** `backups/`. This is a location convention, not a new receipt field:
-the reinstall helper does not verify the manually owned pre-migration checkpoint.
-Its own manifests and isolated restore proof remain mandatory. Use the owning
-migration tool's required same-filesystem staging location; do not relocate live
-staging or journals merely to satisfy the archival layout.
+operation ID. Before publishing migrations, the maintainer prepares the separately
+verified **pre-write** backup, isolated restore evidence and journals in a private
+`~/.tron-maintenance/pre-cutover-<operation-id>/` staging root, with the checkpoint
+under its `pre-migration/` directory. Keep it distinct from the helper's **post-write**
+`<operation-id>/backups/`. After the operation is verified and finished, register
+and move the staging root to `<operation-id>/pre-cutover/` without reopening
+`active.json` (an existing external recovery root can use the same command):
+
+```bash
+scripts/tron mac reinstall --recovery-relocate \
+  --operation-id <verified-operation-id> \
+  --source <owner-only-pre-cutover-root>
+scripts/tron mac reinstall --recovery-verify \
+  --operation-id <verified-operation-id>
+```
+
+The archive command exclusively renames the complete root, refuses collisions,
+and resumes an interrupted rename without copying or merging. It verifies the
+stored closure digest and actual pre-migration backups, isolated restore fixture,
+post-migration backups and retired payloads against their original evidence.
+Pre-migration owner maps verify original UID/GID; the older post-migration
+manifests lack owner maps, so registration records current ownership for later
+integrity checks without claiming historical UID/GID proof. Original source
+manifest digests stay exact; copied data admits only the existing Darwin
+copy-provenance exception. It does not inspect live homes, stop writers or
+publish migrations. The historical
+cutover `verify-publications.py` is not an operational verifier and must not be
+executed against current state. Use the owning migration tool's
+required same-filesystem staging location; do not relocate live staging or
+journals merely to satisfy the archival layout.
 
 Keep one accepted, coherent recovery set, including both checkpoints when a
 migration requires them, until its replacement has passed restore and continuity
@@ -589,10 +612,10 @@ Retire released build/test output before preparing a snapshot rather than
 silently excluding unknown workspace files from the backup inventory.
 
 Keep a concise recovery index identifying each retained checkpoint, original
-revision, verification evidence and recovery constraints. A path-bound legacy
-checkpoint must stay where its validators expect it until relocation has its
-own verified mapping; listing it centrally is not proof it was physically moved
-or newly verified. Do not make another full copy merely to reorganize folders.
+revision, verification evidence and recovery constraints. Completed archive
+registration records the historical source path as evidence but verifies only the
+centralized relative destination; it never requires a compatibility symlink or a
+live checkout. Do not make another full copy merely to reorganize folders.
 These are local recovery checkpoints, not scheduled ongoing backups and not
 protection against disk loss. Off-device backup requires a separately configured
 protected destination. Restoration and any app/Gateway transition remain

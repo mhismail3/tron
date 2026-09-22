@@ -142,8 +142,9 @@ struct AppModelPerformanceSignpostTests {
             do {
                 _ = try await valueOfOwnedTask(opening)
                 Issue.record("stale route unexpectedly installed its provisional open")
-            } catch let failure as GatewayFailure {
-                #expect(failure.code == "sync_failed")
+            } catch is CancellationError {
+                // Navigation supersession is not a failed live conversation.
+                // The exact provisional token must still have been closed.
             }
             #expect(await MainActor.run { harness.model.selectedSnapshot } == nil)
             await harness.close()

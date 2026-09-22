@@ -93,6 +93,50 @@ struct AppModelReconnectTests {
         }
     }
 
+    @Test("pre-hello background retirement refunds its owner without exhausting foreground recovery")
+    func repeatedPreHelloRetirement() async throws {
+        let sockets = (0..<5).map { _ in ScriptedGatewaySocket() }
+        try await withStartupCoordinator(sockets: sockets) { coordinator, projection, factory, budget, _ in
+            let startup = Task { await coordinator.start() }
+            for index in 0..<4 {
+                if index > 0 { await coordinator.becameActive()?.value }
+                try await sockets[index].waitUntilSent(count: 1)
+                #expect(budget["gateway"]?.automaticAttempts == 1)
+                coordinator.retryReconnect()
+                // Retry must not rearm accounting while this hello owns it.
+                #expect(budget["gateway"]?.automaticAttempts == 1)
+                coordinator.enteredBackground()
+                try await sockets[index].waitUntilClosed()
+                while budget["gateway"]?.automaticAttempts != 0 {
+                    try Task.checkCancellation()
+                    await Task.yield()
+                }
+                #expect(budget["gateway"]?.firstFailureCode == nil)
+            }
+            await startup.value
+            await sockets[4].enqueue(helloFrame())
+            await coordinator.becameActive()?.value
+            while projection.aggregateCompletions.isEmpty {
+                try Task.checkCancellation()
+                await Task.yield()
+            }
+            #expect(coordinator.connectionState == .connected)
+            #expect(factory.requests.count == 5)
+            #expect(budget["gateway"]?.automaticAttempts == 1)
+        }
+    }
+
+    @Test("initial projection failure retains the live socket and settles reconciliation")
+    func initialProjectionFailureKeepsTransport() async throws {
+        try await withStartupCoordinator { coordinator, projection, factory, _, _ in
+            projection.setRestoreResult(false)
+            await coordinator.start()
+            #expect(coordinator.connectionState == .connected)
+            #expect(projection.aggregateCompletions == [false])
+            #expect(factory.requests.count == 1)
+        }
+    }
+
     @Test("cold AppModel startup loads authoritative sessions after an early path callback without manual Retry")
     func coldStartupLoadsSessions() async throws {
         try await withFixture(sockets: [ScriptedGatewaySocket()], clock: ManualClock(), units: SequenceReconnectUnits([0])) { fixture in
@@ -336,6 +380,7 @@ struct AppModelReconnectTests {
                 #expect(coordinator.hasResolvedLaunchState)
                 #expect(factory.requests.count == 1)
                 #expect(factory.requests.first?.value(forHTTPHeaderField: "Authorization") == "Bearer token-for-gateway")
+                #expect(budget["gateway"]?.automaticAttempts == 1)
                 #expect(budget["gateway"]?.firstFailureCode == nil)
                 #expect(projection.refreshCount == 1)
             } catch {
@@ -856,7 +901,8 @@ struct AppModelReconnectTests {
         defaults.set(profile.id, forKey: "selectedGateway.v1")
         let displayClock = ManualClock()
         let socket = ScriptedGatewaySocket()
-        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: [socket, ScriptedGatewaySocket()]).factory)
+        let replacement = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: [socket, replacement]).factory)
         let model = AppModel(
             client: client,
             profiles: GatewayProfileStore(defaults: defaults),
@@ -867,6 +913,8 @@ struct AppModelReconnectTests {
         try await socket.waitUntilSent(count: 1)
         await socket.enqueue(helloFrame())
         try await connected.value
+        let snapshot = try SessionScenarioBuilder(seed: 47_022).openingTail(targetEncodedBytes: 4_096)
+        model.installHostedSubscribedSnapshot(snapshot)
         await socket.failPendingReceivers(URLError(.networkConnectionLost))
         try await socket.waitUntilClosed()
         try await displayClock.waitUntilSleeping(count: 1, duration: .seconds(2))
@@ -876,8 +924,21 @@ struct AppModelReconnectTests {
         let warning = try #require(model.visibleNotices.first { $0.replacement?.key == .gatewayRecovery })
         #expect(warning.lifetime == .automatic(.seconds(8)))
         #expect(warning.message?.contains("Settings") == true)
-        let target = SessionPresentationIdentity(sessionID: "unmounted", generation: 1)
+        let target = try #require(model.mountedPresentationTarget)
         #expect(!model.admitsLiveSessionCommands(target))
+        await replacement.enqueue(helloFrame())
+        try await withTestWatchdog { @MainActor in
+            var index = 1
+            while true {
+                try await replacement.waitUntilSent(count: index + 1)
+                let request = try requestFrame(await replacement.sentFrames()[index])
+                if request.method == "session.open" { break }
+                index += 1
+            }
+        }
+        #expect(model.isReconcilingForeground)
+        #expect(!model.admitsLiveSessionCommands(target))
+        #expect(!model.visibleNotices.contains { $0.replacement?.key == .gatewayRecovery })
         await model.teardown()
         await client.close()
     }
@@ -1120,6 +1181,7 @@ struct AppModelReconnectTests {
 
     private func withStartupCoordinator(
         cacheGate: TestReadGate? = nil,
+        sockets: [ScriptedGatewaySocket]? = nil,
         operation: @escaping @MainActor @Sendable (
             GatewayLifecycleCoordinator, NoopGatewayLifecycleProjection,
             ScriptedGatewaySocketFactory, GatewayRecoveryAllowanceStore, ScriptedGatewaySocket
@@ -1136,9 +1198,9 @@ struct AppModelReconnectTests {
             machineId: "replacement-machine", deviceId: "replacement-device"
         )
         defaults.set(try JSONEncoder.gateway.encode([profile, replacement]), forKey: "gatewayProfiles.v1")
-        let socket = ScriptedGatewaySocket()
-        await socket.enqueue(helloFrame())
-        let factory = ScriptedGatewaySocketFactory(socket: socket)
+        let socket = sockets?.first ?? ScriptedGatewaySocket()
+        if sockets == nil { await socket.enqueue(helloFrame()) }
+        let factory = ScriptedGatewaySocketFactory(sockets: sockets ?? [socket])
         let client = GatewayClient(socketFactory: factory.factory)
         let budget = GatewayRecoveryAllowanceStore()
         let projection = NoopGatewayLifecycleProjection(cacheGate: cacheGate)
@@ -1225,6 +1287,7 @@ struct AppModelReconnectTests {
 private final class NoopGatewayLifecycleProjection: GatewayLifecycleProjectionDelegate {
     private(set) var aggregateCompletions: [Bool] = []
     private(set) var cacheLoads = 0
+    private var restoreResult = true
     private(set) var refreshCount = 0
     private(set) var failures: [String] = []
     private let cacheGate: TestReadGate?
@@ -1244,7 +1307,8 @@ private final class NoopGatewayLifecycleProjection: GatewayLifecycleProjectionDe
         aggregateCompletions.append(succeeded)
     }
     func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async { refreshCount += 1 }
-    func lifecycleRestoreMountedPresentation(admission: GatewayLifecycleCoordinator.Admission) async -> Bool { true }
+    func setRestoreResult(_ result: Bool) { restoreResult = result }
+    func lifecycleRestoreMountedPresentation(admission: GatewayLifecycleCoordinator.Admission) async -> Bool { restoreResult }
     func lifecycleReattachTerminals(admission: GatewayLifecycleCoordinator.Admission) async {}
     func lifecycleReconcileForeground(admission: GatewayLifecycleCoordinator.Admission) async throws {}
     func lifecycleRetireProjection(final: Bool) async {}

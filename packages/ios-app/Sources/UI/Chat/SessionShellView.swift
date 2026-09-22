@@ -232,11 +232,18 @@ struct SessionShellView: View {
                 guard let request = model.actionablePushNavigationRequest else { return }
                 await presentPushNavigation(request)
             }
-            .task(id: "search-policy:\(model.profiles.selected?.id ?? ""):\(model.profileRevision):\(model.dashboardPresentationRevision)") {
-                guard let profileID = model.profiles.selected?.id else { return }
+            .task(id: "search-policy:\(model.sessionSearchPolicyDemandIdentity):\(model.profileRevision):\(activity)") {
+                guard activity.allowsPresentationPublication,
+                      let profileID = model.profiles.selected?.id else { return }
+                let demand = model.sessionSearchPolicyDemandIdentity
                 restoringRankingPolicy = true
                 await model.restoreSessionSearchPolicy(profileID: profileID, force: true)
-                guard !Task.isCancelled, model.profiles.selected?.id == profileID else { return }
+                guard !Task.isCancelled, model.profiles.selected?.id == profileID,
+                      model.sessionSearchPolicyDemandIdentity == demand else { return }
+                guard !model.sessionSearchPolicyMutationIsInFlight(for: profileID) else {
+                    restoringRankingPolicy = false
+                    return
+                }
                 remoteRankingEnabled = model.sessionSearchConsent(for: profileID)
                 restoringRankingPolicy = false
             }
@@ -415,21 +422,34 @@ struct SessionShellView: View {
                     if !focused { dismissDashboardSearch() }
                 }
             )
-            Toggle("Send this query and up to 16 selected conversation snippets to the configured Jev provider (max 0.2688¢/query, 2.688¢/day)", isOn: $remoteRankingEnabled)
-                .font(.caption)
-                .tint(.tronEmerald)
-                .onChange(of: remoteRankingEnabled) { _, enabled in
-                    guard !restoringRankingPolicy, let profileID = model.profiles.selected?.id else { return }
-                    rankingPolicyTask?.cancel()
-                    rankingPolicyTask = Task { @MainActor in
-                        do { _ = try await model.setSessionSearchRemoteRanking(enabled, profileID: profileID) }
-                        catch {
-                            guard !Task.isCancelled, model.profiles.selected?.id == profileID else { return }
-                            remoteRankingEnabled = model.sessionSearchConsent(for: profileID)
-                            model.presentError(error)
+            Toggle(
+                "Send this query and up to 16 selected conversation snippets to the configured Jev provider (max 0.2688¢/query, 2.688¢/day)",
+                isOn: Binding(
+                    get: { remoteRankingEnabled },
+                    set: { enabled in
+                        guard !restoringRankingPolicy,
+                              let profileID = model.profiles.selected?.id,
+                              !model.sessionSearchPolicyMutationIsInFlight(for: profileID) else { return }
+                        remoteRankingEnabled = enabled
+                        rankingPolicyTask = Task { @MainActor in
+                            do { _ = try await model.setSessionSearchRemoteRanking(enabled, profileID: profileID) }
+                            catch is CancellationError {
+                                // A superseded/lifecycle-invalidated waiter is
+                                // not evidence that the direct mutation failed.
+                            }
+                            catch {
+                                guard !Task.isCancelled, model.profiles.selected?.id == profileID else { return }
+                                model.presentError(error)
+                            }
                         }
                     }
-                }
+                )
+            )
+                .font(.caption)
+                .tint(.tronEmerald)
+                .disabled(restoringRankingPolicy || (model.profiles.selected.map {
+                    model.sessionSearchPolicyMutationIsInFlight(for: $0.id)
+                } ?? false))
                 .padding(.horizontal, TronSpacing.section)
         }
         .padding(.vertical, 8)
