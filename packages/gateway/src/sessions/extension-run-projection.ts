@@ -445,6 +445,28 @@ export function admitExtensionLifecycleArtifact(
   return admission.accepted ? admission.artifact : undefined;
 }
 
+/** A recovered steering target means this paused producer has been replaced by
+ * a new async run. The producer keeps the source artifact resumable for
+ * explicit history, but it no longer represents live work. Ambiguous recovery
+ * claims fail closed so a malformed status file cannot settle another run. */
+export function recoveredReplacementRunId(artifact: Record<string, unknown>): string | undefined {
+  const steering = record(artifact.steering);
+  const recent = steering && Array.isArray(steering.recent) ? steering.recent : [];
+  const replacements = new Set<string>();
+  for (const requestValue of recent) {
+    const request = record(requestValue);
+    const targets = request && Array.isArray(request.targets) ? request.targets : [];
+    for (const targetValue of targets) {
+      const target = record(targetValue);
+      if (target?.state !== "recovered") continue;
+      if (typeof target.replacementRunId !== "string" || target.replacementRunId.length === 0
+        || Buffer.byteLength(target.replacementRunId) > 256 || /[\\/\0]/u.test(target.replacementRunId)) return undefined;
+      replacements.add(target.replacementRunId);
+    }
+  }
+  return replacements.size === 1 ? [...replacements][0] : undefined;
+}
+
 /** A paused workflow is logically resumable but owns no live OS work after the
  * producer has durably observed its exact runner and writer process trees exit.
  * This proof affects administrative quiescence only; it never fabricates a

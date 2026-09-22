@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ExtensionRunActivity } from "../protocol/types.js";
 import { subagentProcessesFromActivity } from "./process-activity.js";
-import { admitExtensionLifecycleArtifact, boundExtensionActivities, extensionActivityStatusFromTool, extensionLifecycleState, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasObservedPausedProcessTerminal, hasStructuredExtensionRunActivity, inspectExtensionLifecycleArtifact, inspectExtensionLifecycleProjection, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, usesForegroundSubagentChildIdentity } from "./extension-run-projection.js";
+import { admitExtensionLifecycleArtifact, boundExtensionActivities, extensionActivityStatusFromTool, extensionLifecycleState, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasObservedPausedProcessTerminal, hasStructuredExtensionRunActivity, recoveredReplacementRunId, inspectExtensionLifecycleArtifact, inspectExtensionLifecycleProjection, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, usesForegroundSubagentChildIdentity } from "./extension-run-projection.js";
 
 const base = {
   id: "tool-call",
@@ -141,6 +141,14 @@ describe("projectExtensionRunActivity", () => {
     expect(inspectExtensionLifecycleArtifact({ ...valid, endedAt: undefined, completedAt: undefined })).toEqual({ accepted: false, reason: "missing-terminal-time" });
     expect(admitExtensionLifecycleArtifact({ ...valid, state: "running", endedAt: 50 })).toBeUndefined();
     expect(inspectExtensionLifecycleArtifact("not-an-artifact")).toEqual({ accepted: false, reason: "malformed-artifact" });
+  });
+
+  it("recognizes only one bounded recovered replacement claim", () => {
+    const recovered = { steering: { recent: [{ targets: [{ state: "recovered", replacementRunId: "replacement-run" }] }] } };
+    expect(recoveredReplacementRunId(recovered)).toBe("replacement-run");
+    expect(recoveredReplacementRunId({ steering: { recent: [{ targets: [{ state: "delivered", replacementRunId: "replacement-run" }] }] } })).toBeUndefined();
+    expect(recoveredReplacementRunId({ steering: { recent: [{ targets: [{ state: "recovered", replacementRunId: "one" }] }, { targets: [{ state: "recovered", replacementRunId: "two" }] }] } })).toBeUndefined();
+    expect(recoveredReplacementRunId({ steering: { recent: [{ targets: [{ state: "recovered", replacementRunId: "../foreign" }] }] } })).toBeUndefined();
   });
 
   it("admits only exact observed process-terminal proof for paused quiescence", () => {

@@ -97,7 +97,7 @@ import {
 import type { ForkBoundaryAnchor } from "./fork-boundary.js";
 import { RunMarkerCompletionConflictError, type RunMarkerEvidence, type RunMarkerStore } from "./run-markers.js";
 import { attributeExtensions, attributedCommandOwner, attributedToolOwner, currentExtensionOwner, currentInvocationContext, trustedExtensionOriginKind, withInvocationContext } from "../extensions/owner-attribution.js";
-import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasObservedPausedProcessTerminal, hasStructuredExtensionRunActivity, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
+import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasObservedPausedProcessTerminal, hasStructuredExtensionRunActivity, recoveredReplacementRunId, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection } from "./invocation-receipts.js";
@@ -4185,18 +4185,32 @@ export class RuntimeSlot {
         return;
       }
       const { status: state, startedAt, updatedAt, completedAt, durationMs } = normalized;
+      const replacementRunId = recoveredReplacementRunId(raw);
+      const replacementOwner = replacementRunId ? (canonicalFacts ?? this.canonicalExtensionRunFacts()).get(replacementRunId) : undefined;
+      // Recovery is an exact producer-owned handoff: the replacement must be a
+      // distinct canonical tool launch in this same session. A status-only
+      // replacement claim cannot settle a paused run or cross-bind another run.
+      const superseded = state === "running"
+        && replacementRunId !== undefined
+        && replacementOwner?.toolCallId !== undefined
+        && replacementOwner.toolCallId !== toolCallId
+        && replacementOwner.ambiguous !== true;
+      const effectiveState = superseded ? "completed" : state;
+      const effectiveCompletedAt = superseded ? completedAt ?? updatedAt : completedAt;
       const pausedProcessIsQuiescent = hasObservedPausedProcessTerminal(raw, runId);
       // A terminal lifecycle event is authoritative; a late running artifact
       // enriches neither status nor ownership and must not resurrect the pill.
       if (ownership?.terminal && state === "running") return;
       const artifactValue = ownership?.terminal
         ? preserveEmbeddedLifecycleMarker(raw, { ...raw, state: previous?.status === "failed" ? "failed" : "completed" })
-        : raw;
+        : superseded
+          ? preserveEmbeddedLifecycleMarker(raw, { ...raw, state: "completed", supersededByRunId: replacementRunId })
+          : raw;
       const activityKey = previous?.activityId ?? extensionActivityId(this.runtime.session.sessionManager.getSessionId(), toolCallId);
       const sequence = (this.extensionActivitySequences.get(activityKey) ?? previous?.lifecycle?.sequence ?? 0) + 1;
       this.extensionActivitySequences.set(activityKey, sequence);
       const observedAt = new Date().toISOString();
-      const terminalAt = state === "running"
+      const terminalAt = effectiveState === "running"
         ? previous?.lifecycle?.terminalAt
         : previous?.lifecycle?.terminalAt ?? observedAt;
       const recentUntil = terminalAt ? new Date(Date.parse(terminalAt) + 900_000).toISOString() : undefined;
@@ -4207,11 +4221,11 @@ export class RuntimeSlot {
         source: previous?.source ?? this.subagentExtensionOrigin(),
         title: previous?.title ?? "Subagents",
         mode: "asynchronous",
-        status: state,
-        authoritativeStatus: state !== "running" || previous?.lifecycle?.state === "completed" || previous?.lifecycle?.state === "failed" || previous?.lifecycle?.state === "stopped" || previous?.lifecycle?.state === "rejected",
+        status: effectiveState,
+        authoritativeStatus: effectiveState !== "running" || previous?.lifecycle?.state === "completed" || previous?.lifecycle?.state === "failed" || previous?.lifecycle?.state === "stopped" || previous?.lifecycle?.state === "rejected",
         startedAt,
         updatedAt,
-        ...(completedAt ? { completedAt } : {}),
+        ...(effectiveCompletedAt ? { completedAt: effectiveCompletedAt } : {}),
         ...(durationMs === undefined ? {} : { durationMs }),
         ...(previous ? { previous } : {}),
         sequence,
@@ -4455,21 +4469,34 @@ export class RuntimeSlot {
         return;
       }
       const { status: artifactState, updatedAt, completedAt, durationMs } = normalized;
+      const replacementRunId = recoveredReplacementRunId(raw);
+      const replacementOwner = replacementRunId ? this.canonicalExtensionRunFacts().get(replacementRunId) : undefined;
+      // The replacement must already have an exact canonical tool owner in the
+      // same session. A recovered marker without that proof remains paused.
+      const superseded = artifactState === "running"
+        && replacementRunId !== undefined
+        && replacementOwner?.toolCallId !== undefined
+        && replacementOwner.toolCallId !== toolCallId
+        && replacementOwner.ambiguous !== true;
+      const effectiveArtifactState = superseded ? "completed" : artifactState;
+      const effectiveCompletedAt = superseded ? completedAt ?? updatedAt : completedAt;
       const pausedProcessIsQuiescent = hasObservedPausedProcessTerminal(raw, runId);
       const terminalStates = ["completed", "failed", "stopped", "rejected"];
-      if (ownership.terminal && artifactState === "running") return;
+      if (ownership.terminal && artifactState === "running" && !superseded) return;
       if (terminalStates.includes(previous.lifecycle?.state ?? "") && artifactState !== "running") {
         const requestedTerminal = artifactState === "failed" ? "failed" : "completed";
         if (requestedTerminal !== previous.lifecycle?.state) return;
       }
       const artifactValue = ownership.terminal
         ? preserveEmbeddedLifecycleMarker(raw, { ...raw, state: previous.status === "failed" ? "failed" : "completed" })
-        : raw;
+        : superseded
+          ? preserveEmbeddedLifecycleMarker(raw, { ...raw, state: "completed", supersededByRunId: replacementRunId })
+          : raw;
       const activityKey = previous.activityId ?? extensionActivityId(this.runtime.session.sessionManager.getSessionId(), toolCallId);
       const sequence = (this.extensionActivitySequences.get(activityKey) ?? previous.lifecycle?.sequence ?? 0) + 1;
       this.extensionActivitySequences.set(activityKey, sequence);
       const observedAt = new Date().toISOString();
-      const terminalAt = artifactState === "running"
+      const terminalAt = effectiveArtifactState === "running"
         ? previous.lifecycle?.terminalAt
         : previous.lifecycle?.terminalAt ?? observedAt;
       const recentUntil = terminalAt ? new Date(Date.parse(terminalAt) + 900_000).toISOString() : undefined;
@@ -4480,10 +4507,11 @@ export class RuntimeSlot {
         source: previous.source,
         title: previous.title,
         mode: "asynchronous",
-        status: previous.status,
+        status: effectiveArtifactState,
+        authoritativeStatus: effectiveArtifactState !== "running" || previous.lifecycle?.state === "completed" || previous.lifecycle?.state === "failed" || previous.lifecycle?.state === "stopped" || previous.lifecycle?.state === "rejected",
         startedAt: previous.startedAt,
         updatedAt,
-        ...(completedAt ? { completedAt } : {}),
+        ...(effectiveCompletedAt ? { completedAt: effectiveCompletedAt } : {}),
         ...(durationMs === undefined ? {} : { durationMs }),
         previous,
         sequence,

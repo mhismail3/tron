@@ -2037,9 +2037,14 @@ modifying canonical JSONL. `SessionProcessOverview` is the shallow composer auth
 active/recent/problem counts, revision, Gateway `asOf`, and nearest expiry. High-frequency
 output remains in bounded process deltas and does not require a transcript rebuild. Optional
 resolved model and thinking metadata is copied only from bounded fields already present in
-the canonical producer status. The upstream producer does not publish durable completed-tool
-identity, so Gateway and iOS intentionally show only the authoritative current tool and
-bounded output; they do not invent or cache a last-tool record.
+the canonical producer status. A recovered steering target is a separate handoff: when its
+bounded `replacementRunId` is backed by a distinct canonical delegated tool owner in the
+same parent session, the superseded paused artifact is settled as completed for activity
+and drain projection while its source status remains resumable history. A replacement
+claim without exact ownership, or with conflicting replacement IDs, remains paused and
+fails closed. The upstream producer does not publish durable completed-tool identity, so
+Gateway and iOS intentionally show only the authoritative current tool and bounded output;
+they do not invent or cache a last-tool record.
 
 
 The Gateway owns process recency for exactly five minutes from authoritative terminal
