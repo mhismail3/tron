@@ -47,9 +47,9 @@ select Configuration; updates are gated on rendered submenu content so XCTest's
 idle waiting cannot run the test entirely after the updates. Filter has no subtext. Settings always opens
 the shell's existing app settings sheet. Sessions ends with New Session; Automations
 ends with Create Automation and retains Choose agenda date in Upcoming; Knowledge
-groups Observation configuration, Connectors, and Import legacy records under
-Knowledge settings, with Capture URL and New note visible in the root menu's final
-section rather than pushed below its scrolling boundary. Search on Automations
+uses one Knowledge settings submenu in both Chronicle and Library for Observation
+configuration, Needs attention, and Chronicle info, with Capture URL and New note
+visible in the root menu's final creation section rather than in settings. Search on Automations
 explicitly selects All through its persistent preference owner before focusing the
 existing inventory search. Keyboard overlays cover the unchanged floating button,
 which is not interactive or accessible while searching. `DashboardChromeTests` mounts
@@ -119,7 +119,8 @@ observed/empty/excluded breakdown and one button naming the cuts that need atten
 no list and no action of its own, so a healthy corpus costs two short rows; a Gateway that cannot filter
 coverage is told to update instead of being shown a button with no list behind it. That button opens
 `KnowledgeCoverageDetailSheet`, a standard medium/large managed sheet (violet title, Done control, edge
-chrome, hidden grabber) listing every cut needing attention. The page is filtered by disposition
+chrome, hidden grabber) whose host owns the NavigationStack and medium initial detent from its first frame;
+loading, errors, and content therefore keep the same shell and user-selected large detent while the read settles. The page is filtered by disposition
 (`knowledge-coverage-filter.v1`, `pending`/`failed`/`unavailable`), so settled rows never enter the list,
 and the client rejects a response that ignores the filter. When the loaded page holds fewer cuts than the
 Gateway reports, the sheet states "Showing N of M cuts needing attention" and offers **Load more cuts
@@ -138,7 +139,9 @@ row height, the statement cap, the overview cost, the tighter catalogue row gap,
 actions, and the update-guidance state for a Gateway without the filter.
 Coverage retains its rows through sheet dismissal and same-Gateway refresh. An unchanged canonical
 revision reuses the loaded page/cursor; a changed revision replaces it after arrival, without a loading
-placeholder. Initial/new-Gateway reads still show loading. Clear on a failed/unavailable cut uses the
+placeholder. Initial/new-Gateway reads still show loading. Dashboard catalogue rows likewise remain visible
+through a covered read; a genuine same-query failure is an inline retryable notice, while a changed profile,
+filter, or search clears the foreign page before loading its exact context. Clear on a failed/unavailable cut uses the
 confirmed mutation owner and requires `knowledge-coverage-dismiss.v1`; it preserves an exact terminal
 skip, not a deleted gap or a session exclusion. A covered parent must not suppress a legitimate child
 correction callback: the callback checks the originating Knowledge presentation identity while the

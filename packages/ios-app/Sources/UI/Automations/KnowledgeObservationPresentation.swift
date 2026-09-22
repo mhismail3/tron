@@ -308,70 +308,51 @@ struct KnowledgeCoverageDetailSheet: View {
     let onOpenSession: (KnowledgeObservationCoverage) -> Void
     let onClear: (KnowledgeObservationCoverage) -> Void
     let onLoadMore: () -> Void
-    @Environment(\.dismiss) private var dismiss
-    @State private var detent: PresentationDetent = .medium
     @State private var cutToClear: KnowledgeObservationCoverage?
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: TronSpacing.section) {
-                    TronSettingsGroup(
-                        "Cuts needing attention",
-                        detail: KnowledgeCoveragePresentationPolicy.attentionDetail(coverage),
-                        accent: .tronKnowledge
-                    ) {
-                        VStack(spacing: 0) {
-                            if cuts.isEmpty {
-                                TronSettingsRow(icon: "checkmark.circle",
-                                                title: KnowledgeCoveragePresentationPolicy.attentionTitle(coverage),
-                                                accent: .tronKnowledge)
-                            }
-                            ForEach(Array(cuts.enumerated()), id: \.element.id) { index, cut in
-                                if index > 0 { TronSettingsDivider(accent: .tronKnowledge) }
-                                KnowledgeCoverageCutRow(
-                                    cut: cut,
-                                    clearing: clearingCutID == cut.id,
-                                    allowsClear: clearingCutID == nil && allowsActions,
-                                    onOpen: { onOpenSession(cut) },
-                                    onClear: { cutToClear = cut }
-                                )
-                            }
+        ScrollView {
+            VStack(alignment: .leading, spacing: TronSpacing.section) {
+                TronSettingsGroup(
+                    "Cuts needing attention",
+                    detail: KnowledgeCoveragePresentationPolicy.attentionDetail(coverage),
+                    accent: .tronKnowledge
+                ) {
+                    VStack(spacing: 0) {
+                        if cuts.isEmpty {
+                            TronSettingsRow(icon: "checkmark.circle",
+                                            title: KnowledgeCoveragePresentationPolicy.attentionTitle(coverage),
+                                            accent: .tronKnowledge)
+                        }
+                        ForEach(Array(cuts.enumerated()), id: \.element.id) { index, cut in
+                            if index > 0 { TronSettingsDivider(accent: .tronKnowledge) }
+                            KnowledgeCoverageCutRow(
+                                cut: cut,
+                                clearing: clearingCutID == cut.id,
+                                allowsClear: clearingCutID == nil && allowsActions,
+                                onOpen: { onOpenSession(cut) },
+                                onClear: { cutToClear = cut }
+                            )
                         }
                     }
-                    if showsInitialLoading { TronLoadingState(label: "Loading coverage…", accent: .tronKnowledge) }
-                    if let errorText { TronSettingsNotice(message: "Coverage unavailable: \(errorText)", accent: .tronAmber) }
-                    if let mutationErrorText { TronSettingsNotice(message: mutationErrorText, accent: .tronAmber) }
-                    if let progress = KnowledgeCoveragePresentationPolicy.listProgress(coverage, loaded: cuts.count) {
-                        TronSettingsCaption(progress)
-                    }
-                    if canLoadMore {
-                        Button(loadingMore ? "Loading…" : "Load more cuts needing attention") { onLoadMore() }
-                            .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
-                            .disabled(loadingMore || !allowsActions)
-                    }
                 }
-                .padding(18)
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-            }
-            .tronSettingsLayout()
-            .tronScrollEdgeChrome()
-            .tronNavigationTitle("Observation coverage", accent: .tronKnowledge)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark").font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronKnowledge)
-                    }
-                    .accessibilityLabel("Done")
+                if showsInitialLoading { TronLoadingState(label: "Loading coverage…", accent: .tronKnowledge) }
+                if let errorText { TronSettingsNotice(message: "Coverage unavailable: \(errorText)", accent: .tronAmber) }
+                if let mutationErrorText { TronSettingsNotice(message: mutationErrorText, accent: .tronAmber) }
+                if let progress = KnowledgeCoveragePresentationPolicy.listProgress(coverage, loaded: cuts.count) {
+                    TronSettingsCaption(progress)
+                }
+                if canLoadMore {
+                    Button(loadingMore ? "Loading…" : "Load more cuts needing attention") { onLoadMore() }
+                        .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
+                        .disabled(loadingMore || !allowsActions)
                 }
             }
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large], selection: $detent)
-        .presentationDragIndicator(.hidden)
-        .tronSettingsVisualTheme(accent: .tronKnowledge)
-        .tronPresentation()
+        .tronSettingsLayout()
+        .tronScrollEdgeChrome()
         .confirmationDialog("Clear this observation failure?", isPresented: Binding(
             get: { cutToClear != nil }, set: { if !$0 { cutToClear = nil } }
         ), presenting: cutToClear) { cut in
