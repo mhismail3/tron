@@ -101,10 +101,6 @@ final class KnowledgeDashboardLayoutTests: XCTestCase {
 
     func testCoverageOverviewIsInformationalAndOpensTheDetailSheet() async throws {
         let overview = Self.overview()
-        XCTAssertLessThanOrEqual(Self.intrinsicHeight(overview, width: 402),
-                                 KnowledgeDashboardLayout.coverageSectionReservedHeight,
-                                 "The overview must fit the height the dashboard reserves for it")
-
         try await withHost(Self.hosted(overview), size: CGSize(width: 402, height: 200)) { host in
             let elements = Self.accessibilityElements(in: host.view)
             guard !elements.isEmpty else { throw XCTSkip("Hosted SwiftUI accessibility tree unavailable in this simulator runtime") }

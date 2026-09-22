@@ -13,20 +13,54 @@ enum KnowledgeDashboardSection: String, CaseIterable, Identifiable {
     case chronicle
     case sources
     case syntheses
-    case intakeArchive
 
     var id: String { rawValue }
     var title: String {
-        switch self { case .chronicle: "Chronicle"; case .sources: "Sources"; case .syntheses: "Syntheses"; case .intakeArchive: "Intake & archive" }
+        switch self { case .chronicle: "Chronicle"; case .sources: "Sources"; case .syntheses: "Syntheses" }
     }
     var kind: KnowledgeRecordKind? {
-        switch self { case .chronicle: .observation; case .sources, .intakeArchive: .source; case .syntheses: .note }
+        switch self { case .chronicle: .observation; case .sources: .source; case .syntheses: .note }
     }
-    var includesPendingOrArchived: Bool { self == .intakeArchive }
+}
+
+enum KnowledgeDashboardMenuPolicy {
+    static func settingsTitle(for area: KnowledgeDashboardArea) -> String {
+        area == .chronicle ? "Chronicle settings" : "Library settings"
+    }
+
+    static func settingsActions(for area: KnowledgeDashboardArea) -> [String] {
+        area == .chronicle
+            ? ["Observation configuration", "Needs attention", "Chronicle info"]
+            : ["Capture URL", "New note"]
+    }
+}
+
+enum KnowledgeSourceVisibility: String, CaseIterable, Identifiable {
+    case saved
+    case pending
+    case archived
+
+    var id: String { rawValue }
+    var title: String {
+        switch self { case .saved: "Saved sources"; case .pending: "Pending sources"; case .archived: "Archived sources" }
+    }
+    /// These flags are only transport visibility requests; admission remains
+    /// canonical and `visibleRecords` performs the exact final partition.
+    var requestIncludesPending: Bool { self == .pending }
+    var requestIncludesArchived: Bool { self == .archived }
 }
 
 /// Catalogue pagination is available only for list responses. Search responses
 /// are intentionally bounded to one Gateway result page.
+enum KnowledgeCatalogRequestPolicy {
+    static func includesPending(section: KnowledgeDashboardSection, visibility: KnowledgeSourceVisibility) -> Bool {
+        section == .sources && visibility.requestIncludesPending
+    }
+    static func includesArchived(section: KnowledgeDashboardSection, visibility: KnowledgeSourceVisibility) -> Bool {
+        section == .sources && visibility.requestIncludesArchived
+    }
+}
+
 enum KnowledgeCatalogPaginationPolicy {
     static func admits(cursor: String?, search: String, loadingMore: Bool) -> Bool {
         cursor != nil && !loadingMore && search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -34,14 +68,24 @@ enum KnowledgeCatalogPaginationPolicy {
 }
 
 enum KnowledgeCatalogPagePolicy {
-    static func visibleRecords(_ records: [KnowledgeRecord], in section: KnowledgeDashboardSection) -> [KnowledgeRecord] {
+    static func visibleRecords(_ records: [KnowledgeRecord], in section: KnowledgeDashboardSection, sourceVisibility: KnowledgeSourceVisibility = .saved) -> [KnowledgeRecord] {
         records.filter { record in
             switch section {
             case .syntheses:
                 guard case .note(let note) = record.content else { return false }
                 return note.role == .synthesis
-            case .intakeArchive: return KnowledgeSourcePresentationPolicy.isIntakeOrArchive(record)
-            case .chronicle, .sources: return true
+            case .chronicle: return true
+            case .sources:
+                guard case .source = record.content else { return false }
+                let admission: KnowledgeSourceAdmission? = {
+                    guard case .source(let source) = record.content else { return nil }
+                    return source.admission?.status
+                }()
+                switch sourceVisibility {
+                case .saved: return admission == .retained || admission == nil
+                case .pending: return admission == .pending
+                case .archived: return admission == .archived
+                }
             }
         }
     }
@@ -56,6 +100,7 @@ struct KnowledgeCatalogRequestKey: Equatable {
     let kind: KnowledgeRecordKind?
     let scope: KnowledgeScope?
     let search: String
+    let sourceVisibility: KnowledgeSourceVisibility
 }
 
 enum KnowledgeCatalogRequestFence {
@@ -68,10 +113,6 @@ enum KnowledgeCatalogRequestFence {
 /// long retained list stays scannable; section boundaries add their own inset.
 enum KnowledgeDashboardLayout {
     static let recordSpacing: CGFloat = 8
-    /// Height of the coverage overview, reserved while sizing full-height
-    /// loading/empty/error states so they are not pushed past the viewport by a
-    /// section that costs two short rows.
-    static let coverageSectionReservedHeight: CGFloat = 136
 }
 
 enum KnowledgeImportPresentationPolicy {
@@ -102,12 +143,13 @@ struct KnowledgeDashboardView: View {
     @State private var records: [KnowledgeRecord] = []
     @State private var area: KnowledgeDashboardArea = .chronicle
     @State private var section: KnowledgeDashboardSection = .chronicle
+    @State private var lastLibrarySection: KnowledgeDashboardSection = .sources
+    @State private var sourceVisibility: KnowledgeSourceVisibility = .saved
     @State private var selected: KnowledgeRecord?
     @State private var selectedIdentity: KnowledgePresentationIdentity?
     @State private var pendingDetailAction: DetailAction?
     private enum DetailAction { case draft(KnowledgeRecord), session(String, String) }
     @State private var search = ""
-    @State private var kind: KnowledgeRecordKind?
     @State private var scope: KnowledgeScope?
     @State private var loading = false
     @State private var error: String?
@@ -118,28 +160,24 @@ struct KnowledgeDashboardView: View {
     @State private var clearingCoverageID: String?
     @State private var coverageMutationError: String?
     @State private var coverageSheet = false
+    @State private var chronicleInfoSheet = false
     @State private var loadGeneration = 0
-    @State private var connectorRefreshGeneration: [String: Int] = [:]
     @State private var configSheet = false
-    @State private var connectorSheet = false
-    @State private var importSheet = false
     @State private var captureSheet = false
     @State private var noteSheet = false
     @State private var showingFilters = false
     @State private var showingSearch = false
     @State private var dashboardHeader = DashboardHeaderState()
 
-    private var requestKind: KnowledgeRecordKind? { kind ?? section.kind }
+    private var requestKind: KnowledgeRecordKind? { section.kind }
 
     private var filterSummary: String {
-        let summary = [section.title, scope?.label].compactMap { $0 }.joined(separator: " · ")
-        return summary.isEmpty ? "All knowledge" : summary
+        let labels = [section.title, section == .sources ? sourceVisibility.title : nil, scope?.label].compactMap { $0 }
+        return labels.joined(separator: " · ")
     }
 
-    private var librarySections: [KnowledgeDashboardSection] { [.chronicle, .sources, .syntheses] }
-
     private func requestKey() -> KnowledgeCatalogRequestKey {
-        KnowledgeCatalogRequestKey(section: section, kind: requestKind, scope: scope, search: search)
+        KnowledgeCatalogRequestKey(section: section, kind: requestKind, scope: scope, search: search, sourceVisibility: sourceVisibility)
     }
 
     var body: some View {
@@ -154,8 +192,7 @@ struct KnowledgeDashboardView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: KnowledgeDashboardLayout.recordSpacing) {
                         libraryPicker
-                        if section == .chronicle, let status { coverageOverview(status) }
-                        dashboardContent(minimumHeight: max(280, geometry.size.height - (status == nil ? 0 : KnowledgeDashboardLayout.coverageSectionReservedHeight) - 150))
+                        dashboardContent(minimumHeight: max(280, geometry.size.height - 150))
                     }
                     .padding(.horizontal, 20)
                     .padding(.vertical, 16)
@@ -185,19 +222,18 @@ struct KnowledgeDashboardView: View {
         .onChange(of: area) { _, value in
             invalidateCatalogueRequests()
             if value == .chronicle {
+                if section != .chronicle { lastLibrarySection = section }
                 section = .chronicle
-                kind = nil
-            } else if section == .chronicle {
-                section = .sources
-                kind = nil
+            } else {
+                section = lastLibrarySection
             }
         }
         .onChange(of: section) { _, value in
             invalidateCatalogueRequests()
             area = value == .chronicle ? .chronicle : .library
-            if value != .intakeArchive { kind = nil }
+            if value != .chronicle { lastLibrarySection = value }
         }
-        .onChange(of: kind) { _, _ in invalidateCatalogueRequests() }
+        .onChange(of: sourceVisibility) { _, _ in invalidateCatalogueRequests() }
         .onChange(of: scope) { _, _ in invalidateCatalogueRequests() }
         .onChange(of: search) { _, _ in invalidateCatalogueRequests() }
         .onChange(of: model.knowledgePresentationIdentity) { _, _ in
@@ -213,17 +249,14 @@ struct KnowledgeDashboardView: View {
         .tronManagedSheet(isPresented: $coverageSheet, identity: "knowledge.coverage", onDismiss: finishDetailDismissal) {
             coverageDetailSheet
         }
+        .tronManagedSheet(isPresented: $chronicleInfoSheet, identity: "knowledge.chronicle-info") {
+            chronicleInfoSheetView
+        }
         .tronManagedSheet(isPresented: $showingFilters, identity: "knowledge.filters") {
             knowledgeFilterSheet
         }
         .tronManagedSheet(isPresented: $configSheet, identity: "knowledge.configuration") {
             KnowledgeConfigurationView().environment(model)
-        }
-        .tronManagedSheet(isPresented: $connectorSheet, identity: "knowledge.connectors") {
-            KnowledgeConnectorsView().environment(model)
-        }
-        .tronManagedSheet(isPresented: $importSheet, identity: "knowledge.import") {
-            KnowledgeImportView().environment(model)
         }
         .tronManagedSheet(isPresented: $captureSheet, identity: "knowledge.capture") {
             KnowledgeCaptureView { captureSheet = false; await reload() }.environment(model)
@@ -231,7 +264,7 @@ struct KnowledgeDashboardView: View {
         .tronManagedSheet(isPresented: $noteSheet, identity: "knowledge.note") {
             KnowledgeNoteCreateView { noteSheet = false; await reload() }.environment(model)
         }
-        .task(id: "\(section.rawValue)/\(kind?.rawValue ?? "all")/\(scope?.rawValue ?? "all")/\(search)/\(activity.allowsPresentationPublication)/\(model.knowledgePresentationIdentity.profileID ?? "none")/\(model.knowledgePresentationIdentity.lifecycleGeneration ?? -1)/\(model.knowledgePresentationIdentity.connectionID ?? -1)/\(model.knowledgeInvalidationRevision)") {
+        .task(id: "\(section.rawValue)/\(sourceVisibility.rawValue)/\(scope?.rawValue ?? "all")/\(search)/\(activity.allowsPresentationPublication)/\(model.knowledgePresentationIdentity.profileID ?? "none")/\(model.knowledgePresentationIdentity.lifecycleGeneration ?? -1)/\(model.knowledgePresentationIdentity.connectionID ?? -1)/\(model.knowledgeInvalidationRevision)") {
             guard activity.allowsPresentationPublication else { return }
             await reload()
         }
@@ -242,19 +275,22 @@ struct KnowledgeDashboardView: View {
     }
 
     private var dashboardMenuActions: DashboardMenuActions {
-        DashboardMenuActions(
-            search: { showingSearch = true },
-            filter: { showingFilters = true },
-            settings: onOpenSettings,
-            settingsMenu: .init(title: "Knowledge settings", symbol: "slider.horizontal.3", actions: [
+        let settingsActions: [DashboardMenuAction] = area == .chronicle
+            ? [
                 .init(title: "Observation configuration", symbol: "eye", perform: { configSheet = true }),
-                .init(title: "Connectors", symbol: "arrow.triangle.2.circlepath", perform: { connectorSheet = true }),
-                .init(title: "Import legacy records", symbol: "square.and.arrow.down", perform: { importSheet = true }),
-            ]),
-            creation: [
+                .init(title: "Needs attention", symbol: "exclamationmark.triangle", perform: { coverageSheet = true }),
+                .init(title: "Chronicle info", symbol: "info.circle", perform: { chronicleInfoSheet = true }),
+            ]
+            : [
                 .init(title: "Capture URL", symbol: "link.badge.plus", perform: { captureSheet = true }),
                 .init(title: "New note", symbol: "note.text.badge.plus", perform: { noteSheet = true }),
             ]
+        return DashboardMenuActions(
+            search: { showingSearch = true },
+            filter: { showingFilters = true },
+            settings: onOpenSettings,
+            settingsMenu: .init(title: KnowledgeDashboardMenuPolicy.settingsTitle(for: area), symbol: "slider.horizontal.3", actions: settingsActions),
+            creation: []
         )
     }
 
@@ -264,47 +300,16 @@ struct KnowledgeDashboardView: View {
     }
 
     private var libraryPicker: some View {
-        VStack(alignment: .leading, spacing: TronSpacing.sm) {
-            TronSegmentedControl(
-                options: [(label: "Chronicle", value: KnowledgeDashboardArea.chronicle),
-                          (label: "Library", value: KnowledgeDashboardArea.library)],
-                selection: $area,
-                accent: .tronKnowledge,
-                foreground: .tronKnowledgeText,
-                minimumHeight: 40
-            )
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("Knowledge area")
-            if area == .library {
-                TronSegmentedControl(
-                    options: librarySections.filter { $0 != .chronicle }.map { (label: $0.title, value: $0) },
-                    selection: Binding(
-                        get: { section == .syntheses ? .syntheses : .sources },
-                        set: { section = $0 }
-                    ),
-                    accent: .tronKnowledge,
-                    foreground: .tronKnowledgeText,
-                    minimumHeight: 40
-                )
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel("Library section")
-                if section == .syntheses {
-                    TronSettingsCaption("Syntheses are stored as notes. This view filters the current note page because the Gateway has no synthesis-list operation.")
-                }
-                Button {
-                    kind = nil
-                    section = section == .intakeArchive ? .sources : .intakeArchive
-                } label: {
-                    HStack {
-                        Label("Intake & archive", systemImage: "archivebox")
-                        Spacer()
-                        if section == .intakeArchive { Image(systemName: "checkmark").accessibilityHidden(true) }
-                    }
-                }
-                .buttonStyle(TronRowButtonStyle(accent: .tronKnowledge))
-                .accessibilityHint("Shows pending and archived sources separately from retained library content")
-            }
-        }
+        TronSegmentedControl(
+            options: [(label: "Chronicle", value: KnowledgeDashboardArea.chronicle),
+                      (label: "Library", value: KnowledgeDashboardArea.library)],
+            selection: $area,
+            accent: .tronKnowledge,
+            foreground: .tronKnowledgeText,
+            minimumHeight: 40
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Knowledge area")
         .padding(.top, TronSpacing.sm)
     }
 
@@ -319,7 +324,7 @@ struct KnowledgeDashboardView: View {
                                  actionTitle: "Retry", action: { Task { await reload() } })
                 .frame(minHeight: minimumHeight)
         } else if records.isEmpty {
-            let filtered = kind != nil || scope != nil || !search.isEmpty || section != .chronicle
+            let filtered = scope != nil || !search.isEmpty || section != .chronicle || sourceVisibility != .saved
             VStack(alignment: .leading, spacing: TronSpacing.md) {
                 TronPlaceholderState(title: filtered ? "No matching Knowledge" : "No Knowledge yet",
                                      detail: filtered ? "Adjust your search or filters to see more records." : "Observations, links, and notes retained by this Gateway will appear here.",
@@ -366,36 +371,59 @@ struct KnowledgeDashboardView: View {
     }
 
     private var knowledgeFilterSheet: some View {
-        TronDashboardFilterSheet(title: "Knowledge filters", accent: .tronKnowledge,
+        TronDashboardFilterSheet(title: area == .chronicle ? "Chronicle filters" : "Library filters", accent: .tronKnowledge,
                                  detents: [.medium, .large], onDone: { showingFilters = false }) {
-            TronDashboardFilterSectionTitle(title: "Type", detail: "Choose which retained records to browse.")
-            TronDashboardFilterOption(title: "All types", selected: kind == nil, accent: .tronKnowledge,
-                                      inactiveAccent: .tronSlate) { kind = nil; area = .chronicle; section = .chronicle }
-            ForEach(KnowledgeRecordKind.allCases, id: \.self) { value in
-                TronDashboardFilterOption(title: value.label,
-                                          selected: kind == value, accent: .tronKnowledge,
-                                          inactiveAccent: .tronSlate) {
-                    kind = value
-                    area = value == .observation ? .chronicle : .library
-                    section = value == .observation ? .chronicle : (value == .source ? .sources : .syntheses)
+            if area == .library {
+                TronDashboardFilterSectionTitle(title: "Library view", detail: "Choose one library collection at a time.")
+                TronDashboardFilterOption(title: "Sources", selected: section == .sources, accent: .tronKnowledge,
+                                          inactiveAccent: .tronSlate) { section = .sources }
+                TronDashboardFilterOption(title: "Syntheses", selected: section == .syntheses, accent: .tronKnowledge,
+                                          inactiveAccent: .tronSlate) { section = .syntheses }
+                if section == .sources {
+                    TronDashboardFilterSectionTitle(title: "Source visibility", detail: "Admission is read from the canonical source record; these options do not mutate it.")
+                    ForEach(KnowledgeSourceVisibility.allCases) { value in
+                        TronDashboardFilterOption(title: value.title, selected: sourceVisibility == value, accent: .tronKnowledge,
+                                                  inactiveAccent: .tronSlate) { sourceVisibility = value }
+                    }
                 }
             }
-            TronDashboardFilterSectionTitle(title: "Scope", detail: "Narrow results without losing the current type selection.")
+            TronDashboardFilterSectionTitle(title: "Scope", detail: "Narrow this dashboard without changing the collection.")
             TronDashboardFilterOption(title: "All scopes", selected: scope == nil, accent: .tronKnowledge,
                                       inactiveAccent: .tronSlate) { scope = nil }
             ForEach(KnowledgeScope.allCases, id: \.self) { value in
-                TronDashboardFilterOption(title: value.label,
-                                          selected: scope == value, accent: .tronKnowledge,
+                TronDashboardFilterOption(title: value.label, selected: scope == value, accent: .tronKnowledge,
                                           inactiveAccent: .tronSlate) { scope = value }
             }
         }
     }
-    private func coverageOverview(_ status: KnowledgeStatus) -> some View {
-        KnowledgeCoverageOverview(
-            coverage: status.coverage,
-            requiresGatewayUpdate: !supportsCoverageFilter,
-            onOpen: openCoverageDetail
-        )
+    private var chronicleInfoSheetView: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: TronSpacing.md) {
+                    if let status {
+                        Text("Observation coverage")
+                            .font(TronTypography.sheetSectionHeader)
+                            .foregroundStyle(Color.tronKnowledge)
+                        KnowledgeInfoStat(title: "Observed", value: status.coverage.observedCount)
+                        KnowledgeInfoStat(title: "Empty", value: status.coverage.emptyCount)
+                        KnowledgeInfoStat(title: "Excluded", value: status.coverage.excludedCount)
+                        KnowledgeInfoStat(title: "Pending", value: status.coverage.pendingCount)
+                        KnowledgeInfoStat(title: "Failed", value: status.coverage.failedCount)
+                        KnowledgeInfoStat(title: "Unavailable", value: status.coverage.unavailableCount)
+                        Text("Settled \(status.coverage.observedCount + status.coverage.emptyCount + status.coverage.excludedCount) · \(status.coverage.remainingCount) need attention")
+                            .font(TronTypography.caption)
+                            .foregroundStyle(Color.tronTextSecondary)
+                    } else if let error {
+                        TronPlaceholderState(title: "Chronicle info unavailable", detail: error, icon: "externaldrive.badge.xmark", accent: .tronKnowledge,
+                                             actionTitle: "Retry", action: { Task { await reload() } })
+                    } else {
+                        TronLoadingState(label: "Loading Chronicle info…", accent: .tronKnowledge)
+                    }
+                }
+                .padding(TronSpacing.section)
+            }
+            .tronNavigationTitle("Chronicle info", accent: .tronKnowledge)
+        }
     }
 
     /// The coverage list lives in its own detail sheet so the dashboard card
@@ -416,6 +444,12 @@ struct KnowledgeDashboardView: View {
                 onClear: { clearCoverage($0) },
                 onLoadMore: loadMoreCoverage
             )
+        } else if let error {
+            TronPlaceholderState(title: "Needs attention unavailable", detail: error,
+                                 icon: "externaldrive.badge.xmark", accent: .tronKnowledge,
+                                 actionTitle: "Retry", action: { Task { await reload() } })
+        } else {
+            TronLoadingState(label: "Loading attention…", accent: .tronKnowledge)
         }
     }
 
@@ -470,7 +504,8 @@ struct KnowledgeDashboardView: View {
         let requestedKind = requestKind
         let requestedScope = scope
         let requestedSearch = search
-        let requestedKey = KnowledgeCatalogRequestKey(section: requestedSection, kind: requestedKind, scope: requestedScope, search: requestedSearch)
+        let requestedVisibility = sourceVisibility
+        let requestedKey = KnowledgeCatalogRequestKey(section: requestedSection, kind: requestedKind, scope: requestedScope, search: requestedSearch, sourceVisibility: requestedVisibility)
         guard activity.allowsPresentationPublication, identity.profileID != nil, identity.lifecycleGeneration != nil else { return }
         loading = true; error = nil
         defer { if generation == loadGeneration { loading = false } }
@@ -478,12 +513,12 @@ struct KnowledgeDashboardView: View {
             async let loadedStatus = model.knowledge.status()
             var response: KnowledgeListResponse
             if requestedSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                response = try await model.knowledge.list(kind: requestedKind, scope: requestedScope, includeArchived: requestedSection.includesPendingOrArchived, includePending: requestedSection.includesPendingOrArchived, limit: 50)
+                response = try await model.knowledge.list(kind: requestedKind, scope: requestedScope, includeArchived: KnowledgeCatalogRequestPolicy.includesArchived(section: requestedSection, visibility: requestedVisibility), includePending: KnowledgeCatalogRequestPolicy.includesPending(section: requestedSection, visibility: requestedVisibility), limit: 50)
             } else {
-                let found = try await model.knowledge.search(query: requestedSearch, kind: requestedKind, scope: requestedScope, includeArchived: requestedSection.includesPendingOrArchived, includePending: requestedSection.includesPendingOrArchived, limit: 50)
+                let found = try await model.knowledge.search(query: requestedSearch, kind: requestedKind, scope: requestedScope, includeArchived: KnowledgeCatalogRequestPolicy.includesArchived(section: requestedSection, visibility: requestedVisibility), includePending: KnowledgeCatalogRequestPolicy.includesPending(section: requestedSection, visibility: requestedVisibility), limit: 50)
                 response = KnowledgeListResponse(records: found.hits.map { $0.record }, nextCursor: nil, stateRevision: found.stateRevision)
             }
-            response = KnowledgeListResponse(records: KnowledgeCatalogPagePolicy.visibleRecords(response.records, in: requestedSection), nextCursor: response.nextCursor, stateRevision: response.stateRevision)
+            response = KnowledgeListResponse(records: KnowledgeCatalogPagePolicy.visibleRecords(response.records, in: requestedSection, sourceVisibility: requestedVisibility), nextCursor: response.nextCursor, stateRevision: response.stateRevision)
             let currentStatus = try await loadedStatus
             guard generation == loadGeneration, KnowledgeCatalogRequestFence.accepts(requestedKey, current: requestKey()),
                   activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
@@ -506,18 +541,19 @@ struct KnowledgeDashboardView: View {
         loadingMore = true
         let generation = loadGeneration
         let query = search
-        let requestedKind = kind
+        let requestedKind = requestKind
         let requestedScope = scope
         let requestedSection = section
-        let requestedKey = KnowledgeCatalogRequestKey(section: requestedSection, kind: requestedKind ?? requestedSection.kind, scope: requestedScope, search: query)
+        let requestedVisibility = sourceVisibility
+        let requestedKey = KnowledgeCatalogRequestKey(section: requestedSection, kind: requestedKind ?? requestedSection.kind, scope: requestedScope, search: query, sourceVisibility: requestedVisibility)
         let identity = model.knowledgePresentationIdentity
         Task { @MainActor in
             defer { if generation == loadGeneration { loadingMore = false } }
             guard generation == loadGeneration, KnowledgeCatalogRequestFence.accepts(requestedKey, current: requestKey()),
                   activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
             do {
-                let page = try await model.knowledge.list(kind: requestedKind ?? requestedSection.kind, scope: requestedScope, includeArchived: requestedSection.includesPendingOrArchived, includePending: requestedSection.includesPendingOrArchived, cursor: cursor, limit: 50)
-                let visiblePage = KnowledgeListResponse(records: KnowledgeCatalogPagePolicy.visibleRecords(page.records, in: requestedSection), nextCursor: page.nextCursor, stateRevision: page.stateRevision)
+                let page = try await model.knowledge.list(kind: requestedKind ?? requestedSection.kind, scope: requestedScope, includeArchived: KnowledgeCatalogRequestPolicy.includesArchived(section: requestedSection, visibility: requestedVisibility), includePending: KnowledgeCatalogRequestPolicy.includesPending(section: requestedSection, visibility: requestedVisibility), cursor: cursor, limit: 50)
+                let visiblePage = KnowledgeListResponse(records: KnowledgeCatalogPagePolicy.visibleRecords(page.records, in: requestedSection, sourceVisibility: requestedVisibility), nextCursor: page.nextCursor, stateRevision: page.stateRevision)
                 guard generation == loadGeneration, KnowledgeCatalogRequestFence.accepts(requestedKey, current: requestKey()),
                       activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity,
                       visiblePage.records.allSatisfy({ !records.contains($0) }) else { return }
@@ -561,6 +597,25 @@ struct KnowledgeDashboardView: View {
         case .session(let sessionID, let entryID): onOpenSession(sessionID, entryID)
         case nil: break
         }
+    }
+}
+
+private struct KnowledgeInfoStat: View {
+    let title: String
+    let value: Int
+
+    var body: some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(value, format: .number)
+                .monospacedDigit()
+        }
+        .font(TronTypography.body)
+        .foregroundStyle(Color.tronTextPrimary)
+        .padding(.vertical, TronSpacing.sm)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title): \(value)")
     }
 }
 

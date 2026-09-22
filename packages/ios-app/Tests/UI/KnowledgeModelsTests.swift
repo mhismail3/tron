@@ -472,6 +472,14 @@ final class KnowledgeModelsTests: XCTestCase {
             temporal: nil, relations: [], content: .note(KnowledgeNoteContent(title: id, body: "fixture", fields: nil, role: .fact, confirmed: false, contraryEvidence: nil, freshness: .unknown, privacyScope: nil, usageConstraint: nil)))
     }
 
+    nonisolated static func syntheticSource(id: String, revision: String, admission: KnowledgeSourceAdmission?) -> KnowledgeRecord {
+        KnowledgeRecord(schemaVersion: 1, id: id, revisionId: revision, kind: .source, scope: .research,
+            createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+            provenance: KnowledgeProvenance(actor: .user, source: nil, sessionId: nil, branchId: nil, invocationId: nil, evidence: []),
+            temporal: nil, relations: [], content: .source(KnowledgeSourceContent(title: id, uri: "https://example.test/\(id)", text: "fixture", object: nil, mediaType: "text/plain", captureDisposition: .complete, annotations: nil, sourcePublishedAt: nil, capturedAt: "2026-01-01T00:00:00Z", origin: "manual", origins: nil, identity: nil, assessment: nil,
+                admission: admission.map { KnowledgeSourceAdmissionState(status: $0, reason: nil, decidedAt: "2026-01-01T00:00:00Z", profileVersion: nil, rubricVersion: nil) })))
+    }
+
     nonisolated static func syntheticCut(_ id: String, _ disposition: KnowledgeCoverageDisposition, range: KnowledgeObservationRange) -> KnowledgeObservationCoverage {
         KnowledgeObservationCoverage(schemaVersion: 1, id: id, revisionId: "revision-\(id)", range: range, disposition: disposition, groupRevisionIds: [], recordedAt: "2026-01-01T00:00:00Z", reason: "fixture")
     }
@@ -506,13 +514,34 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertEqual(KnowledgeCoveragePresentationPolicy.title(.unavailable), "Observation unavailable")
     }
 
-    func testKnowledgeLibrarySectionsKeepRetainedSourcesPrimaryAndArchiveOptIn() {
+    func testContextualKnowledgeMenusRemoveGlobalMigrationAndConnectorActions() {
+        XCTAssertEqual(KnowledgeDashboardMenuPolicy.settingsTitle(for: .chronicle), "Chronicle settings")
+        XCTAssertEqual(KnowledgeDashboardMenuPolicy.settingsActions(for: .chronicle), ["Observation configuration", "Needs attention", "Chronicle info"])
+        XCTAssertEqual(KnowledgeDashboardMenuPolicy.settingsTitle(for: .library), "Library settings")
+        XCTAssertEqual(KnowledgeDashboardMenuPolicy.settingsActions(for: .library), ["Capture URL", "New note"])
+        XCTAssertFalse(KnowledgeDashboardMenuPolicy.settingsActions(for: .chronicle).contains("Connectors"))
+        XCTAssertFalse(KnowledgeDashboardMenuPolicy.settingsActions(for: .chronicle).contains("Import legacy records"))
+    }
+
+    func testKnowledgeDashboardKeepsOneTopLevelRowAndScopedLibraryVisibility() {
         XCTAssertEqual(KnowledgeDashboardArea.allCases.map(\.title), ["Chronicle", "Library"])
-        XCTAssertEqual(KnowledgeDashboardSection.allCases.map(\.title), ["Chronicle", "Sources", "Syntheses", "Intake & archive"])
-        XCTAssertFalse(KnowledgeDashboardSection.sources.includesPendingOrArchived)
-        XCTAssertFalse(KnowledgeDashboardSection.syntheses.includesPendingOrArchived)
-        XCTAssertTrue(KnowledgeDashboardSection.intakeArchive.includesPendingOrArchived)
+        XCTAssertEqual(KnowledgeDashboardSection.allCases.map(\.title), ["Chronicle", "Sources", "Syntheses"])
+        XCTAssertEqual(KnowledgeSourceVisibility.allCases.map(\.title), ["Saved sources", "Pending sources", "Archived sources"])
         XCTAssertEqual(KnowledgeDashboardSection.syntheses.kind, .note)
+        XCTAssertFalse(KnowledgeCatalogRequestPolicy.includesPending(section: .syntheses, visibility: .pending))
+        XCTAssertFalse(KnowledgeCatalogRequestPolicy.includesArchived(section: .syntheses, visibility: .archived))
+        XCTAssertTrue(KnowledgeCatalogRequestPolicy.includesPending(section: .sources, visibility: .pending))
+        XCTAssertTrue(KnowledgeCatalogRequestPolicy.includesArchived(section: .sources, visibility: .archived))
+    }
+
+    func testSourceFiltersAreExclusiveAndNeverLeakIntoSyntheses() {
+        let retained = Self.syntheticSource(id: "retained", revision: "r-retained", admission: .retained)
+        let pending = Self.syntheticSource(id: "pending", revision: "r-pending", admission: .pending)
+        let archived = Self.syntheticSource(id: "archived", revision: "r-archived", admission: .archived)
+        XCTAssertEqual(KnowledgeCatalogPagePolicy.visibleRecords([retained, pending, archived], in: .sources, sourceVisibility: .saved).map(\.id), ["retained"])
+        XCTAssertEqual(KnowledgeCatalogPagePolicy.visibleRecords([retained, pending, archived], in: .sources, sourceVisibility: .pending).map(\.id), ["pending"])
+        XCTAssertEqual(KnowledgeCatalogPagePolicy.visibleRecords([retained, pending, archived], in: .sources, sourceVisibility: .archived).map(\.id), ["archived"])
+        XCTAssertTrue(KnowledgeCatalogPagePolicy.visibleRecords([retained, pending, archived], in: .syntheses, sourceVisibility: .archived).isEmpty)
     }
 
     func testFilteredPagesKeepLoadMoreReachableAndFindLaterSynthesis() {
@@ -527,8 +556,8 @@ final class KnowledgeModelsTests: XCTestCase {
     }
 
     func testSectionPageFenceRejectsLateResponseAfterLibrarySwitch() {
-        let chronicle = KnowledgeCatalogRequestKey(section: .chronicle, kind: .observation, scope: nil, search: "")
-        let sources = KnowledgeCatalogRequestKey(section: .sources, kind: .source, scope: nil, search: "")
+        let chronicle = KnowledgeCatalogRequestKey(section: .chronicle, kind: .observation, scope: nil, search: "", sourceVisibility: .saved)
+        let sources = KnowledgeCatalogRequestKey(section: .sources, kind: .source, scope: nil, search: "", sourceVisibility: .saved)
         XCTAssertFalse(KnowledgeCatalogRequestFence.accepts(chronicle, current: sources))
         XCTAssertTrue(KnowledgeCatalogRequestFence.accepts(sources, current: sources))
     }
