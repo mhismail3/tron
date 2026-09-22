@@ -345,6 +345,9 @@ struct SessionContextSheet: View {
                         WorkspaceInspectorSheet(sessionID: sessionID)
                     }
                 }
+                // Child sheets match Settings metadata sizing, not the compact
+                // Manage Session summary's local adjustment.
+                .environment(\.tronSettingsSecondaryTextSizeAdjustment, TronSettingsLayoutPolicy.metadataSizeAdjustment)
                 // Only Session destinations inherit teal; the management
                 // shell, usage, model, and export keep their own identities.
                 .tronSettingsVisualTheme(accent: sessionRowAccent)

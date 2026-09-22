@@ -556,8 +556,7 @@ and new-session sheet are separate presentation owners; the sheet retains the sa
 owners, focus behavior, controls, detents, and mutation admission.
 `ChatView` retains route/composer/transcript composition while attachment controls and chips, entrance/render
 rows, and extension-widget implementation live in separate presentation files with unchanged identities and
-transitions. Session History uses the same compact settings-row typography, icon column, spacing, and padding
-rhythm as the surrounding management sheets; long canonical previews wrap without increasing the base row scale. Widget/status state remains canonical, but both native presentations are temporarily gated off.
+transitions. Session History uses the same settings semantic roles as the surrounding management sheets: body-sized row titles, secondary-description explanatory text, and sheet-section headers for paging/context labels. Subagent History uses the same section-header and secondary-description roles; only bounded tool/output previews remain monospaced. Long canonical previews wrap without increasing the base row scale. Widget/status state remains canonical, but both native presentations are temporarily gated off.
 Conversation-turn rendering and lifecycle-safe media chips remain in `TranscriptRow.swift`; transcript event
 controls and tool-run/detail routing live in dedicated owners without widening their private helper state. Tool
 run detail lists order newest invocation first from producer `startedAt` values, with reverse invocation-source ties and
