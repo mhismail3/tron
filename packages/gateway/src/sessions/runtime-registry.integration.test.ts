@@ -1,7 +1,10 @@
+import { ProcessTranscriptLeaseStore } from "../transport/process-transcript-leases.js";
+import { DEFAULT_MAX_LIVE_RUNTIMES } from "../config.js";
 import { randomUUID } from "node:crypto";
 import { performance as nodePerformance } from "node:perf_hooks";
 import { sealBrowserToolReference } from "../display/browser-tool-reference.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
+import * as fsPromises from "node:fs/promises";
 import { appendFileSync, existsSync } from "node:fs";
 import { appendFile, copyFile, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -122,9 +125,9 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
 
   it("rejects malformed or incomplete cold JSONL before branch projection", async () => {
     const fixture = await coldFixture("strict-search-jsonl");
-    await fixture.registry.catalog("user");
+    const admitted = await (fixture.registry as any).catalogSnapshot("user");
     await appendFile(fixture.sessionFile, "{}\\n");
-    vi.spyOn(fixture.registry, "catalog").mockResolvedValue({ sessions: [{ id: fixture.manager.getSessionId() }] as any, listRevision: 1 });
+    vi.spyOn(fixture.registry as any, "catalogSnapshot").mockResolvedValue(admitted);
     await expect(fixture.registry.readSearchCut(fixture.manager.getSessionId())).rejects.toMatchObject({ code: "invalid_request" });
     await appendFile(fixture.sessionFile, "{}");
     await expect(fixture.registry.readSearchCut(fixture.manager.getSessionId())).rejects.toMatchObject({ code: "invalid_request" });
@@ -202,7 +205,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
 
   it("owns one exact live session for a workspace Automation operation", async () => {
     const changed = vi.fn();
-    const fixture = await coldFixture("automation-exact-session", { sessionListChanged: changed });
+    const fixture = await coldFixture("automation-exact-session", { sessionListChanged: changed, maximumLiveRuntimes: 1 });
     const sessionId = "20000000-0000-4000-8000-000000000010";
     const operationId = "automation:20000000-0000-4000-8000-000000000011";
     const automationId = "20000000-0000-4000-8000-000000000013";
@@ -216,13 +219,17 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(first.slot.id).toBe(sessionId);
     expect((await fixture.registry.list("user")).find((session) => session.id === sessionId))
       .toMatchObject({ creationOrigin: { kind: "automation", automationId } });
+    // Replaying the exact owner at capacity must not evict that owner first.
+    (first.slot as unknown as { sessionManager: SessionManager }).sessionManager
+      .appendMessage(fauxAssistantMessage("persisted automation"));
+    first.release();
     const second = await fixture.registry.createAutomationSession(
       fixture.cwd,
       sessionId,
       operationId,
       automationId,
     );
-    expect(second.slot).toBe(first.slot);
+    expect(second.slot === first.slot).toBe(true);
     await expect(fixture.registry.createAutomationSession(
       fixture.cwd,
       sessionId,
@@ -231,7 +238,6 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     )).rejects.toMatchObject({ code: "conflict" });
 
     second.release();
-    first.release();
     expect(changed).toHaveBeenCalled();
   });
 
@@ -1062,7 +1068,9 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       expect((await collectStream(displayLease.stream)).toString()).toBe("retained display artifact");
     } finally { await displayLease.release(); }
     // Only a subsequent successful membership cut can authorize orphan removal.
-    await fixture.registry.maintainDisplayArtifacts(new Set());
+    const membership = vi.spyOn(fixture.registry, "sessionIDsForStorageMaintenance").mockResolvedValueOnce(new Set());
+    await fixture.registry.maintainDisplayArtifacts();
+    membership.mockRestore();
     await expect(store.acquire(display.id, fixture.manager.getSessionId())).rejects.toMatchObject({ code: "not_found" });
     // Storage and an exact canonical session remain usable even when the
     // aggregate presentation catalog cannot be materialized.
@@ -1662,6 +1670,31 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
   });
 
+  it("reclaims reloadable idle runtimes under pressure while protecting visible sessions and drafts", async () => {
+    const fixture = await coldFixture("idle-capacity-reclamation", { maximumLiveRuntimes: 3 });
+    const first = await fixture.registry.acquire(fixture.manager.getSessionId());
+    fixture.registry.subscribe("phone", first.id);
+    const secondManager = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+    secondManager.appendMessage(fauxAssistantMessage("reloadable idle"));
+    const second = await fixture.registry.acquire(secondManager.getSessionId());
+    const draft = await fixture.registry.create(fixture.cwd);
+    const thirdManager = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+    thirdManager.appendMessage(fauxAssistantMessage("new visible selection"));
+    const third = await fixture.registry.acquire(thirdManager.getSessionId());
+    expect(second.isDisposed).toBe(true);
+    expect(first.isDisposed).toBe(false);
+    expect(draft.isDisposed).toBe(false);
+    expect(third.id).toBe(thirdManager.getSessionId());
+    const retain = third.retainLease();
+    try { await expect(fixture.registry.acquire(secondManager.getSessionId())).rejects.toMatchObject({ code: "busy" }); }
+    finally { retain(); }
+    const reopened = await fixture.registry.acquire(secondManager.getSessionId());
+    expect(reopened).not.toBe(second);
+    expect(JSON.stringify(reopened.snapshot().transcript)).toContain("reloadable idle");
+    expect(third.isDisposed).toBe(true);
+    expect(draft.isDisposed).toBe(false);
+  });
+
   it("deduplicates same-session starts and starts distinct sessions concurrently", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-concurrent-cold-starts-"));
     const agentDir = join(root, "agent");
@@ -2204,6 +2237,154 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
   });
 
+  it("retains user catalog and search admission while parallel delegated sessions append", async () => {
+    const fixture = await coldFixture("user-index-parallel-children");
+    const parentFile = fixture.manager.getSessionFile()!;
+    const forks = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
+    await mkdir(forks, { recursive: true });
+    const children = Array.from({ length: 3 }, () => SessionManager.forkFrom(parentFile, fixture.cwd, forks));
+    children.forEach(child => child.appendMessage(fauxAssistantMessage("child starts")));
+    const internals = fixture.registry as any;
+    const scanner = vi.spyOn(internals, "sessionInfos");
+    const parentID = fixture.manager.getSessionId();
+    try {
+      expect((await fixture.registry.catalog("user")).sessions.map(row => row.id)).toEqual([parentID]);
+      expect(scanner).toHaveBeenCalledTimes(1);
+      children.forEach(child => child.appendMessage(fauxAssistantMessage("parallel child progress")));
+      const live = await fixture.registry.create(fixture.cwd);
+      const results = await Promise.all([
+        fixture.registry.catalog("user"), fixture.registry.catalog("user"), fixture.registry.readSearchCut(parentID),
+      ]);
+      for (const result of results.slice(0, 2) as Awaited<ReturnType<RuntimeRegistry["catalog"]>>[]) {
+        expect(result.sessions.map(row => row.id)).toEqual(expect.arrayContaining([parentID, live.id]));
+        expect(result.sessions).toHaveLength(2);
+      }
+      expect(results[2]).toMatchObject({ summary: { id: parentID } });
+      expect(scanner).toHaveBeenCalledTimes(1);
+      // A partial acceleration must never hide children from administration.
+      const all = await fixture.registry.catalog("all");
+      expect(all.sessions.map(row => row.id)).toEqual(expect.arrayContaining(children.map(child => child.getSessionId())));
+    } finally { scanner.mockRestore(); }
+  });
+
+  it("isolates an unfinished child append from unrelated catalog and cold-open reads", async () => {
+    const fixture = await coldFixture("partial-child-isolation");
+    const parentFile = fixture.manager.getSessionFile()!;
+    const parallel = SessionManager.create(fixture.cwd, dirname(parentFile));
+    parallel.appendMessage(fauxAssistantMessage("parallel parent"));
+    const forks = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
+    await mkdir(forks, { recursive: true });
+    const child = SessionManager.forkFrom(parentFile, fixture.cwd, forks);
+    child.appendMessage(fauxAssistantMessage("persisted child"));
+    await appendFile(child.getSessionFile()!, '{"type":"message"');
+    const internals = fixture.registry as any;
+    const fallback = vi.spyOn(internals, "fallbackCatalogAcquisition");
+    try {
+      const parentID = fixture.manager.getSessionId();
+      const first = await fixture.registry.catalog("user");
+      expect(first.sessions.map(row => row.id).sort()).toEqual([parentID, parallel.getSessionId()].sort());
+      const opened = await Promise.all([fixture.registry.acquire(parentID), fixture.registry.acquire(parallel.getSessionId())]);
+      expect(opened.map(slot => slot.id)).toEqual([parentID, parallel.getSessionId()]);
+      expect(fallback).not.toHaveBeenCalled();
+      await expect(fixture.registry.catalog("all")).rejects.toMatchObject({ code: "busy", retryable: true });
+      // A selected incomplete user file still fails closed at the owning read.
+      const other = SessionManager.create(fixture.cwd, dirname(parentFile));
+      other.appendMessage(fauxAssistantMessage("other parent"));
+      await appendFile(other.getSessionFile()!, '{"type":"message"');
+      const incomplete = await readFile(other.getSessionFile()!, "utf8");
+      await expect(fixture.registry.acquire(other.getSessionId()).then(slot => slot.id)).rejects.toMatchObject({ code: "busy", retryable: true });
+      expect(await readFile(other.getSessionFile()!, "utf8")).toBe(incomplete);
+    } finally { fallback.mockRestore(); }
+  });
+
+  it("refreshes user metadata and duplicate quarantine after a scoped cut is warm", async () => {
+    const fixture = await coldFixture("scoped-index-refresh");
+    const parentFile = fixture.manager.getSessionFile()!;
+    const forks = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
+    await mkdir(forks, { recursive: true });
+    const child = SessionManager.forkFrom(parentFile, fixture.cwd, forks);
+    child.appendMessage(fauxAssistantMessage("child"));
+    const parentID = fixture.manager.getSessionId();
+    const initialPage = await fixture.registry.pageSource("user");
+    fixture.manager.appendSessionInfo("Updated canonical name");
+    const refreshedPage = await fixture.registry.pageSource("user");
+    expect(refreshedPage).not.toBe(initialPage);
+    expect((await refreshedPage.page(0, 500)).find(row => row.id === parentID)?.name).toBe("Updated canonical name");
+    await copyFile(parentFile, join(forks, "duplicate.jsonl"));
+    expect((await fixture.registry.catalog("user")).sessions.some(row => row.id === parentID)).toBe(false);
+    await expect(fixture.registry.acquire(parentID)).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("retains persisted, ambiguous, and live-only artifact owners without reading transcript metadata", async () => {
+    const fixture = await coldFixture("maintenance-header-membership");
+    const parentFile = fixture.manager.getSessionFile()!;
+    const forks = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
+    await mkdir(forks, { recursive: true });
+    const child = SessionManager.forkFrom(parentFile, fixture.cwd, forks);
+    child.appendMessage(fauxAssistantMessage("child"));
+    await appendFile(child.getSessionFile()!, '{"type":"message"');
+    await copyFile(parentFile, join(forks, "ambiguous.jsonl"));
+    const live = await fixture.registry.create(fixture.cwd);
+    const internals = fixture.registry as any;
+    const metadata = vi.spyOn(internals, "sessionInfos").mockImplementation(() => {
+      throw new Error("storage maintenance must not read transcripts");
+    });
+    try {
+      const ids = await fixture.registry.sessionIDsForStorageMaintenance();
+      expect([...ids].sort()).toEqual([fixture.manager.getSessionId(), child.getSessionId(), live.id].sort());
+      expect(metadata).not.toHaveBeenCalled();
+      await writeFile(join(dirname(parentFile), "incomplete-header.jsonl"), "{}");
+      await expect(fixture.registry.sessionIDsForStorageMaintenance()).rejects.toMatchObject({ code: "busy", retryable: true });
+    } finally { metadata.mockRestore(); }
+  });
+
+  it("shares one successor header walk across concurrent post-read validations", async () => {
+    const fixture = await coldFixture("header-walk-sharing");
+    const internals = fixture.registry as any;
+    const original = internals.catalogStructureEvidence.bind(internals);
+    let entered!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    let active = 0;
+    let maximumActive = 0;
+    const scanner = vi.spyOn(internals, "catalogStructureEvidence").mockImplementation(async () => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      try {
+        if (scanner.mock.calls.length === 1) { entered(); await barrier; }
+        return await original();
+      } finally { active -= 1; }
+    });
+    try {
+      const first = internals.sharedCatalogStructureEvidence();
+      await started;
+      const refreshes = Array.from({ length: 8 }, () => internals.sharedCatalogStructureEvidence(true));
+      const ordinary = internals.sharedCatalogStructureEvidence();
+      release();
+      const results = await Promise.all([first, ordinary, ...refreshes]);
+      expect(results.every(value => value.complete)).toBe(true);
+      expect(scanner).toHaveBeenCalledTimes(2);
+      expect(maximumActive).toBe(1);
+      expect(results[0]).toBe(results[1]);
+      expect(results.slice(2).every(value => value === results[2])).toBe(true);
+    } finally { release(); scanner.mockRestore(); }
+  });
+
+  it("keeps cold acquisition independent of mutable catalog metadata", async () => {
+    const fixture = await coldFixture("header-only-acquisition");
+    await fixture.registry.catalog("all");
+    const internals = fixture.registry as any;
+    const metadata = vi.spyOn(internals, "validatedStructuralIndex").mockImplementation(() => {
+      throw new Error("acquisition must not depend on dashboard metadata");
+    });
+    try {
+      const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+      expect(slot.id).toBe(fixture.manager.getSessionId());
+      expect(metadata).not.toHaveBeenCalled();
+    } finally { metadata.mockRestore(); }
+  });
+
   it("scans only canonical user metadata for a user catalog and reserves all-scope indexing", async () => {
     const fixture = await coldFixture("user-metadata-cut");
     const parentFile = fixture.manager.getSessionFile()!;
@@ -2232,6 +2413,113 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     } finally {
       scanner.mockRestore();
     }
+  });
+
+  it("coalesces acquisition successors across invalidations until prior physical work settles", async () => {
+    const fixture = await coldFixture("acquisition-successor-ownership");
+    const internal = fixture.registry as any;
+    const original = internal.resolveCatalogAcquisition.bind(internal);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const resolve = vi.spyOn(internal, "resolveCatalogAcquisition").mockImplementation(async () => {
+      if (resolve.mock.calls.length === 1) { await gate; throw new Error("retired cut"); }
+      return original();
+    });
+    const requests = [internal.catalogAcquisition().catch((error: unknown) => error)];
+    try {
+      internal.invalidateCatalogAdmission();
+      requests.push(internal.catalogAcquisition().catch((error: unknown) => error));
+      internal.invalidateCatalogAdmission();
+      requests.push(internal.catalogAcquisition().catch((error: unknown) => error));
+      expect(resolve).toHaveBeenCalledTimes(1);
+      release();
+      const results = await Promise.all(requests);
+      expect(results[0]).toMatchObject({ message: "retired cut" });
+      for (const result of results.slice(1)) expect(result.entriesByID.has(fixture.manager.getSessionId())).toBe(true);
+      expect(resolve).toHaveBeenCalledTimes(2);
+    } finally { release(); await Promise.all(requests); resolve.mockRestore(); }
+  });
+
+  it("lets user discovery finish while an all-scope scan remains blocked and fails", async () => {
+    const fixture = await coldFixture("scope-failure-isolation");
+    const internals = fixture.registry as any;
+    const original = internals.sessionInfos.bind(internals);
+    let enter!: () => void, release!: () => void;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    const scanner = vi.spyOn(internals, "sessionInfos").mockImplementation(async scope => {
+      if (scope === "all") { enter(); await blocked; throw new Error("child-only instability"); }
+      return original(scope);
+    });
+    const all = fixture.registry.catalog("all").catch(error => error);
+    try {
+      await entered;
+      let published = false;
+      const users = Promise.all([fixture.registry.catalog("user"), fixture.registry.catalog("user")])
+        .then(results => { published = true; return results; });
+      void users.catch(() => {}); // Observe the joined failure in negative controls too.
+      await vi.waitFor(() => expect(published).toBe(true));
+      for (const result of await users) expect(result.sessions.map(row => row.id)).toEqual([fixture.manager.getSessionId()]);
+      expect(scanner.mock.calls.map(call => call[0])).toEqual(["all", "user"]);
+      release();
+      expect(await all).toMatchObject({ message: "child-only instability" });
+    } finally { release(); await all; scanner.mockRestore(); }
+  });
+
+  it("retires viewer capacity during one shared catalog wait without multiplying physical scans", async () => {
+    const fixture = await coldFixture("viewer-cancel-catalog");
+    const internals = fixture.registry as any;
+    const original = internals.catalogStructureEvidence.bind(internals);
+    let release!: () => void;
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    let scanSettled = false;
+    const scanner = vi.spyOn(internals, "catalogStructureEvidence").mockImplementation(async () => {
+      await blocked;
+      try { return await original(); } finally { scanSettled = true; }
+    });
+    const viewers = new ProcessTranscriptLeaseStore(fixture.registry);
+    try {
+      for (let index = 0; index < 6; index++) {
+        const viewerId = `viewer-${index}`;
+        let settled = false;
+        const opening = viewers.open("client", fixture.manager.getSessionId(), "process", "child", "run", undefined, vi.fn(), undefined,
+          { viewerId, parentSubscriptionToken: "parent-token" }).catch(error => { settled = true; return error; });
+        await vi.waitFor(() => expect(scanner).toHaveBeenCalledTimes(1));
+        expect(viewers.closeOwned("client", viewerId)).toBe(true);
+        await vi.waitFor(() => expect(settled).toBe(true));
+        expect(await opening).toMatchObject({ code: "conflict" });
+      }
+      expect(scanner).toHaveBeenCalledTimes(1);
+    } finally {
+      release();
+      await vi.waitFor(() => expect(scanSettled).toBe(true));
+      viewers.releaseClient("client"); scanner.mockRestore();
+    }
+  });
+
+  it("publishes child reference availability only after exact binding becomes authoritative", async () => {
+    const fixture = await coldFixture("binding-availability");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const timestamp = new Date().toISOString();
+    const activity: ExtensionRunActivity = {
+      id: "tool", toolCallId: "tool", runId: "run", source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous",
+      status: "running", startedAt: timestamp, updatedAt: timestamp,
+      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: timestamp },
+      children: [
+        { id: "worker", producerId: "worker", label: "worker", status: "running", lifecycle: "running", childSessionRef: "child" },
+        { id: "other", producerId: "other", label: "other", status: "running", lifecycle: "running", childSessionRef: "child" },
+      ],
+    };
+    const internals = slot as any;
+    internals.syncSubagentProcesses(activity);
+    const waiting = slot.snapshot().processActivities!.find(row => row.title === "worker")!;
+    expect(waiting.childSessionRef).toBeUndefined();
+    activity.children.pop();
+    activity.lifecycle!.sequence = 2;
+    internals.syncSubagentProcesses(activity);
+    const ready = slot.snapshot().processActivities!.find(row => row.processId === waiting.processId)!;
+    expect(ready.childSessionRef).toBe("child");
+    expect(slot.processChildSessionBinding(ready.processId)).toMatchObject({ ref: "child", producerId: "worker" });
   });
 
   it("serializes an all-scope materialization behind an active user flight", async () => {
@@ -2323,43 +2611,6 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(removed.generation).not.toBe(added.generation);
     expect((await fixture.registry.catalog("user")).sessions.map((session) => session.id))
       .not.toContain(second.getSessionId());
-  });
-
-  it("makes user reads join an active all-scope flight without a parallel scan", async () => {
-    const fixture = await coldFixture("catalog-all-flight-head-of-line");
-    const parentFile = fixture.manager.getSessionFile()!;
-    const forksDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
-    await mkdir(forksDirectory, { recursive: true });
-    const child = SessionManager.forkFrom(parentFile, fixture.cwd, forksDirectory);
-    child.appendMessage(fauxAssistantMessage("slow all-scope fixture"));
-    const internals = fixture.registry as unknown as {
-      sessionInfos: (scope?: "user" | "all") => Promise<unknown[]>;
-    };
-    const original = internals.sessionInfos.bind(fixture.registry);
-    let entered!: () => void;
-    let release!: () => void;
-    const enteredScan = new Promise<void>((resolve) => { entered = resolve; });
-    const barrier = new Promise<void>((resolve) => { release = resolve; });
-    let userFinished = false;
-    const scanner = vi.spyOn(internals, "sessionInfos").mockImplementation(async (scope) => {
-      entered();
-      await barrier;
-      return original(scope);
-    });
-    try {
-      const all = fixture.registry.catalog("all");
-      await enteredScan;
-      const user = fixture.registry.catalog("user").then(() => { userFinished = true; });
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      expect(userFinished).toBe(false);
-      expect(scanner).toHaveBeenCalledTimes(1);
-      release();
-      await Promise.all([all, user]);
-      expect(scanner).toHaveBeenCalledTimes(1);
-    } finally {
-      release();
-      scanner.mockRestore();
-    }
   });
 
   it("bounds validation reads and retained acquisition evidence before publication", async () => {
@@ -2636,6 +2887,39 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect((await registry.list("user")).map((session) => session.id)).not.toContain(childId);
   }, 30_000);
 
+  it("closes the catalog header handle when the tail probe fails", async () => {
+    const fixture = await coldFixture("header-read-failure");
+    const probePath = join(fixture.root, "isolated-header.jsonl");
+    await copyFile(fixture.manager.getSessionFile()!, probePath);
+    const handle = await fsPromises.open(probePath, "r");
+    const identity = await handle.stat();
+    const originalRead = handle.read;
+    const failure = new Error("injected tail read failure");
+    let failedHandle: typeof handle | undefined;
+    const read = vi.spyOn(Object.getPrototypeOf(handle), "read").mockImplementation(async function (this: typeof handle, ...args: any[]) {
+      const current = await this.stat();
+      if (current.dev === identity.dev && current.ino === identity.ino) {
+        failedHandle = this;
+        throw failure;
+      }
+      return originalRead.apply(this, args as any);
+    });
+    const internals = fixture.registry as unknown as {
+      readCatalogHeader: (path: string, maximumBytes: number, reserve: () => boolean, refund: () => void) => Promise<unknown>;
+    };
+    try {
+      await expect(internals.readCatalogHeader(probePath, 1024, () => true, () => {}))
+        .rejects.toBe(failure);
+      expect(failedHandle).toBeDefined();
+      await expect(failedHandle!.stat()).rejects.toMatchObject({ code: "EBADF" });
+    } finally {
+      read.mockRestore();
+      await handle.close();
+      await failedHandle?.close();
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
   it("reserves a deterministic aggregate header-read budget across concurrent readers", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-catalog-strict-header-budget-"));
     const agentDir = join(root, "agent");
@@ -2897,6 +3181,79 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(repaired.sessions.filter((session) => session.id === slot.id)).toHaveLength(1);
     expect((await registry.acquire(slot.id)).id).toBe(slot.id);
   });
+
+  it("keeps 128 parallel parent runs discoverable through child churn and repeated client reentry", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-scale-qualification-"));
+    const agentDir = join(root, "agent");
+    const projects = Array.from({ length: 8 }, (_, index) => join(root, `project-${index}`));
+    await Promise.all(projects.map(cwd => mkdir(cwd, { recursive: true })));
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    const managers: SessionManager[] = [];
+    const children: SessionManager[] = [];
+    for (let index = 0; index < 128; index++) {
+      const cwd = projects[index % projects.length]!;
+      const directory = join(agentDir, "sessions", `project-${index % projects.length}`);
+      await mkdir(directory, { recursive: true });
+      const manager = SessionManager.create(cwd, directory);
+      manager.appendMessage(fauxAssistantMessage(`parent-${index}`));
+      managers.push(manager);
+      const forks = join(directory, basename(manager.getSessionFile()!, ".jsonl"), "forks");
+      await mkdir(forks, { recursive: true });
+      for (let child = 0; child < 3; child++) {
+        const fork = SessionManager.forkFrom(manager.getSessionFile()!, cwd, forks);
+        fork.appendMessage(fauxAssistantMessage(`child-${index}-${child}`));
+        children.push(fork);
+      }
+    }
+    let release!: () => void;
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    const faux = fauxProvider({ provider: "tron-scale-test", tokensPerSecond: 100_000 });
+    faux.setResponses(managers.map((_, index) => async () => { await barrier; return fauxAssistantMessage(`complete-${index}`); }));
+    const runtimeFactory = vi.fn(async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider);
+      return runtime;
+    });
+    const registry = new RuntimeRegistry({ agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
+      maximumLiveRuntimes: DEFAULT_MAX_LIVE_RUNTIMES, modelRuntimeFactory: runtimeFactory,
+      trust: new TrustService(agentDir), broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {} });
+    registries.push(registry);
+    let acquisitions: Promise<unknown>[] = [];
+    try {
+      await registry.initialize();
+      acquisitions = managers.flatMap(manager => [registry.acquire(manager.getSessionId()), registry.acquire(manager.getSessionId())]);
+      const acquired = await Promise.all(acquisitions) as Awaited<ReturnType<RuntimeRegistry["acquire"]>>[];
+      const slots = acquired.filter((_, index) => index % 2 === 0);
+      for (let index = 0; index < slots.length; index++) expect(acquired[index * 2 + 1]).toBe(slots[index]);
+      const model = faux.getModel();
+      await Promise.all(slots.map(async (slot, index) => { await slot.setModel(model.provider, model.id); await slot.prompt(`work-${index}`); }));
+      await vi.waitFor(() => expect(faux.state.callCount).toBe(128), { timeout: 10_000 });
+      expect(registry.activeSessionIds()).toHaveLength(128);
+      const expected = managers.map(manager => manager.getSessionId()).sort();
+      for (let wave = 0; wave < 3; wave++) {
+        for (const child of children) child.appendMessage(fauxAssistantMessage(`progress-${wave}`));
+        registry.unsubscribeClient("phone");
+        const catalogs = await Promise.all(Array.from({ length: 8 }, () => registry.catalog("user")));
+        for (const catalog of catalogs) expect(catalog.sessions.map(row => row.id).sort()).toEqual(expected);
+        for (let index = 0; index < slots.length; index++) {
+          const slot = slots[(index + wave) % slots.length]!;
+          registry.subscribe("phone", slot.id);
+          expect(await registry.acquire(slot.id)).toBe(slot);
+          expect(slot.snapshot().sessionId).toBe(slot.id);
+          registry.unsubscribeClient("phone");
+        }
+        expect(registry.activeSessionIds()).toHaveLength(128);
+        expect(runtimeFactory).toHaveBeenCalledTimes(128);
+      }
+      release();
+      await registry.waitUntilIdle();
+      expect(registry.activeSessionIds()).toHaveLength(0);
+      for (const slot of slots) expect(slot.snapshot().transcript.some(item => JSON.stringify(item).includes("complete-"))).toBe(true);
+    } finally {
+      release(); await Promise.allSettled(acquisitions); await registry.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 60_000);
 
   it("runs distinct sessions concurrently and keeps a run alive after its client disconnects", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-runtime-integration-"));
@@ -3921,7 +4278,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     };
     internal.extensionActivities.set(toolCallId, {
       id: toolCallId, activityId: "retry-activity", runId, toolCallId,
-      source: { source: "pi-subagents" }, title: "Subagents", mode: "asynchronous", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", mode: "asynchronous", status: "running",
       startedAt, updatedAt: startedAt, children: [],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
     });
@@ -3965,7 +4322,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const startedAt = new Date(Date.now() - 60_000).toISOString();
     const activity: ExtensionRunActivity = {
       id: toolCallId, activityId: "missing-activity", runId, toolCallId,
-      source: { source: "pi-subagents" }, title: "Subagents", mode: "asynchronous", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", mode: "asynchronous", status: "running",
       startedAt, updatedAt: startedAt,
       children: [{ id: "child", producerId: "child", label: "worker", status: "running", lifecycle: "running" }],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
@@ -4027,7 +4384,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     };
     internal.extensionActivities.set(toolCallId, {
       id: toolCallId, activityId: "delayed-workflow-activity", runId: rootRunId, toolCallId,
-      source: { source: "pi-subagents" }, title: "Subagents", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
       startedAt, updatedAt: startedAt, children: [],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
     });
@@ -4080,7 +4437,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     };
     internal.extensionActivities.set(toolCallId, {
       id: toolCallId, activityId, runId, toolCallId,
-      source: { source: "pi-subagents" }, title: "Subagents", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
       startedAt, updatedAt: startedAt, children: [],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
     });
@@ -4245,7 +4602,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     };
     internal.extensionActivities.set(toolCallId, {
       id: toolCallId, activityId: "async-single-activity", runId: asyncRunId, toolCallId,
-      source: { source: "pi-subagents" }, title: "Subagents", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
       startedAt, updatedAt: startedAt, children: [],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
     });
@@ -4327,7 +4684,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const startedAt = new Date(Date.now() - 1_000).toISOString();
     const activity: ExtensionRunActivity = {
       id: "workflow-tool", activityId: "workflow-activity", runId: rootRunId, toolCallId: "workflow-tool",
-      source: { source: "pi-subagents" }, title: "Subagents", mode: "workflow", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", mode: "workflow", status: "running",
       startedAt, updatedAt: startedAt,
       children: [{ id: producerId, producerId, label: "worker", status: "running", lifecycle: "running" }],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
@@ -4357,7 +4714,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const startedAt = new Date(Date.now() - 1_000).toISOString();
     const activity: ExtensionRunActivity = {
       id: "ambiguous-tool", activityId: "ambiguous-activity", runId: "ambiguous-run", toolCallId: "ambiguous-tool",
-      source: { source: "pi-subagents" }, title: "Subagents", mode: "workflow", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", mode: "workflow", status: "running",
       startedAt, updatedAt: startedAt,
       children: ["first", "second"].map((producerId) => ({
         id: producerId, producerId, label: producerId, status: "running" as const,
@@ -4391,7 +4748,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     };
     internal.extensionActivities.set("fork-tool", {
       id: "fork-tool", activityId: "fork-activity", runId: "fork-run", toolCallId: "fork-tool",
-      source: { source: "pi-subagents" }, title: "Subagents", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
       startedAt, updatedAt: startedAt, children: [],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
     });
@@ -4439,7 +4796,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     };
     internal.extensionActivities.set("single-tool", {
       id: "single-tool", activityId: "single-activity", runId: "single-run", toolCallId: "single-tool",
-      source: { source: "pi-subagents" }, title: "Subagents", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
       startedAt, updatedAt: startedAt, children: [],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
     });
@@ -4505,7 +4862,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const startedAt = new Date().toISOString();
     const activity: ExtensionRunActivity = {
       id: "tool", activityId: "activity", runId: "expected-run", toolCallId: "tool",
-      source: { source: "pi-subagents" }, title: "Subagents", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
       startedAt, updatedAt: startedAt,
       children: [{ id: "artifact-child", label: "worker", status: "running" }],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
@@ -4536,7 +4893,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const startedAt = new Date().toISOString();
     const activity: ExtensionRunActivity = {
       id: "tool", activityId: "activity", runId: "expected-run", toolCallId: "tool",
-      source: { source: "pi-subagents" }, title: "Subagents", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
       startedAt, updatedAt: startedAt,
       children: [{ id: "child-run", label: "worker", status: "running" }],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },

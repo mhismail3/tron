@@ -155,15 +155,12 @@ final class ReadOnlySubagentSessionStore {
     private var openTask: Task<Void, Never>?
     private var pageTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
-    private var bindingRetryTask: Task<Void, Never>?
     private var textPreparationTask: Task<Void, Never>?
-    private var bindingRetryAttempts = 0
     private var pendingRefreshRevision: String?
-    private var busyRecoveryTask: Task<Void, Never>?
-    private var busyRecoveryAttempts = 0
+    private var recoveryTask: Task<Void, Never>?
+    private var recoveryAttempts = 0
 
-    private static let maximumBindingRetryAttempts = 2
-    private static let maximumBusyRecoveryAttempts = 3
+    private static let maximumRecoveryAttempts = 3
 
     private(set) var status: Status = .idle
     private(set) var parentSessionID: String?
@@ -190,7 +187,7 @@ final class ReadOnlySubagentSessionStore {
 
     init(client: GatewayClient) { self.client = client }
 
-    var canLoadEarlier: Bool { status == .open && transcriptStart > 0 }
+    var canLoadEarlier: Bool { status == .open && recoveryTask == nil && transcriptStart > 0 }
 
     func open(
         parentSessionID: String,
@@ -199,8 +196,7 @@ final class ReadOnlySubagentSessionStore {
         parentSubscriptionToken: String,
         activity: SessionProcessActivity? = nil
     ) {
-        bindingRetryAttempts = 0
-        busyRecoveryAttempts = 0
+        recoveryAttempts = 0
         selectedToolCallID = activity?.processId == processID ? activity?.toolCallId : nil
         selectedRunID = activity?.processId == processID ? activity?.runId : nil
         startOpen(
@@ -219,7 +215,10 @@ final class ReadOnlySubagentSessionStore {
         parentSubscriptionToken: String,
         activity: SessionProcessActivity?
     ) {
-        retire(sendClose: true)
+        let retainTranscript = self.parentSessionID == parentSessionID && self.processID == processID
+            && self.presentationGeneration == presentationGeneration
+            && self.parentSubscriptionToken == parentSubscriptionToken && !items.isEmpty
+        retire(sendClose: true, preserveTranscript: retainTranscript)
         generation &+= 1
         let ownedGeneration = generation
         // Allocate the opaque identity before the request is sent. The Gateway
@@ -237,7 +236,7 @@ final class ReadOnlySubagentSessionStore {
            SessionProcessAdmissionPolicy.admits(activity) {
             liveActivity = activity
         }
-        status = .opening
+        status = retainTranscript ? .reconnecting : .opening
         openTask = Task { [weak self, client] in
             defer { Task { @MainActor [weak self] in
                 guard let self, self.generation == ownedGeneration else { return }
@@ -298,6 +297,7 @@ final class ReadOnlySubagentSessionStore {
                         Self.closeDetached(client: client, leaseID: viewerID, connectionAdmission: connectionAdmission)
                         return
                     }
+                    self.recoveryAttempts = 0
                     self.status = .open
                     self.refreshNewestPageIfNeeded()
                 }
@@ -316,19 +316,17 @@ final class ReadOnlySubagentSessionStore {
                     guard let self, self.generation == ownedGeneration else { return }
                     if let failure = error as? GatewayFailure,
                        failure.code == "busy", failure.retryable {
-                        self.status = .waiting
-                        self.scheduleBusyRecovery(for: .opening, generation: ownedGeneration)
+                        self.status = self.items.isEmpty ? .waiting : .reconnecting
+                        self.scheduleRecovery(for: .opening, generation: ownedGeneration)
                     } else if let failure = error as? GatewayFailure,
                        ["not_found", "unavailable"].contains(failure.code),
                        self.liveActivity?.lifecycle.state.isActive == true {
-                        // Active subagents can publish their child binding after the
-                        // activity row. The RPC remains the capability authority, so
-                        // two short retries may also trigger Gateway reconciliation
-                        // before a process delta arrives; no path or identity is
-                        // inferred on-device.
-                        self.status = .waiting
-                        if let activity = self.liveActivity {
-                            self.scheduleBindingRetry(activity: activity, delay: .milliseconds(200))
+                        // Missing ownership waits for the authoritative nil-to-ref
+                        // activity transition. Once bound, transient file admission
+                        // shares the same finite recovery episode as busy replies.
+                        self.status = self.items.isEmpty ? .waiting : .reconnecting
+                        if self.liveActivity?.childSessionRef != nil {
+                            self.scheduleRecovery(for: .opening, generation: ownedGeneration)
                         }
                     } else if let failure = error as? GatewayFailure,
                               ["not_found", "unavailable", "unsupported"].contains(failure.code) {
@@ -342,7 +340,7 @@ final class ReadOnlySubagentSessionStore {
     }
 
     func loadEarlier() {
-        guard pageTask == nil, status == .open, let leaseID, let revision, transcriptStart > 0 else { return }
+        guard pageTask == nil, recoveryTask == nil, status == .open, let leaseID, let revision, transcriptStart > 0 else { return }
         let ownedGeneration = generation
         guard let connectionAdmission = viewerConnectionAdmission else { return }
         let before = transcriptStart
@@ -393,7 +391,7 @@ final class ReadOnlySubagentSessionStore {
                         return
                     }
                     self.prepareText()
-                    self.busyRecoveryAttempts = 0
+                    self.recoveryAttempts = 0
                     self.status = .open
                 }
             } catch is CancellationError {
@@ -408,7 +406,7 @@ final class ReadOnlySubagentSessionStore {
                     if let failure = error as? GatewayFailure,
                        failure.code == "busy", failure.retryable {
                         self.status = .open
-                        self.scheduleBusyRecovery(for: .earlier, generation: ownedGeneration)
+                        self.scheduleRecovery(for: .earlier, generation: ownedGeneration)
                     } else if let failure = error as? GatewayFailure, failure.code == "conflict" {
                         self.reopenCanonicalTail(ownedGeneration: ownedGeneration)
                     } else {
@@ -444,19 +442,22 @@ final class ReadOnlySubagentSessionStore {
         refreshNewestPageIfNeeded()
     }
 
-    private enum BusyRecoveryIntent { case opening, earlier, newest }
+    private enum RecoveryIntent { case opening, earlier, newest }
 
-    private func scheduleBusyRecovery(for intent: BusyRecoveryIntent, generation ownedGeneration: Int) {
-        guard busyRecoveryTask == nil,
-              busyRecoveryAttempts < Self.maximumBusyRecoveryAttempts else { return }
-        busyRecoveryAttempts += 1
-        let delay = Duration.milliseconds(150 * busyRecoveryAttempts)
-        busyRecoveryTask = Task { [weak self] in
+    private func scheduleRecovery(for intent: RecoveryIntent, generation ownedGeneration: Int) {
+        guard recoveryTask == nil else { return }
+        guard recoveryAttempts < Self.maximumRecoveryAttempts else {
+            status = .failed("The subagent session is still unavailable. Retry to load it.")
+            return
+        }
+        recoveryAttempts += 1
+        let delay = Duration.milliseconds(150 * recoveryAttempts)
+        recoveryTask = Task { [weak self] in
             do { try await Task.sleep(for: delay) } catch { return }
             guard !Task.isCancelled else { return }
             await MainActor.run { [weak self] in
                 guard let self, self.generation == ownedGeneration else { return }
-                self.busyRecoveryTask = nil
+                self.recoveryTask = nil
                 switch intent {
                 case .opening:
                     guard let parent = self.parentSessionID, let process = self.processID,
@@ -477,7 +478,8 @@ final class ReadOnlySubagentSessionStore {
     private func refreshNewestPageIfNeeded() {
         // The store is the single read owner. Historical prepend wins its lane;
         // the dirty revision remains coalesced until that response settles.
-        guard pageTask == nil, refreshTask == nil,
+        // Invalidation cannot bypass scheduled recovery or a terminal failure.
+        guard status == .open, recoveryTask == nil, pageTask == nil, refreshTask == nil,
               let targetRevision = pendingRefreshRevision,
               targetRevision != revision,
               let leaseID,
@@ -511,8 +513,10 @@ final class ReadOnlySubagentSessionStore {
                     // not a request that may leave the mounted viewer waiting.
                     guard response.revision != expectedRevision else {
                         self.refreshTask = nil
-                        self.pendingRefreshRevision = nil
+                        if self.pendingRefreshRevision == targetRevision { self.pendingRefreshRevision = nil }
+                        self.recoveryAttempts = 0
                         self.status = .open
+                        self.refreshNewestPageIfNeeded()
                         return
                     }
                     let merged = ReadOnlyProcessTranscriptMerge.refreshing(
@@ -534,7 +538,7 @@ final class ReadOnlySubagentSessionStore {
                         return
                     }
                     self.prepareText()
-                    self.busyRecoveryAttempts = 0
+                    self.recoveryAttempts = 0
                     if self.pendingRefreshRevision == targetRevision
                         || self.pendingRefreshRevision == response.revision {
                         self.pendingRefreshRevision = nil
@@ -561,7 +565,7 @@ final class ReadOnlySubagentSessionStore {
                     if let failure = error as? GatewayFailure,
                               failure.code == "busy", failure.retryable {
                         self.status = .open
-                        self.scheduleBusyRecovery(for: .newest, generation: ownedGeneration)
+                        self.scheduleRecovery(for: .newest, generation: ownedGeneration)
                     } else if let failure = error as? GatewayFailure, failure.code == "conflict" {
                         self.reopenCanonicalTail(ownedGeneration: ownedGeneration)
                     } else if let failure = error as? GatewayFailure,
@@ -576,19 +580,15 @@ final class ReadOnlySubagentSessionStore {
     }
 
     private func reopenCanonicalTail(ownedGeneration: Int) {
-        guard generation == ownedGeneration,
-              let parentSessionID,
-              let processID,
-              let parentSubscriptionToken,
-              let presentationGeneration else { return }
-        let activity = liveActivity
-        open(
-            parentSessionID: parentSessionID,
-            processID: processID,
-            presentationGeneration: presentationGeneration,
-            parentSubscriptionToken: parentSubscriptionToken,
-            activity: activity
-        )
+        guard generation == ownedGeneration else { return }
+        scheduleRecovery(for: .opening, generation: ownedGeneration)
+    }
+
+    func retry() {
+        guard let parentSessionID, let processID, let presentationGeneration, let parentSubscriptionToken else { return }
+        open(parentSessionID: parentSessionID, processID: processID,
+             presentationGeneration: presentationGeneration, parentSubscriptionToken: parentSubscriptionToken,
+             activity: liveActivity)
     }
 
     func updateLiveActivity(_ activity: SessionProcessActivity?) {
@@ -598,8 +598,6 @@ final class ReadOnlySubagentSessionStore {
         guard let activity else {
             liveActivity = nil
             if wasActive { rebuildPresentation() }
-            bindingRetryTask?.cancel()
-            bindingRetryTask = nil
             if status == .waiting { status = .unavailable }
             return
         }
@@ -615,9 +613,6 @@ final class ReadOnlySubagentSessionStore {
             // child. Retarget only under the immutable tool/run correlation;
             // ambiguous candidates are filtered by SessionProcessProjection.
             self.processID = activity.processId
-            bindingRetryAttempts = 0
-            bindingRetryTask?.cancel()
-            bindingRetryTask = nil
             if let parentSessionID, let parentSubscriptionToken, let presentationGeneration {
                 startOpen(
                     parentSessionID: parentSessionID,
@@ -629,86 +624,29 @@ final class ReadOnlySubagentSessionStore {
             }
             return
         }
+        guard selectedRunID == nil || activity.runId == selectedRunID else { return }
         liveActivity = activity
         if wasActive != activity.lifecycle.state.isActive { rebuildPresentation() }
-        guard status == .waiting else { return }
-        if activity.childSessionRef != nil {
-            if !hadChildBinding {
-                bindingRetryAttempts = 0
-                bindingRetryTask?.cancel()
-                bindingRetryTask = nil
-            }
-            if activity.lifecycle.state.isActive {
-                scheduleBindingRetry(activity: activity, delay: .zero)
-            } else if let parentSessionID,
-                      let parentSubscriptionToken,
-                      let presentationGeneration {
-                open(
-                    parentSessionID: parentSessionID,
-                    processID: processID,
-                    presentationGeneration: presentationGeneration,
-                    parentSubscriptionToken: parentSubscriptionToken,
-                    activity: activity
-                )
-            }
-        } else if !activity.lifecycle.state.isActive {
-            bindingRetryTask?.cancel()
-            bindingRetryTask = nil
+        guard status == .waiting || status == .unavailable else { return }
+        if activity.childSessionRef != nil && !hadChildBinding,
+           let parentSessionID, let parentSubscriptionToken, let presentationGeneration {
+            // Readiness changes once for this exact child/run. Repeated terminal
+            // updates never reset the recovery allowance or create another viewer.
+            startOpen(parentSessionID: parentSessionID, processID: processID,
+                      presentationGeneration: presentationGeneration,
+                      parentSubscriptionToken: parentSubscriptionToken, activity: activity)
+        } else if activity.childSessionRef == nil && !activity.lifecycle.state.isActive {
             status = .unavailable
         }
     }
 
-    private func scheduleBindingRetry(activity: SessionProcessActivity, delay: Duration) {
-        guard bindingRetryTask == nil,
-              bindingRetryAttempts < Self.maximumBindingRetryAttempts,
-              activity.lifecycle.state.isActive,
-              let parentSessionID,
-              let processID,
-              let parentSubscriptionToken,
-              let presentationGeneration else {
-            // A live process may publish its binding after any bounded retry
-            // window. Remain truthful about pending availability and let the
-            // authoritative activity delta or a later retry recover the viewer;
-            // retry exhaustion is not a terminal read failure.
-            if bindingRetryAttempts >= Self.maximumBindingRetryAttempts,
-               activity.childSessionRef != nil {
-                status = .waiting
-            }
-            return
-        }
-        bindingRetryAttempts += 1
-        let ownedGeneration = generation
-        bindingRetryTask = Task { [weak self] in
-            if delay > .zero {
-                do { try await Task.sleep(for: delay) }
-                catch { return }
-            }
-            guard !Task.isCancelled else { return }
-            await MainActor.run { [weak self] in
-                guard let self,
-                      self.generation == ownedGeneration,
-                      self.status == .waiting else { return }
-                self.bindingRetryTask = nil
-                let currentActivity = self.liveActivity ?? activity
-                self.startOpen(
-                    parentSessionID: parentSessionID,
-                    processID: processID,
-                    presentationGeneration: presentationGeneration,
-                    parentSubscriptionToken: parentSubscriptionToken,
-                    activity: currentActivity
-                )
-            }
-        }
-    }
-
     func close() {
-        bindingRetryAttempts = 0
         selectedToolCallID = nil
         selectedRunID = nil
         retire(sendClose: true)
     }
 
-    private func retire(sendClose: Bool) {
+    private func retire(sendClose: Bool, preserveTranscript: Bool = false) {
         let oldLease = leaseID
         let oldOpeningViewer = openingViewerID
         let oldConnection = viewerConnectionAdmission
@@ -716,15 +654,18 @@ final class ReadOnlySubagentSessionStore {
         openTask?.cancel(); openTask = nil
         pageTask?.cancel(); pageTask = nil
         refreshTask?.cancel(); refreshTask = nil
-        bindingRetryTask?.cancel(); bindingRetryTask = nil
-        busyRecoveryTask?.cancel(); busyRecoveryTask = nil
+        recoveryTask?.cancel(); recoveryTask = nil
         textPreparationTask?.cancel(); textPreparationTask = nil
         textPreparationGeneration &+= 1
         pendingRefreshRevision = nil
-        leaseID = nil; openingViewerID = nil; viewerConnectionAdmission = nil; childSessionRef = nil; parentSubscriptionToken = nil; canAbort = false; revision = nil
-        items.removeAll(); presentation = .empty; preparedText = .empty
-        transcriptStart = 0; transcriptTotal = 0
-        nextEntryID = nil; leafEntryID = nil; forkBoundary = nil; liveActivity = nil
+        leaseID = nil; openingViewerID = nil; viewerConnectionAdmission = nil; parentSubscriptionToken = nil; canAbort = false; revision = nil
+        if !preserveTranscript {
+            childSessionRef = nil
+            items.removeAll(); presentation = .empty; preparedText = .empty
+            transcriptStart = 0; transcriptTotal = 0
+            nextEntryID = nil; leafEntryID = nil; forkBoundary = nil
+        }
+        liveActivity = nil
         status = .idle
         if sendClose {
             if let oldLease { Self.closeDetached(client: client, leaseID: oldLease, connectionAdmission: oldConnection) }

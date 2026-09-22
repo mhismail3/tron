@@ -10,12 +10,18 @@ export type GatewayErrorCode =
   | "cancelled"
   | "internal";
 
+export type GatewayDiagnosticReason =
+  | "viewer_capacity" | "viewer_retired" | "viewer_identity_in_use"
+  | "catalog_capacity" | "catalog_headers_unavailable" | "catalog_changed"
+  | "catalog_identity_ambiguous";
+
 export class GatewayError extends Error {
   constructor(
     readonly code: GatewayErrorCode,
     message: string,
     readonly retryable = false,
     readonly details?: unknown,
+    readonly diagnosticReason?: GatewayDiagnosticReason,
   ) {
     super(message);
     this.name = "GatewayError";

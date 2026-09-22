@@ -1736,6 +1736,7 @@ export class GatewayServer {
         this.options.logger.log("error", `RPC ${frame.method} for client ${connection.id} failed`, {
           event: "rpc.error", source: "transport", method: frame.method, requestID: diagnosticID,
           code: diagnosticErrorCode(error), outcome: "failure",
+          ...(error instanceof GatewayError && error.diagnosticReason ? { reason: error.diagnosticReason } : {}),
         });
       }
       const ownerRequestIDs = new Set([

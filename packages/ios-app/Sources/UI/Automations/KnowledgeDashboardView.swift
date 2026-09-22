@@ -43,14 +43,14 @@ enum KnowledgeDashboardMenuItem: String, CaseIterable {
 
 enum KnowledgeDashboardMenuPolicy {
     static func settingsTitle(for area: KnowledgeDashboardArea) -> String {
-        area == .chronicle ? "Chronicle settings" : "Library settings"
+        "Knowledge settings"
     }
 
     static func settingsItems(for area: KnowledgeDashboardArea) -> [KnowledgeDashboardMenuItem] {
-        area == .chronicle
-            ? [.observationConfiguration, .needsAttention, .chronicleInfo]
-            : [.captureURL, .newNote]
+        [.observationConfiguration, .needsAttention, .chronicleInfo]
     }
+
+    static let creationItems: [KnowledgeDashboardMenuItem] = [.captureURL, .newNote]
 }
 
 enum KnowledgeSourceVisibility: String, CaseIterable, Identifiable {
@@ -238,12 +238,12 @@ struct KnowledgeDashboardView: View {
                                  onOpenSession: { stageDetailAction(.session($0, $1)) })
                 .environment(model)
         }
-        .onChange(of: area) { _, _ in invalidateCatalogueRequests() }
-        .onChange(of: librarySelection) { _, _ in invalidateCatalogueRequests() }
-        .onChange(of: sourceVisibility) { _, _ in invalidateCatalogueRequests() }
-        .onChange(of: chronicleScope) { _, _ in invalidateCatalogueRequests() }
-        .onChange(of: libraryScope) { _, _ in invalidateCatalogueRequests() }
-        .onChange(of: search) { _, _ in invalidateCatalogueRequests() }
+        .onChange(of: area) { _, _ in invalidateCatalogueRequests(clearRecords: true) }
+        .onChange(of: librarySelection) { _, _ in invalidateCatalogueRequests(clearRecords: true) }
+        .onChange(of: sourceVisibility) { _, _ in invalidateCatalogueRequests(clearRecords: true) }
+        .onChange(of: chronicleScope) { _, _ in invalidateCatalogueRequests(clearRecords: true) }
+        .onChange(of: libraryScope) { _, _ in invalidateCatalogueRequests(clearRecords: true) }
+        .onChange(of: search) { _, _ in invalidateCatalogueRequests(clearRecords: true) }
         .onChange(of: model.knowledgePresentationIdentity) { _, _ in
             // Retire both the visible page and any manually spawned page task;
             // the next task must carry the new Gateway identity from its start.
@@ -277,14 +277,20 @@ struct KnowledgeDashboardView: View {
             await reload()
         }
         .onChange(of: activity.allowsPresentationPublication) { _, active in
-            if !active { coverageStore.suspend() }
+            if !active {
+                // Covered reads are disposable, but their accepted page remains
+                // the dashboard projection until a matching refresh arrives.
+                loadGeneration &+= 1
+                loadingMore = false
+                coverageStore.suspend()
+            }
         }
         .onDisappear { coverageStore.suspend() }
     }
 
     private var dashboardMenuActions: DashboardMenuActions {
-        let settingsActions: [DashboardMenuAction] = KnowledgeDashboardMenuPolicy.settingsItems(for: area).map { item in
-            DashboardMenuAction(title: item.rawValue, symbol: item.symbol, perform: {
+        let perform: (KnowledgeDashboardMenuItem) -> @MainActor () -> Void = { item in
+            { [self] in
                 switch item {
                 case .observationConfiguration: configSheet = true
                 case .needsAttention: openCoverageDetail()
@@ -292,14 +298,20 @@ struct KnowledgeDashboardView: View {
                 case .captureURL: captureSheet = true
                 case .newNote: noteSheet = true
                 }
-            })
+            }
+        }
+        let settingsActions = KnowledgeDashboardMenuPolicy.settingsItems(for: area).map {
+            DashboardMenuAction(title: $0.rawValue, symbol: $0.symbol, perform: perform($0))
+        }
+        let creationActions = KnowledgeDashboardMenuPolicy.creationItems.map {
+            DashboardMenuAction(title: $0.rawValue, symbol: $0.symbol, perform: perform($0))
         }
         return DashboardMenuActions(
             search: { showingSearch = true },
             filter: { showingFilters = true },
             settings: onOpenSettings,
             settingsMenu: .init(title: KnowledgeDashboardMenuPolicy.settingsTitle(for: area), symbol: "slider.horizontal.3", actions: settingsActions),
-            creation: []
+            creation: creationActions
         )
     }
 
@@ -337,7 +349,7 @@ struct KnowledgeDashboardView: View {
         if loading && records.isEmpty {
             TronLoadingState(label: "Loading Knowledge…", accent: .tronKnowledge)
                 .frame(maxWidth: .infinity, minHeight: minimumHeight)
-        } else if let error {
+        } else if records.isEmpty, let error {
             TronPlaceholderState(title: "Knowledge unavailable", detail: error,
                                  icon: "externaldrive.badge.xmark", accent: .tronKnowledge,
                                  actionTitle: "Retry", action: { Task { await reload() } })
@@ -358,6 +370,9 @@ struct KnowledgeDashboardView: View {
             // rhythm while the rows themselves pack tighter.
             Text(filterSummary).font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronKnowledge)
                 .padding(.top, TronSpacing.md)
+            if let error {
+                TronSettingsNotice(message: "Refresh unavailable: \(error)", accent: .tronAmber)
+            }
             let previewIdentity = model.knowledgePresentationIdentity
             ForEach(records) { record in
                 Button {
@@ -431,10 +446,15 @@ struct KnowledgeDashboardView: View {
         .environment(model)
     }
 
-    private func invalidateCatalogueRequests() {
+    private func invalidateCatalogueRequests(clearRecords: Bool = false) {
         loadGeneration &+= 1
         loadingMore = false
         nextCursor = nil
+        if clearRecords {
+            records.removeAll()
+            status = nil
+            error = nil
+        }
     }
 
     private func reload() async {
@@ -464,7 +484,16 @@ struct KnowledgeDashboardView: View {
             records = response.records; nextCursor = response.nextCursor; status = currentStatus
             guard generation == loadGeneration, KnowledgeCatalogRequestFence.accepts(requestedKey, current: requestKey()),
                   activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }
-        } catch is CancellationError { return } catch { guard generation == loadGeneration, KnowledgeCatalogRequestFence.accepts(requestedKey, current: requestKey()), activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }; self.error = error.localizedDescription }
+        } catch is CancellationError { return } catch {
+            // Gateway cancellation can be wrapped as a possibly-sent failure
+            // after the sheet retires. Task cancellation and the generation
+            // fence own that disposable read; neither may become dashboard UI.
+            guard !Task.isCancelled, generation == loadGeneration,
+                  KnowledgeCatalogRequestFence.accepts(requestedKey, current: requestKey()),
+                  activity.allowsPresentationPublication,
+                  model.knowledgePresentationIdentity == identity else { return }
+            self.error = error.localizedDescription
+        }
     }
     private func loadMore() {
         guard KnowledgeCatalogPaginationPolicy.admits(cursor: nextCursor, search: search, loadingMore: loadingMore), let cursor = nextCursor else { return }
@@ -489,7 +518,13 @@ struct KnowledgeDashboardView: View {
                       visiblePage.records.allSatisfy({ !records.contains($0) }) else { return }
                 records.append(contentsOf: visiblePage.records); nextCursor = visiblePage.nextCursor
             } catch is CancellationError { return }
-            catch { guard generation == loadGeneration, KnowledgeCatalogRequestFence.accepts(requestedKey, current: requestKey()), activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity else { return }; self.error = error.localizedDescription }
+            catch {
+                guard !Task.isCancelled, generation == loadGeneration,
+                      KnowledgeCatalogRequestFence.accepts(requestedKey, current: requestKey()),
+                      activity.allowsPresentationPublication,
+                      model.knowledgePresentationIdentity == identity else { return }
+                self.error = error.localizedDescription
+            }
         }
     }
     private func stageDetailAction(_ action: DetailAction) {
@@ -536,6 +571,7 @@ private struct KnowledgeChronicleInfoSheet: View {
     @State private var status: KnowledgeStatus?
     @State private var error: String?
     @State private var requestGeneration = 0
+    @State private var detent: PresentationDetent = .medium
 
     private var identity: KnowledgePresentationIdentity { model.knowledgePresentationIdentity }
 
@@ -544,15 +580,14 @@ private struct KnowledgeChronicleInfoSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: TronSpacing.md) {
                     if let status {
-                        Text("Observation coverage")
-                            .font(TronTypography.sheetSectionHeader)
-                            .foregroundStyle(Color.tronKnowledge)
-                        KnowledgeInfoStat(title: "Observed", value: status.coverage.observedCount)
-                        KnowledgeInfoStat(title: "Empty", value: status.coverage.emptyCount)
-                        KnowledgeInfoStat(title: "Excluded", value: status.coverage.excludedCount)
-                        KnowledgeInfoStat(title: "Pending", value: status.coverage.pendingCount)
-                        KnowledgeInfoStat(title: "Failed", value: status.coverage.failedCount)
-                        KnowledgeInfoStat(title: "Unavailable", value: status.coverage.unavailableCount)
+                        TronMetadataTable(title: "Observation coverage", accent: .tronKnowledge, rows: [
+                            metadataRow("Observed", status.coverage.observedCount),
+                            metadataRow("Empty", status.coverage.emptyCount),
+                            metadataRow("Excluded", status.coverage.excludedCount),
+                            metadataRow("Pending", status.coverage.pendingCount),
+                            metadataRow("Failed", status.coverage.failedCount),
+                            metadataRow("Unavailable", status.coverage.unavailableCount),
+                        ])
                         Text("Settled \(status.coverage.observedCount + status.coverage.emptyCount + status.coverage.excludedCount) · \(status.coverage.remainingCount) need attention")
                             .font(TronTypography.caption)
                             .foregroundStyle(Color.tronTextSecondary)
@@ -566,7 +601,21 @@ private struct KnowledgeChronicleInfoSheet: View {
                 .padding(TronSpacing.section)
             }
             .tronNavigationTitle("Chronicle info", accent: .tronKnowledge)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark").font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronKnowledge)
+                    }
+                    .accessibilityLabel("Done")
+                }
+            }
         }
+        .tronTopBlur(.sheet)
+        .presentationDetents([.medium, .large], selection: $detent)
+        .presentationDragIndicator(.hidden)
+        .tronSettingsVisualTheme(accent: .tronKnowledge)
+        .tronPresentation()
         .task(id: "\(requestGeneration)/\(activity.allowsPresentationPublication)/\(identity.profileID ?? "none")/\(identity.lifecycleGeneration ?? -1)/\(identity.connectionID ?? -1)") {
             await load()
         }
@@ -575,6 +624,12 @@ private struct KnowledgeChronicleInfoSheet: View {
             error = nil
             requestGeneration &+= 1
         }
+    }
+
+    @Environment(\.dismiss) private var dismiss
+
+    private func metadataRow(_ title: String, _ value: Int) -> TronMetadataTableRow {
+        TronMetadataTableRow(id: title, title: title, value: value.formatted(.number))
     }
 
     @MainActor private func load() async {
@@ -606,32 +661,51 @@ private struct KnowledgeCoverageSheetHost: View {
     @State private var requestGeneration = 0
     @State private var mutationError: String?
     @State private var clearingID: String?
+    @State private var detent: PresentationDetent = .medium
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        Group {
-            if let status {
-                KnowledgeCoverageDetailSheet(
-                    coverage: status.coverage,
-                    cuts: store.cuts,
-                    showsInitialLoading: store.showsInitialLoading,
-                    loadingMore: store.loading,
-                    canLoadMore: store.nextCursor != nil,
-                    errorText: store.error,
-                    mutationErrorText: mutationError,
-                    clearingCutID: clearingID,
-                    allowsActions: activity.allowsPresentationPublication,
-                    onOpenSession: onOpenSession,
-                    onClear: { clear($0) },
-                    onLoadMore: { loadMore() }
-                )
-            } else if let statusError {
-                TronPlaceholderState(title: "Needs attention unavailable", detail: statusError,
-                                     icon: "externaldrive.badge.xmark", accent: .tronKnowledge,
-                                     actionTitle: "Retry", action: { requestGeneration &+= 1 })
-            } else {
-                TronLoadingState(label: "Loading attention…", accent: .tronKnowledge)
+        NavigationStack {
+            Group {
+                if let status {
+                    KnowledgeCoverageDetailSheet(
+                        coverage: status.coverage,
+                        cuts: store.cuts,
+                        showsInitialLoading: store.showsInitialLoading,
+                        loadingMore: store.loading,
+                        canLoadMore: store.nextCursor != nil,
+                        errorText: store.error,
+                        mutationErrorText: mutationError,
+                        clearingCutID: clearingID,
+                        allowsActions: activity.allowsPresentationPublication,
+                        onOpenSession: onOpenSession,
+                        onClear: { clear($0) },
+                        onLoadMore: { loadMore() }
+                    )
+                } else if let statusError {
+                    TronPlaceholderState(title: "Needs attention unavailable", detail: statusError,
+                                         icon: "externaldrive.badge.xmark", accent: .tronKnowledge,
+                                         actionTitle: "Retry", action: { requestGeneration &+= 1 })
+                } else {
+                    TronLoadingState(label: "Loading attention…", accent: .tronKnowledge)
+                }
+            }
+            .tronNavigationTitle("Observation coverage", accent: .tronKnowledge)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark").font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronKnowledge)
+                    }
+                    .accessibilityLabel("Done")
+                }
             }
         }
+        .tronTopBlur(.sheet)
+        .presentationDetents([.medium, .large], selection: $detent)
+        .presentationDragIndicator(.hidden)
+        .tronSettingsVisualTheme(accent: .tronKnowledge)
+        .tronPresentation()
         .task(id: "\(requestGeneration)/\(activity.allowsPresentationPublication)/\(identity.profileID ?? "none")/\(identity.lifecycleGeneration ?? -1)/\(identity.connectionID ?? -1)") {
             await load()
         }
@@ -682,7 +756,7 @@ private struct KnowledgeCoverageSheetHost: View {
                                      try await model.knowledge.coverage(cursor: cursor, limit: 100,
                                          dispositions: KnowledgeCoveragePresentationPolicy.attentionDispositions)
                                  },
-                                 isCurrent: { activity.allowsPresentationPublication && model.knowledgePresentationIdentity == requestIdentity })
+                                 isCurrent: { !Task.isCancelled && activity.allowsPresentationPublication && model.knowledgePresentationIdentity == requestIdentity })
         }
     }
 
@@ -704,25 +778,6 @@ private struct KnowledgeCoverageSheetHost: View {
                 mutationError = error.localizedDescription
             }
         }
-    }
-}
-
-struct KnowledgeInfoStat: View {
-    let title: String
-    let value: Int
-
-    var body: some View {
-        HStack {
-            Text(title)
-            Spacer()
-            Text(value, format: .number)
-                .monospacedDigit()
-        }
-        .font(TronTypography.body)
-        .foregroundStyle(Color.tronTextPrimary)
-        .padding(.vertical, TronSpacing.sm)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title): \(value)")
     }
 }
 

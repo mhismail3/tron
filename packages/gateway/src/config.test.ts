@@ -17,6 +17,16 @@ afterEach(async () => {
 });
 
 describe("gateway configuration", () => {
+  it("keeps runtime admission bounded and explicitly scalable beyond the default", async () => {
+    const home = await mkdtemp(join(tmpdir(), "tron-runtime-capacity-"));
+    const environment = { TRON_DATA_DIR: home };
+    expect((await loadConfig([], environment)).maxLiveRuntimes).toBe(128);
+    expect((await loadConfig([], { ...environment, TRON_GATEWAY_MAX_LIVE_RUNTIMES: "512" })).maxLiveRuntimes).toBe(512);
+    for (const raw of ["0", "-1", "1.5", "NaN", "1025", "", "1e2"]) {
+      await expect(loadConfig([], { ...environment, TRON_GATEWAY_MAX_LIVE_RUNTIMES: raw })).rejects.toMatchObject({ code: "invalid_request" });
+    }
+  });
+
   it("recognizes only Tailscale CGNAT and canonical IPv6 ranges", () => {
     expect(isTailscaleAddress("100.64.0.1")).toBe(true);
     expect(isTailscaleAddress("100.127.255.254")).toBe(true);

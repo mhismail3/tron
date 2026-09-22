@@ -677,32 +677,40 @@ struct ReadOnlySubagentSessionSheet: View {
 
     @ViewBuilder
     private func content(_ store: ReadOnlySubagentSessionStore) -> some View {
-        switch store.status {
-        case .idle, .opening:
-            TronLoadingState(label: "Opening read-only session…")
-        case .waiting:
-            SessionProcessPlaceholder(
-                title: "Session starting",
-                detail: "Waiting for this live subagent to publish its canonical session.",
-                icon: "ellipsis.message"
-            )
-            .padding(18)
-        case .unavailable:
-            SessionProcessPlaceholder(
-                title: "Session unavailable",
-                detail: "This subagent did not persist an authorized canonical session.",
-                icon: "doc.text.magnifyingglass"
-            )
-            .padding(18)
-        case .failed(let message):
-            SessionProcessPlaceholder(
-                title: "Unable to load session",
-                detail: message,
-                icon: "exclamationmark.triangle"
-            )
-            .padding(18)
-        case .open, .loadingEarlier, .reconnecting:
+        if !store.items.isEmpty {
             transcript(store)
+        } else {
+            switch store.status {
+            case .idle, .opening:
+                TronLoadingState(label: "Opening read-only session…")
+            case .waiting:
+                SessionProcessPlaceholder(
+                    title: "Session starting",
+                    detail: "Waiting for this live subagent to publish its canonical session.",
+                    icon: "ellipsis.message"
+                )
+                .padding(18)
+            case .unavailable:
+                SessionProcessPlaceholder(
+                    title: "Session unavailable",
+                    detail: "This subagent did not persist an authorized canonical session.",
+                    icon: "doc.text.magnifyingglass"
+                )
+                .padding(18)
+            case .failed(let message):
+                VStack(spacing: 12) {
+                    SessionProcessPlaceholder(
+                        title: "Unable to load session",
+                        detail: message,
+                        icon: "exclamationmark.triangle"
+                    )
+                    .padding(18)
+                    Button("Retry", action: store.retry)
+                        .accessibilityIdentifier("retry-subagent-session-button")
+                }
+            case .open, .loadingEarlier, .reconnecting:
+                transcript(store)
+            }
         }
     }
 
@@ -755,6 +763,11 @@ struct ReadOnlySubagentSessionSheet: View {
                         .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
                         .id(item.id)
                     }
+                }
+                if case .failed(let message) = store.status {
+                    Text(message).font(TronTypography.bodySM).foregroundStyle(Color.tronTextMuted)
+                    Button("Retry", action: store.retry)
+                        .accessibilityIdentifier("retry-subagent-session-button")
                 }
                 if store.status == .reconnecting {
                     TronLoadingState(label: "Updating canonical session…")

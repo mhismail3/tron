@@ -574,8 +574,10 @@ export class DisplayArtifactStore {
     await this.maintain(undefined, sessionID);
   }
 
-  async maintain(liveSessionIDs?: ReadonlySet<string>, removingSessionID?: string): Promise<void> {
+  async maintain(resolveLiveSessionIDs?: () => Promise<ReadonlySet<string>>, removingSessionID?: string): Promise<void> {
     await this.serialize(async () => {
+      // A queued grant must commit before orphan membership is captured.
+      const liveSessionIDs = await resolveLiveSessionIDs?.();
       for (const [id, metadata] of [...this.index]) {
         const owners = metadata.owners.filter((owner) => owner !== removingSessionID
           && (liveSessionIDs === undefined || liveSessionIDs.has(owner)));

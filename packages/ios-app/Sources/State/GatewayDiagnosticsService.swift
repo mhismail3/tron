@@ -35,16 +35,25 @@ struct GatewayLogRecord: Identifiable, Hashable, Codable, Sendable {
     let message: String
     let event: String?
     let source: String?
+    let method: String?
+    let requestID: String?
+    let code: String?
+    let outcome: String?
+    let reason: String?
+    let durationMs: Int?
 
-    init(timestamp: String, level: String, message: String, event: String? = nil, source: String? = nil) {
+    init(timestamp: String, level: String, message: String, event: String? = nil, source: String? = nil,
+         method: String? = nil, requestID: String? = nil, code: String? = nil, outcome: String? = nil, reason: String? = nil, durationMs: Int? = nil) {
         self.timestamp = timestamp
         self.level = level
         self.message = message
         self.event = event
         self.source = source
+        self.method = method; self.requestID = requestID; self.code = code
+        self.outcome = outcome; self.reason = reason; self.durationMs = durationMs
     }
 
-    var id: String { "\(timestamp)-\(level)-\(event ?? "")-\(message)" }
+    var id: String { "\(timestamp)-\(level)-\(event ?? "")-\(requestID ?? "")-\(message)" }
 }
 
 struct GatewayProfileLogRecord: Hashable, Identifiable, Codable, Sendable {
@@ -77,6 +86,7 @@ struct GatewayLogCaptureMetadata: Equatable, Sendable {
     let appBuildIdentity: String
     let gatewayIdentities: [String: String]
     let sourceStatuses: [String: String]
+    var appSourceRevision: String? = nil
 
     static let empty = Self(
         capturedAt: GatewayTimestamp.preciseString(from: .now),
@@ -95,7 +105,8 @@ struct GatewayLogCaptureMetadata: Equatable, Sendable {
             representedThrough: dates.last.map(GatewayTimestamp.preciseString(from:)),
             appBuildIdentity: appBuildIdentity,
             gatewayIdentities: gatewayIdentities,
-            sourceStatuses: sourceStatuses
+            sourceStatuses: sourceStatuses,
+            appSourceRevision: appSourceRevision
         )
     }
 }

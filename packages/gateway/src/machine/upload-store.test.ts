@@ -5,6 +5,28 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MAXIMUM_ATTACHMENT_READERS, UploadStore } from "./upload-store.js";
 
+it("captures orphan membership after queued attachment claims and fails closed on unavailable membership", async () => {
+  const directory = await root();
+  const store = new UploadStore(directory, 1_024);
+  const upload = await store.save("retained.txt", "text/plain", Buffer.from("durable"));
+  let release!: () => void;
+  const barrier = new Promise<void>(resolve => { release = resolve; });
+  const live = new Set<string>();
+  const earlier = (store as any).serialize(async () => { await barrier; live.add("new-session"); });
+  const claim = store.materialize([upload.id], "new-session");
+  const maintained = store.maintain(async () => new Set(live));
+  try {
+    release(); await Promise.all([earlier, claim, maintained]);
+    await expect(store.maintain(async () => { throw new Error("membership unavailable"); })).rejects.toThrow("membership unavailable");
+    const lease = await store.acquire(upload.id);
+    try {
+      const chunks = [];
+      for await (const chunk of lease.stream) chunks.push(Buffer.from(chunk));
+      expect(Buffer.concat(chunks).toString()).toBe("durable");
+    } finally { await lease.release(); }
+  } finally { release(); await Promise.allSettled([earlier, claim, maintained]); }
+});
+
 it("bounds attachment metadata acquisition before I/O and releases every reader", async () => {
   const directory = await root();
   const store = new UploadStore(directory, 1_024);
@@ -397,7 +419,7 @@ describe("UploadStore", () => {
     await chmod(upload.path, 0o600);
 
     const migratedStore = new UploadStore(home, 16);
-    await expect(migratedStore.maintain(new Set())).resolves.toMatchObject({
+    await expect(migratedStore.maintain(async () => new Set())).resolves.toMatchObject({
       entryCount: 1,
       objectCount: 1,
       objectBytes: 6,
@@ -426,7 +448,7 @@ describe("UploadStore", () => {
     await writeFile(join(staleBody, "content"), "partial");
     now = 1_101;
 
-    const status = await store.maintain(new Set(["different-session"]));
+    const status = await store.maintain(async () => new Set(["different-session"]));
     expect(status).toMatchObject({ entryCount: 0, logicalBytes: 0, objectBytes: 0 });
     expect(await readdir(join(home, "gateway", "upload-bodies"))).toEqual([]);
     await expect(store.materialize([claimed.id], "deleted-session")).rejects.toMatchObject({ code: "not_found" });
@@ -438,7 +460,7 @@ describe("UploadStore", () => {
     const upload = await store.save("claimed", "text/plain", Buffer.from("value"));
     await store.materialize([upload.id], "live-session");
 
-    await expect(store.maintain(new Set(["live-session"]))).resolves.toMatchObject({
+    await expect(store.maintain(async () => new Set(["live-session"]))).resolves.toMatchObject({
       entryCount: 1,
       claimedCount: 1,
       claimedBytes: 5,

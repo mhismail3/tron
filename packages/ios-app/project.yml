@@ -108,6 +108,12 @@ targets:
           else
             "$SRCROOT/../../scripts/validate-push-service-config.sh" --allow-empty "$SRCROOT/../../config/PushService.xcconfig" >/dev/null
           fi
+    postBuildScripts:
+      - name: Stamp source build identity
+        basedOnDependencyAnalysis: false
+        script: python3 "$SRCROOT/scripts/write-build-identity.py"
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/TronBuildIdentity.json
     dependencies:
       - target: TronShareExtension
         embed:
