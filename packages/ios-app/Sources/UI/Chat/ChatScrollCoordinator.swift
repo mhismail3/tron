@@ -1893,6 +1893,19 @@ final class ChatScrollCoordinator {
                   self.openingTailPhase.context?.token == token,
                   self.openingTailPhase.context?.presentation == admittedPresentation else { return }
             self.openingTailFrameTask = nil
+            if case .positioning(let value) = self.openingTailPhase,
+               let commandToken = value.commandToken,
+               self.appliedTargetCommandToken == commandToken,
+               self.command == nil {
+                // `onScrollGeometryChange` observes an Equatable transform and
+                // does not promise a callback for a command that leaves the
+                // valid viewport value unchanged. This existing display-frame
+                // owner sample records that unchanged native fact once after
+                // application, so a genuine newer marker callback cannot be
+                // stranded waiting for a manufactured duplicate geometry
+                // callback. It is one application-bound sample, not polling.
+                self.geometryRevision &+= 1
+            }
             if case .positioning(var value) = self.openingTailPhase,
                let commandToken = value.commandToken,
                self.command?.token != commandToken {
