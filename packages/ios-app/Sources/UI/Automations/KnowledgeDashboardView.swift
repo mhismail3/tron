@@ -191,7 +191,10 @@ struct KnowledgeDashboardView: View {
     private var requestKind: KnowledgeRecordKind? { section.kind }
 
     private var filterSummary: String {
-        let labels = [section.title, section == .sources ? sourceVisibility.title : nil, scope?.label].compactMap { $0 }
+        let labels = [section.title,
+                      section == .sources ? sourceVisibility.title : nil,
+                      section == .chronicle ? (scope?.label ?? "All") : scope?.label]
+            .compactMap { $0 }
         return labels.joined(separator: " · ")
     }
 
@@ -397,9 +400,7 @@ struct KnowledgeDashboardView: View {
     }
 
     private var loadMoreButton: some View {
-        Button(loadingMore ? "Loading…" : "Load more") { loadMore() }
-            .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
-            .disabled(loadingMore)
+        TronPaginationButton(label: "Load more", loadingLabel: "Loading…", icon: "arrow.down", isLoading: loadingMore, accent: .tronKnowledge, action: loadMore)
             .frame(maxWidth: .infinity)
             .padding(.top, TronSpacing.md)
     }
@@ -515,8 +516,14 @@ struct KnowledgeDashboardView: View {
                 let visiblePage = KnowledgeListResponse(records: KnowledgeCatalogPagePolicy.visibleRecords(page.records, in: requestedSection, sourceVisibility: requestedVisibility), nextCursor: page.nextCursor, stateRevision: page.stateRevision)
                 guard generation == loadGeneration, KnowledgeCatalogRequestFence.accepts(requestedKey, current: requestKey()),
                       activity.allowsPresentationPublication, model.knowledgePresentationIdentity == identity,
-                      visiblePage.records.allSatisfy({ !records.contains($0) }) else { return }
-                records.append(contentsOf: visiblePage.records); nextCursor = visiblePage.nextCursor
+                      visiblePage.nextCursor != cursor else { return }
+                // A Gateway page may contain only another visibility class (or
+                // records already admitted by a retried page). Advance the
+                // canonical cursor even when this projection adds no rows;
+                // rejecting that page made Archived appear empty with an inert
+                // continuation button.
+                let newRecords = visiblePage.records.filter { candidate in !records.contains(candidate) }
+                records.append(contentsOf: newRecords); nextCursor = visiblePage.nextCursor
             } catch is CancellationError { return }
             catch {
                 guard !Task.isCancelled, generation == loadGeneration,
@@ -965,9 +972,7 @@ struct KnowledgeSavedTextReader: View {
                         pagedText(full)
                         if let error = state.error { Text(error).foregroundStyle(Color.tronAmber) }
                         if let next = state.nextOffset, let loadNext {
-                            Button(state.loading ? "Loading…" : "Load more of this file") { loadNext(reference, next) }
-                                .disabled(state.loading)
-                                .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
+                            TronPaginationButton(label: "Load more of this file", loadingLabel: "Loading…", icon: "arrow.down", isLoading: state.loading, accent: .tronKnowledge) { loadNext(reference, next) }
                         }
                         Text("\(state.bytes.count) of \(state.totalBytes ?? reference.bytes) bytes loaded")
                             .font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
@@ -1551,68 +1556,25 @@ struct KnowledgeConfigurationView: View {
     @Environment(\.tronPresentationActivity) private var activity
     @Environment(\.dismiss) private var dismiss
     @State private var config: KnowledgeConfig?
-    @State private var chosenModel: ModelRef?
-    @State private var selectedSessionIDs = Set<String>()
-    @State private var selectedProjectIDs = Set<String>()
-    @State private var interestsText = ""
     @State private var saving = false
     @State private var error: String?
     @State private var identity: KnowledgePresentationIdentity?
-    private var observesAllConversations: Bool { config?.eligibility.allSessions == true }
     private var supportsGlobalObservation: Bool { model.gatewayInfo?.capabilities.contains(KnowledgeRPCClient.globalObservationCapability) == true }
-    private var hasScope: Bool { observesAllConversations || !selectedSessionIDs.isEmpty || !selectedProjectIDs.isEmpty }
     private var canSave: Bool { config != nil }
     var body: some View {
         KnowledgeFormSheet(title: "Observation", isWorking: saving, actionDisabled: !canSave, onAction: save) {
             if config == nil && error == nil { TronLoadingState(label: "Loading configuration…") }
-            TronSettingsGroup("Observer", accent: .tronKnowledge) {
-                TronSelectionSheetRow(icon: "cpu", title: "Model", value: chosenModel?.id ?? "Choose", accent: .tronKnowledge) {
-                    ModelPicker(selection: $chosenModel, models: model.providerCatalog(for: .global)?.models.filter(\.available) ?? [])
-                        .tronNavigationTitle("Observation model", accent: .tronKnowledge)
-                        .presentationDetents([.large])
-                }
-                TronSettingsDivider(accent: .tronKnowledge)
-                TronToggleRow(icon: "eye", title: "Enable observation",
-                              detail: "Save cited observations from future eligible conversation turns.", accent: .tronKnowledge,
+            TronSettingsCaption("Future turns only; earlier turns are not backfilled.")
+            TronSettingsGroup("Observation", accent: .tronKnowledge) {
+                TronToggleRow(icon: "globe", title: "Observe all Tron sessions",
+                              detail: "When enabled, save future observations from every Tron conversation. Excluded conversations and projects stay excluded.", accent: .tronKnowledge,
                               isOn: Binding(get: { config?.observation.enabled ?? false }, set: { config?.observation.enabled = $0 }))
-                    .disabled(config?.observation.enabled != true && (chosenModel == nil || !hasScope))
+                    .disabled(config == nil || (!supportsGlobalObservation && config?.observation.enabled != true))
             }
-            .disabled(config == nil)
-            .tronSettingsCaption("Choose an existing configured model and an observation scope. Earlier turns are not backfilled.")
-            TronSettingsGroup("Scope", accent: .tronKnowledge) {
-                TronToggleRow(icon: "globe", title: "All Tron conversations",
-                              detail: "Include future turns in every workspace on this Gateway. Excluded conversations and projects stay excluded.", accent: .tronKnowledge,
-                              isOn: Binding(get: { observesAllConversations }, set: { config?.eligibility.allSessions = $0 ? true : nil }))
-                    .disabled(config == nil || (!supportsGlobalObservation && !observesAllConversations))
-            }
-            .tronSettingsCaption("This covers Tron conversations, not other apps or files on your Mac. It does not select delegated-agent transcripts.")
+            .tronSettingsCaption("This covers Tron conversations only, not other apps, files, or delegated-agent transcripts.")
             if !supportsGlobalObservation {
-                TronSettingsNotice(message: "Update this Gateway to use all-conversation observation.", accent: .tronAmber)
+                TronSettingsNotice(message: "Update this Gateway to enable all-session observation.", accent: .tronAmber)
             }
-            TronSettingsGroup("Current interests", accent: .tronKnowledge, surfaceStyle: .uncontained) {
-                TextEditor(text: $interestsText).frame(minHeight: 120).tronTextEditor()
-                    .accessibilityLabel("Current interests")
-            }
-            .tronSettingsCaption("One interest per line, up to 50. Interests guide source triage and do not enable observation.")
-            if !observesAllConversations {
-                TronSettingsGroup("Selected conversations", accent: .tronKnowledge, surfaceStyle: model.sessions.isEmpty ? .uncontained : .scrollOptimized) {
-                    if model.sessions.isEmpty { TronSettingsCaption("No sessions are available on this Gateway.") }
-                    ForEach(model.sessions.prefix(100)) { session in
-                        TronToggleRow(icon: "bubble.left.and.bubble.right", title: session.title, accent: .tronKnowledge,
-                                      isOn: Binding(get: { selectedSessionIDs.contains(session.id) }, set: { if $0 { selectedSessionIDs.insert(session.id) } else { selectedSessionIDs.remove(session.id) } }))
-                    }
-                }
-                TronSettingsGroup("Selected projects", accent: .tronKnowledge, surfaceStyle: .scrollOptimized) {
-                    if let workspace = model.workspace {
-                        ForEach(workspace.entries.filter { $0.kind == .directory }.prefix(100)) { entry in
-                            TronToggleRow(icon: "folder", title: entry.name, accent: .tronKnowledge,
-                                          isOn: Binding(get: { selectedProjectIDs.contains(entry.path) }, set: { if $0 { selectedProjectIDs.insert(entry.path) } else { selectedProjectIDs.remove(entry.path) } }))
-                        }
-                    }
-                }
-                .tronSettingsCaption("With all-conversation observation off, an empty selection means no eligible scope. Exclusions always win.")
-            }
-            if !hasScope { TronSettingsNotice(message: "No scope selected", accent: .tronAmber) }
             if let error { TronSettingsNotice(message: error, accent: .tronError) }
         }
         .task { await load() }
@@ -1622,8 +1584,7 @@ struct KnowledgeConfigurationView: View {
         do {
             let loaded = try await model.knowledge.status()
             guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity, requestIdentity.profileID != nil else { return }
-            identity = requestIdentity; config = loaded.config; interestsText = loaded.config.currentInterests.joined(separator: "\n"); selectedSessionIDs = Set(loaded.config.eligibility.sessionIds); selectedProjectIDs = Set(loaded.config.eligibility.projectIds)
-            if let value = loaded.config.observation.model { let parts = value.split(separator: "/", maxSplits: 1).map(String.init); if parts.count == 2 { chosenModel = ModelRef(provider: parts[0], id: parts[1]) } }
+            identity = requestIdentity; config = loaded.config
         } catch {
             guard activity.allowsPresentationPublication,
                   model.knowledgePresentationIdentity == requestIdentity else { return }
@@ -1633,10 +1594,9 @@ struct KnowledgeConfigurationView: View {
     private func save() {
         guard !saving, var config else { return }
         guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == (identity ?? model.knowledgePresentationIdentity) else { error = "Gateway changed; reopen configuration."; return }
-        if config.observation.enabled && (chosenModel == nil || !hasScope) { error = "Select a model and all conversations or at least one selected scope before enabling observation."; return }
+        if config.observation.enabled && !supportsGlobalObservation { error = "Update this Gateway before enabling all-session observation."; return }
         saving = true
-        if let chosenModel { config.observation.model = chosenModel.contextWindowKey }
-        config.eligibility.sessionIds = selectedSessionIDs.sorted(); config.eligibility.projectIds = selectedProjectIDs.sorted(); config.currentInterests = interestsText.split(whereSeparator: \.isNewline).map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }.prefix(50).map { String($0.prefix(500)) }
+        if config.observation.enabled { config.eligibility.allSessions = true }
         let requestIdentity = identity ?? model.knowledgePresentationIdentity
         Task { @MainActor in
             guard model.knowledgePresentationIdentity == requestIdentity else { return }

@@ -776,7 +776,11 @@ export class KnowledgeStore {
   async list(request: KnowledgeListRequest = {}): Promise<KnowledgeListResponse> {
     return this.inspect(async (state, paths) => {
       const limit = this.pageLimit(state, request.limit ?? 50);
-      const scope = JSON.stringify([request.kind ?? null, request.scope ?? null, request.includeSuppressed === true, request.includeArchived === true]);
+      // Every visibility input belongs to cursor identity. A cursor from the
+      // retained view must never be replayed against pending or archived
+      // projection state, where skipped rows can otherwise make pagination
+      // appear stalled or omit the first admitted row.
+      const scope = JSON.stringify([request.kind ?? null, request.scope ?? null, request.includeSuppressed === true, request.includeArchived === true, request.includePending === true]);
       const filter = this.catalogFilter(request);
       if (request.cursor) {
         const cursor = readListCursor(request.cursor, scope);

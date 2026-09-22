@@ -565,9 +565,9 @@ struct AutomationsDashboardView: View {
 
     private var automationFilterSheet: some View {
         TronDashboardFilterSheet(
-            title: "View Automations",
+            title: "Filter",
             accent: .tronAutomation,
-            detents: [.medium],
+            detents: [.medium, .large],
             onDone: { showingFilters = false }
         ) {
             TronDashboardFilterSectionTitle(

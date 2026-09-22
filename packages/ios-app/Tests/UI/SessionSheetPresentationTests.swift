@@ -658,14 +658,14 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
-    func testAutomationFilterRetainsItsMediumOnlyPresentation() async throws {
+    func testAutomationFilterStartsMediumAndAllowsLargePresentation() async throws {
         try await withSheet(TronDashboardFilterSheet(
-            title: "View Automations", accent: .tronAutomation, detents: [.medium], onDone: {}
+            title: "Filter", accent: .tronAutomation, detents: [.medium, .large], onDone: {}
         ) {
             TronDashboardFilterSectionTitle(title: "View")
         }) { controller in
             let sheet = try XCTUnwrap(controller.sheetPresentationController)
-            XCTAssertEqual(sheet.detents.map(\.identifier), [.medium])
+            XCTAssertEqual(sheet.detents.map(\.identifier), [.medium, .large])
             XCTAssertEqual(sheet.selectedDetentIdentifier, .medium)
         }
     }

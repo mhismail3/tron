@@ -96,6 +96,20 @@ describe("KnowledgeStore", () => {
     await expect(store.sourceByIdentity({ provider: "raindrop", accountId: "42", itemId: "item-2" })).resolves.toMatchObject({ id: updated.record.id, revisionId: updated.record.revisionId });
   });
 
+  it("keeps archived pagination cursors scoped to visibility and returns archived heads", async () => {
+    const { store } = await fixture();
+    const first = await store.captureSource({ commandId: command("archive-page-first"), record: source("First") });
+    const archived = await store.setSourceAdmission({ commandId: command("archive-page"), recordId: first.record.id, expectedRevision: first.record.revisionId, status: "archived", reason: "fixture archive" });
+    const second = await store.captureSource({ commandId: command("archive-page-second"), record: source("Second") });
+    const page = await store.list({ kind: "source", includeArchived: true, limit: 1 });
+    expect(page.records).toHaveLength(1);
+    expect(page.nextCursor).toBeDefined();
+    const next = await store.list({ kind: "source", includeArchived: true, cursor: page.nextCursor, limit: 1 });
+    expect(next.records.map(record => record.id)).toContain(archived.record.id);
+    expect(next.records.map(record => record.id)).not.toContain(second.record.id);
+    await expect(store.list({ kind: "source", includePending: true, cursor: page.nextCursor, limit: 1 })).rejects.toThrow(/cursor/i);
+  });
+
   it("is lazy, durable across reopen, and returns lexical canonical results", async () => {
     const { store, home, workspace } = await fixture();
     expect((await store.status()).state).toBe("uninitialized");

@@ -237,7 +237,7 @@ final class DashboardChromeTests: XCTestCase {
                 if mode == .knowledge {
                     let configuration = try XCTUnwrap(sections[0].children.last as? UIMenu)
                     XCTAssertFalse(configuration.options.contains(.displayInline))
-                    XCTAssertEqual(configuration.children.map(\.title), ["Observation configuration", "Connectors", "Import legacy records"])
+                    XCTAssertEqual(configuration.children.map(\.title), ["Observation configuration", "Needs attention", "Chronicle info"])
                 }
                 XCTAssertEqual(sections[2].children.compactMap { $0 as? UIAction }.map(\.state),
                                DashboardMode.allCases.map { $0 == mode ? .on : .off })
@@ -253,15 +253,13 @@ final class DashboardChromeTests: XCTestCase {
 
     func testOtherDashboardActionsKeepExistingSheetOwners() async throws {
         let destinations: [(DashboardMode, String, String)] = [
-            (.automations, "Filter", "View Automations"),
+            (.automations, "Filter", "Filter"),
             (.automations, "Settings", "Settings"),
             (.automations, "Choose agenda date", "Jump to date"),
             (.automations, "Create Automation", "New Automation"),
             (.knowledge, "Filter", "Knowledge filters"),
             (.knowledge, "Settings", "Settings"),
             (.knowledge, "Observation configuration", "Observation"),
-            (.knowledge, "Connectors", "Connectors"),
-            (.knowledge, "Import legacy records", "Import Knowledge"),
             (.knowledge, "Capture URL", "Capture URL"),
             (.knowledge, "New note", "New note"),
         ]

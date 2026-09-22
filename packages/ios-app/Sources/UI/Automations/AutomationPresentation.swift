@@ -151,8 +151,8 @@ struct AutomationSummaryCard: View {
     }
 
     private var expandedContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Image(systemName: presentation.icon)
                     .font(TronTypography.sans(size: 22, weight: .medium))
                     .foregroundStyle(Color.tronAutomation)
@@ -160,7 +160,7 @@ struct AutomationSummaryCard: View {
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 6) {
                     Text(presentation.name)
-                        .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
                         .foregroundStyle(Color.tronTextPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                     ViewThatFits(in: .horizontal) {
@@ -178,6 +178,7 @@ struct AutomationSummaryCard: View {
                 Spacer(minLength: 0)
             }
             Divider().overlay(Color.tronAutomation.opacity(0.18))
+                .padding(.vertical, 1)
             server
 
             let layout = dynamicTypeSize.isAccessibilitySize
@@ -197,7 +198,7 @@ struct AutomationSummaryCard: View {
         } icon: {
             Image(systemName: "server.rack").accessibilityHidden(true)
         }
-        .font(expanded ? TronTypography.bodySM : TronTypography.secondaryDescription)
+        .font(expanded ? TronTypography.secondaryDescription : TronTypography.secondaryDescription)
         .foregroundStyle(Color.tronTextSecondary)
         .accessibilityLabel("Server, \(presentation.server)")
     }

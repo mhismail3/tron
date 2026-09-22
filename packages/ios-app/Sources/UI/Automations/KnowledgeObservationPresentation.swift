@@ -343,9 +343,7 @@ struct KnowledgeCoverageDetailSheet: View {
                     TronSettingsCaption(progress)
                 }
                 if canLoadMore {
-                    Button(loadingMore ? "Loading…" : "Load more cuts needing attention") { onLoadMore() }
-                        .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
-                        .disabled(loadingMore || !allowsActions)
+                    TronPaginationButton(label: "Load more cuts needing attention", loadingLabel: "Loading…", icon: "arrow.down", isLoading: loadingMore, isEnabled: allowsActions, accent: .tronKnowledge, action: onLoadMore)
                 }
             }
             .padding(18)
