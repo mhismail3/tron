@@ -2040,6 +2040,90 @@ struct ChatScrollCoordinatorTests {
         coordinator.cancel()
     }
 
+    @Test("applied opening command requires newer native evidence before positioning")
+    func openingCommandRequiresPostApplicationEvidence() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualViewportFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            let positioning = Task {
+                await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom", physicalTargetID: "transcript-bottom")
+            }
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            let command = try await coordinator.hostedNextCommand()
+            #expect(coordinator.commandApplied(command))
+            // The sample that existed when ScrollPosition crossed the native
+            // boundary cannot certify its own estimated pre-measurement layout.
+            #expect(coordinator.targetReleaseGeneration == 0)
+            coordinator.physicalTerminalRowObserved(layoutEpoch: coordinator.layoutEpoch)
+            coordinator.geometryChanged(previous: .zero, current: bottom)
+            coordinator.semanticFrameChanged(
+                renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+            )
+            #expect(await positioning.value)
+            coordinator.cancel()
+        }
+    }
+
+    @Test("streaming tail updates still release opening without keyboard geometry")
+    func streamingTailUpdatesDoNotStarveOpeningSettlement() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualViewportFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            let positioning = Task {
+                await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom", physicalTargetID: "transcript-bottom")
+            }
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            let command = try await coordinator.hostedNextCommand()
+            #expect(coordinator.commandApplied(command))
+            coordinator.physicalTerminalRowObserved(layoutEpoch: coordinator.layoutEpoch)
+            coordinator.geometryChanged(previous: .zero, current: bottom)
+            coordinator.semanticFrameChanged(
+                renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+            )
+            #expect(await positioning.value)
+
+            coordinator.openingRevealCompleted()
+            let settlement = Task { await coordinator.waitForOpeningTailSettlement() }
+            var previous = bottom
+            for index in 0..<4 {
+                let geometry = ChatTranscriptGeometry(
+                    offsetY: bottom.offsetY + CGFloat(index * 2),
+                    contentHeight: bottom.contentHeight + CGFloat(index * 2),
+                    containerHeight: bottom.containerHeight,
+                    bottomInset: bottom.bottomInset
+                )
+                coordinator.geometryChanged(previous: previous, current: geometry)
+                coordinator.semanticFrameChanged(
+                    renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
+                    frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+                )
+                previous = geometry
+                await Task.yield()
+                if index < 3 {
+                    await frames.waitForRequest(count: index + 2)
+                    frames.releaseNext()
+                }
+            }
+            // The physical tail remains aligned while content grows; no
+            // keyboard-sized inset change is supplied by this test.
+            for _ in 0..<4 where coordinator.targetReleaseGeneration == 0 {
+                await frames.waitForRequest(count: 5)
+                frames.releaseNext()
+                await Task.yield()
+            }
+            #expect(coordinator.targetReleaseGeneration == 1)
+            #expect(coordinator.consumeTargetRelease())
+            #expect(await settlement.value == .settled)
+            coordinator.completeVisibleOpeningReveal()
+            #expect(coordinator.admitsSubmission)
+            coordinator.cancel()
+        }
+    }
+
     @Test("opening tail admits exact physical evidence in either callback order")
     func openingTailExactEvidencePermutations() async {
         let geometryFirst = ChatScrollCoordinator()

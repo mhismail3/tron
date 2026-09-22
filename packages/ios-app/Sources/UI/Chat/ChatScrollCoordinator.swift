@@ -1806,6 +1806,18 @@ final class ChatScrollCoordinator {
         if physicallyPositioned {
             switch openingTailPhase {
             case .positioning(var value):
+                // A ScrollPosition command can be applied against SwiftUI's
+                // estimated pre-measurement geometry. Do not reveal from that
+                // stale sample: once the target crossed the native boundary,
+                // require one newer semantic marker and geometry sample. The
+                // pending-command case remains allowed to clear a command when
+                // proof arrived before delayed native application.
+                let commandWasApplied = value.commandToken != nil
+                    && appliedTargetCommandToken == value.commandToken
+                let hasFreshPostApplicationEvidence = !commandWasApplied
+                    || (semanticFrameRevision > (value.commandSemanticRevision ?? -1)
+                        && geometryRevision > (value.commandGeometryRevision ?? -1))
+                guard hasFreshPostApplicationEvidence else { return }
                 clearOpeningCommand(matching: value.commandToken)
                 value.commandToken = nil
                 openingTailPhase = .positioned(value)
@@ -1862,8 +1874,6 @@ final class ChatScrollCoordinator {
         let token = context.token
         let admittedPresentation = context.presentation
         let admittedLayoutEpoch = layoutEpoch
-        let admittedGeometry = geometry
-        let admittedTargetFrame = context.targetSample?.frame
         openingTailFrameTask = Task { [weak self, frameScheduler] in
             do { try await frameScheduler.nextFrame(); try Task.checkCancellation() }
             catch {
@@ -1901,12 +1911,12 @@ final class ChatScrollCoordinator {
                 schedulesPositionedFrame: false
             )
             guard case .postReveal(var value) = self.openingTailPhase else { return }
-            // Display-frame stability is equality of the physical facts, not
-            // absence of observation callbacks. SwiftUI may republish identical
-            // marker and geometry values while active row chrome refreshes.
+            // Streaming can change content height every frame while the
+            // native bottom owner keeps the marker aligned. Stability is the
+            // current, exact physical proof across two display frames—not
+            // equality with a stale pre-stream geometry sample. A changed
+            // layout epoch still resets admission through the guards above.
             let stable = self.layoutEpoch == admittedLayoutEpoch
-                && self.geometry == admittedGeometry
-                && value.base.targetSample?.frame == admittedTargetFrame
                 && self.openingTailViewportIsPhysicallySettled
             if stable {
                 value.stableFrameCount &+= 1
