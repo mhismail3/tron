@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import ImageIO
 
 enum KnowledgeDashboardArea: String, CaseIterable, Identifiable {
     case chronicle
@@ -620,6 +621,20 @@ struct KnowledgeRecordRow: View {
     }
 }
 
+enum KnowledgePreviewDecoder {
+    nonisolated static func downsample(_ data: Data) async -> UIImage? {
+        await Task.detached(priority: .utility) {
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+                  let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceThumbnailMaxPixelSize: 256,
+                    kCGImageSourceCreateThumbnailWithTransform: true
+                  ] as CFDictionary) else { return nil }
+            return UIImage(cgImage: cgImage)
+        }.value
+    }
+}
+
 struct KnowledgeSourceThumbnail: View {
     let source: KnowledgeSourceContent
     let size: CGFloat
@@ -642,6 +657,7 @@ struct KnowledgeSourceRow: View {
     let source: KnowledgeSourceContent
     let previewLoader: KnowledgeRecordRow.PreviewLoader?
     @State private var previewImage: UIImage?
+    @State private var previewTicket = UUID()
 
     var body: some View {
         HStack(alignment: .top, spacing: TronSpacing.md) {
@@ -660,7 +676,7 @@ struct KnowledgeSourceRow: View {
                     .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                     .foregroundStyle(Color.tronTextPrimary)
                     .lineLimit(2)
-                if let summary = KnowledgeSourcePresentationPolicy.summary(source) {
+                if let summary = KnowledgeSourcePresentationPolicy.summary(source, updatedAt: record.updatedAt) {
                     Text(summary)
                         .font(TronTypography.secondaryDescription)
                         .foregroundStyle(Color.tronTextSecondary)
@@ -678,20 +694,30 @@ struct KnowledgeSourceRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityHint("Opens source details")
-        .task(id: source.preview?.hash) {
-            guard let reference = source.preview, previewImage == nil, let previewLoader else { return }
-            guard let response = await previewLoader(reference, record),
-                  let data = Data(base64Encoded: response.base64),
-                  data.count <= 512_000, let image = UIImage(data: data) else { return }
+        .task(id: "\(record.id):\(record.revisionId):\(source.preview?.hash ?? "none")") {
+            previewImage = nil
+            previewTicket = UUID()
+            let ticket = previewTicket
+            guard let reference = source.preview, let previewLoader else { return }
+            guard let response = await previewLoader(reference, record), !Task.isCancelled, ticket == previewTicket,
+                  response.offset == 0, response.nextOffset == nil,
+                  let data = Data(base64Encoded: response.base64), data.count == response.bytes,
+                  response.totalBytes == response.bytes, data.count <= 512_000,
+                  let image = await KnowledgePreviewDecoder.downsample(data), !Task.isCancelled, ticket == previewTicket else { return }
             previewImage = image
         }
     }
 }
 
 struct KnowledgeSavedTextReader: View {
+    let text: String?
     let reference: KnowledgeObjectRef?
+    let recordID: String
+    let revisionID: String
     let label: String
     @Bindable var readers: KnowledgeObjectReaderStore
+    @State private var page = 0
+    private let pageSize = 12_000
 
     var body: some View {
         ScrollView {
@@ -699,7 +725,24 @@ struct KnowledgeSavedTextReader: View {
                 Text(label.capitalized)
                     .font(TronTypography.largeTitle)
                     .foregroundStyle(Color.tronKnowledge)
-                if let reference, let state = state(for: reference) {
+                if let text, !text.isEmpty {
+                    let decoded = decodeEntities(text)
+                    let start = min(page * pageSize, decoded.count)
+                    let end = min(start + pageSize, decoded.count)
+                    let startIndex = decoded.index(decoded.startIndex, offsetBy: start)
+                    let endIndex = decoded.index(decoded.startIndex, offsetBy: end)
+                    Text(decoded[startIndex..<endIndex])
+                        .font(TronTypography.body).foregroundStyle(Color.tronTextPrimary)
+                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Button("Previous") { page = max(0, page - 1) }.disabled(page == 0)
+                        Spacer()
+                        Text("Page \(page + 1) of \(max(1, (decoded.count + pageSize - 1) / pageSize))").font(TronTypography.caption)
+                        Spacer()
+                        Button("Next") { page += 1 }.disabled(end >= decoded.count)
+                    }
+                    .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
+                } else if let reference { let state = state(for: reference)
                     if state.loading && state.bytes.isEmpty { TronLoadingState(label: "Loading saved text…", accent: .tronKnowledge) }
                     else if let error = state.error, state.bytes.isEmpty { Text(error).font(TronTypography.body).foregroundStyle(Color.tronAmber) }
                     else if state.bytes.isEmpty { Text("No readable text is available for this source.").font(TronTypography.body).foregroundStyle(Color.tronTextSecondary) }
@@ -724,11 +767,11 @@ struct KnowledgeSavedTextReader: View {
         }
         .tronScrollEdgeChrome()
         .tronSettingsVisualTheme(accent: .tronKnowledge)
+        .onChange(of: text) { _, _ in page = 0 }
     }
 
-    private func state(for reference: KnowledgeObjectRef) -> KnowledgeObjectReaderState? {
-        let key = readers.states.keys.first { $0.reference == reference }
-        return key.map { readers.state(for: $0) }
+    private func state(for reference: KnowledgeObjectRef) -> KnowledgeObjectReaderState {
+        readers.state(for: KnowledgeObjectSelectionKey(recordID: recordID, revisionID: revisionID, reference: reference))
     }
 
     private func decodeEntities(_ value: String) -> String {
@@ -770,8 +813,12 @@ struct KnowledgeDetailView: View {
     @State private var reflectionRequestGeneration = 0
     @State private var objectReaders = KnowledgeObjectReaderStore()
     @State private var linkedReader = KnowledgeLinkedRecordReaderStore()
+    @State private var citationTitles: [String: String] = [:]
+    @State private var detailPreviewImage: UIImage?
+    @State private var detailPreviewTicket = UUID()
     @State private var readerPresented = false
     @State private var readerReference: KnowledgeObjectRef?
+    @State private var readerText: String?
     @State private var readerLabel = "saved text"
     private var admitsOrigin: Bool { model.knowledgePresentationIdentity == origin && activity.allowsPresentationPublication }
     private var observationPresentation: KnowledgeObservationPresentation? { KnowledgeObservationPresentation(record: currentRecord) }
@@ -846,6 +893,18 @@ struct KnowledgeDetailView: View {
             .padding(.vertical, TronSpacing.large)
         }
         .tronScrollEdgeChrome()
+        .task(id: "detail-preview-\(currentRecord.id):\(currentRecord.revisionId):\(currentRecord.content.sourcePreviewHash ?? "none")") {
+            detailPreviewImage = nil; detailPreviewTicket = UUID(); let ticket = detailPreviewTicket
+            guard case .source(let source) = currentRecord.content, let reference = source.preview,
+                  model.knowledgePresentationIdentity == origin, activity.allowsPresentationPublication else { return }
+            guard let response = try? await model.knowledge.readObject(reference, recordID: currentRecord.id, revisionID: currentRecord.revisionId),
+                  !Task.isCancelled, ticket == detailPreviewTicket,
+                  response.offset == 0, response.nextOffset == nil, let data = Data(base64Encoded: response.base64),
+                  data.count == response.bytes, response.totalBytes == response.bytes, data.count <= 512_000,
+                  let image = await KnowledgePreviewDecoder.downsample(data), !Task.isCancelled,
+                  ticket == detailPreviewTicket, model.knowledgePresentationIdentity == origin else { return }
+            detailPreviewImage = image
+        }
         .tronNavigationTitle(observationPresentation == nil ? "Knowledge detail" : "Observation", accent: .tronKnowledge)
         .toolbar {
             if observationPresentation != nil {
@@ -879,12 +938,13 @@ struct KnowledgeDetailView: View {
         }
         .foregroundStyle(Color.tronTextPrimary)
         .tronSettingsLayout()
+        .task(id: "citations-\(currentRecord.id):\(currentRecord.revisionId)") { await loadCitationTitles() }
         .tronSettingsVisualTheme(accent: .tronKnowledge)
         .confirmationDialog("Forget this record?", isPresented: $forgetConfirmation) {
             Button("Forget", role: .destructive) { forget() }
         }
         .tronManagedSheet(isPresented: $readerPresented, identity: "knowledge.reader.\(currentRecord.id)") {
-            KnowledgeSavedTextReader(reference: readerReference, label: readerLabel, readers: objectReaders)
+            KnowledgeSavedTextReader(text: readerText, reference: readerReference, recordID: currentRecord.id, revisionID: currentRecord.revisionId, label: readerLabel, readers: objectReaders)
         }
         .tronManagedSheet(isPresented: $technicalDetailsSheet, identity: "knowledge.technical.\(currentRecord.id)") {
             if let observation = observationPresentation {
@@ -953,7 +1013,10 @@ struct KnowledgeDetailView: View {
     private func sourceDetailHeader(_ source: KnowledgeSourceContent) -> some View {
         TronSettingsGroup("Source", accent: .tronKnowledge) {
             HStack(alignment: .top, spacing: TronSpacing.md) {
-                KnowledgeSourceThumbnail(source: source, size: 76)
+                Group {
+                    if let detailPreviewImage { Image(uiImage: detailPreviewImage).resizable().scaledToFill().frame(width: 76, height: 76).clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous)) }
+                    else { KnowledgeSourceThumbnail(source: source, size: 76) }
+                }
                 VStack(alignment: .leading, spacing: TronSpacing.md) {
                     Text(source.title)
                         .font(TronTypography.largeTitle)
@@ -982,7 +1045,7 @@ struct KnowledgeDetailView: View {
                 .font(TronTypography.bodySM)
                 .foregroundStyle(Color.tronKnowledgeText)
             }
-            if let summary = KnowledgeSourcePresentationPolicy.summary(source) {
+            if let summary = KnowledgeSourcePresentationPolicy.summary(source, updatedAt: currentRecord.updatedAt) {
                 TronSettingsGroup("At a glance", accent: .tronKnowledge) {
                     Text(summary)
                         .font(TronTypography.body)
@@ -1049,8 +1112,7 @@ struct KnowledgeDetailView: View {
     @ViewBuilder private func savedTextAction(_ source: KnowledgeSourceContent) -> some View {
         if let text = source.text, !text.isEmpty {
             Button("Open saved text") {
-                guard let object = source.object else { return }
-                readerReference = object; readerLabel = "saved text"; readerPresented = true; readObject(object, offset: 0)
+                readerText = text; readerReference = nil; readerLabel = "saved text"; readerPresented = true
             }
             .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
             Text("Saved readable text is separate from the original evidence file.")
@@ -1101,7 +1163,7 @@ struct KnowledgeDetailView: View {
         let key = KnowledgeObjectSelectionKey(recordID: currentRecord.id, revisionID: currentRecord.revisionId, reference: reference)
         let state = objectReaders.state(for: key)
         Button(state.bytes.isEmpty ? "Open \(label) (\(reference.bytes) bytes)" : "Load \(label)") {
-            readerReference = reference; readerLabel = label; readerPresented = true; readObject(reference, offset: state.nextOffset ?? 0)
+            readerText = nil; readerReference = reference; readerLabel = label; readerPresented = true; readObject(reference, offset: state.nextOffset ?? 0)
         }
         .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
         .disabled(state.loading || (state.nextOffset == nil && !state.bytes.isEmpty))
@@ -1132,8 +1194,9 @@ struct KnowledgeDetailView: View {
             if let citation = ref.sessionEntry {
                 Button("Open originating session · \(citation.entryId)") { openSessionEvidence(citation) }
                     .buttonStyle(TronRowButtonStyle(accent: .tronKnowledge))
-            } else if let recordID = ref.recordId {
-                Button("Open record \(recordID) · revision \(ref.revisionId ?? "latest")") { openLinkedRecord(id: recordID, revisionID: ref.revisionId) }
+            } else if let recordID = ref.recordId, recordID != currentRecord.id {
+                let title = citationTitles["\(recordID)|\(ref.revisionId ?? "latest")"] ?? citationTitles[recordID] ?? ref.locator.flatMap { URL(string: $0)?.host } ?? "Related source"
+                Button("Open \(title)") { openLinkedRecord(id: recordID, revisionID: ref.revisionId) }
                     .buttonStyle(TronRowButtonStyle(accent: .tronKnowledge))
             } else if let hash = ref.objectHash {
                 Text("Retained object \(hash.prefix(12))…").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextSecondary).textSelection(.enabled)
@@ -1190,6 +1253,28 @@ struct KnowledgeDetailView: View {
                 isCurrent: { model.knowledgePresentationIdentity == requestIdentity && activity.allowsPresentationPublication })
         }
     }
+    private func loadCitationTitles() async {
+        let refs = currentRecord.provenance.evidence + {
+            if case .observation(let observation) = currentRecord.content { return observation.items.flatMap { $0.evidence ?? [] } }
+            if case .note(let note) = currentRecord.content { return note.contraryEvidence ?? [] }
+            return []
+        }()
+        for ref in refs.prefix(24) {
+            guard let id = ref.recordId, id != currentRecord.id, citationTitles[id] == nil,
+                  model.knowledgePresentationIdentity == origin, activity.allowsPresentationPublication else { return }
+            guard let record = try? await model.knowledge.read(id: id, revisionID: ref.revisionId),
+                  !Task.isCancelled, model.knowledgePresentationIdentity == origin, activity.allowsPresentationPublication else { return }
+            let title: String
+            switch record.content {
+            case .source(let source): title = source.title
+            case .observation(let observation): title = observation.items.first?.text ?? "Observation"
+            case .note(let note): title = note.title
+            }
+            citationTitles[id] = title.isEmpty ? id : title
+            if let revision = ref.revisionId { citationTitles["\(id)|\(revision)"] = citationTitles[id] }
+        }
+    }
+
     private func openLinkedRecord(id: String, revisionID: String?) {
         guard admitsOrigin else { evidenceMessage = "Gateway changed; reopen this entry."; return }
         let requestIdentity = origin

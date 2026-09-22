@@ -284,6 +284,12 @@ export async function readPublicXPost(url: string, options: Pick<SourceCaptureOp
 
 const PREVIEW_MAX_BYTES = 512_000;
 const PREVIEW_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+function validPreviewBytes(bytes: Uint8Array, type: string): boolean {
+  if (bytes.byteLength < 12) return false;
+  if (type === "image/png") return bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a;
+  if (type === "image/webp") return bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50;
+  return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+}
 function previewURL(bytes: Uint8Array, base: string): string | undefined {
   const html = new TextDecoder().decode(bytes);
   const match = html.match(/<meta[^>]+(?:property|name)=["'](?:og:image|twitter:image)["'][^>]+content=["']([^"']+)["'][^>]*>/i)
@@ -291,13 +297,13 @@ function previewURL(bytes: Uint8Array, base: string): string | undefined {
   if (!match?.[1]) return undefined;
   try { const candidate = new URL(match[1], base); assertSafeUrl(candidate.toString()); return candidate.toString(); } catch { return undefined; }
 }
-async function optionalPreview(store: KnowledgeStore, bytes: Uint8Array | undefined, mediaType: string | undefined, base: string, options: { fetcher?: SourceFetch; resolveHost: ResolveHost; signal: AbortSignal }): Promise<KnowledgeObjectRef | undefined> {
-  if (!bytes || !mediaType?.toLowerCase()?.split(";")[0]?.trim().includes("html")) return undefined;
-  const url = previewURL(bytes, base); if (!url) return undefined;
+async function optionalPreview(store: KnowledgeStore, bytes: Uint8Array | undefined, mediaType: string | undefined, base: string, options: { fetcher?: SourceFetch; resolveHost: ResolveHost; signal: AbortSignal }, declaredURL?: string): Promise<KnowledgeObjectRef | undefined> {
+  if (!declaredURL && (!bytes || !mediaType?.toLowerCase()?.split(";")[0]?.trim().includes("html"))) return undefined;
+  const url = declaredURL ?? (bytes ? previewURL(bytes, base) : undefined); if (!url) return undefined;
   try {
     const fetched = await fetchSafe(url, { ...(options.fetcher ? { fetcher: options.fetcher } : {}), resolveHost: options.resolveHost, signal: options.signal, limits: { ...SOURCE_CAPTURE_LIMITS, maxBytes: PREVIEW_MAX_BYTES, maxRedirects: 2 } });
     const type = fetched.mediaType?.toLowerCase()?.split(";")[0]?.trim();
-    if (!fetched.bytes || !type || !PREVIEW_MEDIA_TYPES.has(type) || fetched.truncated) return undefined;
+    if (!fetched.bytes || !type || !PREVIEW_MEDIA_TYPES.has(type) || fetched.truncated || fetched.bytes.byteLength > PREVIEW_MAX_BYTES || !validPreviewBytes(fetched.bytes, type)) return undefined;
     return await store.putObject(fetched.bytes, type);
   } catch { return undefined; }
 }
@@ -391,6 +397,7 @@ function mergeHydratedContent(existing: SourceContent, incoming: SourceContent):
     } : {}),
     ...(incoming.text === undefined && existing.text !== undefined ? { text: existing.text } : {}),
     ...(incoming.object === undefined && existing.object !== undefined ? { object: existing.object } : {}),
+    ...(incoming.preview === undefined && existing.preview !== undefined ? { preview: existing.preview } : {}),
     ...(representations.length > 0 ? { representations: representations.slice(0, 20) } : {}),
     ...(origins.length > 0 ? { origins: origins.slice(-20) } : {}),
     ...(annotations.length > 0 ? { annotations: annotations.slice(-200) } : {}),
@@ -620,7 +627,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
   const capturedAt = timestamp(now);
   const bytes = fetched.bytes;
   const mediaType = fetched.mediaType;
-  const preview = await optionalPreview(store, bytes, mediaType, fetched.finalUrl, { ...(fetcher ? { fetcher } : {}), resolveHost, signal: operationController.signal });
+  const preview = await optionalPreview(store, bytes, mediaType, fetched.finalUrl, { ...(fetcher ? { fetcher } : {}), resolveHost, signal: operationController.signal }, publicPost?.article?.coverURL);
   const publicReadable = publicPost?.readableText ?? publicPost?.text;
   const readable = publicPost ? (publicReadable ? { text: publicReadable.slice(0, limits.maxReadableChars), truncated: publicReadable.length > limits.maxReadableChars } : undefined) : bytes && bytes.byteLength ? extractReadable(bytes, mediaType, limits.maxReadableChars) : undefined;
   const disposition: SourceContent["captureDisposition"] = publicPost && (fetched.truncated || readable?.truncated) ? "partial" : fetched.disposition ?? (bytes && bytes.byteLength > 0 ? (readable === undefined ? "metadata-only" : fetched.quality === "partial" || readable.quality === "partial" || fetched.truncated || readable.truncated ? "partial" : "complete") : "metadata-only");

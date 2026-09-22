@@ -287,7 +287,7 @@ describe("preview capture", () => {
     const { store } = await fixture();
     const html = '<html><head><meta property="og:image" content="https://example.com/preview.png"></head><body>Readable</body></html>';
     const fetcher = vi.fn(async (url: URL) => url.toString() === "https://example.com/preview.png"
-      ? new Response(new Uint8Array([137, 80, 78, 71]), { headers: { "content-type": "image/png" } })
+      ? new Response(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0]), { headers: { "content-type": "image/png" } })
       : new Response(html, { headers: { "content-type": "text/html" } }));
     const result = await captureSource(store, { commandId: command("preview"), url: "https://example.com/article", scope: "research" }, { fetcher, resolveHost: publicResolver });
     expect(result.record.content.preview?.mediaType).toBe("image/png");

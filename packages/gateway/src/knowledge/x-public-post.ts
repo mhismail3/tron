@@ -23,6 +23,8 @@ export interface XPublicArticle {
   title?: string;
   text: string;
   linkedUrls?: string[];
+  /** Provider-declared Article cover URL; fetched only by the bounded source owner. */
+  coverURL?: string;
   truncated?: boolean;
   limitations: string[];
 }
@@ -154,11 +156,13 @@ function articleEvidence(post: Record<string, any>): XPublicArticle | undefined 
     if (text.length > remaining) { limitations.push("Article body exceeded the bounded readable-text limit."); break; }
   }
   const links = articleEntityLinks(article);
+  const coverCandidate = object(article.cover_media)?.media_url_https ?? object(article.cover_media)?.media_url ?? object(article.cover_media)?.url;
+  const coverURL = normalizePublicLinkedUrl(coverCandidate);
   if (links.malformed) limitations.push("Some Article link metadata was malformed or unreferenced; only block-referenced safe links were retained.");
   if (links.truncated) limitations.push("Article-declared links exceeded the bounded retained-link limit.");
   if (article.cover_media || article.media_entities || article.content?.entityMap) limitations.push("Article embeds and media metadata are retained in raw evidence but were not downloaded or interpreted.");
   const text = chunks.join("\n\n");
-  return { id, ...(typeof article.title === "string" && article.title.trim() ? { title: article.title.trim().slice(0, 10_000) } : {}), text, ...(links.urls.length ? { linkedUrls: links.urls } : {}), ...(links.truncated ? { truncated: true } : {}), limitations };
+  return { id, ...(typeof article.title === "string" && article.title.trim() ? { title: article.title.trim().slice(0, 10_000) } : {}), text, ...(coverURL ? { coverURL } : {}), ...(links.urls.length ? { linkedUrls: links.urls } : {}), ...(links.truncated ? { truncated: true } : {}), limitations };
 }
 function postReadableText(postText: string, article?: XPublicArticle): string | undefined {
   if (!article?.text) return postText || undefined;

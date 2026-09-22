@@ -319,6 +319,9 @@ enum KnowledgeRecordContent: Codable, Hashable, Sendable {
     }
     private enum ProbeKeys: String, CodingKey { case range, role }
 }
+extension KnowledgeRecordContent {
+    var sourcePreviewHash: String? { if case .source(let source) = self { return source.preview?.hash }; return nil }
+}
 struct KnowledgeImportOrigin: Codable, Hashable, Sendable { let store: String; let recordId: String; let revision: String; let importedAt: String; let review: KnowledgeImportReview? }
 struct KnowledgeImportReview: Codable, Hashable, Sendable { let batch: String?; let auditId: String?; let receiptId: String?; let resultRevision: String?; let basis: String? }
 struct KnowledgeRecord: Codable, Hashable, Identifiable, Sendable {
@@ -398,8 +401,11 @@ enum KnowledgeSourcePresentationPolicy {
 
     static func domain(_ value: String?) -> String? { safeURL(value)?.host?.lowercased() }
 
-    static func summary(_ source: KnowledgeSourceContent) -> String? {
-        guard let value = source.assessment?.summary.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
+    static func summary(_ source: KnowledgeSourceContent, updatedAt: String? = nil) -> String? {
+        guard let assessment = source.assessment else { return nil }
+        let value = assessment.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return nil }
+        if let updatedAt, let generated = ISO8601DateFormatter().date(from: assessment.generatedAt), let updated = ISO8601DateFormatter().date(from: updatedAt), generated < updated { return nil }
         return String(value.prefix(320))
     }
 
