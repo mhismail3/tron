@@ -2479,52 +2479,30 @@ final class AppModel {
         return report
     }
 
-    /// Exports only the immutable capture report through the existing
-    /// authenticated, connection-bound export owner.
-    func exportDiagnosticCapture() async throws -> String {
+    /// Exports the immutable capture and current device-local diagnostics to a
+    /// bounded artifact. Remote log rows are not required: an unavailable or
+    /// stale Gateway is represented by the source-status metadata on the Logs
+    /// projection rather than by a failed export prerequisite.
+    func exportDiagnosticCapture() async throws -> URL {
         guard let report = diagnosticCaptureReport else { throw CancellationError() }
-        return try await exportGatewayLogs(GatewayLogExport.uploadText(report.text))
+        let local = await loadGatewayLogsResult(limit: 1_000, includeRemote: false)
+        let localLogs = GatewayLogExport.text(
+            records: local.records,
+            metadata: local.metadata
+        )
+        let text = GatewayLogExport.uploadText("Tron capture and local diagnostics\n\n\(report.text)\n\n\(localLogs)")
+        return try await exportLocalDiagnosticArtifact(text, suggestedName: "tron-diagnostic-capture.txt")
     }
 
-    /// Exports the already-redacted Logs surface to the exact currently
-    /// admitted Gateway. The connection-bound admission prevents a delayed
-    /// response from copying a path on a newly selected server.
-    var gatewaySupportsDiagnosticExport: Bool {
-        gatewayInfo?.capabilities.contains("diagnostic-export.v1") == true
+    /// Writes the already-redacted Logs projection to a bounded local artifact.
+    /// Remote rows remain exportable after they have been retained in the iOS
+    /// projection, and an offline or stale Gateway cannot delay or fail sharing.
+    func exportGatewayLogs(_ text: String) async throws -> URL {
+        try await exportLocalDiagnosticArtifact(text, suggestedName: "tron-gateway-logs.txt")
     }
 
-    func exportGatewayLogs(_ text: String) async throws -> String {
-        guard gatewaySupportsDiagnosticExport else {
-            throw GatewayFailure(code: "unsupported", message: "This Gateway does not support log sharing.", retryable: false, details: nil)
-        }
-        struct Params: Encodable {
-            let commandId: String
-            let content: String
-        }
-        struct Response: Codable {
-            let path: String
-        }
-        let admission = try requireCurrentGatewayConnection()
-        let profileID = profiles.selected?.id
-        let commandID = uuidSource.next().uuidString
-        let response: Response = try await mutationExecutor.perform(
-            method: "system.logs.export",
-            commandID: commandID
-        ) {
-            try await self.client.request(
-                "system.logs.export",
-                Params(commandId: commandID, content: text),
-                as: Response.self,
-                timeout: .seconds(20),
-                expectedEpochID: admission.connectionID!
-            )
-        }
-        try requireConnection(admission)
-        guard profiles.selected?.id == profileID,
-              response.path.hasPrefix("/tmp/tron-diagnostics/") else {
-            throw CancellationError()
-        }
-        return response.path
+    private func exportLocalDiagnosticArtifact(_ text: String, suggestedName: String) async throws -> URL {
+        try await exportArtifacts.writeText(text, suggestedName: suggestedName)
     }
 
     private func logCaptureMetadata(

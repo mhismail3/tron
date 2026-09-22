@@ -28,18 +28,9 @@ struct GatewayLogExportTests {
 
     @Test("share availability explains empty, loading, and unsupported states")
     func shareAvailability() {
-        #expect(GatewayLogShareAvailability.resolve(
-            hasVisibleLogs: false, gatewayInfoAvailable: true, supportsExport: true
-        ) == .unavailable("No logs are available to share yet."))
-        #expect(GatewayLogShareAvailability.resolve(
-            hasVisibleLogs: true, gatewayInfoAvailable: false, supportsExport: false
-        ) == .unavailable("The Gateway connection is still loading. Try again shortly."))
-        #expect(GatewayLogShareAvailability.resolve(
-            hasVisibleLogs: true, gatewayInfoAvailable: true, supportsExport: false
-        ) == .unavailable("This Gateway does not support log sharing."))
-        #expect(GatewayLogShareAvailability.resolve(
-            hasVisibleLogs: true, gatewayInfoAvailable: true, supportsExport: true
-        ) == .available)
+        #expect(GatewayLogShareAvailability.resolve(hasVisibleLogs: false)
+            == .unavailable("No logs are available to share yet."))
+        #expect(GatewayLogShareAvailability.resolve(hasVisibleLogs: true) == .available)
     }
 
     private func record(at date: Date = .now, message: String = "queuedBytes=44", event: String = "gateway.connection") -> GatewayProfileLogRecord {
@@ -66,6 +57,68 @@ struct GatewayLogExportTests {
         for secret in ["hidden-old", "hidden-new", "Private customer", "abc.def", "sentinel", "/Users/private", "private.example"] {
             #expect(!text.contains(secret))
         }
+    }
+
+    @MainActor
+    @Test("AppModel exports capture and retained logs locally while Gateway is disconnected")
+    func appModelOfflineExports() async throws {
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        let cacheRoot = FileManager.default.temporaryDirectory.appending(path: "diagnostic-cache-\(UUID().uuidString)")
+        let artifactRoot = FileManager.default.temporaryDirectory.appending(path: "diagnostic-artifact-\(UUID().uuidString)")
+        let store = SessionExportArtifactStore(root: artifactRoot, maximumBytes: 4_096, maximumTotalBytes: 8_192, maximumArtifacts: 3)
+        let model = AppModel(
+            client: client,
+            cache: SnapshotCache(root: cacheRoot),
+            exportArtifacts: store
+        )
+        defer {
+            try? FileManager.default.removeItem(at: cacheRoot)
+            try? FileManager.default.removeItem(at: artifactRoot)
+            Task { await model.teardown(); await client.close() }
+        }
+        await client.close()
+        _ = model.startDiagnosticCapture(duration: .seconds(1))
+        #expect(model.stopDiagnosticCapture() != nil)
+
+        let captureURL = try await model.exportDiagnosticCapture()
+        let capture = try String(contentsOf: captureURL, encoding: .utf8)
+        #expect(capture.contains("Tron Diagnostic Capture"))
+        #expect(capture.contains("not-requested-retained") == false)
+
+        let retained = GatewayLogExport.text(
+            records: [record(message: "path=/Users/private/token authorization=Bearer secret")],
+            metadata: GatewayLogCaptureMetadata(
+                capturedAt: "fixture-load", representedFrom: "old", representedThrough: "new",
+                appBuildIdentity: "fixture", gatewayIdentities: ["fixture": "runtime=fixture"],
+                sourceStatuses: ["fixture": "failed-retained"]
+            )
+        )
+        let logsURL = try await model.exportGatewayLogs(retained)
+        let logs = try String(contentsOf: logsURL, encoding: .utf8)
+        #expect(logs.contains("failed-retained"))
+        #expect(logs.contains("runtime=fixture"))
+        #expect(!logs.contains("/Users/private"))
+        #expect(!logs.contains("secret"))
+        #expect(await socket.sentFrames().isEmpty)
+
+        await model.discardExportArtifact(captureURL)
+        await model.discardExportArtifact(logsURL)
+    }
+
+    @Test("artifact retirement releases the bounded ShareLink lease")
+    func artifactRetirement() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "diagnostic-artifact-\(UUID().uuidString)")
+        let store = SessionExportArtifactStore(root: root, maximumBytes: 4_096, maximumTotalBytes: 8_192, maximumArtifacts: 1)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = try await store.writeText("local evidence", suggestedName: "capture.txt")
+        await #expect(throws: URLError.self) {
+            try await store.writeText("replacement", suggestedName: "replacement.txt")
+        }
+        await store.discard(first)
+        let replacement = try await store.writeText("replacement", suggestedName: "replacement.txt")
+        #expect(FileManager.default.fileExists(atPath: replacement.path))
+        await store.discard(replacement)
     }
 
     @Test("server uploads remain UTF-8 safe and bounded")

@@ -38,6 +38,7 @@ struct GatewayLogsSettingsView: View {
     @State private var shareGeneration = 0
     @State private var captureExportInFlight = false
     @State private var captureExportGeneration = 0
+    @State private var preparedShare: PreparedDiagnosticShare?
     @State private var captureMetadata = GatewayLogCaptureMetadata.empty
     @State private var loadCoordinator = GatewayLogsLoadCoordinator()
 
@@ -134,21 +135,31 @@ struct GatewayLogsSettingsView: View {
                 }
                 .accessibilityLabel("Diagnostic Capture")
 
-                Button { beginShare() } label: {
-                    Group {
-                        if shareInFlight {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Image(systemName: shareSucceeded ? "checkmark" : "square.and.arrow.up")
-                                .contentTransition(.symbolEffect(.replace.downUp))
-                        }
+                if let preparedShare {
+                    ShareLink(item: preparedShare.url) {
+                        Image(systemName: shareSucceeded ? "checkmark" : "square.and.arrow.up")
+                            .font(TronTypography.buttonSM)
+                            .tronSettingsAccent()
+                            .contentTransition(.symbolEffect(.replace.downUp))
                     }
-                    .font(TronTypography.buttonSM)
-                    .tronSettingsAccent()
+                    .accessibilityLabel("Share logs")
+                } else {
+                    Button { beginShare() } label: {
+                        Group {
+                            if shareInFlight {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "square.and.arrow.up")
+                                    .contentTransition(.symbolEffect(.replace.downUp))
+                            }
+                        }
+                        .font(TronTypography.buttonSM)
+                        .tronSettingsAccent()
+                    }
+                    .disabled(visibleItems.isEmpty || shareInFlight)
+                    .accessibilityLabel(shareInFlight ? "Preparing logs" : "Prepare logs to share")
                 }
-                .disabled(visibleItems.isEmpty || shareInFlight)
-                .accessibilityLabel(shareInFlight ? "Sharing logs" : "Share logs")
             }
         }
         .sensoryFeedback(.success, trigger: copySucceeded)
@@ -164,6 +175,7 @@ struct GatewayLogsSettingsView: View {
             shareGeneration &+= 1
             shareInFlight = false
             shareSucceeded = false
+            retirePreparedShare()
         }
         .onDisappear {
             loadGeneration &+= 1
@@ -172,6 +184,7 @@ struct GatewayLogsSettingsView: View {
             shareGeneration &+= 1
             shareInFlight = false
             shareSucceeded = false
+            retirePreparedShare()
             captureExportGeneration &+= 1
             captureExportInFlight = false
         }
@@ -275,10 +288,17 @@ struct GatewayLogsSettingsView: View {
                 let path = try await model.exportDiagnosticCapture()
                 guard generation == captureExportGeneration,
                       presentationActivity == activity,
-                      activity.allowsPresentationPublication else { return }
-                UIPasteboard.general.string = path
+                      activity.allowsPresentationPublication,
+                      !Task.isCancelled else {
+                    await model.discardExportArtifact(path)
+                    return
+                }
+                if let previous = preparedShare {
+                    await model.discardExportArtifact(previous.url)
+                }
+                preparedShare = PreparedDiagnosticShare(url: path)
                 model.postNotice(
-                    "Diagnostic capture path copied to clipboard",
+                    "Diagnostic capture is ready to share",
                     role: .success, lifetime: .standard, priority: .low
                 )
             } catch is CancellationError {
@@ -289,7 +309,7 @@ struct GatewayLogsSettingsView: View {
                       activity.allowsPresentationPublication else { return }
                 // Sharing is an explicit export action. Keep failures as a
                 // transient toast and never route them into the persistent
-                // diagnostic-error surface or clipboard path.
+                // diagnostic-error surface or a stale prepared artifact.
                 model.postNotice(
                     "Diagnostic capture could not be exported. Try again.",
                     role: .error,
@@ -373,11 +393,7 @@ struct GatewayLogsSettingsView: View {
 
     private func beginShare() {
         guard !shareInFlight, presentationActivity.allowsPresentationPublication else { return }
-        switch GatewayLogShareAvailability.resolve(
-            hasVisibleLogs: !visibleItems.isEmpty,
-            gatewayInfoAvailable: model.gatewayInfo != nil,
-            supportsExport: model.gatewaySupportsDiagnosticExport
-        ) {
+        switch GatewayLogShareAvailability.resolve(hasVisibleLogs: !visibleItems.isEmpty) {
         case .available:
             break
         case .unavailable(let message):
@@ -395,18 +411,21 @@ struct GatewayLogsSettingsView: View {
         Task { @MainActor in
             do {
                 let path = try await model.exportGatewayLogs(text)
-                guard generation == shareGeneration else { return }
-                guard presentationActivity == activity,
-                      activity.allowsPresentationPublication else {
-                    shareInFlight = false
-                    shareSucceeded = false
+                guard generation == shareGeneration,
+                      presentationActivity == activity,
+                      activity.allowsPresentationPublication,
+                      !Task.isCancelled else {
+                    await model.discardExportArtifact(path)
                     return
                 }
-                UIPasteboard.general.string = path
+                if let previous = preparedShare {
+                    await model.discardExportArtifact(previous.url)
+                }
+                preparedShare = PreparedDiagnosticShare(url: path)
                 shareInFlight = false
                 shareSucceeded = true
                 model.postNotice(
-                    "Log file path copied to clipboard",
+                    "Logs are ready to share",
                     role: .success,
                     lifetime: .standard,
                     priority: .low
@@ -426,7 +445,7 @@ struct GatewayLogsSettingsView: View {
                 guard presentationActivity == activity,
                       activity.allowsPresentationPublication else { return }
                 // A failed share must not expose a persistent error sheet or
-                // mutate the clipboard; only a bounded toast is appropriate.
+                // retain a partial artifact; only a bounded toast is appropriate.
                 model.postNotice(
                     "Logs could not be shared. Try again.",
                     role: .error,
@@ -437,6 +456,12 @@ struct GatewayLogsSettingsView: View {
         }
     }
 
+    private func retirePreparedShare() {
+        guard let prepared = preparedShare else { return }
+        preparedShare = nil
+        Task { await model.discardExportArtifact(prepared.url) }
+    }
+
     private func accent(for level: String) -> Color {
         switch level {
         case "error": .tronError
@@ -445,6 +470,11 @@ struct GatewayLogsSettingsView: View {
         default: .tronSlate
         }
     }
+}
+
+private struct PreparedDiagnosticShare: Identifiable {
+    let url: URL
+    var id: URL { url }
 }
 
 struct GatewayLogsLoadID: Hashable {

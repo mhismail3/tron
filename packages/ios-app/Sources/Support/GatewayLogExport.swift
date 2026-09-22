@@ -4,14 +4,11 @@ enum GatewayLogShareAvailability: Equatable {
     case available
     case unavailable(String)
 
-    static func resolve(
-        hasVisibleLogs: Bool,
-        gatewayInfoAvailable: Bool,
-        supportsExport: Bool
-    ) -> Self {
+    static func resolve(hasVisibleLogs: Bool) -> Self {
         guard hasVisibleLogs else { return .unavailable("No logs are available to share yet.") }
-        guard gatewayInfoAvailable else { return .unavailable("The Gateway connection is still loading. Try again shortly.") }
-        guard supportsExport else { return .unavailable("This Gateway does not support log sharing.") }
+        // A visible projection can always be written to a bounded local
+        // artifact. Sharing never requires Gateway readiness or a remote
+        // diagnostic export RPC.
         return .available
     }
 }

@@ -98,6 +98,41 @@ actor SessionExportArtifactStore {
         return reservation
     }
 
+    /// Stores an already-redacted, device-local export without contacting the
+    /// Gateway. Diagnostics use this owner for every share preparation so
+    /// retained evidence remains exportable offline; the bounded artifact
+    /// keeps ShareLink files private, finite, and distinct from session data.
+    func writeText(_ text: String, suggestedName: String) throws -> URL {
+        let data = Data(text.utf8)
+        try prepareForIncoming(byteCount: Int64(data.count), additionalDiskBytes: 0)
+        let folder = root.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        do {
+            try FileManager.default.createDirectory(
+                at: folder,
+                withIntermediateDirectories: false,
+                attributes: [.protectionKey: FileProtectionType.complete]
+            )
+            let destination = folder.appending(
+                path: Self.safeFilename(suggestedName),
+                directoryHint: .notDirectory
+            )
+            try data.write(to: destination, options: [.atomic, .completeFileProtection])
+            let values = try destination.resourceValues(forKeys: [
+                .fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey,
+            ])
+            guard values.isRegularFile == true,
+                  values.isSymbolicLink != true,
+                  values.fileSize == data.count else {
+                throw URLError(.cannotDecodeContentData)
+            }
+            activeArtifacts.insert(destination)
+            return destination
+        } catch {
+            try? FileManager.default.removeItem(at: folder)
+            throw error
+        }
+    }
+
     func cancelDownload(_ reservation: SessionExportArtifactReservation) {
         reservations.removeValue(forKey: reservation.id)
     }
