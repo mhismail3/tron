@@ -535,7 +535,7 @@ final class KnowledgeModelsTests: XCTestCase {
     func testKnowledgeMenusUseOneSettingsSubmenuAndKeepCreationActionsSeparate() {
         XCTAssertEqual(KnowledgeDashboardMenuPolicy.settingsTitle(for: .chronicle), "Knowledge settings")
         XCTAssertEqual(KnowledgeDashboardMenuPolicy.settingsTitle(for: .library), "Knowledge settings")
-        let settings = ["Observation configuration", "Observation preferences", "Needs attention", "Chronicle info"]
+        let settings = ["Observation configuration", "Needs attention", "Chronicle info"]
         XCTAssertEqual(KnowledgeDashboardMenuPolicy.settingsItems(for: .chronicle).map(\.rawValue), settings)
         XCTAssertEqual(KnowledgeDashboardMenuPolicy.settingsItems(for: .library).map(\.rawValue), settings)
         XCTAssertEqual(KnowledgeDashboardMenuPolicy.creationItems.map(\.rawValue), ["Capture URL", "New note"])

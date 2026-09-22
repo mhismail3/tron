@@ -237,7 +237,7 @@ final class DashboardChromeTests: XCTestCase {
                 if mode == .knowledge {
                     let configuration = try XCTUnwrap(sections[0].children.last as? UIMenu)
                     XCTAssertFalse(configuration.options.contains(.displayInline))
-                    XCTAssertEqual(configuration.children.map(\.title), ["Observation configuration", "Observation preferences", "Needs attention", "Chronicle info"])
+                    XCTAssertEqual(configuration.children.map(\.title), ["Observation configuration", "Needs attention", "Chronicle info"])
                 }
                 XCTAssertEqual(sections[2].children.compactMap { $0 as? UIAction }.map(\.state),
                                DashboardMode.allCases.map { $0 == mode ? .on : .off })
@@ -260,7 +260,6 @@ final class DashboardChromeTests: XCTestCase {
             (.knowledge, "Filter", "Knowledge filters"),
             (.knowledge, "Settings", "Settings"),
             (.knowledge, "Observation configuration", "Observation"),
-            (.knowledge, "Observation preferences", "Observation preferences"),
             (.knowledge, "Capture URL", "Capture URL"),
             (.knowledge, "New note", "New note"),
         ]

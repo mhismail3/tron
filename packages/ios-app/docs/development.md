@@ -147,9 +147,9 @@ skip, not a deleted gap or a session exclusion. A covered parent must not suppre
 correction callback: the callback checks the originating Knowledge presentation identity while the
 managed child owns presentation publication.
 
-Observation has one explicit **Observe all Tron sessions** on/off control. The separate Observation
-preferences item owns the configured observer model and interests; the Observation sheet
-does not enumerate conversations or projects; enabling the control explicitly persists `allSessions` and applies to
+Observation configuration owns the observer model, current interests, and one explicit
+**Observe all Tron sessions** on/off control in a single sheet and Save operation.
+It does not enumerate conversations or projects; enabling the control explicitly persists `allSessions` and applies to
 future primary Tron conversations only. Exclusions remain authoritative, delegated transcripts stay
 out of scope, and no past turns are backfilled. The control requires
 `knowledge-global-observation.v1`; without it, show update guidance and reject global configuration

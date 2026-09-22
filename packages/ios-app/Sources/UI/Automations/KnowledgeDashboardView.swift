@@ -25,7 +25,6 @@ enum KnowledgeDashboardSection: String, CaseIterable, Identifiable {
 
 enum KnowledgeDashboardMenuItem: String, CaseIterable {
     case observationConfiguration = "Observation configuration"
-    case observationPreferences = "Observation preferences"
     case needsAttention = "Needs attention"
     case chronicleInfo = "Chronicle info"
     case captureURL = "Capture URL"
@@ -34,7 +33,6 @@ enum KnowledgeDashboardMenuItem: String, CaseIterable {
     var symbol: String {
         switch self {
         case .observationConfiguration: "eye"
-        case .observationPreferences: "slider.horizontal.2.square"
         case .needsAttention: "exclamationmark.triangle"
         case .chronicleInfo: "info.circle"
         case .captureURL: "link.badge.plus"
@@ -49,7 +47,7 @@ enum KnowledgeDashboardMenuPolicy {
     }
 
     static func settingsItems(for area: KnowledgeDashboardArea) -> [KnowledgeDashboardMenuItem] {
-        [.observationConfiguration, .observationPreferences, .needsAttention, .chronicleInfo]
+        [.observationConfiguration, .needsAttention, .chronicleInfo]
     }
 
     static let creationItems: [KnowledgeDashboardMenuItem] = [.captureURL, .newNote]
@@ -189,7 +187,6 @@ struct KnowledgeDashboardView: View {
     @State private var chronicleInfoSheet = false
     @State private var loadGeneration = 0
     @State private var configSheet = false
-    @State private var observationPreferencesSheet = false
     @State private var captureSheet = false
     @State private var noteSheet = false
     @State private var showingFilters = false
@@ -280,9 +277,6 @@ struct KnowledgeDashboardView: View {
         .tronManagedSheet(isPresented: $configSheet, identity: "knowledge.configuration") {
             KnowledgeConfigurationView().environment(model)
         }
-        .tronManagedSheet(isPresented: $observationPreferencesSheet, identity: "knowledge.observation-preferences") {
-            KnowledgeObservationPreferencesView().environment(model)
-        }
         .tronManagedSheet(isPresented: $captureSheet, identity: "knowledge.capture") {
             KnowledgeCaptureView { captureSheet = false; await reload() }.environment(model)
         }
@@ -310,7 +304,6 @@ struct KnowledgeDashboardView: View {
             { [self] in
                 switch item {
                 case .observationConfiguration: configSheet = true
-                case .observationPreferences: observationPreferencesSheet = true
                 case .needsAttention: openCoverageDetail()
                 case .chronicleInfo: chronicleInfoSheet = true
                 case .captureURL: captureSheet = true
@@ -1571,73 +1564,15 @@ struct KnowledgeConfigurationView: View {
     @Environment(\.tronPresentationActivity) private var activity
     @Environment(\.dismiss) private var dismiss
     @State private var config: KnowledgeConfig?
-    @State private var saving = false
-    @State private var error: String?
-    @State private var identity: KnowledgePresentationIdentity?
-    private var supportsGlobalObservation: Bool { model.gatewayInfo?.capabilities.contains(KnowledgeRPCClient.globalObservationCapability) == true }
-    private var canSave: Bool { config != nil }
-    var body: some View {
-        KnowledgeFormSheet(title: "Observation", isWorking: saving, actionDisabled: !canSave, onAction: save) {
-            if config == nil && error == nil { TronLoadingState(label: "Loading configuration…") }
-            TronSettingsCaption("Future turns only; earlier turns are not backfilled.")
-            TronSettingsGroup("Observation", accent: .tronKnowledge) {
-                TronToggleRow(icon: "globe", title: "Observe all Tron sessions",
-                              detail: "When enabled, save future observations from every Tron conversation. Excluded conversations and projects stay excluded.", accent: .tronKnowledge,
-                              isOn: Binding(get: { config?.observation.enabled ?? false }, set: { config?.observation.enabled = $0 }))
-                    .disabled(config == nil || (!supportsGlobalObservation && config?.observation.enabled != true))
-            }
-            .tronSettingsCaption("This covers Tron conversations only, not other apps, files, or delegated-agent transcripts.")
-            if !supportsGlobalObservation {
-                TronSettingsNotice(message: "Update this Gateway to enable all-session observation.", accent: .tronAmber)
-            }
-            if let error { TronSettingsNotice(message: error, accent: .tronError) }
-        }
-        .task { await load() }
-    }
-    private func load() async {
-        let requestIdentity = model.knowledgePresentationIdentity
-        do {
-            let loaded = try await model.knowledge.status()
-            guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity, requestIdentity.profileID != nil else { return }
-            identity = requestIdentity; config = loaded.config
-        } catch {
-            guard activity.allowsPresentationPublication,
-                  model.knowledgePresentationIdentity == requestIdentity else { return }
-            self.error = error.localizedDescription
-        }
-    }
-    private func save() {
-        guard !saving, var config else { return }
-        guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == (identity ?? model.knowledgePresentationIdentity) else { error = "Gateway changed; reopen configuration."; return }
-        if config.observation.enabled && !KnowledgeObservationConfigurationPolicy.admitsEnable(hasModel: config.observation.model != nil, supportsGlobalObservation: supportsGlobalObservation) {
-            error = config.observation.model == nil ? "Choose a model in Observation preferences before enabling observation." : "Update this Gateway before enabling all-session observation."
-            return
-        }
-        saving = true
-        config = KnowledgeObservationConfigurationPolicy.applyingGlobalGrant(config, enabled: config.observation.enabled)
-        let requestIdentity = identity ?? model.knowledgePresentationIdentity
-        Task { @MainActor in
-            guard model.knowledgePresentationIdentity == requestIdentity else { return }
-            do { _ = try await model.knowledge.configure(config, capabilities: model.gatewayInfo?.capabilities ?? []); guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; saving = false; dismiss() }
-            catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { saving = false }; return }
-            catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; saving = false; self.error = error.localizedDescription }
-        }
-    }
-}
-
-struct KnowledgeObservationPreferencesView: View {
-    @Environment(AppModel.self) private var model
-    @Environment(\.tronPresentationActivity) private var activity
-    @Environment(\.dismiss) private var dismiss
-    @State private var config: KnowledgeConfig?
     @State private var chosenModel: ModelRef?
     @State private var interestsText = ""
     @State private var saving = false
     @State private var error: String?
     @State private var identity: KnowledgePresentationIdentity?
+    private var supportsGlobalObservation: Bool { model.gatewayInfo?.capabilities.contains(KnowledgeRPCClient.globalObservationCapability) == true }
 
     var body: some View {
-        KnowledgeFormSheet(title: "Observation preferences", isWorking: saving, actionDisabled: config == nil, onAction: save) {
+        KnowledgeFormSheet(title: "Observation", isWorking: saving, actionDisabled: config == nil, onAction: save) {
             if config == nil && error == nil { TronLoadingState(label: "Loading configuration…") }
             TronSettingsGroup("Observer", accent: .tronKnowledge) {
                 TronSelectionSheetRow(icon: "cpu", title: "Model", value: chosenModel?.id ?? "Choose", accent: .tronKnowledge) {
@@ -1648,6 +1583,16 @@ struct KnowledgeObservationPreferencesView: View {
             }
             .disabled(config == nil)
             .tronSettingsCaption("The model is used for future eligible turns; earlier turns are not backfilled.")
+            TronSettingsGroup("Observation", accent: .tronKnowledge) {
+                TronToggleRow(icon: "globe", title: "Observe all Tron sessions",
+                              detail: "When enabled, save future observations from every Tron conversation. Excluded conversations and projects stay excluded.", accent: .tronKnowledge,
+                              isOn: Binding(get: { config?.observation.enabled ?? false }, set: { config?.observation.enabled = $0 }))
+                    .disabled(config == nil || (!supportsGlobalObservation && config?.observation.enabled != true))
+            }
+            .tronSettingsCaption("This covers Tron conversations only, not other apps, files, or delegated-agent transcripts.")
+            if !supportsGlobalObservation {
+                TronSettingsNotice(message: "Update this Gateway to enable all-session observation.", accent: .tronAmber)
+            }
             TronSettingsGroup("Current interests", accent: .tronKnowledge, surfaceStyle: .uncontained) {
                 TextEditor(text: $interestsText).frame(minHeight: 120).tronTextEditor()
                     .accessibilityLabel("Current interests")
@@ -1665,7 +1610,7 @@ struct KnowledgeObservationPreferencesView: View {
             guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity, requestIdentity.profileID != nil else { return }
             identity = requestIdentity
             config = loaded.config
-            interestsText = loaded.config.currentInterests.joined(separator: "\\n")
+            interestsText = loaded.config.currentInterests.joined(separator: "\n")
             if let value = loaded.config.observation.model {
                 let parts = value.split(separator: "/", maxSplits: 1).map(String.init)
                 if parts.count == 2 { chosenModel = ModelRef(provider: parts[0], id: parts[1]) }
@@ -1679,18 +1624,23 @@ struct KnowledgeObservationPreferencesView: View {
     private func save() {
         guard !saving, var config else { return }
         let requestIdentity = identity ?? model.knowledgePresentationIdentity
-        guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { error = "Gateway changed; reopen preferences."; return }
-        guard let chosenModel else { error = "Choose a model before saving observation preferences."; return }
+        guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { error = "Gateway changed; reopen configuration."; return }
+        if let chosenModel { config.observation.model = chosenModel.contextWindowKey }
+        if config.observation.enabled && !KnowledgeObservationConfigurationPolicy.admitsEnable(hasModel: config.observation.model != nil, supportsGlobalObservation: supportsGlobalObservation) {
+            error = config.observation.model == nil ? "Choose a model before enabling observation." : "Update this Gateway before enabling all-session observation."
+            return
+        }
         saving = true
-        config.observation.model = chosenModel.contextWindowKey
+        config = KnowledgeObservationConfigurationPolicy.applyingGlobalGrant(config, enabled: config.observation.enabled)
         config.currentInterests = interestsText.split(whereSeparator: \.isNewline).map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }.prefix(50).map { String($0.prefix(500)) }
         Task { @MainActor in
+            guard model.knowledgePresentationIdentity == requestIdentity else { return }
             do {
                 _ = try await model.knowledge.configure(config, capabilities: model.gatewayInfo?.capabilities ?? [])
                 guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
                 saving = false; dismiss()
-            } catch is CancellationError { saving = false }
-            catch { guard model.knowledgePresentationIdentity == requestIdentity else { return }; saving = false; self.error = error.localizedDescription }
+            } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { saving = false } }
+            catch { guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }; saving = false; self.error = error.localizedDescription }
         }
     }
 }
