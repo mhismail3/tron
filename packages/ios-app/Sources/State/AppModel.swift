@@ -240,6 +240,8 @@ final class AppModel {
     var customModelInvalidationGeneration: Int { customModelConfiguration.invalidationGeneration }
     var trustRevision: Int { settingsTrust.trustRevision }
     var pairedDevices: [PairedDevice] = []
+    // Invalidates surface-owned device reads without blocking control-event intake.
+    var deviceCatalogRevision = 0
     let notificationInbox: NotificationInboxCoordinator
     var pushNotificationReadiness: PushReadiness = .unavailable
     var pushRegistrationDiagnostic: PushRegistrationDiagnostic = .idle
@@ -2591,6 +2593,68 @@ final class AppModel {
         return authorized
     }
 
+    func loadAuthorizedDevice(for authorized: GatewayAuthorizedDevice) async throws -> PairedDevice {
+        let admission = try deviceLabelAdmission(for: authorized.profileID)
+        struct Response: Decodable { let devices: [PairedDevice] }
+        let response: Response = try await client.request("device.list", EmptyParams(), timeout: .seconds(30))
+        try requireLifecycle(admission)
+        guard let device = try PairedDeviceCatalogPolicy.admit(response.devices).first(where: { $0.id == authorized.device.id }) else {
+            throw GatewayFailure(code: "not_found", message: "This device is no longer authorized.", retryable: false, details: nil)
+        }
+        return device
+    }
+
+    private func deviceLabelAdmission(for profileID: String) throws -> GatewayLifecycleCoordinator.Admission {
+        try requireSelectedAdministrativeProfile(profileID)
+        guard gatewayInfo?.capabilities.contains("device-label.v1") == true else {
+            throw GatewayFailure(code: "unsupported", message: "This server does not support custom device labels.", retryable: false, details: nil)
+        }
+        guard let admission = lifecycle.generationAdmission else { throw CancellationError() }
+        try requireLifecycle(admission)
+        return admission
+    }
+
+    func setAuthorizedDeviceLabel(
+        for authorized: GatewayAuthorizedDevice,
+        label: String?
+    ) async throws -> PairedDevice {
+        let admission = try deviceLabelAdmission(for: authorized.profileID)
+        struct Params: Encodable {
+            let commandId: String
+            let deviceId: String
+            let label: String?
+
+            enum CodingKeys: String, CodingKey { case commandId, deviceId, label }
+            func encode(to encoder: Encoder) throws {
+                var values = encoder.container(keyedBy: CodingKeys.self)
+                try values.encode(commandId, forKey: .commandId)
+                try values.encode(deviceId, forKey: .deviceId)
+                try values.encode(label, forKey: .label)
+            }
+        }
+        let commandID = uuidSource.next().uuidString
+        let updated: PairedDevice = try await mutationExecutor.perform(
+            method: "device.label",
+            commandID: commandID
+        ) {
+            try await self.client.request(
+                "device.label",
+                Params(commandId: commandID, deviceId: authorized.device.id, label: label),
+                as: PairedDevice.self,
+                timeout: .seconds(30)
+            )
+        }
+        try requireLifecycle(admission)
+        guard updated.id == authorized.device.id else {
+            throw GatewayFailure(code: "invalid_response", message: "The saved device label belongs to another device.", retryable: true, details: nil)
+        }
+        _ = try PairedDeviceCatalogPolicy.admit([updated])
+        deviceLoadGeneration &+= 1
+        if let index = pairedDevices.firstIndex(where: { $0.id == updated.id }) { pairedDevices[index] = updated }
+        deviceCatalogRevision &+= 1
+        return updated
+    }
+
     nonisolated static func supportsIosDeviceInstall(capabilities: [String]) -> Bool {
         capabilities.contains("ios-device-install.v3")
     }
@@ -4175,6 +4239,8 @@ final class AppModel {
             customModelConfiguration.noteCustomModelsChanged()
         case "notification.inbox.changed":
             if let profile = profiles.selected { scheduleNotificationInboxRefresh(profile: profile) }
+        case "devices.changed":
+            deviceCatalogRevision &+= 1
         case "automation.changed":
             guard case .automationChanged = event.preparation else { return }
             automationCatalog.invalidate()
@@ -4406,6 +4472,10 @@ final class AppModel {
 }
 
 extension AppModel: DashboardGatewayConnectionPoolDelegate {
+    func dashboardPoolDevicesChanged(profileID: String) {
+        deviceCatalogRevision &+= 1
+    }
+
     func dashboardPoolAutomationChanged(profileID: String) {
         automationCatalog.invalidate(profileID: profileID)
     }

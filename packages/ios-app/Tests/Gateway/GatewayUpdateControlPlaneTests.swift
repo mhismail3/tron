@@ -578,6 +578,58 @@ struct GatewayUpdateControlPlaneTests {
         await client.close()
     }
 
+    @Test("device labels use receipts, encode reset as null, and reject a different response identity")
+    func deviceLabelMutation() async throws {
+        let suiteName = "device-label-mutation-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let cacheRoot = FileManager.default.temporaryDirectory.appending(path: suiteName, directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: cacheRoot) }
+        let profile = GatewayProfile(id: "stable", label: "Stable", host: "gateway.test", port: 9_847,
+                                     machineId: "machine", deviceId: "phone")
+        defaults.set(try JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
+        defaults.set(profile.id, forKey: "selectedGateway.v1")
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        let model = AppModel(client: client, profiles: GatewayProfileStore(defaults: defaults), cache: SnapshotCache(root: cacheRoot))
+        let connecting = Task { try await model.connectHostedGateway(profile: profile, token: "fixture-token") }
+        try await socket.waitUntilSent(count: 1)
+        // Naming is independent of supervised install capability.
+        await socket.enqueue(helloFrame(machineID: "machine", capabilities: ["device-label.v1"]))
+        try await connecting.value
+        let device = PairedDevice(id: "phone", name: "iPhone", createdAt: "2026-08-31T00:00:00Z")
+        model.pairedDevices = [device]
+        let authorized = GatewayAuthorizedDevice(profileID: profile.id, profileLabel: profile.label, device: device)
+        for (index, label) in [Optional("Work Phone"), nil].enumerated() {
+            let saving = Task { try await model.setAuthorizedDeviceLabel(for: authorized, label: label) }
+            try await socket.waitUntilSent(count: index + 2)
+            let request = try requestFrame(await socket.sentFrames()[index + 1])
+            #expect(request.method == "device.label")
+            #expect(request.params?["deviceId"] == .string("phone"))
+            #expect(request.params?["label"] == (label.map(JSONValue.string) ?? .null))
+            #expect(request.params?["commandId"]?.stringValue?.isEmpty == false)
+            let updated = PairedDevice(id: "phone", name: label ?? "Personal Phone", customLabel: label, createdAt: device.createdAt)
+            await socket.enqueue(successResponse(id: request.id, result: try JSONDecoder.gateway.decode(JSONValue.self, from: JSONEncoder.gateway.encode(updated))))
+            #expect(try await saving.value == updated)
+            #expect(model.pairedDevices == [updated])
+        }
+        let invalid = Task { try await model.setAuthorizedDeviceLabel(for: authorized, label: "Unexpected") }
+        try await socket.waitUntilSent(count: 4)
+        let request = try requestFrame(await socket.sentFrames()[3])
+        await socket.enqueue(successResponse(id: request.id, result: .object([
+            "id": .string("other-phone"), "name": .string("Unexpected"), "createdAt": .string(device.createdAt),
+        ])))
+        do {
+            _ = try await invalid.value
+            Issue.record("A different device's response must not update the device catalog")
+        } catch let failure as GatewayFailure {
+            #expect(failure.code == "invalid_response")
+        }
+        #expect(model.pairedDevices.first?.name == "Personal Phone")
+        await model.teardown()
+        await client.close()
+    }
+
     private func debugCandidate(fingerprint: String) throws -> GatewayDebugPromotionCandidate {
         let data = Data(#"{"state":"prepared","channel":"stable","currentIdentity":null,"candidateIdentity":{"version":"debug-tested","sourceRevision":"revision-1","runtimeEpoch":"candidate-epoch","payloadFingerprint":"\#(fingerprint)"},"candidateAvailable":true,"candidateOrigin":"debug","candidateProvenance":{"origin":"debug","version":"debug-tested","payloadFingerprint":"\#(fingerprint)","sourceRevision":"revision-1","testedRuntimeEpoch":"tested-epoch","candidateRuntimeEpoch":"candidate-epoch"},"error":null,"updatedAt":null}"#.utf8)
         return try #require(JSONDecoder.gateway.decode(GatewayUpdateStatus.self, from: data).debugPromotionCandidate)

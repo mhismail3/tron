@@ -38,6 +38,41 @@ describe("DeviceStore", () => {
     });
   });
 
+  it("uses observed names unless a custom label overrides them, and supports reset", async () => {
+    const { store } = await fixture();
+    const enrollment = await store.ensureEnrollment();
+    const paired = await store.pair(enrollment.code, "iPhone");
+    expect((await store.listDevices())[0]).toMatchObject({ name: "iPhone" });
+    await store.updateObservedName(paired.deviceId, "Personal iPhone");
+    expect((await store.listDevices())[0]).toMatchObject({ name: "Personal iPhone" });
+    await store.setCustomLabel(paired.deviceId, "Work phone");
+    expect((await store.listDevices())[0]).toMatchObject({ name: "Work phone", customLabel: "Work phone" });
+    await store.updateObservedName(paired.deviceId, "Renamed iPhone");
+    expect((await store.listDevices())[0]).toMatchObject({ name: "Work phone" });
+    await store.setCustomLabel(paired.deviceId, null);
+    expect((await store.listDevices())[0]).toMatchObject({ name: "Renamed iPhone" });
+  });
+
+  it("rejects malformed custom and observed names without changing persisted identity", async () => {
+    const { store } = await fixture();
+    const enrollment = await store.ensureEnrollment();
+    const paired = await store.pair(enrollment.code, "iPhone");
+    await expect(store.setCustomLabel(paired.deviceId, " \u0000 ")).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(store.updateObservedName(paired.deviceId, " \u0001 ")).resolves.toBe(false);
+    expect((await store.listDevices())[0]).toMatchObject({ id: paired.deviceId, name: "iPhone" });
+  });
+
+  it("retains observed metadata across persisted reads", async () => {
+    const { root, store } = await fixture();
+    const enrollment = await store.ensureEnrollment();
+    const paired = await store.pair(enrollment.code, "iPhone");
+    const path = join(root, "gateway", "devices.json");
+    const document = JSON.parse(await readFile(path, "utf8"));
+    document.devices[0].observedName = "Personal iPhone";
+    await writeFile(path, `${JSON.stringify(document)}\n`);
+    expect(await store.listDevices()).toEqual([expect.objectContaining({ id: paired.deviceId, name: "Personal iPhone" })]);
+  });
+
   it("rejects pairing beyond capacity without consuming the invitation", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-gateway-device-bound-"));
     const store = new DeviceStore(root, "machine-id", { maximumDevices: 1 });

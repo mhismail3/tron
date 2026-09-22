@@ -17,6 +17,19 @@ struct PairedDeviceDetailView: View {
     @State private var confirmingInstall = false
     @State private var fastDebugRebuild = true
     @State private var confirmingRevoke = false
+    @State private var draftLabel: String
+    @State private var displayedName: String
+    @State private var savingLabel = false
+    @State private var savedLabel: String
+    @State private var labelReadGeneration = 0
+    @State private var labelPresentationGeneration = 0
+
+    init(authorized: GatewayAuthorizedDevice) {
+        self.authorized = authorized
+        _draftLabel = State(initialValue: authorized.device.customLabel ?? "")
+        _displayedName = State(initialValue: authorized.device.name)
+        _savedLabel = State(initialValue: authorized.device.customLabel ?? "")
+    }
 
     private var profile: GatewayProfile? {
         _ = model.profileRevision
@@ -36,6 +49,15 @@ struct PairedDeviceDetailView: View {
             && AppModel.supportsIosDeviceInstall(capabilities: model.gatewayInfo?.capabilities ?? [])
     }
 
+    private var labelSupported: Bool {
+        serverConnected && model.gatewayInfo?.capabilities.contains("device-label.v1") == true
+    }
+
+    private var labelValid: Bool {
+        draftLabel.utf8.count <= PairedDeviceCatalogPolicy.maximumNameBytes
+            && draftLabel.unicodeScalars.allSatisfy { !CharacterSet.controlCharacters.contains($0) }
+    }
+
     private var installConfigured: Bool {
         config?.sourceRoot != nil
     }
@@ -46,6 +68,7 @@ struct PairedDeviceDetailView: View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
                 deviceGroup
+                if labelSupported { deviceLabelGroup }
                 if usesServer {
                     installationGroup
                 } else {
@@ -57,7 +80,7 @@ struct PairedDeviceDetailView: View {
             .padding(.vertical, 18)
         }
         .tronScrollEdgeChrome()
-        .tronNavigationTitle(authorized.device.name, accent: .tronPurple)
+        .tronNavigationTitle(displayedName, accent: .tronPurple)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button { dismiss() } label: {
@@ -93,10 +116,20 @@ struct PairedDeviceDetailView: View {
                 await loadStatus()
             }
         }
-        .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
-            if !active { loadGeneration &+= 1; statusReadGeneration &+= 1 }
+        .task(id: "\(model.deviceCatalogRevision):\(labelSupported):\(scenePhase == .active):\(presentationActivity.allowsPresentationPublication)") {
+            guard labelSupported, admitsReadResult else { return }
+            await reloadLabel()
         }
-        .onDisappear { loadGeneration &+= 1; statusReadGeneration &+= 1 }
+        .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
+            if !active {
+                loadGeneration &+= 1; statusReadGeneration &+= 1
+                labelReadGeneration &+= 1; labelPresentationGeneration &+= 1
+            }
+        }
+        .onDisappear {
+            loadGeneration &+= 1; statusReadGeneration &+= 1
+            labelReadGeneration &+= 1; labelPresentationGeneration &+= 1
+        }
         .tronManagedSheet(
             isPresented: $configuringSource,
             identity: "settings.device.\(authorized.id).source"
@@ -112,8 +145,8 @@ struct PairedDeviceDetailView: View {
             TronConfirmationSheet(
                 title: "Rebuild and install Tron?",
                 message: fastDebugRebuild
-                    ? "The Mac will build the development-signed Tron Device app for UI iteration, validate its signing and Gateway protocol, overwrite-install it on \(authorized.device.name), and relaunch it without erasing app or Keychain data."
-                    : "The Mac will build the optimized development-signed Tron Device app, validate its signing and Gateway protocol, overwrite-install it on \(authorized.device.name), and relaunch it without erasing app or Keychain data.",
+                    ? "The Mac will build the development-signed Tron Device app for UI iteration, validate its signing and Gateway protocol, overwrite-install it on \(displayedName), and relaunch it without erasing app or Keychain data."
+                    : "The Mac will build the optimized development-signed Tron Device app, validate its signing and Gateway protocol, overwrite-install it on \(displayedName), and relaunch it without erasing app or Keychain data.",
                 confirmTitle: "Install",
                 centersTitle: true,
                 alwaysUsesToolbarActions: true,
@@ -137,7 +170,7 @@ struct PairedDeviceDetailView: View {
             identity: "settings.device.\(authorized.id).revoke-confirmation"
         ) {
             TronConfirmationSheet(
-                title: "Revoke \(authorized.device.name)?",
+                title: "Revoke \(displayedName)?",
                 message: "This removes the device's access to \(authorized.profileLabel) and its saved local install mapping.",
                 confirmTitle: "Revoke Device",
                 destructive: true,
@@ -152,7 +185,7 @@ struct PairedDeviceDetailView: View {
             VStack(spacing: 0) {
                 TronValueRow(
                     icon: "iphone",
-                    title: authorized.device.name,
+                    title: displayedName,
                     detail: authorized.device.id == model.profiles.selected?.deviceId
                         ? "This device"
                         : "Paired mobile device",
@@ -165,6 +198,37 @@ struct PairedDeviceDetailView: View {
                     detail: authorized.profileLabel,
                     accent: .tronPurple
                 )
+            }
+        }
+    }
+
+    private var deviceLabelGroup: some View {
+        TronSettingsGroup("Device Name", detail: "A custom label overrides the name last observed by the Mac. Clear it to restore the default name.", accent: .tronPurple) {
+            VStack(spacing: 10) {
+                TextField("Custom label", text: $draftLabel)
+                    .textInputAutocapitalization(.words)
+                    .autocorrectionDisabled()
+                    .disabled(savingLabel)
+                    .accessibilityIdentifier("device.customLabel")
+                    .tronField(
+                        monospaced: false,
+                        compact: true,
+                        dense: true,
+                        surfaceTint: Color.tronPurple.opacity(0.14),
+                        border: Color.tronPurple.opacity(0.42)
+                    )
+                Button {
+                    Task { await saveLabel() }
+                } label: {
+                    HStack(spacing: 8) {
+                        if savingLabel { TronPulseLoadingIndicator(accent: .tronPurple, size: 16) }
+                        Text(draftLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Use Default Name" : "Save Custom Label")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(TronActionButtonStyle(role: .standard))
+                .disabled(savingLabel || !labelValid)
+                .accessibilityIdentifier("device.saveLabel")
             }
         }
     }
@@ -385,6 +449,49 @@ struct PairedDeviceDetailView: View {
         } catch is CancellationError {
             return
         } catch {
+            model.presentError(error)
+        }
+    }
+
+    private func reloadLabel() async {
+        labelReadGeneration &+= 1
+        let generation = labelReadGeneration
+        do {
+            let updated = try await model.loadAuthorizedDevice(for: authorized)
+            guard generation == labelReadGeneration, admitsReadResult else { return }
+            displayedName = updated.name
+            if !savingLabel && draftLabel == savedLabel { draftLabel = updated.customLabel ?? "" }
+            savedLabel = updated.customLabel ?? ""
+        } catch is CancellationError {
+            return
+        } catch {
+            guard generation == labelReadGeneration, admitsReadResult else { return }
+            model.presentError(error)
+        }
+    }
+
+    private func saveLabel() async {
+        guard !savingLabel, labelSupported, labelValid else { return }
+        labelReadGeneration &+= 1
+        let generation = labelPresentationGeneration
+        savingLabel = true
+        // This flag belongs to the accepted mutation, not a disposable read.
+        // Covering the sheet must not admit a second concurrent save.
+        defer { savingLabel = false }
+        let normalized = draftLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            let updated = try await model.setAuthorizedDeviceLabel(
+                for: authorized,
+                label: normalized.isEmpty ? nil : normalized
+            )
+            guard generation == labelPresentationGeneration, admitsReadResult else { return }
+            displayedName = updated.name
+            draftLabel = updated.customLabel ?? ""
+            savedLabel = updated.customLabel ?? ""
+        } catch is CancellationError {
+            return
+        } catch {
+            guard generation == labelPresentationGeneration, admitsReadResult else { return }
             model.presentError(error)
         }
     }

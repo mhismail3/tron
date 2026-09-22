@@ -327,6 +327,7 @@ export class GatewayService {
       capabilities: [
         ...(process.env.TRON_GATEWAY_SUPERVISED === "1" ? ["restart-supervised.v1"] : []),
         "sessions.v1",
+        "device-label.v1",
         "diagnostic-export.v1",
         "session-export.v2",
         "auth.v1",
@@ -487,6 +488,22 @@ export class GatewayService {
         });
       case "device.list":
         return safeJson({ devices: await this.dependencies.devices.listDevices() });
+      case "device.label":
+        return this.mutation(client, method, params, async () => {
+          if (Object.keys(params).some((key) => !["commandId", "deviceId", "label"].includes(key))) {
+            throw new GatewayError("invalid_request", "Device label contains unknown fields");
+          }
+          const deviceId = string(params.deviceId, "deviceId", { max: 100 });
+          const label = params.label === null ? null : string(params.label, "label", { max: 320 });
+          if (label !== null && label.length === 0) throw new GatewayError("invalid_request", "Device label must contain visible text");
+          return this.withMobileIdentityLane(deviceId, async () => {
+            await this.requirePairedDevice(deviceId);
+            const updated = await this.dependencies.devices.setCustomLabel(deviceId, label);
+            if (!updated) throw new GatewayError("not_found", "Authorized device no longer exists");
+            this.dependencies.broadcast("devices.changed", { deviceId });
+            return safeJson(updated);
+          });
+        });
       case "device.install.config.status": {
         if (Object.keys(params).some((key) => key !== "deviceId")) {
           throw new GatewayError("invalid_request", "iOS install configuration status accepts only deviceId");
@@ -507,9 +524,13 @@ export class GatewayService {
           return this.withMobileIdentityLane(deviceId, async () => {
             await this.requirePairedDevice(deviceId);
             await this.requireNoActiveGatewayUpdate();
-            return safeJson(projectIosDeviceInstallConfig(
-              await this.iosDeviceInstallService.bindTarget(deviceId, targetIdentifier),
-            ));
+            const config = await this.iosDeviceInstallService.bindTarget(deviceId, targetIdentifier);
+            if (config.target) {
+              if (await this.dependencies.devices.updateObservedName(deviceId, config.target.name)) {
+                this.dependencies.broadcast("devices.changed", { deviceId });
+              }
+            }
+            return safeJson(projectIosDeviceInstallConfig(config));
           });
         });
       case "device.install.config":
@@ -539,9 +560,17 @@ export class GatewayService {
           const deviceId = string(params.deviceId, "deviceId", { max: 100 });
           const commandId = string(params.commandId, "commandId", { min: 8, max: 160 });
           const buildMode = string(params.buildMode, "buildMode", { min: 1, max: 32 });
-          await this.requirePairedDevice(deviceId);
-          await this.requireNoActiveGatewayUpdate();
-          return safeJson(await this.iosDeviceInstallService.install(deviceId, commandId, buildMode));
+          return this.withMobileIdentityLane(deviceId, async () => {
+            await this.requirePairedDevice(deviceId);
+            await this.requireNoActiveGatewayUpdate();
+            return safeJson(await this.iosDeviceInstallService.install(deviceId, commandId, buildMode, async (name) => {
+              // Same identity lane as binding/revocation: a discovery result cannot
+              // rename a replacement binding or resurrect a revoked pairing.
+              if (await this.dependencies.devices.updateObservedName(deviceId, name)) {
+                this.dependencies.broadcast("devices.changed", { deviceId });
+              }
+            }));
+          });
         });
       case "device.revoke": {
         const deviceId = string(params.deviceId, "deviceId", { max: 100 });

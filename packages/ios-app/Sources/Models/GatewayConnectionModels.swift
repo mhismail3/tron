@@ -345,7 +345,15 @@ struct GatewayInfo: Codable, Hashable, Sendable {
 struct PairedDevice: Codable, Hashable, Identifiable, Sendable {
     let id: String
     let name: String
+    let customLabel: String?
     let createdAt: String
+
+    init(id: String, name: String, customLabel: String? = nil, createdAt: String) {
+        self.id = id
+        self.name = name
+        self.customLabel = customLabel
+        self.createdAt = createdAt
+    }
 }
 
 struct GatewayAuthorizedDevice: Hashable, Identifiable, Sendable {
@@ -502,6 +510,9 @@ enum PairedDeviceCatalogPolicy {
                   device.id.utf8.count <= maximumIDBytes,
                   !device.name.isEmpty,
                   device.name.utf8.count <= maximumNameBytes,
+                  device.customLabel.map({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                      && $0.utf8.count <= maximumNameBytes
+                      && $0.unicodeScalars.allSatisfy { !CharacterSet.controlCharacters.contains($0) } }) ?? true,
                   device.name.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }),
                   !device.createdAt.isEmpty,
                   device.createdAt.utf8.count <= maximumTimestampBytes,

@@ -22,10 +22,12 @@ protocol DashboardGatewayConnectionPoolDelegate: AnyObject {
     )
     func dashboardPoolNotificationInboxChanged(profileID: String)
     func dashboardPoolAutomationChanged(profileID: String)
+    func dashboardPoolDevicesChanged(profileID: String)
 }
 
 extension DashboardGatewayConnectionPoolDelegate {
     func dashboardPoolAutomationChanged(profileID: String) {}
+    func dashboardPoolDevicesChanged(profileID: String) {}
 }
 
 /// Maintains lightweight dashboard catalog connections for non-focused servers.
@@ -480,6 +482,8 @@ final class DashboardGatewayConnectionPool {
             scheduleRefresh(profileID: profileID, generation: generation)
         case "notification.inbox.changed":
             delegate?.dashboardPoolNotificationInboxChanged(profileID: profileID)
+        case "devices.changed":
+            delegate?.dashboardPoolDevicesChanged(profileID: profileID)
         case "automation.changed":
             guard case .automationChanged = event.preparation else { return }
             delegate?.dashboardPoolAutomationChanged(profileID: profileID)
