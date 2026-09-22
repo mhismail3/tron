@@ -23,6 +23,23 @@ struct SettingsRouteIdentityTests {
         #expect(dashboard.projectCWD == nil)
     }
 
+    @Test("authorized device detail survives a list refresh and adopts refreshed content")
+    func authorizedDeviceSelectionSurvivesRefresh() {
+        let original = GatewayAuthorizedDevice(
+            profileID: "profile-a",
+            profileLabel: "Mac",
+            device: PairedDevice(id: "device-a", name: "Old name", createdAt: "2025-01-01T00:00:00Z")
+        )
+        let refreshed = GatewayAuthorizedDevice(
+            profileID: "profile-a",
+            profileLabel: "Mac",
+            device: PairedDevice(id: "device-a", name: "New name", createdAt: "2025-01-01T00:00:00Z")
+        )
+
+        #expect(AuthorizedDevicePresentationPolicy.selection(current: original, refreshedDevices: [refreshed]) == refreshed)
+        #expect(AuthorizedDevicePresentationPolicy.selection(current: original, refreshedDevices: []) == original)
+    }
+
     @Test("integration routes keep connected services separate from MCP servers")
     func integrationSurfaceFiltering() {
         let service = IntegrationDefinition(

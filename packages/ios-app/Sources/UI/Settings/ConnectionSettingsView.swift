@@ -43,6 +43,20 @@ struct GatewayConnectionStatusBadge: View {
     }
 }
 
+enum AuthorizedDevicePresentationPolicy {
+    /// Keep the selected detail alive while the connection switch replaces the
+    /// bounded device list. If the device is still present, use its refreshed
+    /// value; if the transient refresh omits it, retain the last authoritative
+    /// detail rather than letting a list projection dismiss the sheet.
+    static func selection(
+        current: GatewayAuthorizedDevice?,
+        refreshedDevices: [GatewayAuthorizedDevice]
+    ) -> GatewayAuthorizedDevice? {
+        guard let current else { return nil }
+        return refreshedDevices.first(where: { $0.id == current.id }) ?? current
+    }
+}
+
 struct ConnectionsSettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(PushNotificationCoordinator.self) private var pushNotifications
@@ -58,6 +72,15 @@ struct ConnectionsSettingsView: View {
     private var pairedProfiles: [GatewayProfile] {
         _ = model.profileRevision
         return model.profiles.profiles
+    }
+
+    private var authorizedDeviceDetailPresented: Binding<Bool> {
+        Binding(
+            get: { selectedAuthorizedDevice != nil },
+            set: { presented in
+                if !presented { selectedAuthorizedDevice = nil }
+            }
+        )
     }
 
     private var pushStatus: (icon: String, title: String, detail: String) {
@@ -214,17 +237,19 @@ struct ConnectionsSettingsView: View {
             .presentationContentInteraction(.resizes)
         }
         .tronManagedSheet(
-            item: $selectedAuthorizedDevice,
-            identity: { "settings.device.\($0.profileID).\($0.device.id)" },
+            isPresented: authorizedDeviceDetailPresented,
+            identity: "settings.device.detail",
             onDismiss: { Task { await reload() } }
-        ) { authorized in
-            NavigationStack {
-                PairedDeviceDetailView(authorized: authorized)
+        ) {
+            if let authorized = selectedAuthorizedDevice {
+                NavigationStack {
+                    PairedDeviceDetailView(authorized: authorized)
+                }
+                .tronTopBlur(.sheet)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.hidden)
+                .presentationContentInteraction(.resizes)
             }
-            .tronTopBlur(.sheet)
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.hidden)
-            .presentationContentInteraction(.resizes)
         }
         .tronManagedSheet(
             isPresented: $showAddServer,
@@ -256,6 +281,10 @@ struct ConnectionsSettingsView: View {
             guard generation == dataLoadGeneration,
                   presentationActivity.allowsPresentationPublication else { return }
             authorizedDevices = loadedDevices
+            selectedAuthorizedDevice = AuthorizedDevicePresentationPolicy.selection(
+                current: selectedAuthorizedDevice,
+                refreshedDevices: loadedDevices
+            )
         } catch {
             // A retired or canceled read keeps the previously published list;
             // unreachable profiles were already skipped by the read owner.
