@@ -97,7 +97,7 @@ import {
 import type { ForkBoundaryAnchor } from "./fork-boundary.js";
 import { RunMarkerCompletionConflictError, type RunMarkerEvidence, type RunMarkerStore } from "./run-markers.js";
 import { attributeExtensions, attributedCommandOwner, attributedToolOwner, currentExtensionOwner, currentInvocationContext, trustedExtensionOriginKind, withInvocationContext } from "../extensions/owner-attribution.js";
-import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasObservedPausedProcessTerminal, hasStructuredExtensionRunActivity, recoveredReplacementRunId, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
+import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, MAX_EXTENSION_LIFECYCLE_HEADER_BYTES, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasObservedPausedProcessTerminal, hasStructuredExtensionRunActivity, recoveredReplacementClaim, inspectExtensionLifecycleProjection, inspectExtensionLifecycleArtifact, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection } from "./invocation-receipts.js";
@@ -178,6 +178,8 @@ type CanonicalExtensionRunFact = {
   asyncDir?: string;
   terminal: boolean;
   ambiguous: boolean;
+  recoveredReplacementRunId?: string;
+  recoveredSourceRunId?: string;
 };
 
 type ExtensionArtifactDirectoryIdentity = { dev: number; ino: number };
@@ -4185,16 +4187,26 @@ export class RuntimeSlot {
         return;
       }
       const { status: state, startedAt, updatedAt, completedAt, durationMs } = normalized;
-      const replacementRunId = recoveredReplacementRunId(raw);
-      const replacementOwner = replacementRunId ? (canonicalFacts ?? this.canonicalExtensionRunFacts()).get(replacementRunId) : undefined;
-      // Recovery is an exact producer-owned handoff: the replacement must be a
-      // distinct canonical tool launch in this same session. A status-only
-      // replacement claim cannot settle a paused run or cross-bind another run.
-      const superseded = state === "running"
-        && replacementRunId !== undefined
-        && replacementOwner?.toolCallId !== undefined
-        && replacementOwner.toolCallId !== toolCallId
-        && replacementOwner.ambiguous !== true;
+      const facts = canonicalFacts ?? this.canonicalExtensionRunFacts();
+      const recoveryClaim = recoveredReplacementClaim(raw);
+      const sourceFact = facts.get(runId);
+      const processTerminal = hasObservedPausedProcessTerminal(raw, runId);
+      const rawLastUpdate = raw.lastUpdate;
+      const rawEndedAt = raw.endedAt;
+      // Only the exact provider recovery receipt plus the original paused
+      // runner's terminal proof can settle this source. A later explicit
+      // resume leaves the historical marker behind but has a new live state or
+      // timestamps, so it must not be terminalized by that old marker.
+      const superseded = extensionLifecycleState(raw.state ?? raw.status) === "paused"
+        && recoveryClaim !== undefined
+        && sourceFact?.recoveredReplacementRunId === recoveryClaim.replacementRunId
+        && sourceFact.ambiguous !== true
+        && processTerminal
+        && typeof rawLastUpdate === "number" && Number.isSafeInteger(rawLastUpdate)
+        && rawLastUpdate <= recoveryClaim.recoveredAt
+        && typeof rawEndedAt === "number" && Number.isSafeInteger(rawEndedAt)
+        && rawEndedAt <= recoveryClaim.recoveredAt;
+      if (runId === "recovered-source-run") console.log("DEBUG source projection", { raw, recoveryClaim, sourceFact, processTerminal, state, normalized, ownership });
       const effectiveState = superseded ? "completed" : state;
       const effectiveCompletedAt = superseded ? completedAt ?? updatedAt : completedAt;
       const pausedProcessIsQuiescent = hasObservedPausedProcessTerminal(raw, runId);
@@ -4237,6 +4249,7 @@ export class RuntimeSlot {
       // Ambient discovery is another producer of lifecycle candidates. Apply
       // the same Gateway terminal latch and sequence admission as live tool
       // events before replacing an existing row.
+      if (runId === "recovered-source-run") console.log("DEBUG candidate", { superseded, effectiveState, activity, previous, admitted: admitExtensionRunActivity(previous, activity) !== previous });
       if (admitExtensionRunActivity(previous, activity) === previous) return;
       const terminalReceiptOwner = activity.status === "running"
         ? undefined
@@ -4332,6 +4345,9 @@ export class RuntimeSlot {
    * artifact-created activity. Runtime maps are intentionally disposable. */
   private canonicalExtensionRunFacts(): Map<string, CanonicalExtensionRunFact> {
     const facts = new Map<string, CanonicalExtensionRunFact>();
+    const recoveryReceipts: Array<{ sourceRunId: string; replacementRunId: string; toolCallId: string }> = [];
+    const boundedRunId = (value: unknown): value is string => typeof value === "string"
+      && value.length > 0 && Buffer.byteLength(value) <= 256 && !/[\\/\0]/u.test(value);
     for (const entry of this.runtime.session.sessionManager.getEntries()) {
       if (entry.type !== "message") continue;
       const message = entry.message as unknown as Record<string, unknown>;
@@ -4347,9 +4363,26 @@ export class RuntimeSlot {
       const details = message.details !== null && typeof message.details === "object" && !Array.isArray(message.details)
         ? message.details as Record<string, unknown>
         : undefined;
-      const runId = typeof details?.runId === "string"
+      // Auto-recovery returns a management receipt, not a second launcher
+      // result. It can authorize only the exact provider-owned source run and
+      // replacement pair; supervisor references never enter this path.
+      const steering = details?.steering !== null && typeof details?.steering === "object" && !Array.isArray(details.steering)
+        ? details.steering as Record<string, unknown>
+        : undefined;
+      const recoveryTargets = steering && Array.isArray(steering.targets) ? steering.targets : [];
+      const recoveryTarget = recoveryTargets.find((value) => value !== null && typeof value === "object" && !Array.isArray(value)
+        && (value as Record<string, unknown>).state === "recovered") as Record<string, unknown> | undefined;
+      const sourceRunId = steering && boundedRunId(steering.sourceRunId) ? steering.sourceRunId : undefined;
+      const replacementRunId = steering && boundedRunId(steering.replacementRunId) ? steering.replacementRunId : undefined;
+      if (toolName === DELEGATED_PROVIDER_TOOL_NAME && details?.mode === "management"
+        && steering?.state === "recovered" && steering.deliveryStatus === "delivered"
+        && sourceRunId && replacementRunId && sourceRunId !== replacementRunId
+        && recoveryTarget && recoveryTarget.replacementRunId === replacementRunId) {
+        recoveryReceipts.push({ sourceRunId, replacementRunId, toolCallId });
+      }
+      const runId = boundedRunId(details?.runId)
         ? details.runId
-        : typeof details?.asyncId === "string" ? details.asyncId : undefined;
+        : boundedRunId(details?.asyncId) ? details.asyncId : undefined;
       if (!runId) continue;
       const explicitTerminal = details?.state === "failed"
         || details?.state === "complete"
@@ -4388,6 +4421,34 @@ export class RuntimeSlot {
         previous.ambiguous = true;
         previous.terminal ||= terminal;
       }
+    }
+    // Bind an auto-recovery receipt to the original canonical launch. The
+    // replacement has no distinct toolResult, so its artifact receives a
+    // stable synthetic owner derived from this exact handoff, never from its
+    // name/path alone. Conflicting handoffs fail closed on both runs.
+    for (const receipt of recoveryReceipts) {
+      const source = facts.get(receipt.sourceRunId);
+      if (!source || source.ambiguous || !source.toolCallId) continue;
+      const syntheticToolCallId = `subagent:recovery:${createHash("sha256").update(`${receipt.toolCallId}\\0${receipt.sourceRunId}\\0${receipt.replacementRunId}`).digest("hex").slice(0, 48)}`;
+      const replacement = facts.get(receipt.replacementRunId);
+      if (replacement && (!replacement.toolCallId || replacement.toolCallId !== syntheticToolCallId || replacement.recoveredSourceRunId !== receipt.sourceRunId)) {
+        replacement.ambiguous = true;
+        delete replacement.toolCallId;
+        continue;
+      }
+      if (source.recoveredReplacementRunId && source.recoveredReplacementRunId !== receipt.replacementRunId) {
+        source.ambiguous = true;
+        delete source.recoveredReplacementRunId;
+        continue;
+      }
+      source.recoveredReplacementRunId = receipt.replacementRunId;
+      facts.set(receipt.replacementRunId, {
+        ...(replacement ?? {}),
+        toolCallId: syntheticToolCallId,
+        terminal: replacement?.terminal ?? false,
+        ambiguous: replacement?.ambiguous ?? false,
+        recoveredSourceRunId: receipt.sourceRunId,
+      });
     }
     return facts;
   }
@@ -4469,15 +4530,21 @@ export class RuntimeSlot {
         return;
       }
       const { status: artifactState, updatedAt, completedAt, durationMs } = normalized;
-      const replacementRunId = recoveredReplacementRunId(raw);
-      const replacementOwner = replacementRunId ? this.canonicalExtensionRunFacts().get(replacementRunId) : undefined;
-      // The replacement must already have an exact canonical tool owner in the
-      // same session. A recovered marker without that proof remains paused.
-      const superseded = artifactState === "running"
-        && replacementRunId !== undefined
-        && replacementOwner?.toolCallId !== undefined
-        && replacementOwner.toolCallId !== toolCallId
-        && replacementOwner.ambiguous !== true;
+      const facts = this.canonicalExtensionRunFacts();
+      const recoveryClaim = recoveredReplacementClaim(raw);
+      const sourceFact = facts.get(runId);
+      const processTerminal = hasObservedPausedProcessTerminal(raw, runId);
+      const rawLastUpdate = raw.lastUpdate;
+      const rawEndedAt = raw.endedAt;
+      const superseded = extensionLifecycleState(raw.state ?? raw.status) === "paused"
+        && recoveryClaim !== undefined
+        && sourceFact?.recoveredReplacementRunId === recoveryClaim.replacementRunId
+        && sourceFact.ambiguous !== true
+        && processTerminal
+        && typeof rawLastUpdate === "number" && Number.isSafeInteger(rawLastUpdate)
+        && rawLastUpdate <= recoveryClaim.recoveredAt
+        && typeof rawEndedAt === "number" && Number.isSafeInteger(rawEndedAt)
+        && rawEndedAt <= recoveryClaim.recoveredAt;
       const effectiveArtifactState = superseded ? "completed" : artifactState;
       const effectiveCompletedAt = superseded ? completedAt ?? updatedAt : completedAt;
       const pausedProcessIsQuiescent = hasObservedPausedProcessTerminal(raw, runId);

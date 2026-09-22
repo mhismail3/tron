@@ -449,10 +449,10 @@ export function admitExtensionLifecycleArtifact(
  * a new async run. The producer keeps the source artifact resumable for
  * explicit history, but it no longer represents live work. Ambiguous recovery
  * claims fail closed so a malformed status file cannot settle another run. */
-export function recoveredReplacementRunId(artifact: Record<string, unknown>): string | undefined {
+export function recoveredReplacementClaim(artifact: Record<string, unknown>): { replacementRunId: string; recoveredAt: number } | undefined {
   const steering = record(artifact.steering);
   const recent = steering && Array.isArray(steering.recent) ? steering.recent : [];
-  const replacements = new Set<string>();
+  const replacements = new Map<string, number>();
   for (const requestValue of recent) {
     const request = record(requestValue);
     const targets = request && Array.isArray(request.targets) ? request.targets : [];
@@ -460,11 +460,18 @@ export function recoveredReplacementRunId(artifact: Record<string, unknown>): st
       const target = record(targetValue);
       if (target?.state !== "recovered") continue;
       if (typeof target.replacementRunId !== "string" || target.replacementRunId.length === 0
-        || Buffer.byteLength(target.replacementRunId) > 256 || /[\\/\0]/u.test(target.replacementRunId)) return undefined;
-      replacements.add(target.replacementRunId);
+        || Buffer.byteLength(target.replacementRunId) > 256 || /[\\/\0]/u.test(target.replacementRunId)
+        || !Number.isSafeInteger(target.recoveredAt) || (target.recoveredAt as number) < 0) return undefined;
+      replacements.set(target.replacementRunId, target.recoveredAt as number);
     }
   }
-  return replacements.size === 1 ? [...replacements][0] : undefined;
+  if (replacements.size !== 1) return undefined;
+  const [replacementRunId, recoveredAt] = [...replacements.entries()][0]!;
+  return { replacementRunId, recoveredAt };
+}
+
+export function recoveredReplacementRunId(artifact: Record<string, unknown>): string | undefined {
+  return recoveredReplacementClaim(artifact)?.replacementRunId;
 }
 
 /** A paused workflow is logically resumable but owns no live OS work after the

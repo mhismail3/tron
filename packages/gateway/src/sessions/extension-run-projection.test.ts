@@ -144,11 +144,11 @@ describe("projectExtensionRunActivity", () => {
   });
 
   it("recognizes only one bounded recovered replacement claim", () => {
-    const recovered = { steering: { recent: [{ targets: [{ state: "recovered", replacementRunId: "replacement-run" }] }] } };
+    const recovered = { steering: { recent: [{ targets: [{ state: "recovered", replacementRunId: "replacement-run", recoveredAt: 10 }] }] } };
     expect(recoveredReplacementRunId(recovered)).toBe("replacement-run");
-    expect(recoveredReplacementRunId({ steering: { recent: [{ targets: [{ state: "delivered", replacementRunId: "replacement-run" }] }] } })).toBeUndefined();
-    expect(recoveredReplacementRunId({ steering: { recent: [{ targets: [{ state: "recovered", replacementRunId: "one" }] }, { targets: [{ state: "recovered", replacementRunId: "two" }] }] } })).toBeUndefined();
-    expect(recoveredReplacementRunId({ steering: { recent: [{ targets: [{ state: "recovered", replacementRunId: "../foreign" }] }] } })).toBeUndefined();
+    expect(recoveredReplacementRunId({ steering: { recent: [{ targets: [{ state: "delivered", replacementRunId: "replacement-run", recoveredAt: 10 }] }] } })).toBeUndefined();
+    expect(recoveredReplacementRunId({ steering: { recent: [{ targets: [{ state: "recovered", replacementRunId: "one", recoveredAt: 10 }] }, { targets: [{ state: "recovered", replacementRunId: "two", recoveredAt: 11 }] }] } })).toBeUndefined();
+    expect(recoveredReplacementRunId({ steering: { recent: [{ targets: [{ state: "recovered", replacementRunId: "../foreign", recoveredAt: 10 }] }] } })).toBeUndefined();
   });
 
   it("admits only exact observed process-terminal proof for paused quiescence", () => {

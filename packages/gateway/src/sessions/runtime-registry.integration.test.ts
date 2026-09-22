@@ -3422,46 +3422,87 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }]);
   });
 
-  it("settles a paused source after an exact recovered replacement owner is observed", async () => {
+  it("settles an auto-recovered source and tracks its real replacement artifact", async () => {
     const fixture = await coldFixture("recovered-replacement-settlement");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
-    const runId = "recovered-source-run";
+    const manager = (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } }).runtime.session.sessionManager;
+    const sourceRunId = "recovered-source-run";
     const replacementRunId = "recovered-replacement-run";
-    const toolCallId = "recovered-source-tool";
-    const replacementToolCallId = "recovered-replacement-tool";
-    const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", runId);
-    await mkdir(asyncDir, { recursive: true });
-    const started = Date.now() - 5_000;
+    const sourceToolCallId = "recovered-source-tool";
+    const recoveryToolCallId = "recovered-steering-tool";
+    const sourceDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", sourceRunId);
+    const replacementDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", replacementRunId);
+    await mkdir(sourceDir, { recursive: true });
+    await mkdir(replacementDir, { recursive: true });
+    vi.spyOn(slot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
+      .mockReturnValue({ source: "pi-subagents" });
+    manager.appendMessage({
+      role: "toolResult", toolCallId: sourceToolCallId, toolName: "subagent",
+      content: [{ type: "text", text: "launched" }],
+      details: { runId: sourceRunId, asyncId: sourceRunId, asyncDir: sourceDir, mode: "single", results: [] },
+      isError: false, timestamp: Date.now(),
+    });
+    manager.appendMessage({
+      role: "toolResult", toolCallId: recoveryToolCallId, toolName: "subagent",
+      content: [{ type: "text", text: "recovered" }],
+      details: {
+        mode: "management", results: [],
+        steering: {
+          state: "recovered", deliveryStatus: "delivered", sourceRunId, replacementRunId,
+          targets: [{ index: 0, state: "recovered", replacementRunId }],
+        },
+      },
+      isError: false, timestamp: Date.now(),
+    });
     const internal = slot as unknown as {
       extensionActivities: Map<string, ExtensionRunActivity>;
       extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean; pausedProcessQuiescent?: boolean }>;
-      canonicalExtensionRunFacts: () => Map<string, { toolCallId?: string; asyncDir?: string; terminal: boolean; ambiguous: boolean }>;
+      canonicalExtensionRunFacts: () => Map<string, unknown>;
     };
-    internal.extensionActivities.set(toolCallId, {
-      id: toolCallId, activityId: "recovered-source-activity", runId, toolCallId,
+    const started = Date.now() - 5_000;
+    const recoveredAt = started + 3_000;
+    internal.extensionActivities.set(sourceToolCallId, {
+      id: sourceToolCallId, activityId: "recovered-source-activity", runId: sourceRunId, toolCallId: sourceToolCallId,
       source: { source: "pi-subagents" }, title: "Pi Subagents", status: "running",
       startedAt: new Date(started).toISOString(), updatedAt: new Date(started + 1_000).toISOString(), children: [],
       lifecycle: { version: 1, state: "paused", attention: "needsAttention", sequence: 1, observedAt: new Date(started + 1_000).toISOString() },
     });
-    internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
-    internal.canonicalExtensionRunFacts = () => new Map([
-      [runId, { toolCallId, asyncDir, terminal: false, ambiguous: false }],
-      [replacementRunId, { toolCallId: replacementToolCallId, terminal: false, ambiguous: false }],
-    ]);
-    await writeFile(join(asyncDir, "status.json"), JSON.stringify({
-      lifecycleArtifactVersion: 3, runId, state: "paused", startedAt: started, endedAt: started + 1_000, lastUpdate: started + 2_000,
-      steering: { recent: [{ targets: [{ state: "recovered", replacementRunId }] }] },
+    internal.extensionRunOwnership.set(sourceRunId, { toolCallId: sourceToolCallId, asyncDir: sourceDir, terminal: false });
+    await writeFile(join(sourceDir, "status.json"), JSON.stringify({
+      lifecycleArtifactVersion: 3, runId: sourceRunId, state: "paused", startedAt: started, endedAt: started + 1_000, lastUpdate: started + 2_000,
+      steering: { recent: [{ targets: [{ state: "recovered", replacementRunId, recoveredAt }] }] },
+    }));
+    await writeFile(join(sourceDir, "process-terminal.json"), JSON.stringify({
+      version: 1, state: "observed", runId: sourceRunId, runnerProcessInstanceId: "source-runner", observedAt: started + 1_500,
+      instances: [{ kind: "runner", processInstanceId: "source-runner", closeObservedAt: started + 1_500, exitCode: 0, signal: null }],
+    }));
+    await writeFile(join(replacementDir, "status.json"), JSON.stringify({
+      lifecycleArtifactVersion: 3, runId: replacementRunId, state: "running", startedAt: recoveredAt + 1, lastUpdate: recoveredAt + 2,
     }));
 
+    console.log("DEBUG recovery facts", internal.canonicalExtensionRunFacts());
     const drain = fixture.registry.waitUntilIdle();
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(fixture.registry.administrativeDrainSnapshot()).toMatchObject({ blockerCount: 1, blockerCounts: { "detached-extension-run": 1 } });
-    await slot.discoverExtensionArtifact(asyncDir);
+    await slot.discoverExtensionArtifact(sourceDir);
+    await slot.discoverExtensionArtifact(replacementDir);
+    expect(slot.snapshot().extensionActivities).toMatchObject([
+      { toolCallId: sourceToolCallId, status: "completed", lifecycle: { state: "completed" } },
+      { runId: replacementRunId, status: "running", lifecycle: { state: "running" } },
+    ]);
+    expect(slot.isDrainBusy).toBe(true);
+
+    const finished = Date.now();
+    await writeFile(join(replacementDir, "status.json"), JSON.stringify({
+      lifecycleArtifactVersion: 3, runId: replacementRunId, state: "complete", startedAt: recoveredAt + 1,
+      lastUpdate: finished, endedAt: finished,
+    }));
+    await slot.discoverExtensionArtifact(replacementDir);
     await drain;
     expect(slot.isDrainBusy).toBe(false);
-    expect(slot.snapshot().extensionActivities).toMatchObject([{
-      toolCallId, status: "completed", lifecycle: { state: "completed" },
-    }]);
+    expect(slot.snapshot().extensionActivities).toMatchObject([
+      { toolCallId: sourceToolCallId, status: "completed", lifecycle: { state: "completed" } },
+      { runId: replacementRunId, status: "completed", lifecycle: { state: "completed" } },
+    ]);
   });
 
   it("does not retain unwatched async launcher acknowledgements as running work", async () => {
