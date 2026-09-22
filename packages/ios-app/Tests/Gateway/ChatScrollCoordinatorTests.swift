@@ -1372,8 +1372,12 @@ struct ChatScrollCoordinatorTests {
             await frames.waitForRequest(count: 2)
             frames.releaseNext()
             await frames.waitForRequest(count: 3)
+            let firstRelease = targetReleaseGenerationBarrier(for: coordinator)
+            defer { firstRelease.continuation.finish() }
             frames.releaseNext()
-            await Task.yield()
+            var firstReleaseIterator = firstRelease.stream.makeAsyncIterator()
+            _ = await firstReleaseIterator.next()
+            #expect(coordinator.targetReleaseGeneration == 1)
             #expect(!coordinator.consumeTargetRelease())
             let transferred = try #require(coordinator.command)
             #expect(transferred.destination == .materialize("retired-outgoing-row"))
@@ -1387,8 +1391,11 @@ struct ChatScrollCoordinatorTests {
             // it never waits for a successor semantic sample.
             admitAlignedTail(coordinator)
             await frames.waitForRequest(count: 4)
+            let secondRelease = targetReleaseGenerationBarrier(for: coordinator)
+            defer { secondRelease.continuation.finish() }
             frames.releaseNext()
-            await Task.yield()
+            var secondReleaseIterator = secondRelease.stream.makeAsyncIterator()
+            _ = await secondReleaseIterator.next()
             #expect(coordinator.targetReleaseGeneration == 2)
             #expect(coordinator.consumeTargetRelease())
         }
@@ -2904,6 +2911,23 @@ private final class ResultRecorder {
         guard values.isEmpty else { return }
         await withCheckedContinuation { waiter = $0 }
     }
+}
+
+@MainActor
+private func targetReleaseGenerationBarrier(
+    for coordinator: ChatScrollCoordinator
+) -> (stream: AsyncStream<Void>, continuation: AsyncStream<Void>.Continuation) {
+    let (stream, continuation) = AsyncStream<Void>.makeStream(
+        bufferingPolicy: .bufferingNewest(1)
+    )
+    // Register before releasing the frame. The callback fires in willSet;
+    // the MainActor waiter reads only after the synchronous publication ends.
+    withObservationTracking {
+        _ = coordinator.targetReleaseGeneration
+    } onChange: {
+        continuation.yield()
+    }
+    return (stream, continuation)
 }
 
 @MainActor

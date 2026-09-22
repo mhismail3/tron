@@ -77,6 +77,8 @@ struct TronMobileApp: App {
                 HostedAutomationFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-dashboard-menu-fixture") {
                 HostedDashboardMenuFixtureView()
+            } else if ProcessInfo.processInfo.arguments.contains("-tron-accessibility-fixture") {
+                HostedAccessibilityFixtureView()
             } else if ProcessInfo.processInfo.arguments.contains("-tron-settings-navigation-fixture") {
                 SettingsView()
                     .environment(hostedModel)

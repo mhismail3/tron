@@ -35,7 +35,19 @@ bounded retry outcome.
 
 ## Policy restoration
 
-`session.search.policy.get` is issued only after a captured lifecycle or pool
-admission, with per-profile request generations. A late read cannot overwrite a
-newer toggle receipt or another profile. Missing/offline/error reads fail safe
-to false and remain visible through the existing notice owner.
+The selected profile's `session.search.policy.get` follows active dashboard
+presentation demand, including uncover, after captured lifecycle admission.
+Secondary profiles refresh once on an admitted connection transition. Dashboard
+summaries trigger neither read. Loaded consent is valid only for its exact
+profile/connection; a replacement client's local epoch number alone is not an
+identity. Missing/offline/error reads cannot authorize remote disclosure.
+
+Reads fence cancellation, connection identity and the latest request before
+publishing values or errors. Per-profile policy mutations serialize user intent
+and retain their original connection admission while queued; a cancelled view
+cannot cancel an accepted write or move it to a replacement connection.
+Programmatic toggle restoration never issues a write. Unknown direct-RPC
+outcomes are not replayed or treated as definite rejection.
+
+`SessionSearchTransportTests` exercises summary-trigger suppression, read versus
+write ordering, serialized mutations, and consent invalidation on reconnect.

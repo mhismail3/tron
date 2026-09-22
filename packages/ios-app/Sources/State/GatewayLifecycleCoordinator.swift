@@ -562,6 +562,12 @@ final class GatewayLifecycleCoordinator {
     /// not call this path.
     func retryReconnect() {
         guard phase.admitsWork, !sceneIsBackgrounded,
+              reconnectTask == nil || reconnectCanBeAccelerated,
+              connectionAdmissionTask == nil,
+              committedConnectionTask == nil,
+              foregroundReconciliationTask == nil,
+              deferredProjectionTask == nil,
+              backgroundRetirementTask == nil,
               let profile = profiles.selected, let token = profileTokenLookup(profile) else { return }
         recoveryBudgets[profile.id, default: GatewayRecoveryBudget()].rearmForExplicitRetry()
         cancelReconnect()
@@ -866,13 +872,14 @@ final class GatewayLifecycleCoordinator {
         awaitProjection: Bool = true
     ) async {
         guard admits(admission) else { return }
-        guard recoveryBudgets[profile.id, default: GatewayRecoveryBudget()].beginAutomaticAttempt() else {
+        guard let recoveryAttemptID = recoveryBudgets[profile.id, default: GatewayRecoveryBudget()].beginAutomaticAttemptID() else {
             stopAutomaticRecovery(profileID: profile.id)
             return
         }
         activatedConnectionID = nil
         connectionState = .connecting
         var establishedConnectionID: Int?
+        var reconciliationAdmission: Admission?
         do {
             let connection = try await client.connectForLifecycle(profile: profile, token: token)
             establishedConnectionID = connection.id
@@ -887,25 +894,42 @@ final class GatewayLifecycleCoordinator {
             )
             try require(connectedAdmission)
             gatewayInfo = connection.info
-            recoveryBudgets[profile.id]?.markConnected(at: clock.now())
+            var settledBudget = recoveryBudgets[profile.id, default: GatewayRecoveryBudget()]
+            _ = settledBudget.settleAutomaticAttempt(recoveryAttemptID, intentionalRetirement: false)
+            settledBudget.markConnected(at: clock.now())
+            recoveryBudgets[profile.id] = settledBudget
             connectionState = .connected
             restartWatchdogTask?.cancel()
             restartWatchdogTask = nil
             restartRequested = false
+            maintenanceIntent = false
             delegate?.lifecycleInvalidateSessionConnectionOwnership()
+            delegate?.lifecycleBeginReconciliationAggregate(admission: connectedAdmission)
+            reconciliationAdmission = connectedAdmission
             if awaitProjection {
                 async let refresh: Void = delegate?.lifecycleRefreshAll(admission: connectedAdmission) ?? ()
                 async let restore = delegate?.lifecycleRestoreMountedPresentation(admission: connectedAdmission) ?? true
                 async let terminals: Void = delegate?.lifecycleReattachTerminals(admission: connectedAdmission) ?? ()
                 let (_, restored, _) = await (refresh, restore, terminals)
+                let activeConnectionID = await client.activeConnectionID()
                 try require(connectedAdmission)
-                if !restored {
-                    projectionFailureGeneration = admission.generation
+                guard activeConnectionID == connection.id else {
+                    throw GatewayFailure(code: "disconnected", message: "The Gateway connection closed during reconciliation.", retryable: true, details: nil)
                 }
-                if projectionFailureGeneration == admission.generation {
-                    projectionFailureGeneration = nil
-                    connectionState = .offline("Gateway projection refresh failed")
-                    scheduleReconnect(immediate: true)
+                let succeeded = restored && projectionFailureGeneration != admission.generation
+                projectionFailureGeneration = nil
+                delegate?.lifecycleCompleteReconciliationAggregate(
+                    admission: connectedAdmission,
+                    succeeded: succeeded
+                )
+                reconciliationAdmission = nil
+                if !succeeded {
+                    // Session projection failure is not transport failure. Keep
+                    // the authenticated socket and expose the scoped Retry
+                    // surface owned by the mounted presentation.
+                    connectionState = .connected
+                    if let pairingAttemptID { try requirePairingAttempt(pairingAttemptID) }
+                    cancelReconnect()
                     return
                 }
                 if let pairingAttemptID { try requirePairingAttempt(pairingAttemptID) }
@@ -917,22 +941,39 @@ final class GatewayLifecycleCoordinator {
                     async let restore = self.delegate?.lifecycleRestoreMountedPresentation(admission: connectedAdmission) ?? true
                     async let terminals: Void = self.delegate?.lifecycleReattachTerminals(admission: connectedAdmission) ?? ()
                     let (_, restored, _) = await (refresh, restore, terminals)
+                    let activeConnectionID = await self.client.activeConnectionID()
                     guard !Task.isCancelled, self.admits(connectedAdmission) else { return }
-                    if !restored {
-                        self.projectionFailureGeneration = admission.generation
+                    guard activeConnectionID == connectedAdmission.connectionID else {
+                        self.connectionState = .offline("Gateway connection closed")
+                        self.delegate?.lifecycleCompleteReconciliationAggregate(admission: connectedAdmission, succeeded: false)
+                        self.deferredProjectionTask = nil
+                        self.requestReconnect(immediate: true)
+                        return
                     }
-                    if self.projectionFailureGeneration == admission.generation {
-                        self.projectionFailureGeneration = nil
-                        self.connectionState = .offline("Gateway projection refresh failed")
-                        self.scheduleReconnect(immediate: true)
-                    } else {
-                        self.cancelReconnect()
-                    }
+                    let succeeded = restored && self.projectionFailureGeneration != admission.generation
+                    self.projectionFailureGeneration = nil
+                    self.delegate?.lifecycleCompleteReconciliationAggregate(
+                        admission: connectedAdmission,
+                        succeeded: succeeded
+                    )
+                    // Projection failure leaves the live socket usable; only
+                    // transport failure may recycle it.
+                    self.connectionState = .connected
+                    self.cancelReconnect()
                     self.deferredProjectionTask = nil
                 }
                 deferredProjectionTask = projectionTask
             }
         } catch {
+            var settledBudget = recoveryBudgets[profile.id, default: GatewayRecoveryBudget()]
+            _ = settledBudget.settleAutomaticAttempt(
+                recoveryAttemptID,
+                intentionalRetirement: Task.isCancelled && error is CancellationError
+            )
+            recoveryBudgets[profile.id] = settledBudget
+            if let reconciliationAdmission {
+                delegate?.lifecycleCompleteReconciliationAggregate(admission: reconciliationAdmission, succeeded: false)
+            }
             let establishedEvidence: GatewayLiveEvidence?
             if let establishedConnectionID {
                 establishedEvidence = await client.liveEvidence(connectionID: establishedConnectionID)
@@ -942,7 +983,9 @@ final class GatewayLifecycleCoordinator {
             } else {
                 establishedEvidence = nil
             }
-            guard admitsGeneration(admission.generation) else { return }
+            guard admitsGeneration(admission.generation),
+                  connectionID == nil || connectionID == establishedConnectionID else { return }
+            if Task.isCancelled, pairingAttemptID == nil { return }
             if let pairingAttemptID, (try? requirePairingAttempt(pairingAttemptID)) == nil { return }
             if let failure = error as? GatewayFailure, failure.code == "unauthenticated" {
                 connectionState = .unauthorized
@@ -988,7 +1031,12 @@ final class GatewayLifecycleCoordinator {
         token: String,
         generation: Int
     ) {
-        guard admitsGeneration(generation), committedConnectionTask == nil else { return }
+        guard admitsGeneration(generation),
+              connectionAdmissionTask == nil,
+              committedConnectionTask == nil,
+              foregroundReconciliationTask == nil,
+              deferredProjectionTask == nil,
+              backgroundRetirementTask == nil else { return }
         connectionState = .reconnecting
         committedConnectionTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -1127,13 +1175,19 @@ final class GatewayLifecycleCoordinator {
                     }
                     let profileID = profile.id
                     if !self.restartRequested { self.recoveryBudgets[profileID]?.resumeRecovery(at: clock.now()) }
-                    guard self.restartRequested || self.recoveryBudgets[profileID, default: GatewayRecoveryBudget()].beginAutomaticAttempt() else {
-                        self.stopAutomaticRecovery(profileID: profileID)
-                        self.finishReconnect(
-                            lifecycleGeneration: lifecycleGeneration,
-                            attemptGeneration: attemptGeneration
-                        )
-                        return
+                    let recoveryAttemptID: UUID?
+                    if self.restartRequested {
+                        recoveryAttemptID = nil
+                    } else {
+                        recoveryAttemptID = self.recoveryBudgets[profileID, default: GatewayRecoveryBudget()].beginAutomaticAttemptID()
+                        guard recoveryAttemptID != nil else {
+                            self.stopAutomaticRecovery(profileID: profileID)
+                            self.finishReconnect(
+                                lifecycleGeneration: lifecycleGeneration,
+                                attemptGeneration: attemptGeneration
+                            )
+                            return
+                        }
                     }
                     do {
                         // Background may retire startup before its first hello
@@ -1168,6 +1222,9 @@ final class GatewayLifecycleCoordinator {
                         )
                         self.gatewayInfo = connection.info
                         var connectedBudget = self.recoveryBudgets[profileID, default: GatewayRecoveryBudget()]
+                        if let recoveryAttemptID {
+                            _ = connectedBudget.settleAutomaticAttempt(recoveryAttemptID, intentionalRetirement: false)
+                        }
                         connectedBudget.markConnected(at: clock.now(), chargedAttempt: !self.restartRequested)
                         self.recoveryBudgets[profileID] = connectedBudget
                         // Authenticated handshake plus event activation is the
@@ -1285,6 +1342,11 @@ final class GatewayLifecycleCoordinator {
                         )
                         return
                     } catch let failure as GatewayFailure where failure.code == "unauthenticated" {
+                        if let recoveryAttemptID {
+                            var settledBudget = self.recoveryBudgets[profileID, default: GatewayRecoveryBudget()]
+                            _ = settledBudget.settleAutomaticAttempt(recoveryAttemptID, intentionalRetirement: false)
+                            self.recoveryBudgets[profileID] = settledBudget
+                        }
                         if let reconciliationAggregateAdmission {
                             self.delegate?.lifecycleCompleteReconciliationAggregate(
                                 admission: reconciliationAggregateAdmission,
@@ -1314,6 +1376,14 @@ final class GatewayLifecycleCoordinator {
                         )
                         return
                     } catch is CancellationError {
+                        if let recoveryAttemptID {
+                            var settledBudget = self.recoveryBudgets[profileID, default: GatewayRecoveryBudget()]
+                            _ = settledBudget.settleAutomaticAttempt(
+                                recoveryAttemptID,
+                                intentionalRetirement: Task.isCancelled
+                            )
+                            self.recoveryBudgets[profileID] = settledBudget
+                        }
                         if let reconciliationAggregateAdmission {
                             self.delegate?.lifecycleCompleteReconciliationAggregate(
                                 admission: reconciliationAggregateAdmission,
@@ -1337,6 +1407,11 @@ final class GatewayLifecycleCoordinator {
                         self.scheduleReconnect(immediate: true)
                         return
                     } catch let failure where GatewayRecoveryFailurePolicy.isNonRetryable(failure) {
+                        if let recoveryAttemptID {
+                            var settledBudget = self.recoveryBudgets[profileID, default: GatewayRecoveryBudget()]
+                            _ = settledBudget.settleAutomaticAttempt(recoveryAttemptID, intentionalRetirement: false)
+                            self.recoveryBudgets[profileID] = settledBudget
+                        }
                         if let reconciliationAggregateAdmission {
                             self.delegate?.lifecycleCompleteReconciliationAggregate(
                                 admission: reconciliationAggregateAdmission,
@@ -1370,6 +1445,11 @@ final class GatewayLifecycleCoordinator {
                         )
                         return
                     } catch {
+                        if let recoveryAttemptID {
+                            var settledBudget = self.recoveryBudgets[profileID, default: GatewayRecoveryBudget()]
+                            _ = settledBudget.settleAutomaticAttempt(recoveryAttemptID, intentionalRetirement: false)
+                            self.recoveryBudgets[profileID] = settledBudget
+                        }
                         if let reconciliationAggregateAdmission {
                             self.delegate?.lifecycleCompleteReconciliationAggregate(
                                 admission: reconciliationAggregateAdmission,

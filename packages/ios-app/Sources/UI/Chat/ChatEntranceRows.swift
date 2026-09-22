@@ -82,7 +82,7 @@ enum ChatIncrementalContentGrowthPolicy {
     }
 }
 
-private struct ChatIncrementalContentMeasurement<Identity: Equatable>: Equatable {
+private struct ChatIncrementalContentMeasurement<Identity: Equatable & Sendable>: Equatable, Sendable {
     let identity: Identity
     let width: CGFloat
     let height: CGFloat
@@ -92,7 +92,7 @@ private struct ChatIncrementalContentMeasurement<Identity: Equatable>: Equatable
 /// Canonical text and controls are installed immediately at natural size, then
 /// clipped by one local height while ordinary additions expand. Width changes,
 /// replacement/shrink, covered surfaces, and large backlogs install atomically.
-struct ChatIncrementalContentGrowthHost<Identity: Equatable, Content: View>: View {
+struct ChatIncrementalContentGrowthHost<Identity: Equatable & Sendable, Content: View>: View {
     let identity: Identity
     let streaming: Bool
     @ViewBuilder let content: Content
@@ -114,11 +114,12 @@ struct ChatIncrementalContentGrowthHost<Identity: Equatable, Content: View>: Vie
     }
 
     var body: some View {
-        content
+        let measurementIdentity = identity
+        return content
             .fixedSize(horizontal: false, vertical: true)
             .onGeometryChange(for: ChatIncrementalContentMeasurement<Identity>.self) { geometry in
                 ChatIncrementalContentMeasurement(
-                    identity: identity,
+                    identity: measurementIdentity,
                     width: geometry.size.width,
                     height: geometry.size.height
                 )

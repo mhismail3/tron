@@ -618,6 +618,9 @@ final class SessionPresentationStore {
             replacingVisibleTranscript: true,
             presentationGeneration: requested.generation
         )
+        if !synchronized, Task.isCancelled || pendingTarget != requested {
+            throw CancellationError()
+        }
         if !synchronized,
            let failure = terminalSynchronizationFailures.removeValue(forKey: requested) {
             throw failure
@@ -1848,17 +1851,31 @@ final class SessionPresentationStore {
         }
 
         while !Task.isCancelled {
+            if replacingVisibleTranscript {
+                guard let presentationGeneration,
+                      pendingTarget == SessionPresentationIdentity(sessionID: sessionID, generation: presentationGeneration) else {
+                    return false
+                }
+            }
             let lease = synchronization.acquire(sessionID: sessionID, intent: intent)
             switch lease.role {
             case .join:
                 return await lease.sharedValue()
             case .retryAfterCurrent:
-                // A visible presentation and lifecycle reconnect are two views
-                // of the same per-session authority. The current leader owns
-                // the open/ack/replay transaction. If that owner was retired by
-                // a connection epoch handoff, retry under the fresh owner
-                // rather than surfacing a transient false result to ChatView.
+                // A fresh presentation cannot accept a predecessor reconnect
+                // result: it needs its own bounded tail and target. Wait for
+                // that exact owner to drain, then reacquire under the still
+                // current pending target.
                 let shared = await lease.sharedValue()
+                guard !Task.isCancelled else { return false }
+                if replacingVisibleTranscript {
+                    guard let presentationGeneration,
+                          pendingTarget == SessionPresentationIdentity(sessionID: sessionID, generation: presentationGeneration) else { return false }
+                    // The predecessor's outcome belongs to its reconnect/fresh
+                    // target, never to this exact pending generation. Reacquire
+                    // once it has settled, including after a same-epoch failure.
+                    continue
+                }
                 if shared || connectionGeneration == initialConnectionGeneration { return shared }
             case .leader:
                 synchronization.prepareLeaderAttempt(lease)

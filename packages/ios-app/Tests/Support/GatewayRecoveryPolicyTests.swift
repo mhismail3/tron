@@ -6,10 +6,10 @@ struct GatewayRecoveryPolicyTests {
     @Test("automatic recovery stops after three attempts until explicit retry")
     func automaticBudgetStopsAndRearms() {
         var budget = GatewayRecoveryBudget()
-        let first = budget.beginAutomaticAttempt()
-        let second = budget.beginAutomaticAttempt()
-        let third = budget.beginAutomaticAttempt()
-        let fourth = budget.beginAutomaticAttempt()
+        let first = budget.beginAutomaticAttemptID() != nil
+        let second = budget.beginAutomaticAttemptID() != nil
+        let third = budget.beginAutomaticAttemptID() != nil
+        let fourth = budget.beginAutomaticAttemptID() != nil
         #expect(first)
         #expect(second)
         #expect(third)
@@ -19,15 +19,32 @@ struct GatewayRecoveryPolicyTests {
         budget.rearmForExplicitRetry()
         #expect(!budget.exhausted)
         #expect(!budget.nonRetryableStopped)
-        let retry = budget.beginAutomaticAttempt()
+        let retry = budget.beginAutomaticAttemptID() != nil
         #expect(retry)
+    }
+
+    @Test("late intentional settlement cannot refund a successor attempt")
+    func lateAttemptSettlementIsIdentityQualified() {
+        var budget = GatewayRecoveryBudget()
+        let predecessor = budget.beginAutomaticAttemptID()
+        #expect(predecessor != nil)
+        let settledPredecessor = budget.settleAutomaticAttempt(predecessor!, intentionalRetirement: true)
+        #expect(settledPredecessor)
+        let successor = budget.beginAutomaticAttemptID()
+        #expect(successor != nil)
+        #expect(budget.automaticAttempts == 1)
+        let lateSettlement = budget.settleAutomaticAttempt(predecessor!, intentionalRetirement: true)
+        #expect(!lateSettlement)
+        #expect(budget.automaticAttempts == 1)
+        let settledSuccessor = budget.settleAutomaticAttempt(successor!, intentionalRetirement: false)
+        #expect(settledSuccessor)
     }
 
     @Test("rapid hello failure does not reset the budget")
     func rapidEpochFailureRetainsBudget() {
         var budget = GatewayRecoveryBudget()
         let now = ContinuousClock().now
-        let began = budget.beginAutomaticAttempt()
+        let began = budget.beginAutomaticAttemptID() != nil
         #expect(began)
         budget.markConnected(at: now)
         budget.markTransportFailure(code: "ping_timeout", at: now + .seconds(1))
@@ -39,8 +56,8 @@ struct GatewayRecoveryPolicyTests {
     func stableEpochResetsBudget() {
         var budget = GatewayRecoveryBudget()
         let now = ContinuousClock().now
-        let first = budget.beginAutomaticAttempt()
-        let second = budget.beginAutomaticAttempt()
+        let first = budget.beginAutomaticAttemptID() != nil
+        let second = budget.beginAutomaticAttemptID() != nil
         #expect(first)
         #expect(second)
         budget.markConnected(at: now)
@@ -49,7 +66,7 @@ struct GatewayRecoveryPolicyTests {
         #expect(budget.automaticAttempts == 0)
         #expect(!budget.exhausted)
         #expect(budget.firstFailureCode == "disconnected")
-        let next = budget.beginAutomaticAttempt()
+        let next = budget.beginAutomaticAttemptID() != nil
         #expect(next)
     }
 
@@ -57,7 +74,7 @@ struct GatewayRecoveryPolicyTests {
     func backgroundRetirementPreservesBudget() {
         var budget = GatewayRecoveryBudget()
         let now = ContinuousClock().now
-        let began = budget.beginAutomaticAttempt()
+        let began = budget.beginAutomaticAttemptID() != nil
         #expect(began)
         budget.markConnected(at: now)
         budget.markConnectionRetired(at: now + .seconds(1), stableProof: false)
@@ -70,11 +87,11 @@ struct GatewayRecoveryPolicyTests {
     func intentionalRetirementPreservesRealFailures() {
         var budget = GatewayRecoveryBudget()
         let now = ContinuousClock().now
-        let first = budget.beginAutomaticAttempt()
+        let first = budget.beginAutomaticAttemptID() != nil
         #expect(first)
         budget.markTransportFailure(code: "timeout", at: now)
         for _ in 0..<10 {
-            let admitted = budget.beginAutomaticAttempt()
+            let admitted = budget.beginAutomaticAttemptID() != nil
             #expect(admitted)
             budget.markConnected(at: now)
             budget.markConnectionRetired(at: now + .seconds(1), stableProof: false)
@@ -82,14 +99,14 @@ struct GatewayRecoveryPolicyTests {
             #expect(budget.firstFailureCode == "timeout")
         }
         for _ in 0..<2 {
-            let admitted = budget.beginAutomaticAttempt()
+            let admitted = budget.beginAutomaticAttemptID() != nil
             #expect(admitted)
             budget.markConnected(at: now)
             budget.markTransportFailure(code: "ping_timeout", at: now + .seconds(1))
             budget.markConnectionRetired(at: now + .seconds(2), stableProof: false)
         }
         #expect(budget.exhausted)
-        let blocked = budget.beginAutomaticAttempt()
+        let blocked = budget.beginAutomaticAttemptID() != nil
         #expect(!blocked)
         #expect(budget.firstFailureCode == "timeout")
     }
@@ -99,15 +116,15 @@ struct GatewayRecoveryPolicyTests {
     func sharedAllowanceRetainsFailureAcrossRoleHandoff() {
         let store = GatewayRecoveryAllowanceStore()
         var budget = store["profile", default: GatewayRecoveryBudget()]
-        let first = budget.beginAutomaticAttempt()
+        let first = budget.beginAutomaticAttemptID() != nil
         #expect(first)
         budget.markTransportFailure(code: "timeout", at: ContinuousClock().now)
         store["profile"] = budget
         #expect(store["profile"]?.firstFailureCode == "timeout")
         budget = store["profile", default: GatewayRecoveryBudget()]
-        let second = budget.beginAutomaticAttempt()
-        let third = budget.beginAutomaticAttempt()
-        let fourth = budget.beginAutomaticAttempt()
+        let second = budget.beginAutomaticAttemptID() != nil
+        let third = budget.beginAutomaticAttemptID() != nil
+        let fourth = budget.beginAutomaticAttemptID() != nil
         #expect(second)
         #expect(third)
         #expect(!fourth)
@@ -146,7 +163,7 @@ struct GatewayRecoveryPolicyTests {
         healthy.beginRecoveryEpisode(at: ContinuousClock().now)
         #expect(store["A"]?.isStopped == true)
         #expect(!healthy.isStopped)
-        let admitted = healthy.beginAutomaticAttempt()
+        let admitted = healthy.beginAutomaticAttemptID() != nil
         #expect(admitted)
     }
 
@@ -166,7 +183,7 @@ struct GatewayRecoveryPolicyTests {
     func maintenanceRetirementCannotForgiveFailure() {
         var budget = GatewayRecoveryBudget()
         let now = ContinuousClock().now
-        let admitted = budget.beginAutomaticAttempt()
+        let admitted = budget.beginAutomaticAttemptID() != nil
         #expect(admitted)
         budget.markTransportFailure(code: "timeout", at: now)
         budget.markConnected(at: now + .seconds(1), chargedAttempt: false)
@@ -190,7 +207,7 @@ struct GatewayRecoveryPolicyTests {
         budget.notePathHint(satisfied: true, at: now + .seconds(66))
         budget.admitFreshForegroundVerification()
         #expect(budget.isStopped)
-        let admitted = budget.beginAutomaticAttempt()
+        let admitted = budget.beginAutomaticAttemptID() != nil
         #expect(!admitted)
     }
 
@@ -199,7 +216,7 @@ struct GatewayRecoveryPolicyTests {
         var budget = GatewayRecoveryBudget()
         let now = ContinuousClock().now
         budget.beginRecoveryEpisode(at: now)
-        budget.beginAutomaticAttempt()
+        _ = budget.beginAutomaticAttemptID()
         budget.markConnected(at: now)
         #expect(budget.recoveryEpisodeStartedAt == now)
         budget.markTransportFailure(code: "disconnected", at: now + .seconds(1))
@@ -211,11 +228,11 @@ struct GatewayRecoveryPolicyTests {
         var budget = GatewayRecoveryBudget()
         budget.markNonRetryableFailure(code: "protocol_mismatch")
         #expect(budget.nonRetryableStopped)
-        let stopped = budget.beginAutomaticAttempt()
+        let stopped = budget.beginAutomaticAttemptID() != nil
         #expect(!stopped)
         budget.rearmForExplicitRetry()
         #expect(!budget.nonRetryableStopped)
-        let retried = budget.beginAutomaticAttempt()
+        let retried = budget.beginAutomaticAttemptID() != nil
         #expect(retried)
     }
 }

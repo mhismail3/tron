@@ -80,6 +80,106 @@ struct SessionPresentationStoreTests {
         return index
     }
 
+    @Test("fresh presentation drains reconnect without adopting its target or paged prefix",
+          arguments: ["success", "failure", "superseded", "cancelled"])
+    func freshPresentationAfterReconnect(mode: String) async throws {
+        try await withTestWatchdog { @MainActor in
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+            let profile = GatewayProfile(id: "gateway", label: "Mac", host: "gateway.test", port: 9847, machineId: "machine", deviceId: "device")
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            _ = try await client.connect(profile: profile, token: "token")
+            do {
+                let recorder = RecordingPerformanceSignposts()
+                let store = SessionPresentationStore(client: client, performanceSignposts: recorder)
+                var tail = try SessionScenarioBuilder(seed: 8_811).openingTail(targetEncodedBytes: 4_096)
+                tail.transcriptStart = 1
+                tail.transcriptTotal = tail.transcript.count + 1
+                var visible = tail
+                visible.transcript = SessionScenarioBuilder(seed: 8_812).historyPage(count: 1, longRowBytes: 16) + tail.transcript
+                visible.transcriptStart = 0
+                store.installHostedSubscription(snapshot: tail, token: "retired")
+                store.installHostedLoadedHistory(visible: visible, authoritativeTail: tail)
+                let mounted = try #require(store.mountedTarget)
+                store.retireConnection()
+
+                let reconnect = Task { await store.reconnectMountedPresentation() }
+                let predecessor = try await nextRequest("session.open", socket: socket, startingAt: 1)
+                let first = Task { try await store.open(tail.sessionId) }
+                // The production open emits this signpost before its first await,
+                // after which its pending identity is installed on the MainActor.
+                while recorder.events().filter({ $0 == .begin(.sessionOpen) }).count < 1 {
+                    try Task.checkCancellation()
+                    await Task.yield()
+                }
+                let successor: Task<Int, Error>?
+                if mode == "superseded" {
+                    successor = Task { try await store.open(tail.sessionId) }
+                    while recorder.events().filter({ $0 == .begin(.sessionOpen) }).count < 2 {
+                        try Task.checkCancellation()
+                        await Task.yield()
+                    }
+                } else { successor = nil }
+                if mode == "cancelled" {
+                    first.cancel()
+                    await #expect(throws: CancellationError.self) { try await first.value }
+                }
+                let predecessorID = try #require(predecessor.request.objectValue?["id"]?.stringValue)
+                if mode == "failure" {
+                    await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                        "type": .string("response"), "id": .string(predecessorID), "ok": .bool(false),
+                        "error": .object(["code": .string("busy"), "message": .string("Held predecessor failed"), "retryable": .bool(true)]),
+                    ])))
+                } else {
+                    await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                        "type": .string("response"), "id": .string(predecessorID), "ok": .bool(true),
+                        "result": .object(["session": try JSONValue.encode(tail), "syncToken": .string("reconnect-sync"), "subscriptionToken": .string("reconnect-token")]),
+                    ])))
+                    let ack = try await nextRequest("session.sync", socket: socket, startingAt: predecessor.index + 1)
+                    await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                        "type": .string("response"), "id": ack.request.objectValue?["id"] ?? .null, "ok": .bool(true),
+                        "result": .object(["synchronized": .bool(true)]),
+                    ])))
+                }
+                let reconnected = await reconnect.value
+                #expect(reconnected == (mode != "failure"))
+                if mode == "cancelled" {
+                    #expect(store.mountedTarget == mounted)
+                    #expect(store.visibleTranscript.map(\.id) == visible.transcript.map(\.id))
+                } else {
+                    let fresh = try await nextRequest("session.open", socket: socket, startingAt: predecessor.index + (mode == "failure" ? 1 : 2))
+                    await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                        "type": .string("response"), "id": fresh.request.objectValue?["id"] ?? .null, "ok": .bool(true),
+                        "result": .object(["session": try JSONValue.encode(tail), "syncToken": .string("fresh-sync"), "subscriptionToken": .string("fresh-token")]),
+                    ])))
+                    let ack = try await nextRequest("session.sync", socket: socket, startingAt: fresh.index + 1)
+                    await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                        "type": .string("response"), "id": ack.request.objectValue?["id"] ?? .null, "ok": .bool(true),
+                        "result": .object(["synchronized": .bool(true)]),
+                    ])))
+                    let generation: Int
+                    if let successor {
+                        await #expect(throws: CancellationError.self) { try await first.value }
+                        generation = try await successor.value
+                    } else { generation = try await first.value }
+                    #expect(generation == mounted.generation + (mode == "superseded" ? 2 : 1))
+                    #expect(store.mountedTarget == SessionPresentationIdentity(sessionID: tail.sessionId, generation: generation))
+                    #expect(store.hasInstalledSubscription(for: tail.sessionId))
+                    #expect(store.visibleTranscript.map(\.id) == tail.transcript.map(\.id))
+                    #expect(store.mountedTranscriptCoverage == nil)
+                }
+                let opens = try await socket.sentFrames().filter {
+                    try JSONDecoder.gateway.decode(JSONValue.self, from: $0).objectValue?["method"]?.stringValue == "session.open"
+                }
+                #expect(opens.count == (mode == "cancelled" ? 1 : 2))
+            } catch {
+                await client.close()
+                throw error
+            }
+            await client.close()
+        }
+    }
+
     @Test("opaque synchronization tokens admit valid values and reject invalid boundaries")
     func synchronizationTokenAdmission() {
         for token in [
