@@ -470,10 +470,6 @@ export function recoveredReplacementClaim(artifact: Record<string, unknown>): { 
   return { replacementRunId, recoveredAt };
 }
 
-export function recoveredReplacementRunId(artifact: Record<string, unknown>): string | undefined {
-  return recoveredReplacementClaim(artifact)?.replacementRunId;
-}
-
 /** A paused workflow is logically resumable but owns no live OS work after the
  * producer has durably observed its exact runner and writer process trees exit.
  * This proof affects administrative quiescence only; it never fabricates a

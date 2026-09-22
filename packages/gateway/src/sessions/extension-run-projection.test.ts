@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ExtensionRunActivity } from "../protocol/types.js";
 import { subagentProcessesFromActivity } from "./process-activity.js";
-import { admitExtensionLifecycleArtifact, boundExtensionActivities, extensionActivityStatusFromTool, extensionLifecycleState, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasObservedPausedProcessTerminal, hasStructuredExtensionRunActivity, recoveredReplacementRunId, inspectExtensionLifecycleArtifact, inspectExtensionLifecycleProjection, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, usesForegroundSubagentChildIdentity } from "./extension-run-projection.js";
+import { admitExtensionLifecycleArtifact, boundExtensionActivities, extensionActivityStatusFromTool, extensionLifecycleState, hasExtensionLifecycleProjectionProperty, hasForegroundSubagentRunActivity, hasObservedPausedProcessTerminal, hasStructuredExtensionRunActivity, recoveredReplacementClaim, inspectExtensionLifecycleArtifact, inspectExtensionLifecycleProjection, lifecycleProjectionArtifact, normalizeExtensionArtifact, parseExtensionLifecycleProjectionHeader, projectExtensionRunActivity, usesForegroundSubagentChildIdentity } from "./extension-run-projection.js";
 
 const base = {
   id: "tool-call",
@@ -145,10 +145,10 @@ describe("projectExtensionRunActivity", () => {
 
   it("recognizes only one bounded recovered replacement claim", () => {
     const recovered = { steering: { recent: [{ targets: [{ state: "recovered", replacementRunId: "replacement-run", recoveredAt: 10 }] }] } };
-    expect(recoveredReplacementRunId(recovered)).toBe("replacement-run");
-    expect(recoveredReplacementRunId({ steering: { recent: [{ targets: [{ state: "delivered", replacementRunId: "replacement-run", recoveredAt: 10 }] }] } })).toBeUndefined();
-    expect(recoveredReplacementRunId({ steering: { recent: [{ targets: [{ state: "recovered", replacementRunId: "one", recoveredAt: 10 }] }, { targets: [{ state: "recovered", replacementRunId: "two", recoveredAt: 11 }] }] } })).toBeUndefined();
-    expect(recoveredReplacementRunId({ steering: { recent: [{ targets: [{ state: "recovered", replacementRunId: "../foreign", recoveredAt: 10 }] }] } })).toBeUndefined();
+    expect(recoveredReplacementClaim(recovered)).toEqual({ replacementRunId: "replacement-run", recoveredAt: 10 });
+    expect(recoveredReplacementClaim({ steering: { recent: [{ targets: [{ state: "delivered", replacementRunId: "replacement-run", recoveredAt: 10 }] }] } })).toBeUndefined();
+    expect(recoveredReplacementClaim({ steering: { recent: [{ targets: [{ state: "recovered", replacementRunId: "one", recoveredAt: 10 }] }, { targets: [{ state: "recovered", replacementRunId: "two", recoveredAt: 11 }] }] } })).toBeUndefined();
+    expect(recoveredReplacementClaim({ steering: { recent: [{ targets: [{ state: "recovered", replacementRunId: "../foreign", recoveredAt: 10 }] }] } })).toBeUndefined();
   });
 
   it("admits only exact observed process-terminal proof for paused quiescence", () => {

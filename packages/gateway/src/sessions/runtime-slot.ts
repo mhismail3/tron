@@ -4189,7 +4189,9 @@ export class RuntimeSlot {
         now: new Date().toISOString(),
         ...(previous?.startedAt ? { fallbackStartedAt: previous.startedAt } : {}),
         ...(previous?.updatedAt ? { fallbackUpdatedAt: previous.updatedAt } : {}),
-        useArtifactStartedAt: false,
+        // A recovery handoff has no launcher row to supply a start time.
+        // Once admitted, keep that first start stable across later updates.
+        useArtifactStartedAt: previous === undefined,
       });
       if (!normalized) {
         if (diagnosticOwner) this.warnExtensionArtifact("invalid-timestamp", diagnosticOwner);
@@ -4215,7 +4217,6 @@ export class RuntimeSlot {
         && rawLastUpdate <= recoveryClaim.recoveredAt
         && typeof rawEndedAt === "number" && Number.isSafeInteger(rawEndedAt)
         && rawEndedAt <= recoveryClaim.recoveredAt;
-      if (runId === "recovered-source-run") console.log("DEBUG source projection", { raw, recoveryClaim, sourceFact, processTerminal, state, normalized, ownership });
       const effectiveState = superseded ? "completed" : state;
       const effectiveCompletedAt = superseded ? completedAt ?? updatedAt : completedAt;
       const pausedProcessIsQuiescent = hasObservedPausedProcessTerminal(raw, runId);
@@ -4225,7 +4226,7 @@ export class RuntimeSlot {
       const artifactValue = ownership?.terminal
         ? preserveEmbeddedLifecycleMarker(raw, { ...raw, state: previous?.status === "failed" ? "failed" : "completed" })
         : superseded
-          ? preserveEmbeddedLifecycleMarker(raw, { ...raw, state: "completed", supersededByRunId: replacementRunId })
+          ? preserveEmbeddedLifecycleMarker(raw, { ...raw, state: "stopped", supersededByRunId: recoveryClaim!.replacementRunId })
           : raw;
       const activityKey = previous?.activityId ?? extensionActivityId(this.runtime.session.sessionManager.getSessionId(), toolCallId);
       const sequence = (this.extensionActivitySequences.get(activityKey) ?? previous?.lifecycle?.sequence ?? 0) + 1;
@@ -4258,7 +4259,6 @@ export class RuntimeSlot {
       // Ambient discovery is another producer of lifecycle candidates. Apply
       // the same Gateway terminal latch and sequence admission as live tool
       // events before replacing an existing row.
-      if (runId === "recovered-source-run") console.log("DEBUG candidate", { superseded, effectiveState, activity, previous, admitted: admitExtensionRunActivity(previous, activity) !== previous });
       if (admitExtensionRunActivity(previous, activity) === previous) return;
       const terminalReceiptOwner = activity.status === "running"
         ? undefined
@@ -4383,7 +4383,7 @@ export class RuntimeSlot {
         && (value as Record<string, unknown>).state === "recovered") as Record<string, unknown> | undefined;
       const sourceRunId = steering && boundedRunId(steering.sourceRunId) ? steering.sourceRunId : undefined;
       const replacementRunId = steering && boundedRunId(steering.replacementRunId) ? steering.replacementRunId : undefined;
-      if (toolName === DELEGATED_PROVIDER_TOOL_NAME && details?.mode === "management"
+      if (this.isForegroundSubagentTool(toolName, this.extensionToolOrigin(toolName)) && details?.mode === "management"
         && steering?.state === "recovered" && steering.deliveryStatus === "delivered"
         && sourceRunId && replacementRunId && sourceRunId !== replacementRunId
         && recoveryTarget && recoveryTarget.replacementRunId === replacementRunId) {
@@ -4566,7 +4566,7 @@ export class RuntimeSlot {
       const artifactValue = ownership.terminal
         ? preserveEmbeddedLifecycleMarker(raw, { ...raw, state: previous.status === "failed" ? "failed" : "completed" })
         : superseded
-          ? preserveEmbeddedLifecycleMarker(raw, { ...raw, state: "completed", supersededByRunId: replacementRunId })
+          ? preserveEmbeddedLifecycleMarker(raw, { ...raw, state: "stopped", supersededByRunId: recoveryClaim!.replacementRunId })
           : raw;
       const activityKey = previous.activityId ?? extensionActivityId(this.runtime.session.sessionManager.getSessionId(), toolCallId);
       const sequence = (this.extensionActivitySequences.get(activityKey) ?? previous.lifecycle?.sequence ?? 0) + 1;

@@ -3779,7 +3779,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }]);
   });
 
-  it("settles an auto-recovered source and tracks its real replacement artifact", async () => {
+  it.each(["recovered", "live-source", "foreign-owner", "unobserved-process"] as const)("admits exact auto-recovery handoff: %s", async (scenario) => {
     const fixture = await coldFixture("recovered-replacement-settlement");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const manager = (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } }).runtime.session.sessionManager;
@@ -3791,8 +3791,11 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const replacementDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", replacementRunId);
     await mkdir(sourceDir, { recursive: true });
     await mkdir(replacementDir, { recursive: true });
-    vi.spyOn(slot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
-      .mockReturnValue({ source: "pi-subagents" });
+    const providerOrigin = { source: "pi-subagents", owner: { id: "installed-provider" } };
+    vi.spyOn(slot as unknown as { subagentExtensionOrigin: () => typeof providerOrigin }, "subagentExtensionOrigin")
+      .mockReturnValue(providerOrigin);
+    vi.spyOn(slot as unknown as { extensionToolOrigin: (name: string) => typeof providerOrigin | undefined }, "extensionToolOrigin")
+      .mockReturnValue(scenario === "foreign-owner" ? { ...providerOrigin, owner: { id: "project-impostor" } } : providerOrigin);
     manager.appendMessage({
       role: "toolResult", toolCallId: sourceToolCallId, toolName: "subagent",
       content: [{ type: "text", text: "launched" }],
@@ -3826,26 +3829,32 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
     internal.extensionRunOwnership.set(sourceRunId, { toolCallId: sourceToolCallId, asyncDir: sourceDir, terminal: false });
     await writeFile(join(sourceDir, "status.json"), JSON.stringify({
-      lifecycleArtifactVersion: 3, runId: sourceRunId, state: "paused", startedAt: started, endedAt: started + 1_000, lastUpdate: started + 2_000,
+      lifecycleArtifactVersion: 3, runId: sourceRunId, state: scenario === "live-source" ? "running" : "paused", startedAt: started, endedAt: started + 1_000, lastUpdate: started + 2_000,
+      steps: [{ index: 0, agent: "worker", status: "paused" }],
       steering: { recent: [{ targets: [{ state: "recovered", replacementRunId, recoveredAt }] }] },
     }));
     await writeFile(join(sourceDir, "process-terminal.json"), JSON.stringify({
-      version: 1, state: "observed", runId: sourceRunId, runnerProcessInstanceId: "source-runner", observedAt: started + 1_500,
+      version: 1, state: scenario === "unobserved-process" ? "pending" : "observed", runId: sourceRunId, runnerProcessInstanceId: "source-runner", observedAt: started + 1_500,
       instances: [{ kind: "runner", processInstanceId: "source-runner", closeObservedAt: started + 1_500, exitCode: 0, signal: null }],
     }));
     await writeFile(join(replacementDir, "status.json"), JSON.stringify({
       lifecycleArtifactVersion: 3, runId: replacementRunId, state: "running", startedAt: recoveredAt + 1, lastUpdate: recoveredAt + 2,
     }));
 
-    console.log("DEBUG recovery facts", internal.canonicalExtensionRunFacts());
-    const drain = fixture.registry.waitUntilIdle();
-    await new Promise((resolve) => setTimeout(resolve, 50));
     await slot.discoverExtensionArtifact(sourceDir);
     await slot.discoverExtensionArtifact(replacementDir);
-    expect(slot.snapshot().extensionActivities).toMatchObject([
-      { toolCallId: sourceToolCallId, status: "completed", lifecycle: { state: "completed" } },
-      { runId: replacementRunId, status: "running", lifecycle: { state: "running" } },
-    ]);
+    if (scenario !== "recovered") {
+      expect(slot.snapshot().extensionActivities.find((item) => item.runId === sourceRunId)?.status).toBe("running");
+      if (scenario === "foreign-owner") {
+        expect(slot.snapshot().extensionActivities.some((item) => item.runId === replacementRunId)).toBe(false);
+      }
+      return;
+    }
+    const drain = fixture.registry.waitUntilIdle();
+    expect(slot.snapshot().extensionActivities).toEqual(expect.arrayContaining([
+      expect.objectContaining({ toolCallId: sourceToolCallId, status: "completed", lifecycle: expect.objectContaining({ state: "stopped" }) }),
+      expect.objectContaining({ runId: replacementRunId, status: "running", lifecycle: expect.objectContaining({ state: "running" }) }),
+    ]));
     expect(slot.isDrainBusy).toBe(true);
 
     const finished = Date.now();
@@ -3856,10 +3865,18 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await slot.discoverExtensionArtifact(replacementDir);
     await drain;
     expect(slot.isDrainBusy).toBe(false);
-    expect(slot.snapshot().extensionActivities).toMatchObject([
-      { toolCallId: sourceToolCallId, status: "completed", lifecycle: { state: "completed" } },
-      { runId: replacementRunId, status: "completed", lifecycle: { state: "completed" } },
-    ]);
+    expect(slot.snapshot().extensionActivities).toEqual(expect.arrayContaining([
+      expect.objectContaining({ toolCallId: sourceToolCallId, status: "completed", lifecycle: expect.objectContaining({ state: "stopped" }) }),
+      expect.objectContaining({ runId: replacementRunId, status: "completed", lifecycle: expect.objectContaining({ state: "completed" }) }),
+    ]));
+    expect(slot.snapshot().processOverview.activeCount).toBe(0);
+    // A delayed original artifact cannot resurrect the retired execution.
+    await writeFile(join(sourceDir, "status.json"), JSON.stringify({
+      lifecycleArtifactVersion: 3, runId: sourceRunId, state: "running", startedAt: started, lastUpdate: Date.now(),
+    }));
+    await slot.discoverExtensionArtifact(sourceDir);
+    expect(slot.snapshot().extensionActivities.find((item) => item.runId === sourceRunId)?.lifecycle?.state).toBe("stopped");
+    expect(slot.isDrainBusy).toBe(false);
   });
 
   it("does not retain unwatched async launcher acknowledgements as running work", async () => {

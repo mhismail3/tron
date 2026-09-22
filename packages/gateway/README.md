@@ -2058,12 +2058,17 @@ modifying canonical JSONL. `SessionProcessOverview` is the shallow composer auth
 active/recent/problem counts, revision, Gateway `asOf`, and nearest expiry. High-frequency
 output remains in bounded process deltas and does not require a transcript rebuild. Optional
 resolved model and thinking metadata is copied only from bounded fields already present in
-the canonical producer status. A recovered steering target is a separate handoff: when its
-bounded `replacementRunId` is backed by a distinct canonical delegated tool owner in the
-same parent session, the superseded paused artifact is settled as completed for activity
-and drain projection while its source status remains resumable history. A replacement
-claim without exact ownership, or with conflicting replacement IDs, remains paused and
-fails closed. The upstream producer does not publish durable completed-tool identity, so
+the canonical producer status. Automatic steering recovery emits a management receipt,
+not a second launcher result. The exact installed provider's recovered receipt binds its
+source and replacement IDs to the original canonical launch in the same parent session;
+a stable recovery identity owns the replacement's artifact. Its first admitted artifact
+supplies the start time when no launcher row exists. A matching recovered artifact claim,
+with the original paused runner's observed terminal proof and pre-handoff timestamps,
+settles the superseded execution as stopped—not successful work—while leaving the producer's
+resumable history unchanged. The replacement remains independently active until its own
+terminal evidence arrives. Foreign owners, conflicting claims, missing process proof,
+and currently running sources never authorize this settlement. Late original artifacts
+cannot resurrect an already retired execution. The upstream producer does not publish durable completed-tool identity, so
 Gateway and iOS intentionally show only the authoritative current tool and bounded output;
 they do not invent or cache a last-tool record.
 
