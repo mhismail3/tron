@@ -111,6 +111,12 @@ final class ChatScrollCoordinator {
     }
 
     private struct OpeningTailContext: Equatable {
+        struct PostApplicationFrameProof: Equatable {
+            let commandToken: Int
+            let presentation: Int
+            let layoutEpoch: Int
+        }
+
         var token: Int
         var targetRenderedID: String
         var physicalTargetID: String
@@ -119,6 +125,7 @@ final class ChatScrollCoordinator {
         var commandToken: Int?
         var commandSemanticRevision: Int?
         var commandGeometryRevision: Int?
+        var postApplicationFrameProof: PostApplicationFrameProof?
         var commandAttemptCount: Int
     }
 
@@ -1597,6 +1604,7 @@ final class ChatScrollCoordinator {
             // geometry evidence before a timeout may be treated as a failure.
             opening.commandSemanticRevision = semanticFrameRevision
             opening.commandGeometryRevision = geometryRevision
+            opening.postApplicationFrameProof = nil
             openingTailPhase = .positioning(opening)
             scheduleOpeningTailTimeout(token: opening.token, presentation: opening.presentation)
             scheduleOpeningTailFrame()
@@ -1752,6 +1760,7 @@ final class ChatScrollCoordinator {
             commandToken: nil,
             commandSemanticRevision: nil,
             commandGeometryRevision: nil,
+            postApplicationFrameProof: nil,
             commandAttemptCount: 0
         )
         openingTailPhase = .positioning(context)
@@ -1814,9 +1823,15 @@ final class ChatScrollCoordinator {
                 // proof arrived before delayed native application.
                 let commandWasApplied = value.commandToken != nil
                     && appliedTargetCommandToken == value.commandToken
+                let hasPostApplicationFrameProof = value.postApplicationFrameProof == .init(
+                    commandToken: value.commandToken ?? -1,
+                    presentation: value.presentation,
+                    layoutEpoch: layoutEpoch
+                )
                 let hasFreshPostApplicationEvidence = !commandWasApplied
                     || (semanticFrameRevision > (value.commandSemanticRevision ?? -1)
-                        && geometryRevision > (value.commandGeometryRevision ?? -1))
+                        && (geometryRevision > (value.commandGeometryRevision ?? -1)
+                            || hasPostApplicationFrameProof))
                 guard hasFreshPostApplicationEvidence else { return }
                 clearOpeningCommand(matching: value.commandToken)
                 value.commandToken = nil
@@ -1856,6 +1871,7 @@ final class ChatScrollCoordinator {
         updated.commandToken = command?.token
         updated.commandSemanticRevision = semanticFrameRevision
         updated.commandGeometryRevision = geometryRevision
+        updated.postApplicationFrameProof = nil
         updated.commandAttemptCount &+= 1
         openingTailPhase = .positioning(updated)
     }
@@ -1893,18 +1909,21 @@ final class ChatScrollCoordinator {
                   self.openingTailPhase.context?.token == token,
                   self.openingTailPhase.context?.presentation == admittedPresentation else { return }
             self.openingTailFrameTask = nil
-            if case .positioning(let value) = self.openingTailPhase,
+            if case .positioning(var value) = self.openingTailPhase,
                let commandToken = value.commandToken,
                self.appliedTargetCommandToken == commandToken,
                self.command == nil {
                 // `onScrollGeometryChange` observes an Equatable transform and
                 // does not promise a callback for a command that leaves the
-                // valid viewport value unchanged. This existing display-frame
-                // owner sample records that unchanged native fact once after
-                // application, so a genuine newer marker callback cannot be
-                // stranded waiting for a manufactured duplicate geometry
-                // callback. It is one application-bound sample, not polling.
-                self.geometryRevision &+= 1
+                // valid viewport value unchanged. Keep this proof local to the
+                // exact command/presentation/layout instead of manufacturing a
+                // global geometry revision for unrelated consumers.
+                value.postApplicationFrameProof = .init(
+                    commandToken: commandToken,
+                    presentation: value.presentation,
+                    layoutEpoch: self.layoutEpoch
+                )
+                self.openingTailPhase = .positioning(value)
             }
             if case .positioning(var value) = self.openingTailPhase,
                let commandToken = value.commandToken,
@@ -1916,6 +1935,7 @@ final class ChatScrollCoordinator {
                     value.commandToken = nil
                     value.commandSemanticRevision = nil
                     value.commandGeometryRevision = nil
+                    value.postApplicationFrameProof = nil
                     self.openingTailPhase = .positioning(value)
                 }
             }

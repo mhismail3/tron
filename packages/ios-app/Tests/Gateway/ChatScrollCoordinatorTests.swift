@@ -2081,10 +2081,30 @@ struct ChatScrollCoordinatorTests {
             #expect(positioningResult == nil)
             #expect(coordinator.targetReleaseGeneration == 0)
             // No duplicate geometry callback is injected. The native
-            // ScrollGeometry value stayed unchanged, so the owner samples it
-            // at this required post-application frame instead.
+            // ScrollGeometry value stayed unchanged, so the exact opening
+            // owner records a frame-bound proof without advancing genuine
+            // geometry evidence used by unrelated consumers.
+            let geometryEvidenceBeforeFrame = coordinator.hostedGeometryEvidenceRevision
             frames.releaseNext()
             #expect(await positioning.value)
+            #expect(coordinator.hostedGeometryEvidenceRevision == geometryEvidenceBeforeFrame)
+
+            coordinator.openingRevealCompleted()
+            let settlement = Task { await coordinator.waitForOpeningTailSettlement() }
+            var nextFrame = 3
+            while coordinator.targetReleaseGeneration == 0 && nextFrame <= 6 {
+                await frames.waitForRequest(count: nextFrame)
+                frames.releaseNext()
+                await Task.yield()
+                nextFrame += 1
+            }
+            #expect(coordinator.targetReleaseGeneration == 1)
+            #expect(coordinator.consumeTargetRelease())
+            #expect(await settlement.value == .settled)
+            coordinator.completeVisibleOpeningReveal()
+            #expect(coordinator.admitsSubmission)
+            #expect(coordinator.command == nil)
+            #expect(coordinator.hostedGeometryEvidenceRevision == geometryEvidenceBeforeFrame)
             coordinator.cancel()
         }
     }
