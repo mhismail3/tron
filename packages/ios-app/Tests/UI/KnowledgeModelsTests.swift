@@ -576,8 +576,38 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertNil(KnowledgeSourcePresentationPolicy.summary(source), "A bound assessment with the wrong evidence digest must not present as current")
         XCTAssertEqual(record.summary, "")
         XCTAssertNil(source.assessment?.confidence, "Missing confidence must remain missing")
-        XCTAssertEqual(KnowledgeSourcePresentationPolicy.evidenceDigest(title: "Metadata", text: ""), KnowledgeSourcePresentationPolicy.evidenceDigest(title: "Metadata", text: ""))
         XCTAssertNotEqual(KnowledgeSourcePresentationPolicy.evidenceDigest(title: "Metadata", text: "changed"), KnowledgeSourcePresentationPolicy.evidenceDigest(title: "Metadata", text: ""))
+    }
+
+    func testSavedTextEntityPresentationDoesNotDecodeNestedEntitiesTwice() {
+        XCTAssertEqual(KnowledgeSourcePresentationPolicy.decodeSavedTextEntities("don&#x27;t &lt;tag&gt; &amp;"), "don't <tag> &")
+        XCTAssertEqual(KnowledgeSourcePresentationPolicy.decodeSavedTextEntities("&amp;#x27; &amp;lt; &amp;amp;"), "&#x27; &lt; &amp;")
+    }
+
+    func testSummaryDigestMatchesGatewayEncodingAndIgnoresMetadataUpdates() throws {
+        let title = "A / B"
+        let text = "https://example.com/a\n\"Quoted\" 🌲"
+        // SHA-256 of Gateway JSON.stringify({title, text}); not a self-comparison.
+        let digest = "5a5ffb2316ae0f7bdccef02cf63fc10121160fecb8f84af6323568aa4f152fd0"
+        XCTAssertEqual(KnowledgeSourcePresentationPolicy.evidenceDigest(title: title, text: text), digest)
+        let summary = String(repeating: "A useful summary. ", count: 30)
+        var wire: [String: Any] = [
+            "title": title, "text": text, "captureDisposition": "partial",
+            "capturedAt": "2026-01-01T00:00:00.000Z",
+            "assessment": ["summary": summary, "evidenceQuality": "high", "freshness": "current",
+                           "generatedAt": "2026-01-02T00:00:00.001Z", "evidenceDigest": digest]
+        ]
+        func source(_ value: [String: Any]) throws -> KnowledgeSourceContent {
+            try JSONDecoder().decode(KnowledgeSourceContent.self, from: JSONSerialization.data(withJSONObject: value))
+        }
+        XCTAssertEqual(KnowledgeSourcePresentationPolicy.summary(try source(wire)), summary.trimmingCharacters(in: .whitespacesAndNewlines))
+        wire["capturedAt"] = "2026-01-03T00:00:00Z"
+        XCTAssertNotNil(KnowledgeSourcePresentationPolicy.summary(try source(wire)), "Unchanged evidence stays valid across metadata updates")
+        wire["text"] = "Changed evidence"
+        XCTAssertNil(KnowledgeSourcePresentationPolicy.summary(try source(wire)))
+        wire["text"] = text
+        wire["title"] = "Changed title"
+        XCTAssertNil(KnowledgeSourcePresentationPolicy.summary(try source(wire)))
     }
 
     func testSourceAndNoteUseTheCommonDiscriminatedContentShape() throws {

@@ -59,12 +59,17 @@ describe("KnowledgeService integration", () => {
     const store = new KnowledgeStore(new TronWorkspace(root));
     const source = await store.captureSource({ commandId: "service-source", record: {
       kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [],
-      content: { title: "Retained source", text: "bounded source evidence", captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z", origin: "manual" },
+      content: { title: "A / B", text: "https://example.com/a\n\"Quoted\" 🌲", captureDisposition: "complete", capturedAt: "2026-01-01T00:00:00Z", origin: "manual", admission: { status: "retained", decidedAt: "2026-01-01T00:00:00Z", reason: "User saved this source" } },
     }});
     const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => model());
     const result = await service.invoke({ operation: "knowledge.source.triage", request: { commandId: "service-triage", sourceId: source.record.id, expectedRevision: source.record.revisionId } });
-    expect(result).toMatchObject({ assessment: { summary: "Useful source", evidenceQuality: "high" } });
-    expect((await store.read(source.record.id))?.content).toMatchObject({ assessment: { summary: "Useful source" } });
+    // Shared with the Swift wire regression: slash escaping must match JSON.stringify.
+    const evidenceDigest = "5a5ffb2316ae0f7bdccef02cf63fc10121160fecb8f84af6323568aa4f152fd0";
+    expect(result).toMatchObject({ assessment: { summary: "Useful source", evidenceQuality: "high", evidenceDigest } });
+    expect((await store.read(source.record.id))?.content).toMatchObject({
+      assessment: { summary: "Useful source", evidenceDigest },
+      admission: { status: "retained", decidedAt: "2026-01-01T00:00:00Z", reason: "User saved this source" },
+    });
   });
 
   it("rejects reflection queued behind a configuration change", async () => {

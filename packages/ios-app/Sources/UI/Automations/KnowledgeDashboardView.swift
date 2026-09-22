@@ -686,7 +686,7 @@ struct KnowledgeSourceRow: View {
                     .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                     .foregroundStyle(Color.tronTextPrimary)
                     .lineLimit(2)
-                if let summary = KnowledgeSourcePresentationPolicy.summary(source, updatedAt: record.updatedAt) {
+                if let summary = KnowledgeSourcePresentationPolicy.summary(source) {
                     Text(summary)
                         .font(TronTypography.secondaryDescription)
                         .foregroundStyle(Color.tronTextSecondary)
@@ -726,6 +726,7 @@ struct KnowledgeSavedTextReader: View {
     let revisionID: String
     let label: String
     @Bindable var readers: KnowledgeObjectReaderStore
+    var loadNext: ((KnowledgeObjectRef, Int) -> Void)? = nil
     @State private var page = 0
     private let pageSize = 12_000
 
@@ -736,38 +737,23 @@ struct KnowledgeSavedTextReader: View {
                     .font(TronTypography.largeTitle)
                     .foregroundStyle(Color.tronKnowledge)
                 if let text, !text.isEmpty {
-                    let decoded = decodeEntities(text)
-                    let start = min(page * pageSize, decoded.count)
-                    let end = min(start + pageSize, decoded.count)
-                    let startIndex = decoded.index(decoded.startIndex, offsetBy: start)
-                    let endIndex = decoded.index(decoded.startIndex, offsetBy: end)
-                    Text(decoded[startIndex..<endIndex])
-                        .font(TronTypography.body).foregroundStyle(Color.tronTextPrimary)
-                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                    HStack {
-                        Button("Previous") { page = max(0, page - 1) }.disabled(page == 0)
-                        Spacer()
-                        Text("Page \(page + 1) of \(max(1, (decoded.count + pageSize - 1) / pageSize))").font(TronTypography.caption)
-                        Spacer()
-                        Button("Next") { page += 1 }.disabled(end >= decoded.count)
-                    }
-                    .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
+                    pagedText(KnowledgeSourcePresentationPolicy.decodeSavedTextEntities(text))
                 } else if let reference { let state = state(for: reference)
                     if state.loading && state.bytes.isEmpty { TronLoadingState(label: "Loading saved text…", accent: .tronKnowledge) }
                     else if let error = state.error, state.bytes.isEmpty { Text(error).font(TronTypography.body).foregroundStyle(Color.tronAmber) }
                     else if state.bytes.isEmpty { Text("No readable text is available for this source.").font(TronTypography.body).foregroundStyle(Color.tronTextSecondary) }
                     else {
                         let full = KnowledgeObjectPresentationPolicy.renderedText(state.bytes, mediaType: reference.mediaType, label: label)
-                        let bounded = String(full.prefix(12_000))
-                        Text(decodeEntities(bounded))
-                            .font(TronTypography.body)
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if full.count > bounded.count || state.nextOffset != nil {
-                            Text("Showing the first 12,000 characters. Raw files and later chunks remain available in Technical details.")
-                                .font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
+                        // Raw evidence stays verbatim; only the readable-text presentation decodes entities.
+                        pagedText(full)
+                        if let error = state.error { Text(error).foregroundStyle(Color.tronAmber) }
+                        if let next = state.nextOffset, let loadNext {
+                            Button(state.loading ? "Loading…" : "Load more of this file") { loadNext(reference, next) }
+                                .disabled(state.loading)
+                                .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
                         }
+                        Text("\(state.bytes.count) of \(state.totalBytes ?? reference.bytes) bytes loaded")
+                            .font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
                     }
                 } else {
                     Text("Saved text is unavailable for this source.").font(TronTypography.body).foregroundStyle(Color.tronTextSecondary)
@@ -775,22 +761,36 @@ struct KnowledgeSavedTextReader: View {
             }
             .padding(24)
         }
+        .id(page) // Each bounded page starts at the top, rather than inheriting the previous page's scroll.
         .tronScrollEdgeChrome()
         .tronSettingsVisualTheme(accent: .tronKnowledge)
         .onChange(of: text) { _, _ in page = 0 }
+        .onChange(of: recordID) { _, _ in page = 0 }
+        .onChange(of: revisionID) { _, _ in page = 0 }
+        .onChange(of: reference) { _, _ in page = 0 }
     }
 
     private func state(for reference: KnowledgeObjectRef) -> KnowledgeObjectReaderState {
         readers.state(for: KnowledgeObjectSelectionKey(recordID: recordID, revisionID: revisionID, reference: reference))
     }
 
-    private func decodeEntities(_ value: String) -> String {
-        value.replacingOccurrences(of: "&amp;", with: "&")
-            .replacingOccurrences(of: "&quot;", with: "\"")
-            .replacingOccurrences(of: "&#x27;", with: "'")
-            .replacingOccurrences(of: "&#39;", with: "'")
-            .replacingOccurrences(of: "&lt;", with: "<")
-            .replacingOccurrences(of: "&gt;", with: ">")
+    @ViewBuilder private func pagedText(_ value: String) -> some View {
+        let count = value.count
+        let start = min(page * pageSize, count)
+        let end = min(start + pageSize, count)
+        let first = value.index(value.startIndex, offsetBy: start)
+        let last = value.index(value.startIndex, offsetBy: end)
+        Text(value[first..<last])
+            .font(TronTypography.body).foregroundStyle(Color.tronTextPrimary)
+            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+        HStack {
+            Button("Previous") { page = max(0, page - 1) }.disabled(page == 0)
+            Spacer()
+            Text("Page \(page + 1) of \(max(1, (count + pageSize - 1) / pageSize))").font(TronTypography.caption)
+            Spacer()
+            Button("Next") { page += 1 }.disabled(end >= count)
+        }
+        .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
     }
 }
 
@@ -805,8 +805,10 @@ struct KnowledgeDetailView: View {
     @State private var currentRecord: KnowledgeRecord
     @State private var mutationInFlight = false
     @State private var noteBody = ""
+    private let navigationAncestors: Set<String>
 
-    init(record: KnowledgeRecord, origin: KnowledgePresentationIdentity, onChanged: @escaping () async -> Void, onOpenDraft: @escaping (KnowledgeRecord) -> Void, onOpenSession: @escaping (String, String) -> Void) {
+    init(record: KnowledgeRecord, origin: KnowledgePresentationIdentity, onChanged: @escaping () async -> Void, onOpenDraft: @escaping (KnowledgeRecord) -> Void, onOpenSession: @escaping (String, String) -> Void, navigationAncestors: Set<String> = []) {
+        self.navigationAncestors = navigationAncestors.union([record.id])
         self.origin = origin
         self.onChanged = onChanged
         self.onOpenDraft = onOpenDraft
@@ -958,7 +960,7 @@ struct KnowledgeDetailView: View {
             Button("Forget", role: .destructive) { forget() }
         }
         .tronManagedSheet(isPresented: $readerPresented, identity: "knowledge.reader.\(currentRecord.id)") {
-            KnowledgeSavedTextReader(text: readerText, reference: readerReference, recordID: currentRecord.id, revisionID: currentRecord.revisionId, label: readerLabel, readers: objectReaders)
+            KnowledgeSavedTextReader(text: readerText, reference: readerReference, recordID: currentRecord.id, revisionID: currentRecord.revisionId, label: readerLabel, readers: objectReaders, loadNext: { reference, offset in readObject(reference, offset: offset) })
         }
         .tronManagedSheet(isPresented: $technicalDetailsSheet, identity: "knowledge.technical.\(currentRecord.id)") {
             if let observation = observationPresentation {
@@ -978,7 +980,7 @@ struct KnowledgeDetailView: View {
         }
         .navigationDestination(item: Binding(get: { linkedReader.record }, set: { _ in linkedReader.clear() })) { linked in
             KnowledgeDetailView(record: linked, origin: origin, onChanged: onChanged,
-                                onOpenDraft: onOpenDraft, onOpenSession: onOpenSession)
+                                onOpenDraft: onOpenDraft, onOpenSession: onOpenSession, navigationAncestors: navigationAncestors)
         }
         .onDisappear { objectReaders.suspend(); linkedReader.suspend() }
     }
@@ -1056,7 +1058,7 @@ struct KnowledgeDetailView: View {
                 .font(TronTypography.bodySM)
                 .foregroundStyle(Color.tronKnowledgeText)
             }
-            if let summary = KnowledgeSourcePresentationPolicy.summary(source, updatedAt: currentRecord.updatedAt) {
+            if let summary = KnowledgeSourcePresentationPolicy.summary(source) {
                 TronSettingsGroup("At a glance", accent: .tronKnowledge) {
                     Text(summary)
                         .font(TronTypography.body)
@@ -1095,24 +1097,23 @@ struct KnowledgeDetailView: View {
                 .padding(.horizontal, 14).padding(.vertical, 12)
                 .tronScrollSurface(accent: .tronKnowledge, tintOpacity: 0.06)
             }
-            if let origin = source.origins?.last ?? source.origin.flatMap({ value in KnowledgeSourceOriginKind(rawValue: value).map { KnowledgeSourceOrigin(kind: $0, capturedAt: source.capturedAt, annotation: nil, uri: source.uri, identity: source.identity) } }) {
-                DisclosureGroup {
-                    VStack(alignment: .leading, spacing: TronSpacing.sm) {
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: TronSpacing.sm) {
+                    if let origin = source.origins?.last ?? source.origin.flatMap({ value in KnowledgeSourceOriginKind(rawValue: value).map { KnowledgeSourceOrigin(kind: $0, capturedAt: source.capturedAt, annotation: nil, uri: source.uri, identity: source.identity) } }) {
                         Text("Saved from \(origin.kind.rawValue.capitalized) on \(humanDate(origin.capturedAt)).")
                         if let annotation = origin.annotation { Text(annotation).foregroundStyle(Color.tronTextSecondary) }
-                        if let reason = plainLanguageLimitation(source) { Text(reason).foregroundStyle(Color.tronTextSecondary) }
+                    } else {
+                        Text("Saved on \(humanDate(source.capturedAt)).")
                     }
-                    .font(TronTypography.secondaryDescription)
-                    .padding(.top, 8)
-                } label: { Label("About this source", systemImage: "info.circle") }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .tronScrollSurface(accent: .tronKnowledge, tintOpacity: 0.06)
-            }
-            DisclosureGroup {
-                technicalSourceDetails(source)
+                    if let reason = plainLanguageLimitation(source) { Text(reason).foregroundStyle(Color.tronTextSecondary) }
+                    DisclosureGroup("Technical details") {
+                        technicalSourceDetails(source)
+                    }
+                }
+                .font(TronTypography.secondaryDescription)
+                .padding(.top, 8)
             } label: {
-                Label("Technical details", systemImage: "slider.horizontal.3")
+                Label("About this source", systemImage: "info.circle")
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
@@ -1271,23 +1272,27 @@ struct KnowledgeDetailView: View {
             return []
         }()
         for ref in refs.prefix(24) {
-            guard let id = ref.recordId, id != currentRecord.id, citationTitles[id] == nil,
-                  model.knowledgePresentationIdentity == origin, activity.allowsPresentationPublication else { return }
-            guard let record = try? await model.knowledge.read(id: id, revisionID: ref.revisionId),
-                  !Task.isCancelled, model.knowledgePresentationIdentity == origin, activity.allowsPresentationPublication else { return }
+            guard !Task.isCancelled, model.knowledgePresentationIdentity == origin, activity.allowsPresentationPublication else { return }
+            guard let id = ref.recordId, id != currentRecord.id else { continue }
+            let key = ref.revisionId.map { "\(id)|\($0)" } ?? id
+            guard citationTitles[key] == nil else { continue }
+            let record = try? await model.knowledge.read(id: id, revisionID: ref.revisionId)
+            guard !Task.isCancelled, model.knowledgePresentationIdentity == origin, activity.allowsPresentationPublication else { return }
+            guard let record else { continue }
             let title: String
             switch record.content {
             case .source(let source): title = source.title
             case .observation(let observation): title = observation.items.first?.text ?? "Observation"
             case .note(let note): title = note.title
             }
-            citationTitles[id] = title.isEmpty ? id : title
-            if let revision = ref.revisionId { citationTitles["\(id)|\(revision)"] = citationTitles[id] }
+            citationTitles[key] = title.isEmpty ? "Related source" : title
         }
     }
 
     private func openLinkedRecord(id: String, revisionID: String?) {
         guard admitsOrigin else { evidenceMessage = "Gateway changed; reopen this entry."; return }
+        guard !navigationAncestors.contains(id) else { evidenceMessage = "This source is already open. Use Back to return to it."; return }
+        guard navigationAncestors.count < 32 else { evidenceMessage = "Return to the library to open another source."; return }
         let requestIdentity = origin
         Task { @MainActor in
             await linkedReader.load(id: id, revisionID: revisionID,

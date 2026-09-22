@@ -402,17 +402,20 @@ enum KnowledgeSourcePresentationPolicy {
 
     static func domain(_ value: String?) -> String? { safeURL(value)?.host?.lowercased() }
 
-    static func summary(_ source: KnowledgeSourceContent, updatedAt: String? = nil) -> String? {
+    static func summary(_ source: KnowledgeSourceContent) -> String? {
         guard let assessment = source.assessment else { return nil }
         let value = assessment.summary.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return nil }
         if let digest = assessment.evidenceDigest, digest != evidenceDigest(title: source.title, text: source.text ?? "") { return nil }
-        return String(value.prefix(320))
+        return value
     }
 
     static func evidenceDigest(title: String, text: String) -> String {
         func jsonString(_ value: String) -> String {
-            String(data: (try? JSONEncoder().encode(value)) ?? Data("\"\"".utf8), encoding: .utf8) ?? "\"\""
+            let encoder = JSONEncoder()
+            // Match Gateway JSON.stringify: Foundation otherwise escapes URL slashes.
+            encoder.outputFormatting = [.withoutEscapingSlashes]
+            return String(data: (try? encoder.encode(value)) ?? Data("\"\"".utf8), encoding: .utf8) ?? "\"\""
         }
         let canonical = "{\"title\":\(jsonString(title)),\"text\":\(jsonString(text))}"
         return SHA256.hash(data: Data(canonical.utf8)).map { String(format: "%02x", $0) }.joined()
@@ -424,6 +427,16 @@ enum KnowledgeSourcePresentationPolicy {
         if host.contains("x.com") || host.contains("twitter") { return "Post" }
         if source.mediaType?.contains("pdf") == true { return "PDF" }
         return "Web page"
+    }
+
+    static func decodeSavedTextEntities(_ value: String) -> String {
+        // Ampersands last: &amp;#x27; denotes the literal entity, not an apostrophe.
+        value.replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#x27;", with: "'")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&amp;", with: "&")
     }
 
     static func thumbnailLetters(_ source: KnowledgeSourceContent) -> String {

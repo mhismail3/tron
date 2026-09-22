@@ -231,6 +231,18 @@ persisted, cited recall under both selected and global scope without backfill.
 
 `SourceContent` keeps the original immutable object (`object`) separate from its
 bounded readable extraction (`text`) and optional generated `assessment`.
+An optional `preview` is an exact canonical image object reference, governed by
+normal source admission, suppression, historical-revision authority, and object
+cleanup—not a publisher URL fetched by iOS. HTML OpenGraph/Twitter image metadata
+and X Article covers use the same pinned, redirect-checked capture transport with
+a 512 KB ceiling and JPEG/PNG/WebP signature checks. Optional image failure does
+not fail source capture or remove a previously saved preview.
+
+New assessments published by capture or triage include `evidenceDigest`: SHA-256
+of UTF-8 `JSON.stringify({title, text})` for their source evidence. Native clients
+must match JSON's escaping (not Foundation's default escaped slashes). This binds
+summary freshness to content rather than the record's general update timestamp;
+older assessments without the field do not assert that content binding.
 Capture quality is explicit (`complete`, `partial`, `metadata-only`,
 `inaccessible`, or `failed`) and is never upgraded because assessment worked.
 Connector captures may include opaque provider/account/item identity and
