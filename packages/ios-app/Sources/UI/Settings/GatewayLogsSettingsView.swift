@@ -176,6 +176,8 @@ struct GatewayLogsSettingsView: View {
             shareInFlight = false
             shareSucceeded = false
             retirePreparedShare()
+            captureExportGeneration &+= 1
+            captureExportInFlight = false
         }
         .onDisappear {
             loadGeneration &+= 1
@@ -293,9 +295,9 @@ struct GatewayLogsSettingsView: View {
                     await model.discardExportArtifact(path)
                     return
                 }
-                if let previous = preparedShare {
-                    await model.discardExportArtifact(previous.url)
-                }
+                // Publish without another await after admission. Cleanup must
+                // not let a covered or superseded request publish on return.
+                retirePreparedShare()
                 preparedShare = PreparedDiagnosticShare(url: path)
                 model.postNotice(
                     "Diagnostic capture is ready to share",
@@ -418,9 +420,7 @@ struct GatewayLogsSettingsView: View {
                     await model.discardExportArtifact(path)
                     return
                 }
-                if let previous = preparedShare {
-                    await model.discardExportArtifact(previous.url)
-                }
+                retirePreparedShare()
                 preparedShare = PreparedDiagnosticShare(url: path)
                 shareInFlight = false
                 shareSucceeded = true
