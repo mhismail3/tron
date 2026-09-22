@@ -78,9 +78,11 @@ struct SessionShellView: View {
     @State private var searchProfileStatuses: [SessionSearchProfileStatus] = []
     @State private var searchLoading = false
     @State private var remoteRankingEnabled = false
+    @State private var remoteRankingError: String?
     @State private var rankingPolicyTask: Task<Void, Never>?
     @State private var restoringRankingPolicy = false
     @State private var showingSearch = false
+    @State private var showingSearchOptions = false
     @State private var presentedSession: AppModel.SessionNavigationRoute?
     @State private var sessionToDelete: SessionSummary?
     @State private var sessionToRename: SessionSummary?
@@ -142,6 +144,12 @@ struct SessionShellView: View {
                 .presentationDragIndicator(.hidden)
             }
             .tronManagedSheet(
+                isPresented: $showingSearchOptions,
+                identity: "dashboard.search-options"
+            ) {
+                searchOptionsSheet
+            }
+            .tronManagedSheet(
                 isPresented: $showingServerFilter,
                 identity: "dashboard.server-filter"
             ) {
@@ -178,6 +186,7 @@ struct SessionShellView: View {
                     routeReplacementOwner.invalidate(); knowledgeDraftText = nil; knowledgeDraftIdentity = nil
                     rankingPolicyTask?.cancel(); rankingPolicyTask = nil
                     remoteRankingEnabled = profileID.map(model.sessionSearchConsent(for:)) ?? false
+                    remoteRankingError = nil
                 }
                 var route = presentedSession
                 profileRouteOwner.reconcile(
@@ -237,17 +246,20 @@ struct SessionShellView: View {
                       let profileID = model.profiles.selected?.id else { return }
                 let demand = model.sessionSearchPolicyDemandIdentity
                 restoringRankingPolicy = true
+                defer {
+                    if model.profiles.selected?.id == profileID,
+                       model.sessionSearchPolicyDemandIdentity == demand {
+                        restoringRankingPolicy = false
+                    }
+                }
                 await model.restoreSessionSearchPolicy(profileID: profileID, force: true)
                 guard !Task.isCancelled, model.profiles.selected?.id == profileID,
                       model.sessionSearchPolicyDemandIdentity == demand else { return }
-                guard !model.sessionSearchPolicyMutationIsInFlight(for: profileID) else {
-                    restoringRankingPolicy = false
-                    return
-                }
+                guard !model.sessionSearchPolicyMutationIsInFlight(for: profileID) else { return }
                 remoteRankingEnabled = model.sessionSearchConsent(for: profileID)
-                restoringRankingPolicy = false
+                remoteRankingError = nil
             }
-            .task(id: "\(model.profiles.selected?.id ?? ""):\(search):\(remoteRankingEnabled):\(activity):\(serverFilter.searchIdentity):\(model.profileRevision):\(model.dashboardPresentationRevision):\(model.sessionSearchConsent(for: model.profiles.selected?.id ?? ""))") {
+            .task(id: "\(model.profiles.selected?.id ?? ""):\(search):\(remoteRankingEnabled):\(activity):\(serverFilter.searchIdentity):\(model.profileRevision):\(model.sessionSearchConsent(for: model.profiles.selected?.id ?? ""))") {
                 guard activity.allowsPresentationPublication else { return }
                 do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
                 guard !Task.isCancelled else { return }
@@ -412,47 +424,19 @@ struct SessionShellView: View {
     }
 
     private var dashboardSearchBar: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            TronSearchBar(
-                text: $search,
-                prompt: "Search sessions",
-                focusOnAppear: true,
-                onClose: dismissDashboardSearch,
-                onFocusChange: { focused in
-                    if !focused { dismissDashboardSearch() }
-                }
-            )
-            Toggle(
-                "Send this query and up to 16 selected conversation snippets to the configured Jev provider (max 0.2688¢/query, 2.688¢/day)",
-                isOn: Binding(
-                    get: { remoteRankingEnabled },
-                    set: { enabled in
-                        guard !restoringRankingPolicy,
-                              let profileID = model.profiles.selected?.id,
-                              !model.sessionSearchPolicyMutationIsInFlight(for: profileID) else { return }
-                        remoteRankingEnabled = enabled
-                        rankingPolicyTask = Task { @MainActor in
-                            do { _ = try await model.setSessionSearchRemoteRanking(enabled, profileID: profileID) }
-                            catch is CancellationError {
-                                // A superseded/lifecycle-invalidated waiter is
-                                // not evidence that the direct mutation failed.
-                            }
-                            catch {
-                                guard !Task.isCancelled, model.profiles.selected?.id == profileID else { return }
-                                model.presentError(error)
-                            }
-                        }
-                    }
-                )
-            )
-                .font(.caption)
-                .tint(.tronEmerald)
-                .disabled(restoringRankingPolicy || (model.profiles.selected.map {
-                    model.sessionSearchPolicyMutationIsInFlight(for: $0.id)
-                } ?? false))
-                .padding(.horizontal, TronSpacing.section)
-        }
+        TronSearchBar(
+            text: $search,
+            prompt: "Search sessions",
+            focusOnAppear: true,
+            onClose: dismissDashboardSearch,
+            onOptions: { showingSearchOptions = true }
+        )
+        .padding(.horizontal, 8)
         .padding(.vertical, 8)
+        // The search chrome is overlaid by DashboardChrome. Use an opaque
+        // dashboard-colored backing so translucent result rows cannot show
+        // through it while the list scrolls underneath.
+        .background(Color.tronBackground)
         .simultaneousGesture(
             DragGesture(minimumDistance: 16)
                 .onEnded { value in
@@ -461,6 +445,68 @@ struct SessionShellView: View {
                     dismissDashboardSearch()
                 }
         )
+    }
+
+    private var searchRankingProfileLabel: String {
+        model.profiles.selected?.label ?? "No connected Gateway"
+    }
+
+    private var searchRankingIsEnabled: Bool {
+        guard let profileID = model.profiles.selected?.id else { return false }
+        return !restoringRankingPolicy && !model.sessionSearchPolicyMutationIsInFlight(for: profileID)
+    }
+
+    private var searchRankingDetail: String {
+        if restoringRankingPolicy { return "Checking consent for \(searchRankingProfileLabel)…" }
+        if model.profiles.selected == nil { return "Connect a Gateway before enabling remote ranking" }
+        if model.profiles.selected.map({ model.sessionSearchPolicyMutationIsInFlight(for: $0.id) }) == true {
+            return "Saving consent…"
+        }
+        if let remoteRankingError { return remoteRankingError }
+        return "Up to 0.2688¢ per query and 2.688¢ per day"
+    }
+
+    private var searchOptionsSheet: some View {
+        TronDashboardFilterSheet(
+            title: "Search options",
+            accent: .tronEmerald,
+            detents: [.medium],
+            onDone: { showingSearchOptions = false }
+        ) {
+            TronDashboardFilterSectionTitle(
+                title: "Ranking",
+                detail: "Keyword search stays on this Gateway. Optional remote ranking sends the query and up to 16 snippets to Jev."
+            )
+            TronToggleRow(
+                icon: "arrow.up.arrow.down",
+                title: "Use remote ranking",
+                detail: searchRankingDetail,
+                accent: .tronEmerald,
+                isEnabled: searchRankingIsEnabled,
+                isOn: Binding(
+                    get: { remoteRankingEnabled },
+                    set: { value in updateRemoteRanking(value) }
+                )
+            )
+        }
+    }
+
+    private func updateRemoteRanking(_ enabled: Bool) {
+        guard !restoringRankingPolicy,
+              let profileID = model.profiles.selected?.id,
+              !model.sessionSearchPolicyMutationIsInFlight(for: profileID) else { return }
+        remoteRankingEnabled = enabled
+        remoteRankingError = nil
+        rankingPolicyTask = Task { @MainActor in
+            do { _ = try await model.setSessionSearchRemoteRanking(enabled, profileID: profileID) }
+            catch is CancellationError { return }
+            catch {
+                guard !Task.isCancelled, model.profiles.selected?.id == profileID else { return }
+                remoteRankingEnabled = !enabled
+                remoteRankingError = "Could not save ranking consent"
+                model.presentError(error)
+            }
+        }
     }
 
     private func present(_ route: AppModel.SessionNavigationRoute) {
@@ -713,56 +759,15 @@ struct SessionShellView: View {
     }
 
     private var searchResultList: some View {
-        List {
-            if searchLoading {
-                HStack(spacing: 8) { ProgressView(); Text("Searching connected Gateways…").font(.caption).foregroundStyle(.secondary) }
-            }
-            ForEach(searchProfileStatuses) { status in
-                if status.state != "ready" && status.state != "cancelled" {
-                    Text("\(status.label): \(status.message ?? status.state)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            ForEach(searchGroups) { group in
-                Section {
-                    if group.passages.isEmpty {
-                        Button { openLocalSearchGroup(group) } label: {
-                            Label("Open matching session", systemImage: "arrow.right.circle")
-                                .font(.subheadline)
-                        }
-                    } else {
-                        ForEach(group.passages) { result in
-                            Button { openSearchResult(result) } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(result.snippet).font(.subheadline).lineLimit(3)
-                                    Text(result.passageKind == "user" ? "You · entry \(result.ordinal)" : "Tron · entry \(result.ordinal)")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                                .padding(.vertical, 5)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                } header: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack {
-                            Text(group.title.isEmpty ? group.sessionId : group.title).font(.headline)
-                            if group.isLocalMatch { Text("local").font(.caption2).foregroundStyle(.secondary) }
-                        }
-                        Text("\(group.profileLabel) · \(group.cwd)").font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            }
-        }
-        .overlay {
-            if !searchLoading && searchGroups.isEmpty && searchProfileStatuses.allSatisfy({ $0.state == "ready" }) {
-                ContentUnavailableView("No matches", systemImage: "magnifyingglass", description: Text("Try a title, folder, or conversation phrase."))
-            }
-        }
-        .listStyle(.plain)
-        .contentMargins(.bottom, 92)
-        .tronCollectionSurface()
+        SessionSearchResultsView(
+            loading: searchLoading,
+            statuses: searchProfileStatuses,
+            groups: searchGroups,
+            onOpenSession: openLocalSearchGroup,
+            onOpenResult: openSearchResult
+        )
+        .tronScrollEdgeChrome()
+        .tronDashboardScroll(dashboardHeader, topMargin: 6)
     }
 
     private func openLocalSearchGroup(_ group: SessionSearchSessionGroup) {
@@ -1441,6 +1446,169 @@ private struct HistoricalSessionRow: View {
             label.isEmpty ? nil : label
         } ?? "Unknown server"
         return "\(projectName) · \(serverName)"
+    }
+}
+
+private struct SessionSearchResultsView: View {
+    let loading: Bool
+    let statuses: [SessionSearchProfileStatus]
+    let groups: [SessionSearchSessionGroup]
+    let onOpenSession: (SessionSearchSessionGroup) -> Void
+    let onOpenResult: (SessionSearchResult) -> Void
+
+    var body: some View {
+        ScrollView(.vertical) {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                if loading {
+                    HStack(spacing: 8) {
+                        ProgressView().tint(.tronEmerald)
+                        Text("Searching connected Gateways…")
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                            .foregroundStyle(Color.tronTextMuted)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, SessionDashboardLayout.headerLeadingPadding)
+                    .padding(.vertical, 12)
+                }
+                ForEach(statuses) { status in
+                    if shouldShowStatus(status) {
+                        HStack(spacing: 7) {
+                            Image(systemName: status.state == "error" || status.state == "offline" || rankingUnavailable(status) ? "exclamationmark.circle" : "info.circle")
+                            Text(statusMessage(status))
+                        }
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                        .foregroundStyle(status.state == "error" || status.state == "offline" || rankingUnavailable(status) ? Color.tronAmber : Color.tronTextMuted)
+                        .padding(.horizontal, SessionDashboardLayout.headerLeadingPadding)
+                        .padding(.vertical, 8)
+                    }
+                }
+                ForEach(groups) { group in
+                    SessionSearchGroupView(group: group, onOpenSession: { onOpenSession(group) }, onOpenResult: onOpenResult)
+                }
+                if !loading && groups.isEmpty {
+                    ContentUnavailableView(emptyTitle, systemImage: emptySymbol, description: Text(emptyDescription))
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 48)
+                }
+            }
+            .padding(.top, 6)
+            .padding(.bottom, 110)
+        }
+        .scrollIndicators(.hidden)
+        // DashboardChrome presents the search field as bottom chrome. Reserve
+        // its footprint so the last result never sits underneath it after the
+        // keyboard is dismissed.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Color.clear.frame(height: 76)
+        }
+    }
+
+    private var emptyTitle: String {
+        if statuses.isEmpty { return "No searchable Gateways" }
+        if statuses.allSatisfy({ $0.state == "ready" }) { return "No matches" }
+        if statuses.allSatisfy({ $0.state == "cancelled" }) { return "Search cancelled" }
+        return "Search unavailable"
+    }
+
+    private var emptySymbol: String {
+        statuses.isEmpty || statuses.allSatisfy({ $0.state == "ready" }) ? "magnifyingglass" : "exclamationmark.circle"
+    }
+
+    private var emptyDescription: String {
+        if statuses.isEmpty { return "Connect a Gateway or change the server filter." }
+        if statuses.allSatisfy({ $0.state == "ready" }) { return "Try a title, folder, or conversation phrase." }
+        return statuses.compactMap(\.message).joined(separator: " · ")
+    }
+
+    private func shouldShowStatus(_ status: SessionSearchProfileStatus) -> Bool {
+        guard status.state != "cancelled" else { return false }
+        if status.state != "ready" { return true }
+        return rankingUnavailable(status)
+    }
+
+    private func rankingUnavailable(_ status: SessionSearchProfileStatus) -> Bool {
+        guard let ranking = status.response?.ranking else { return false }
+        return SessionSearchCoveragePresentation.rankingWarning(for: ranking) != nil
+    }
+
+    private func statusMessage(_ status: SessionSearchProfileStatus) -> String {
+        if let message = status.message, !message.isEmpty { return "\(status.label): \(message)" }
+        if let ranking = status.response?.ranking,
+           let warning = SessionSearchCoveragePresentation.rankingWarning(for: ranking) {
+            return "\(status.label): \(warning)"
+        }
+        return "\(status.label): \(status.state)"
+    }
+}
+
+private struct SessionSearchGroupView: View {
+    let group: SessionSearchSessionGroup
+    let onOpenSession: () -> Void
+    let onOpenResult: (SessionSearchResult) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Image(systemName: "bubble.left.and.bubble.right").foregroundStyle(Color.tronEmerald)
+                Text(group.title.isEmpty ? group.sessionId : group.title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(group.profileLabel)
+                    .font(TronTypography.code(size: TronTypography.sizeCaption))
+                    .foregroundStyle(Color.tronTextMuted)
+                    .lineLimit(1)
+            }
+            if !group.cwd.isEmpty {
+                Text(URL(fileURLWithPath: group.cwd).lastPathComponent)
+                    .font(TronTypography.code(size: TronTypography.sizeCaption))
+                    .foregroundStyle(Color.tronTextMuted)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, SessionDashboardLayout.headerLeadingPadding)
+        .padding(.top, 14)
+        .padding(.bottom, 7)
+        if group.passages.isEmpty {
+            Button(action: onOpenSession) {
+                row(title: "Open matching session", detail: "Title or workspace match", symbol: "arrow.right.circle")
+            }
+            .buttonStyle(.plain)
+        } else {
+            ForEach(group.passages) { result in
+                Button { onOpenResult(result) } label: {
+                    row(title: result.snippet, detail: "\(result.passageKind == "user" ? "You" : "Tron") · message \(result.ordinal)", symbol: "arrow.up.right")
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func row(title: String, detail: String, symbol: String) -> some View {
+        HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
+            Image(systemName: symbol)
+                .font(TronTypography.sans(size: SessionDashboardLayout.headerIconSize, weight: .semibold))
+                .foregroundStyle(Color.tronEmerald)
+                .frame(width: SessionDashboardLayout.iconColumnWidth)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                Text(detail)
+                    .font(TronTypography.code(size: TronTypography.sizeCaption))
+                    .foregroundStyle(Color.tronTextMuted)
+            }
+            Spacer(minLength: 6)
+        }
+        .padding(.horizontal, SessionDashboardLayout.rowContentHorizontalPadding)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .tronGlassSurface(accent: .tronEmerald, cornerRadius: 12, tintOpacity: 0.14, interactive: true)
+        .padding(.horizontal, SessionDashboardLayout.rowContainerHorizontalInset)
+        .padding(.vertical, 2)
     }
 }
 

@@ -1,5 +1,34 @@
 import Foundation
 
+enum SessionSearchCoveragePresentation {
+    static func state(for response: SessionSearchResponse) -> String {
+        response.coverage.state == "complete" ? "ready" : "partial"
+    }
+
+    static func message(for response: SessionSearchResponse) -> String? {
+        response.coverage.state == "complete" ? nil : "Some conversations could not be searched"
+    }
+
+    static func rankingWarning(for ranking: SessionSearchResponse.Ranking) -> String? {
+        // Successful semantic or Jev ranking is not a fallback. Warnings concern
+        // only unavailable enrichment; locally retrieved matches remain usable.
+        if ranking.state == "jev" { return nil }
+        let reason: String
+        switch ranking.jev {
+        case "consentRequired": reason = "Remote ranking needs permission"
+        case "notConfigured": reason = "Remote ranking is not configured"
+        case "uncertain": reason = "Remote ranking did not finish"
+        default:
+            switch ranking.state {
+            case "budgetLimited": reason = "Remote ranking spending limit reached"
+            case "jevUnavailable": reason = "Remote ranking is unavailable"
+            default: return nil
+            }
+        }
+        return "\(reason). Local results are shown."
+    }
+}
+
 /// Presentation owner for search-as-you-type. Transport admission is captured
 /// before every request so a reconnect cannot silently move work to a successor
 /// connection. The selected profile uses the lifecycle-owned client; background
@@ -126,15 +155,11 @@ final class SessionSearchCoordinator {
         }
         do {
             let response = try await searchSingle(query: query, profileID: target.profileID, connections: connections, maxResults: maxResults, remoteRanking: remoteRanking, remoteConsent: remoteConsent, requestID: requestID, lifecycle: lifecycle)
-            let state = response.map { $0.coverage.state == "complete" && $0.semantic.state == "ready" && $0.ranking.state == "lexical" ? "ready" : "partial" } ?? "offline"
-            let message = response.map { response -> String? in
-                var values: [String] = []
-                if response.coverage.state != "complete" { values.append("Coverage \(response.coverage.state)") }
-                if response.semantic.state != "ready" { values.append("semantic \(response.semantic.state)") }
-                if response.ranking.state != "lexical" { values.append("ranking \(response.ranking.state)") }
-                if let jev = response.ranking.jev, jev != "disabled" { values.append("Jev \(jev)") }
-                return values.isEmpty ? nil : values.joined(separator: "; ")
-            } ?? "Gateway is offline"
+            // Lexical results are the baseline product capability. Semantic and
+            // Jev ranking are optional enrichments and must not make a usable
+            // search look broken or partial.
+            let state = response.map(SessionSearchCoveragePresentation.state(for:)) ?? "offline"
+            let message = response.map(SessionSearchCoveragePresentation.message(for:)) ?? "Gateway is offline"
             return SessionSearchProfileStatus(profileID: target.profileID, label: target.label, state: state, response: response, message: message)
         } catch is CancellationError {
             return SessionSearchProfileStatus(profileID: target.profileID, label: target.label, state: "cancelled", response: nil, message: nil)

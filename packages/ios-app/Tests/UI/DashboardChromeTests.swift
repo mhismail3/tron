@@ -76,6 +76,22 @@ final class DashboardChromeTests: XCTestCase {
         XCTAssertEqual(invoked, ["Settings", "Filter", "Search", "New Session"])
     }
 
+    func testSearchRetainsQueryAfterKeyboardDismissalAndCapturesResults() async throws {
+        try await withDashboard(style: .light) { host in
+            let menu = try await self.menuButton(in: host.view)
+            self.invoke(try self.action("Search", in: menu))
+            try await self.waitUntil { self.views(UITextField.self, in: host.view).contains { $0.isFirstResponder } }
+            let field = try XCTUnwrap(self.views(UITextField.self, in: host.view).first { $0.isFirstResponder })
+            field.text = "Review"
+            field.sendActions(for: .editingChanged)
+            try await Task.sleep(for: .milliseconds(350))
+            host.view.endEditing(true)
+            try await self.waitUntil { !field.isFirstResponder }
+            XCTAssertEqual(field.text, "Review", "Dismissing the keyboard must not dismiss an active search")
+            try await self.attach(host.view, name: "session-search-results-after-keyboard-dismissal")
+        }
+    }
+
     func testRealDashboardHeaderScrollAndExistingDestinations() async throws {
         try await withDashboard { host in
             var menu = try await self.menuButton(in: host.view)

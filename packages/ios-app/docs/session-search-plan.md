@@ -51,3 +51,20 @@ outcomes are not replayed or treated as definite rejection.
 
 `SessionSearchTransportTests` exercises summary-trigger suppression, read versus
 write ordering, serialized mutations, and consent invalidation on reconnect.
+
+## Search presentation
+
+The dashboard search field uses the shared `TronSearchBar` chrome and keeps
+remote ranking behind its compact Search options sheet. Keyword search remains
+the baseline: optional semantic or Jev availability does not turn a complete
+lexical response into a partial/error state. Search requests are keyed only by
+profile, query, connection scope, and consent; dashboard summary revisions do
+not restart an in-flight request. Results use the dashboard's standard compact
+emerald rows, show a short workspace name instead of a full local path, and
+retain exact anchor navigation for message matches. Keyboard dismissal does not
+clear an active query; only the explicit close or downward search dismissal does
+so. The search chrome has an opaque dashboard backing to prevent rows bleeding
+through it. Empty, offline, cancelled, and partial coverage states are explicit.
+When remote ranking is consented but unavailable or over budget, the UI keeps
+lexical results marked ready while showing the remote-ranking failure as a
+secondary status.

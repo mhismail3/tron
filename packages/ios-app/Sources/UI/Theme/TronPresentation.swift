@@ -694,6 +694,7 @@ struct TronSearchBar: View {
     var accent: Color = .tronEmerald
     var focusOnAppear = false
     var onClose: (() -> Void)?
+    var onOptions: (() -> Void)?
     var onFocusChange: ((Bool) -> Void)?
     @FocusState private var focused: Bool
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
@@ -739,6 +740,19 @@ struct TronSearchBar: View {
             .glassEffect(.regular.tint(accent.opacity(0.16)).interactive(), in: .capsule)
             .contentShape(Capsule())
             .onTapGesture { focused = true }
+
+            if let onOptions {
+                Button(action: onOptions) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .foregroundStyle(accent)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Circle())
+                        .glassEffect(.regular.tint(accent.opacity(0.12)).interactive(), in: .circle)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Search options")
+            }
 
             if let onClose {
                 Button {
@@ -1662,6 +1676,7 @@ struct TronToggleRow: View {
     let title: String
     let detail: String?
     let accent: Color
+    var isEnabled = true
     @Binding var isOn: Bool
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
@@ -1670,12 +1685,14 @@ struct TronToggleRow: View {
         title: String,
         detail: String? = nil,
         accent: Color = .tronEmerald,
+        isEnabled: Bool = true,
         isOn: Binding<Bool>
     ) {
         self.icon = icon
         self.title = title
         self.detail = detail
         self.accent = accent
+        self.isEnabled = isEnabled
         _isOn = isOn
     }
 
@@ -1687,8 +1704,11 @@ struct TronToggleRow: View {
             }
         }
         .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.62)
         .accessibilityRepresentation {
             Toggle(isOn: $isOn) { Text(title) }
+                .disabled(!isEnabled)
                 .accessibilityHint(detail ?? "")
         }
     }

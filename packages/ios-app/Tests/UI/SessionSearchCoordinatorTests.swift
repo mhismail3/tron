@@ -44,6 +44,35 @@ final class SessionSearchCoordinatorTests: XCTestCase {
         XCTAssertTrue(aggregate.groups.isEmpty)
     }
 
+    func testCompleteLexicalCoverageIsReadyWithoutOptionalSemanticOrRemoteRanking() async {
+        let revision = SessionSearchAnchorRevision(indexRevision: "i", fileIdentity: "f", branchDigest: "b", leafEntryId: nil, entryOrdinal: 1, forkBoundary: nil)
+        let response = SessionSearchResponse(
+            query: "needle", queryRevision: "q", corpusRevision: "c", indexRevision: "i",
+            coverage: .init(state: "complete", sessionsIndexed: 1, sessionsTotal: 1, passagesIndexed: 1, omittedSessions: 0, reason: nil),
+            semantic: .init(state: "unavailable", modelRevision: nil, language: nil, dimension: nil, vectorsIndexed: 0, vectorsTotal: 0, reason: "not installed"),
+            ranking: .init(state: "lexical", jev: "disabled"),
+            results: [SessionSearchResult(sessionId: "s", gatewayProfileID: "one", title: "S", cwd: "/tmp", updatedAt: "1", entryId: "e", parentEntryId: nil, ordinal: 1, passageKind: "user", snippet: "needle", lexicalScore: 1, semanticScore: nil, jevScore: nil, anchorRevision: revision)]
+        )
+        XCTAssertEqual(response.coverage.state, "complete")
+        XCTAssertEqual(response.semantic.state, "unavailable")
+        XCTAssertEqual(response.ranking.state, "lexical")
+        XCTAssertEqual(SessionSearchCoveragePresentation.state(for: response), "ready")
+        XCTAssertNil(SessionSearchCoveragePresentation.message(for: response))
+    }
+
+    func testRankingWarningsDistinguishSuccessfulEnrichmentFromFallback() {
+        for state in ["lexical", "localSemantic", "jev"] {
+            XCTAssertNil(SessionSearchCoveragePresentation.rankingWarning(for: .init(state: state, jev: nil)))
+        }
+        XCTAssertNil(SessionSearchCoveragePresentation.rankingWarning(for: .init(state: "localSemantic", jev: "disabled")))
+        for state in ["budgetLimited", "jevUnavailable"] {
+            XCTAssertNotNil(SessionSearchCoveragePresentation.rankingWarning(for: .init(state: state, jev: nil)))
+        }
+        for reason in ["consentRequired", "notConfigured", "uncertain"] {
+            XCTAssertNotNil(SessionSearchCoveragePresentation.rankingWarning(for: .init(state: "localSemantic", jev: reason)))
+        }
+    }
+
     func testSearchAllPreservesOfflineStatusPerProfileWithoutCollapsingFanout() async {
         let pool = DashboardGatewayConnectionPool()
         let coordinator = SessionSearchCoordinator()
