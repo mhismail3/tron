@@ -567,7 +567,7 @@ private struct KnowledgeChronicleInfoSheet: View {
             }
             .tronNavigationTitle("Chronicle info", accent: .tronKnowledge)
         }
-        .task(id: "\(requestGeneration)/\(identity.profileID ?? "none")/\(identity.lifecycleGeneration ?? -1)/\(identity.connectionID ?? -1)") {
+        .task(id: "\(requestGeneration)/\(activity.allowsPresentationPublication)/\(identity.profileID ?? "none")/\(identity.lifecycleGeneration ?? -1)/\(identity.connectionID ?? -1)") {
             await load()
         }
         .onChange(of: identity) { _, _ in
@@ -580,15 +580,16 @@ private struct KnowledgeChronicleInfoSheet: View {
     @MainActor private func load() async {
         guard activity.allowsPresentationPublication else { return }
         let requestIdentity = identity
+        let generation = requestGeneration
         do {
             let value = try await model.knowledge.status()
-            guard !Task.isCancelled, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
+            guard !Task.isCancelled, generation == requestGeneration, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
             status = value
             error = nil
         } catch is CancellationError {
             return
         } catch {
-            guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
+            guard !Task.isCancelled, generation == requestGeneration, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
             self.error = error.localizedDescription
         }
     }
@@ -631,9 +632,13 @@ private struct KnowledgeCoverageSheetHost: View {
                 TronLoadingState(label: "Loading attention…", accent: .tronKnowledge)
             }
         }
-        .task(id: "\(requestGeneration)/\(identity.profileID ?? "none")/\(identity.lifecycleGeneration ?? -1)/\(identity.connectionID ?? -1)") {
+        .task(id: "\(requestGeneration)/\(activity.allowsPresentationPublication)/\(identity.profileID ?? "none")/\(identity.lifecycleGeneration ?? -1)/\(identity.connectionID ?? -1)") {
             await load()
         }
+        .onChange(of: activity.allowsPresentationPublication) { _, active in
+            if !active { store.suspend() }
+        }
+        .onDisappear { store.suspend() }
         .onChange(of: identity) { _, _ in
             status = nil
             statusError = nil
@@ -645,9 +650,10 @@ private struct KnowledgeCoverageSheetHost: View {
     @MainActor private func load() async {
         guard activity.allowsPresentationPublication else { return }
         let requestIdentity = identity
+        let generation = requestGeneration
         do {
             let value = try await model.knowledge.status()
-            guard !Task.isCancelled, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
+            guard !Task.isCancelled, generation == requestGeneration, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
             status = value
             statusError = nil
             guard model.gatewayInfo?.capabilities.contains(KnowledgeRPCClient.coverageFilterCapability) == true else {
@@ -659,11 +665,11 @@ private struct KnowledgeCoverageSheetHost: View {
                                  try await model.knowledge.coverage(cursor: cursor, limit: 100,
                                      dispositions: KnowledgeCoveragePresentationPolicy.attentionDispositions)
                              },
-                             isCurrent: { !Task.isCancelled && activity.allowsPresentationPublication && model.knowledgePresentationIdentity == requestIdentity })
+                             isCurrent: { !Task.isCancelled && generation == requestGeneration && activity.allowsPresentationPublication && model.knowledgePresentationIdentity == requestIdentity })
         } catch is CancellationError {
             return
         } catch {
-            guard activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
+            guard !Task.isCancelled, generation == requestGeneration, activity.allowsPresentationPublication, model.knowledgePresentationIdentity == requestIdentity else { return }
             statusError = error.localizedDescription
         }
     }
