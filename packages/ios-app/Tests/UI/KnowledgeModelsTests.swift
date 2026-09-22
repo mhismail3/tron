@@ -564,17 +564,20 @@ final class KnowledgeModelsTests: XCTestCase {
     }
 
     func testSourceWireShapeDecodesCaptureReasonAndAssessmentMetadataWithoutInventingConfidence() throws {
-        let data = Data(#"{"schemaVersion":1,"id":"source","revisionId":"r1","kind":"source","scope":"research","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","provenance":{"actor":"connector","evidence":[]},"relations":[],"content":{"title":"Metadata","uri":"https://example.com","captureDisposition":"metadata-only","captureReason":"Provider returned metadata without readable text","capturedAt":"2026-01-01T00:00:00Z","assessment":{"summary":"Bounded review","evidenceQuality":"unknown","freshness":"unknown","generatedAt":"2026-01-01T00:00:00Z","coverage":"sampled","classification":"reference","inputDigest":"digest","usage":{"inputTokens":12,"outputTokens":4,"estimatedCostCents":0,"pricing":"fixture"}}}}"#.utf8)
+        let data = Data(#"{"schemaVersion":1,"id":"source","revisionId":"r1","kind":"source","scope":"research","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","provenance":{"actor":"connector","evidence":[]},"relations":[],"content":{"title":"Metadata","uri":"https://example.com","captureDisposition":"metadata-only","captureReason":"Provider returned metadata without readable text","capturedAt":"2026-01-01T00:00:00Z","assessment":{"summary":"Bounded review","evidenceQuality":"unknown","freshness":"unknown","generatedAt":"2026-01-01T00:00:00Z","evidenceDigest":"0000000000000000000000000000000000000000000000000000000000000000","coverage":"sampled","classification":"reference","inputDigest":"digest","usage":{"inputTokens":12,"outputTokens":4,"estimatedCostCents":0,"pricing":"fixture"}}}}"#.utf8)
         let record = try JSONDecoder().decode(KnowledgeRecord.self, from: data)
         guard case .source(let source) = record.content else { return XCTFail("Expected source") }
         XCTAssertEqual(source.captureDisposition, .metadataOnly)
         XCTAssertEqual(source.captureReason, "Provider returned metadata without readable text")
+        XCTAssertEqual(source.assessment?.evidenceDigest, String(repeating: "0", count: 64))
         XCTAssertEqual(source.assessment?.coverage, "sampled")
         XCTAssertEqual(source.assessment?.classification, "reference")
         XCTAssertEqual(source.assessment?.usage?.inputTokens, 12)
-        XCTAssertEqual(KnowledgeSourcePresentationPolicy.summary(source), "Bounded review")
-        XCTAssertEqual(record.summary, "Bounded review")
+        XCTAssertNil(KnowledgeSourcePresentationPolicy.summary(source), "A bound assessment with the wrong evidence digest must not present as current")
+        XCTAssertEqual(record.summary, "")
         XCTAssertNil(source.assessment?.confidence, "Missing confidence must remain missing")
+        XCTAssertEqual(KnowledgeSourcePresentationPolicy.evidenceDigest(title: "Metadata", text: ""), KnowledgeSourcePresentationPolicy.evidenceDigest(title: "Metadata", text: ""))
+        XCTAssertNotEqual(KnowledgeSourcePresentationPolicy.evidenceDigest(title: "Metadata", text: "changed"), KnowledgeSourcePresentationPolicy.evidenceDigest(title: "Metadata", text: ""))
     }
 
     func testSourceAndNoteUseTheCommonDiscriminatedContentShape() throws {

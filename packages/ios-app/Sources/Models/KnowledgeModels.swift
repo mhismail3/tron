@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import CryptoKit
 
 // These projections intentionally mirror packages/gateway/src/knowledge/
 // knowledge-contract.ts. The Gateway owns all bytes and revisions; iOS only
@@ -263,17 +264,17 @@ struct KnowledgeSourceAssessmentUsage: Codable, Hashable, Sendable {
 struct KnowledgeSourceAssessment: Codable, Hashable, Sendable {
     let summary: String; let contribution: String?; let whyItMatters: String?; let evidenceQuality: KnowledgeEvidenceQuality; let freshness: KnowledgeFreshness; let possibleUse: String?; let generatedAt: String; let model: String?; let recommendation: KnowledgeSourceAdmission?; let confidence: Double?; let profileVersion: String?; let rubricVersion: String?
     // These fields are provider assessment metadata, not capture completeness or epistemic confidence.
-    let inputDigest: String?; let assessmentInputDigest: String?; let coverage: String?; let classification: String?; let usage: KnowledgeSourceAssessmentUsage?
-    init(summary: String, contribution: String?, whyItMatters: String?, evidenceQuality: KnowledgeEvidenceQuality, freshness: KnowledgeFreshness, possibleUse: String?, generatedAt: String, model: String?, recommendation: KnowledgeSourceAdmission? = nil, confidence: Double? = nil, profileVersion: String? = nil, rubricVersion: String? = nil, inputDigest: String? = nil, assessmentInputDigest: String? = nil, coverage: String? = nil, classification: String? = nil, usage: KnowledgeSourceAssessmentUsage? = nil) {
-        self.summary = summary; self.contribution = contribution; self.whyItMatters = whyItMatters; self.evidenceQuality = evidenceQuality; self.freshness = freshness; self.possibleUse = possibleUse; self.generatedAt = generatedAt; self.model = model; self.recommendation = recommendation; self.confidence = confidence; self.profileVersion = profileVersion; self.rubricVersion = rubricVersion; self.inputDigest = inputDigest; self.assessmentInputDigest = assessmentInputDigest; self.coverage = coverage; self.classification = classification; self.usage = usage
+    let inputDigest: String?; let evidenceDigest: String?; let assessmentInputDigest: String?; let coverage: String?; let classification: String?; let usage: KnowledgeSourceAssessmentUsage?
+    init(summary: String, contribution: String?, whyItMatters: String?, evidenceQuality: KnowledgeEvidenceQuality, freshness: KnowledgeFreshness, possibleUse: String?, generatedAt: String, model: String?, recommendation: KnowledgeSourceAdmission? = nil, confidence: Double? = nil, profileVersion: String? = nil, rubricVersion: String? = nil, inputDigest: String? = nil, evidenceDigest: String? = nil, assessmentInputDigest: String? = nil, coverage: String? = nil, classification: String? = nil, usage: KnowledgeSourceAssessmentUsage? = nil) {
+        self.summary = summary; self.contribution = contribution; self.whyItMatters = whyItMatters; self.evidenceQuality = evidenceQuality; self.freshness = freshness; self.possibleUse = possibleUse; self.generatedAt = generatedAt; self.model = model; self.recommendation = recommendation; self.confidence = confidence; self.profileVersion = profileVersion; self.rubricVersion = rubricVersion; self.inputDigest = inputDigest; self.evidenceDigest = evidenceDigest; self.assessmentInputDigest = assessmentInputDigest; self.coverage = coverage; self.classification = classification; self.usage = usage
     }
-    private enum CodingKeys: String, CodingKey { case summary, contribution, whyItMatters, evidenceQuality, freshness, possibleUse, generatedAt, model, recommendation, confidence, profileVersion, rubricVersion, inputDigest, assessmentInputDigest, coverage, classification, usage }
+    private enum CodingKeys: String, CodingKey { case summary, contribution, whyItMatters, evidenceQuality, freshness, possibleUse, generatedAt, model, recommendation, confidence, profileVersion, rubricVersion, inputDigest, evidenceDigest, assessmentInputDigest, coverage, classification, usage }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         summary = try c.decode(String.self, forKey: .summary); contribution = try c.decodeIfPresent(String.self, forKey: .contribution); whyItMatters = try c.decodeIfPresent(String.self, forKey: .whyItMatters)
         evidenceQuality = try c.decode(KnowledgeEvidenceQuality.self, forKey: .evidenceQuality); freshness = try c.decode(KnowledgeFreshness.self, forKey: .freshness); possibleUse = try c.decodeIfPresent(String.self, forKey: .possibleUse); generatedAt = try c.decode(String.self, forKey: .generatedAt); model = try c.decodeIfPresent(String.self, forKey: .model)
         recommendation = try c.decodeIfPresent(KnowledgeSourceAdmission.self, forKey: .recommendation); confidence = try c.decodeIfPresent(Double.self, forKey: .confidence); profileVersion = try c.decodeIfPresent(String.self, forKey: .profileVersion); rubricVersion = try c.decodeIfPresent(String.self, forKey: .rubricVersion)
-        inputDigest = try c.decodeIfPresent(String.self, forKey: .inputDigest); assessmentInputDigest = try c.decodeIfPresent(String.self, forKey: .assessmentInputDigest); coverage = try c.decodeIfPresent(String.self, forKey: .coverage); classification = try c.decodeIfPresent(String.self, forKey: .classification); usage = try c.decodeIfPresent(KnowledgeSourceAssessmentUsage.self, forKey: .usage)
+        inputDigest = try c.decodeIfPresent(String.self, forKey: .inputDigest); evidenceDigest = try c.decodeIfPresent(String.self, forKey: .evidenceDigest); assessmentInputDigest = try c.decodeIfPresent(String.self, forKey: .assessmentInputDigest); coverage = try c.decodeIfPresent(String.self, forKey: .coverage); classification = try c.decodeIfPresent(String.self, forKey: .classification); usage = try c.decodeIfPresent(KnowledgeSourceAssessmentUsage.self, forKey: .usage)
     }
 }
 struct KnowledgeSourceAdmissionState: Codable, Hashable, Sendable { let status: KnowledgeSourceAdmission; let reason: String?; let decidedAt: String; let profileVersion: String?; let rubricVersion: String? }
@@ -405,8 +406,16 @@ enum KnowledgeSourcePresentationPolicy {
         guard let assessment = source.assessment else { return nil }
         let value = assessment.summary.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return nil }
-        if let updatedAt, let generated = ISO8601DateFormatter().date(from: assessment.generatedAt), let updated = ISO8601DateFormatter().date(from: updatedAt), generated < updated { return nil }
+        if let digest = assessment.evidenceDigest, digest != evidenceDigest(title: source.title, text: source.text ?? "") { return nil }
         return String(value.prefix(320))
+    }
+
+    static func evidenceDigest(title: String, text: String) -> String {
+        func jsonString(_ value: String) -> String {
+            String(data: (try? JSONEncoder().encode(value)) ?? Data("\"\"".utf8), encoding: .utf8) ?? "\"\""
+        }
+        let canonical = "{\"title\":\(jsonString(title)),\"text\":\(jsonString(text))}"
+        return SHA256.hash(data: Data(canonical.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     static func sourceType(_ source: KnowledgeSourceContent) -> String? {

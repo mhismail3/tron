@@ -1,7 +1,7 @@
 import type { KnowledgeRecord, SourceAssessment, SourceContent } from "./knowledge-contract.js";
 import { KnowledgeStore, type KnowledgeMutationResult } from "./knowledge-store.js";
 import { awaitAbortableWithSettlement } from "./model-await.js";
-import type { SourceAssessmentModel } from "./source-capture.js";
+import { sourceEvidenceDigest, type SourceAssessmentModel } from "./source-capture.js";
 
 export interface SourceTriageInput {
   commandId: string;
@@ -53,7 +53,7 @@ export async function triageSource(store: KnowledgeStore, input: SourceTriageInp
   const excluded = latest?.kind === "source" ? await store.scopeExcluded({ ...(latest.provenance.sessionId ? { sessionId: latest.provenance.sessionId } : {}), ...(latest.provenance.branchId ? { branchId: latest.provenance.branchId } : {}) }) : false;
   if (signal.aborted) throw new Error("Source triage was cancelled");
   if (latestConfig.revision !== config.revision || !latest || latest.kind !== "source" || excluded) throw new Error("Source changed or became unavailable during triage");
-  const complete: SourceAssessment = { ...assessment, generatedAt: assessment.generatedAt ?? now() };
+  const complete: SourceAssessment = { ...assessment, generatedAt: assessment.generatedAt ?? now(), evidenceDigest: sourceEvidenceDigest(source.content.title, source.content.text ?? "") };
   const content: SourceContent = { ...latest.content, assessment: complete };
   const result: KnowledgeMutationResult = await store.captureSource({
     commandId: input.commandId,

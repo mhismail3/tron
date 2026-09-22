@@ -13,6 +13,11 @@ import { awaitAbortableWithSettlement } from "./model-await.js";
 import { isPublicXEmbedUrl, lookupPublicXPost, normalizePublicLinkedUrl, xPostIdentity, type XPublicCoverage, type XPublicLookupOptions, type XPublicPost } from "./x-public-post.js";
 
 export const SOURCE_CAPTURE_USER_AGENT = "Tron/0.1 (public-source-capture)";
+
+/** Canonical derivative binding: only title and readable evidence determine freshness. */
+export function sourceEvidenceDigest(title: string, text: string): string {
+  return createHash("sha256").update(JSON.stringify({ title, text })).digest("hex");
+}
 export const SOURCE_CAPTURE_LIMITS = {
   maxBytes: 8_000_000,
   maxReadableChars: 2_000_000,
@@ -727,7 +732,7 @@ export async function captureSource(store: KnowledgeStore, input: SourceCaptureI
       const excluded = latest?.kind === "source" ? await store.scopeExcluded({ ...(latest.provenance.sessionId ? { sessionId: latest.provenance.sessionId } : {}), ...(latest.provenance.branchId ? { branchId: latest.provenance.branchId } : {}) }) : false;
       if (operationController.signal.aborted) throw new SourceNetworkError("Source assessment cancelled");
       if (latestConfig.revision !== initialConfig.revision || !latest || latest.kind !== "source" || excluded) throw new Error("Source changed or became unavailable during assessment");
-      const assessed: SourceContent = { ...latest.content, assessment: { ...assessment, generatedAt: assessment.generatedAt ?? now() } };
+      const assessed: SourceContent = { ...latest.content, assessment: { ...assessment, generatedAt: assessment.generatedAt ?? now(), evidenceDigest: sourceEvidenceDigest(latest.content.title, latest.content.text ?? "") } };
       if (operationController.signal.aborted) throw new SourceNetworkError("Source assessment cancelled");
       result = await store.captureSource({ commandId: `${input.commandId}:assessment`, expectedRevision: sourceRecord.revisionId, signal: operationController.signal, record: retryTarget ? retrySourceDraft(sourceRecord, assessed) : { ...sourceDraft(input, assessed), id: sourceRecord.id, createdAt: sourceRecord.createdAt } });
       if (result.record.kind !== "source") throw new Error("Source assessment returned a non-source record");

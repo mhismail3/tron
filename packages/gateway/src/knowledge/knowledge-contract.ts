@@ -112,6 +112,8 @@ export interface SourceAssessment {
   rubricVersion?: string;
   /** Digest of the complete captured evidence and interests for this assessment. */
   inputDigest?: string;
+  /** Digest of the exact title/text evidence attached to this derivative. */
+  evidenceDigest?: string;
   /** Digest of the exact bounded state actually supplied to the model. */
   assessmentInputDigest?: string;
   /** Full evidence was evaluated, or a bounded excerpt was evaluated. */
@@ -818,6 +820,7 @@ function validateKindContent(kind: KnowledgeRecordKind, value: unknown): void {
       assertTimestamp(assessment.generatedAt, "source assessment generatedAt");
       if (assessment.model !== undefined) boundedString(assessment.model, "source assessment model", 200);
       if (assessment.inputDigest !== undefined && !/^[a-f0-9]{64}$/.test(String(assessment.inputDigest))) throw new Error("Invalid source assessment input digest");
+      if (assessment.evidenceDigest !== undefined && !/^[a-f0-9]{64}$/.test(String(assessment.evidenceDigest))) throw new Error("Invalid source assessment evidence digest");
       if (assessment.assessmentInputDigest !== undefined && !/^[a-f0-9]{64}$/.test(String(assessment.assessmentInputDigest))) throw new Error("Invalid source assessment state digest");
       if (assessment.coverage !== undefined && !["full", "sampled"].includes(String(assessment.coverage))) throw new Error("Invalid source assessment coverage");
       if (assessment.usage !== undefined) {

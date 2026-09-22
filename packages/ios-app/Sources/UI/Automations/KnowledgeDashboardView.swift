@@ -334,19 +334,27 @@ struct KnowledgeDashboardView: View {
             // rhythm while the rows themselves pack tighter.
             Text(filterSummary).font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronKnowledge)
                 .padding(.top, TronSpacing.md)
+            let previewIdentity = model.knowledgePresentationIdentity
             ForEach(records) { record in
                 Button {
                     selected = record
-                    selectedIdentity = model.knowledgePresentationIdentity
+                    selectedIdentity = previewIdentity
                 } label: { KnowledgeRecordRow(record: record, previewLoader: { reference, record in
-                        try? await model.knowledge.readObject(reference, recordID: record.id, revisionID: record.revisionId)
-                    }) }
+                        await readPreview(reference, record: record, identity: previewIdentity)
+                    }, presentationIdentity: previewIdentity) }
                     .buttonStyle(.plain)
             }
             if KnowledgeCatalogPagePolicy.offersContinuation(nextCursor: nextCursor, loadingMore: loadingMore) {
                 loadMoreButton
             }
         }
+    }
+
+    @MainActor private func readPreview(_ reference: KnowledgeObjectRef, record: KnowledgeRecord, identity: KnowledgePresentationIdentity) async -> KnowledgeObjectRead? {
+        guard model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication else { return nil }
+        let response = try? await model.knowledge.readObject(reference, recordID: record.id, revisionID: record.revisionId)
+        guard !Task.isCancelled, model.knowledgePresentationIdentity == identity, activity.allowsPresentationPublication else { return nil }
+        return response
     }
 
     private var loadMoreButton: some View {
@@ -563,9 +571,10 @@ struct KnowledgeRecordRow: View {
     typealias PreviewLoader = @Sendable (KnowledgeObjectRef, KnowledgeRecord) async -> KnowledgeObjectRead?
     let record: KnowledgeRecord
     let previewLoader: PreviewLoader?
+    let presentationIdentity: KnowledgePresentationIdentity?
 
-    init(record: KnowledgeRecord, previewLoader: PreviewLoader? = nil) {
-        self.record = record; self.previewLoader = previewLoader
+    init(record: KnowledgeRecord, previewLoader: PreviewLoader? = nil, presentationIdentity: KnowledgePresentationIdentity? = nil) {
+        self.record = record; self.previewLoader = previewLoader; self.presentationIdentity = presentationIdentity
     }
 
     var body: some View {
@@ -574,7 +583,7 @@ struct KnowledgeRecordRow: View {
                 KnowledgeObservationStatement(presentation: observation, preview: true)
                     .accessibilityElement(children: .combine)
             } else if case .source(let source) = record.content {
-                KnowledgeSourceRow(record: record, source: source, previewLoader: previewLoader)
+                KnowledgeSourceRow(record: record, source: source, previewLoader: previewLoader, presentationIdentity: presentationIdentity)
                     .accessibilityElement(children: .combine)
             } else {
                 otherRecord
@@ -656,6 +665,7 @@ struct KnowledgeSourceRow: View {
     let record: KnowledgeRecord
     let source: KnowledgeSourceContent
     let previewLoader: KnowledgeRecordRow.PreviewLoader?
+    let presentationIdentity: KnowledgePresentationIdentity?
     @State private var previewImage: UIImage?
     @State private var previewTicket = UUID()
 
@@ -694,7 +704,7 @@ struct KnowledgeSourceRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityHint("Opens source details")
-        .task(id: "\(record.id):\(record.revisionId):\(source.preview?.hash ?? "none")") {
+        .task(id: "\(presentationIdentity?.profileID ?? "none"):\(presentationIdentity?.lifecycleGeneration ?? 0):\(presentationIdentity?.connectionID ?? 0):\(record.id):\(record.revisionId):\(source.preview?.hash ?? "none")") {
             previewImage = nil
             previewTicket = UUID()
             let ticket = previewTicket
@@ -893,16 +903,20 @@ struct KnowledgeDetailView: View {
             .padding(.vertical, TronSpacing.large)
         }
         .tronScrollEdgeChrome()
-        .task(id: "detail-preview-\(currentRecord.id):\(currentRecord.revisionId):\(currentRecord.content.sourcePreviewHash ?? "none")") {
+        .task(id: "detail-preview-\(origin.profileID ?? "none"):\(origin.lifecycleGeneration ?? 0):\(origin.connectionID ?? 0):\(currentRecord.id):\(currentRecord.revisionId):\(currentRecord.content.sourcePreviewHash ?? "none")") {
             detailPreviewImage = nil; detailPreviewTicket = UUID(); let ticket = detailPreviewTicket
+            let requestIdentity = model.knowledgePresentationIdentity
+            let requestActivity = activity
             guard case .source(let source) = currentRecord.content, let reference = source.preview,
-                  model.knowledgePresentationIdentity == origin, activity.allowsPresentationPublication else { return }
+                  requestIdentity == origin, requestActivity.allowsPresentationPublication else { return }
             guard let response = try? await model.knowledge.readObject(reference, recordID: currentRecord.id, revisionID: currentRecord.revisionId),
-                  !Task.isCancelled, ticket == detailPreviewTicket,
+                  !Task.isCancelled, ticket == detailPreviewTicket, model.knowledgePresentationIdentity == requestIdentity,
+                  requestActivity.allowsPresentationPublication,
                   response.offset == 0, response.nextOffset == nil, let data = Data(base64Encoded: response.base64),
                   data.count == response.bytes, response.totalBytes == response.bytes, data.count <= 512_000,
                   let image = await KnowledgePreviewDecoder.downsample(data), !Task.isCancelled,
-                  ticket == detailPreviewTicket, model.knowledgePresentationIdentity == origin else { return }
+                  ticket == detailPreviewTicket, model.knowledgePresentationIdentity == requestIdentity,
+                  requestActivity.allowsPresentationPublication else { return }
             detailPreviewImage = image
         }
         .tronNavigationTitle(observationPresentation == nil ? "Knowledge detail" : "Observation", accent: .tronKnowledge)
@@ -1027,9 +1041,6 @@ struct KnowledgeDetailView: View {
                             .font(TronTypography.secondaryDescription)
                             .foregroundStyle(Color.tronKnowledgeText)
                     }
-                    Label("\(currentRecord.scope.label) source", systemImage: currentRecord.kind.icon)
-                        .font(TronTypography.caption)
-                        .foregroundStyle(Color.tronTextSecondary)
                 }
             }
             .padding(14)
