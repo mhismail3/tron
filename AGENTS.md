@@ -153,8 +153,22 @@ only when packaging/build validation needs generated resources.
 ### Work plans
 
 Work that spans more than one agent session has a plan in `docs/plans/`, named
-and structured by the template in `docs/plans/README.md`. When you work on a
-plan:
+and structured by the template in `docs/plans/README.md`. Which output a request
+calls for:
+
+- **Investigate, review or answer:** reply in chat with the findings. Write no
+  file.
+- **Draft a plan or proposal** for work that will be done later, by other
+  agents, or across sessions: create it in `docs/plans/` from the template with
+  Status `Proposed`, give the user its path, and do not commit it. When the user
+  approves, set Status to `Active` and commit it. When the user rejects it,
+  delete the file; it gets no history entry.
+- **Plan your own current task:** plan within your session. Write no file.
+
+`docs/plans/` takes precedence over any tool's own plan location for a plan
+meant to outlive the session. Tasks in a `Proposed` plan cannot be claimed.
+
+When you work on an `Active` plan:
 
 - Claim the task on `main` before starting, and update the plan (task status,
   handoff entry, newly discovered tasks, deviations) in the same commit as the

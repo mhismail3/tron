@@ -4,11 +4,11 @@ This folder holds work that spans more than one agent session. A plan is a
 living record of the work: any agent can pick it up, and every agent that works
 on it updates it with what was done, what came up and what is left. Work one
 agent can finish in one session needs no plan; it ships with a clear commit
-message.
+message. Investigation findings are answered in chat, not written here.
 
 The folder contains only:
 
-- **Active plans**, one file each, named `YYYY-MM-DD-<slug>.md`.
+- **Proposed and active plans**, one file each, named `YYYY-MM-DD-<slug>.md`.
 - [HISTORY.md](HISTORY.md), one short entry per finished or abandoned plan.
 - This README, the only copy of the template and protocol.
 
@@ -33,7 +33,7 @@ left out; the others are required.
 # <Title>
 
 - **Started:** YYYY-MM-DD
-- **Status:** Active | Paused (reason)
+- **Status:** Proposed | Active | Paused (reason)
 - **Last updated:** YYYY-MM-DD, <task ID>
 - **Goal:** <one sentence>
 
@@ -84,6 +84,17 @@ produced is Done.>
 - For the next agent: <next steps, traps, open questions for the user>
 ````
 
+**Plan statuses**
+
+- **Proposed:** drafted and awaiting the user's approval. The drafting agent
+  writes the file, gives the user its path and does not commit it. Its tasks
+  cannot be claimed.
+- **Active:** approved and committed; tasks can be claimed. Approval is the
+  commit that sets this status.
+- **Paused:** approved, but no task may be claimed until the reason is resolved.
+
+A rejected proposal is deleted without a history entry.
+
 **Task statuses:** Ready, Needs scoping, Claimed, Blocked, Done. Rows are kept in
 priority order. Task IDs are never reused.
 
@@ -95,8 +106,8 @@ elsewhere surface as a failing check.
 
 ## Protocol
 
-1. **Pick a task.** Take the first Ready row whose dependencies are all Done,
-   unless the user assigned you one.
+1. **Pick a task.** In an Active plan, take the first Ready row whose
+   dependencies are all Done, unless the user assigned you one.
 2. **Claim it on `main`.** Set Status to Claimed and Owner to your session name
    and the date. Commit only that change directly to `main` with the message
    `plan(<slug>): claim <ID>`. If the commit conflicts, another agent claimed
