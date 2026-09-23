@@ -46,8 +46,9 @@ final class DashboardGatewayConnectionPool {
         var task: Task<Void, Never>?
         var refreshTask: Task<Void, Never>?
         var reconnectTask: Task<Void, Never>?
+        let reconnectSchedule: GatewayReconnectSchedule
         var reconnectWaiting: Bool
-        var maintenanceWatchdog: Task<Void, Never>?
+        var networkPathSatisfied: Bool
         var generation: Int
         var refreshInvalidationGeneration: Int
         var refreshSatisfiedGeneration: Int
@@ -60,20 +61,16 @@ final class DashboardGatewayConnectionPool {
     private let clientFactory: @MainActor () -> GatewayClient
     private let clock: MonotonicClock
     private var entries: [String: Entry] = [:]
-    private let recoveryBudgets: GatewayRecoveryAllowanceStore
     private var generation = 0
     private var retirementTasks: [String: (generation: Int, task: Task<Void, Never>)] = [:]
-    private var maintenanceDeadlines: [String: ContinuousClock.Instant] = [:]
-    private static let maintenanceRecoveryLimit: Duration = .seconds(90)
+    private var nonRetryableProfiles = Set<String>()
 
     init(
         clientFactory: @escaping @MainActor () -> GatewayClient = { GatewayClient() },
-        clock: MonotonicClock = .continuous,
-        recoveryBudgets: GatewayRecoveryAllowanceStore = GatewayRecoveryAllowanceStore()
+        clock: MonotonicClock = .continuous
     ) {
         self.clientFactory = clientFactory
         self.clock = clock
-        self.recoveryBudgets = recoveryBudgets
     }
 
     func reconcile(
@@ -83,8 +80,6 @@ final class DashboardGatewayConnectionPool {
     ) {
         generation &+= 1
         let profileIDs = Set(profiles.map(\.id))
-        recoveryBudgets.prune(keeping: profileIDs)
-        maintenanceDeadlines = maintenanceDeadlines.filter { profileIDs.contains($0.key) }
         let selectedProfile = profiles.first(where: { $0.id == selectedProfileID })
         let admittedIDs = Self.admittedProfileIDs(
             profiles,
@@ -103,10 +98,6 @@ final class DashboardGatewayConnectionPool {
                 continue
             }
             if current.profile != profile || current.token != currentToken {
-                if current.profile.host != profile.host || current.profile.port != profile.port
-                    || current.profile.deviceId != profile.deviceId || currentToken != current.token {
-                    recoveryBudgets[profileID]?.rearmForExplicitRetry()
-                }
                 stop(profileID: profileID)
             }
         }
@@ -289,8 +280,9 @@ final class DashboardGatewayConnectionPool {
             task: nil,
             refreshTask: nil,
             reconnectTask: nil,
+            reconnectSchedule: GatewayReconnectSchedule(clock: clock),
             reconnectWaiting: false,
-            maintenanceWatchdog: nil,
+            networkPathSatisfied: true,
             generation: generation,
             refreshInvalidationGeneration: 0,
             refreshSatisfiedGeneration: 0,
@@ -298,22 +290,12 @@ final class DashboardGatewayConnectionPool {
             refreshRetryAttempt: 0,
             refreshFailedAttempts: 0
         )
-        if recoveryBudgets[profile.id]?.isStopped == true {
-            entries[profile.id]?.state = .offline
-            publish(profileID: profile.id)
-            return
-        }
         publish(profileID: profile.id)
         let task = Task { @MainActor [weak self] in
             await retirementBarrier?.value
             guard let self,
                   !Task.isCancelled,
                   self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
-            guard let recoveryAttemptID = self.recoveryBudgets[profile.id, default: GatewayRecoveryBudget()].beginAutomaticAttemptID() else {
-                self.entries[profile.id]?.state = self.recoveryBudgets[profile.id]?.firstFailureCode == "identity_mismatch" ? .identityMismatch : .offline
-                self.publish(profileID: profile.id)
-                return
-            }
             do {
                 let info = try await client.connect(profile: profile, token: token)
                 guard Self.admitsIdentity(info, for: profile) else {
@@ -326,16 +308,8 @@ final class DashboardGatewayConnectionPool {
                 }
                 let connectionID = await client.activeConnectionID()
                 guard let connectionID, !Task.isCancelled,
-                      self.isCurrent(profileID: profile.id, client: client, generation: generation) else {
-                    var settledBudget = self.recoveryBudgets[profile.id, default: GatewayRecoveryBudget()]
-                    _ = settledBudget.settleAutomaticAttempt(recoveryAttemptID, intentionalRetirement: Task.isCancelled)
-                    self.recoveryBudgets[profile.id] = settledBudget
-                    return
-                }
-                var connectedBudget = self.recoveryBudgets[profile.id, default: GatewayRecoveryBudget()]
-                _ = connectedBudget.settleAutomaticAttempt(recoveryAttemptID, intentionalRetirement: false)
-                connectedBudget.markConnected(at: self.clock.now())
-                self.recoveryBudgets[profile.id] = connectedBudget
+                      self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
+                self.entries[profile.id]?.reconnectSchedule.reset()
                 self.entries[profile.id]?.connectionID = connectionID
                 self.entries[profile.id]?.gatewayInfo = info
                 self.entries[profile.id]?.state = .connecting
@@ -351,12 +325,7 @@ final class DashboardGatewayConnectionPool {
                     await self.handle(delivery, profileID: profile.id, generation: generation)
                 }
                 guard !Task.isCancelled,
-                      self.isCurrent(profileID: profile.id, client: client, generation: generation) else {
-                    var settledBudget = self.recoveryBudgets[profile.id, default: GatewayRecoveryBudget()]
-                    _ = settledBudget.settleAutomaticAttempt(recoveryAttemptID, intentionalRetirement: Task.isCancelled)
-                    self.recoveryBudgets[profile.id] = settledBudget
-                    return
-                }
+                      self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
                 self.retireConnectionEpoch(
                     profileID: profile.id,
                     generation: generation,
@@ -364,32 +333,17 @@ final class DashboardGatewayConnectionPool {
                 )
                 self.scheduleReconnect(profileID: profile.id, generation: generation)
             } catch is CancellationError {
-                var settledBudget = self.recoveryBudgets[profile.id, default: GatewayRecoveryBudget()]
-                _ = settledBudget.settleAutomaticAttempt(recoveryAttemptID, intentionalRetirement: Task.isCancelled)
-                self.recoveryBudgets[profile.id] = settledBudget
                 return
             } catch let failure as GatewayFailure where GatewayRecoveryFailurePolicy.isNonRetryable(failure) {
-                var settledBudget = self.recoveryBudgets[profile.id, default: GatewayRecoveryBudget()]
-                _ = settledBudget.settleAutomaticAttempt(recoveryAttemptID, intentionalRetirement: false)
-                self.recoveryBudgets[profile.id] = settledBudget
                 await client.close()
                 guard self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
-                self.recoveryBudgets[profile.id, default: GatewayRecoveryBudget()].markNonRetryableFailure(
-                    code: failure.code
-                )
+                self.nonRetryableProfiles.insert(profile.id)
                 self.entries[profile.id]?.gatewayInfo = nil
                 self.entries[profile.id]?.state = failure.code == "identity_mismatch" ? .identityMismatch : .offline
                 self.publish(profileID: profile.id)
             } catch {
-                var settledBudget = self.recoveryBudgets[profile.id, default: GatewayRecoveryBudget()]
-                _ = settledBudget.settleAutomaticAttempt(recoveryAttemptID, intentionalRetirement: false)
-                self.recoveryBudgets[profile.id] = settledBudget
                 guard !Task.isCancelled,
                       self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
-                self.recoveryBudgets[profile.id, default: GatewayRecoveryBudget()].markTransportFailure(
-                    code: GatewayDiagnosticFailure.code(error),
-                    at: self.clock.now()
-                )
                 self.retireConnectionEpoch(
                     profileID: profile.id,
                     generation: generation,
@@ -403,11 +357,10 @@ final class DashboardGatewayConnectionPool {
 
     private func stop(profileID: String, close: Bool = true) {
         guard let entry = entries.removeValue(forKey: profileID) else { return }
-        maintenanceDeadlines[profileID] = nil
         entry.task?.cancel()
         entry.refreshTask?.cancel()
         entry.reconnectTask?.cancel()
-        entry.maintenanceWatchdog?.cancel()
+        entry.reconnectSchedule.cancel()
         delegate?.dashboardPoolDidUpdate(
             profileID: profileID,
             sessions: entry.catalog.sessions,
@@ -417,20 +370,8 @@ final class DashboardGatewayConnectionPool {
             let previous = retirementTasks[profileID]?.task
             let task = Task { @MainActor [weak self] in
                 await previous?.value
-                let evidence: GatewayLiveEvidence?
-                if let connectionID = entry.connectionID {
-                    evidence = await entry.client.liveEvidence(connectionID: connectionID)
-                } else {
-                    evidence = nil
-                }
                 await entry.client.close()
                 guard let self else { return }
-                if entry.connectionID != nil {
-                    self.recoveryBudgets[profileID]?.markConnectionRetired(
-                        at: self.clock.now(),
-                        stableProof: evidence?.hasStableProof == true
-                    )
-                }
                 // A predecessor must not erase the successor that joined it.
                 // Replacement admission observes the tail of this exact chain.
                 if self.retirementTasks[profileID]?.generation == entry.generation {
@@ -488,22 +429,11 @@ final class DashboardGatewayConnectionPool {
             guard case .automationChanged = event.preparation else { return }
             delegate?.dashboardPoolAutomationChanged(profileID: profileID)
         case "transport.disconnected":
-            let evidence = await entry.client.liveEvidence(connectionID: delivery.connectionID)
             guard isCurrent(profileID: profileID, client: entry.client, generation: generation),
                   entries[profileID]?.connectionID == delivery.connectionID else { return }
-            if maintenanceDeadlines[profileID] == nil {
-                var budget = recoveryBudgets[profileID, default: GatewayRecoveryBudget()]
-                budget.markTransportFailure(
-                    code: GatewayDiagnosticFailure.normalizedCode(event.payload.objectValue?["reason"]?.stringValue ?? "disconnected"),
-                    at: clock.now(),
-                    stableProof: evidence?.hasStableProof == true
-                )
-                recoveryBudgets[profileID] = budget
-            }
             retireConnectionEpoch(profileID: profileID, generation: generation, state: .reconnecting)
             scheduleReconnect(profileID: profileID, generation: generation)
         case "system.stopping":
-            beginMaintenance(profileID: profileID, generation: generation)
             retireConnectionEpoch(profileID: profileID, generation: generation, state: .restarting)
             scheduleReconnect(profileID: profileID, generation: generation, immediate: true)
         default:
@@ -511,54 +441,32 @@ final class DashboardGatewayConnectionPool {
         }
     }
 
-    private func clearMaintenance(profileID: String) {
-        maintenanceDeadlines[profileID] = nil
-        entries[profileID]?.maintenanceWatchdog?.cancel()
-        entries[profileID]?.maintenanceWatchdog = nil
-    }
-
-    private func stopMaintenance(profileID: String, generation: Int) {
-        guard entries[profileID]?.generation == generation else { return }
-        clearMaintenance(profileID: profileID)
-        recoveryBudgets[profileID, default: GatewayRecoveryBudget()].stopRecoveryEpisode()
-        entries[profileID]?.reconnectTask?.cancel()
-        entries[profileID]?.reconnectTask = nil
-        entries[profileID]?.reconnectWaiting = false
-        entries[profileID]?.state = .offline
-        publish(profileID: profileID)
-    }
-
-    private func beginMaintenance(profileID: String, generation: Int) {
-        guard maintenanceDeadlines[profileID] == nil else { return }
-        let deadline = clock.now() + Self.maintenanceRecoveryLimit
-        maintenanceDeadlines[profileID] = deadline
-        let clock = self.clock
-        entries[profileID]?.maintenanceWatchdog = Task { @MainActor [weak self] in
-            do { try await clock.sleep(Self.maintenanceRecoveryLimit) } catch { return }
-            guard let self, self.maintenanceDeadlines[profileID] == deadline else { return }
-            self.stopMaintenance(profileID: profileID, generation: generation)
-        }
-    }
-
     /// Path hints are advisory per profile. A satisfied return hint can revive
     /// a parked secondary entry even when its previous callback was missed.
     func notePathHint(profileID: String, satisfied: Bool) {
-        var budget = recoveryBudgets[profileID, default: GatewayRecoveryBudget()]
-        budget.notePathHint(satisfied: satisfied, at: clock.now())
-        recoveryBudgets[profileID] = budget
-        guard satisfied, !budget.isStopped,
-              let entry = entries[profileID], entry.connectionID == nil,
+        guard var entry = entries[profileID] else { return }
+        entry.networkPathSatisfied = satisfied
+        entries[profileID] = entry
+        guard !nonRetryableProfiles.contains(profileID), entry.connectionID == nil,
               entry.state != .connecting else { return }
-        if let task = entry.reconnectTask {
-            guard entry.reconnectWaiting else { return }
-            task.cancel()
-            entries[profileID]?.reconnectTask = nil
+        guard satisfied else {
+            if entry.reconnectWaiting {
+                entry.reconnectSchedule.cancel()
+                entry.reconnectTask?.cancel()
+                entries[profileID]?.reconnectTask = nil
+                entries[profileID]?.reconnectWaiting = false
+            }
+            return
+        }
+        if entry.reconnectTask != nil, entry.reconnectWaiting {
+            entry.reconnectSchedule.accelerate()
+            return
         }
         scheduleReconnect(profileID: profileID, generation: entry.generation, immediate: true)
     }
 
-    /// Explicit user retry re-arms only this profile's exhausted automatic
-    /// recovery budget; background retirement and navigation never do so.
+    /// Explicit user retry clears this profile's nonretryable stop; background
+    /// retirement and navigation never do so.
     func retry(profileID: String) {
         guard let entry = entries[profileID], entry.refreshTask == nil,
               (entry.reconnectTask == nil || entry.reconnectWaiting),
@@ -577,79 +485,42 @@ final class DashboardGatewayConnectionPool {
             scheduleRefresh(profileID: profileID, generation: generation, delay: .zero)
             return
         }
-        maintenanceDeadlines[profileID] = nil
-        recoveryBudgets[profileID, default: GatewayRecoveryBudget()].rearmForExplicitRetry()
+        nonRetryableProfiles.remove(profileID)
         stop(profileID: profileID)
         start(profile: profile, token: token, generation: generation)
     }
 
     private func scheduleReconnect(profileID: String, generation: Int, immediate: Bool = false) {
-        guard let entry = entries[profileID], entry.generation == generation else { return }
-        var episodeBudget = recoveryBudgets[profileID, default: GatewayRecoveryBudget()]
-        episodeBudget.beginRecoveryEpisode(at: clock.now())
-        recoveryBudgets[profileID] = episodeBudget
-        if let budget = recoveryBudgets[profileID], budget.isStopped {
-            entries[profileID]?.state = budget.firstFailureCode == "identity_mismatch" ? .identityMismatch : .offline
-            publish(profileID: profileID)
-            return
-        }
-        if immediate, let existing = entry.reconnectTask {
+        guard let entry = entries[profileID], entry.generation == generation,
+              entry.networkPathSatisfied, !nonRetryableProfiles.contains(profileID) else { return }
+        if immediate, entry.reconnectTask != nil {
             guard entry.reconnectWaiting else { return }
-            existing.cancel()
-            entries[profileID]?.reconnectTask = nil
+            entry.reconnectSchedule.accelerate()
+            return
         }
         guard entries[profileID]?.reconnectTask == nil else { return }
         entries[profileID]?.reconnectWaiting = false
-        let clock = self.clock
         let loopID = UUID().uuidString
+        let clock = self.clock
         let task = Task { @MainActor [weak self, clock] in
-            var delay: Duration = immediate ? .zero : .seconds(2)
+            var shouldWait = !immediate
             while !Task.isCancelled {
                 guard let self, let waitingEntry = self.entries[profileID], waitingEntry.generation == generation else { return }
-                if delay > .zero {
+                if shouldWait {
                     self.entries[profileID]?.reconnectWaiting = true
-                    try? await clock.sleep(delay)
+                    let delayCompleted = await waitingEntry.reconnectSchedule.afterFailure()
+                    guard !Task.isCancelled else { return }
+                    guard delayCompleted || self.entries[profileID]?.networkPathSatisfied == true else {
+                        self.entries[profileID]?.reconnectTask = nil
+                        return
+                    }
                 }
-                guard !Task.isCancelled, self.isCurrent(profileID: profileID, client: waitingEntry.client, generation: generation) else { return }
+                guard !Task.isCancelled, self.isCurrent(profileID: profileID, client: waitingEntry.client, generation: generation),
+                      self.entries[profileID]?.networkPathSatisfied == true else { return }
                 self.entries[profileID]?.reconnectWaiting = false
-                let maintenance = self.maintenanceDeadlines[profileID]
-                if let maintenance, clock.now() >= maintenance {
-                    self.stopMaintenance(profileID: profileID, generation: generation)
-                    return
-                }
-                guard maintenance != nil || (self.recoveryBudgets[profileID]?.activeRecoveryDuration(at: clock.now()) ?? .zero) <= GatewayRecoveryBudget.stableEpochDuration else {
-                    var budget = self.recoveryBudgets[profileID, default: GatewayRecoveryBudget()]
-                    budget.stopRecoveryEpisode()
-                    self.recoveryBudgets[profileID] = budget
-                    self.entries[profileID]?.state = .offline
-                    self.entries[profileID]?.reconnectTask = nil
-                    self.publish(profileID: profileID)
-                    return
-                }
                 guard !Task.isCancelled,
                       let entry = self.entries[profileID],
                       entry.generation == generation else { return }
-                if maintenance == nil, self.recoveryBudgets[profileID]?.knownNoUsablePath == true {
-                    guard self.recoveryBudgets[profileID, default: GatewayRecoveryBudget()].consumeFallbackVerification() else {
-                        self.entries[profileID]?.state = .offline
-                        self.entries[profileID]?.reconnectTask = nil
-                        self.publish(profileID: profileID)
-                        return
-                    }
-                }
-                if maintenance == nil { self.recoveryBudgets[profileID]?.resumeRecovery(at: clock.now()) }
-                let recoveryAttemptID: UUID?
-                if maintenance == nil {
-                    recoveryAttemptID = self.recoveryBudgets[profileID, default: GatewayRecoveryBudget()].beginAutomaticAttemptID()
-                    guard recoveryAttemptID != nil else {
-                        self.entries[profileID]?.state = .offline
-                        self.entries[profileID]?.reconnectTask = nil
-                        self.publish(profileID: profileID)
-                        return
-                    }
-                } else {
-                    recoveryAttemptID = nil
-                }
                 do {
                     let identity = try await entry.client.reconnectForLifecycle(
                         profile: entry.profile, token: entry.token,
@@ -657,19 +528,7 @@ final class DashboardGatewayConnectionPool {
                         attemptID: loopID
                     )
                     try Task.checkCancellation()
-                    guard self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else {
-                        if let recoveryAttemptID {
-                            var settledBudget = self.recoveryBudgets[profileID, default: GatewayRecoveryBudget()]
-                            _ = settledBudget.settleAutomaticAttempt(recoveryAttemptID, intentionalRetirement: Task.isCancelled)
-                            self.recoveryBudgets[profileID] = settledBudget
-                        }
-                        return
-                    }
-                    if let maintenance, clock.now() >= maintenance {
-                        await entry.client.closeIfCurrent(connectionID: identity.id)
-                        self.stopMaintenance(profileID: profileID, generation: generation)
-                        return
-                    }
+                    guard self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
                     let info = identity.info
                     guard Self.admitsIdentity(info, for: entry.profile) else {
                         await entry.client.closeIfCurrent(connectionID: identity.id)
@@ -680,22 +539,9 @@ final class DashboardGatewayConnectionPool {
                             details: nil
                         )
                     }
-                    guard self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else {
-                        if let recoveryAttemptID {
-                            var settledBudget = self.recoveryBudgets[profileID, default: GatewayRecoveryBudget()]
-                            _ = settledBudget.settleAutomaticAttempt(recoveryAttemptID, intentionalRetirement: Task.isCancelled)
-                            self.recoveryBudgets[profileID] = settledBudget
-                        }
-                        return
-                    }
+                    guard self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
                     self.entries[profileID]?.gatewayInfo = info
-                    var connectedBudget = self.recoveryBudgets[profileID, default: GatewayRecoveryBudget()]
-                    if let recoveryAttemptID {
-                        _ = connectedBudget.settleAutomaticAttempt(recoveryAttemptID, intentionalRetirement: false)
-                    }
-                    connectedBudget.markConnected(at: clock.now(), chargedAttempt: maintenance == nil)
-                    self.recoveryBudgets[profileID] = connectedBudget
-                    self.clearMaintenance(profileID: profileID)
+                    entry.reconnectSchedule.reset()
                     self.entries[profileID]?.state = .connecting
                     self.publish(profileID: profileID)
                     let connectionID = identity.id
@@ -705,65 +551,27 @@ final class DashboardGatewayConnectionPool {
                     self.scheduleRefresh(profileID: profileID, generation: generation, delay: .zero)
                     return
                 } catch is CancellationError {
-                    if let recoveryAttemptID {
-                        var settledBudget = self.recoveryBudgets[profileID, default: GatewayRecoveryBudget()]
-                        _ = settledBudget.settleAutomaticAttempt(recoveryAttemptID, intentionalRetirement: Task.isCancelled)
-                        self.recoveryBudgets[profileID] = settledBudget
-                    }
                     return
                 } catch let failure as GatewayFailure where GatewayRecoveryFailurePolicy.isNonRetryable(failure) {
-                    if let recoveryAttemptID {
-                        var settledBudget = self.recoveryBudgets[profileID, default: GatewayRecoveryBudget()]
-                        _ = settledBudget.settleAutomaticAttempt(recoveryAttemptID, intentionalRetirement: false)
-                        self.recoveryBudgets[profileID] = settledBudget
-                    }
                     guard !Task.isCancelled,
                           self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
-                    self.recoveryBudgets[profileID, default: GatewayRecoveryBudget()].markNonRetryableFailure(
-                        code: failure.code
-                    )
+                    self.nonRetryableProfiles.insert(profileID)
                     self.entries[profileID]?.gatewayInfo = nil
                     self.entries[profileID]?.state = failure.code == "identity_mismatch" ? .identityMismatch : .offline
                     self.entries[profileID]?.reconnectTask = nil
                     self.publish(profileID: profileID)
                     return
                 } catch {
-                    if let recoveryAttemptID {
-                        var settledBudget = self.recoveryBudgets[profileID, default: GatewayRecoveryBudget()]
-                        _ = settledBudget.settleAutomaticAttempt(recoveryAttemptID, intentionalRetirement: false)
-                        self.recoveryBudgets[profileID] = settledBudget
-                    }
                     guard !Task.isCancelled,
                           self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
-                    let evidence = await entry.client.liveEvidence(connectionID: entry.connectionID ?? -1)
                     guard self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
-                    if self.maintenanceDeadlines[profileID] == nil {
-                        var budget = self.recoveryBudgets[profileID, default: GatewayRecoveryBudget()]
-                        budget.markTransportFailure(
-                            code: GatewayDiagnosticFailure.code(error),
-                            at: clock.now(),
-                            stableProof: evidence?.hasStableProof == true
-                        )
-                        self.recoveryBudgets[profileID] = budget
-                    }
-                    if self.maintenanceDeadlines[profileID] == nil,
-                       self.recoveryBudgets[profileID]?.isStopped == true {
-                        self.entries[profileID]?.state = .offline
-                        self.entries[profileID]?.reconnectTask = nil
-                        self.publish(profileID: profileID)
-                        return
-                    }
                     self.entries[profileID]?.state = .reconnecting
                     self.publish(profileID: profileID)
-                    delay = Self.nextReconnectDelay(after: delay)
+                    shouldWait = true
                 }
             }
         }
         entries[profileID]?.reconnectTask = task
-    }
-
-    nonisolated static func nextReconnectDelay(after current: Duration) -> Duration {
-        current == .zero ? .seconds(2) : min(current * 2, .seconds(15))
     }
 
     private enum RefreshOutcome {

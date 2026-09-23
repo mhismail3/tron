@@ -125,7 +125,7 @@ struct GatewayClientTransportTests {
             #expect(info.machineId == "machine")
             #expect(factory.requests.count == 1)
             #expect(factory.requests[0].url == profile.socketURL)
-            #expect(factory.requests[0].timeoutInterval == GatewaySocketPolicy.requestTimeout)
+            #expect(factory.requests[0].timeoutInterval == GatewayConnectionPolicy.requestInactivityTimeout)
             #expect(factory.requests[0].value(forHTTPHeaderField: "Authorization") == "Bearer token")
 
             let sentHello = try await decodedValue(in: socket, index: 0)
@@ -277,12 +277,12 @@ struct GatewayClientTransportTests {
             _ = try await client.reconnect()
 
             #expect(factory.requests.map(\.timeoutInterval) == [
-                GatewaySocketPolicy.requestTimeout,
-                GatewaySocketPolicy.requestTimeout,
+                GatewayConnectionPolicy.requestInactivityTimeout,
+                GatewayConnectionPolicy.requestInactivityTimeout,
             ])
-            #expect(GatewaySocketPolicy.requestTimeout > 18)
-            #expect(GatewaySocketPolicy.gracefulCloseLimit == .seconds(1))
-            #expect(GatewaySocketPolicy.gracefulCloseLimit < .seconds(60))
+            #expect(GatewayConnectionPolicy.requestInactivityTimeout > 18)
+            #expect(GatewayConnectionPolicy.gracefulCloseLimit == .seconds(1))
+            #expect(GatewayConnectionPolicy.gracefulCloseLimit < .seconds(60))
             await client.close()
         }
     }
@@ -1538,32 +1538,6 @@ struct GatewayClientTransportTests {
         return .object(page)
     }
 
-    @Test("a pong after suspension starts, rather than completes, a healthy proof interval")
-    func suspensionDoesNotInventStableProof() async throws {
-        try await withTestWatchdog {
-            let clock = ManualClock()
-            let socket = ScriptedGatewaySocket()
-            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory, clock: clock.clock)
-            do {
-                await socket.enqueue(helloFrame())
-                _ = try await client.connect(profile: profile, token: "fixture")
-                let epoch = try #require(await client.activeConnectionID())
-                try await clock.waitUntilSleeping(count: 1, duration: GatewayLivenessPolicy.probeInterval)
-                clock.advance(by: .seconds(60))
-                try await socket.waitUntilPingInvoked(count: 1)
-                try await clock.waitUntilSleeping(count: 1, duration: GatewayLivenessPolicy.probeInterval)
-                #expect(await client.liveEvidence(connectionID: epoch)?.consecutiveProofIntervals == 0)
-                for count in 2...4 {
-                    clock.advance(by: GatewayLivenessPolicy.probeInterval)
-                    try await socket.waitUntilPingInvoked(count: count)
-                    try await clock.waitUntilSleeping(count: 1, duration: GatewayLivenessPolicy.probeInterval)
-                    #expect(await client.liveEvidence(connectionID: epoch)?.hasStableProof == (count == 4))
-                }
-                await client.close()
-            } catch { await client.close(); throw error }
-        }
-    }
-
     @Test("successful pong advances progress without an application request")
     func successfulPongRefreshesProgress() async throws {
         try await withTestWatchdog {
@@ -1573,12 +1547,12 @@ struct GatewayClientTransportTests {
             do {
                 await socket.enqueue(helloFrame())
                 _ = try await client.connect(profile: profile, token: "synthetic-token")
-                try await clock.waitUntilSleeping(count: 1, duration: GatewayLivenessPolicy.probeInterval)
-                clock.advance(by: GatewayLivenessPolicy.probeInterval)
+                try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.clientPingInterval)
+                clock.advance(by: GatewayConnectionPolicy.clientPingInterval)
                 try await socket.waitUntilPingInvoked(count: 1)
                 // This next registration happens after the completed pong has
                 // crossed back to the connection owner.
-                try await clock.waitUntilSleeping(count: 1, duration: GatewayLivenessPolicy.probeInterval)
+                try await clock.waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.clientPingInterval)
                 clock.advance(by: .seconds(3))
                 try await client.ensureResponsive(maximumSilence: .seconds(4))
                 #expect(await socket.sentFrames().count == 1)

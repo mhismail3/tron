@@ -74,14 +74,11 @@ struct AppModelReconnectTests {
 
     @Test("a path callback before cold startup cannot consume recovery or bypass cached-profile admission")
     func pathHintBeforeStartup() async throws {
-        try await withStartupCoordinator { coordinator, projection, factory, budget, _ in
+        try await withStartupCoordinator { coordinator, projection, factory, _ in
             // Production starts NWPathMonitor before the root task, and sends
             // another path hint before awaiting notification badge cleanup.
             coordinator.notePathHint(satisfied: true)
             await coordinator.becameActive()?.value
-            #expect(budget["gateway"]?.automaticAttempts ?? 0 == 0)
-            #expect(budget["gateway"]?.firstFailureCode == nil)
-
             await coordinator.start()
 
             #expect(coordinator.connectionState == .connected)
@@ -93,42 +90,9 @@ struct AppModelReconnectTests {
         }
     }
 
-    @Test("pre-hello background retirement refunds its owner without exhausting foreground recovery")
-    func repeatedPreHelloRetirement() async throws {
-        let sockets = (0..<5).map { _ in ScriptedGatewaySocket() }
-        try await withStartupCoordinator(sockets: sockets) { coordinator, projection, factory, budget, _ in
-            let startup = Task { await coordinator.start() }
-            for index in 0..<4 {
-                if index > 0 { await coordinator.becameActive()?.value }
-                try await sockets[index].waitUntilSent(count: 1)
-                #expect(budget["gateway"]?.automaticAttempts == 1)
-                coordinator.retryReconnect()
-                // Retry must not rearm accounting while this hello owns it.
-                #expect(budget["gateway"]?.automaticAttempts == 1)
-                coordinator.enteredBackground()
-                try await sockets[index].waitUntilClosed()
-                while budget["gateway"]?.automaticAttempts != 0 {
-                    try Task.checkCancellation()
-                    await Task.yield()
-                }
-                #expect(budget["gateway"]?.firstFailureCode == nil)
-            }
-            await startup.value
-            await sockets[4].enqueue(helloFrame())
-            await coordinator.becameActive()?.value
-            while projection.aggregateCompletions.isEmpty {
-                try Task.checkCancellation()
-                await Task.yield()
-            }
-            #expect(coordinator.connectionState == .connected)
-            #expect(factory.requests.count == 5)
-            #expect(budget["gateway"]?.automaticAttempts == 1)
-        }
-    }
-
     @Test("initial projection failure retains the live socket and settles reconciliation")
     func initialProjectionFailureKeepsTransport() async throws {
-        try await withStartupCoordinator { coordinator, projection, factory, _, _ in
+        try await withStartupCoordinator { coordinator, projection, factory, _ in
             projection.setRestoreResult(false)
             await coordinator.start()
             #expect(coordinator.connectionState == .connected)
@@ -309,7 +273,7 @@ struct AppModelReconnectTests {
           arguments: [false, true])
     func pathHintDuringStartupCache(switching: Bool) async throws {
         let gate = TestReadGate()
-        try await withStartupCoordinator(cacheGate: gate) { coordinator, projection, factory, budget, _ in
+        try await withStartupCoordinator(cacheGate: gate) { coordinator, projection, factory, _ in
             let target = switching ? coordinator.profiles.profiles[1] : coordinator.profiles.selected!
             let start = Task {
                 if switching { await coordinator.switchGateway(target) }
@@ -317,12 +281,9 @@ struct AppModelReconnectTests {
             }
             do {
                 try await gate.waitForEntry()
-                let attemptsBeforeHint = budget[target.id]?.automaticAttempts ?? 0
                 coordinator.notePathHint(satisfied: true)
                 await coordinator.becameActive()?.value
                 #expect(factory.requests.isEmpty)
-                #expect(budget[target.id]?.automaticAttempts ?? 0 == attemptsBeforeHint)
-                #expect(budget[target.id]?.firstFailureCode == nil)
             } catch {
                 await gate.release()
                 await start.value
@@ -341,7 +302,7 @@ struct AppModelReconnectTests {
     @Test("a repeated start preserves the existing admission instead of loading cache and connecting twice")
     func repeatedStartDuringCache() async throws {
         let gate = TestReadGate()
-        try await withStartupCoordinator(cacheGate: gate) { coordinator, projection, factory, _, _ in
+        try await withStartupCoordinator(cacheGate: gate) { coordinator, projection, factory, _ in
             let first = Task { await coordinator.start() }
             do {
                 try await gate.waitForEntry()
@@ -369,7 +330,7 @@ struct AppModelReconnectTests {
     @Test("background before the first hello resumes the selected profile and fences late cache completion")
     func backgroundDuringStartupCache() async throws {
         let gate = TestReadGate()
-        try await withStartupCoordinator(cacheGate: gate) { coordinator, projection, factory, budget, socket in
+        try await withStartupCoordinator(cacheGate: gate) { coordinator, projection, factory, socket in
             let start = Task { await coordinator.start() }
             do {
                 try await gate.waitForEntry()
@@ -380,8 +341,6 @@ struct AppModelReconnectTests {
                 #expect(coordinator.hasResolvedLaunchState)
                 #expect(factory.requests.count == 1)
                 #expect(factory.requests.first?.value(forHTTPHeaderField: "Authorization") == "Bearer token-for-gateway")
-                #expect(budget["gateway"]?.automaticAttempts == 1)
-                #expect(budget["gateway"]?.firstFailureCode == nil)
                 #expect(projection.refreshCount == 1)
             } catch {
                 await gate.release()
@@ -434,14 +393,9 @@ struct AppModelReconnectTests {
             clock.advance(by: .seconds(1.6))
             try await failHandshake(fixture.sockets[1])
             try await clock.waitUntilSleeping(count: 1)
-            #expect(clock.recordedSleeps() == [.seconds(1.6), .seconds(2)])
-
-            clock.advance(by: .seconds(2))
-            try await failHandshake(fixture.sockets[2])
-            try await fixture.sockets[2].waitUntilClosed()
-            for _ in 0..<20 { await Task.yield() }
-            #expect(clock.recordedSleeps() == [.seconds(1.6), .seconds(2)])
-            #expect(fixture.socketFactory.requests.count == 3)
+            #expect(clock.recordedSleeps() == [.seconds(1.6), .seconds(3.4000000000000004)])
+            #expect(fixture.socketFactory.requests.count == 2)
+            #expect(fixture.socketFactory.requests.count == 2)
         }
     }
 
@@ -472,72 +426,87 @@ struct AppModelReconnectTests {
         }
     }
 
-    @Test("automatic recovery stops after three failed handshakes until explicit retry")
-    func automaticRecoveryStopsUntilExplicitRetry() async throws {
+    @Test("transient failures keep retrying with capped backoff until a handshake succeeds")
+    func retriesTenFailuresThenConnects() async throws {
         let clock = ManualClock()
-        let sockets = (0..<5).map { _ in ScriptedGatewaySocket() }
-        let units = SequenceReconnectUnits([0, 0.5, 1, 0.5])
+        let sockets = (0..<12).map { _ in ScriptedGatewaySocket() }
+        let units = SequenceReconnectUnits(Array(repeating: 0.5, count: 16))
         try await withFixture(sockets: sockets, clock: clock, units: units) { fixture in
             let start = Task { await fixture.model.start() }
             try await failHandshake(sockets[0])
             try await clock.waitUntilSleeping(count: 1)
             await start.value
 
-            clock.advance(by: .seconds(1.6))
-            try await failHandshake(sockets[1])
-            try await clock.waitUntilSleeping(count: 1)
-            clock.advance(by: .seconds(2))
-
-            try await failHandshake(sockets[2])
-            try await sockets[2].waitUntilClosed()
-            for _ in 0..<20 { await Task.yield() }
-            #expect(fixture.socketFactory.requests.count == 3)
-            #expect(fixture.model.connectionState == .offline(GatewayRecoveryBudget.stoppedMessage))
-            fixture.model.enteredBackground()
-            fixture.model.becameActive()
-            for _ in 0..<20 { await Task.yield() }
-            await fixture.model.start()
-            #expect(fixture.socketFactory.requests.count == 3)
-            #expect(fixture.model.connectionState == .offline(GatewayRecoveryBudget.stoppedMessage))
-
-            let profile = GatewayProfile(
-                id: "gateway", label: "Mac", host: "gateway.test", port: 9_847,
-                machineId: "machine", deviceId: "device"
-            )
-            fixture.model.retryGatewayConnection(for: profile)
-            try await sockets[3].waitUntilSent(count: 1)
+            for index in 1...10 {
+                clock.advance(by: .seconds(60))
+                try await sockets[index].waitUntilSent(count: 1)
+                try await failHandshake(sockets[index])
+                try await sockets[index].waitUntilClosed()
+                try await clock.waitUntilSleeping(count: 1)
+            }
+            await sockets[11].enqueue(helloFrame())
+            clock.advance(by: .seconds(60))
+            try await sockets[11].waitUntilSent(count: 1)
+            while fixture.model.connectionState != .connected {
+                try Task.checkCancellation()
+                await Task.yield()
+            }
+            #expect(fixture.socketFactory.requests.count == 12)
+            #expect(fixture.model.connectionState == .connected)
         }
     }
 
-    @Test("no-path parking permits one fallback and explicit Retry despite a missed return callback")
-    func noPathParkingAndExplicitRetry() async throws {
+    @Test("an unsatisfied path pauses retry and path return resumes immediately")
+    func noPathPausesAndPathReturnResumes() async throws {
         let clock = ManualClock()
         let sockets = (0..<3).map { _ in ScriptedGatewaySocket() }
-        try await withFixture(sockets: sockets, clock: clock, units: SequenceReconnectUnits([0, 0])) { fixture in
+        try await withFixture(sockets: sockets, clock: clock, units: SequenceReconnectUnits([0])) { fixture in
             let start = Task { await fixture.model.start() }
             try await failHandshake(sockets[0])
             try await clock.waitUntilSleeping(count: 1)
             await start.value
             fixture.model.lifecycleNotePathHint(satisfied: false)
-            clock.advance(by: .seconds(1.6))
-            try await sockets[1].waitUntilSent(count: 1)
-            try await failHandshake(sockets[1])
-            try await sockets[1].waitUntilClosed()
-            await Task.yield()
-            #expect(fixture.socketFactory.requests.count == 2)
-            clock.advance(by: .seconds(30))
-            await Task.yield()
-            #expect(fixture.socketFactory.requests.count == 2)
+            clock.advance(by: .seconds(60))
+            #expect(fixture.socketFactory.requests.count == 1)
 
-            // The OS return callback is intentionally omitted. Explicit Retry
-            // clears the stale path hint and owns the exact new attempt.
+            fixture.model.lifecycleNotePathHint(satisfied: true)
+            try await sockets[1].waitUntilSent(count: 1)
+            #expect(fixture.socketFactory.requests.count == 2)
+            await sockets[1].enqueue(helloFrame())
+            while fixture.model.connectionState != .connected {
+                try Task.checkCancellation()
+                await Task.yield()
+            }
+        }
+    }
+
+    @Test("authentication failure stops recovery until explicit Retry")
+    func authenticationFailureStopsUntilRetry() async throws {
+        let clock = ManualClock()
+        let sockets = [ScriptedGatewaySocket(), ScriptedGatewaySocket()]
+        try await withFixture(sockets: sockets, clock: clock, units: SequenceReconnectUnits([0])) { fixture in
+            let start = Task { await fixture.model.start() }
+            try await sockets[0].waitUntilSent(count: 1)
+            await sockets[0].failPendingReceivers(GatewayFailure(
+                code: "unauthenticated", message: "Pair this Gateway again.", retryable: false, details: nil
+            ))
+            try await sockets[0].waitUntilClosed()
+            await start.value
+            #expect(fixture.model.connectionState == .unauthorized)
+            #expect(fixture.socketFactory.requests.count == 1)
+
             let profile = GatewayProfile(
                 id: "gateway", label: "Mac", host: "gateway.test", port: 9_847,
                 machineId: "machine", deviceId: "device"
             )
             fixture.model.retryGatewayConnection(for: profile)
-            try await sockets[2].waitUntilSent(count: 1)
-            #expect(fixture.socketFactory.requests.count == 3)
+            try await sockets[1].waitUntilSent(count: 1)
+            await sockets[1].enqueue(helloFrame())
+            while fixture.model.connectionState != .connected {
+                try Task.checkCancellation()
+                await Task.yield()
+            }
+            #expect(fixture.socketFactory.requests.count == 2)
         }
     }
 
@@ -956,30 +925,26 @@ struct AppModelReconnectTests {
             let sockets = (0..<3).map { _ in ScriptedGatewaySocket() }
             let factory = ScriptedGatewaySocketFactory(sockets: sockets)
             let client = GatewayClient(socketFactory: factory.factory)
-            let budget = GatewayRecoveryAllowanceStore()
             let projection = NoopGatewayLifecycleProjection()
             let coordinator = GatewayLifecycleCoordinator(client: client, profiles: GatewayProfileStore(defaults: defaults),
                 clock: clock.clock, reconnectDelayPolicy: .standard, uuidSource: .random, pairer: GatewayPairer(),
-                pairingCommit: { _, _ in }, profileTokenLookup: { _ in "fixture" }, recoveryBudgets: budget)
+                pairingCommit: { _, _ in }, profileTokenLookup: { _ in "fixture" })
             coordinator.delegate = projection
             do {
                 await sockets[0].enqueue(helloFrame())
                 await coordinator.start()
-                let initial = budget[profile.id]?.automaticAttempts
                 coordinator.beginRestarting()
+                #expect(coordinator.connectionState == .restarting)
                 await coordinator.noteDisconnected(connectionID: await client.activeConnectionID(), countsAsTransportFailure: false)
                 coordinator.requestReconnect(immediate: true)
                 try await sockets[1].waitUntilSent(count: 1)
-                try await clock.waitUntilSleeping(count: 1, duration: .seconds(90))
-                #expect(budget[profile.id]?.automaticAttempts == initial)
-                clock.advance(by: .seconds(90))
+                try await failHandshake(sockets[1])
                 try await sockets[1].waitUntilClosed()
-                #expect(budget[profile.id]?.isStopped == true)
-                coordinator.notePathHint(satisfied: true)
-                await coordinator.becameActive()?.value
-                #expect(factory.requests.count == 2)
-                coordinator.retryReconnect()
+                try await clock.waitUntilSleeping(count: 1, duration: .seconds(90))
+                clock.advance(by: .seconds(90))
                 try await sockets[2].waitUntilSent(count: 1)
+                #expect(coordinator.connectionState == .reconnecting)
+                #expect(factory.requests.count == 3)
             } catch {
                 await coordinator.teardown(); await client.close(); throw error
             }
@@ -1184,7 +1149,7 @@ struct AppModelReconnectTests {
         sockets: [ScriptedGatewaySocket]? = nil,
         operation: @escaping @MainActor @Sendable (
             GatewayLifecycleCoordinator, NoopGatewayLifecycleProjection,
-            ScriptedGatewaySocketFactory, GatewayRecoveryAllowanceStore, ScriptedGatewaySocket
+            ScriptedGatewaySocketFactory, ScriptedGatewaySocket
         ) async throws -> Void
     ) async throws {
         let suiteName = "GatewayColdStartupTests.\(UUID().uuidString)"
@@ -1202,17 +1167,16 @@ struct AppModelReconnectTests {
         if sockets == nil { await socket.enqueue(helloFrame()) }
         let factory = ScriptedGatewaySocketFactory(sockets: sockets ?? [socket])
         let client = GatewayClient(socketFactory: factory.factory)
-        let budget = GatewayRecoveryAllowanceStore()
         let projection = NoopGatewayLifecycleProjection(cacheGate: cacheGate)
         let coordinator = GatewayLifecycleCoordinator(
             client: client, profiles: GatewayProfileStore(defaults: defaults), clock: .continuous,
             reconnectDelayPolicy: .standard, uuidSource: .random, pairer: GatewayPairer(),
-            pairingCommit: { _, _ in }, profileTokenLookup: { "token-for-\($0.id)" }, recoveryBudgets: budget
+            pairingCommit: { _, _ in }, profileTokenLookup: { "token-for-\($0.id)" }
         )
         coordinator.delegate = projection
         do {
             try await withTestWatchdog {
-                try await operation(coordinator, projection, factory, budget, socket)
+                try await operation(coordinator, projection, factory, socket)
             }
         } catch {
             await cacheGate?.release()

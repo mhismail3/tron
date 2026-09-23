@@ -55,7 +55,7 @@ final class ManualClock: Sendable {
     func expireRequest(on socket: ScriptedGatewaySocket, sentCount: Int, after duration: Duration) async throws {
         try await socket.waitUntilSent(count: sentCount)
         try await waitUntilSleeping(count: 1, duration: duration)
-        try await waitUntilSleeping(count: 1, duration: GatewayLivenessPolicy.probeInterval)
+        try await waitUntilSleeping(count: 1, duration: GatewayConnectionPolicy.clientPingInterval)
         advance(by: duration)
     }
 

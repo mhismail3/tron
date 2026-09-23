@@ -445,14 +445,13 @@ final class AppModel {
         let noticeCenter = InAppNoticeCenter(clock: clock)
         let diagnosticCapture = DiagnosticCaptureCoordinator(clock: clock)
         let captureSignposts = DiagnosticCaptureSignposts(base: performanceSignposts, capture: diagnosticCapture)
-        let recoveryBudgets = GatewayRecoveryAllowanceStore()
         let dashboardConnections = DashboardGatewayConnectionPool(clientFactory: {
             GatewayClient(
                 performanceSignposts: captureSignposts,
                 diagnosticStore: diagnosticStore,
                 diagnosticCaptureSink: diagnosticCapture
             )
-        }, recoveryBudgets: recoveryBudgets)
+        })
         let lifecycle = GatewayLifecycleCoordinator(
             client: client,
             profiles: profiles,
@@ -462,8 +461,7 @@ final class AppModel {
             pairer: pairer,
             pairingCommit: resolvedPairingCommit,
             pairingCommitWithoutSelection: resolvedPairingCommitWithoutSelection,
-            profileTokenLookup: resolvedProfileTokenLookup,
-            recoveryBudgets: recoveryBudgets
+            profileTokenLookup: resolvedProfileTokenLookup
         )
         let mutationExecutor = ConfirmedMutationExecutor(
             client: client,
@@ -1034,9 +1032,9 @@ final class AppModel {
         providerAuth.preferredAvailableModel(for: target)
     }
 
-    /// Explicit user retry re-arms only the selected or secondary profile's
-    /// bounded automatic recovery budget. Accepted domain mutations and their
-    /// receipts never use this transport control.
+    /// Explicit user retry clears a nonretryable stop only for the selected or
+    /// secondary profile. Accepted domain mutations and receipts never use this
+    /// transport control.
     func retryGatewayConnection(for profile: GatewayProfile) {
         guard profiles.profiles.contains(where: { $0.id == profile.id }) else { return }
         if profiles.selected?.id == profile.id {
