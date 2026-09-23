@@ -17,13 +17,16 @@ options:
 
     project_path = Path("TronMobile.xcodeproj/project.pbxproj")
     project = project_path.read_text()
-    project, replacements = re.subn(
-        r'(\/\* TronWatch \*\/ = \{.*?productType = ")[^"]+(";)',
-        r'\1com.apple.product-type.application.watchapp2\2', project, count=1, flags=re.S
-    )
-    if replacements != 1 or 'dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";' not in project:
-        raise SystemExit("TronWatch must be an embedded watchapp2 in Watch content")
-    project_path.write_text(project)
+    watch_target = re.search(r'/\* TronWatch \*/ = \{(.*?)\n\s*\};', project, re.S)
+    if watch_target is None:
+        raise SystemExit("TronWatch target is missing")
+    watch_settings = watch_target.group(1)
+    if 'productType = "com.apple.product-type.application";' not in watch_settings:
+        raise SystemExit("TronWatch must be a compiled watchOS application target")
+    if "INFOPLIST_KEY_WKApplication = YES;" not in project or "INFOPLIST_KEY_WKCompanionAppBundleIdentifier =" not in project:
+        raise SystemExit("TronWatch must declare Watch application and companion metadata")
+    if 'dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";' not in project:
+        raise SystemExit("TronWatch must be embedded in Watch content")
 
     scheme_dir = Path("TronMobile.xcodeproj/xcshareddata/xcschemes")
     expected = {
@@ -114,6 +117,8 @@ targets:
       configs:
         Development:
           INFOPLIST_KEY_WKCompanionAppBundleIdentifier: com.tron.mobile.beta
+        Test:
+          INFOPLIST_KEY_WKCompanionAppBundleIdentifier: com.tron.mobile.testhost
         LocalDevice:
           INFOPLIST_KEY_WKCompanionAppBundleIdentifier: com.tron.mobile
         Release:

@@ -8,12 +8,12 @@ complete.
 
 ## Implemented source behavior
 
-- `project.yml` defines a `TronWatch` watchOS target and an embedded Watch Content
-  phase. XcodeGen does not model the `application.watchapp2` product type used by
-  this pinned generator, so the canonical post-generation check sets that
-  product type and asserts the Watch embedding destination. An iOS scheme build
-  requiring watchOS cannot run here because the Xcode watchOS 26.5 platform
-  component is absent.
+- `project.yml` defines `TronWatch` as a compiled watchOS application using
+  Xcode's modern `com.apple.product-type.application` product type, with
+  generated `WKApplication` metadata and an embedded Watch Content relationship.
+  Per-configuration companion bundle identifiers pair Development with the beta
+  iPhone app, Test with the test host, and DevicePerformance/LocalDevice/Release
+  with the production bundle.
 - Watch microphone input is copied into a bounded eight-item serial-writer queue
   and written as one-minute CAF linear PCM segments. Rotation uses the opened
   hardware input format's sample rate instead of assuming 48 kHz. Queue
@@ -95,15 +95,26 @@ durability, or reliable WatchConnectivity delivery on hardware.
 ## Validation and qualification
 
 - `scripts/tron ios generate` passed. Generated project inspection confirmed
-  `com.apple.product-type.application.watchapp2` and an `Embed Watch Content`
-  phase with destination `$(CONTENTS_FOLDER_PATH)/Watch`.
+  the compiled Watch application product type and `Embed Watch Content` phase
+  with destination `$(CONTENTS_FOLDER_PATH)/Watch`.
 - Strict watchOS source typecheck passed with `WatchRecordingStore.swift`,
   `WatchRecordingConnectivity.swift`, and `TronWatchApp.swift`; strict iOS SDK
   source typecheck passed for `WatchRecordingInbox.swift`.
-- After Watch embedding was introduced, `scripts/tron-ios-test build` was
-  blocked before compilation: `watchOS 26.5 must be installed in order to test
-  the scheme`. No platform component was installed. The added metadata test and
-  existing store tests have not been run on this revision.
+- Xcode 26.6 (build 17F113) watchOS 26.5 SDK target build passed with real
+  production sources and both arm64 and arm64_32 architectures:
+  `xcodebuild build -project packages/ios-app/TronMobile.xcodeproj -target TronWatch -configuration Development -sdk watchos CODE_SIGNING_ALLOWED=NO ...`.
+  The built product is `/tmp/tron-watch-sdk-build-products/Development-watchos/TronWatch.app`;
+  its Info.plist contains `WKApplication`, microphone usage text, and the
+  Development companion bundle `com.tron.mobile.beta`. Generated configuration
+  inspection confirms Test pairs with `com.tron.mobile.testhost`, and
+  DevicePerformance/LocalDevice/Release pair with `com.tron.mobile`.
+- This Xcode installation has the watchOS device and simulator SDKs but no watch
+  simulator runtime. The iOS generic-scheme build still reports the watchOS
+  component unavailable; a direct iPhone target build incorrectly schedules the
+  embedded Watch sources with the iOS SDK, so it is not a valid companion build.
+  No iOS simulator/device install or signing qualification was performed.
+  The added metadata test and existing store tests have not been run on this
+  revision.
 - Gateway `npm run check` passed. The focused 18-test recording suite runs with
   Homebrew Node (`/opt/homebrew/bin/node node_modules/vitest/vitest.mjs`); the
   bundled Gateway Node rejects the native binding's Team ID. No dependency
