@@ -491,8 +491,32 @@ async function validatePayloadPushConfiguration(root, channel) {
   } finally { await handle.close(); }
 }
 
+// tsc emits double-quoted specifiers for static imports, re-exports, side-effect
+// imports, and literal dynamic imports.
+const RELATIVE_MODULE_SPECIFIER = /(?:\bfrom\s*|\bimport\s*\(?\s*)"(\.{1,2}\/[^"]+)"/gu;
+
+/**
+ * Only app/ ships. A compiled import that resolves anywhere else (for example a
+ * repo fixture outside packages/gateway) passes source builds and tests but
+ * fails module loading before the Gateway can log, so reject it at admission.
+ */
+async function assertCompiledImportsShipped(root) {
+  const appRoot = join(root, "app");
+  for (const { path, target } of await regularFiles(root, "app/dist")) {
+    if (target !== undefined || !path.endsWith(".js")) continue;
+    const file = join(root, path);
+    for (const [, specifier] of (await readFile(file, "utf8")).matchAll(RELATIVE_MODULE_SPECIFIER)) {
+      const resolved = resolve(dirname(file), specifier);
+      if (!under(appRoot, resolved) || !(await regular(resolved).catch(() => false))) {
+        throw new Error(`payload module ${path} imports ${specifier}, which is not shipped in app/`);
+      }
+    }
+  }
+}
+
 export async function validatePayload(root, expected = {}, checkFingerprint = true) {
   await completePayload(root);
+  await assertCompiledImportsShipped(root);
   const manifest = payloadManifest(await json(join(root, "manifest.json")), expected);
   await validatePayloadPushConfiguration(root, manifest.channel);
   if (checkFingerprint) {

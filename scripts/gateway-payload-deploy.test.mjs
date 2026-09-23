@@ -723,6 +723,27 @@ test("runtime Node and Pi aliases are exact required command links", async () =>
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("compiled Gateway imports must resolve to files shipped in app/", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-payload-import-containment-"));
+  try {
+    const payload = await makePreflightFixture(root);
+    const dist = join(payload, "app", "dist");
+    await mkdir(join(dist, "transport"));
+    await writeFile(join(dist, "transport", "policy.js"), 'import "../version.js";\nexport { PROTOCOL_VERSION } from "../version.js";\nawait import("./peer.js");\n');
+    await writeFile(join(dist, "transport", "peer.js"), "export {};\n");
+    await validatePayload(payload, { channel: "stable" }, false);
+
+    // Regression: a repo fixture outside packages/gateway resolved in source
+    // builds but crashed the installed candidate before its logger opened.
+    await writeFile(join(payload, "protocol-fixtures.json"), "{}\n");
+    await writeFile(join(dist, "transport", "policy.js"), 'import contract from "../../../protocol-fixtures.json" with { type: "json" };\n');
+    await assert.rejects(validatePayload(payload, { channel: "stable" }, false), /policy\.js imports \.\.\/\.\.\/\.\.\/protocol-fixtures\.json/);
+
+    await writeFile(join(dist, "transport", "policy.js"), 'await import("./missing.js");\n');
+    await assert.rejects(validatePayload(payload, { channel: "stable" }, false), /policy\.js imports \.\/missing\.js/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("dev empty push configuration cannot be promoted into Stable", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-push-dev-promotion-"));
   try {

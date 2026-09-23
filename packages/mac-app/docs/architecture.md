@@ -409,7 +409,13 @@ computes the same byte-ordered line stream incrementally, retaining full read,
 ordering, and fail-closed checks without buffering the complete stream. The
 runtime `node` and technical `pi` aliases are stronger required entries:
 every validator requires exact relative target text and exact resolution to the
-corresponding architecture runtime or payload CLI. Manifest schema 1 retains
+corresponding architecture runtime or payload CLI. The Node deployment
+validator also rejects any relative module import in compiled `app/dist` that
+does not resolve to a regular file inside `app/`; only `app/` ships, so an
+import of repository content (such as `packages/protocol-fixtures`) would pass
+source builds and tests yet fail module loading before the Gateway can log.
+Runtime code owns its values and tests assert parity with shared fixtures.
+Manifest schema 1 retains
 its historical `dependencyTreeCoverage` string so the immediately preceding
 signed launcher can admit a new payload; the canonical fingerprint algorithm
 nevertheless includes internal symlink paths and target text. The small C launcher also recomputes the complete
