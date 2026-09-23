@@ -43,7 +43,7 @@ final class SessionMutationService {
             method: "session.import",
             commandID: commandID
         ) {
-            try await client.request("session.import", params, timeout: .seconds(120))
+            try await client.request("session.import", params, timeout: GatewayRequestTimeout.sessionImport)
         }
         return response.sessionId
     }

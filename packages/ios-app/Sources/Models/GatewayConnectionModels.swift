@@ -284,7 +284,8 @@ struct AdministrativeDrainSnapshot: Codable, Hashable, Sendable {
 struct GatewayRestartResponse: Codable, Hashable, Sendable {
     let restarting: Bool
     let scheduled: Bool
-    let activeSessionIds: [String]
+    let activeSessionIds: [String]?
+    let restartNow: Bool?
     let drain: AdministrativeDrainSnapshot?
 }
 

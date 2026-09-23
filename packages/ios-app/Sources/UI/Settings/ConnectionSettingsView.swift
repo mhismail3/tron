@@ -507,6 +507,7 @@ struct GatewayConnectionDetailView: View {
     @State private var loadingInfo = false
     @State private var infoLoadGeneration = 0
     @State private var confirmingRestart = false
+    @State private var confirmingRestartNow = false
     @State private var updateIntent: GatewayUpdateIntent?
     @State private var confirmingRollback = false
     @State private var activeUpdateCommandID: String?
@@ -759,6 +760,26 @@ struct GatewayConnectionDetailView: View {
                 }
             )
         }
+        .tronManagedSheet(
+            isPresented: $confirmingRestartNow,
+            identity: "settings.gateway.restart-now-confirmation"
+        ) {
+            TronConfirmationSheet(
+                title: "Restart Now?",
+                message: "The Gateway will stop waiting for accepted work to finish. Any work without a confirmed terminal receipt may have an unknown outcome.",
+                confirmTitle: "Restart Now",
+                destructive: true,
+                icon: "bolt.fill",
+                onConfirm: {
+                    Task {
+                        guard let response = await model.requestGatewayRestart(for: currentProfile, restartNow: true),
+                              let drain = response.drain else { return }
+                        drainPollingOwner = .restart(drainID: drain.drainId)
+                        drainSnapshot = drain
+                    }
+                }
+            )
+        }
     }
 
     private func gatewayUpdateStatusRow(_ updateStatus: GatewayUpdateStatus) -> some View {
@@ -790,12 +811,22 @@ struct GatewayConnectionDetailView: View {
             AdministrativeDrainPresentation.summary(snapshot),
             AdministrativeDrainPresentation.suspectSummary(snapshot),
         ].compactMap { $0 }.joined(separator: "\n")
-        return TronValueRow(
-            icon: snapshot.phase == .failed ? "exclamationmark.triangle" : "hourglass",
-            title: "Restart drain",
-            detail: detail,
-            accent: snapshot.phase == .failed ? .tronError : .tronAmber
-        )
+        return VStack(alignment: .leading, spacing: 8) {
+            TronValueRow(
+                icon: snapshot.phase == .failed ? "exclamationmark.triangle" : "hourglass",
+                title: "Restart drain",
+                detail: detail,
+                accent: snapshot.phase == .failed ? .tronError : .tronAmber
+            )
+            if snapshot.phase == .preparing || snapshot.phase == .waiting {
+                Button("Restart Now", systemImage: "bolt.fill") {
+                    confirmingRestartNow = true
+                }
+                .buttonStyle(.bordered)
+                .tint(.tronError)
+                .accessibilityHint("Stops waiting for accepted work to finish")
+            }
+        }
     }
 
     private func gatewayUpdateGroup(config: GatewayUpdateConfig?) -> some View {

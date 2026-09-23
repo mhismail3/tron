@@ -431,6 +431,13 @@ struct SessionCatalogLoadKey: Equatable, Sendable {
 
 /// Owns the bounded dashboard projection, revisioned global row overlays, and
 /// exact admission for one catalog materialization. Gateway remains canonical.
+enum SessionCatalogLoadBounds {
+    // Limits cap one user-list traversal while allowing the current 25,000-row catalog.
+    static let pageSize = 500
+    static let maximumPages = 50
+    static let maximumRows = 25_000
+}
+
 struct SessionCatalogCoordinator: Equatable {
     struct LoadAdmission: Equatable, Sendable {
         fileprivate let generation: Int

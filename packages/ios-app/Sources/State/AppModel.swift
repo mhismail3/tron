@@ -972,7 +972,7 @@ final class AppModel {
 
     func presentComposerActionError(_ error: Error, target: SessionPresentationTarget) {
         guard composerDrafts.admits(target), !(error is CancellationError) else { return }
-        presentError(error)
+        surface(error)
     }
 
     func presentComposerActionError(_ message: String, target: SessionPresentationTarget) {
@@ -1039,7 +1039,7 @@ final class AppModel {
         guard profiles.profiles.contains(where: { $0.id == profile.id }) else { return }
         if profiles.selected?.id == profile.id {
             if connectionState == .connected,
-               catalogRefreshFailedAttempts >= DashboardCatalogRetryPolicy.maximumFailedAttempts,
+               catalogRefreshFailedAttempts >= DashboardCatalogRetryPolicy.unavailableNoticeAfterFailures,
                let key = currentCatalogLoadKey() {
                 Task { [weak self] in _ = await self?.retryCatalog(ownedBy: key) }
                 return
@@ -1122,7 +1122,7 @@ final class AppModel {
                   !sessionSearchPolicyMutationIsInFlight(for: profileID) else { return }
             sessionSearchConsentByProfile[profileID] = false
             sessionSearchPolicyLoadedConnections[profileID] = nil
-            presentError(error)
+            surface(error)
         }
     }
 
@@ -1435,7 +1435,7 @@ final class AppModel {
 
     func presentConfigurationActionError(_ error: Error) {
         guard !(error is CancellationError) else { return }
-        presentError(error)
+        surface(error)
     }
 
     func start(sceneIsActive: Bool = true) async {
@@ -1581,7 +1581,7 @@ final class AppModel {
             profileRevision &+= 1
             reconcileDashboardConnections()
         } catch {
-            presentError(error)
+            surface(error)
         }
     }
 
@@ -1608,7 +1608,7 @@ final class AppModel {
             profileRevision &+= 1
             reconcileDashboardConnections()
         } catch {
-            presentError(error)
+            surface(error)
         }
     }
 
@@ -1657,7 +1657,6 @@ final class AppModel {
     private func scheduleCatalogRefresh() -> Task<CatalogRefreshLeaseResult, Never>? {
         guard !Task.isCancelled, let key = currentCatalogLoadKey() else { return nil }
         prepareCatalogOwner(key)
-        guard catalogRefreshFailedAttempts < DashboardCatalogRetryPolicy.maximumFailedAttempts else { return nil }
         if let task = catalogRefreshTask, catalogRefreshKey == key { return task }
         if catalogRefreshTask != nil { cancelCatalogRefresh() }
         catalogInvalidationGeneration &+= 1
@@ -1718,7 +1717,7 @@ final class AppModel {
             pageCount: pageCount,
             revision: revision,
             retryAttempt: retryAttempt,
-            retryBudget: DashboardCatalogRetryPolicy.maximumFailedAttempts
+            retryBudget: DashboardCatalogRetryPolicy.unavailableNoticeAfterFailures
         )
         if let record = iosClientDiagnostics.records.first { diagnosticStore?.record(record) }
         diagnosticCapture.recordCausal(
@@ -1854,7 +1853,7 @@ final class AppModel {
                             // and revision churn intentionally retain the last
                             // complete projection without surfacing a warning.
                             self.catalogRefreshFailedAttempts = min(
-                                DashboardCatalogRetryPolicy.maximumFailedAttempts,
+                                DashboardCatalogRetryPolicy.unavailableNoticeAfterFailures,
                                 self.catalogRefreshFailedAttempts + 1
                             )
                         }
@@ -1864,14 +1863,9 @@ final class AppModel {
                         // next authoritative list-change event rather than
                         // creating an unbounded self-refresh loop.
                         guard result.genuineFailure,
-                              DashboardCatalogRetryPolicy.shouldRetry(
-                                  isDirty: remainsDirty,
-                                  isCurrent: true,
-                                  transportFailed: result.outcome == .transportFailure,
-                                  failedAttempts: self.catalogRefreshFailedAttempts
-                              ) else {
+                              DashboardCatalogRetryPolicy.shouldRetry(isDirty: remainsDirty, isCurrent: true) else {
                             if result.genuineFailure,
-                               self.catalogRefreshFailedAttempts >= DashboardCatalogRetryPolicy.maximumFailedAttempts {
+                               self.catalogRefreshFailedAttempts == DashboardCatalogRetryPolicy.unavailableNoticeAfterFailures {
                                 self.showCatalogFailure(ownedBy: key, result: result)
                             }
                             return result
@@ -1961,9 +1955,9 @@ final class AppModel {
             var pageCount = 0
             var expectedRevision: Int?
             do {
-                let pageLimit = 500
-                let maximumPages = 50
-                let maximumItems = 25_000
+                let pageLimit = SessionCatalogLoadBounds.pageSize
+                let maximumPages = SessionCatalogLoadBounds.maximumPages
+                let maximumItems = SessionCatalogLoadBounds.maximumRows
                 var all: [SessionSummary] = []
                 var cursor: String?
                 var seenCursors = Set<String>()
@@ -1984,8 +1978,7 @@ final class AppModel {
                     requestedContinuation = cursor != nil
                     let response: Response = try await client.request(
                         "session.list",
-                        Params(cursor: cursor, limit: pageLimit, scope: "user"),
-                        timeout: .seconds(10)
+                        Params(cursor: cursor, limit: pageLimit, scope: "user")
                     )
                     pageCount += 1
                     guard admitsCatalogRefresh(key: key, requestGeneration: requestGeneration),
@@ -3515,7 +3508,7 @@ final class AppModel {
         let response: Response = try await client.request(
             "session.export",
             Params(sessionId: sessionID, format: format),
-            timeout: .seconds(1_800)
+            timeout: GatewayRequestTimeout.sessionExport
         )
         guard sessionPresentation.ownsInstalledSubscription(
             sessionID: sessionID,
@@ -3800,10 +3793,10 @@ final class AppModel {
     }
 
     @discardableResult
-    func restartGateway() async throws -> GatewayRestartResponse {
+    func restartGateway(restartNow: Bool = false) async throws -> GatewayRestartResponse {
         guard let admission = lifecycle.generationAdmission else { throw CancellationError() }
         do {
-            return try await restartGateway(admission: admission)
+            return try await restartGateway(admission: admission, restartNow: restartNow)
         } catch {
             guard admitsLifecycle(admission) else { throw CancellationError() }
             throw error
@@ -3811,22 +3804,23 @@ final class AppModel {
     }
 
     @discardableResult
-    func requestGatewayRestart() async -> GatewayRestartResponse? {
-        do { return try await restartGateway() }
+    func requestGatewayRestart(restartNow: Bool = false) async -> GatewayRestartResponse? {
+        do { return try await restartGateway(restartNow: restartNow) }
         catch { surface(error); return nil }
     }
 
     @discardableResult
-    func requestGatewayRestart(for profile: GatewayProfile) async -> GatewayRestartResponse? {
+    func requestGatewayRestart(for profile: GatewayProfile, restartNow: Bool = false) async -> GatewayRestartResponse? {
         if profiles.selected?.id != profile.id {
             await switchGateway(profile)
         }
         guard profiles.selected?.id == profile.id else { return nil }
-        return await requestGatewayRestart()
+        return await requestGatewayRestart(restartNow: restartNow)
     }
 
     private func restartGateway(
-        admission: GatewayLifecycleCoordinator.Admission
+        admission: GatewayLifecycleCoordinator.Admission,
+        restartNow: Bool
     ) async throws -> GatewayRestartResponse {
         try requireLifecycle(admission)
         guard Self.supportsSafeGatewayRestart(capabilities: gatewayInfo?.capabilities ?? []) else {
@@ -3837,12 +3831,12 @@ final class AppModel {
                 details: nil
             )
         }
-        struct Params: Codable { let commandId: String }
+        struct Params: Codable { let commandId: String; let restartNow: Bool? }
         let commandID = uuidSource.next().uuidString
         let response: GatewayRestartResponse
         do {
             response = try await mutationExecutor.perform(method: "gateway.restart", commandID: commandID) {
-                try await client.request("gateway.restart", Params(commandId: commandID))
+                try await client.request("gateway.restart", Params(commandId: commandID, restartNow: restartNow ? true : nil))
             }
         } catch {
             guard admitsLifecycle(admission) else { throw CancellationError() }
@@ -4290,7 +4284,7 @@ final class AppModel {
         } catch {
             // Group identity is a presentation-side safety hint. Keep the
             // authenticated runtime usable if metadata repair is unavailable.
-            presentError(error)
+            surface(error)
         }
     }
 
@@ -4333,8 +4327,7 @@ final class AppModel {
         guard let key = currentCatalogLoadKey() else { return }
         prepareCatalogOwner(key)
         catalogInvalidationGeneration &+= 1
-        guard catalogRefreshFailedAttempts < DashboardCatalogRetryPolicy.maximumFailedAttempts,
-              catalogRefreshTask == nil else { return }
+        guard catalogRefreshTask == nil else { return }
         _ = startCatalogRefresh(key: key, trigger: "list-change")
     }
 
@@ -4374,9 +4367,9 @@ final class AppModel {
     }
 
     static func shouldSurface(_ error: Error) -> Bool {
-        if error is CancellationError || error is GatewayPossiblySentError { return false }
+        if error is CancellationError || error is GatewayDefinitelyNotSentError || error is GatewayPossiblySentError { return false }
         if let failure = error as? GatewayFailure {
-            return !["disconnected", "closed", "replaced", "timeout", "event_overflow"].contains(failure.code)
+            return !["disconnected", "closed", "replaced", "timeout", "event_overflow", "definitely_not_sent", "possibly_sent"].contains(failure.code)
         }
         if let urlError = error as? URLError {
             return ![

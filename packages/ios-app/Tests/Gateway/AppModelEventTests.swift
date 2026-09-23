@@ -877,6 +877,12 @@ struct AppModelEventTests {
         )))
         #expect(!AppModel.shouldSurface(URLError(.networkConnectionLost)))
         #expect(!AppModel.shouldSurface(NSError(domain: NSPOSIXErrorDomain, code: 53)))
+        #expect(!AppModel.shouldSurface(GatewayFailure(
+            code: "possibly_sent", message: "A read lost its transport.", retryable: false, details: nil
+        )))
+        #expect(!AppModel.shouldSurface(GatewayFailure(
+            code: "definitely_not_sent", message: "A read was not sent.", retryable: false, details: nil
+        )))
         #expect(AppModel.shouldSurface(GatewayFailure(
             code: "invalid_request",
             message: "Choose a valid setting.",
