@@ -37,7 +37,7 @@ describe("durable recording ingestion", () => {
     expect(fixture.segment.size).toBe(bytes.length);
     expect(fixture.segment.sha256).toBe(digest);
     expect(fixture.finalizeRequest.capture).toEqual(capture(1));
-    expect(fixture.commitReceipt.contentSha256).toBe(createHash("sha256").update(`1:${digest}:${bytes.length}\\n`).digest("hex"));
+    expect(fixture.commitReceipt.contentSha256).toBe(createHash("sha256").update(Buffer.from(`1:${digest}:${bytes.length}\n`, "utf8")).digest("hex"));
   });
 
   it("admits reordered segments idempotently, finalizes exact bytes, and reopens durable receipts", async () => {
@@ -58,7 +58,51 @@ describe("durable recording ingestion", () => {
     expect(status.segments).toHaveLength(1);
     expect(status.nextOffset).toBe(1);
     expect(await readFile(join(home, "workspace", "files", "recordings", id, "segments", "000001.audio"))).toEqual(bytes);
-    expect(await reopened.finalize(id, device, { segmentCount: 2, capture: capture(2, true) })).toEqual(receipt);
+    const reorderedCapture = JSON.parse(JSON.stringify(capture(2, true), (_key, value) => value));
+    reorderedCapture.source = { platformVersion: "26.0", platform: "watchOS", appVersion: "1.0" };
+    reorderedCapture.timeline[0] = { format: "m4a", codec: "AAC", frameCount: 48_000, pauseBeforeMilliseconds: 0, durationMilliseconds: 1000, startMonotonicMilliseconds: 0, segment: 1 };
+    expect(await reopened.finalize(id, device, { segmentCount: 2, capture: reorderedCapture })).toEqual(receipt);
+  });
+
+  it.each(["recordingId", "destinationId", "sourceDeviceId", "totalBytes", "segmentCount", "schemaVersion", "finalizedAt", "contentSha256", "capture"])("fails closed on a tampered durable receipt field: %s", async field => {
+    const { home, workspace, store } = await fixture();
+    await store.acceptSegment(id, 1, bytes.length, digest, device, source(bytes));
+    await store.finalize(id, device, { segmentCount: 1, capture: capture(1) });
+    const path = join(home, "workspace", "files", "recordings", id, "commit.json");
+    const stored = JSON.parse(await readFile(path, "utf8"));
+    switch (field) {
+      case "recordingId": stored.recordingId = randomUUID(); break;
+      case "destinationId": stored.destinationId = "another-machine"; break;
+      case "sourceDeviceId": stored.sourceDeviceId = "another-device"; break;
+      case "totalBytes": stored.totalBytes++; break;
+      case "segmentCount": stored.segmentCount++; break;
+      case "schemaVersion": stored.schemaVersion = 2; break;
+      case "finalizedAt": stored.finalizedAt = "yesterday"; break;
+      case "contentSha256": stored.contentSha256 = "f".repeat(64); break;
+      case "capture": stored.capture.timeline[0].segment = 2; break;
+    }
+    await writeFile(path, JSON.stringify(stored));
+    const reopened = new RecordingStore(workspace, "gateway-machine");
+    await expect(reopened.status(id, device, 0, 10)).rejects.toMatchObject({ code: "conflict" });
+    await expect(reopened.finalize(id, device, { segmentCount: 1, capture: capture(1) })).rejects.toMatchObject({ code: "conflict" });
+
+    if (field === "capture") {
+      stored.capture.timeline[0].segment = 1;
+      stored.capture.startedAt = "2025-01-01T00:00:00.000Z";
+      await writeFile(path, JSON.stringify(stored));
+      expect((await reopened.status(id, device, 0, 10)).receipt?.capture.startedAt).toBe("2025-01-01T00:00:00.000Z");
+      await expect(reopened.finalize(id, device, { segmentCount: 1, capture: capture(1) })).rejects.toMatchObject({ code: "conflict" });
+    }
+  });
+
+  it("fails closed when finalized audio is changed after receipt publication", async () => {
+    const { home, workspace, store } = await fixture();
+    await store.acceptSegment(id, 1, bytes.length, digest, device, source(bytes));
+    await store.finalize(id, device, { segmentCount: 1, capture: capture(1) });
+    const path = join(home, "workspace", "files", "recordings", id, "segments", "000001.audio");
+    await chmod(path, 0o600);
+    await writeFile(path, Buffer.from("truncated"));
+    await expect(new RecordingStore(workspace, "gateway-machine").status(id, device, 0, 10)).rejects.toMatchObject({ code: "conflict" });
   });
 
   it("does not finalize missing segments and rejects foreign ownership", async () => {

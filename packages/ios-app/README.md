@@ -11,6 +11,7 @@ See:
 - [Onboarding](docs/onboarding.md)
 - [Gateway event policy](docs/events.md)
 - [iOS hardening plan](docs/hardening-plan.md)
+- [Apple Watch audio recording plan](docs/watch-audio-plan.md)
 
 Generate the project with `scripts/tron ios generate` from the repository root;
 it resolves the pinned XcodeGen and keeps `project.yml` as project truth. Run

@@ -12,7 +12,18 @@ options:
   postGenCommand: |
     python3 - <<'PY'
     from pathlib import Path
+    import re
     import xml.etree.ElementTree as ET
+
+    project_path = Path("TronMobile.xcodeproj/project.pbxproj")
+    project = project_path.read_text()
+    project, replacements = re.subn(
+        r'(\/\* TronWatch \*\/ = \{.*?productType = ")[^"]+(";)',
+        r'\1com.apple.product-type.application.watchapp2\2', project, count=1, flags=re.S
+    )
+    if replacements != 1 or 'dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";' not in project:
+        raise SystemExit("TronWatch must be an embedded watchapp2 in Watch content")
+    project_path.write_text(project)
 
     scheme_dir = Path("TronMobile.xcodeproj/xcshareddata/xcschemes")
     expected = {
@@ -83,12 +94,39 @@ settings:
     STRING_CATALOG_GENERATE_SYMBOLS: YES
 
 targets:
+  TronWatch:
+    type: application
+    platform: watchOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: WatchApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.watchkitapp
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_WKApplication: YES
+        INFOPLIST_KEY_WKCompanionAppBundleIdentifier: com.tron.mobile
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: Tron records audio only when you choose Record.
+        INFOPLIST_KEY_UIBackgroundModes:
+          - audio
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: MYGKXH6TY4
+      configs:
+        Development:
+          INFOPLIST_KEY_WKCompanionAppBundleIdentifier: com.tron.mobile.beta
+        LocalDevice:
+          INFOPLIST_KEY_WKCompanionAppBundleIdentifier: com.tron.mobile
+        Release:
+          INFOPLIST_KEY_WKCompanionAppBundleIdentifier: com.tron.mobile
+
   TronMobile:
     type: application
     platform: iOS
     sources:
       - path: Sources
         createIntermediateGroups: true
+        excludes:
+          - WatchApp/**
       - path: Sources/Resources/Fonts
         type: folder
         buildPhase: resources
@@ -119,6 +157,8 @@ targets:
         embed:
           codeSign: true
           removeHeadersOnCopy: true
+      - target: TronWatch
+        embed: true
       - package: SwiftTerm
     settings:
       base:
@@ -169,6 +209,7 @@ targets:
       - path: Tests
         createIntermediateGroups: true
         optional: true
+      - path: WatchApp/WatchRecordingStore.swift
       - path: ../protocol-fixtures
         type: folder
         buildPhase: resources

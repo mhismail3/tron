@@ -175,6 +175,7 @@ struct TronMobileApp: App {
                 }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
+                        WatchRecordingDeliveryCoordinator.shared.retry()
                         pathDiagnostics.setSceneActive(true)
                         Task {
                             await RetiredNotificationBadge.clear()

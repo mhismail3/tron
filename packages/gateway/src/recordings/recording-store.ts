@@ -58,6 +58,25 @@ function validateCapture(value: unknown): RecordingCaptureMetadata {
   return item;
 }
 function boundedText(value: unknown, maximum: number): value is string { return typeof value === "string" && value.length > 0 && value.length <= maximum && !/[\u0000-\u001f\u007f]/.test(value); }
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+function isRecordingReceipt(value: unknown, expected: { id: string; deviceId: string; destinationId: string; segmentCount: number; totalBytes: number; contentSha256: string; capture: RecordingCaptureMetadata }): value is RecordingReceipt {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const receipt = value as Record<string, unknown>;
+  try { validateCapture(receipt.capture); } catch { return false; }
+  return Object.keys(receipt).sort().join(",") === "capture,contentSha256,destinationId,finalizedAt,recordingId,schemaVersion,segmentCount,sourceDeviceId,totalBytes"
+    && receipt.schemaVersion === 1 && receipt.recordingId === expected.id
+    && receipt.destinationId === expected.destinationId && receipt.sourceDeviceId === expected.deviceId
+    && validDate(receipt.finalizedAt) && typeof receipt.contentSha256 === "string" && SHA256.test(receipt.contentSha256)
+    && receipt.contentSha256 === expected.contentSha256 && receipt.segmentCount === expected.segmentCount
+    && Number.isSafeInteger(receipt.totalBytes) && receipt.totalBytes === expected.totalBytes
+    && canonicalJson(receipt.capture) === canonicalJson(expected.capture);
+}
 function isSegmentReceipt(value: unknown, id: string, number: number): value is SegmentReceipt {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const receipt = value as Record<string, unknown>;
@@ -254,9 +273,8 @@ export class RecordingStore {
       }
       const receipt: RecordingReceipt = { schemaVersion: 1, recordingId: id, destinationId: this.destinationId, sourceDeviceId: deviceId, finalizedAt: new Date().toISOString(), contentSha256: aggregate.digest("hex"), totalBytes, segmentCount: requested.segmentCount, capture };
       if (existing) {
-        const prior = existing;
-        if (prior.contentSha256 !== receipt.contentSha256 || prior.segmentCount !== receipt.segmentCount || JSON.stringify(prior.capture) !== JSON.stringify(capture)) throw new GatewayError("conflict", "Recording has already been finalized with different content or metadata");
-        return prior;
+        if (!isRecordingReceipt(existing, { id, deviceId, destinationId: this.destinationId, segmentCount: receipt.segmentCount, totalBytes: receipt.totalBytes, contentSha256: receipt.contentSha256, capture })) throw new GatewayError("conflict", "Stored recording receipt is invalid or does not match the finalized recording");
+        return existing;
       }
       await durableAtomicWriteJson(commitPath, receipt);
       const directory = await open(folder, "r"); try { await directory.sync(); } finally { await directory.close(); }
@@ -278,8 +296,28 @@ export class RecordingStore {
         if (!isSegmentReceipt(item, id, number)) throw new GatewayError("conflict", "Stored recording segment receipt is invalid");
         segments.push(item);
       }
-      const receipt = await this.readOptionalOwnedJson<RecordingReceipt>(folder, "commit.json", 128 * 1_024);
-      return { recordingId: id, finalized: !!receipt, ...(receipt ? { receipt } : {}), segments, nextOffset: offset + selected.length < numbers.length ? offset + selected.length : null };
+      const receipt = await this.readOptionalOwnedJson<unknown>(folder, "commit.json", 128 * 1_024);
+      if (receipt) {
+        if (numbers.length > MAX_RECORDING_SEGMENTS) throw new GatewayError("conflict", "Stored recording segment set exceeds its bound");
+        const allSegments: SegmentReceipt[] = [];
+        for (const number of numbers) {
+          const item = await this.readOwnedJson<unknown>(root!, `${String(number).padStart(6, "0")}.json`, 2_048);
+          if (!isSegmentReceipt(item, id, number)) throw new GatewayError("conflict", "Stored recording segment receipt is invalid");
+          allSegments.push(item);
+        }
+        const aggregate = createHash("sha256"); let totalBytes = 0;
+        for (const [index, segment] of allSegments.entries()) {
+          if (segment.segment !== index + 1) throw new GatewayError("conflict", "Stored recording segment set is not contiguous");
+          const audio = await this.hashOwnedAudio(root!, `${String(segment.segment).padStart(6, "0")}.audio`);
+          if (audio.size !== segment.size || audio.sha256 !== segment.sha256) throw new GatewayError("conflict", "Stored recording audio does not match its admitted receipt");
+          aggregate.update(Buffer.from(`${segment.segment}:${segment.sha256}:${segment.size}\n`));
+          totalBytes += segment.size;
+        }
+        const finalized = allSegments.length;
+        const digest = aggregate.digest("hex");
+        if (!isRecordingReceipt(receipt, { id, deviceId, destinationId: this.destinationId, segmentCount: finalized, totalBytes, contentSha256: digest, capture: (receipt as RecordingReceipt).capture })) throw new GatewayError("conflict", "Stored recording receipt is invalid");
+      }
+      return { recordingId: id, finalized: !!receipt, ...(receipt ? { receipt: receipt as RecordingReceipt } : {}), segments, nextOffset: offset + selected.length < numbers.length ? offset + selected.length : null };
     });
   }
 }

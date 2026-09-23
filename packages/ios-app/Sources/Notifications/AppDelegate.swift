@@ -65,7 +65,19 @@ final class AppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNUser
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        _ = WatchRecordingInbox.shared
+        WatchRecordingDeliveryCoordinator.shared.restoreAndDrain()
         return true
+    }
+
+    func applicationDidBecomeActive(_ application: UIApplication) {
+        WatchRecordingDeliveryCoordinator.shared.retry()
+    }
+
+    func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String,
+                     completionHandler: @escaping () -> Void) {
+        guard identifier == "com.tron.mobile.watch-recording-upload.v1" else { completionHandler(); return }
+        Task { @MainActor in WatchRecordingDeliveryCoordinator.shared.handleBackgroundEvents(completion: completionHandler) }
     }
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {

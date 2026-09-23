@@ -54,6 +54,13 @@ struct SettingsView: View {
                             icon: "desktopcomputer",
                             accent: .tronEmerald
                         ) { ConnectionsSettingsView() }
+                        settingsDivider(accent: .tronEmerald)
+                        settingsLink(
+                            "Watch Recordings",
+                            summary: "Choose a paired Mac and verify saved recordings",
+                            icon: "waveform",
+                            accent: .tronEmerald
+                        ) { WatchRecordingDeliveryView() }
                     }
 
                     TronSettingsGroup("Agent Behavior", accent: .tronPurple) {
