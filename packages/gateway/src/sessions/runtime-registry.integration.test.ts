@@ -4394,15 +4394,17 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
     });
     internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
+    const canonicalAsyncDir = await realpath(asyncDir);
     const originalRead = internal.readExtensionStatusArtifact.bind(slot);
-    let reads = 0;
+    let missingReadCompleted = false;
     internal.readExtensionStatusArtifact = async (directory) => {
-      reads += 1;
-      return originalRead(directory);
+      const status = await originalRead(directory);
+      if (directory === canonicalAsyncDir && status === undefined) missingReadCompleted = true;
+      return status;
     };
     internal.startExtensionActivityWatcher(toolCallId, asyncDir);
     try {
-      await waitUntil(() => reads >= 1);
+      await waitUntil(() => missingReadCompleted);
       const pendingStatus = join(asyncDir, "status.json.pending");
       await writeFile(pendingStatus, JSON.stringify({
         lifecycleArtifactVersion: 3,

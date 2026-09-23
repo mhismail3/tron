@@ -390,7 +390,6 @@ struct AppModelCatalogSyncTests {
             #expect(await disconnectedLoad.value == .retained)
             #expect(await harness.client.activeConnectionID() != nil)
             #expect(harness.model.visibleNotices.isEmpty)
-            #expect(harness.model.visibleNotices.isEmpty)
         }
     }
 
