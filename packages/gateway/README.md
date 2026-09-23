@@ -1927,17 +1927,30 @@ Dashboard provider catalog and global authentication use this runtime before any
 session is opened; project-only extension providers remain in their trusted
 project RuntimeSlot and never enter the global catalog.
 
-Global package install/update/remove and global `settings.update` package-resource
-changes request a serialized global extension-resource reload. Pi remains the
-resource-loader/provider-registration owner; Gateway reconciles extension-owned
-provider IDs in the same ModelRuntime and credential store and publishes the
-normal provider/catalog invalidation after the refreshed snapshot is available.
-A per-extension load/registration failure is logged without removing that
-extension's last working registration or other valid providers. Global provider
-authentication is allowed to settle before a reload replaces its extension
-runtime; while reconciliation is pending, new global auth begins are rejected
-retryably rather than using a stale provider registration. Project-scoped package
-and settings changes do not reload or mutate the global provider runtime.
+Global package install/update/remove and global `settings.update` changes to
+`packages` or explicit `extensions` paths request a serialized global
+extension-resource reload. An admitted global package mutation with an uncertain
+outcome also requests reconciliation; validation failures and uncertain
+project-scoped mutations do not. Pi remains the resource-loader/provider-
+registration owner; Gateway reconciles each extension-owned provider ID with its
+actual extension runtime in the same ModelRuntime and credential store. Provider
+and model catalog reads, provider-usage reads, and global model refresh serialize
+with asynchronous reconciliation. The normal provider/catalog invalidation is
+published after registrations commit, even
+if the SDK's later availability refresh reports an error. A per-extension
+load/registration failure is logged without removing that extension's last
+working registration or other valid providers. A global authentication operation
+remains a provider-runtime user until its underlying login promise settles, even
+after timeout or cancellation retires its UI operation. Reconciliation waits for
+those promises; while authentication or refresh is pending, new global auth begins
+are rejected retryably rather than using a stale provider registration.
+The pinned SDK merges duplicate provider registrations in extension order: later
+defined fields take precedence and omitted fields remain from earlier
+contributors. Gateway retains every registration/runtime contribution and replays
+the current ordered set after unregistering old extension layers, so removing or
+reordering a contributor does not leave stale fields behind or disturb built-in
+providers. Project-scoped package and settings changes do not reload or mutate the
+global provider runtime.
 
 ### Tron context and delegated children
 

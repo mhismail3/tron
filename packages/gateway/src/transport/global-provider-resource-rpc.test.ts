@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { GatewayError } from "../errors.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "./gateway-service.js";
 
 const client: ClientContext = {
@@ -37,9 +38,19 @@ describe("global provider resource invalidation RPC", () => {
     expect(f.requestReload).toHaveBeenCalledTimes(1);
 
     await f.instance.invoke(client, "settings.update", {
+      commandId: "settings-global-extensions", scope: "global", cwd: "/tmp/project", patch: { extensions: ["/tmp/provider.ts"] },
+    });
+    expect(f.requestReload).toHaveBeenCalledTimes(2);
+
+    await f.instance.invoke(client, "settings.update", {
+      commandId: "settings-global-skills", scope: "global", cwd: "/tmp/project", patch: { skills: ["/tmp/skill"] },
+    });
+    expect(f.requestReload).toHaveBeenCalledTimes(2);
+
+    await f.instance.invoke(client, "settings.update", {
       commandId: "settings-project-1", scope: "project", cwd: "/tmp/project", patch: { packages: ["npm:project-provider"] },
     });
-    expect(f.requestReload).toHaveBeenCalledTimes(1);
+    expect(f.requestReload).toHaveBeenCalledTimes(2);
   });
 
   it("reloads after user package mutations but keeps project package installs isolated", async () => {
@@ -53,5 +64,27 @@ describe("global provider resource invalidation RPC", () => {
       commandId: "packages-project-1", cwd: "/tmp/project", source: "npm:project-provider", local: true,
     });
     expect(f.requestReload).toHaveBeenCalledTimes(1);
+  });
+
+  it("reconciles uncertain admitted user package mutations, but not pre-admission failures", async () => {
+    const f = service();
+    f.packages.mutate.mockRejectedValueOnce(new GatewayError("conflict", "Partial install", false, { outcomeUnknown: true }));
+    await expect(f.instance.invoke(client, "packages.install", {
+      commandId: "packages-partial-1", cwd: "/tmp/project", source: "npm:provider", local: false,
+    })).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+    expect(f.requestReload).toHaveBeenCalledTimes(1);
+
+    f.requestReload.mockClear();
+    f.packages.mutate.mockRejectedValueOnce(new GatewayError("invalid_request", "Bad source"));
+    await expect(f.instance.invoke(client, "packages.install", {
+      commandId: "packages-invalid-1", cwd: "/tmp/project", source: "npm:bad", local: false,
+    })).rejects.toMatchObject({ code: "invalid_request" });
+    expect(f.requestReload).not.toHaveBeenCalled();
+
+    f.packages.mutate.mockRejectedValueOnce(new GatewayError("conflict", "Project effect uncertain", false, { outcomeUnknown: true }));
+    await expect(f.instance.invoke(client, "packages.install", {
+      commandId: "packages-project-uncertain", cwd: "/tmp/project", source: "npm:provider", local: true,
+    })).rejects.toMatchObject({ details: { outcomeUnknown: true } });
+    expect(f.requestReload).not.toHaveBeenCalled();
   });
 });

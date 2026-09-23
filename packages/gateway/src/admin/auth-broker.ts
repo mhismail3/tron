@@ -157,6 +157,7 @@ export class AuthBroker {
   private readonly workRegistry: GatewayWorkRegistry | undefined;
   private pendingGlobalProviderRefresh: (() => Promise<void>) | undefined;
   private runningGlobalProviderRefresh = false;
+  private readonly unsettledGlobalAuthOperations = new Set<AuthOperation>();
 
   constructor(
     private readonly modelRuntime: ModelRuntime,
@@ -262,6 +263,7 @@ export class AuthBroker {
       ...(work ? { work } : {}),
     };
     this.operations.set(operation.id, operation);
+    if (targetKey === "global") this.unsettledGlobalAuthOperations.add(operation);
     if (receiptKey) {
       this.beginReceipts.set(receiptKey, {
         ownerIdentity,
@@ -297,7 +299,13 @@ export class AuthBroker {
         () => this.complete(operation, true),
         (error: unknown) => this.complete(operation, false, error),
       )
-      .finally(() => operation.work?.settle());
+      .finally(() => {
+        operation.work?.settle();
+        if (operation.targetKey === "global") {
+          this.unsettledGlobalAuthOperations.delete(operation);
+          this.drainGlobalProviderRefresh();
+        }
+      });
     return operation.id;
   }
 
@@ -504,7 +512,7 @@ export class AuthBroker {
 
   private drainGlobalProviderRefresh(): void {
     if (this.runningGlobalProviderRefresh || !this.pendingGlobalProviderRefresh
-      || [...this.operations.values()].some((operation) => operation.targetKey === "global")) return;
+      || this.unsettledGlobalAuthOperations.size > 0) return;
     const refresh = this.pendingGlobalProviderRefresh;
     this.pendingGlobalProviderRefresh = undefined;
     this.runningGlobalProviderRefresh = true;

@@ -46,10 +46,12 @@ async function fixture() {
   return { root, agentDir, extensionPath, runtime, events, broker, log, broadcast, createResources };
 }
 
-function providerExtension(providerId: string, waitForPrompt = false): string {
-  const login = waitForPrompt
-    ? `async login(callbacks) { const code = await callbacks.onPrompt({ message: "Fixture authorization code" }); return { refresh: "fixture-refresh-" + code, access: "fixture-access-" + code, expires: Date.now() + 60000 }; }`
-    : `async login() { return { refresh: "fixture-refresh", access: "fixture-access", expires: Date.now() + 60000 }; }`;
+function providerExtension(providerId: string, waitForPrompt = false, probeRuntime = false): string {
+  const login = probeRuntime
+    ? `async login() { let refresh; try { pi.getAllTools(); refresh = "active"; } catch (error) { refresh = error.message; } return { refresh, access: "fixture-access", expires: Date.now() + 60000 }; }`
+    : waitForPrompt
+      ? `async login(callbacks) { const code = await callbacks.onPrompt({ message: "Fixture authorization code" }); return { refresh: "fixture-refresh-" + code, access: "fixture-access-" + code, expires: Date.now() + 60000 }; }`
+      : `async login() { return { refresh: "fixture-refresh", access: "fixture-access", expires: Date.now() + 60000 }; }`;
   return `export default (pi) => pi.registerProvider(${JSON.stringify(providerId)}, {
     name: "Global fixture",
     api: "openai-completions",
@@ -87,7 +89,10 @@ describe("global provider resources", () => {
     expect(f.runtime.getModels()).toEqual(expect.arrayContaining([
       expect.objectContaining({ provider: "global-fixture", id: "fixture-model" }),
     ]));
-    const dashboard = new GatewayService({ modelRuntime: f.runtime } as unknown as GatewayServiceDependencies);
+    const dashboard = new GatewayService({
+      modelRuntime: f.runtime,
+      globalProviderResources: resources,
+    } as unknown as GatewayServiceDependencies);
     await expect(dashboard.invoke(client, "provider.list", {})).resolves.toMatchObject({
       providers: expect.arrayContaining([expect.objectContaining({ id: "global-fixture", modelCount: 1 })]),
     });
@@ -143,6 +148,164 @@ describe("global provider resources", () => {
     await removed;
     expect(f.runtime.getProvider("global-fixture")).toBeUndefined();
     expect(f.runtime.getProvider("project-fixture")).toBeUndefined();
+  });
+
+  it("loads providers from ordered global package resources and removes them when the package is removed", async () => {
+    const f = await fixture();
+    const packageDir = join(f.agentDir, "fixture-provider-package");
+    await mkdir(packageDir, { recursive: true });
+    await writeFile(join(packageDir, "package.json"), JSON.stringify({
+      name: "fixture-provider-package", version: "1.0.0", pi: { extensions: ["provider.ts"] },
+    }));
+    await writeFile(join(packageDir, "provider.ts"), providerExtension("packaged-provider"));
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ packages: ["./fixture-provider-package"] }));
+    const resources = await f.createResources();
+    expect(f.runtime.getProvider("packaged-provider")).toBeDefined();
+
+    const refreshed = new Promise<void>((resolve) => f.broadcast.mockImplementationOnce(resolve));
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ packages: [] }));
+    resources.requestReload();
+    await refreshed;
+    expect(f.runtime.getProvider("packaged-provider")).toBeUndefined();
+  });
+
+  it("restores a built-in provider after removing its global extension layer", async () => {
+    const f = await fixture();
+    await writeFile(f.extensionPath, providerExtension("openai"));
+    await configure(f.agentDir, [f.extensionPath]);
+    const resources = await f.createResources();
+    expect(f.runtime.getProvider("openai")).toBeDefined();
+    expect(f.runtime.getProvider("openai")?.getModels()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "fixture-model" }),
+    ]));
+
+    const refreshed = new Promise<void>((resolve) => f.broadcast.mockImplementationOnce(resolve));
+    await configure(f.agentDir, []);
+    resources.requestReload();
+    await refreshed;
+    expect(f.runtime.getProvider("openai")).toBeDefined();
+    expect(f.runtime.getProvider("openai")?.getModels()).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "fixture-model" }),
+    ]));
+  });
+
+  it("replays duplicate provider contributions in SDK order and removes omitted fields with their owner", async () => {
+    const f = await fixture();
+    const first = join(f.root, "first.ts");
+    const second = join(f.root, "second.ts");
+    await writeFile(first, providerExtension("shared-provider")
+      .replace('name: "Global fixture"', 'name: "First contributor"')
+      .replace("https://example.invalid/v1", "https://first.invalid/v1"));
+    await writeFile(second, providerExtension("shared-provider")
+      .replace('name: "Global fixture",\n    api:', 'api:')
+      .replace("https://example.invalid/v1", "https://second.invalid/v1"));
+    await configure(f.agentDir, [first, second]);
+    const resources = await f.createResources();
+    const providerName = () => f.runtime.getProvider("shared-provider")?.name;
+    const modelBaseUrl = () => f.runtime.getModels().find(({ provider }) => provider === "shared-provider")?.baseUrl;
+    expect(providerName()).toBe("First contributor");
+    expect(modelBaseUrl()).toBe("https://second.invalid/v1");
+
+    const reload = async (paths: string[]) => {
+      const refreshed = new Promise<void>((resolve) => f.broadcast.mockImplementationOnce(resolve));
+      await configure(f.agentDir, paths);
+      resources.requestReload();
+      await refreshed;
+    };
+    await reload([first]);
+    expect(providerName()).toBe("First contributor");
+    expect(modelBaseUrl()).toBe("https://first.invalid/v1");
+
+    await reload([second]);
+    expect(providerName()).not.toBe("First contributor");
+    expect(modelBaseUrl()).toBe("https://second.invalid/v1");
+
+    await reload([second, first]);
+    expect(providerName()).toBe("First contributor");
+    expect(modelBaseUrl()).toBe("https://first.invalid/v1");
+  });
+
+  it("retains the actual runtime of a provider whose replacement registration fails", async () => {
+    const f = await fixture();
+    await writeFile(f.extensionPath, providerExtension("retained-provider", false, true));
+    await configure(f.agentDir, [f.extensionPath]);
+    const resources = await f.createResources();
+
+    const refreshed = new Promise<void>((resolve) => f.broadcast.mockImplementationOnce(resolve));
+    const invalidRegistration = providerExtension("retained-provider", false, true)
+      .replaceAll('api: "openai-completions",', "");
+    await writeFile(f.extensionPath, invalidRegistration);
+    resources.requestReload();
+    await refreshed;
+
+    const provider = f.runtime.getProvider("retained-provider");
+    expect(provider).toBeDefined();
+    const credential = await provider!.auth.oauth!.login({
+      signal: new AbortController().signal,
+      prompt: async () => "",
+      notify: () => {},
+    });
+    expect(credential.refresh).toContain("Extension runtime not initialized");
+    expect(credential.refresh).not.toContain("Global provider extension resources were reloaded");
+  });
+
+  it("holds global provider catalog reads until an asynchronous resource refresh commits", async () => {
+    const f = await fixture();
+    const initial = join(f.root, "initial.ts");
+    const added = join(f.root, "added.ts");
+    await writeFile(initial, providerExtension("initial-provider"));
+    await writeFile(added, providerExtension("added-provider"));
+    await configure(f.agentDir, [initial]);
+    const resources = await f.createResources();
+    f.broadcast.mockClear();
+    const dashboard = new GatewayService({
+      modelRuntime: f.runtime,
+      globalProviderResources: resources,
+    } as unknown as GatewayServiceDependencies);
+
+    let releaseRefresh!: () => void;
+    let refreshEntered!: () => void;
+    let refreshCalls = 0;
+    const entered = new Promise<void>((resolve) => { refreshEntered = resolve; });
+    const blockedRefresh = new Promise<void>((resolve) => { releaseRefresh = resolve; });
+    const originalRefresh = f.runtime.refresh.bind(f.runtime);
+    f.runtime.refresh = async (options) => {
+      refreshCalls += 1;
+      refreshEntered();
+      await blockedRefresh;
+      return originalRefresh(options);
+    };
+    await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ extensions: [initial, added] }));
+    const refreshed = new Promise<void>((resolve) => f.broadcast.mockImplementationOnce(resolve));
+    resources.requestReload();
+    await entered;
+
+    let catalogResolved = false;
+    const catalogPromise = dashboard.invoke(client, "provider.list", {}).then((result) => {
+      catalogResolved = true;
+      return result as { providers: Array<{ id: string }> };
+    });
+    let modelsResolved = false;
+    const modelsPromise = dashboard.invoke(client, "model.list", {}).then((result) => {
+      modelsResolved = true;
+      return result as { models: Array<{ provider: string }> };
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(refreshCalls).toBeGreaterThan(0);
+    expect(catalogResolved).toBe(false);
+    expect(modelsResolved).toBe(false);
+
+    releaseRefresh();
+    await refreshed;
+    const catalog = await catalogPromise;
+    let models = await modelsPromise;
+    const modelProviders = new Set(models.models.map(({ provider }) => provider));
+    while (models.nextCursor) {
+      models = await dashboard.invoke(client, "model.list", { cursor: models.nextCursor }) as typeof models;
+      for (const { provider } of models.models) modelProviders.add(provider);
+    }
+    expect(catalog.providers.map(({ id }) => id)).toContain("added-provider");
+    expect(modelProviders).toContain("added-provider");
   });
 
   it("defers global resource replacement until the exact global login settles", async () => {

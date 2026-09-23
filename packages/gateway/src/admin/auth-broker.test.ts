@@ -102,6 +102,30 @@ describe("AuthBroker", () => {
     expect(broker.activeOperationCount).toBe(0);
   });
 
+  it("waits for a cancelled global provider login to actually settle before refreshing its runtime", async () => {
+    let finishLogin!: () => void;
+    let loginStarted!: () => void;
+    const started = new Promise<void>((resolve) => { loginStarted = resolve; });
+    const runtime = runtimeWithLogin(async () => {
+      loginStarted();
+      await new Promise<void>((resolve) => { finishLogin = resolve; });
+    });
+    const broker = new AuthBroker(runtime, () => {});
+    const refresh = vi.fn(async () => {});
+    const operationId = broker.start("phone", "provider", "api_key", runtime, "phone", "command-1", "global");
+    await started;
+
+    broker.requestGlobalProviderRefresh(refresh);
+    expect(refresh).not.toHaveBeenCalled();
+    expect(broker.cancel("phone", operationId)).toBe(true);
+    await flushPromises();
+    expect(refresh).not.toHaveBeenCalled();
+
+    finishLogin();
+    await waitFor(() => refresh.mock.calls.length === 1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
   it("times out providers that ignore abort and ignores their late completion", async () => {
     vi.useFakeTimers();
     let interaction: LoginInteraction | undefined;

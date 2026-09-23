@@ -4,7 +4,7 @@ import type { AuthType } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { contextWindowLimits } from "../providers/context-window-policy.js";
 import type { GatewayConfig } from "../config.js";
-import { GatewayError } from "../errors.js";
+import { GatewayError, isUncertainOutcome } from "../errors.js";
 import { runtimeIdentity } from "./runtime-identity.js";
 import type { JsonValue } from "../protocol/types.js";
 import { PI_VERSION, GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
@@ -229,7 +229,7 @@ export interface GatewayServiceDependencies {
   modelConfig: ModelConfigService;
   packages: PackageService;
   auth: AuthBroker;
-  globalProviderResources: Pick<GlobalProviderResources, "requestReload">;
+  globalProviderResources: Pick<GlobalProviderResources, "requestReload" | "withStableSnapshot">;
   /** Configured only by the LaunchAgent-owned update helper; never from RPC params. */
   updateService?: GatewayUpdateService;
   /** Fixed LocalDevice installer; source and CoreDevice identity never come from install RPC params. */
@@ -1433,8 +1433,12 @@ export class GatewayService {
           boolean(params.expanded, "expanded"),
         ), true);
 
-      case "provider.list":
-        return this.providers(await this.modelRuntime(params));
+      case "provider.list": {
+        const modelRuntime = await this.modelRuntime(params);
+        return params.sessionId === undefined
+          ? this.dependencies.globalProviderResources.withStableSnapshot(() => this.providers(modelRuntime), client.signal)
+          : this.providers(modelRuntime);
+      }
       case "provider.usage": {
         if (Object.keys(params).some((key) => key !== "sessionId" && key !== "providerId")) {
           throw new GatewayError("invalid_request", "Provider usage accepts only sessionId and providerId");
@@ -1448,12 +1452,19 @@ export class GatewayService {
           this.requireObserverAdmission(client);
           return safeJson(result);
         }
-        const result = await this.providerUsage.read(this.dependencies.modelRuntime, providerId, client.signal);
+        const result = await this.dependencies.globalProviderResources.withStableSnapshot(
+          () => this.providerUsage.read(this.dependencies.modelRuntime, providerId, client.signal),
+          client.signal,
+        );
         this.requireObserverAdmission(client);
         return safeJson(result);
       }
-      case "model.list":
-        return this.models(await this.modelRuntime(params), params.cursor, params.limit);
+      case "model.list": {
+        const modelRuntime = await this.modelRuntime(params);
+        return params.sessionId === undefined
+          ? this.dependencies.globalProviderResources.withStableSnapshot(() => this.models(modelRuntime, params.cursor, params.limit), client.signal)
+          : this.models(modelRuntime, params.cursor, params.limit);
+      }
       case "auth.begin": {
         const sessionId = optionalString(params.sessionId, "sessionId", 200);
         const providerId = string(params.providerId, "providerId", { max: 120 });
@@ -1534,7 +1545,8 @@ export class GatewayService {
             projectTrusted: scope === "project" && resolved.trusted,
             ...(settingsSlot ? { modelRuntime: settingsSlot.modelRuntime } : {}),
           });
-          if (params.patch && typeof params.patch === "object" && scope === "global" && "packages" in params.patch) {
+          if (params.patch && typeof params.patch === "object" && scope === "global"
+            && ("packages" in params.patch || "extensions" in params.patch)) {
             this.dependencies.globalProviderResources.requestReload();
           }
           if (params.patch && typeof params.patch === "object" && "compaction" in params.patch) {
@@ -1573,14 +1585,21 @@ export class GatewayService {
         rejectUnknownFields(params, ["commandId", "cwd", "source", "local"], "Package mutation");
         return this.mutation(client, method, params, async () => {
           const cwd = optionalString(params.cwd, "cwd", 4_096) ?? process.cwd();
-          const result = await this.dependencies.packages.mutate(
-            method.slice("packages.".length) as "install" | "remove" | "update",
-            method === "packages.update" ? optionalString(params.source, "source", 2_000) : string(params.source, "source", { max: 2_000 }),
-            cwd,
-            params.local === undefined ? false : boolean(params.local, "local"),
-          );
+          const local = params.local === undefined ? false : boolean(params.local, "local");
+          let result: Awaited<ReturnType<PackageService["mutate"]>>;
+          try {
+            result = await this.dependencies.packages.mutate(
+              method.slice("packages.".length) as "install" | "remove" | "update",
+              method === "packages.update" ? optionalString(params.source, "source", 2_000) : string(params.source, "source", { max: 2_000 }),
+              cwd,
+              local,
+            );
+          } catch (error) {
+            if (!local && isUncertainOutcome(error)) this.dependencies.globalProviderResources.requestReload();
+            throw error;
+          }
           this.dependencies.broadcast("packages.changed", { cwd });
-          if (params.local !== true) this.dependencies.globalProviderResources.requestReload();
+          if (!local) this.dependencies.globalProviderResources.requestReload();
           return safeJson(result);
         });
       case "models.custom.get":
@@ -1605,11 +1624,15 @@ export class GatewayService {
             const timer = setTimeout(() => controller.abort(), 60_000);
             timer.unref();
             try {
-              const result = await (await this.modelRuntime(params)).refresh({
+              const modelRuntime = await this.modelRuntime(params);
+              const refresh = () => modelRuntime.refresh({
                 allowNetwork: true,
                 force: params.force === undefined ? false : boolean(params.force, "force"),
                 signal: controller.signal,
               });
+              const result = params.sessionId === undefined
+                ? await this.dependencies.globalProviderResources.withStableSnapshot(refresh, controller.signal)
+                : await refresh();
               return safeJson({ aborted: result.aborted, errors: Object.fromEntries([...result.errors].map(([key, error]) => [key, error.message])) });
             } finally {
               clearTimeout(timer);
