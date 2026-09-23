@@ -108,6 +108,35 @@ describe("Gateway update control plane", () => {
     } finally { await rm(value.root, { recursive: true, force: true }); }
   });
 
+  it("projects generated and historical multiline failure diagnostics as bounded text", async () => {
+    const value = await fixture();
+    try {
+      const message = `error: no compiler for café\n${"é".repeat(1_100)}\u0000`;
+      const generated = updaterFailureProgress("stable", "command-1", new Error(message), "2026-01-01T00:00:00.000Z");
+      expect(Buffer.byteLength(generated.error as string)).toBeLessThanOrEqual(2_048);
+      await writeFile(join(value.state, "update-progress.json"), `${JSON.stringify(generated)}\n`);
+      const status = await new GatewayUpdateService({ tronHome: value.root }).status();
+      expect(status.state).toBe("failure");
+      expect(status.error).toContain("error: no compiler for café");
+      expect(status.error).not.toMatch(/[\u0000-\u001f\u007f]/u);
+      expect(Buffer.byteLength(status.error ?? "")).toBeLessThanOrEqual(2_048);
+
+      await writeFile(join(value.state, "update-progress.json"), `${JSON.stringify({
+        ...generated, error: "legacy compiler error:\n  missing tsc for café\u0000",
+      })}\n`);
+      const historical = await new GatewayUpdateService({ tronHome: value.root }).status();
+      expect(historical.error).toBe("legacy compiler error: missing tsc for café");
+
+      await rm(join(value.state, "update-progress.json"));
+      await writeFile(join(value.state, "deployment-state.json"), `${JSON.stringify({
+        schema: 1, kind: "tron-gateway-deployment", channel: "stable", state: "failed",
+        updatedAt: "2026-01-01T00:00:01Z", error: "historical deploy failure:\n  caused by café\u0000",
+      })}\n`);
+      const historicalDeployment = await new GatewayUpdateService({ tronHome: value.root }).status();
+      expect(historicalDeployment.error).toBe("historical deploy failure: caused by café");
+    } finally { await rm(value.root, { recursive: true, force: true }); }
+  });
+
   it("returns a bounded projection and reports unavailable candidates explicitly", async () => {
     const value = await fixture();
     try {

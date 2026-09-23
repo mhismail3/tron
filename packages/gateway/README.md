@@ -809,7 +809,10 @@ being stored in `gateway/update-config.json`. It invokes no client-supplied comm
 path. The LaunchAgent-owned helper reads that projection only: source mode invokes the
 repository's local TypeScript compiler with its checked-in config and a private temporary
 `outDir` (it never writes the trusted repository's `packages/gateway/dist`), then stages
-only verified output. Source-only updates require the package lock and dependency declarations
+only verified output. The trusted source checkout must already have its lockfile-pinned
+Gateway development dependencies installed (prepare them with `cd packages/gateway && npm ci`
+before requesting a source rebuild); the helper never installs dependencies or contacts the
+registry during an update. Source-only updates require the package lock and dependency declarations
 to match the selected validated payload exactly and reuse that payload's complete fingerprinted
 `node_modules` tree. They never invoke npm or depend on registry availability, package-manager
 shutdown, or fresh native-module signatures; dependency changes require a newly signed app or
@@ -838,7 +841,10 @@ source revision, tested runtime epoch, and candidate runtime epoch) matches the 
 candidate manifest. Generic automatic/source updates never infer a Debug-origin candidate from
 state; promotion must pin its exact candidate version and fingerprint.
 `gateway.update.config.status` and `gateway.update.status` are bounded projections; the latter
-includes build/staging/draining/promotion/rollback/failure progress. The mutation is usable only when the helper is
+includes build/staging/draining/promotion/rollback/failure progress. Generated update diagnostics
+are normalized to one line and capped at 2 KiB of UTF-8 before persistence; historical diagnostic
+text is similarly normalized on projection, while update identity and document validation remain
+strict. The mutation is usable only when the helper is
 configured, in which case `gateway-update.v1` appears in capabilities. Candidate transition health uses a 60-second default deadline; an owned decimal-millisecond override is admitted only from 2,000 through 300,000 milliseconds.
 
 A separate supervised macOS control plane advertises `ios-device-install.v3`. After configuring the source checkout in Settings, bind the intended phone from the Mac (after the Gateway payload containing this contract is manually installed) with `scripts/tron-ios-device-bind.mjs --device-id <paired-device-id> --target-identifier <CoreDevice-identifier>`. Obtain the latter from `xcrun devicectl list devices`; obtain the former with the read-only `scripts/tron-ios-device-bind.mjs --list`, which prints paired IDs, names, and creation timestamps. Confirm the intended pairing explicitly when names are duplicated. The helper defaults to Stable's local Tailscale address and port 9847; `--channel dev` selects the separate Debug home and loopback port 9848. Local credential reads reuse the existing bounded, no-symlink credential reader. `--host` accepts only `tailscale` or `127.0.0.1`, never a remote hostname. Receipt-backed `device.install.config` binds one authorized Gateway device to a validated Tron source checkout; it never accepts a physical target from iOS. The one-time Mac-local `scripts/tron-ios-device-bind.mjs` command calls the local-only `device.install.target.bind` operation with the intended CoreDevice identifier after `devicectl` discovery; the Gateway verifies that exact target is connected and has Developer Mode enabled, then persists the owner-only binding. At install admission the Mac revalidates that exact binding and fails closed if it is unavailable or changed; it never substitutes another physical device. CoreDevice identifiers, serials, UDIDs, and complete discovery documents remain owner-only Mac state. The per-device configuration is stored under `gateway/ios-device-installs/` with mode `0600`; source roots must be absolute, symlink-free directories containing the canonical iOS project, pinned-toolchain configuration, fixed install helper, artifact validator, and protocol validator. Config/status reads revalidate paired-device authority and never accept an executable, scheme, build configuration, bundle ID, or arbitrary command from RPC; only the authenticated local Mac binding operation accepts a validated CoreDevice identifier.

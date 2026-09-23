@@ -7,6 +7,7 @@ import { test } from "node:test";
 import {
   deploymentTransition,
   deploymentTimeoutMs,
+  failureText,
   RELAUNCH_LIMIT_MS,
   STARTUP_LIMIT_MS,
   commandTimeoutMs,
@@ -55,6 +56,13 @@ test("deployment timeout defaults to a valid bounded millisecond value", () => {
   assert.equal(deploymentTimeoutMs({ TRON_GATEWAY_UPDATE_TIMEOUT_MS: "120000" }), 120_000);
   assert.throws(() => deploymentTimeoutMs({ TRON_GATEWAY_UPDATE_TIMEOUT_MS: "60_000" }), /invalid update timeout/);
   assert.throws(() => deploymentTimeoutMs({ TRON_GATEWAY_UPDATE_TIMEOUT_MS: "1999" }), /invalid update timeout/);
+});
+
+test("update failure diagnostics normalize controls and stay within UTF-8 byte bounds", () => {
+  const multiline = failureText(new Error("TS error:\n  missing café\u0000\r\nNext"));
+  assert.equal(multiline, "TS error: missing café Next");
+  assert.equal(failureText("é".repeat(2_000)), "é".repeat(1_024));
+  assert.ok(Buffer.byteLength(failureText("é".repeat(2_000))) <= 2_048);
 });
 
 test("command timeout defaults to a valid bounded millisecond value", () => {

@@ -132,8 +132,22 @@ export function gatewayUpdateHelperArgs(request: GatewayUpdateRequest): string[]
     "--command-id", commandId];
 }
 
+function failureText(error: unknown, maximum = 2_048): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const cleaned = raw.replace(/[\u0000-\u001f\u007f]+/gu, " ").replace(/\s+/gu, " ").trim();
+  if (Buffer.byteLength(cleaned) <= maximum) return cleaned || "Gateway update failed.";
+  return Buffer.from(cleaned).subarray(0, maximum).toString("utf8").replace(/�+$/u, "");
+}
+
+function admittedFailure(value: unknown): string {
+  if (typeof value !== "string" || Buffer.byteLength(value) === 0) {
+    throw new GatewayError("conflict", "Gateway update error is malformed");
+  }
+  return failureText(value);
+}
+
 export function updaterFailureMessage(error: unknown): string {
-  return String(error instanceof Error ? error.message : error).slice(0, 2_048);
+  return failureText(error);
 }
 
 export function updaterFailureProgress(
@@ -451,7 +465,7 @@ export class GatewayUpdateService {
         throw new GatewayError("conflict", "Gateway deployment command ID is malformed");
       }
       commandId = stateCommandId ?? null;
-      if (raw.error !== undefined) error = boundedString(raw.error, "error", 2_048) ?? null;
+      if (raw.error !== undefined) error = admittedFailure(raw.error);
       if (raw.candidateOrigin !== undefined) {
         if (raw.candidateOrigin !== "debug") throw new GatewayError("conflict", "Gateway candidate origin is malformed");
         declaresDebugOrigin = true;
@@ -547,7 +561,7 @@ export class GatewayUpdateService {
         state = raw.state;
         updatedAt = progressUpdatedAt;
         commandId = progressCommandId ?? null;
-        if (raw.error !== undefined) error = boundedString(raw.error, "error", 2_048) ?? null;
+        if (raw.error !== undefined) error = admittedFailure(raw.error);
       }
     }
     if (!candidateAvailable) { candidateOrigin = null; candidateProvenance = null; }

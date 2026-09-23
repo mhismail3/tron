@@ -846,15 +846,26 @@ export function deploymentTransition(state, event) {
   return next;
 }
 
+export function failureText(error, maximum = 2_048) {
+  const raw = error instanceof Error ? error.message : String(error);
+  const cleaned = raw.replace(/[\u0000-\u001f\u007f]+/gu, " ").replace(/\s+/gu, " ").trim();
+  if (Buffer.byteLength(cleaned) <= maximum) return cleaned || "Gateway update failed.";
+  return Buffer.from(cleaned).subarray(0, maximum).toString("utf8").replace(/�+$/u, "");
+}
+
 async function writeState(paths, value) {
-  await atomicJson(paths.state, { schema: SCHEMA, kind: "tron-gateway-deployment", ...value, updatedAt: new Date().toISOString() });
+  await atomicJson(paths.state, {
+    schema: SCHEMA, kind: "tron-gateway-deployment", ...value,
+    ...(value.error === undefined ? {} : { error: failureText(value.error) }),
+    updatedAt: new Date().toISOString(),
+  });
 }
 
 async function writeProgress(paths, state, commandId, error) {
   await assertStoreRoots(paths);
   await atomicJson(paths.progress, {
     schema: SCHEMA, kind: "tron-gateway-update-progress", channel: paths.channel, state,
-    commandId, ...(error ? { error: String(error).slice(0, 2_048) } : {}), updatedAt: new Date().toISOString(),
+    commandId, ...(error ? { error: failureText(error) } : {}), updatedAt: new Date().toISOString(),
   });
 }
 
