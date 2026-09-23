@@ -9,6 +9,7 @@ import { updateJsonLocked } from "./util/json.js";
 import { durableAtomicWriteJson } from "./util/durable-json.js";
 import { readSecureJson, SecureJsonFileError } from "./util/secure-json.js";
 import { GatewayError } from "./errors.js";
+import { resolveTronHome } from "./tron-home.js";
 
 export interface GatewayConfig {
   readonly host: string;
@@ -133,21 +134,6 @@ export function resolveBindHost(raw: string | undefined, interfaces = networkInt
   throw new GatewayError("conflict", "Tailscale is not connected; Tron cannot expose the mobile gateway", true);
 }
 
-export function resolveTronHome(environment = process.env): string {
-  const explicit = environment.TRON_DATA_DIR;
-  if (explicit) {
-    if (!isAbsolute(explicit)) throw new GatewayError("invalid_request", "TRON_DATA_DIR must be absolute");
-    return resolve(explicit);
-  }
-  const homeName = environment.TRON_HOME_NAME;
-  if (homeName) {
-    if (homeName === "." || homeName === ".." || homeName.includes("/")) {
-      throw new GatewayError("invalid_request", "TRON_HOME_NAME must be one home-relative directory name");
-    }
-    return join(homedir(), homeName);
-  }
-  return join(homedir(), ".tron");
-}
 
 function isStoredGatewayConfig(value: unknown): value is StoredGatewayConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;

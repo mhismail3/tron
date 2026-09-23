@@ -29,7 +29,7 @@ function redact(value: string): string {
     .replace(/\/private\/var\/[^\s'"]+/gu, "[PRIVATE_PATH]");
 }
 
-function boundedMessage(value: string): string {
+export function boundedMessage(value: string): string {
   const redacted = redact(value);
   const bytes = Buffer.from(redacted, "utf8");
   if (bytes.length <= MAX_MESSAGE_BYTES) return redacted;

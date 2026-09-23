@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-23, L-0
+- **Last updated:** 2026-09-23, L-1a
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -176,7 +176,7 @@ user reinstalls manually, so batch them for one reinstall.
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
 | L-0 | Done | Payload import containment | none | planning session, 2026-09-23 |
-| L-1a | Claimed | Gateway startup-fatal record | none | observability-L-1a session, 2026-09-23 |
+| L-1a | Done | Gateway startup-fatal record | none | observability-L-1a session, 2026-09-23 |
 | L-1c | Ready | Deploy timeline and real failure cause | L-1a | |
 | L-2 | Ready | Gateway levels, debug buffer, retention, record format | none | |
 | L-3 | Ready | iOS always-on recording replaces Diagnostic Capture; one-tap export | L-2 | |
@@ -190,11 +190,10 @@ user reinstalls manually, so batch them for one reinstall.
 
 ### L-1a — Gateway startup-fatal record
 
-- Move the body of `packages/gateway/src/index.ts` into a new
-  `gateway-main.ts` in `packages/gateway/src/`.
-- `index.ts` becomes a small shim. It installs `uncaughtException` and
-  `unhandledRejection` handlers and runs `await import("./gateway-main.js")` in
-  `try`. On failure it synchronously appends `gateway.fatal-startup` (with
+- Move the body of `packages/gateway/src/index.ts` into
+  `packages/gateway/src/gateway-main.ts`.
+- `index.ts` becomes a small shim that runs `await import("./gateway-main.js")`
+  in `try`. On failure it synchronously appends `gateway.fatal-startup` (with
   `error`, epoch and version) to `gateway.jsonl`, then exits non-zero.
 - The entrypoint path is unchanged, so the launcher and validator contracts
   stay as they are.
@@ -342,3 +341,12 @@ user reinstalls manually, so batch them for one reinstall.
 - Changes: `1919394af`.
 - Tasks added: L-1a through L-6. The plan started as a shared Claude Doc and moved here the same day when the plans folder was created.
 - For the next agent: start with L-1a, then L-1c.
+
+### L-1a · Done · 2026-09-23 · observability-L-1a session
+
+- Result: `packages/gateway/src/index.ts` is now a small entrypoint that imports `gateway-main.ts` and, when loading or startup fails, appends one `gateway.fatal-startup` record (error with one level of cause, runtime epoch, payload version) to `gateway.jsonl` and exits 1.
+- Evidence: focused tests (`index.test.ts`, `config.test.ts`, `logger.test.ts`) pass 32/32 in under 1 s; negative control: removing the record call fails `index.test.ts`. Compiled build with `dist/transport/connection-policy.js` deleted, run in an isolated home: exit 1 and one record naming `<payload>/dist/transport/connection-policy.js` with `ERR_MODULE_NOT_FOUND`. Unmodified compiled build in an isolated home reached `gateway.listening`, wrote no fatal record and stopped cleanly on SIGTERM. Compiled `index.js` is 2,943 bytes, above the 1,024-byte entrypoint minimum the launcher, deploy helper and Swift validator enforce. The full Gateway suite was started but stopped before finishing: running it on the Mac that hosts the live Gateway raised the load average to about 15 and stalled the live Gateway's event loop for 22–35 s, dropping phone connections. It has not been run on this change.
+- Changes: branch `observability/L-1a`.
+- Tasks added: none.
+- Deviations: the shim installs no global `uncaughtException`/`unhandledRejection` handlers, because `gateway-main.ts` already installs them once running and errors before that reject the import the shim awaits. `resolveTronHome` moved from `config.ts` into `packages/gateway/src/tron-home.ts` so the shim avoids `config.ts`'s third-party imports; `boundedMessage` is now exported from the logger for reuse. Payload and home path prefixes are shortened before redaction, because the standard redaction replaces whole `/Users/...` paths and would hide the failing file. One level of `cause` is recorded because wrapped startup errors carry their root reason there.
+- For the next agent: run the full Gateway suite only when the live Gateway is idle or on another machine; focused owner tests are the default. L-1c can now read `gateway.fatal-startup` records for the candidate's `runtimeEpoch` or `payloadVersion`. Keep the entrypoint above 1,024 bytes; the installed launcher enforces that minimum.

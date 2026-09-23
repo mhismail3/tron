@@ -2,7 +2,8 @@ import { chmod, lstat, mkdtemp as createTemp, readFile, rm, symlink, writeFile }
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { isTailscaleAddress, loadConfig as loadGatewayConfig, machineGroupIdentityPaths, resolveBindHost, resolveTronHome } from "./config.js";
+import { isTailscaleAddress, loadConfig as loadGatewayConfig, machineGroupIdentityPaths, resolveBindHost } from "./config.js";
+import { resolveTronHome } from "./tron-home.js";
 import * as durableJson from "./util/durable-json.js";
 
 const roots: string[] = [];
