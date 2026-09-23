@@ -15,6 +15,7 @@ function model(): KnowledgeGenerationModel {
   return {
     async reflect() { return "generated handoff"; },
     async synthesize() { return "generated synthesis"; },
+    async summarizeSource() { return { text: "A substantive source summary.", tags: [{ label: "AI agents", kind: "semantic" as const }] }; },
     async assess() { return { summary: "Useful source", evidenceQuality: "high", freshness: "current" }; },
   };
 }
@@ -52,6 +53,26 @@ describe("KnowledgeService integration", () => {
     for (const coverage of [pending.coverage, observed.coverage]) {
       await expect(service.invoke({ operation: "knowledge.observation.dismiss", request: { commandId: `cannot-clear-${coverage.id}`, coverageId: coverage.id, expectedRevision: coverage.revisionId } })).rejects.toThrow("Only failed");
     }
+  });
+
+  it("generates an explicit source-content summary against the exact saved revision", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-source-summary-")); roots.push(root);
+    const store = new KnowledgeStore(new TronWorkspace(root));
+    const source = await store.captureSource({ commandId: "source-summary-capture", record: { kind: "source", scope: "research", provenance: { actor: "user", evidence: [] }, relations: [], content: { title: "Thread", text: "A post and its saved replies", captureDisposition: "partial", capturedAt: "2026-01-01T00:00:00Z" } } });
+    let input = "";
+    let generations = 0;
+    const service = new KnowledgeService(store, new KnowledgeObservationService(store, undefined), {}, () => ({ ...model(), async summarizeSource(request) { generations += 1; input = request.sourceText; return { text: "A post with some saved replies.", tags: [{ label: "AI agents", kind: "semantic" }] }; } }));
+    const action = { operation: "knowledge.source.summarize" as const, request: { commandId: "source-summary-generate", sourceId: source.record.id, expectedRevision: source.record.revisionId } };
+    const result = await service.invoke(action);
+    expect(input).toContain("coverage=sampled");
+    expect(input).toContain("disposition=partial");
+    expect(result).toMatchObject({ record: { content: { summary: { text: "A post with some saved replies.", tags: [{ label: "AI agents", kind: "semantic" }], sourceRevisionId: source.record.revisionId, coverage: "sampled" } } } });
+    const replay = await service.invoke(action);
+    expect(replay).toMatchObject({ record: { content: { summary: { text: "A post with some saved replies." } } } });
+    expect(generations).toBe(1);
+    const updated = await store.read(source.record.id);
+    expect(updated?.content.assessment).toBeUndefined();
+    expect(updated?.content.summary?.evidenceDigest).toMatch(/^[a-f0-9]{64}$/);
   });
 
   it("routes source triage through the persisted source and model seam", async () => {

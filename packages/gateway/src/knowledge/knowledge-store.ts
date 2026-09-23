@@ -1066,6 +1066,22 @@ export class KnowledgeStore {
    * derived note. The expected configuration and exact revision set are
    * checked inside the serialized mutation, so late cancellation/config or
    * privacy changes cannot publish stale generated content. */
+  async generateSourceSummary(commandId: string, sourceId: string, expectedRevision: string, expectedConfigRevision: number, generate: (source: KnowledgeRecord & { kind: "source" }) => Promise<import("./knowledge-contract.js").SourceSummary>, signal?: AbortSignal): Promise<KnowledgeMutationResult> {
+    // Keep model dispatch inside the receipt-owned mutation: a replayed command
+    // returns its committed result without charging the configured model again.
+    return this.mutate("knowledge.source.summarize", commandId, { sourceId, expectedRevision, expectedConfigRevision }, async (state, paths) => {
+      if (signal?.aborted) throw new GatewayError("busy", "Source summary was cancelled", true);
+      if (state.config.revision !== expectedConfigRevision) throw conflict("Knowledge configuration changed while the summary was generated");
+      const current = await this.currentRecord(state, paths, sourceId);
+      if (!current || current.kind !== "source" || current.revisionId !== expectedRevision || this.recordExcluded(state, current)) throw conflict("Source changed or became unavailable while the summary was generated");
+      if (!current.content.text?.trim()) throw new GatewayError("unsupported", "A readable source extraction is required to generate a summary");
+      const summary = await generate(current);
+      if (signal?.aborted) throw new GatewayError("busy", "Source summary was cancelled", true);
+      if (state.config.revision !== expectedConfigRevision) throw conflict("Knowledge configuration changed while the summary was generated");
+      if (summary.sourceRevisionId !== current.revisionId) throw conflict("Source summary evidence revision is stale");
+      return this.putRecord(state, paths, { kind: "source", id: current.id, createdAt: current.createdAt, scope: current.scope, provenance: current.provenance, relations: current.relations, ...(current.temporal ? { temporal: current.temporal } : {}), content: { ...current.content, summary } }, current.revisionId);
+    }, undefined, signal);
+  }
   async synthesize(commandId: string, sessionId: string, sourceRevisionIds: string[], text: string, expectedConfigRevision: number, signal?: AbortSignal): Promise<KnowledgeMutationResult> {
     safeId(sessionId, "session id");
     if (!text || text.length > 30_000 || sourceRevisionIds.length === 0 || sourceRevisionIds.length > 100 || new Set(sourceRevisionIds).size !== sourceRevisionIds.length) throw invalid("Synthesis is bounded and requires distinct source revisions");

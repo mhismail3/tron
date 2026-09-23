@@ -643,6 +643,13 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertEqual(KnowledgeSourcePresentationPolicy.thumbnailLetters(source), "EC")
     }
 
+    func testRaindropCreatedTimeIsNotMisrepresentedAsPublicationTime() {
+        let raindrop = KnowledgeSourceContent(title: "Saved", uri: "https://example.com", text: "text", object: nil, mediaType: "text/plain", captureDisposition: .complete, annotations: nil, sourcePublishedAt: "2025-12-30T12:00:00Z", sourceSavedAt: nil, capturedAt: "2026-01-01T00:00:00Z", origin: "connector", origins: nil, identity: KnowledgeSourceIdentity(provider: "raindrop", accountId: "1", itemId: "2"), assessment: nil)
+        XCTAssertNil(KnowledgeSourcePresentationPolicy.publishedAt(raindrop), "Historical Raindrop `created` values were saved times, not publish times")
+        let xPost = KnowledgeSourceContent(title: "Post", uri: "https://x.com/example/status/1", text: "text", object: nil, mediaType: "text/plain", captureDisposition: .complete, annotations: nil, sourcePublishedAt: "2025-12-30T12:00:00Z", capturedAt: "2026-01-01T00:00:00Z", origin: "connector", origins: nil, identity: KnowledgeSourceIdentity(provider: "x", accountId: "1", itemId: "2"), assessment: nil)
+        XCTAssertEqual(KnowledgeSourcePresentationPolicy.publishedAt(xPost), "2025-12-30T12:00:00Z")
+    }
+
     func testSourceWireShapeDecodesCaptureReasonAndAssessmentMetadataWithoutInventingConfidence() throws {
         let data = Data(#"{"schemaVersion":1,"id":"source","revisionId":"r1","kind":"source","scope":"research","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","provenance":{"actor":"connector","evidence":[]},"relations":[],"content":{"title":"Metadata","uri":"https://example.com","captureDisposition":"metadata-only","captureReason":"Provider returned metadata without readable text","capturedAt":"2026-01-01T00:00:00Z","assessment":{"summary":"Bounded review","evidenceQuality":"unknown","freshness":"unknown","generatedAt":"2026-01-01T00:00:00Z","evidenceDigest":"0000000000000000000000000000000000000000000000000000000000000000","coverage":"sampled","classification":"reference","inputDigest":"digest","usage":{"inputTokens":12,"outputTokens":4,"estimatedCostCents":0,"pricing":"fixture"}}}}"#.utf8)
         let record = try JSONDecoder().decode(KnowledgeRecord.self, from: data)
@@ -674,13 +681,15 @@ final class KnowledgeModelsTests: XCTestCase {
         var wire: [String: Any] = [
             "title": title, "text": text, "captureDisposition": "partial",
             "capturedAt": "2026-01-01T00:00:00.000Z",
-            "assessment": ["summary": summary, "evidenceQuality": "high", "freshness": "current",
-                           "generatedAt": "2026-01-02T00:00:00.001Z", "evidenceDigest": digest]
+            "summary": ["text": summary, "tags": [["label": "AI agents", "kind": "semantic"]], "generatedAt": "2026-01-02T00:00:00.001Z", "sourceRevisionId": "revision-1234567890123456", "evidenceDigest": digest, "coverage": "full"],
+            "assessment": ["summary": "Useful or uncertain intake classification; retained by policy.", "evidenceQuality": "unknown", "freshness": "unknown", "generatedAt": "2026-01-02T00:00:00.001Z"]
         ]
         func source(_ value: [String: Any]) throws -> KnowledgeSourceContent {
             try JSONDecoder().decode(KnowledgeSourceContent.self, from: JSONSerialization.data(withJSONObject: value))
         }
         XCTAssertEqual(KnowledgeSourcePresentationPolicy.summary(try source(wire)), summary.trimmingCharacters(in: .whitespacesAndNewlines))
+        var assessmentOnly = wire; assessmentOnly.removeValue(forKey: "summary")
+        XCTAssertNil(KnowledgeSourcePresentationPolicy.summary(try source(assessmentOnly)), "Intake assessment text is not a content summary")
         wire["capturedAt"] = "2026-01-03T00:00:00Z"
         XCTAssertNotNil(KnowledgeSourcePresentationPolicy.summary(try source(wire)), "Unchanged evidence stays valid across metadata updates")
         wire["text"] = "Changed evidence"

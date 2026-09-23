@@ -327,7 +327,7 @@ describe("knowledge connectors", () => {
     const assessment: SourceAssessmentModel = { async assess(_input, _signal, context) { await context?.beforeDispatch?.(); return { summary: "Synthetic retained source", evidenceQuality: "high", freshness: "current", model: "jev-1.13.0", recommendation: "retained", confidence: 0.95, profileVersion: "fixture-profile", rubricVersion: "fixture-rubric", usage: { inputTokens: 100, outputTokens: 4, estimatedCostCents: 0.00042, pricing: "typesafe-jev-1.13.0-input-0.042-usd-per-million-output-free" } }; } };
     const { store, extension } = await fixture(async (url, init) => {
       if (url.endsWith("/user")) return response({ user: { _id: 42 } });
-      if (url.includes("/raindrops/111?page=0")) return response({ items: [{ _id: 1, title: "Synthetic item", link: "https://example.test/item", collection: { $id: 111 }, custom: { preserved: true } }] });
+      if (url.includes("/raindrops/111?page=0")) return response({ items: [{ _id: 1, title: "Synthetic item", link: "https://example.test/item", created: "2025-12-30T12:00:00Z", collection: { $id: 111 }, custom: { preserved: true } }] });
       if (url.endsWith("/raindrop/1") && init.method !== "PUT") return response({ item: { _id: 1, collection: { $id: Number(collection) } } });
       if (init.method === "PUT") { collection = "222"; return response({ item: { _id: 1, collection: { $id: 222 } } });
       }
@@ -347,6 +347,8 @@ describe("knowledge connectors", () => {
     const sources = (await store.list({ kind: "source", includeArchived: true })).records;
     expect(sources).toHaveLength(1);
     expect(sources[0]?.content.collectionId).toBe("111");
+    expect(sources[0]?.content.sourceSavedAt).toBe("2025-12-30T12:00:00Z");
+    expect(sources[0]?.content.sourcePublishedAt).toBeUndefined();
     expect(sources[0]?.content.representations?.[0]?.kind).toBe("provider-api");
     expect(sources[0]?.content.admission?.status).toBe("retained");
     expect((await store.connectorState("raindrop"))?.assessmentPilot).toMatchObject({ usedItems: 1, reservedCents: 1 });
