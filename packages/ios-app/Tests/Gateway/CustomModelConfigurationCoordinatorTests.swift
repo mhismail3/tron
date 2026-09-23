@@ -43,7 +43,6 @@ struct CustomModelConfigurationCoordinatorTests {
             await harness.socket.enqueue(response(id: pendingRequest.id, result: models("late")))
             #expect(!(await pending.value))
             #expect(harness.owner.models(for: .global) == nil)
-            #expect(CustomModelConfigurationCoordinator.requestTimeout == .seconds(30))
             await harness.client.close()
         }
     }

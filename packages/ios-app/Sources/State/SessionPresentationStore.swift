@@ -145,7 +145,9 @@ extension SessionPresentationStoreDelegate {
 @MainActor
 @Observable
 final class SessionPresentationStore {
+    // Renew at one-third of the Gateway's 45-second presentation lease.
     private static let presentationLeaseRenewalInterval: Duration = .seconds(15)
+    // A busy open may clear quickly; keep its bounded retry local to this presentation owner.
     private static let busyOpenRetryBaseDelay: Duration = .milliseconds(250)
 
     private let client: GatewayClient
@@ -985,7 +987,7 @@ final class SessionPresentationStore {
                        expectedNextEntryId: forward ? nil : oldWindow.items.first?.id,
                        expectedPreviousEntryId: forward ? oldWindow.items.last?.id : nil,
                        expectedRuntimeGeneration: authority.runtimeGeneration, expectedLeafEntryId: authority.leafEntryId),
-                timeout: .seconds(15), expectedConnection: expectedConnection
+                expectedConnection: expectedConnection
             )
             let currentConnectionID = await client.activeConnectionID()
             // Revalidate the complete presentation lease after the last await,
@@ -1789,8 +1791,7 @@ final class SessionPresentationStore {
         struct Response: Decodable { let closed: Bool }
         let response: Response? = try? await client.request(
             "session.close",
-            Params(sessionId: lease.sessionID, subscriptionToken: lease.subscriptionToken),
-            timeout: .seconds(5)
+            Params(sessionId: lease.sessionID, subscriptionToken: lease.subscriptionToken)
         )
         guard connectionGeneration == lease.connectionGeneration,
               subscribedSessionID == lease.sessionID,
@@ -1819,8 +1820,7 @@ final class SessionPresentationStore {
         struct Response: Decodable { let closed: Bool }
         let _: Response? = try? await client.request(
             "session.close",
-            Params(sessionId: sessionID, subscriptionToken: token),
-            timeout: .seconds(5)
+            Params(sessionId: sessionID, subscriptionToken: token)
         )
     }
 
@@ -2045,8 +2045,7 @@ final class SessionPresentationStore {
             struct Params: Codable { let sessionId: String }
             let responseValue = try await client.requestValue(
                 "session.open",
-                Params(sessionId: sessionID),
-                timeout: .seconds(20)
+                Params(sessionId: sessionID)
             )
             // session.open creates synchronization ownership before iOS decodes
             // the snapshot. Preserve the independently bounded close token so
@@ -2460,8 +2459,7 @@ final class SessionPresentationStore {
                 subscriptionToken: subscriptionToken,
                 revision: revision,
                 visible: visible
-            ),
-            timeout: .seconds(5)
+            )
         )
     }
 
@@ -2564,8 +2562,7 @@ final class SessionPresentationStore {
             do {
                 let _: JSONValue = try await client.requestValue(
                     "session.attention.read",
-                    params,
-                    timeout: .seconds(8)
+                    params
                 )
                 guard connectionGeneration == expectedConnectionGeneration,
                       subscribedSessionID == sessionID,
@@ -2594,8 +2591,7 @@ final class SessionPresentationStore {
         struct Response: Decodable { let synchronized: Bool }
         let response: Response = try await client.request(
             "session.sync",
-            Params(sessionId: sessionID, syncToken: syncToken),
-            timeout: .seconds(15)
+            Params(sessionId: sessionID, syncToken: syncToken)
         )
         guard response.synchronized else {
             throw GatewayFailure(code: "sync_failed", message: "Tron did not confirm session synchronization.", retryable: true, details: nil)

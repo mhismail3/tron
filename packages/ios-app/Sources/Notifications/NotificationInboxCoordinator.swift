@@ -95,8 +95,11 @@ struct NotificationInboxItem: Hashable, Identifiable, Sendable {
 }
 
 enum NotificationInboxAdmissionPolicy {
+    // Match the Gateway page limit so one scroll request cannot over-read.
     static let maximumPageCount = 50
+    // Bound aggregate retained rows across profile buckets.
     static let maximumRetainedCount = 512
+    // Cap encoded projection size while retaining bounded history.
     static let maximumAggregateBytes = 512 * 1_024
 
     static func admits(_ item: GatewayNotificationInboxItem) -> Bool {

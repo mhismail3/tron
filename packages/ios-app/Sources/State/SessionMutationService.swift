@@ -63,7 +63,7 @@ final class SessionMutationService {
             method: "session.create",
             commandID: commandID
         ) {
-            try await client.request("session.create", params, timeout: .seconds(60))
+            try await client.request("session.create", params, timeout: GatewayRequestTimeout.sessionCreate)
         }
         return response.sessionId
     }
@@ -94,7 +94,7 @@ final class SessionMutationService {
             commandId: commandID
         )
         let response: Response = try await executor.perform(method: "session.prompt", commandID: commandID) {
-            try await client.request("session.prompt", params, as: Response.self, timeout: .seconds(15))
+            try await client.request("session.prompt", params, as: Response.self)
         }
         return response.operationId
     }
@@ -118,7 +118,7 @@ final class SessionMutationService {
             commandId: commandID
         )
         return try await executor.perform(method: "session.attention.set", commandID: commandID) {
-            try await client.request("session.attention.set", params, as: SessionAttentionProjection.self, timeout: .seconds(15))
+            try await client.request("session.attention.set", params, as: SessionAttentionProjection.self)
         }
     }
 
@@ -138,7 +138,7 @@ final class SessionMutationService {
             commandId: commandID
         )
         let _: Response = try await executor.perform(method: "session.abort", commandID: commandID) {
-            try await client.request("session.abort", params, timeout: .seconds(30))
+            try await client.request("session.abort", params)
         }
     }
 
@@ -156,8 +156,7 @@ final class SessionMutationService {
         ) {
             try await client.request(
                 "session.processTranscript.abort",
-                params,
-                timeout: .seconds(30)
+                params
             )
         }
     }
@@ -225,7 +224,7 @@ final class SessionMutationService {
             commandId: commandID
         )
         _ = try await executor.performValue(method: "session.bash", commandID: commandID) {
-            try await client.requestValue("session.bash", params, timeout: .seconds(300))
+            try await client.requestValue("session.bash", params, timeout: GatewayRequestTimeout.sessionBash)
         }
     }
 
@@ -324,7 +323,7 @@ final class SessionMutationService {
         let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, instructions: instructions, commandId: commandID)
         let _: Response = try await executor.perform(method: "session.compact", commandID: commandID) {
-            try await client.request("session.compact", params, timeout: .seconds(300))
+            try await client.request("session.compact", params, timeout: GatewayRequestTimeout.sessionCompact)
         }
     }
 
@@ -355,7 +354,7 @@ final class SessionMutationService {
             commandId: commandID
         )
         let response: Response = try await executor.perform(method: "session.fork", commandID: commandID) {
-            try await client.request("session.fork", params, timeout: .seconds(120))
+            try await client.request("session.fork", params, timeout: GatewayRequestTimeout.sessionFork)
         }
         return SessionForkOutcome(sessionID: response.sessionId, selectedText: response.selectedText)
     }
@@ -391,7 +390,7 @@ final class SessionMutationService {
             method: "session.navigate",
             commandID: commandID
         ) {
-            try await client.request("session.navigate", params, timeout: .seconds(300))
+            try await client.request("session.navigate", params, timeout: GatewayRequestTimeout.sessionNavigate)
         }
         return response.editorText
     }
@@ -418,7 +417,7 @@ final class SessionMutationService {
         let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, commandId: commandID)
         let _: Response = try await executor.perform(method: "session.delete", commandID: commandID) {
-            try await client.request("session.delete", params, timeout: .seconds(60))
+            try await client.request("session.delete", params, timeout: GatewayRequestTimeout.sessionDelete)
         }
     }
 
@@ -431,7 +430,7 @@ final class SessionMutationService {
             method: "session.reloadResources",
             commandID: commandID
         ) {
-            try await client.request("session.reloadResources", params, timeout: .seconds(120))
+            try await client.request("session.reloadResources", params, timeout: GatewayRequestTimeout.sessionReloadResources)
         }
     }
 

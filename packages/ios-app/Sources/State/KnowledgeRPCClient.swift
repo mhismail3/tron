@@ -9,7 +9,7 @@ final class KnowledgeRPCClient {
     /// Lets coverage be read by disposition, so a client can list the cuts that
     /// need attention instead of scanning a ledger that is mostly settled.
     static let coverageFilterCapability = "knowledge-coverage-filter.v1"
-    typealias Request = @MainActor @Sendable (String, JSONValue, Duration) async throws -> JSONValue
+    typealias Request = @MainActor @Sendable (String, JSONValue) async throws -> JSONValue
     private let requestValue: Request
     private let mutationExecutor: ConfirmedMutationExecutor?
     private let uuidSource: UUIDSource
@@ -18,16 +18,16 @@ final class KnowledgeRPCClient {
         self.requestValue = request; self.mutationExecutor = mutationExecutor; self.uuidSource = uuidSource
     }
 
-    private func request<Response: Decodable>(_ method: String, _ params: some Encodable = EmptyParams(), timeout: Duration = .seconds(20)) async throws -> Response {
-        try await requestValue(method, JSONValue.encode(params), timeout).decode(Response.self)
+    private func request<Response: Decodable>(_ method: String, _ params: some Encodable = EmptyParams()) async throws -> Response {
+        try await requestValue(method, JSONValue.encode(params)).decode(Response.self)
     }
-    private func mutate<Response: Decodable>(_ method: String, parameters: some Encodable, commandID: String? = nil, timeout: Duration = .seconds(30)) async throws -> Response {
+    private func mutate<Response: Decodable>(_ method: String, parameters: some Encodable, commandID: String? = nil) async throws -> Response {
         guard let mutationExecutor else { throw needsSelectedGateway() }
         let id = commandID ?? uuidSource.next().uuidString.lowercased()
         var object = try JSONValue.encode(parameters).objectValue ?? [:]
         object["commandId"] = .string(id)
         let value = try await mutationExecutor.performValue(method: method, commandID: id) { [requestValue] in
-            try await requestValue(method, .object(object), timeout)
+            try await requestValue(method, .object(object))
         }
         return try value.decode(Response.self)
     }
@@ -84,7 +84,7 @@ final class KnowledgeRPCClient {
         struct Params: Encodable { let recordId: String; let revisionId: String; let hash: String; let bytes: Int; let mediaType: String; let includeArchived: Bool?; let offset: Int }
         let requestedOffset = max(0, offset)
         guard reference.bytes >= 0, reference.bytes <= 512_000, !reference.hash.isEmpty, !reference.mediaType.isEmpty else { throw invalidResponse() }
-        let value: JSONValue = try await request("knowledge.object.read", Params(recordId: recordID, revisionId: revisionID, hash: reference.hash, bytes: reference.bytes, mediaType: reference.mediaType, includeArchived: includeArchived ? true : nil, offset: requestedOffset), timeout: .seconds(30))
+        let value: JSONValue = try await request("knowledge.object.read", Params(recordId: recordID, revisionId: revisionID, hash: reference.hash, bytes: reference.bytes, mediaType: reference.mediaType, includeArchived: includeArchived ? true : nil, offset: requestedOffset))
         if value == .null { return nil }
         let object = try value.decode(KnowledgeObjectRead.self)
         guard let decoded = Data(base64Encoded: object.base64),

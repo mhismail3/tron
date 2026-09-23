@@ -142,7 +142,7 @@ final class SettingsTrustCoordinator {
             method: "settings.update",
             commandID: commandID
         ) {
-            try await client.requestValue("settings.update", params, timeout: .seconds(60))
+            try await client.requestValue("settings.update", params)
         }
         try requireProfile(admittedProfileGeneration)
         _ = await refreshSettings(target: target)

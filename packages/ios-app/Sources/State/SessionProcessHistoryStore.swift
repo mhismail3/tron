@@ -181,8 +181,7 @@ final class SessionProcessHistoryStore {
                 }
                 let page: SessionProcessHistoryPage = try await client.request(
                     "session.processHistory.list",
-                    Params(sessionId: sessionID, cursor: cursor, limit: 50),
-                    timeout: .seconds(15)
+                    Params(sessionId: sessionID, cursor: cursor, limit: 50)
                 )
                 guard !Task.isCancelled else { return }
                 await MainActor.run { [weak self] in
@@ -295,8 +294,7 @@ final class SessionProcessHistoryStore {
                 struct Params: Encodable { let sessionId, processId: String; let historyRevision: String? }
                 let response: SessionProcessHistoryDetail = try await client.request(
                     "session.processHistory.get",
-                    Params(sessionId: sessionID, processId: processID, historyRevision: revision),
-                    timeout: .seconds(15)
+                    Params(sessionId: sessionID, processId: processID, historyRevision: revision)
                 )
                 guard !Task.isCancelled else { return }
                 await MainActor.run { [weak self] in

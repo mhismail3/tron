@@ -347,8 +347,7 @@ final class ProviderAuthCoordinator {
                 authType: authType,
                 sessionId: target.sessionID,
                 commandId: uuidSource.next().uuidString
-            ),
-            timeout: .seconds(15)
+            )
         )
         try requireProfile(admittedProfileGeneration)
         // Retain every operation target admitted by this profile so even a
@@ -468,8 +467,7 @@ final class ProviderAuthCoordinator {
         do {
             let response: ResumeResponse = try await client.request(
                 "auth.resume",
-                ResumeParams(operationId: operationID),
-                timeout: .seconds(15)
+                ResumeParams(operationId: operationID)
             )
             guard response.operationId == operationID else { return }
             if response.state != "active" && activeAuthOperationID == operationID {
@@ -512,8 +510,7 @@ final class ProviderAuthCoordinator {
                 operationId: operationID,
                 callbackId: capture.id,
                 query: callback.percentEncodedQuery
-            ),
-            timeout: .seconds(45)
+            )
         )
         if response.forwarded || activeAuthOperationID != operationID {
             pendingBrowserCallbackByOperation[operationID] = nil
@@ -569,7 +566,7 @@ final class ProviderAuthCoordinator {
             method: "models.refresh",
             commandID: commandID
         ) {
-            try await client.request("models.refresh", params, timeout: .seconds(75))
+            try await client.request("models.refresh", params, timeout: GatewayRequestTimeout.modelCatalogRefresh)
         }
         try requireProfile(admittedProfileGeneration)
         // Pi retains prior provider entries when one network refresh fails. Reload
@@ -599,7 +596,7 @@ final class ProviderAuthCoordinator {
         let commandID = uuidSource.next().uuidString
         let params = LogoutParams(providerId: providerID, commandId: commandID, sessionId: target.sessionID)
         let _: LogoutResponse = try await mutationExecutor.perform(method: "auth.logout", commandID: commandID) {
-            try await client.request("auth.logout", params, timeout: .seconds(60))
+            try await client.request("auth.logout", params)
         }
         try requireProfile(admittedProfileGeneration)
         _ = await refreshCatalog(target: target)

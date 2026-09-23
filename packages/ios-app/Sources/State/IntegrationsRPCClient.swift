@@ -6,7 +6,7 @@ import Foundation
 /// shared receipt executor and continue after presentation dismissal.
 @MainActor
 final class IntegrationsRPCClient {
-    typealias Request = @MainActor @Sendable (String, JSONValue, Duration) async throws -> JSONValue
+    typealias Request = @MainActor @Sendable (String, JSONValue) async throws -> JSONValue
     private let requestValue: Request
     private let mutationExecutor: ConfirmedMutationExecutor?
     private let uuidSource: UUIDSource
@@ -88,17 +88,17 @@ final class IntegrationsRPCClient {
         return value
     }
 
-    private func request<Response: Decodable>(_ method: String, _ parameters: some Encodable = EmptyParams(), timeout: Duration = .seconds(20)) async throws -> Response {
-        try await requestValue(method, JSONValue.encode(parameters), timeout).decode(Response.self)
+    private func request<Response: Decodable>(_ method: String, _ parameters: some Encodable = EmptyParams()) async throws -> Response {
+        try await requestValue(method, JSONValue.encode(parameters)).decode(Response.self)
     }
 
-    private func mutate<Response: Decodable>(_ method: String, parameters: some Encodable, timeout: Duration = .seconds(30)) async throws -> Response {
+    private func mutate<Response: Decodable>(_ method: String, parameters: some Encodable) async throws -> Response {
         guard let mutationExecutor else { throw needsSelectedGateway() }
         let commandID = uuidSource.next().uuidString.lowercased()
         var object = try JSONValue.encode(parameters).objectValue ?? [:]
         object["commandId"] = .string(commandID)
         let value = try await mutationExecutor.performValue(method: method, commandID: commandID) { [requestValue] in
-            try await requestValue(method, .object(object), timeout)
+            try await requestValue(method, .object(object))
         }
         return try value.decode(Response.self)
     }

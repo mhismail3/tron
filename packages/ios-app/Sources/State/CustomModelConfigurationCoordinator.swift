@@ -11,8 +11,6 @@ protocol CustomModelConfigurationCoordinatorDelegate: AnyObject {
 @MainActor
 @Observable
 final class CustomModelConfigurationCoordinator {
-    static let requestTimeout: Duration = .seconds(30)
-
     private struct ValidateParams: Codable {
         let document: JSONValue
     }
@@ -61,8 +59,7 @@ final class CustomModelConfigurationCoordinator {
         do {
             let value = try await client.requestValue(
                 "models.custom.get",
-                EmptyParams(),
-                timeout: Self.requestTimeout
+                EmptyParams()
             )
             guard admits(admission) else { return false }
             modelsByTarget[target] = value
@@ -82,8 +79,7 @@ final class CustomModelConfigurationCoordinator {
         do {
             _ = try await client.requestValue(
                 "models.custom.validate",
-                ValidateParams(document: document),
-                timeout: Self.requestTimeout
+                ValidateParams(document: document)
             )
         } catch {
             guard admitsMutation(
@@ -106,7 +102,7 @@ final class CustomModelConfigurationCoordinator {
                 method: "models.custom.put",
                 commandID: commandID
             ) {
-                try await client.requestValue("models.custom.put", params, timeout: Self.requestTimeout)
+                try await client.requestValue("models.custom.put", params)
             }
         } catch {
             guard admitsMutation(

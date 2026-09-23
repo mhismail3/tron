@@ -598,9 +598,7 @@ struct AppModelReconnectTests {
             coordinator.requestReconnect(immediate: true)
             try await sockets[1].waitUntilSent(count: 1)
             await sockets[1].enqueue(helloFrame())
-            for _ in 0..<50 where projection.aggregateCompletions.isEmpty {
-                await Task.yield()
-            }
+            await projection.waitForAggregateCompletion(count: 1)
             #expect(projection.restoreCount == 1)
             #expect(projection.aggregateCompletions == [false])
             #expect(coordinator.connectionState == .connected)
@@ -769,9 +767,7 @@ struct AppModelReconnectTests {
         for _ in 0..<20 where coordinator.connectionState != .connected { await Task.yield() }
         await foreground?.value
         #expect(factory.requests.count == 2)
-        for _ in 0..<50 where projection.aggregateCompletions.isEmpty {
-            await Task.yield()
-        }
+        await projection.waitForAggregateCompletion(count: 1)
         #expect(projection.aggregateCompletions == [true])
         #expect(coordinator.connectionState == .connected)
 
@@ -1255,6 +1251,7 @@ struct AppModelReconnectTests {
 @MainActor
 private final class NoopGatewayLifecycleProjection: GatewayLifecycleProjectionDelegate {
     private(set) var aggregateCompletions: [Bool] = []
+    private var aggregateWaiters: [(count: Int, continuation: CheckedContinuation<Void, Never>)] = []
     private(set) var cacheLoads = 0
     private var restoreResult = true
     private(set) var refreshCount = 0
@@ -1274,8 +1271,17 @@ private final class NoopGatewayLifecycleProjection: GatewayLifecycleProjectionDe
         succeeded: Bool
     ) {
         aggregateCompletions.append(succeeded)
+        let ready = aggregateWaiters.filter { aggregateCompletions.count >= $0.count }
+        aggregateWaiters.removeAll { aggregateCompletions.count >= $0.count }
+        for waiter in ready { waiter.continuation.resume() }
     }
     func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async { refreshCount += 1 }
+    func waitForAggregateCompletion(count: Int) async {
+        if aggregateCompletions.count >= count { return }
+        await withCheckedContinuation { continuation in
+            aggregateWaiters.append((count: count, continuation: continuation))
+        }
+    }
     func setRestoreResult(_ result: Bool) { restoreResult = result }
     func lifecycleRestoreMountedPresentation(admission: GatewayLifecycleCoordinator.Admission) async -> Bool { restoreResult }
     func lifecycleReattachTerminals(admission: GatewayLifecycleCoordinator.Admission) async {}
@@ -1288,6 +1294,7 @@ private final class NoopGatewayLifecycleProjection: GatewayLifecycleProjectionDe
 private final class FailFirstMountedRestoreProjection: GatewayLifecycleProjectionDelegate {
     private(set) var restoreCount = 0
     private(set) var aggregateCompletions: [Bool] = []
+    private var aggregateWaiters: [(count: Int, continuation: CheckedContinuation<Void, Never>)] = []
     private let blockRefresh: Bool
     private(set) var refreshStarted = false
     private var releaseRefreshContinuation: CheckedContinuation<Void, Never>?
@@ -1302,7 +1309,18 @@ private final class FailFirstMountedRestoreProjection: GatewayLifecycleProjectio
         succeeded: Bool
     ) {
         aggregateCompletions.append(succeeded)
+        let ready = aggregateWaiters.filter { aggregateCompletions.count >= $0.count }
+        aggregateWaiters.removeAll { aggregateCompletions.count >= $0.count }
+        for waiter in ready { waiter.continuation.resume() }
     }
+
+    func waitForAggregateCompletion(count: Int) async {
+        if aggregateCompletions.count >= count { return }
+        await withCheckedContinuation { continuation in
+            aggregateWaiters.append((count: count, continuation: continuation))
+        }
+    }
+
     func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {
         guard blockRefresh else { return }
         refreshStarted = true

@@ -4,6 +4,17 @@ import Testing
 
 @MainActor
 struct GatewayReconnectScheduleTests {
+    @Test("bounded projection retries reuse the shared jittered backoff curve")
+    func boundedRetryDelayUsesSharedCurve() {
+        let policy = ReconnectDelayPolicy(nextUnitInterval: { 0.5 })
+        #expect(policy.delay(forFailureAttempt: 1) == .seconds(2))
+        let second = policy.delay(forFailureAttempt: 2)
+        #expect(second > .seconds(3.399) && second < .seconds(3.401))
+        let third = policy.delay(forFailureAttempt: 3)
+        #expect(third > .seconds(5.779) && third < .seconds(5.781))
+        #expect(policy.delay(forFailureAttempt: 20) == .seconds(13.5))
+    }
+
     @Test("cancellation ends a pending reconnect delay without waking it")
     func cancellationEndsPendingDelay() async throws {
         let clock = ManualClock()

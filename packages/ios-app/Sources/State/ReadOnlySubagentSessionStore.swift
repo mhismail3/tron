@@ -160,7 +160,10 @@ final class ReadOnlySubagentSessionStore {
     private var recoveryTask: Task<Void, Never>?
     private var recoveryAttempts = 0
 
+    // Bound local viewer recovery; this is not connection retry admission.
     private static let maximumRecoveryAttempts = 3
+    // Short resource-recovery retries should not delay a read-only viewer behind full reconnect backoff.
+    private static let recoveryRetryBaseDelay = Duration.milliseconds(150)
 
     private(set) var status: Status = .idle
     private(set) var parentSessionID: String?
@@ -262,7 +265,6 @@ final class ReadOnlySubagentSessionStore {
                 let response: ProcessTranscriptOpenResponse = try await client.request(
                     "session.processTranscript.open",
                     Params(sessionId: parentSessionID, processId: processID, viewerId: viewerID, subscriptionToken: admittedParentSubscriptionToken),
-                    timeout: .seconds(15),
                     expectedConnection: connectionAdmission
                 )
                 guard !Task.isCancelled else {
@@ -364,7 +366,7 @@ final class ReadOnlySubagentSessionStore {
                     "session.processTranscript.page",
                     Params(leaseId: leaseID, before: before,
                            expectedNextEntryId: expectedNext, expectedRevision: revision),
-                    timeout: .seconds(15), expectedConnection: connectionAdmission
+                    expectedConnection: connectionAdmission
                 )
                 guard !Task.isCancelled else { return }
                 await MainActor.run { [weak self] in
@@ -451,7 +453,7 @@ final class ReadOnlySubagentSessionStore {
             return
         }
         recoveryAttempts += 1
-        let delay = Duration.milliseconds(150 * recoveryAttempts)
+        let delay = Self.recoveryRetryBaseDelay * recoveryAttempts
         recoveryTask = Task { [weak self] in
             do { try await Task.sleep(for: delay) } catch { return }
             guard !Task.isCancelled else { return }
@@ -496,7 +498,7 @@ final class ReadOnlySubagentSessionStore {
                 let response: ProcessTranscriptPageResponse = try await client.request(
                     "session.processTranscript.page",
                     Params(leaseId: leaseID, expectedRevision: expectedRevision),
-                    timeout: .seconds(15), expectedConnection: connectionAdmission
+                    expectedConnection: connectionAdmission
                 )
                 guard !Task.isCancelled else { return }
                 await MainActor.run { [weak self] in
@@ -733,7 +735,7 @@ final class ReadOnlySubagentSessionStore {
             struct Params: Encodable { let leaseId: String }
             struct Response: Decodable { let closed: Bool }
             let _: Response? = try? await client.request(
-                "session.processTranscript.close", Params(leaseId: leaseID), timeout: .seconds(5),
+                "session.processTranscript.close", Params(leaseId: leaseID),
                 expectedConnection: connectionAdmission
             )
         }
