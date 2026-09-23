@@ -2059,8 +2059,14 @@ Async lifecycle artifacts use one canonical `status.json`; its first JSON proper
 bounded `lifecycleProjection` header. RuntimeSlot reads only a 32 KiB prefix for modern
 artifacts, structurally locates and parses only a complete header value bounded to 30 KiB,
 and never searches later keys or parses report-bearing status. Header-less old
-artifacts retain the bounded legacy reader. A malformed, truncated, mismatched, or schema-invalid
-modern header fails closed rather than fabricating a child or terminal state. Producer
+artifacts retain the bounded legacy reader. If a modern header supplies `sessionId`,
+it must exactly match the canonical parent session opened by that RuntimeSlot; the
+producer preserves this original owner through legitimate resumes. A foreign session
+header is an ownership mismatch even when run, tool-call, and artifact path match; it
+cannot update children or settle/receipt the activity. Headers without `sessionId`
+remain subject to the existing exact run/tool/path ownership proof. A malformed,
+truncated, mismatched, or schema-invalid modern header fails closed rather than
+fabricating a child or terminal state. Producer
 `partial` is adapted to the existing native `failed` state with `needsAttention`; no new
 native lifecycle value is required. Header root and child activity/timing, bounded omission
 counts, allowlisted host-step metadata, paused process-terminal proof, and exact child session

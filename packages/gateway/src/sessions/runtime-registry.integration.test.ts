@@ -5177,8 +5177,14 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await mkdir(asyncDir, { recursive: true });
     const fixturePath = (name: "active" | "terminal") => join(dirname(fileURLToPath(import.meta.url)), "fixtures", `frozen-real-${name}.json`);
     const loadFixture = async (name: "active" | "terminal"): Promise<string> => {
-      const raw = await readFile(fixturePath(name), "utf8");
-      return raw.replaceAll("/tmp/frozen-real-child/session.jsonl", childFile)
+      const parsed = JSON.parse(await readFile(fixturePath(name), "utf8")) as {
+        lifecycleProjection: { sessionId?: string };
+      };
+      // The frozen producer capture uses a placeholder owner; bind it to this
+      // fixture's exact canonical parent session before exercising admission.
+      parsed.lifecycleProjection.sessionId = slot.id;
+      return JSON.stringify(parsed)
+        .replaceAll("/tmp/frozen-real-child/session.jsonl", childFile)
         .replaceAll("/tmp/frozen-real-nested/session.jsonl", nestedFile);
     };
     const internal = slot as unknown as {
@@ -5235,6 +5241,96 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await slot.discoverExtensionArtifact(asyncDir);
     const terminal = slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId)!;
     expect(terminal).toMatchObject({ status: "completed", lifecycle: { state: "completed" }, completedAt: new Date(1_700_000_010_000).toISOString() });
+  });
+
+  it("rejects foreign producer session headers before live or reconstructed activity admission", async () => {
+    const fixture = await coldFixture("foreign-producer-session-header");
+    const runId = "packed-producer-owned-session-run";
+    const toolCallId = "packed-producer-owned-session-tool";
+    const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", runId);
+    await mkdir(asyncDir, { recursive: true });
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const fixtureDirectory = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
+    const loadHeader = async (name: string): Promise<Record<string, unknown>> => {
+      const parsed = JSON.parse(await readFile(join(fixtureDirectory, name), "utf8")) as { lifecycleProjection: Record<string, unknown> };
+      return structuredClone(parsed.lifecycleProjection);
+    };
+    // These compact first-property headers were serialized by writeAsyncStatusAtomic
+    // from packed pi-subagents d3bd36e5c1767c807615151922192554fef36ec3.
+    const ownedHeader = await loadHeader("packed-producer-owned-lifecycle-header.json");
+    ownedHeader.sessionId = slot.id;
+    const foreignHeader = await loadHeader("packed-producer-foreign-lifecycle-header.json");
+    const foreignTerminalHeader = await loadHeader("packed-producer-foreign-terminal-lifecycle-header.json");
+    expect(foreignHeader).toMatchObject({ runId, toolCallId, sessionId: "foreign-parent-session", root: { children: expect.arrayContaining([expect.objectContaining({ id: "step-a", state: "failed" })]) } });
+    expect(foreignTerminalHeader).toMatchObject({ runId, toolCallId, sessionId: "foreign-parent-session", root: { state: "complete", endedAt: expect.any(Number) } });
+
+    const writeHeader = async (projection: Record<string, unknown>) => {
+      await writeFile(join(asyncDir, "status.json"), JSON.stringify({
+        lifecycleProjection: projection,
+        error: "oversized workflow report " + "x".repeat(300 * 1_024),
+      }));
+      expect((await readFile(join(asyncDir, "status.json"))).byteLength).toBeGreaterThan(256 * 1_024);
+    };
+    const runtimeManager = (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } }).runtime.session.sessionManager;
+    runtimeManager.appendMessage({
+      role: "toolResult", toolCallId, toolName: "subagent", content: [{ type: "text", text: "launched" }],
+      details: { runId, asyncId: runId, asyncDir, mode: "workflow", state: "running" },
+      isError: false, timestamp: Date.now(),
+    });
+    vi.spyOn(slot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
+      .mockReturnValue({ source: "pi-subagents" });
+
+    const warnings: Array<{ reason: string; owner: string }> = [];
+    (slot as unknown as { dependencies: { extensionArtifactWarning?: (warning: { reason: string; owner: string }) => void } })
+      .dependencies.extensionArtifactWarning = (warning) => warnings.push(warning);
+    await writeHeader(ownedHeader);
+    await slot.discoverExtensionArtifact(asyncDir);
+    const admitted = slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId)!;
+    expect(admitted).toMatchObject({ status: "running", children: expect.arrayContaining([
+      expect.objectContaining({ id: "step-a", status: "completed" }),
+      expect.objectContaining({ id: "step-c", status: "running" }),
+    ]) });
+
+    // Exact run/tool/path bindings do not authorize this producer header's foreign session.
+    await writeHeader(foreignHeader);
+    await slot.discoverExtensionArtifact(asyncDir);
+    const afterForeign = slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId)!;
+    expect(afterForeign.children.find((child) => child.id === "step-a")?.status).toBe("completed");
+    expect(warnings).toContainEqual(expect.objectContaining({ reason: "ownership-mismatch" }));
+    await writeHeader(foreignTerminalHeader);
+    await slot.discoverExtensionArtifact(asyncDir);
+    expect(slot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId)?.status).toBe("running");
+    const receiptCount = async (sessionFile: string) => (await readFile(sessionFile, "utf8"))
+      .trimEnd().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((entry) => entry.type === "custom" && entry.customType === EXTENSION_ACTIVITY_RECEIPT_TYPE).length;
+    expect(await receiptCount(slot.sessionFile!)).toBe(0);
+
+    // A cold reconstructed slot must reject the same foreign terminal header before
+    // it can synthesize a child or append a terminal parent receipt.
+    await fixture.registry.dispose();
+    const recoveredRegistry = new RuntimeRegistry({
+      agentDir: fixture.agentDir, tronHome: join(fixture.root, "tron"), idleRuntimeMs: 60_000,
+      trust: new TrustService(fixture.agentDir), broadcast: () => {},
+      sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(recoveredRegistry);
+    await recoveredRegistry.initialize();
+    const recoveredSlot = await recoveredRegistry.acquire(slot.id);
+    vi.spyOn(recoveredSlot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
+      .mockReturnValue({ source: "pi-subagents" });
+    await recoveredRegistry.discoverExtensionArtifacts();
+    await recoveredSlot.discoverExtensionArtifact(asyncDir);
+    const coldForeign = recoveredSlot.snapshot().extensionActivities?.find((activity) => activity.runId === runId);
+    expect(coldForeign?.status).not.toBe("completed");
+    expect(coldForeign?.children.some((child) => child.id === "step-a" && child.status === "completed")).not.toBe(true);
+    expect(await receiptCount(recoveredSlot.sessionFile!)).toBe(0);
+
+    await writeHeader(ownedHeader);
+    await recoveredRegistry.discoverExtensionArtifacts();
+    expect(recoveredSlot.snapshot().extensionActivities?.find((activity) => activity.toolCallId === toolCallId)).toMatchObject({
+      status: "running", children: expect.arrayContaining([expect.objectContaining({ id: "step-a", status: "completed" })]),
+    });
+    expect(await receiptCount(recoveredSlot.sessionFile!)).toBe(0);
   });
 
   it("discovers oversized active lifecycle headers on the registered path and after runtime reconstruction", async () => {

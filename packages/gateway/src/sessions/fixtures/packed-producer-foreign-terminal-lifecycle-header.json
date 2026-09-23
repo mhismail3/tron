@@ -1,0 +1,62 @@
+{
+  "lifecycleProjection": {
+    "version": 1,
+    "runId": "packed-producer-owned-session-run",
+    "toolCallId": "packed-producer-owned-session-tool",
+    "sessionId": "foreign-parent-session",
+    "generatedAt": 1700000004000,
+    "caps": {
+      "maxRuns": 1,
+      "maxChildrenPerNode": 8,
+      "maxDepth": 3,
+      "maxStringLength": 160,
+      "maxSerializedBytes": 30720
+    },
+    "omitted": {
+      "runs": 0,
+      "children": 0,
+      "byteLimitExceeded": false
+    },
+    "root": {
+      "id": "packed-producer-owned-session-run",
+      "kind": "workflow",
+      "label": "FOREIGN_TERMINAL, B, C",
+      "state": "complete",
+      "startedAt": 1700000000000,
+      "updatedAt": 1700000004000,
+      "endedAt": 1700000004000,
+      "children": [
+        {
+          "id": "step-c",
+          "kind": "step",
+          "label": "C",
+          "state": "complete",
+          "startedAt": 1700000002000,
+          "updatedAt": 1700000004000,
+          "endedAt": 1700000004000,
+          "workflowKey": "step-c"
+        },
+        {
+          "id": "step-a",
+          "kind": "step",
+          "label": "FOREIGN_TERMINAL",
+          "state": "complete",
+          "startedAt": 1700000001000,
+          "updatedAt": 1700000003000,
+          "endedAt": 1700000003000,
+          "workflowKey": "step-a"
+        },
+        {
+          "id": "step-b",
+          "kind": "step",
+          "label": "B",
+          "state": "complete",
+          "startedAt": 1700000001000,
+          "updatedAt": 1700000003000,
+          "endedAt": 1700000003000,
+          "workflowKey": "step-b"
+        }
+      ]
+    }
+  }
+}

@@ -256,6 +256,21 @@ class OversizedExtensionArtifactError extends Error {
     this.name = "OversizedExtensionArtifactError";
   }
 }
+
+class ForeignExtensionArtifactSessionError extends Error {
+  constructor() {
+    super("Extension lifecycle projection belongs to another canonical session");
+    this.name = "ForeignExtensionArtifactSessionError";
+  }
+}
+
+function extensionArtifactReadFailureReason(error: unknown): ExtensionArtifactRejectionReason {
+  if (error instanceof OversizedExtensionArtifactError) return "oversized-artifact";
+  if (error instanceof ForeignExtensionArtifactSessionError) return "ownership-mismatch";
+  if (error instanceof SyntaxError) return "malformed-artifact";
+  return "artifact-replacement-in-progress";
+}
+
 const EXTENSION_ARTIFACT_MISSING_GRACE_MS = 30_000;
 const MAX_EXTENSION_EVENT_TAIL_BYTES = 64 * 1_024;
 const MAX_EXTENSION_EVENT_LINES = 256;
@@ -3831,6 +3846,11 @@ export class RuntimeSlot {
       if (lifecycleHeader !== undefined) {
         const projection = inspectExtensionLifecycleProjection(lifecycleHeader);
         if (!projection) throw new SyntaxError("Invalid extension lifecycle projection header");
+        // The producer retains the original parent session identity across resumes.
+        // Exact run/tool/path ownership does not authorize a header copied from another session.
+        if (projection.sessionId !== undefined && projection.sessionId !== this.id) {
+          throw new ForeignExtensionArtifactSessionError();
+        }
         const projected = lifecycleProjectionArtifact(projection);
         const withRecovery = await this.attachRecoverySessionOwner(asyncDir, projected, opened.directory);
         const withProof = await this.attachProcessTerminalProof(asyncDir, withRecovery, opened.directory);
@@ -4340,12 +4360,7 @@ export class RuntimeSlot {
       if (error instanceof OversizedExtensionArtifactError && missingToolCallId) {
         this.observeMissingExtensionArtifact(missingToolCallId);
       }
-      if (diagnosticOwner) this.warnExtensionArtifact(
-        error instanceof OversizedExtensionArtifactError
-          ? "oversized-artifact"
-          : error instanceof SyntaxError ? "malformed-artifact" : "artifact-replacement-in-progress",
-        diagnosticOwner,
-      );
+      if (diagnosticOwner) this.warnExtensionArtifact(extensionArtifactReadFailureReason(error), diagnosticOwner);
     }
   }
 
@@ -4683,9 +4698,7 @@ export class RuntimeSlot {
       if (claimedReceiptActivityId) this.releaseExtensionReceiptOwnership(claimedReceiptActivityId, claimedReceiptOwner);
       // The next filesystem event or normal snapshot retries; warning is bounded.
       this.warnExtensionArtifact(
-        error instanceof OversizedExtensionArtifactError
-          ? "oversized-artifact"
-          : error instanceof SyntaxError ? "malformed-artifact" : "artifact-replacement-in-progress",
+        extensionArtifactReadFailureReason(error),
         `${previous.runId ?? "run"}\0${toolCallId}`,
       );
     }
