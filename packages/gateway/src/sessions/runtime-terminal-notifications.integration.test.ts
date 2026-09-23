@@ -88,6 +88,12 @@ describe.sequential("automatic terminal notifications with the pinned runtime", 
     await registry.initialize();
     slot = await registry.create(cwd);
     await slot.setModel(faux.getModel().provider, faux.getModel().id);
+    const sdkEvents: string[] = [];
+    const onEvent = (slot as unknown as { onEvent: (event: { type: string }) => void }).onEvent.bind(slot);
+    vi.spyOn(slot as unknown as { onEvent: (event: { type: string }) => void }, "onEvent").mockImplementation((event) => {
+      if (event.type === "agent_start" || event.type === "agent_end" || event.type === "agent_settled") sdkEvents.push(event.type);
+      onEvent(event);
+    });
     if (options.observed) {
       registry.subscribe("phone", slot.id);
       registry.setPresentationVisibility({
@@ -100,7 +106,7 @@ describe.sequential("automatic terminal notifications with the pinned runtime", 
       // A mock call is visible before its async admission recorder settles.
       await Promise.allSettled(enqueue.mock.results.map((result) => result.value));
     };
-    return { slot, registry, faux, enqueue, suppressAutomatic, settle, canonicalAtAdmission, persistedAtAdmission };
+    return { slot, registry, faux, enqueue, suppressAutomatic, settle, canonicalAtAdmission, persistedAtAdmission, sdkEvents };
   }
 
   it.each([
@@ -172,17 +178,34 @@ describe.sequential("automatic terminal notifications with the pinned runtime", 
       fauxAssistantMessage("", { stopReason: "error", errorMessage: "terminal failure" }),
     ], { extension: `export default function(pi) {
       let continued = false;
-      pi.on("agent_settled", () => {
+      pi.on("agent_before_settle", (event) => {
+        pi.appendEntry("test-settlement-order", { stage: "agent_before_settle", outcome: event.outcome });
         if (continued) return;
         continued = true;
-        pi.sendMessage({ customType: "test-continuation", content: "continue", display: false }, { triggerTurn: true });
+        return { entries: [{ type: "custom_message", customType: "test-continuation", content: "continue", display: false }], continue: true };
       });
+      pi.on("agent_settled", () => pi.appendEntry("test-settlement-order", { stage: "agent_settled" }));
     }` });
     await value.slot.prompt("continuation request");
     await value.settle();
     expect(value.faux.state.callCount).toBe(2);
+    expect(value.sdkEvents).toEqual(["agent_start", "agent_end", "agent_start", "agent_end", "agent_settled"]);
     expect(value.enqueue).toHaveBeenCalledTimes(1);
     expect(value.enqueue.mock.calls[0]![0].message).toBe("The agent stopped because of an error.");
+    const entries = value.canonicalAtAdmission[0]!;
+    const assistants = entries.filter((entry: any) => entry.type === "message" && entry.message.role === "assistant");
+    const terminals = entries.filter((entry: any) => entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE && entry.data.receiptKind === "terminal");
+    const callbacks = entries.filter((entry: any) => entry.type === "custom" && entry.customType === "test-settlement-order")
+      .map((entry: any) => entry.data.stage);
+    expect(callbacks).toEqual(["agent_before_settle", "agent_before_settle", "agent_settled"]);
+    expect(assistants).toHaveLength(2);
+    expect(assistants[1].message.stopReason).toBe("error");
+    expect(value.enqueue.mock.calls[0]![0].sourceId).toBe(assistants[1].id);
+    // The user invocation owns its first completed assistant. Pi's queued
+    // continuation is a distinct SDK run whose failure notifies separately; it
+    // must not rewrite the already durable invocation receipt.
+    expect(terminals).toHaveLength(1);
+    expect(terminals[0].data.lifecycle).toBe("completed");
   });
 
   it("lets recoverable tool errors continue but announces a terminating tool block", async () => {
@@ -246,11 +269,13 @@ describe.sequential("automatic terminal notifications with the pinned runtime", 
       fauxAssistantMessage("rejected continuation"),
     ], { extension: `export default function(pi) {
       let continued = false;
-      pi.on("agent_settled", () => {
+      pi.on("agent_before_settle", (event) => {
+        pi.appendEntry("test-settlement-order", { stage: "agent_before_settle", outcome: event.outcome });
         if (continued) return;
         continued = true;
-        pi.sendMessage({ customType: "test-continuation", content: "continue", display: false }, { triggerTurn: true });
+        return { entries: [{ type: "custom_message", customType: "test-continuation", content: "continue", display: false }], continue: true };
       });
+      pi.on("agent_settled", () => pi.appendEntry("test-settlement-order", { stage: "agent_settled" }));
     }` });
     try {
       await value.slot.prompt("draining request");
@@ -259,9 +284,20 @@ describe.sequential("automatic terminal notifications with the pinned runtime", 
     } finally { release.release(); }
     await value.settle();
     await waitUntil(() => !value.slot.isDrainBusy);
+    expect(value.sdkEvents).toEqual(["agent_start", "agent_end", "agent_start", "agent_end", "agent_settled"]);
     expect(value.enqueue.mock.calls, JSON.stringify(value.enqueue.mock.calls)).toHaveLength(1);
     expect(value.enqueue.mock.calls[0]![0].message).toBe("The agent was stopped.");
-    const terminals = value.canonicalAtAdmission[0]!.filter((entry) => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data.receiptKind === "terminal");
+    const entries = value.canonicalAtAdmission[0]!;
+    const assistants = entries.filter((entry: any) => entry.type === "message" && entry.message.role === "assistant");
+    expect(assistants).toHaveLength(2);
+    expect(assistants[0].message.stopReason).toBe("stop");
+    expect(assistants[1].message.stopReason).toBe("aborted");
+    // Drain rejects the SDK continuation; notification remains bound to the
+    // preceding successful assistant without rewriting its completion receipt.
+    expect(value.enqueue.mock.calls[0]![0].sourceId).toBe(assistants[0].id);
+    expect(entries.filter((entry: any) => entry.type === "custom" && entry.customType === "test-settlement-order")
+      .map((entry: any) => entry.data.stage)).toEqual(["agent_before_settle", "agent_settled"]);
+    const terminals = entries.filter((entry: any) => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data.receiptKind === "terminal");
     expect(terminals).toHaveLength(1);
     expect(terminals[0].data.lifecycle).toBe("completed");
   });

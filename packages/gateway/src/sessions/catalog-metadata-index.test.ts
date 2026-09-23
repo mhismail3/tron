@@ -91,6 +91,10 @@ describe("CatalogMetadataIndex", () => {
       messageCount: 0, firstMessage: "(no messages)", name: "named", updatedAt: "2026-01-01T00:00:00.000Z",
     };
     applyCatalogMetadataEntry(target, { type: "message", timestamp: 1_704_067_200_000, message: {
+      role: "system", content: "provider context delta",
+    } });
+    expect(target.messageCount).toBe(0);
+    applyCatalogMetadataEntry(target, { type: "message", timestamp: 1_704_067_200_000, message: {
       role: "toolResult", content: "ignored for preview and recency",
     } });
     expect(target.messageCount).toBe(1);

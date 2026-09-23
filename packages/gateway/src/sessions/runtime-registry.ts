@@ -2855,19 +2855,33 @@ export class RuntimeRegistry {
           throw new GatewayError("busy", "Project trust is being reconfigured", true);
         }
         this.requireLiveSlotCapacity();
-        const manager = SessionManager.inMemory(trust.cwd);
-        const slot = await RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false);
-        this.slots.set(slot.id, slot);
+        const sessionDirectory = this.sessionDirectoryFor(trust.cwd);
+        const manager = SessionManager.forkFrom(path, trust.cwd, sessionDirectory);
+        const importedId = manager.getSessionId();
+        const importedPath = manager.getSessionFile();
+        let slot: RuntimeSlot | undefined;
+        let published = false;
         try {
-          await slot.importFromJsonl(path, trust.cwd);
-          this.slots.set(slot.id, slot);
+          if (!importedPath) throw new GatewayError("internal", "Imported session was not persisted");
+          const existingPath = SessionManager.findById(trust.cwd, importedId, sessionDirectory);
+          if (this.slots.has(importedId) || (existingPath && resolve(existingPath) !== resolve(importedPath))) {
+            throw new GatewayError("conflict", "Imported session identity is already registered");
+          }
+          slot = await RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false);
+          if (this.slots.has(importedId)) {
+            throw new GatewayError("conflict", "Imported session identity became registered");
+          }
+          this.slots.set(importedId, slot);
+          published = true;
           this.invalidateCatalogAcquisition();
           this.revision += 1;
           this.options.sessionListChanged();
           return slot;
         } catch (error) {
-          this.slots.delete(slot.id);
-          await slot.dispose().catch(() => {});
+          if (!published) {
+            await slot?.dispose().catch(() => {});
+            if (importedPath) await rm(importedPath, { force: true });
+          }
           throw error;
         }
       });

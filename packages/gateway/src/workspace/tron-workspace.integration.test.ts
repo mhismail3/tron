@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { fauxAssistantMessage, fauxProvider, fauxToolCall, type Context } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxProvider, fauxToolCall, getCurrentSystemPrompt, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { TrustService } from "../admin/trust-service.js";
@@ -32,8 +32,8 @@ async function fixture(extension?: string) {
     await writeFile(join(agentDir, "extensions", "fixture.ts"), extension);
   }
   const faux = fauxProvider({ provider: "workspace-fixture", tokensPerSecond: 100_000 });
-  const contexts: Context[] = [];
-  const response = (text = "Done") => (context: Context) => {
+  const contexts: TranscriptContext[] = [];
+  const response = (text = "Done") => (context: TranscriptContext) => {
     contexts.push(context);
     return fauxAssistantMessage(text);
   };
@@ -85,9 +85,9 @@ describe("Tron workspace through the pinned runtime", () => {
       await generated.slot.prompt("scheduled execution context");
     } finally { generated.release(); }
     await settle(generated.slot);
-    const agentContexts = f.contexts.filter(context => context.systemPrompt?.includes("## Tron operating context"));
-    for (const context of agentContexts) {
-      const text = context.systemPrompt ?? "";
+    const agentContexts = f.contexts.map(context => getCurrentSystemPrompt(context.messages))
+      .filter(systemPrompt => systemPrompt.includes("## Tron operating context"));
+    for (const text of agentContexts) {
       expect(text.match(/## Tron operating context/g)).toHaveLength(1);
       expect(text).toContain(JSON.stringify(f.cwd));
       expect(text).toContain(JSON.stringify(internal));
@@ -100,7 +100,7 @@ describe("Tron workspace through the pinned runtime", () => {
     expect(await readFile(file, "utf8")).not.toContain("## Tron operating context");
     await rm(internal, { recursive: true });
     await resumed.prompt("unrelated work still works"); await settle(resumed);
-    expect(f.contexts.at(-1)?.systemPrompt).toContain("(unavailable)");
+    expect(getCurrentSystemPrompt(f.contexts.at(-1)!.messages)).toContain("(unavailable)");
     expect(resumed.cwd).toBe(f.cwd);
   }, 30_000);
 

@@ -8,7 +8,7 @@ import type { SessionCreationOrigin } from "../protocol/types.js";
 import { userFacingPromptPreview } from "./resource-invocation.js";
 import { boundedSummaryText, MAX_SUMMARY_TEXT_BYTES } from "./summary-text.js";
 
-export const CATALOG_METADATA_INDEX_VERSION = 2 as const;
+export const CATALOG_METADATA_INDEX_VERSION = 3 as const;
 export const CATALOG_METADATA_INDEX_MAX_BYTES = 8 * 1_024 * 1_024;
 export const CATALOG_METADATA_INDEX_MAX_ENTRIES = 25_000;
 const TAIL_BOUNDARY_BYTES = 4_096;
@@ -45,11 +45,15 @@ export function applyCatalogMetadataEntry(target: CatalogMetadataAccumulator, en
     return;
   }
   if (entry.type !== "message") return;
-  // Match the pinned SDK catalog contract: every parsed message entry counts,
-  // even when its payload is unusable for preview/activity projection.
+  const message = entry.message && typeof entry.message === "object" && !Array.isArray(entry.message)
+    ? entry.message as Record<string, unknown>
+    : undefined;
+  // System-message transcript deltas carry provider context in Pi 0.87 but
+  // aren't visible conversation rows. Keep malformed non-system records counted
+  // as before, while matching live and cold catalog counts for that new entry.
+  if (message?.role === "system") return;
   target.messageCount += 1;
-  if (!entry.message || typeof entry.message !== "object" || Array.isArray(entry.message)) return;
-  const message = entry.message as Record<string, unknown>;
+  if (!message) return;
   if ((message.role !== "user" && message.role !== "assistant") || !("content" in message)) return;
   if (target.firstMessage === "(no messages)" && message.role === "user") {
     const content = message.content;
@@ -100,7 +104,7 @@ export interface CatalogMetadataIndexDiagnostics {
 }
 
 interface CatalogMetadataIndexDocument {
-  version: 2;
+  version: typeof CATALOG_METADATA_INDEX_VERSION;
   root: string;
   rows: CatalogMetadataIndexRow[];
 }
