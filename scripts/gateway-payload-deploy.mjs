@@ -1363,12 +1363,16 @@ function sameProcess(left, right) {
     && left.pid === right.pid && left.startIdentity === right.startIdentity;
 }
 
+export const RELAUNCH_LIMIT_MS = 60_000; // Existing allowance for launchd to produce its first listener.
+export const STARTUP_LIMIT_MS = 180_000; // Candidate warmup may include bounded session recovery.
+
 export async function waitForReplacement({
   oldProcess,
   expected,
   oldEpoch,
   requireEpochChange = true,
-  timeoutMs,
+  relaunchLimitMs = RELAUNCH_LIMIT_MS,
+  startupLimitMs = STARTUP_LIMIT_MS,
   // launchd owns the normal candidate relaunch. A process can be alive but not
   // listening during startup, so listener absence must never trigger a normal
   // promotion kickstart. Recovery explicitly opts into its own replacement
@@ -1381,13 +1385,15 @@ export async function waitForReplacement({
   sleep = (milliseconds) => new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds)),
 }) {
   const startedAt = now();
-  const deadline = startedAt + timeoutMs;
+  const relaunchDeadline = startedAt + relaunchLimitMs;
+  let startupDeadline;
   let launched = false;
   let observedProcess;
-  while (now() < deadline) {
+  while (now() < (startupDeadline ?? relaunchDeadline)) {
     // Listener probe failures are safety failures, never evidence of absence.
     const listener = await readListener();
     if (listener) {
+      startupDeadline ??= now() + startupLimitMs;
       try {
         const value = await readHealth();
         const after = await readListener();
@@ -1396,7 +1402,7 @@ export async function waitForReplacement({
           // A foreign listener must never become killable merely because it was
           // observed during the candidate window.
           if (healthMatchesCandidate(value, expected, oldEpoch, false)) observedProcess = after;
-          if (healthMatchesCandidate(value, expected, oldEpoch, requireEpochChange)) {
+          if (value.status === "ok" && healthMatchesCandidate(value, expected, oldEpoch, requireEpochChange)) {
             return { process: after, health: value };
           }
         }
@@ -1416,19 +1422,22 @@ export async function waitForReplacement({
     }
     await sleep(250);
   }
-  const error = new Error("Gateway did not become ready with a coherent replacement payload identity");
+  const error = new Error(startupDeadline === undefined
+    ? "Gateway relaunch did not produce a listener within its bounded window"
+    : "Gateway candidate did not become ready within its bounded startup window");
   if (observedProcess) error.observedProcess = observedProcess;
   throw error;
 }
 
-export async function waitForDrainedReplacement({ oldProcess, replacement, expected, oldEpoch, timeoutMs, onDrainComplete }) {
+export async function waitForDrainedReplacement({ oldProcess, replacement, expected, oldEpoch, relaunchLimitMs = RELAUNCH_LIMIT_MS, startupLimitMs = STARTUP_LIMIT_MS, onDrainComplete }) {
   await waitForDrainCompletion(oldProcess, replacement.readExactProcess, replacement.sleep);
   onDrainComplete?.();
   return waitForReplacement({
     oldProcess,
     expected,
     oldEpoch,
-    timeoutMs,
+    relaunchLimitMs,
+    startupLimitMs,
     readListener: replacement.readListener,
     readHealth: replacement.readHealth,
     launchSupervisor: replacement.launchSupervisor,
@@ -1438,39 +1447,55 @@ export async function waitForDrainedReplacement({ oldProcess, replacement, expec
 }
 
 export async function restoreAndVerifyReplacement({
-  restore, validateRestored, beforeLaunch, replacement, expected, oldEpoch, timeoutMs, replaceableProcess,
+  restore, validateRestored, beforeLaunch, replacement, expected, oldEpoch,
+  relaunchLimitMs = RELAUNCH_LIMIT_MS, startupLimitMs = STARTUP_LIMIT_MS, replaceableProcess,
 }) {
   await restore();
   await validateRestored();
   await beforeLaunch?.();
+  const proveRecovery = async (ready) => {
+    const health = replacement.readAuthenticatedHealth
+      ? await replacement.readAuthenticatedHealth()
+      : ready.health;
+    if (!healthMatchesCandidate(health, expected, oldEpoch, false)) {
+      throw new Error("authenticated system.info does not prove the restored selection");
+    }
+    return { ...ready, health };
+  };
 
   const listener = await replacement.readListener();
   if (listener) {
     let value;
     try { value = await replacement.readHealth(); } catch { /* exact captured candidate may be replaced below */ }
-    // A second listener read is a safety check and must propagate failure.
+    // A second listener read binds the unauthenticated warmup identity to this
+    // exact PID/start pair; only that proof makes its startup ours to wait on.
     const after = await replacement.readListener();
-    if (sameProcess(listener, after)
-      && value !== undefined
+    if (sameProcess(listener, after) && value !== undefined
       && healthMatchesCandidate(value, expected, oldEpoch, false)) {
-      // The retained launcher already restored and relaunched the exact recovery
-      // payload. Do not create a second kill owner.
-      return { process: after, health: value };
+      return proveRecovery(await waitForReplacement({
+        oldProcess: undefined, expected, oldEpoch, requireEpochChange: false,
+        relaunchLimitMs, startupLimitMs, readListener: replacement.readListener,
+        readHealth: replacement.readHealth, launchSupervisor: replacement.launchSupervisor,
+        naturalGraceMs: Number.POSITIVE_INFINITY,
+        ...(replacement.now ? { now: replacement.now } : {}),
+        ...(replacement.sleep ? { sleep: replacement.sleep } : {}),
+      }));
     }
     if (!sameProcess(listener, after) || !sameProcess(after, replaceableProcess)) {
-      throw new Error("Gateway recovery found an unknown live listener; supervisor kickstart was withheld");
+      throw new Error("Gateway recovery found a foreign live listener; supervisor kickstart was withheld");
     }
   }
 
   // No listener, or the exact process captured from the failed candidate
   // attempt, is the only intentional replacement boundary.
   await replacement.launchSupervisor();
-  return waitForReplacement({
+  return proveRecovery(await waitForReplacement({
     oldProcess: listener,
     expected,
     oldEpoch,
     requireEpochChange: false,
-    timeoutMs,
+    relaunchLimitMs,
+    startupLimitMs,
     readListener: replacement.readListener,
     readHealth: replacement.readHealth,
     launchSupervisor: replacement.launchSupervisor,
@@ -1478,7 +1503,7 @@ export async function restoreAndVerifyReplacement({
     naturalGraceMs: Number.POSITIVE_INFINITY,
     ...(replacement.now ? { now: replacement.now } : {}),
     ...(replacement.sleep ? { sleep: replacement.sleep } : {}),
-  });
+  }));
 }
 
 function commandProvedAbsence(error) {
@@ -1579,12 +1604,24 @@ async function captureAuthenticatedRestartBoundary({ host, port, token, timeoutM
   return { info, process };
 }
 
+async function readHttpHealth(host, port) {
+  const healthHost = host.includes(":") ? `[${host}]` : host;
+  const response = await fetch(`http://${healthHost}:${port}/health`, { signal: AbortSignal.timeout(2_000) });
+  const body = await response.json();
+  if (!body || typeof body !== "object" || typeof body.buildFingerprint !== "string"
+    || typeof body.sourceRevision !== "string" || typeof body.runtimeEpoch !== "string") {
+    throw new Error("Gateway health identity is incomplete");
+  }
+  return body;
+}
+
 function productionReplacementDependencies({ channel, host, port, token, timeoutMs }) {
   return {
     readExactProcess: (pid) => captureLocalProcess(pid),
     readListener: () => captureLocalListenerProcess(port),
-    readHealth: async () => requireAuthenticatedRuntimeInfo(await authenticatedRequest({
-      host, port, token, timeoutMs: Math.min(2_000, timeoutMs), method: "system.info",
+    readHealth: () => readHttpHealth(host, port),
+    readAuthenticatedHealth: async () => requireAuthenticatedRuntimeInfo(await authenticatedRequest({
+      host, port, token, timeoutMs, method: "system.info",
     }), channel),
     launchSupervisor: () => kickstartStableSupervisor(channel),
   };
@@ -1720,16 +1757,24 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
         replacement: replacementBoundary,
         expected: manifest,
         oldEpoch: before.runtimeEpoch,
-        timeoutMs,
+        relaunchLimitMs: timeoutMs,
+        startupLimitMs: STARTUP_LIMIT_MS,
         onDrainComplete: () => { oldProcessGone = true; },
       });
-      // Commit only after one coherent replacement identity is proven.
+      // /health admits warmup only; authenticated system.info is the promotion proof.
+      const confirmed = requireAuthenticatedRuntimeInfo(
+        await authenticatedRequest({ host, port, token, timeoutMs, method: "system.info" }), channel,
+      );
+      const confirmedListener = await replacementBoundary.readListener();
+      if (!sameProcess(ready.process, confirmedListener)
+        || !healthMatchesCandidate(confirmed, manifest, before.runtimeEpoch, true)) {
+        throw new Error("authenticated system.info does not prove the selected candidate listener");
+      }
       await requireSelectedPayload(paths, target);
       if (prior) {
         await commitPendingAttempt(paths, target);
         await clearPendingAttempt(paths, target, true);
       }
-      const confirmed = ready.health;
       await writeState(paths, { ...stateBase, state: "ready" });
       return { state: "ready", manifest, health: confirmed };
     } catch (caught) {
@@ -1758,7 +1803,8 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
             replacement: replacementBoundary,
             expected: recoveryManifest,
             oldEpoch: before.runtimeEpoch,
-            timeoutMs,
+            relaunchLimitMs: timeoutMs,
+            startupLimitMs: STARTUP_LIMIT_MS,
             replaceableProcess: error.observedProcess,
           });
           await writeState(paths, { ...stateBase, state: deploymentTransition("rollback-requested", "rolledBack") });
@@ -2162,7 +2208,7 @@ export async function handoffDebugCandidate({
  * from the validated home projection; request parameters select policy only.
  */
 export function deploymentTimeoutMs(environment = process.env) {
-  const timeoutMs = Number(environment.TRON_GATEWAY_UPDATE_TIMEOUT_MS ?? "60000");
+  const timeoutMs = Number(environment.TRON_GATEWAY_UPDATE_TIMEOUT_MS ?? String(RELAUNCH_LIMIT_MS));
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 2_000 || timeoutMs > 300_000) {
     throw new Error("invalid update timeout");
   }
@@ -2296,7 +2342,8 @@ async function rollback({ paths, host, port, token, timeoutMs, commandId, replac
         replacement: replacementBoundary,
         expected: target,
         oldEpoch: before.runtimeEpoch,
-        timeoutMs,
+        relaunchLimitMs: timeoutMs,
+        startupLimitMs: STARTUP_LIMIT_MS,
         onDrainComplete: () => { oldProcessGone = true; },
       });
       await writeState(paths, {
@@ -2322,7 +2369,8 @@ async function rollback({ paths, host, port, token, timeoutMs, commandId, replac
               replacement: replacementBoundary,
               expected: currentManifest,
               oldEpoch: before.runtimeEpoch,
-              timeoutMs,
+              relaunchLimitMs: timeoutMs,
+              startupLimitMs: STARTUP_LIMIT_MS,
               replaceableProcess: error.observedProcess,
             });
           } else {

@@ -53,6 +53,24 @@ struct MenuBarItemBuilderTests {
         #expect(content.uptime == "01:07:42")
     }
 
+    @Test("split update shows both identities and exposes one rerun action")
+    func updateIncomplete() {
+        let snapshot = ServerStatusSnapshot(state: .updateIncomplete(running: "abc123", selected: "release-7"))
+        let items = Self.build(snapshot: snapshot)
+        guard case .header(let header) = items[0] else {
+            Issue.record("split update should be presented in the status header")
+            return
+        }
+        #expect(header.status == "Update incomplete")
+        #expect(snapshot.state.tooltip.contains("running abc123, selected release-7"))
+        let actions = items.compactMap { item -> (String, MenuBarAction)? in
+            guard case .action(let title, _, let action) = item else { return nil }
+            return (title, action)
+        }
+        #expect(actions.filter { $0.1 == .updateGateway }.map(\.0) == ["Rerun Gateway Update"])
+        #expect(actions.filter { $0.1 == .restartServer }.isEmpty)
+    }
+
     @Test("paused snapshot reports that no endpoint is available")
     func pausedSnapshot() {
         let items = Self.build(snapshot: ServerStatusSnapshot(state: .paused))

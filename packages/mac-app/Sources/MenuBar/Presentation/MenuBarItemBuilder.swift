@@ -91,7 +91,7 @@ enum MenuBarItemBuilder {
         } else {
             items.append(.action(title: snapshot.state.resumeTitle, isEnabled: serviceControlsEnabled, action: .resumeServer))
         }
-        items.append(.action(title: snapshot.state.restartTitle, isEnabled: serviceControlsEnabled, action: .restartServer))
+        items.append(.action(title: snapshot.state.restartTitle, isEnabled: serviceControlsEnabled, action: snapshot.state.requiresUpdateRepair ? .updateGateway : .restartServer))
         items.append(.action(title: "Uninstall Tron", isEnabled: serviceControlsEnabled, action: .uninstall))
         items.append(.quit(title: "Quit Tron"))
 
@@ -104,6 +104,8 @@ enum MenuBarItemBuilder {
             return "Running"
         case .needsRepair:
             return "Update required"
+        case .updateIncomplete:
+            return "Update incomplete"
         case .busy(let action):
             return action.rawValue
         case .paused:
@@ -157,12 +159,14 @@ enum ServerBusyAction: String, Equatable, Sendable {
     case restarting = "Restarting"
     case pausing = "Pausing"
     case resuming = "Resuming"
+    case updating = "Updating"
 }
 
 enum ServerStatusState: Equatable, Sendable {
     case checking
     case running(version: String?, port: Int)
     case needsRepair(version: String?, port: Int, reason: String)
+    case updateIncomplete(running: String, selected: String)
     case busy(ServerBusyAction)
     case paused
     case failed(reason: String)
@@ -172,7 +176,7 @@ enum ServerStatusState: Equatable, Sendable {
         switch self {
         case .running:
             return .running
-        case .needsRepair, .checking, .busy, .unauthorized:
+        case .needsRepair, .updateIncomplete, .checking, .busy, .unauthorized:
             return .attention
         case .paused:
             return .paused
@@ -186,14 +190,22 @@ enum ServerStatusState: Equatable, Sendable {
         return false
     }
 
-    var isRunning: Bool {
-        if case .running = self { return true }
+    var requiresUpdateRepair: Bool {
+        if case .updateIncomplete = self { return true }
         return false
+    }
+
+    var isRunning: Bool {
+        switch self {
+        case .running, .updateIncomplete: return true
+        default: return false
+        }
     }
 
     var runningPort: Int? {
         switch self {
         case .running(_, let port), .needsRepair(_, let port, _): return port
+        case .updateIncomplete: return 9847
         default: return nil
         }
     }
@@ -206,6 +218,8 @@ enum ServerStatusState: Equatable, Sendable {
             return "Tron: Running"
         case .needsRepair:
             return "Tron: Installation needs repair"
+        case .updateIncomplete(let running, let selected):
+            return "Tron: Update incomplete — running \(running), selected \(selected)"
         case .busy(let action):
             return "Tron: \(action.rawValue)"
         case .paused:
@@ -221,6 +235,7 @@ enum ServerStatusState: Equatable, Sendable {
         if case .busy(let action) = self {
             return "\(action.rawValue)…"
         }
+        if case .updateIncomplete = self { return "Rerun Gateway Update" }
         if case .needsRepair = self { return "Repair Tron" }
         return "Restart Tron"
     }

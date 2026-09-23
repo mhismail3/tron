@@ -14,12 +14,18 @@ enum GatewayRestartClient {
         let restarting: Bool
         let scheduled: Bool
         let activeSessionIds: [String]
+    }
 
-        enum CodingKeys: String, CodingKey {
-            case restarting
-            case scheduled
-            case activeSessionIds = "activeSessionIds"
-        }
+    struct UpdateResponse: Codable, Equatable, Sendable {
+        let accepted: Bool
+        let state: String
+        let commandId: String
+        let version: String?
+    }
+
+    struct CommandStatusResponse: Codable, Equatable, Sendable {
+        let status: String
+        let result: UpdateResponse?
     }
 
     enum Failure: Error, Equatable, Sendable {
@@ -119,6 +125,93 @@ enum GatewayRestartClient {
             }
             throw Failure.transport
         }
+    }
+
+    static func update(
+        host: String,
+        port: Int,
+        token: String?,
+        commandID: String,
+        timeout: TimeInterval = defaultTimeout
+    ) async throws -> UpdateResponse {
+        try Task.checkCancellation()
+        guard validCommandID(commandID) else { throw Failure.invalidCommandID }
+        guard let token, !token.isEmpty else { throw Failure.missingCredential }
+        let request = try makeRequest(host: host, port: port, token: token, timeout: timeout)
+        do {
+            let deadline = GatewayWebSocketTransport.Deadline(timeout: timeout)
+            let connection = try await GatewayWebSocketTransport.connect(
+                request: request, protocolVersion: protocolVersion, minimumProtocolVersion: minimumProtocolVersion,
+                clientID: UUID().uuidString, deadline: deadline
+            )
+            defer { connection.close() }
+            try await connection.send(jsonObject: [
+                "type": "request", "id": commandID, "method": "gateway.update",
+                "params": ["channel": "stable", "mode": "auto", "commandId": commandID],
+            ], deadline: deadline)
+            for _ in 0..<8 {
+                guard let data = try await connection.receiveData(deadline: deadline) else { throw Failure.malformedResponse }
+                guard let frame = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      frame["id"] as? String == commandID else { continue }
+                guard frame["type"] as? String == "response", let ok = frame["ok"] as? Bool else { throw Failure.malformedResponse }
+                if !ok {
+                    guard let error = frame["error"] as? [String: Any], let code = error["code"] as? String,
+                          let message = error["message"] as? String else { throw Failure.malformedResponse }
+                    throw Failure.gateway(code: code, message: message, retryable: error["retryable"] as? Bool ?? false)
+                }
+                guard let result = frame["result"], JSONSerialization.isValidJSONObject(result),
+                      let resultData = try? JSONSerialization.data(withJSONObject: result),
+                      let response = try? JSONDecoder().decode(UpdateResponse.self, from: resultData),
+                      response.commandId == commandID else { throw Failure.malformedResponse }
+                return response
+            }
+            throw Failure.timeout
+        } catch is CancellationError { throw CancellationError() }
+        catch let failure as Failure { throw failure }
+        catch let failure as GatewayWebSocketTransport.Failure {
+            switch failure {
+            case .timeout: throw Failure.timeout
+            case .invalidHello: throw Failure.protocolMismatch
+            case .upgrade(let statusCode) where statusCode == 401: throw Failure.unauthorized
+            default: throw Failure.transport
+            }
+        } catch { throw Failure.transport }
+    }
+
+    static func commandStatus(
+        host: String, port: Int, token: String?, commandID: String, timeout: TimeInterval = defaultTimeout
+    ) async throws -> CommandStatusResponse {
+        try Task.checkCancellation()
+        guard validCommandID(commandID) else { throw Failure.invalidCommandID }
+        guard let token, !token.isEmpty else { throw Failure.missingCredential }
+        let request = try makeRequest(host: host, port: port, token: token, timeout: timeout)
+        do {
+            let deadline = GatewayWebSocketTransport.Deadline(timeout: timeout)
+            let connection = try await GatewayWebSocketTransport.connect(
+                request: request, protocolVersion: protocolVersion, minimumProtocolVersion: minimumProtocolVersion,
+                clientID: UUID().uuidString, deadline: deadline
+            )
+            defer { connection.close() }
+            try await connection.send(jsonObject: [
+                "type": "request", "id": commandID, "method": "command.status",
+                "params": ["method": "gateway.update", "commandId": commandID],
+            ], deadline: deadline)
+            for _ in 0..<8 {
+                guard let data = try await connection.receiveData(deadline: deadline) else { throw Failure.malformedResponse }
+                guard let frame = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      frame["id"] as? String == commandID else { continue }
+                guard frame["type"] as? String == "response", let result = frame["result"],
+                      JSONSerialization.isValidJSONObject(result),
+                      let bytes = try? JSONSerialization.data(withJSONObject: result),
+                      let response = try? JSONDecoder().decode(CommandStatusResponse.self, from: bytes) else {
+                    throw Failure.malformedResponse
+                }
+                return response
+            }
+            throw Failure.timeout
+        } catch is CancellationError { throw CancellationError() }
+        catch let failure as Failure { throw failure }
+        catch { throw Failure.transport }
     }
 
     static func makeRequest(

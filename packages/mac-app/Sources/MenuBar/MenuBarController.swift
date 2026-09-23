@@ -274,8 +274,23 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             normalizeMenuItem(item)
             return item
         case .quit(let title):
-            // Use the run-loop boundary shared by async application exits.
-            let wrapper = ActionWrapper { ApplicationTermination.request() }
+            // Quitting interrupts an active drain and forces launchd relaunch.
+            let restarting: Bool = {
+                if case .busy(.restarting) = snapshot.state { return true }
+                return false
+            }()
+            let wrapper = ActionWrapper {
+                if restarting {
+                    let alert = NSAlert()
+                    alert.messageText = "Gateway restart is still draining"
+                    alert.informativeText = "Quitting Tron now interrupts the drain and restarts the Gateway before accepted work finishes."
+                    alert.alertStyle = .warning
+                    alert.addButton(withTitle: "Quit Anyway")
+                    alert.addButton(withTitle: "Keep Tron Open")
+                    guard alert.runModal() == .alertFirstButtonReturn else { return }
+                }
+                ApplicationTermination.request()
+            }
             let item = NSMenuItem(title: title, action: #selector(ActionWrapper.invoke), keyEquivalent: "")
             item.target = wrapper
             item.representedObject = wrapper // keep alive

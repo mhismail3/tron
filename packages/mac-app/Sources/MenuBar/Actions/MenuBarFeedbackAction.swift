@@ -67,6 +67,8 @@ private extension ServerStatusSnapshot {
             return "running on port \(port), version \(version.map { VersionDisplay.label(for: $0) } ?? "?")"
         case .needsRepair(let version, let port, let reason):
             return "installation needs repair on port \(port), version \(version.map { VersionDisplay.label(for: $0) } ?? "?") (\(reason))"
+        case .updateIncomplete(let running, let selected):
+            return "update incomplete: running \(running), selected \(selected)"
         case .busy(let action):
             return action.rawValue.lowercased()
         case .paused:

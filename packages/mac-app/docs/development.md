@@ -251,21 +251,32 @@ scripts/gateway-payload-deploy.mjs rollback --channel stable --command-id <uniqu
 ```
 
 Promotion is serialized per channel, verifies the complete payload fingerprint,
-uses authenticated drain-aware `gateway.restart`, waits without a deadline for the
-exact old PID/start to disappear, and proves one different stable PID/start plus the
-exact candidate health identity. Normal candidate startup belongs exclusively to launchd;
-listener absence cannot authorize a kickstart because a live startup process may not have
-bound yet. On failure it restores and revalidates the prior selection. If the launcher
-already restored the exact healthy payload, recovery accepts it without another kill;
-otherwise, after the candidate deadline, it kickstarts only an absent or exact
-captured failed listener and fails closed on an unknown listener. Recovery never calls the failed Gateway. The iOS update button invokes
+uses authenticated drain-aware `gateway.restart`, and waits without a deadline for the
+exact old PID/start to disappear. It then allows 60 seconds for launchd to produce a
+listener and starts a separate 180-second startup window at the first listener. During
+warmup, `/health` identity is accepted only while the same listener PID/start pair
+remains, and its status must be `ok`. Promotion still requires authenticated
+`system.info` from that exact listener before committing. Listener absence cannot
+authorize a normal kickstart because a live startup process may not have bound yet.
+On failure it restores and revalidates the prior selection. Recovery waits for an
+exact candidate already warming rather than treating it as unknown; a foreign
+listener is never touched, and the bounded startup window covers crash-looping
+candidates before restoration. Recovery never calls the failed Gateway. The iOS update button invokes
 only the LaunchAgent-owned helper; verified artifact promotion is wired, and source
 builds read only the validated `gateway/update-config.json` projection. Source mode uses
 the repository's local TypeScript compiler with a private temporary output directory,
 never `packages/gateway/dist`, and stages only verified output. A helper launch
 acknowledgement does not claim eventual build or promotion success; failures are exposed
 through bounded update progress. The Mac menu Restart seam uses the authenticated drain command rather than
-`launchctl kickstart`; kickstart is deployment recovery only.
+`launchctl kickstart`; kickstart is deployment recovery only. If authenticated
+runtime identity differs from the validated Stable selection, the menu presents
+“Update incomplete” with both running and selected identities and offers one
+“Rerun Gateway Update” action. That action sends `gateway.update` (`mode: auto`)
+through the authenticated Gateway client, reusing Gateway-owned configuration,
+command receipts, and deployment state; it never invokes the helper or a second
+update lifecycle directly. An uncertain request is reconciled with
+`command.status` and is not automatically repeated. Quitting during an active
+restart drain now requires confirmation because it interrupts accepted work.
 
 The Stable plist now requires Boolean `KeepAlive=true`. Delivering that plist requires
 following **Reinstall a local Release build** below and refreshing registration with

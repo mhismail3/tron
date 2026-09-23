@@ -70,6 +70,15 @@ struct ServerStatusPoller: Sendable {
             let installationState: ServerStatusState
             if admission != nil {
                 installationState = .running(version: info.version, port: setup.serverPort)
+            } else if setup.profile.channel == "stable",
+                      let running = info.buildFingerprint,
+                      case .success(let selected) = GatewayPayloadValidator.validateSelection(
+                        store: GatewayPayloadStore(home: setup.tronHome, channel: setup.profile.channel)
+                      ),
+                      running != selected.manifest.payloadFingerprint {
+                installationState = .updateIncomplete(
+                    running: String(running.prefix(12)), selected: selected.manifest.version
+                )
             } else {
                 installationState = .needsRepair(
                     version: info.version,

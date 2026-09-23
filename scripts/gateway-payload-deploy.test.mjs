@@ -7,6 +7,8 @@ import { test } from "node:test";
 import {
   deploymentTransition,
   deploymentTimeoutMs,
+  RELAUNCH_LIMIT_MS,
+  STARTUP_LIMIT_MS,
   commandTimeoutMs,
   publishSelection,
   rollbackSelection,
@@ -811,11 +813,12 @@ test("startup timing and kickstart do not begin while the exact old process rema
     oldProcess,
     expected,
     oldEpoch: "old-epoch",
-    timeoutMs: 2_000,
+    relaunchLimitMs: 2_000, startupLimitMs: 2_000,
     replacement: {
       readExactProcess: async () => { await drained; return undefined; },
       readListener: async () => ({ pid: 11, startIdentity: "new" }),
       readHealth: async () => ({
+        status: "ok",
         buildFingerprint: expected.payloadFingerprint,
         sourceRevision: expected.sourceRevision,
         runtimeEpoch: expected.runtimeEpoch,
@@ -834,7 +837,7 @@ test("startup timing and kickstart do not begin while the exact old process rema
 
   clockReads = 0;
   await assert.rejects(waitForDrainedReplacement({
-    oldProcess, expected, oldEpoch: "old-epoch", timeoutMs: 2_000,
+    oldProcess, expected, oldEpoch: "old-epoch", relaunchLimitMs: 2_000, startupLimitMs: 2_000,
     replacement: {
       readExactProcess: async () => { throw new Error("process probe failed"); },
       readListener: async () => undefined,
@@ -911,15 +914,55 @@ test("Stable kickstart is fixed and fails closed outside supervised Stable", asy
   }, environment, "darwin", 501), /launchctl refused/);
 });
 
+test("replacement uses independent relaunch and startup windows for delayed warmup", async () => {
+  const oldProcess = { pid: 10, startIdentity: "old" };
+  const candidate = { pid: 11, startIdentity: "candidate-start" };
+  const expected = { payloadFingerprint: "a".repeat(64), sourceRevision: "r", runtimeEpoch: "candidate" };
+  let now = 0;
+  let listeners = 0;
+  const result = await waitForReplacement({
+    oldProcess, expected, oldEpoch: "old", relaunchLimitMs: RELAUNCH_LIMIT_MS, startupLimitMs: STARTUP_LIMIT_MS,
+    readListener: async () => {
+      listeners += 1;
+      return now < 40_000 ? undefined : candidate;
+    },
+    readHealth: async () => {
+      const identity = { buildFingerprint: expected.payloadFingerprint, sourceRevision: expected.sourceRevision, runtimeEpoch: expected.runtimeEpoch };
+      if (now < 65_000) return { status: "attention-recovery", ...identity };
+      return { status: "ok", ...identity };
+    },
+    launchSupervisor: async () => assert.fail("normal update must not kickstart launchd"),
+    now: () => now,
+    sleep: async (milliseconds) => { now += milliseconds; },
+  });
+  assert.deepEqual(result.process, candidate);
+  assert.equal(now, 65_000);
+  assert.ok(listeners > 2);
+});
+
+test("crash-looping candidates fail within the candidate startup bound", async () => {
+  const candidate = { pid: 11, startIdentity: "crashing" };
+  let now = 0;
+  await assert.rejects(waitForReplacement({
+    expected: { payloadFingerprint: "a".repeat(64), sourceRevision: "r", runtimeEpoch: "candidate" },
+    oldEpoch: "old", relaunchLimitMs: 40_000, startupLimitMs: 180_000,
+    readListener: async () => candidate,
+    readHealth: async () => { throw new Error("candidate process restarted during warmup"); },
+    launchSupervisor: async () => {}, now: () => now,
+    sleep: async (milliseconds) => { now += milliseconds; },
+  }), /bounded startup window/);
+  assert.equal(now, 180_000);
+});
+
 test("replacement waits for coherent new process and kickstarts only with an explicit recovery grace", async () => {
   const oldProcess = { pid: 10, startIdentity: "old" };
   const nextProcess = { pid: 11, startIdentity: "new" };
   const expected = { payloadFingerprint: "a".repeat(64), sourceRevision: "revision", runtimeEpoch: "new-epoch" };
-  const health = { buildFingerprint: expected.payloadFingerprint, sourceRevision: expected.sourceRevision, runtimeEpoch: expected.runtimeEpoch };
+  const health = { status: "ok", buildFingerprint: expected.payloadFingerprint, sourceRevision: expected.sourceRevision, runtimeEpoch: expected.runtimeEpoch };
 
   let launches = 0;
   const natural = await waitForReplacement({
-    oldProcess, expected, oldEpoch: "old-epoch", timeoutMs: 2_000,
+    oldProcess, expected, oldEpoch: "old-epoch", relaunchLimitMs: 2_000, startupLimitMs: 2_000,
     readListener: async () => nextProcess,
     readHealth: async () => health,
     launchSupervisor: async () => { launches += 1; },
@@ -932,7 +975,7 @@ test("replacement waits for coherent new process and kickstarts only with an exp
   // and killing that unobserved startup process.
   let now = 0;
   const delayedNatural = await waitForReplacement({
-    oldProcess, expected, oldEpoch: "old-epoch", timeoutMs: 5_000,
+    oldProcess, expected, oldEpoch: "old-epoch", relaunchLimitMs: 5_000, startupLimitMs: 5_000,
     readListener: async () => now < 3_000 ? undefined : nextProcess,
     readHealth: async () => health,
     launchSupervisor: async () => { launches += 1; },
@@ -944,7 +987,7 @@ test("replacement waits for coherent new process and kickstarts only with an exp
 
   now = 0; let launched = false;
   const kicked = await waitForReplacement({
-    oldProcess, expected, oldEpoch: "old-epoch", timeoutMs: 2_000, naturalGraceMs: 500,
+    oldProcess, expected, oldEpoch: "old-epoch", relaunchLimitMs: 2_000, startupLimitMs: 2_000, naturalGraceMs: 500,
     readListener: async () => launched ? nextProcess : undefined,
     readHealth: async () => health,
     launchSupervisor: async () => { launches += 1; launched = true; },
@@ -956,7 +999,7 @@ test("replacement waits for coherent new process and kickstarts only with an exp
 
   now = 0; launches = 0;
   const slowLive = await waitForReplacement({
-    oldProcess, expected, oldEpoch: "old-epoch", timeoutMs: 2_000, naturalGraceMs: 500,
+    oldProcess, expected, oldEpoch: "old-epoch", relaunchLimitMs: 2_000, startupLimitMs: 2_000, naturalGraceMs: 500,
     readListener: async () => nextProcess,
     readHealth: async () => {
       if (now < 1_500) throw new Error("still starting");
@@ -972,7 +1015,7 @@ test("replacement waits for coherent new process and kickstarts only with an exp
   now = 0; launches = 0;
   let listenerReads = 0;
   const appearedAtBoundary = await waitForReplacement({
-    oldProcess, expected, oldEpoch: "old-epoch", timeoutMs: 2_000, naturalGraceMs: 0,
+    oldProcess, expected, oldEpoch: "old-epoch", relaunchLimitMs: 2_000, startupLimitMs: 2_000, naturalGraceMs: 0,
     readListener: async () => (++listenerReads === 1 ? undefined : nextProcess),
     readHealth: async () => health,
     launchSupervisor: async () => { launches += 1; },
@@ -984,7 +1027,7 @@ test("replacement waits for coherent new process and kickstarts only with an exp
 
   launches = 0;
   await assert.rejects(waitForReplacement({
-    oldProcess, expected, oldEpoch: "old-epoch", timeoutMs: 2_000, naturalGraceMs: 0,
+    oldProcess, expected, oldEpoch: "old-epoch", relaunchLimitMs: 2_000, startupLimitMs: 2_000, naturalGraceMs: 0,
     readListener: async () => { throw new Error("listener probe denied"); },
     readHealth: async () => health,
     launchSupervisor: async () => { launches += 1; },
@@ -998,18 +1041,18 @@ test("foreign listeners and stale health cannot satisfy replacement", async () =
   const stale = { buildFingerprint: expected.payloadFingerprint, sourceRevision: expected.sourceRevision, runtimeEpoch: "old-epoch" };
   let now = 0;
   await assert.rejects(waitForReplacement({
-    oldProcess, expected, oldEpoch: "old-epoch", timeoutMs: 500, naturalGraceMs: 0,
+    oldProcess, expected, oldEpoch: "old-epoch", relaunchLimitMs: 500, startupLimitMs: 500, naturalGraceMs: 0,
     readListener: async () => oldProcess,
     readHealth: async () => stale,
     launchSupervisor: async () => assert.fail("the old listener must not be kickstarted"),
     now: () => now,
     sleep: async (milliseconds) => { now += milliseconds; },
-  }), /coherent replacement/);
+  }), /bounded startup window/);
 
   now = 0;
   let reads = 0;
   await assert.rejects(waitForReplacement({
-    oldProcess, expected, oldEpoch: "old-epoch", timeoutMs: 500, naturalGraceMs: 0,
+    oldProcess, expected, oldEpoch: "old-epoch", relaunchLimitMs: 500, startupLimitMs: 500, naturalGraceMs: 0,
     readListener: async () => (++reads % 2 === 1
       ? { pid: 11, startIdentity: "one" }
       : { pid: 12, startIdentity: "two" }),
@@ -1017,13 +1060,13 @@ test("foreign listeners and stale health cannot satisfy replacement", async () =
     launchSupervisor: async () => assert.fail("an unstable listener must not be kickstarted"),
     now: () => now,
     sleep: async (milliseconds) => { now += milliseconds; },
-  }), /coherent replacement/);
+  }), /bounded startup window/);
 
   now = 0;
   let foreignError;
   try {
     await waitForReplacement({
-      oldProcess, expected, oldEpoch: "old-epoch", timeoutMs: 500, naturalGraceMs: 0,
+      oldProcess, expected, oldEpoch: "old-epoch", relaunchLimitMs: 500, startupLimitMs: 500, naturalGraceMs: 0,
       readListener: async () => ({ pid: 99, startIdentity: "foreign" }),
       readHealth: async () => ({ ...stale, buildFingerprint: "b".repeat(64) }),
       launchSupervisor: async () => assert.fail("foreign listener must not be kickstarted"),
@@ -1031,13 +1074,13 @@ test("foreign listeners and stale health cannot satisfy replacement", async () =
       sleep: async (milliseconds) => { now += milliseconds; },
     });
   } catch (error) { foreignError = error; }
-  assert.match(foreignError.message, /coherent replacement/);
+  assert.match(foreignError.message, /bounded startup window/);
   assert.equal(foreignError.observedProcess, undefined);
 });
 
 test("recovery coordinates an existing restored listener and fails closed on unknown listeners", async () => {
   const expected = { payloadFingerprint: "a".repeat(64), sourceRevision: "old-revision", runtimeEpoch: "old-epoch" };
-  const health = { buildFingerprint: expected.payloadFingerprint, sourceRevision: expected.sourceRevision, runtimeEpoch: expected.runtimeEpoch };
+  const health = { status: "ok", buildFingerprint: expected.payloadFingerprint, sourceRevision: expected.sourceRevision, runtimeEpoch: expected.runtimeEpoch };
   const candidate = { pid: 12, startIdentity: "candidate" };
   const restored = { pid: 13, startIdentity: "restored" };
   const order = [];
@@ -1053,7 +1096,7 @@ test("recovery coordinates an existing restored listener and fails closed on unk
     restore: async () => { order.push("restore"); },
     validateRestored: async () => { order.push("validate"); },
     beforeLaunch: async () => { order.push("rollback-requested"); },
-    replacement, expected, oldEpoch: "candidate-epoch", timeoutMs: 2_000,
+    replacement, expected, oldEpoch: "candidate-epoch", relaunchLimitMs: 2_000, startupLimitMs: 2_000,
     replaceableProcess: candidate,
   });
   assert.deepEqual(order, ["restore", "validate", "rollback-requested", "launch"]);
@@ -1067,7 +1110,7 @@ test("recovery coordinates an existing restored listener and fails closed on unk
       readHealth: async () => health,
       launchSupervisor: async () => { launches += 1; },
     },
-    expected, oldEpoch: "candidate-epoch", timeoutMs: 500,
+    expected, oldEpoch: "candidate-epoch", relaunchLimitMs: 500, startupLimitMs: 500,
     replaceableProcess: candidate,
   });
   assert.deepEqual(alreadyRestored.process, restored);
@@ -1080,9 +1123,9 @@ test("recovery coordinates an existing restored listener and fails closed on unk
       readHealth: async () => ({ ...health, buildFingerprint: "b".repeat(64) }),
       launchSupervisor: async () => { launches += 1; },
     },
-    expected, oldEpoch: "candidate-epoch", timeoutMs: 500,
+    expected, oldEpoch: "candidate-epoch", relaunchLimitMs: 500, startupLimitMs: 500,
     replaceableProcess: candidate,
-  }), /unknown live listener/);
+  }), /foreign live listener/);
   assert.equal(launches, 0);
 
   let selectionRestored = false;
@@ -1094,7 +1137,7 @@ test("recovery coordinates an existing restored listener and fails closed on unk
       readHealth: async () => health,
       launchSupervisor: async () => { throw new Error("launchctl refused"); },
     },
-    expected, oldEpoch: "candidate-epoch", timeoutMs: 500,
+    expected, oldEpoch: "candidate-epoch", relaunchLimitMs: 500, startupLimitMs: 500,
   }), /launchctl refused/);
   assert.equal(selectionRestored, true);
 
@@ -1107,8 +1150,8 @@ test("recovery coordinates an existing restored listener and fails closed on unk
       readHealth: async () => ({ ...health, buildFingerprint: "b".repeat(64) }),
       launchSupervisor: async () => { launched = true; },
     },
-    expected, oldEpoch: "candidate-epoch", timeoutMs: 500,
-  }), /coherent replacement/);
+    expected, oldEpoch: "candidate-epoch", relaunchLimitMs: 500, startupLimitMs: 500,
+  }), /bounded startup window/);
 });
 
 test("promotion readiness requires exact candidate epoch and an epoch transition", () => {

@@ -13,6 +13,7 @@ enum MenuBarAction: Equatable, Sendable {
     case pauseServer
     case resumeServer
     case restartServer
+    case updateGateway
     case uninstall
 }
 
@@ -49,6 +50,8 @@ final class MenuBarActionHandler {
             await resumeServer()
         case .restartServer:
             await restartServer()
+        case .updateGateway:
+            await rerunGatewayUpdate()
         case .uninstall:
             await confirmAndUninstall()
         }
@@ -119,6 +122,36 @@ final class MenuBarActionHandler {
             await finishRestartFailure(title: "Restart failed", message: failure.userMessage)
         } catch {
             await finishRestartFailure(title: "Restart failed", message: "The Gateway restart request failed safely.")
+        }
+    }
+
+    private func rerunGatewayUpdate() async {
+        guard await ensureLaunchAgentManagementAllowed(actionTitle: "Update unavailable") else { return }
+        guard case .updateIncomplete = menuBarController?.snapshot.state else { return }
+        let commandID = "mac-update-\(UUID().uuidString.lowercased())"
+        applyBusy(.updating)
+        do {
+            let response = try await setup.updateGateway(commandID)
+            await refreshStatus()
+            let message = response.state == "ready"
+                ? "Gateway update is ready as \(response.version ?? "the selected payload")."
+                : "Gateway update was accepted and is still \(response.state). Restart remains available; check the selected and running identities before retrying."
+            await MenuBarNotifier.post(title: response.state == "ready" ? "Tron updated" : "Update accepted", body: message)
+        } catch {
+            let outcome: String
+            do {
+                let receipt = try await setup.gatewayUpdateCommandStatus(commandID)
+                outcome = receipt.status == "completed" ? "completed" : receipt.status
+            } catch {
+                outcome = "unknown"
+            }
+            await refreshStatus()
+            await MenuBarNotifier.post(
+                title: "Update \(outcome)",
+                body: outcome == "missing"
+                    ? "Gateway has no durable receipt for this update request. Check update status before starting another update."
+                    : "The update request is \(outcome). Do not repeat it until Gateway status and running/selected identities are checked."
+            )
         }
     }
 

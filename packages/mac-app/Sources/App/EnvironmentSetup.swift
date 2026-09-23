@@ -100,6 +100,12 @@ struct EnvironmentSetup: Sendable {
     var restartGateway: @Sendable () async throws -> GatewayRestartClient.Response = {
         throw GatewayRestartClient.Failure.transport
     }
+    var updateGateway: @Sendable (String) async throws -> GatewayRestartClient.UpdateResponse = { _ in
+        throw GatewayRestartClient.Failure.transport
+    }
+    var gatewayUpdateCommandStatus: @Sendable (String) async throws -> GatewayRestartClient.CommandStatusResponse = { _ in
+        throw GatewayRestartClient.Failure.transport
+    }
 
     /// Health wait policy after menu-bar start/restart/resume actions.
     /// Tests can lower these to keep stale-helper paths deterministic.
@@ -279,6 +285,20 @@ struct EnvironmentSetup: Sendable {
                     host: host, port: profile.port, token: BearerTokenReader.read(at: bearer)
                 )
             },
+            updateGateway: { commandID in
+                let host = await resolveHost()
+                guard let host else { throw GatewayRestartClient.Failure.transport }
+                return try await GatewayRestartClient.update(
+                    host: host, port: profile.port, token: BearerTokenReader.read(at: bearer), commandID: commandID
+                )
+            },
+            gatewayUpdateCommandStatus: { commandID in
+                let host = await resolveHost()
+                guard let host else { throw GatewayRestartClient.Failure.transport }
+                return try await GatewayRestartClient.commandStatus(
+                    host: host, port: profile.port, token: BearerTokenReader.read(at: bearer), commandID: commandID
+                )
+            },
             launchAgentManager: LiveLaunchAgentManager(profile: profile),
             touchOnboardedSentinel: { try OnboardedSentinelWriter.touch(at: marker) },
             currentAppVersion: { MacAppVersionIdentity.current() },
@@ -331,6 +351,8 @@ struct EnvironmentSetup: Sendable {
             validateGatewayPayload: { nil },
             pingServer: { _ in .unreachable },
             restartGateway: { throw GatewayRestartClient.Failure.transport },
+            updateGateway: { _ in throw GatewayRestartClient.Failure.transport },
+            gatewayUpdateCommandStatus: { _ in throw GatewayRestartClient.Failure.transport },
             launchAgentManager: ReadOnlyDebugLaunchAgentManager(),
             touchOnboardedSentinel: {},
             readRecordedAppVersion: { nil },
