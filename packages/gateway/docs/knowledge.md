@@ -72,10 +72,16 @@ after an uncertain publication, the manifest still decides which catalog is acti
 
 `knowledge-catalog.test.ts` covers preserving a legacy corpus and receipt replay,
 missing-revision retry, rescue of a 16,000-cut legacy state above four MiB,
-atomic group rollback, missing/symlinked catalogs,
-evidence-heavy byte/node paging, and a 10,005-record fixture larger than four MiB.
-It checks exact body-read counts, full-history continuation, deleted anchors,
+atomic group rollback, missing/symlinked catalogs, evidence-heavy byte/node
+paging, and public pagination/search across multiple pages with deleted anchors.
+`knowledge-catalog.scale.test.ts` retains the 10,005-record, over-four-MiB
+fixture; it checks exact body-read counts, full-history continuation,
 late-corpus search/recall, scoped recovery, and actual SQLite date-index plans.
+The default Raindrop pagination test crosses the real 50-item provider page
+boundary with 51 items; the more expensive all-incomplete-head recovery case is
+in `raindrop-intake-multipage.scale.test.ts`. Run both exact scale regressions
+at release checkpoints with `npm run test:scale`. Default small fixtures do not
+prove the 10,000-record/four-MiB or repeated incomplete-head scale thresholds.
 
 Missing state in an established namespace is invalid and is never treated as
 an empty corpus. Missing or malformed/newer state, unsafe ancestors, and

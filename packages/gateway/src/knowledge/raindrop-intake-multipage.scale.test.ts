@@ -19,7 +19,8 @@ const response = (value: unknown, status = 200): ConnectorHTTPResponse => ({ sta
 const command = (name: string) => `multipage-intake-${name}`;
 
 describe("Raindrop intake pagination and cohort accounting", () => {
-  it.each([{ total: 51, incomplete: 1, cohorts: 0, dryRun: false }, { total: 51, incomplete: 0, cohorts: 0, dryRun: true }])("discovers shifted pages and recovers with $incomplete incomplete heads among $total items (dry run: $dryRun)", async ({ total, incomplete, cohorts, dryRun }) => {
+  // Every item is incomplete, so bounded recovery must cross multiple provider pages.
+  it.each([{ total: 51, incomplete: 51, cohorts: 5 }])("discovers shifted pages and recovers with $incomplete incomplete heads among $total items", async ({ total, incomplete, cohorts }) => {
     const root = await mkdtemp(join(tmpdir(), "tron-intake-multipage-")); roots.push(root);
     let workspace = new TronWorkspace(root); workspaces.push(workspace);
     let store = new KnowledgeStore(workspace);
@@ -60,7 +61,7 @@ describe("Raindrop intake pagination and cohort accounting", () => {
     };
     let extension = new KnowledgeConnectorExtension(store, options);
     await extension.invoke({ operation: "knowledge.connector.configure", request: { commandId: command("configure"), connector: "raindrop", enabled: true, accountId: "42", scope: "111", destination: "900", allowWrites: true, credentialRef: "connector:raindrop:synthetic" } });
-    const intake = (id: string, pilot: string, limit = 10, isDryRun = false) => extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command(id), sourceCollection: "111", dryRun: isDryRun, limit, pilot: { id: pilot, maxItems: 10, budgetCents: 10 } } });
+    const intake = (id: string, pilot: string) => extension.invoke({ operation: "knowledge.raindrop.intake", request: { commandId: command(id), sourceCollection: "111", dryRun: false, limit: 10, pilot: { id: pilot, maxItems: 10, budgetCents: 10 } } });
     async function completeCohort(commandId: string, cohort: string, expectedMoves: number): Promise<void> {
       const first = await intake(commandId, cohort);
       const pending = (await store.connectorState("raindrop"))?.pendingRemote;
@@ -76,13 +77,6 @@ describe("Raindrop intake pagination and cohort accounting", () => {
         const resumed = await intake(`${commandId}-resumed`, cohort);
         expect(resumed).toMatchObject({ moved: expectedMoves });
       } else expect(first).toMatchObject({ moved: expectedMoves });
-    }
-    if (dryRun) {
-      let result: unknown;
-      for (let pass = 0; pass < 6; pass += 1) result = await intake(`page-boundary-${pass}`, "page-boundary", 10, true);
-      expect(result).toMatchObject({ dryRun: true, discovered: 1 });
-      expect(requestedPages).toEqual([0, 0, 0, 0, 0, 0, 1]);
-      return;
     }
     await completeCohort("first", "pilot", Math.max(0, 10 - incomplete));
 
@@ -107,5 +101,6 @@ describe("Raindrop intake pagination and cohort accounting", () => {
     expect(Object.keys(state?.assessmentAttempts ?? {})).toHaveLength(completeIds.length);
     expect(state?.assessmentApprovals?.reduce((sum, item) => sum + item.itemIds.length, 0) ?? 0).toBe(selected - 10);
     expect(requestedPages).toContain(0);
+    if (total > 50) expect(requestedPages).toContain(1);
   }, 30_000);
 });
