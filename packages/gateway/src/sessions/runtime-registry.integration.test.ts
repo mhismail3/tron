@@ -4389,7 +4389,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     };
     internal.extensionActivities.set(toolCallId, {
       id: toolCallId, activityId: "retry-activity", runId, toolCallId,
-      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", mode: "asynchronous", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
       startedAt, updatedAt: startedAt, children: [],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
     });
@@ -4401,26 +4401,47 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       return originalRead(directory);
     };
     internal.startExtensionActivityWatcher(toolCallId, asyncDir);
-    await waitUntil(() => reads >= 1);
-    await writeFile(join(asyncDir, "status.json"), JSON.stringify({
-      lifecycleArtifactVersion: 3,
-      runId,
-      state: "running",
-      startedAt: Date.parse(startedAt),
-      lastUpdate: Date.now(),
-      mode: "workflow",
-      // The artifact itself is authoritative running evidence even before a
-      // workflow publishes its first child step.
-      steps: [],
-    }));
-    await waitUntil(() => reads >= 2 && (slot.snapshot().processActivities?.length ?? 0) === 1);
-    expect(slot.snapshot().processActivities?.[0]).toMatchObject({
-      kind: "subagent",
-      runId,
-      executionMode: "asynchronous",
-      visibility: "active",
-    });
-    expect(slot.snapshot().processOverview).toMatchObject({ visibility: "active", activeCount: 1 });
+    try {
+      await waitUntil(() => reads >= 1);
+      const pendingStatus = join(asyncDir, "status.json.pending");
+      await writeFile(pendingStatus, JSON.stringify({
+        lifecycleArtifactVersion: 3,
+        runId,
+        state: "running",
+        startedAt: Date.parse(startedAt),
+        lastUpdate: Date.now(),
+        mode: "workflow",
+        // The artifact itself is authoritative running evidence even before a
+        // workflow publishes its first child step.
+        steps: [],
+      }));
+      await rename(pendingStatus, join(asyncDir, "status.json"));
+      await waitUntil(() => (slot.snapshot().processActivities?.length ?? 0) === 1);
+      expect(slot.snapshot().processActivities?.[0]).toMatchObject({
+        kind: "subagent",
+        runId,
+        executionMode: "asynchronous",
+        visibility: "active",
+      });
+      expect(slot.snapshot().processOverview).toMatchObject({ visibility: "active", activeCount: 1 });
+    } finally {
+      const endedAt = Date.now();
+      const completedStatus = join(asyncDir, "status.json.pending");
+      await writeFile(completedStatus, JSON.stringify({
+        lifecycleArtifactVersion: 3,
+        runId,
+        state: "complete",
+        startedAt: Date.parse(startedAt),
+        lastUpdate: endedAt,
+        endedAt,
+        mode: "workflow",
+        steps: [],
+      }));
+      await rename(completedStatus, join(asyncDir, "status.json"));
+      await waitUntil(() => slot.snapshot().extensionActivities?.some((activity) =>
+        activity.toolCallId === toolCallId && activity.status === "completed") === true);
+      await fixture.registry.waitUntilIdle();
+    }
   });
 
   it("retires a stale active process when its exact status artifact stays missing", async () => {
@@ -4433,7 +4454,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const startedAt = new Date(Date.now() - 60_000).toISOString();
     const activity: ExtensionRunActivity = {
       id: toolCallId, activityId: "missing-activity", runId, toolCallId,
-      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", mode: "asynchronous", status: "running",
+      source: { source: "project", owner: { id: "extension:pi-subagents", title: "Subagents", source: "project" } }, title: "Subagents", mode: "asynchronous", status: "running",
       startedAt, updatedAt: startedAt,
       children: [{ id: "child", producerId: "child", label: "worker", status: "running", lifecycle: "running" }],
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
