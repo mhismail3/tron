@@ -1,10 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import { lstat, open, opendir, readFile, readdir, realpath, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { performance } from "node:perf_hooks";
-import { createInterface } from "node:readline";
 import {
   ModelRuntime,
   parseSessionEntries,
@@ -60,10 +59,8 @@ import type { ScheduleToolOperations } from "../automations/tron-schedule-extens
 import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 import { isAutomationId, runIdFromAutomationOperationId } from "../automations/automation-contract.js";
 import {
-  INVOCATION_RECEIPT_TYPE,
   invocationProjection,
   invocationReceipts,
-  parseInvocationReceipt,
   type InvocationProjection,
 } from "./invocation-receipts.js";
 import { projectTranscriptPage, type TranscriptPage } from "./projection.js";
@@ -71,8 +68,6 @@ import {
   CatalogMetadataIndex,
   type CatalogMetadataIndexRow,
   type CatalogMetadataIndexSummary,
-  type CatalogMetadataAccumulator,
-  applyCatalogMetadataEntry,
 } from "./catalog-metadata-index.js";
 import { branchFromParsedSession } from "./session-branch.js";
 import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-boundary.js";
@@ -83,6 +78,16 @@ import type { McpAdapter } from "../integrations/mcp-adapter.js";
 import type { SessionSearchForkBoundary } from "./session-search-contract.js";
 import { validateSearchBranch } from "./session-search-text.js";
 import { observationEntriesDigest } from "../knowledge/knowledge-observation.js";
+import {
+  CatalogDiscovery,
+  DEFAULT_CATALOG_DISCOVERY_LIMITS,
+  buildCatalogSessionInfo,
+  type CatalogDiscoveryOptions,
+  type CatalogHeaderIdentity,
+  type CatalogSessionInfo,
+  type CatalogStructureEvidence,
+  type DelegatedSessionTopology,
+} from "./catalog-discovery.js";
 
 const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
 /** A read-only child observer may page only canonical sessions that fit this
@@ -205,149 +210,6 @@ function parseStrictSessionJSONL(bytes: Buffer): FileEntry[] {
   catch { throw new GatewayError("invalid_request", "Session JSONL could not be parsed"); }
   if (entries.length !== raw.length) throw new GatewayError("invalid_request", "Session JSONL contains an unsupported record");
   return entries;
-}
-
-const DEFAULT_CATALOG_DISCOVERY_LIMITS = {
-  maximumDirectories: 25_001,
-  maximumEntries: 50_001,
-  maximumTraversalBytes: 8 * 1_024 * 1_024,
-  maximumSessions: 25_000,
-  maximumRetainedBytes: 8 * 1_024 * 1_024,
-  maximumAcquisitionBytes: 4 * 1_024 * 1_024,
-  maximumHeaderBytes: 64 * 1_024 * 1_024,
-  maximumHeaderBytesPerFile: 64 * 1_024,
-  normalizationConcurrency: 16,
-};
-
-type SessionInfo = Awaited<ReturnType<typeof SessionManager.listAll>>[number];
-type CatalogSessionInfo = Omit<SessionInfo, "allMessagesText"> & {
-  fileIdentity?: string;
-  creationOrigin?: SessionCreationOrigin;
-};
-
-/** SDK-compatible row metadata without constructing its unused transcript-wide
- * `allMessagesText` accumulator. The complete JSONL remains authoritative for
- * RuntimeSlot.open; this pass is only catalog discovery metadata. */
-async function buildCatalogSessionInfo(filePath: string): Promise<CatalogSessionInfo | null> {
-  try {
-    const physical = await lstat(filePath);
-    if (!physical.isFile() || physical.isSymbolicLink()) return null;
-    const stats = await stat(filePath);
-    let header: Record<string, unknown> | undefined;
-    const metadata: CatalogMetadataAccumulator = {
-      messageCount: 0,
-      firstMessage: "(no messages)",
-      name: undefined,
-      updatedAt: "",
-    };
-    const automationStarts = new Map<string, { automationId: string; sessionId: string }>();
-    let sawPrePromptMessage = false;
-    let firstUserEntryId: string | undefined;
-    let automationCreation: { automationId: string; sessionId: string } | undefined;
-    const lines = createInterface({
-      input: createReadStream(filePath, { encoding: "utf8" }),
-      crlfDelay: Infinity,
-    });
-    for await (const line of lines) {
-      let value: unknown;
-      try { value = JSON.parse(line); } catch { continue; }
-      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
-      const entry = value as Record<string, unknown>;
-      if (!header) {
-        if (entry.type !== "session") return null;
-        header = entry;
-        continue;
-      }
-      if (firstUserEntryId === undefined && entry.type === "message") {
-        if (typeof entry.id === "string"
-          && entry.message && typeof entry.message === "object" && !Array.isArray(entry.message)
-          && (entry.message as Record<string, unknown>).role === "user") {
-          firstUserEntryId = entry.id;
-        } else {
-          // A generated Automation session begins with its invocation receipts
-          // and canonical user prompt. Any earlier message proves another owner.
-          sawPrePromptMessage = true;
-          automationStarts.clear();
-        }
-      }
-      if (entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE) {
-        const receipt = parseInvocationReceipt(entry.data);
-        if (receipt?.receiptKind === "start" && firstUserEntryId === undefined
-          && !sawPrePromptMessage && automationStarts.size < 128
-          && receipt.source !== "extension"
-          && receipt.origin.kind === "gateway" && receipt.origin.confidence === "boundary"
-          && isAutomationId(receipt.origin.ownerId)
-          && runIdFromAutomationOperationId(receipt.operationId) !== undefined) {
-          automationStarts.set(receipt.invocationId, {
-            automationId: receipt.origin.ownerId,
-            sessionId: receipt.sessionId,
-          });
-        } else if (receipt?.receiptKind === "binding"
-          && receipt.canonicalEntryId === firstUserEntryId) {
-          automationCreation = automationStarts.get(receipt.invocationId);
-        }
-      }
-      applyCatalogMetadataEntry(metadata, entry);
-    }
-    if (!header || typeof header.id !== "string") return null;
-    const cwd = typeof header.cwd === "string" ? header.cwd : "";
-    const headerTime = typeof header.timestamp === "string" ? Date.parse(header.timestamp) : NaN;
-    const modified = metadata.updatedAt ? new Date(metadata.updatedAt)
-      : Number.isFinite(headerTime) ? new Date(headerTime) : stats.mtime;
-    return {
-      path: filePath,
-      id: header.id,
-      cwd,
-      ...(metadata.name ? { name: metadata.name } : {}),
-      ...(typeof header.parentSession === "string" ? { parentSessionPath: header.parentSession } : {}),
-      ...(automationCreation?.sessionId === header.id && typeof header.parentSession !== "string"
-        ? { creationOrigin: { kind: "automation", automationId: automationCreation.automationId } as const }
-        : {}),
-      created: new Date(typeof header.timestamp === "string" ? header.timestamp : stats.birthtime),
-      modified,
-      messageCount: metadata.messageCount,
-      firstMessage: metadata.firstMessage,
-    };
-  } catch {
-    return null;
-  }
-}
-
-async function buildCatalogSessionInfos(files: readonly string[]): Promise<CatalogSessionInfo[]> {
-  const results: Array<CatalogSessionInfo | null> = new Array(files.length).fill(null);
-  let next = 0;
-  const worker = async (): Promise<void> => {
-    while (true) {
-      const index = next++;
-      if (index >= files.length) return;
-      results[index] = await buildCatalogSessionInfo(files[index]!);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(10, files.length) }, worker));
-  return results.filter((info): info is CatalogSessionInfo => info !== null);
-}
-
-interface CatalogHeaderIdentity {
-  id: string;
-  cwd: string;
-  fileIdentity: string;
-  size: number;
-  mtimeMs: number;
-  parentSessionPath?: string;
-}
-
-interface DelegatedSessionTopology {
-  parentSessionId?: string;
-  contradictoryHeader: boolean;
-}
-
-interface CatalogStructureEvidence {
-  digest: string;
-  factsDigest: string;
-  identitiesByPath: ReadonlyMap<string, CatalogHeaderIdentity>;
-  complete: boolean;
-  unstableCanonicalFiles: boolean;
-  unstableCanonicalPaths?: ReadonlySet<string>;
 }
 
 interface CatalogAcquisitionEntry {
@@ -1145,18 +1007,20 @@ export class RuntimeRegistry {
     return this.configuredSessionDirectory() ?? join(this.options.agentDir, "sessions");
   }
 
-  /** pi-subagents writes diagnostic transcripts beneath the exact reserved
-   * `<catalog-root>/<workspace>/subagent-artifacts` subtree. A legitimate
-   * deeper project directory with the same name remains canonical. */
-  private isIgnoredCatalogDirectory(directory: string, canonicalRoot: string): boolean {
-    const fromRoot = relative(canonicalRoot, resolve(directory));
-    if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) return true;
-    const parts = fromRoot.split(sep);
-    return parts.length === 2 && parts[1] === "subagent-artifacts";
-  }
-
   private catalogDiscoveryLimits() {
     return { ...DEFAULT_CATALOG_DISCOVERY_LIMITS, ...this.options.catalogDiscoveryLimits };
+  }
+
+  private catalogDiscovery(): CatalogDiscovery {
+    const options: CatalogDiscoveryOptions = {
+      limits: this.catalogDiscoveryLimits(),
+      catalogDirectory: () => this.catalogDirectory(),
+      catalogCapacityExceeded: () => this.catalogCapacityExceeded(),
+      isLiveRuntimeOwnedPath: (path, sessionID) => this.isLiveRuntimeOwnedPath(path, sessionID),
+      canonicalSessionPath: (path) => this.canonicalSessionPath(path),
+      delegatedTopologyParentPath: (path, root) => this.delegatedTopologyParentPath(path, root),
+    };
+    return new CatalogDiscovery(options);
   }
 
   private catalogCapacityExceeded(): never {
@@ -1228,7 +1092,10 @@ export class RuntimeRegistry {
     if (this.catalogStructuralIndex === index
         && structuralGeneration === this.catalogStructuralGeneration
         && evidence.complete
-        && evidence.digest === index.structureDigest
+        && (index.scope === "user"
+          ? this.catalogEvidenceMatchesIndexedUserScope(index.allInfos, evidence)
+            && this.sameStringSet(index.ambiguousDiskIDs, this.diskAmbiguousSessionIDsFromEvidence(evidence))
+          : evidence.digest === index.structureDigest)
         && this.catalogFactsDigest(evidence, index.scope) === index.factsDigest) return index;
     // Metadata freshness cannot revoke a concurrent identity-only acquisition.
     if (this.catalogStructuralIndex === index) {
@@ -1236,6 +1103,24 @@ export class RuntimeRegistry {
       this.catalogProjectionGeneration += 1;
     }
     return undefined;
+  }
+
+  private sameStringSet(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
+    return left.size === right.size && [...left].every((value) => right.has(value));
+  }
+
+  private catalogEvidenceMatchesIndexedUserScope(
+    infos: readonly CatalogSessionInfo[],
+    evidence: CatalogStructureEvidence,
+  ): boolean {
+    const indexed = infos.map((info) => [
+      resolve(info.path), info.id, info.cwd, info.fileIdentity ?? "", info.parentSessionPath ?? "",
+    ].join("\\0")).sort();
+    const discovered = this.catalogIdentitiesForScope(evidence, "user")
+      .map(([path, identity]) => [
+        path, identity.id, identity.cwd, identity.fileIdentity, identity.parentSessionPath ?? "",
+      ].join("\\0")).sort();
+    return JSON.stringify(indexed) === JSON.stringify(discovered);
   }
 
   private async removeIndexedCatalogFile(path: string): Promise<boolean> {
@@ -1269,347 +1154,6 @@ export class RuntimeRegistry {
       remaining.filter((session) => !this.delegatedSessionTopologies(remaining).has(resolve(session.path))),
     );
     return true;
-  }
-
-  private async catalogStructureEvidence(): Promise<CatalogStructureEvidence> {
-    const limits = this.catalogDiscoveryLimits();
-    const catalogRoot = await realpath(resolve(this.catalogDirectory())).catch(() => resolve(this.catalogDirectory()));
-    const pending = [catalogRoot];
-    const seenDirectories = new Set<string>();
-    const candidatePaths = new Set<string>();
-    let entriesExamined = 0;
-    let traversalBytes = Buffer.byteLength(pending[0]!);
-    let complete = true;
-    let unstableCanonicalFiles = false;
-    const unstableCanonicalPaths = new Set<string>();
-    while (pending.length > 0) {
-      const candidate = pending.pop()!;
-      let directory: string;
-      try { directory = await realpath(candidate); }
-      catch (error) {
-        if (!isMissingFilesystemError(error)) complete = false;
-        continue;
-      }
-      if (this.isIgnoredCatalogDirectory(directory, catalogRoot)) continue;
-      if (!seenDirectories.add(directory)) continue;
-      traversalBytes += Buffer.byteLength(directory);
-      if (seenDirectories.size > limits.maximumDirectories
-        || traversalBytes > limits.maximumTraversalBytes) this.catalogCapacityExceeded();
-      try {
-        const entries = await opendir(directory);
-        for await (const entry of entries) {
-          entriesExamined += 1;
-          if (entriesExamined > limits.maximumEntries) this.catalogCapacityExceeded();
-          const child = join(directory, entry.name);
-          if (entry.isDirectory()) {
-            if (this.isIgnoredCatalogDirectory(child, catalogRoot)) continue;
-            traversalBytes += Buffer.byteLength(child);
-            if (traversalBytes > limits.maximumTraversalBytes) this.catalogCapacityExceeded();
-            pending.push(child);
-            continue;
-          }
-          if (!entry.name.endsWith(".jsonl") || (!entry.isFile() && !entry.isSymbolicLink())) continue;
-          // Symlinked JSONL is never canonical authority. Following it could
-          // import a session outside the configured root or create an alias
-          // that changes inode identity between admission and open.
-          if (entry.isSymbolicLink()) continue;
-          let canonicalPath: string;
-          try { canonicalPath = await realpath(child); }
-          catch { continue; }
-          const fromRoot = relative(catalogRoot, canonicalPath);
-          if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) continue;
-          traversalBytes += Buffer.byteLength(canonicalPath);
-          if (traversalBytes > limits.maximumTraversalBytes) this.catalogCapacityExceeded();
-          candidatePaths.add(canonicalPath);
-          if (candidatePaths.size > limits.maximumSessions) this.catalogCapacityExceeded();
-        }
-      } catch (error) {
-        if (error instanceof GatewayError) throw error;
-        if (!isMissingFilesystemError(error)) complete = false;
-      }
-    }
-
-    const paths = [...candidatePaths].sort();
-    let remainingHeaderBytes = limits.maximumHeaderBytes;
-    const perCandidateHeaderBytes = Math.min(
-      limits.maximumHeaderBytesPerFile,
-      Math.floor(limits.maximumHeaderBytes / Math.max(1, paths.length)),
-    );
-    let retainedIdentityBytes = 0;
-    const reserveHeaderBytes = (count: number): boolean => {
-      if (count > remainingHeaderBytes) return false;
-      remainingHeaderBytes -= count;
-      return true;
-    };
-    const refundHeaderBytes = (count: number): void => { remainingHeaderBytes += count; };
-    const digest = createHash("sha256");
-    const factsDigest = createHash("sha256");
-    const identitiesByPath = new Map<string, CatalogHeaderIdentity>();
-    digest.update(`count:${paths.length}\n`);
-    factsDigest.update(`count:${paths.length}\n`);
-    for (let start = 0; start < paths.length; start += limits.normalizationConcurrency) {
-      const batchPaths = paths.slice(start, start + limits.normalizationConcurrency);
-      const identities = await Promise.all(batchPaths.map(async (path) => {
-        try {
-          const header = await this.readCatalogHeader(
-            path,
-            perCandidateHeaderBytes,
-            reserveHeaderBytes,
-            refundHeaderBytes,
-            true,
-          );
-          if (header.unstable) {
-            unstableCanonicalFiles = true;
-            unstableCanonicalPaths.add(path);
-          }
-          const identity = header.identity;
-          if (!identity) return undefined;
-          return identity.parentSessionPath
-            ? { ...identity, parentSessionPath: await this.canonicalSessionPath(identity.parentSessionPath) }
-            : identity;
-        } catch {
-          return undefined;
-        }
-      }));
-      for (let index = 0; index < batchPaths.length; index += 1) {
-        const path = batchPaths[index]!;
-        let identity = identities[index];
-        if (identity) {
-          const identityBytes = Buffer.byteLength(JSON.stringify({ path, ...identity }));
-          if (retainedIdentityBytes + identityBytes > limits.maximumAcquisitionBytes) identity = undefined;
-          else retainedIdentityBytes += identityBytes;
-        }
-        if (!identity) complete = false;
-        digest.update(path).update("\0")
-          .update(identity?.id ?? "").update("\0")
-          .update(identity?.cwd ?? "").update("\0")
-          .update(identity?.fileIdentity ?? "").update("\0")
-          .update(identity?.parentSessionPath ?? "").update("\n");
-        const liveOwner = identity !== undefined && this.isLiveRuntimeOwnedPath(path, identity.id);
-        factsDigest.update(path).update("\0")
-          .update(identity?.id ?? "").update("\0")
-          .update(identity?.cwd ?? "").update("\0")
-          .update(identity?.fileIdentity ?? "").update("\0")
-          // A Gateway-owned JSONL may grow while its header is being read. Its
-          // inode and identity remain structural authority; cold/unowned files
-          // retain size/mtime validation so external rewrites cannot slip by.
-          .update(identity ? (liveOwner ? "live-append" : String(identity.size)) : "").update("\0")
-          .update(identity ? (liveOwner ? "live-append" : String(identity.mtimeMs)) : "").update("\n");
-        if (identity) identitiesByPath.set(path, identity);
-      }
-    }
-    return {
-      digest: digest.digest("base64url"),
-      factsDigest: factsDigest.digest("base64url"),
-      identitiesByPath,
-      complete,
-      unstableCanonicalFiles,
-      unstableCanonicalPaths,
-    };
-  }
-
-  private isLiveRuntimeOwnedPath(path: string, sessionID: string): boolean {
-    const canonicalPath = resolve(path);
-    return [...this.slots.values()].some((slot) => !slot.isDisposed
-      && slot.id === sessionID
-      && slot.persistedSessionFile !== undefined
-      && resolve(slot.persistedSessionFile) === canonicalPath);
-  }
-
-  private async readCatalogHeader(
-    path: string,
-    maximumBytes: number,
-    reserveBytes: (count: number) => boolean,
-    refundBytes: (count: number) => void,
-    allowAppendOnlyLiveOwner = false,
-  ): Promise<{ identity?: CatalogHeaderIdentity; unstable?: boolean }> {
-    const firstReadLength = Math.min(512, maximumBytes);
-    if (!reserveBytes(firstReadLength)) return {};
-    let handle: Awaited<ReturnType<typeof open>>;
-    try { handle = await open(path, "r"); }
-    catch (error) {
-      refundBytes(firstReadLength);
-      throw error;
-    }
-    let opened: Awaited<ReturnType<typeof handle.stat>>;
-    try { opened = await handle.stat(); }
-    catch (error) {
-      refundBytes(firstReadLength);
-      await handle.close().catch(() => {});
-      throw error;
-    }
-    if (!opened.isFile()) {
-      refundBytes(firstReadLength);
-      await handle.close();
-      return {};
-    }
-    const fileIdentity = `${opened.dev}:${opened.ino}`;
-    if (opened.size === 0) {
-      refundBytes(firstReadLength);
-      await handle.close();
-      return {};
-    }
-    try {
-      const finalByte = Buffer.alloc(1);
-      const finalRead = await handle.read(finalByte, 0, 1, opened.size - 1);
-      // A stable header remains identity evidence while this file has a partial
-      // tail. Transcript/catalog readers separately enforce their selected scope.
-      const incompleteTail = finalRead.bytesRead !== 1 || finalByte[0] !== 0x0a;
-      const buffer = Buffer.allocUnsafe(maximumBytes);
-      const parseHeader = (line: Buffer): CatalogHeaderIdentity | undefined => {
-        if (line.length === 0 || !line.toString("utf8").trim()) return undefined;
-        let value: unknown;
-        try { value = JSON.parse(line.toString("utf8")); }
-        catch { return undefined; }
-        if (!value || typeof value !== "object") return undefined;
-        const record = value as Record<string, unknown>;
-        if (record.type !== "session" || typeof record.id !== "string") return undefined;
-        return {
-          id: record.id,
-          cwd: typeof record.cwd === "string" ? record.cwd : "",
-          fileIdentity,
-          size: opened.size,
-          mtimeMs: opened.mtimeMs,
-          ...(typeof record.parentSession === "string"
-            ? { parentSessionPath: record.parentSession }
-            : {}),
-        };
-      };
-      const stableIdentity = async (identity: CatalogHeaderIdentity | undefined): Promise<CatalogHeaderIdentity | undefined> => {
-        if (!identity) return undefined;
-        const after = await handle.stat();
-        const afterPath = await lstat(path);
-        const sameFile = after.isFile() && after.dev === opened.dev && after.ino === opened.ino
-          && afterPath.isFile() && !afterPath.isSymbolicLink()
-          && afterPath.dev === opened.dev && afterPath.ino === opened.ino;
-        const unchanged = after.size === opened.size && after.mtimeMs === opened.mtimeMs
-          && afterPath.size === opened.size && afterPath.mtimeMs === opened.mtimeMs;
-        const appendOnly = allowAppendOnlyLiveOwner
-          && this.isLiveRuntimeOwnedPath(path, identity.id)
-          && (after.size > opened.size || afterPath.size > opened.size);
-        if (!sameFile || (!unchanged && !appendOnly)) return undefined;
-        return identity;
-      };
-      let bytesReadTotal = 0;
-      let lineStart = 0;
-      while (bytesReadTotal < maximumBytes) {
-        const readLength = Math.min(512, maximumBytes - bytesReadTotal);
-        if (bytesReadTotal > 0 && !reserveBytes(readLength)) return {};
-        let bytesRead: number;
-        try {
-          ({ bytesRead } = await handle.read(buffer, bytesReadTotal, readLength, bytesReadTotal));
-        } catch (error) {
-          refundBytes(readLength);
-          throw error;
-        }
-        refundBytes(readLength - bytesRead);
-        if (bytesRead === 0) {
-          if (lineStart >= bytesReadTotal) return {};
-          const identity = parseHeader(buffer.subarray(lineStart, bytesReadTotal));
-          const stable = await stableIdentity(identity);
-          return stable ? { identity: stable, ...(incompleteTail ? { unstable: true } : {}) } : {};
-        }
-        bytesReadTotal += bytesRead;
-        const newline = buffer.indexOf(0x0a, lineStart);
-        if (newline >= 0 && newline < bytesReadTotal) {
-          const identity = parseHeader(buffer.subarray(lineStart, newline));
-          const stable = await stableIdentity(identity);
-          return stable ? { identity: stable, ...(incompleteTail ? { unstable: true } : {}) } : {};
-        }
-      }
-      return {};
-    } finally {
-      await handle.close();
-    }
-  }
-
-  private async sessionInfos(scope: "user" | "all" = "all") {
-    const limits = this.catalogDiscoveryLimits();
-    const catalogRoot = await realpath(resolve(this.catalogDirectory())).catch(() => resolve(this.catalogDirectory()));
-    const pending = [catalogRoot];
-    const seen = new Set<string>();
-    const sessions: CatalogSessionInfo[] = [];
-    let entriesExamined = 0;
-    let traversalBytes = Buffer.byteLength(pending[0]!);
-    let retainedBytes = 0;
-    while (pending.length > 0) {
-      const candidate = pending.pop()!;
-      let directory: string;
-      try { directory = await realpath(candidate); }
-      catch (error) {
-        if (isMissingFilesystemError(error)) continue;
-        throw new GatewayError("busy", "Session catalog directory could not be validated", true);
-      }
-      if (this.isIgnoredCatalogDirectory(directory, catalogRoot)) continue;
-      if (!seen.add(directory)) continue;
-      traversalBytes += Buffer.byteLength(directory);
-      if (seen.size > limits.maximumDirectories
-        || traversalBytes > limits.maximumTraversalBytes) this.catalogCapacityExceeded();
-
-      const files: string[] = [];
-      try {
-        const entries = await opendir(directory);
-        for await (const entry of entries) {
-          entriesExamined += 1;
-          if (entriesExamined > limits.maximumEntries) this.catalogCapacityExceeded();
-          if (entry.isDirectory()) {
-            const child = join(directory, entry.name);
-            if (this.isIgnoredCatalogDirectory(child, catalogRoot)) continue;
-            traversalBytes += Buffer.byteLength(child);
-            if (traversalBytes > limits.maximumTraversalBytes) this.catalogCapacityExceeded();
-            pending.push(child);
-          } else if (entry.name.endsWith(".jsonl") && entry.isFile()) {
-            files.push(join(directory, entry.name));
-          }
-        }
-      } catch (error) {
-        if (error instanceof GatewayError) throw error;
-        if (isMissingFilesystemError(error)) continue;
-        throw new GatewayError("busy", "Session catalog directory could not be enumerated", true);
-      }
-
-      // RuntimeRegistry owns recursion and uses a bounded metadata scanner here;
-      // the SDK list helper also builds an unused transcript-wide search string.
-      // User lists never expose delegated sessions, so their metadata is not
-      // needed to build the response. Structural evidence still walks every
-      // path and all-scope materialization remains strict over the whole tree.
-      const metadataFiles = scope === "user"
-        ? files.filter((file) => this.delegatedTopologyParentPath(file, catalogRoot) === undefined)
-        : files;
-      const discovered = await buildCatalogSessionInfos(metadataFiles);
-      if (sessions.length + discovered.length > limits.maximumSessions) this.catalogCapacityExceeded();
-      for (const session of discovered) {
-        retainedBytes += Buffer.byteLength(JSON.stringify(session));
-        if (retainedBytes > limits.maximumRetainedBytes) this.catalogCapacityExceeded();
-        sessions.push(session);
-      }
-    }
-
-    const normalized = new Array<CatalogSessionInfo>(sessions.length);
-    let nextIndex = 0;
-    const normalize = async () => {
-      while (true) {
-        const index = nextIndex;
-        nextIndex += 1;
-        const session = sessions[index];
-        if (!session) return;
-        const path = await this.canonicalSessionPath(session.path);
-        normalized[index] = {
-          ...session,
-          path,
-          ...(session.parentSessionPath
-            ? { parentSessionPath: await this.canonicalSessionPath(session.parentSessionPath) }
-            : {}),
-        };
-      }
-    };
-    await Promise.all(Array.from(
-      { length: Math.min(limits.normalizationConcurrency, sessions.length) },
-      normalize,
-    ));
-    // Overlapping recursive discovery roots may report the same canonical file
-    // more than once. Canonical path aliases are one file, not an ID collision.
-    return [...new Map(normalized.map((session) => [resolve(session.path), session])).values()];
   }
 
   private async canonicalSessionPath(path: string): Promise<string> {
@@ -1721,6 +1265,34 @@ export class RuntimeRegistry {
       }
       if ((await this.markers.evidenceFor(sessionId)).length === 0) this.interrupted.delete(sessionId);
     }
+  }
+
+  private async catalogStructureEvidence(): Promise<CatalogStructureEvidence> {
+    return this.catalogDiscovery().catalogStructureEvidence();
+  }
+
+  private async readCatalogHeader(
+    path: string,
+    maximumBytes: number,
+    reserveBytes: (count: number) => boolean,
+    refundBytes: (count: number) => void,
+    allowAppendOnlyLiveOwner = false,
+  ): Promise<{ identity?: CatalogHeaderIdentity; unstable?: boolean }> {
+    return this.catalogDiscovery().readCatalogHeader(
+      path, maximumBytes, reserveBytes, refundBytes, allowAppendOnlyLiveOwner,
+    );
+  }
+
+  private async sessionInfos(scope: "user" | "all" = "all"): Promise<CatalogSessionInfo[]> {
+    return this.catalogDiscovery().sessionInfos(scope);
+  }
+
+  private isLiveRuntimeOwnedPath(path: string, sessionID: string): boolean {
+    const canonicalPath = resolve(path);
+    return [...this.slots.values()].some((slot) => !slot.isDisposed
+      && slot.id === sessionID
+      && slot.persistedSessionFile !== undefined
+      && resolve(slot.persistedSessionFile) === canonicalPath);
   }
 
   private async attentionLiveOnlyStillAdmitted(sessionId: string): Promise<boolean> {

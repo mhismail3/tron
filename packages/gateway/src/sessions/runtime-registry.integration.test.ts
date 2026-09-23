@@ -1017,6 +1017,41 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await expect(makeRegistry(3, 2).catalog("all")).resolves.toMatchObject({ sessions: [] });
   });
 
+  it("ignores JSONL symlinks outside the canonical catalog root", async () => {
+    const fixture = await coldFixture("catalog-file-symlink");
+    const external = join(fixture.root, "external-session.jsonl");
+    const outside = SessionManager.create(fixture.cwd, join(fixture.root, "outside"));
+    outside.appendMessage(fauxAssistantMessage("outside catalog fixture"));
+    await copyFile(outside.getSessionFile()!, external);
+    const alias = join(fixture.agentDir, "sessions", "workspace", "outside.jsonl");
+    await symlink(external, alias);
+
+    const listed = await fixture.registry.catalog("all");
+    expect(listed.sessions.map((session) => session.id)).not.toContain(outside.getSessionId());
+  });
+
+  it("keeps public catalog identity stable when the same folders are enumerated in another order", async () => {
+    const fixture = await coldFixture("catalog-walk-order");
+    const catalogRoot = join(fixture.agentDir, "sessions");
+    const folderNames = ["walk-a", "walk-b", "walk-c"];
+    const managers = folderNames.map((name) => {
+      const directory = join(catalogRoot, name);
+      return SessionManager.create(fixture.cwd, directory);
+    });
+    for (const manager of managers) manager.appendMessage(fauxAssistantMessage("stable catalog fixture"));
+
+    const before = await fixture.registry.catalog("all");
+    const beforeIDs = before.sessions.map((session) => session.id).sort();
+    const holding = join(fixture.root, "walk-order-holding");
+    await mkdir(holding);
+    for (const name of folderNames) await rename(join(catalogRoot, name), join(holding, name));
+    for (const name of [...folderNames].reverse()) await rename(join(holding, name), join(catalogRoot, name));
+
+    const after = await fixture.registry.catalog("all");
+    expect(after.listRevision).toBe(before.listRevision);
+    expect(after.sessions.map((session) => session.id).sort()).toEqual(beforeIDs);
+  });
+
   it("owns recursion without overlapping SDK directory materializations", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-catalog-direct-sdk-listing-"));
     const agentDir = join(root, "agent");
