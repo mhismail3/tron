@@ -60,16 +60,26 @@ export function applyCatalogMetadataEntry(target: CatalogMetadataAccumulator, en
         .map((part) => part.text as string).join(" ") : "";
     if (text) target.firstMessage = boundedSummaryText(userFacingPromptPreview(text));
   }
-  const timestamp = typeof message.timestamp === "number"
-    ? message.timestamp
-    : typeof entry.timestamp === "number" ? entry.timestamp
-      : typeof entry.timestamp === "string" ? Date.parse(entry.timestamp) : NaN;
-  if (Number.isFinite(timestamp) && timestamp > 0) {
+  const timestamp = catalogActivityTimestamp(entry);
+  if (timestamp !== undefined) {
     const current = Date.parse(target.updatedAt);
     if (!Number.isFinite(current) || timestamp > current) {
       target.updatedAt = new Date(timestamp).toISOString();
     }
   }
+}
+
+/** Cold catalogs and live summaries share the same canonical recency boundary.
+ * Restoring settings or extension metadata must not impersonate conversation work. */
+export function catalogActivityTimestamp(entry: { type?: unknown; timestamp?: unknown; message?: unknown }): number | undefined {
+  if (entry.type !== "message" || !entry.message || typeof entry.message !== "object" || Array.isArray(entry.message)) return;
+  const message = entry.message as Record<string, unknown>;
+  if ((message.role !== "user" && message.role !== "assistant") || !("content" in message)) return;
+  const timestamp = typeof message.timestamp === "number"
+    ? message.timestamp
+    : typeof entry.timestamp === "number" ? entry.timestamp
+      : typeof entry.timestamp === "string" ? Date.parse(entry.timestamp) : NaN;
+  return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : undefined;
 }
 
 export interface CatalogMetadataIndexSummary {

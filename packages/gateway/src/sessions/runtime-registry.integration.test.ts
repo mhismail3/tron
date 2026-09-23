@@ -3086,6 +3086,38 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
   });
 
+  it.each(["ordinary", "inherited"])("does not advance settled session recency when a cold runtime is opened (%s messages)", async (kind) => {
+    const fixture = await coldFixture("open-does-not-refresh-recency", {
+      beforeInitialize: async (path) => {
+        if (kind !== "inherited") return;
+        // Fork/import headers can be newer than the conversation they contain.
+        const entries = (await readFile(path, "utf8")).trimEnd().split("\n").map((line) => JSON.parse(line));
+        for (const entry of entries) {
+          if (entry.type !== "message") continue;
+          entry.timestamp = "2026-01-01T00:00:00.000Z";
+          entry.message.timestamp = Date.parse(entry.timestamp);
+        }
+        await writeFile(path, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+      },
+    });
+    const before = await fixture.registry.catalog("user");
+    const canonicalUpdatedAt = before.sessions.find((session) => session.id === fixture.manager.getSessionId())!.updatedAt;
+
+    // Ensure opening happens after the canonical timestamp, as it does when a
+    // dashboard resumes an older row.
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const openedAt = Date.now();
+    await fixture.registry.acquire(fixture.manager.getSessionId());
+
+    const after = await fixture.registry.catalog("user");
+    expect(after.sessions.find((session) => session.id === fixture.manager.getSessionId())!.updatedAt)
+      .toBe(canonicalUpdatedAt);
+    const openedSummaries = fixture.summaries.filter((summary) => summary.sessionId === fixture.manager.getSessionId());
+    expect(openedSummaries.length).toBeGreaterThan(0);
+    expect(openedSummaries.every((summary) => summary.updatedAt === canonicalUpdatedAt)).toBe(true);
+    expect(Date.parse(openedSummaries.at(-1)!.updatedAt)).toBeLessThan(openedAt);
+  });
+
   it("orders history by parsed recency while active heartbeats keep stable positions", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-catalog-time-precision-"));
     const agentDir = join(root, "agent");
@@ -3596,6 +3628,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       publishSnapshot: () => void;
       publishExtensionActivity: (activity: ExtensionRunActivity) => void;
       publishActivityHeartbeat: () => void;
+      extensionActivityAsOf: string;
     };
     const startedAt = new Date(Date.now() - 2_000).toISOString();
     const running: ExtensionRunActivity = {
@@ -3695,6 +3728,25 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(fixture.summaries.at(-1)!.activeSince).toBeUndefined();
     expect(Date.parse(fixture.summaries.at(-1)!.updatedAt))
       .toBeGreaterThanOrEqual(Date.parse(heartbeat.updatedAt));
+
+    // A cold artifact reconciliation may publish terminal history with a fresh
+    // projection as-of time. That observation must not impersonate new work.
+    const settledRecency = fixture.summaries.at(-1)!.updatedAt;
+    internal.extensionActivityAsOf = new Date(Date.parse(settledRecency) + 60_000).toISOString();
+    const staleTerminal = {
+      ...completed,
+      updatedAt: startedAt,
+      lifecycle: {
+        ...completed.lifecycle!,
+        observedAt: startedAt,
+        terminalAt: startedAt,
+        recentUntil: startedAt,
+      },
+    };
+    internal.publishExtensionActivity(staleTerminal);
+    expect(fixture.summaries.at(-1)!.updatedAt).toBe(settledRecency);
+    internal.publishActivityHeartbeat();
+    expect(fixture.summaries.at(-1)!.updatedAt).toBe(settledRecency);
   });
 
   it.each(["complete", "failed"] as const)("reconciles an exact-owned historical %s artifact during administrative drain", async (terminalState) => {

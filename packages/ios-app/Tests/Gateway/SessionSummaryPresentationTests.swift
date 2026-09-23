@@ -105,7 +105,23 @@ struct SessionSummaryPresentationTests {
 
         #expect(value.relativeActivityDescription(relativeTo: oneMinute)
             != value.relativeActivityDescription(relativeTo: twoHours))
-        #expect(DashboardActivityClock.refreshInterval == 30)
+    }
+
+    @Test("settled rows age in seconds without events or changes to their stable order")
+    func settledRowsAgeWithoutReordering() {
+        let first = session("a", updatedAt: "2026-01-01T00:00:00Z")
+        let second = session("b", updatedAt: "2026-01-01T00:00:00.000Z")
+        let completion = GatewayTimestamp.parse(first.updatedAt)!
+        let initial = first.relativeActivityDescription(relativeTo: completion)
+        let nextTick = completion.addingTimeInterval(DashboardActivityClock.refreshInterval)
+
+        #expect(nextTick.timeIntervalSince(completion) == 1)
+        #expect(first.relativeActivityDescription(relativeTo: nextTick) != initial)
+        #expect(first.relativeActivityDescription(relativeTo: completion.addingTimeInterval(5)) != initial)
+        for rows in [[first, second], [second, first]] {
+            #expect(SessionSummary.orderedForDashboard(rows).map(\.id) == ["a", "b"])
+        }
+        #expect(first.updatedAt == "2026-01-01T00:00:00Z")
     }
 
     @Test("missing kind decodes as a user session")

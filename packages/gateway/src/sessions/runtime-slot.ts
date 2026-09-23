@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { boundedSummaryText } from "./summary-text.js";
+import { catalogActivityTimestamp } from "./catalog-metadata-index.js";
 import { historyPage, historyEntry, type HistoryCursor } from "./history.js";
 import {
   DELEGATED_PROVIDER_TOOL_NAME,
@@ -2383,7 +2384,7 @@ export class RuntimeSlot {
       const entries = this.sessionManager.getEntries();
       let firstMessage = "";
       let messageCount = 0;
-      let updatedAt = this.sessionManager.getHeader()?.timestamp ?? new Date().toISOString();
+      let updatedAt: string | undefined;
       for (const entry of entries) {
         if (entry.type === "message") {
           messageCount += 1;
@@ -2393,13 +2394,16 @@ export class RuntimeSlot {
               : entry.message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("")));
           }
         }
-        updatedAt = entry.timestamp;
+        const activityAt = catalogActivityTimestamp(entry);
+        if (activityAt !== undefined && (updatedAt === undefined || activityAt > Date.parse(updatedAt))) {
+          updatedAt = new Date(activityAt).toISOString();
+        }
       }
       const rawName = this.sessionManager.getSessionName();
       const name = rawName ? boundedSummaryText(rawName) : undefined;
       this.cachedSummaryContent = {
         ...(name ? { name } : {}),
-        updatedAt,
+        updatedAt: updatedAt ?? this.sessionManager.getHeader()?.timestamp ?? new Date().toISOString(),
         messageCount,
         firstMessage,
       };
@@ -2899,9 +2903,16 @@ export class RuntimeSlot {
   private onEvent(event: AgentSessionEvent): void {
     this.revision += 1;
     this.touch();
-    this.noteDashboardActivity(event.type === "entry_appended"
-      ? event.entry.timestamp
-      : new Date().toISOString());
+    // Session lifecycle/metadata events (notably session_start on a cold open)
+    // are not user activity. Only canonical conversation entries and events during
+    // owned dashboard work may advance recency; otherwise simply reopening an
+    // old session would make it look newly active and reorder settled history.
+    if (event.type === "entry_appended") {
+      const activityAt = catalogActivityTimestamp(event.entry);
+      if (activityAt !== undefined) this.noteDashboardActivity(new Date(activityAt).toISOString());
+    } else if (event.type === "agent_start" || this.hasCurrentDashboardWork()) {
+      this.noteDashboardActivity();
+    }
     switch (event.type) {
       case "agent_start": {
         const precedingAssistant = this.notificationRun?.assistant;
@@ -5057,7 +5068,10 @@ export class RuntimeSlot {
    * changes. Avoid rebuilding and sending the canonical transcript for every
    * status artifact heartbeat. */
   private publishExtensionActivity(activity: ExtensionRunActivity): void {
-    this.noteDashboardActivity(this.extensionActivityAsOf);
+    // The projection's `asOf` is refresh time, not execution recency. Artifact
+    // reconciliation can publish an old terminal run during a cold open; use
+    // the activity's own timestamp so observation alone cannot refresh history.
+    this.noteDashboardActivity(activity.updatedAt);
     if (this.hasDetachedDashboardWork() && !this.activityHeartbeat) this.startActivityHeartbeat();
     this.emit("session.extensionActivity", safeJson({
       activity: this.extensionActivityWire(activity),

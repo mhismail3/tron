@@ -1329,7 +1329,9 @@ private struct HistoricalSessionRow: View {
                 viewportVisible: isVisible
             ) {
                 TimelineView(.periodic(from: .now, by: DashboardActivityClock.refreshInterval)) { timeline in
-                    row(relativeTo: timeline.date)
+                    // A summary may arrive between ticks; the last scheduled
+                    // tick must not make its newer timestamp look future-dated.
+                    row(relativeTo: max(timeline.date, .now))
                 }
             } else {
                 row(relativeTo: .now)

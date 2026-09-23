@@ -105,9 +105,9 @@ struct DashboardPresentationSnapshot: Equatable {
 }
 
 enum DashboardActivityClock {
-    /// Relative labels age while the dashboard is otherwise idle. Gateway live
-    /// summaries still drive exact activity timestamps and row reordering.
-    static let refreshInterval: TimeInterval = 30
+    /// Labels include seconds, so even settled rows must age once per second.
+    /// This visible-surface clock never changes catalog timestamps or ordering.
+    static let refreshInterval: TimeInterval = 1
 }
 
 enum DashboardServerConnectionState: Equatable, Sendable {
