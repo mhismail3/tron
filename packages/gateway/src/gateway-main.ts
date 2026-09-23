@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { existsSync } from "node:fs";
-import { ModelRuntime, SettingsManager, createAgentSessionServices } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "./config.js";
 import { DeviceStore } from "./security/device-store.js";
 import { TrustService } from "./admin/trust-service.js";
@@ -12,6 +12,7 @@ import { SettingsService } from "./admin/settings-service.js";
 import { ModelConfigService } from "./admin/model-config-service.js";
 import { PackageService } from "./admin/package-service.js";
 import { AuthBroker } from "./admin/auth-broker.js";
+import { GlobalProviderResources } from "./admin/global-provider-resources.js";
 import { RuntimeRegistry } from "./sessions/runtime-registry.js";
 import { GatewayWorkRegistry } from "./sessions/gateway-work-registry.js";
 import { acquireAgentRuntimeLocks } from "./sessions/agent-runtime-lock.js";
@@ -113,24 +114,6 @@ const modelRuntime = installKimiK3Policy(await ModelRuntime.create({
   refreshOnCreate: true,
   allowModelNetwork: false,
 }));
-// Compose global extension providers into the administration runtime used by
-// onboarding. Project providers remain isolated in their RuntimeSlot runtime.
-// Retain these services for the gateway lifetime. Their resource loader owns
-// global extension runtime state used by administration model/auth operations;
-// constructing and immediately discarding it can orphan that state.
-const administrationServices = await createAgentSessionServices({
-  cwd: homedir(),
-  agentDir: config.agentDir,
-  modelRuntime,
-  resourceLoaderReloadOptions: { resolveProjectTrust: async () => false },
-});
-for (const diagnostic of administrationServices.diagnostics) {
-  logger.log(
-    diagnostic.type === "error" ? "error" : diagnostic.type === "warning" ? "warning" : "info",
-    diagnostic.message,
-    { event: "runtime.diagnostic", source: "resource-loader" }
-  );
-}
 const trust = new TrustService(config.agentDir);
 const filesystem = new FilesystemService();
 const uploads = new UploadStore(config.tronHome, config.maxUploadBytes);
@@ -141,6 +124,21 @@ const receipts = new CommandReceiptStore(config.tronHome);
 await receipts.prune();
 
 const workRegistry = new GatewayWorkRegistry();
+const auth = new AuthBroker(
+  modelRuntime,
+  (clientId, topic, payload) => transport?.emitToClient(clientId, topic, payload),
+  (topic, payload) => transport?.broadcast(topic, payload),
+  { workRegistry },
+);
+const globalProviderResources = await GlobalProviderResources.create({
+  cwd: homedir(),
+  agentDir: config.agentDir,
+  modelRuntime,
+  auth,
+  workRegistry,
+  log: (level, message) => logger.log(level, message, { event: "runtime.diagnostic", source: "resource-loader" }),
+  broadcast: () => transport?.broadcast("providers.changed", {}),
+});
 const connections = new ConnectionOwner(config.tronHome);
 const knowledgeCredentials = new MacKeychainConnectorCredentialStore();
 const jevClient = new JevDecisionClient(knowledgeCredentials);
@@ -251,12 +249,6 @@ const terminal = new TerminalService(
   config.terminalReplayBytes,
   (terminalId, topic, payload) => transport?.broadcastTerminal(terminalId, topic, payload),
 );
-const auth = new AuthBroker(
-  modelRuntime,
-  (clientId, topic, payload) => transport?.emitToClient(clientId, topic, payload),
-  (topic, payload) => transport?.broadcast(topic, payload),
-  { workRegistry },
-);
 const packages = new PackageService(
   config.agentDir,
   trust,
@@ -346,10 +338,6 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
     sessionSearchWarmTask = undefined;
     await sessionSearch?.close();
     await sessions.dispose();
-    // The retained pi-coding-agent session exposes no disposal API on the
-    // administration resource loader/model runtime. Admission closure and exact
-    // operation settlement above are therefore its truthful teardown boundary.
-    void administrationServices;
     await releaseRuntimeLock();
     clearTimeout(forced);
     process.exit(exitCode);
@@ -438,6 +426,7 @@ const service = new GatewayService({
   modelConfig,
   packages,
   auth,
+  globalProviderResources,
   logger,
   receipts,
   // LaunchAgent/supervisor restarts unsuccessful exits. Administrative

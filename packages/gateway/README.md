@@ -1921,8 +1921,23 @@ interpreting unavailable membership as an empty catalog.
 ## Trust and execution
 
 Each project session has an isolated mutable model/provider runtime. Tron's
-administration/onboarding runtime composes global providers without loading
-untrusted project resources.
+administration/onboarding runtime loads the user's global Pi extensions into the
+canonical global ModelRuntime without loading untrusted project resources. The
+Dashboard provider catalog and global authentication use this runtime before any
+session is opened; project-only extension providers remain in their trusted
+project RuntimeSlot and never enter the global catalog.
+
+Global package install/update/remove and global `settings.update` package-resource
+changes request a serialized global extension-resource reload. Pi remains the
+resource-loader/provider-registration owner; Gateway reconciles extension-owned
+provider IDs in the same ModelRuntime and credential store and publishes the
+normal provider/catalog invalidation after the refreshed snapshot is available.
+A per-extension load/registration failure is logged without removing that
+extension's last working registration or other valid providers. Global provider
+authentication is allowed to settle before a reload replaces its extension
+runtime; while reconciliation is pending, new global auth begins are rejected
+retryably rather than using a stale provider registration. Project-scoped package
+and settings changes do not reload or mutate the global provider runtime.
 
 ### Tron context and delegated children
 

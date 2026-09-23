@@ -34,6 +34,7 @@ import type { TrustService } from "../admin/trust-service.js";
 import type { SettingsService } from "../admin/settings-service.js";
 import type { ModelConfigService } from "../admin/model-config-service.js";
 import type { PackageService } from "../admin/package-service.js";
+import type { GlobalProviderResources } from "../admin/global-provider-resources.js";
 import type { AuthBroker } from "../admin/auth-broker.js";
 import { GatewayUpdateService, validateGatewayUpdateRequest } from "../admin/gateway-update-service.js";
 import {
@@ -228,6 +229,7 @@ export interface GatewayServiceDependencies {
   modelConfig: ModelConfigService;
   packages: PackageService;
   auth: AuthBroker;
+  globalProviderResources: Pick<GlobalProviderResources, "requestReload">;
   /** Configured only by the LaunchAgent-owned update helper; never from RPC params. */
   updateService?: GatewayUpdateService;
   /** Fixed LocalDevice installer; source and CoreDevice identity never come from install RPC params. */
@@ -1532,6 +1534,9 @@ export class GatewayService {
             projectTrusted: scope === "project" && resolved.trusted,
             ...(settingsSlot ? { modelRuntime: settingsSlot.modelRuntime } : {}),
           });
+          if (params.patch && typeof params.patch === "object" && scope === "global" && "packages" in params.patch) {
+            this.dependencies.globalProviderResources.requestReload();
+          }
           if (params.patch && typeof params.patch === "object" && "compaction" in params.patch) {
             this.dependencies.sessions.refreshCompactionPolicies(scope, resolved.cwd);
           }
@@ -1575,6 +1580,7 @@ export class GatewayService {
             params.local === undefined ? false : boolean(params.local, "local"),
           );
           this.dependencies.broadcast("packages.changed", { cwd });
+          if (params.local !== true) this.dependencies.globalProviderResources.requestReload();
           return safeJson(result);
         });
       case "models.custom.get":

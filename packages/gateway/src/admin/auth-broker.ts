@@ -155,6 +155,8 @@ export class AuthBroker {
   private readonly maximumOperationsPerClient: number;
   private readonly operationTimeoutMs: number;
   private readonly workRegistry: GatewayWorkRegistry | undefined;
+  private pendingGlobalProviderRefresh: (() => Promise<void>) | undefined;
+  private runningGlobalProviderRefresh = false;
 
   constructor(
     private readonly modelRuntime: ModelRuntime,
@@ -180,6 +182,12 @@ export class AuthBroker {
   }
 
   get activeOperationCount(): number { return this.operations.size; }
+
+  /** Coalesce user-resource changes and apply them between global auth operations. */
+  requestGlobalProviderRefresh(refresh: () => Promise<void>): void {
+    this.pendingGlobalProviderRefresh = refresh;
+    this.drainGlobalProviderRefresh();
+  }
 
   start(
     clientId: string,
@@ -210,6 +218,9 @@ export class AuthBroker {
       }
     }
 
+    if (targetKey === "global" && (this.pendingGlobalProviderRefresh || this.runningGlobalProviderRefresh)) {
+      throw new GatewayError("busy", "Global provider resources are refreshing; retry authentication shortly", true);
+    }
     const provider = modelRuntime.getProvider(providerId);
     if (!provider) throw new GatewayError("not_found", "Provider is not registered in Tron");
     if (authType === "api_key" && !provider.auth.apiKey?.login) {
@@ -470,6 +481,7 @@ export class AuthBroker {
     operation.prompt?.cleanup?.();
     operation.prompt?.reject(new GatewayError("cancelled", reason));
     operation.prompt = undefined;
+    if (operation.targetKey === "global") queueMicrotask(() => this.drainGlobalProviderRefresh());
     return true;
   }
 
@@ -488,6 +500,21 @@ export class AuthBroker {
       if (!evictable) throw new GatewayError("busy", "Authentication command receipt capacity is full", true);
       this.beginReceipts.delete(evictable[0]);
     }
+  }
+
+  private drainGlobalProviderRefresh(): void {
+    if (this.runningGlobalProviderRefresh || !this.pendingGlobalProviderRefresh
+      || [...this.operations.values()].some((operation) => operation.targetKey === "global")) return;
+    const refresh = this.pendingGlobalProviderRefresh;
+    this.pendingGlobalProviderRefresh = undefined;
+    this.runningGlobalProviderRefresh = true;
+    void Promise.resolve()
+      .then(refresh)
+      .catch(() => {})
+      .finally(() => {
+        this.runningGlobalProviderRefresh = false;
+        this.drainGlobalProviderRefresh();
+      });
   }
 
   private timeout(operation: AuthOperation): void {

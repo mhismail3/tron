@@ -562,8 +562,13 @@ confirmed-mutation executor, and profile retirement synchronously revokes suspen
 and clears settings projections. `ProviderAuthCoordinator` likewise solely owns typed-target
 provider/model catalogs, per-target paging admission, event-only provider invalidation,
 auth prompt/event parsing, browser-callback submission, and operation-to-target retention through
-completion or confirmed cancellation. Because provider login can synchronously emit presentation or completion events
-before `auth.begin` returns, a four-operation, 64-element, 16 KiB pre-response quarantine promotes only the
+completion or confirmed cancellation. Dashboard Providers uses the Gateway's canonical global
+catalog and can configure globally installed provider extensions without opening a session;
+chat/session provider settings request that session's isolated catalog. `providers.changed` is the
+invalidation edge after the Gateway reconciles global provider resources, and the next presentation
+read remains the authoritative snapshot rather than a client-side union of session catalogs.
+Because provider login can synchronously emit presentation or completion events before
+`auth.begin` returns, a four-operation, 64-element, 16 KiB pre-response quarantine promotes only the
 newest admitted operation and is synchronously revoked on failure, cancellation, or profile
 retirement. `auth.begin` carries a command ID, while the active operation belongs to the authenticated
 device identity rather than a disposable socket. Transient transport retirement clears prompt delivery
