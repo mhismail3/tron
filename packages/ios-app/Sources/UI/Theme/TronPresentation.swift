@@ -173,7 +173,7 @@ private struct TronCollectionSurfaceModifier: ViewModifier {
             .foregroundStyle(Color.tronTextPrimary)
             .tint(Color.tronEmerald)
             .scrollContentBackground(.hidden)
-            .background(Color.tronBackground)
+            .background { TronBackdrop().ignoresSafeArea() }
     }
 }
 

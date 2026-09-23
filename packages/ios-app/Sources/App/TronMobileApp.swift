@@ -257,7 +257,7 @@ private struct RootView: View {
                 .presentationContentInteraction(.resizes)
                 .interactiveDismissDisabled()
         }
-        .background(Color.tronBackground.ignoresSafeArea())
+        .background(TronBackdrop().ignoresSafeArea())
         .onAppear { syncOnboardingPresentation() }
         .onChange(of: model.connectionState) { _, _ in syncOnboardingPresentation() }
         .onChange(of: model.hasResolvedLaunchState) { _, _ in syncOnboardingPresentation() }

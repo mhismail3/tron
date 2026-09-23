@@ -97,7 +97,7 @@ struct DashboardChrome<Content: View, SearchContent: View>: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.tronBackground)
+        .background { TronBackdrop().ignoresSafeArea() }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .navigationBar)

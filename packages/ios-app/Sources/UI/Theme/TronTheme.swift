@@ -43,18 +43,18 @@ extension Color {
     static let tronPink = Color(lightHex: "#DB2777", darkHex: "#EC4899")
     static let tronSlate = Color(lightHex: "#64748B", darkHex: "#94A3B8")
 
-    static let tronBackground = Color(lightHex: "#F7F8FA", darkHex: "#090A0C")
+    static let tronBackground = Color(lightHex: "#F7F8FA", darkHex: "#111213")
     /// Historical neutral tint used by the composer and terminal keyboard bar.
     static let tronPhthaloGreen = Color(lightHex: "#FFFFFF", darkHex: "#111827")
     static let tronSurface = Color(lightHex: "#FFFFFF", darkHex: "#16181D")
     static let tronSurfaceElevated = Color(lightHex: "#EEF2F6", darkHex: "#252A32")
     static let tronBorder = Color(lightHex: "#D8DEE6", darkHex: "#3B424D")
-    static let tronTextPrimary = Color(lightHex: "#111827", darkHex: "#F8FAFC")
+    static let tronTextPrimary = Color(lightHex: "#111827", darkHex: "#E8E9EA")
     static let tronTextSecondary = Color(lightHex: "#4B5563", darkHex: "#AAB2BF")
     static let tronTextMuted = Color(lightHex: "#6B7280", darkHex: "#8B949E")
     static let tronTextDisabled = Color(lightHex: "#9CA3AF", darkHex: "#5B6472")
     static let userMessageText = Color(lightHex: "#059669", darkHex: "#10B981")
-    static let assistantMessageText = Color(lightHex: "#111827", darkHex: "#F8FAFC")
+    static let assistantMessageText = Color(lightHex: "#111827", darkHex: "#E8E9EA")
     static let inputText = Color(lightHex: "#059669", darkHex: "#10B981")
     static let inputPlaceholder = Color(lightHex: "#6EE7B7", darkHex: "#047857")
     static let userBubble = Color(lightHex: "#059669", darkHex: "#10B981")
@@ -119,8 +119,49 @@ enum TronSpacing {
     static let cornerInput: CGFloat = 18
 }
 
+/// Full-screen app background: the palette color plus a faint static grain so
+/// flat regions read as paper and glass has texture to refract. The grain is
+/// one pre-rendered tile, so it adds no per-frame filter cost.
+struct TronBackdrop: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Color.tronBackground
+            .overlay {
+                Image(uiImage: TronGrain.tile)
+                    .renderingMode(.template)
+                    .resizable(resizingMode: .tile)
+                    .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
+                    .opacity(colorScheme == .dark ? 0.07 : 0.06)
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
+private enum TronGrain {
+    /// 128pt tile rendered at 3x so each speck is one device pixel.
+    static let tile: UIImage = {
+        let side = 384
+        var pixels = [UInt8](repeating: 0, count: side * side * 4)
+        var generator = SystemRandomNumberGenerator()
+        for pixel in stride(from: 0, to: pixels.count, by: 4) {
+            // Premultiplied white: every channel equals the random alpha.
+            let alpha = UInt8.random(in: 0...255, using: &generator)
+            pixels.replaceSubrange(pixel..<pixel + 4, with: [alpha, alpha, alpha, alpha])
+        }
+        let provider = CGDataProvider(data: Data(pixels) as CFData)!
+        let image = CGImage(
+            width: side, height: side, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: side * 4,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent
+        )!
+        return UIImage(cgImage: image, scale: 3, orientation: .up)
+    }()
+}
+
 extension View {
-    func tronScreenBackground() -> some View { background { Color.tronBackground.ignoresSafeArea() } }
+    func tronScreenBackground() -> some View { background { TronBackdrop().ignoresSafeArea() } }
     func tronCard() -> some View {
         background(Color.tronSurface)
             .clipShape(RoundedRectangle(cornerRadius: TronSpacing.cornerLG, style: .continuous))

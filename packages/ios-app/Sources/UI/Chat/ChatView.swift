@@ -151,7 +151,7 @@ struct ChatView: View {
         } action: { width in
             toolbarContainerWidth = width
         }
-        .background { Color.tronBackground.ignoresSafeArea(.all) }
+        .background { TronBackdrop().ignoresSafeArea(.all) }
         .environment(\.canonicalResourceSessionID, sessionID)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -1831,7 +1831,7 @@ struct ChatView: View {
         case .opening, .positioning, .revealing, .presenting:
             ZStack {
                 if ChatOpeningSurfacePolicy.showsOpaqueCover(phase: sessionPresentation.open.phase) {
-                    Color.tronBackground
+                    TronBackdrop()
                 }
                 TronPulseLoadingIndicator(accent: .tronEmerald, size: 44)
                     .padding(18)
