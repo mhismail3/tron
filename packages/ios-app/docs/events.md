@@ -100,8 +100,8 @@ admits and reduces mounted-session topics:
   profile event streams converge every dashboard; Gateway invalidates the catalog when it cannot
   broadcast a full summary rather than fabricating an unknown row. `session.listChanged` marks
   the shared traversal dirty instead of cancel/restarting it. User-scoped 500-row pagination
-  has exact page/item/identity/cursor bounds and publishes atomically. Mixed page revisions
-  and expired continuation leases restart once from a nil cursor and then retain the previous catalog silently; persistent application failures have a finite three-failed-attempt allowance in both focused and dashboard owners, and invalidations coalesce without re-arming that failed lease. This expected
+  has named page/item/cursor bounds and publishes atomically. Mixed page revisions
+  and expired continuation leases restart once from a nil cursor and then retain the previous catalog silently; a current connection retries failed catalog reads with the shared reconnect backoff and shows “Session list unavailable” after three consecutive failures without stopping retries. Invalidations coalesce with the current traversal. This expected
   optimistic invalidation no longer creates the intrusive “Sessions changed while loading the
   dashboard” in-app notification or another routine synchronization notice;
 - `automation.changed` is a global, coalescible invalidation containing only the Gateway catalog revision and an optional opaque automation ID. It carries no name, prompt, notification text, target content, or run error. The typed client admits the payload bounds but does not create a local automation journal; the Automations dashboard pages `automation.list` under one exact revision and fetches full action content only through authenticated `automation.get`; its Upcoming agenda uses `automation.timeline.list` and requires `automations.timeline.v1`. Timeline windows are Gateway-generated, bounded to seven days per load, and grouped by the device timezone only for presentation;

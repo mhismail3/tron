@@ -163,8 +163,9 @@ while it owns that live runtime slot; if Pi has not persisted content, the dispo
 after Gateway restart or idle slot retirement. Initial connection, structural and summary events,
 reconnect, creation, and deletion own dashboard convergence without a manual refresh surface. Focused and
 secondary profile owners retain an unsatisfied structural generation across responsive list failures and retry with
-a capped delay until a complete authoritative publication; epoch retirement, backgrounding, and profile removal
-cancel that lease rather than turning it into polling. Catalog observability stays in this same ownership path: `GatewayClient` emits bounded `gateway.rpc` records for `session.list` with the sanitized request ID, outcome, failure code, duration, and profile identity, while `AppModel` emits `gateway.catalog` admission and terminal decisions with connection/lifecycle/request generations, actual failure code/reason, page, revision, retry attempt/budget, and the owning RPC request ID. The existing iOS diagnostic buffer and retained Logs export bound these records to 200 entries; they contain no session content, paths, payloads, credentials, or raw errors. A successful authoritative publication clears the catalog warning through the normal notice owner rather than inventing a second health state. Session command catalogs are loaded by the
+the shared reconnect delay policy until a complete authoritative publication; the unavailable notice appears after
+three consecutive failures without ending retry. Epoch retirement, backgrounding, and profile removal cancel that
+lease rather than turning it into polling. Catalog observability stays in this same ownership path: `GatewayClient` emits bounded `gateway.rpc` records for `session.list` with the sanitized request ID, outcome, failure code, duration, and profile identity, while `AppModel` emits `gateway.catalog` admission and terminal decisions with connection/lifecycle/request generations, actual failure code/reason, page, revision, retry attempt/budget, and the owning RPC request ID. The existing iOS diagnostic buffer and retained Logs export bound these records to 200 entries; they contain no session content, paths, payloads, credentials, or raw errors. A successful authoritative publication clears the catalog warning through the normal notice owner rather than inventing a second health state. Session command catalogs are loaded by the
 presentation store only after exact subscription-target installation; the AppModel open callback
 refreshes provider catalogs but does not issue a duplicate command read. Opt-in diagnostic RPC
 records carry only an allowlisted purpose and bounded pagination ordinal, never request parameters,
@@ -477,7 +478,7 @@ A restart response may be immediate or scheduled behind active runs. Connection 
 briefly poll the bounded drain projection only for an operation explicitly requested in that view;
 it shows fixed aggregate labels and retains nothing after the view's ownership ends. Drain phase,
 counts, and ages are diagnostic presentation only: `system.stopping` and the replacement handshake
-remain the sole reconnect and liveness authority. Assistant error pills preserve provider-authored details, except the provider's bare `Error Not Found` placeholder is expanded into actionable model/provider-connection guidance. Diagnostics routes current unsupported, busy,
+remain the sole reconnect and liveness authority. While a drain is preparing or waiting, Connection Settings offers an explicit, confirmed “Restart Now” command with `restartNow: true`; it goes through the same command-receipt owner and warns that unfinished work may have an unknown outcome. Assistant error pills preserve provider-authored details, except the provider's bare `Error Not Found` placeholder is expanded into actionable model/provider-connection guidance. Diagnostics routes current unsupported, busy,
 receipt, and transport action failures through the existing global error surface; lifecycle-retired
 cancellation remains silent. Unexpected process
 death is different: a surviving run marker projects the session as interrupted and Tron

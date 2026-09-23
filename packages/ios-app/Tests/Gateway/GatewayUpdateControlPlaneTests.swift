@@ -277,10 +277,11 @@ struct GatewayUpdateControlPlaneTests {
         await socket.enqueue(successResponse(id: drainRequest.id, result: snapshot))
         #expect(try await reading.value?.drainId == "drain-one")
 
-        let restarting = Task { await model.requestGatewayRestart(for: profile) }
+        let restarting = Task { await model.requestGatewayRestart(for: profile, restartNow: true) }
         try await socket.waitUntilSent(count: 3)
         let restartRequest = try requestFrame(await socket.sentFrames()[2])
         #expect(restartRequest.method == "gateway.restart")
+        #expect(restartRequest.params?["restartNow"] == .bool(true))
         await socket.enqueue(successResponse(id: restartRequest.id, result: .object([
             "restarting": .bool(false), "scheduled": .bool(true), "activeSessionIds": .array([]),
             "drainId": .string("drain-one"), "drainRevision": .number(1), "drain": snapshot,

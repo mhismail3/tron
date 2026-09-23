@@ -157,37 +157,13 @@ struct DashboardStateOwnerTests {
         #expect(replacement == newer)
     }
 
-    @Test("dirty catalog retries stop after the bounded failed-attempt allowance")
+    @Test("current dirty catalog remains eligible for retries after repeated failures")
     func catalogDirtyRetryPolicy() {
-        for attempt in 0..<DashboardCatalogRetryPolicy.maximumFailedAttempts {
-            #expect(DashboardCatalogRetryPolicy.shouldRetry(
-                isDirty: true,
-                isCurrent: true,
-                transportFailed: false,
-                failedAttempts: attempt
-            ))
+        for _ in 0..<10 {
+            #expect(DashboardCatalogRetryPolicy.shouldRetry(isDirty: true, isCurrent: true))
         }
-        #expect(!DashboardCatalogRetryPolicy.shouldRetry(
-            isDirty: true,
-            isCurrent: true,
-            transportFailed: false,
-            failedAttempts: DashboardCatalogRetryPolicy.maximumFailedAttempts
-        ))
-        #expect(!DashboardCatalogRetryPolicy.shouldRetry(
-            isDirty: false,
-            isCurrent: true,
-            transportFailed: false
-        ))
-        #expect(!DashboardCatalogRetryPolicy.shouldRetry(
-            isDirty: true,
-            isCurrent: false,
-            transportFailed: false
-        ))
-        #expect(!DashboardCatalogRetryPolicy.shouldRetry(
-            isDirty: true,
-            isCurrent: true,
-            transportFailed: true
-        ))
+        #expect(!DashboardCatalogRetryPolicy.shouldRetry(isDirty: false, isCurrent: true))
+        #expect(!DashboardCatalogRetryPolicy.shouldRetry(isDirty: true, isCurrent: false))
     }
 
     @MainActor
@@ -300,7 +276,7 @@ struct DashboardStateOwnerTests {
     }
 
     @MainActor
-    @Test("secondary dirty catalog retries finitely after persistent failure")
+    @Test("secondary dirty catalog retries past warning threshold and recovers")
     func secondaryCatalogDirtyRetryConverges() async throws {
         try await withTestWatchdog { @MainActor in
             let selected = GatewayProfile(
@@ -329,7 +305,7 @@ struct DashboardStateOwnerTests {
 
             try await socket.waitUntilSent(count: 2)
             var catalog = try Self.requestFrame(await socket.sentFrames()[1])
-            for attempt in 0..<DashboardCatalogRetryPolicy.maximumFailedAttempts {
+            for attempt in 0..<3 {
                 let sleepsBeforeFailure = clock.recordedSleeps().count
                 await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
                     "type": .string("response"),
@@ -342,7 +318,7 @@ struct DashboardStateOwnerTests {
                         "details": .null,
                     ]),
                 ])))
-                if attempt < DashboardCatalogRetryPolicy.maximumFailedAttempts - 1 {
+                if attempt < 3 {
                     try await Self.waitUntil {
                         clock.recordedSleeps().count > sleepsBeforeFailure
                     }
@@ -355,15 +331,8 @@ struct DashboardStateOwnerTests {
                 }
             }
             try await recorder.waitForState(.stale, profileID: remote.id)
-            let requestsAfterExhaustion = (await socket.sentFrames()).count
-            for _ in 0..<5 { await socket.enqueue(Self.listChangedEvent()) }
-            await socket.enqueue(Self.notificationInboxChangedEvent())
-            try await Self.waitUntil { recorder.notificationInvalidations == [remote.id] }
-            #expect((await socket.sentFrames()).count == requestsAfterExhaustion)
-            #expect(pool.state(for: remote.id) == .stale)
-            pool.retry(profileID: remote.id)
-            try await socket.waitUntilSent(count: requestsAfterExhaustion + 1)
-            let retried = try Self.requestFrame(await socket.sentFrames()[requestsAfterExhaustion])
+            let retried = try Self.requestFrame(await socket.sentFrames()[4])
+            #expect(retried.method == "session.list")
             await socket.enqueue(Self.catalogResponse(id: retried.id, sessions: [summary(revision: 2)], listRevision: 2))
             try await recorder.waitForState(.connected, profileID: remote.id)
             #expect(factory.requests.count == 1)

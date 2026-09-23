@@ -1,15 +1,10 @@
 import Foundation
 
 enum DashboardCatalogRetryPolicy {
-    static let maximumFailedAttempts = 3
+    static let unavailableNoticeAfterFailures = 3
 
-    nonisolated static func shouldRetry(
-        isDirty: Bool,
-        isCurrent: Bool,
-        transportFailed: Bool,
-        failedAttempts: Int = 0
-    ) -> Bool {
-        isDirty && isCurrent && !transportFailed && failedAttempts < maximumFailedAttempts
+    nonisolated static func shouldRetry(isDirty: Bool, isCurrent: Bool) -> Bool {
+        isDirty && isCurrent
     }
 }
 
@@ -479,12 +474,6 @@ final class DashboardGatewayConnectionPool {
         let profile = entry.profile
         let token = entry.token
         let generation = entry.generation
-        if entry.connectionID != nil, entry.refreshFailedAttempts >= DashboardCatalogRetryPolicy.maximumFailedAttempts {
-            entries[profileID]?.refreshFailedAttempts = 0
-            entries[profileID]?.refreshRetryAttempt = 0
-            scheduleRefresh(profileID: profileID, generation: generation, delay: .zero)
-            return
-        }
         nonRetryableProfiles.remove(profileID)
         stop(profileID: profileID)
         start(profile: profile, token: token, generation: generation)
@@ -594,8 +583,6 @@ final class DashboardGatewayConnectionPool {
         delay: Duration = .milliseconds(250)
     ) {
         guard var entry = entries[profileID], entry.generation == generation else { return }
-        guard entry.refreshFailedAttempts < DashboardCatalogRetryPolicy.maximumFailedAttempts
-                || entry.refreshTask != nil else { return }
         entry.refreshInvalidationGeneration &+= 1
         entry.refreshRetryAttempt = 0
         entries[profileID] = entry
@@ -635,19 +622,14 @@ final class DashboardGatewayConnectionPool {
             } else {
                 if result.outcome == .published {
                     current.refreshFailedAttempts = 0
-                } else if result.outcome == .retryRead || result.outcome == .retained {
+                } else {
                     current.refreshFailedAttempts = min(
-                        DashboardCatalogRetryPolicy.maximumFailedAttempts,
+                        DashboardCatalogRetryPolicy.unavailableNoticeAfterFailures,
                         current.refreshFailedAttempts + 1
                     )
                 }
-                guard DashboardCatalogRetryPolicy.shouldRetry(
-                    isDirty: remainsDirty,
-                    isCurrent: true,
-                    transportFailed: result.outcome == .transportFailure,
-                    failedAttempts: current.refreshFailedAttempts
-                ) else {
-                    if current.refreshFailedAttempts >= DashboardCatalogRetryPolicy.maximumFailedAttempts {
+                guard DashboardCatalogRetryPolicy.shouldRetry(isDirty: remainsDirty, isCurrent: true) else {
+                    if current.refreshFailedAttempts == DashboardCatalogRetryPolicy.unavailableNoticeAfterFailures {
                         current.catalog.markLoadUnavailable()
                         current.state = .stale
                     }
@@ -747,14 +729,13 @@ final class DashboardGatewayConnectionPool {
                 var revisionChanged = false
                 var pageCount = 0
                 repeat {
-                    guard pageCount < 50 else {
+                    guard pageCount < SessionCatalogLoadBounds.maximumPages else {
                         throw Self.invalidDashboardCatalog("The server returned too many dashboard pages.")
                     }
                     requestedContinuation = cursor != nil
                     let response: Response = try await seed.client.request(
                         "session.list",
-                        Params(cursor: cursor, limit: 500, scope: "user"),
-                        timeout: .seconds(10)
+                        Params(cursor: cursor, limit: SessionCatalogLoadBounds.pageSize, scope: "user")
                     )
                     guard admitsRefresh(
                         profileID: profileID,
@@ -769,8 +750,8 @@ final class DashboardGatewayConnectionPool {
                         break
                     }
                     expectedRevision = response.listRevision
-                    guard response.sessions.count <= 500,
-                          all.count <= 25_000 - response.sessions.count,
+                    guard response.sessions.count <= SessionCatalogLoadBounds.pageSize,
+                          all.count <= SessionCatalogLoadBounds.maximumRows - response.sessions.count,
                           response.sessions.allSatisfy({ seenSessionIDs.insert($0.id).inserted }) else {
                         throw Self.invalidDashboardCatalog("The server returned an invalid dashboard page.")
                     }

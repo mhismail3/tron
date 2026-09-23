@@ -146,6 +146,7 @@ extension SessionPresentationStoreDelegate {
 @Observable
 final class SessionPresentationStore {
     private static let presentationLeaseRenewalInterval: Duration = .seconds(15)
+    private static let busyOpenRetryBaseDelay: Duration = .milliseconds(250)
 
     private let client: GatewayClient
     private let performanceSignposts: any PerformanceSignposting
@@ -607,10 +608,7 @@ final class SessionPresentationStore {
         }
         clearSecondaryProjection()
         if subscribedSessionID != sessionID {
-            guard await closeCurrentSubscription() else {
-                if pendingTarget == requested { pendingTarget = nil }
-                throw GatewayFailure(code: "subscription_close_failed", message: "The previous session is still closing. Please try again.", retryable: true, details: nil)
-            }
+            retireCurrentSubscriptionLocally()
         }
         guard pendingTarget == requested else { throw CancellationError() }
         let synchronized = await synchronize(
@@ -1575,7 +1573,7 @@ final class SessionPresentationStore {
         let generation = contextLoadGeneration
         struct Params: Codable { let sessionId: String }
         do {
-            let loaded = try await client.requestValue("session.context", Params(sessionId: sessionID), timeout: .seconds(60))
+            let loaded = try await client.requestValue("session.context", Params(sessionId: sessionID), timeout: GatewayRequestTimeout.sessionContext)
             guard generation == contextLoadGeneration,
                   ownsSubscription(sessionID: sessionID, requestedToken: token) else { return }
             context = loaded
@@ -1643,7 +1641,7 @@ final class SessionPresentationStore {
         let generation = resourceLoadGeneration
         struct Params: Codable { let sessionId: String }
         do {
-            let loaded = try await client.requestValue("session.resources", Params(sessionId: sessionID), timeout: .seconds(60))
+            let loaded = try await client.requestValue("session.resources", Params(sessionId: sessionID), timeout: GatewayRequestTimeout.sessionResources)
             guard !Task.isCancelled,
                   generation == resourceLoadGeneration,
                   ownsSubscription(sessionID: sessionID, requestedToken: token),
@@ -1738,6 +1736,20 @@ final class SessionPresentationStore {
     private func closeCurrentSubscription() async -> Bool {
         guard let sessionID = subscribedSessionID else { return true }
         return await closeSubscription(sessionID, expectedTarget: nil)
+    }
+
+    private func retireCurrentSubscriptionLocally() {
+        attentionReadTask?.cancel()
+        attentionReadTask = nil
+        pendingAttentionRead = nil
+        attentionReadHighWaterRevision = 0
+        attentionReadAcknowledgedRevision = 0
+        attentionReadRequiresVisibility = false
+        observedAttentionSummary = nil
+        retirePresentationVisibilityLocally()
+        subscriptionToken = nil
+        subscribedSessionID = nil
+        subscriptionTarget = nil
     }
 
     @discardableResult
@@ -1893,7 +1905,7 @@ final class SessionPresentationStore {
 
     private enum AttemptOutcome {
         case success
-        case retry
+        case retry(Duration?)
         case failed(showCatchUpNotice: Bool)
     }
 
@@ -1933,7 +1945,11 @@ final class SessionPresentationStore {
                 delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp, scope: noticeScope)
                 delegate?.sessionPresentationStoreCheckpointCache()
                 return true
-            case .retry:
+            case .retry(let delay):
+                if let delay {
+                    do { try await clock.sleep(delay * (attempt + 1)) }
+                    catch { synchronization.complete(lease, outcome: false); return false }
+                }
                 // The attempt may already have installed a subscription before
                 // discovering a contiguous-replay race. Retire that exact
                 // owner before opening the replacement attempt.
@@ -2149,7 +2165,7 @@ final class SessionPresentationStore {
                     expectedConnectionGeneration: attemptConnectionGeneration
                 )
                 result = .discarded
-                return .retry
+                return .retry(nil)
             }
 
             // Reduce the complete quarantined suffix locally. Snapshot, token,
@@ -2179,7 +2195,7 @@ final class SessionPresentationStore {
                     expectedConnectionGeneration: attemptConnectionGeneration
                 )
                 result = .discarded
-                return .retry
+                return .retry(nil)
             }
             if synchronization.consumeRetryRequirement(for: lease) {
                 if case .freshPresentation = mode { synchronization.requireFreshInstall(sessionID: sessionID) }
@@ -2189,7 +2205,7 @@ final class SessionPresentationStore {
                     expectedConnectionGeneration: attemptConnectionGeneration
                 )
                 result = .discarded
-                return .retry
+                return .retry(nil)
             }
             guard let synchronizationTarget = synchronizationTarget(
                 for: lease.intent,
@@ -2306,9 +2322,15 @@ final class SessionPresentationStore {
                 return .failed(showCatchUpNotice: false)
             }
             if let failure = error as? GatewayFailure,
+               failure.code == "busy",
+               retriesInvalidResponse,
+               case .presentation = lease.intent {
+                return .retry(Self.busyOpenRetryBaseDelay)
+            }
+            if let failure = error as? GatewayFailure,
                failure.code == "history_changed",
                retriesInvalidResponse {
-                return .retry
+                return .retry(nil)
             }
             if let failure = error as? GatewayFailure,
                failure.code == "invalid_response",
@@ -2317,7 +2339,7 @@ final class SessionPresentationStore {
                 // activity settles. Retry a malformed projection twice from a
                 // fresh session.open; the final failure remains actionable and
                 // enters the iOS Logs ring.
-                return .retry
+                return .retry(nil)
             }
             if let failure = error as? GatewayFailure,
                failure.code == "invalid_response",
