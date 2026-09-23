@@ -18,3 +18,12 @@ Append entries in this format when closing a plan (see [the plan protocol](READM
 ```
 
 ## Entries
+
+## 2026-09-23 → 2026-09-23 · Global provider extension settings · Completed
+
+- Plan: `2026-09-23-global-provider-settings.md`, deleted in commit `docs(plan): close global provider settings`.
+- Outcome: Global extensions and package-installed provider registrations are available through the canonical administration ModelRuntime and reconcile safely after global resource changes. The reviewed implementation is integrated into local `main`; the running Gateway was not transitioned.
+- Key commits: `1f6a94cfd` (activate plan), `86194d0bc` (claim GP-1), `daf6dc11b` (initial implementation), `fcdf90345` (review fixes and integration).
+- Deviations: No iOS code change was needed. Review corrected the initial false fail-closed collision assumption to match the pinned SDK's ordered merge contract. The maintainer must manually transition the Gateway and verify the live dashboard/auth flow.
+- Lessons: Track underlying global login promises until actual settlement after cancellation/timeout. Provider IDs may have multiple ordered contributors; unregister and replay current contributions to remove stale merged fields while retaining the real extension runtime for failed registrations. Serialize global provider/model reads with asynchronous publication. Reconcile only successful or explicitly uncertain admitted global mutations.
+- Knowledge moved to: `packages/gateway/README.md`, `packages/ios-app/docs/architecture.md`.
