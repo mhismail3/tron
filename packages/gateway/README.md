@@ -147,9 +147,13 @@ otherwise it marks the cut unavailable with an explicit reason.
 
 `packages/gateway/package.json` is the sole Pi SDK version authority. The four
 runtime dependencies (`pi-agent-core`, `pi-ai`, `pi-coding-agent`, and `pi-tui`)
-must always be exact, equal versions. The complete seven-package Pi family,
-including `pi-client`, `pi-protocol`, and `pi-telemetry`, must resolve coherently
-in npm's lockfile and installed tree; npm's native nested `pi-coding-agent`
+must always be exact, equal versions. The checker validates every recognized Pi
+SDK package actually present in npm's lockfile and installed tree against that
+cohort and the canonical registry; it does not require optional historical
+packages that a newer coding-agent no longer depends on. The published package
+preflight covers the known family (`pi-client`, `pi-protocol`, `pi-telemetry`,
+and `chord` included); 0.87.1 adds `chord` and removes coding-agent's direct
+`pi-client`/`pi-protocol` dependencies. npm's native nested `pi-coding-agent`
 shrinkwrap entries may omit integrity while retaining their canonical registry
 URL. The executable authority is npm's `node_modules/.bin/pi` projection: it must
 be a symlink to the declared `bin.pi` executable inside `pi-coding-agent`, and
@@ -175,6 +179,18 @@ resulting lockfile, runs `npm audit signatures`, and restores its owned
 manifests plus the disposable installed tree with `npm ci` on failure. Do not submit independent
 Pi package updates, hand-edit lockfiles, run Gateway deployment/lifecycle
 commands, or promote/restart a Gateway as part of this process.
+
+After each candidate update, inventory every release-note/API/documentation delta
+against its owning Gateway seam and record whether it is inherited, adapted with
+evidence, deferred with rationale and acceptance criteria, or not applicable.
+Review the concrete seams, not just the package build: custom `StreamFn` wrappers
+and request context in `src/runtime/`, canonical session entries and mobile
+projections/history in `src/sessions/`, provider catalogs and source-preserving
+media paths, and Pi-owned extension registration/lifecycle in
+`src/extensions/compatibility-manifest.ts`. Update focused owner tests and this
+boundary map when ownership changes. Keep a candidate's detailed version matrix
+in its active `docs/plans/` entry until closeout; do not turn this paragraph into
+a second change tracker.
 
 After each candidate update, run the focused SDK checks, Gateway build and
 owning runtime tests, then the full required Gateway/Mac/iOS validation. Treat
@@ -1666,8 +1682,11 @@ only on explicit detail reads (their temporary serialization still scales with t
 The separate metadata object contains bounded scalar identity/role/model/tool/branch facts and finite
 usage counters, not arbitrary tool arguments, extension payloads, or image bytes. Oversized scalar metadata
 is explicitly marked with `<field>Truncated`; content paging does not discard authored text. Images are
-identified without turning base64 into message text. Complete raw producer metadata/media remain in the
-canonical JSONL export. `history.test.ts`, `gateway-history.test.ts`, and the focused runtime registry
+identified without turning base64 into message text. Pi 0.87 context-edit entries are retained as
+`contextEdit` history evidence (target and replacement) but do not fabricate a chat row; system-message
+entries are retained as `systemMessage` history evidence and likewise stay out of the chat transcript.
+The iOS tree-kind field is an open string so these additive kinds decode without protocol-version changes.
+Complete raw producer metadata/media remain in the canonical JSONL export. `history.test.ts`, `gateway-history.test.ts`, and the focused runtime registry
 integration case protect beyond-cap traversal, ordering, text/wire bounds, Unicode, subscription admission
 and runtime fencing. Using these APIs requires a user-initiated Mac Gateway update; source validation never
 transitions a running Gateway.

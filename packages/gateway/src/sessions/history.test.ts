@@ -57,6 +57,16 @@ describe("canonical Session History pages", () => {
     expect(page.nodes.map(n => n.kind)).toEqual(expect.arrayContaining(["message", "customEntry", "label", "branchSummary", "thinkingChange", "modelChange", "compaction", "sessionInfo", "customMessage"]));
   });
 
+  it("preserves model-context edits as explicit history evidence", () => {
+    const manager = SessionManager.inMemory("/fixture");
+    const target = manager.appendMessage({ role: "user", content: "Original request", timestamp: 0 });
+    const edit = manager.appendContextEdit(target, { content: "Sanitized request" });
+    expect(manager.buildSessionProjection().messages[0]).toMatchObject({ role: "user", content: "Sanitized request" });
+    const page = historyPage(manager, "runtime");
+    expect(page.nodes.find(node => node.id === edit)).toMatchObject({ kind: "contextEdit", preview: `Model context edit: ${target}` });
+    expect(historyEntry(manager, "runtime", edit, 0).text).toBe(`Target entry: ${target}\n\nReplacement: {"content":"Sanitized request"}`);
+  });
+
   it("keeps full large authored text reachable with Unicode-safe bounded chunks and metadata separate", () => {
     const manager = SessionManager.inMemory("/fixture");
     const content = "x".repeat(HISTORY_TEXT_CHARS - 1) + "😀\n" + "Full message\n".repeat(25_000) + "last-authored-line";

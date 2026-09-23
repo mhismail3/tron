@@ -54,6 +54,14 @@ describe("context window policy", () => {
     expect(contextWindowLimits({ ...astra, contextWindow: 0 })).toBeUndefined();
   });
 
+  it("inherits Opus 5.5's adaptive-thinking and long-context metadata from the pinned SDK", async () => {
+    const runtime = await ModelRuntime.create({ modelsPath: null, credentials: new InMemoryCredentialStore(), refreshOnCreate: false });
+    expect(runtime.getModel("anthropic", "claude-opus-5-5")).toMatchObject({
+      id: "claude-opus-5-5", contextWindow: 1_000_000, maxTokens: 128_000,
+      compat: { forceAdaptiveThinking: true, supportsMidConvoEffort: true, supportsMidConvoSystemMessages: true },
+    });
+  });
+
   it("rejects noninteger/unbounded values and malformed canonical preferences", () => {
     const limits = contextWindowLimits(astra);
     for (const value of [undefined, "1000000", NaN, Infinity, 1.5, 0, -1, 1_050_001, 16_384]) {
@@ -102,7 +110,7 @@ describe("context window policy", () => {
     policy.set(astra, 1_050_000);
     const message = fauxAssistantMessage("prior response");
     message.usage.input = 400_000;
-    session.agent.state.messages = [message];
+    session.sessionManager.appendMessage(message);
     const append = vi.spyOn(session.sessionManager, "appendCustomEntry");
     expect(() => policy.set({ provider: astra.provider, id: "other" }, 100_000)).toThrow(/model changed/);
     expect(() => policy.set(astra, 200_000)).toThrow(/Compact/);

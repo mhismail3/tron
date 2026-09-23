@@ -45,7 +45,7 @@ function validateRollbackInstalled(project, version) {
   const rootReal = realpathSync(root);
   const found = new Set();
   for (const [relativePath, entry] of Object.entries(lock.packages ?? {})) {
-    const match = relativePath.match(/(?:^|\/)node_modules\/(?:@earendil-works\/)?(pi-[^/]+)$/u);
+    const match = relativePath.match(/(?:^|\/)node_modules\/@earendil-works\/(pi-[^/]+|chord)$/u);
     if (!match || !entry || typeof entry !== "object") continue;
     const name = `@earendil-works/${match[1]}`;
     if (!PI_PACKAGES.includes(name)) throw new Error(`rollback install contains unexpected Pi package: ${name}`);
@@ -61,7 +61,7 @@ function validateRollbackInstalled(project, version) {
       || (entry.integrity !== undefined && !validSha512Integrity(entry.integrity))
       || (entry.integrity === undefined && !nestedShrinkwrap)) throw new Error(`rollback Pi package metadata is incoherent: ${relativePath}`);
   }
-  for (const name of PI_PACKAGES) if (!found.has(name)) throw new Error(`rollback install omitted ${name}`);
+  if (!found.has(PACKAGE_NAME)) throw new Error(`rollback install omitted ${PACKAGE_NAME}`);
 }
 
 function installRollback(gatewayDir, version, temp) {

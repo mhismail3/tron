@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { createAgentSessionServices, createAgentSessionFromServices, ModelRuntime, SessionManager, type AgentSession, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
-import { fauxProvider, fauxAssistantMessage, fauxToolCall, type Context, type SimpleStreamOptions } from "@earendil-works/pi-ai";
+import { Type, fauxProvider, fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt, getCurrentTools, normalizeContext, type TranscriptContext, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { abortAwareStream } from "./abort-aware-stream.js";
 import { CompactionOperationPolicy, compactionPolicyExtension, oversizedRequestOverflow, resolveCompactionPolicy } from "./compaction-policy.js";
 
@@ -52,8 +52,8 @@ async function fixture(configuration: Record<string, unknown> = {}, adapted = tr
   }
   // Like RuntimeSlot, bind an actual host callback so reload emits session_start.
   await session.bindExtensions({ mode: "rpc", onError: error => { throw new Error(error.error); } });
-  const calls: Array<{ context: Context; options?: SimpleStreamOptions }> = [];
-  const record = (text: string) => (context: Context, options: SimpleStreamOptions | undefined) => {
+  const calls: Array<{ context: TranscriptContext; options?: SimpleStreamOptions }> = [];
+  const record = (text: string) => (context: TranscriptContext, options: SimpleStreamOptions | undefined) => {
     calls.push({ context, ...(options ? { options } : {}) });
     return fauxAssistantMessage(text);
   };
@@ -62,7 +62,11 @@ async function fixture(configuration: Record<string, unknown> = {}, adapted = tr
 
 function normalized(calls: Awaited<ReturnType<typeof fixture>>["calls"]) {
   return calls.map(({ context, options }) => ({
-    context: { ...context, messages: context.messages.map(({ timestamp: _timestamp, ...message }) => message) },
+    context: {
+      systemPrompt: getCurrentSystemPrompt(context.messages),
+      tools: getCurrentTools(context.messages),
+      messages: context.messages.filter(message => message.role !== "system").map(({ timestamp: _timestamp, ...message }) => message),
+    },
     options: Object.fromEntries(Object.entries(options ?? {}).filter(([key]) => !["signal", "sessionId"].includes(key))),
   }));
 }
@@ -107,6 +111,26 @@ describe.sequential("pinned SDK compaction request policy", () => {
     expect(adapted.policy.snapshot().active).toBeUndefined();
   });
 
+  it("preserves existing system prompt, structured sections, and tool deltas with the compaction focus", async () => {
+    const item = await fixture({ instructions: "Keep decisions" });
+    const retainedTool = { name: "retained-tool", description: "Existing declaration", parameters: Type.Object({}) };
+    const stream = item.session.agent.streamFunction;
+    item.session.agent.streamFunction = (model, context, options) => stream(model, normalizeContext({
+      messages: [...context.messages, {
+        role: "system", content: "Existing system prompt", sections: { runtime: "Existing named section" },
+        toolsAdded: [retainedTool], timestamp: 7,
+      }],
+    }), options);
+    item.faux.setResponses([item.record("History"), item.record("Prefix")]);
+    await item.session.compact();
+    const messages = item.calls[0]!.context.messages;
+    const prompt = getCurrentSystemPrompt(messages);
+    expect(prompt).toContain("Existing system prompt");
+    expect(prompt).toContain("Existing named section");
+    expect(prompt).toContain("User-configured summary focus:\nKeep decisions");
+    expect(getCurrentTools(messages)).toMatchObject([{ name: "retained-tool", description: "Existing declaration" }]);
+  });
+
   it("changes only reasoning for Low, including both split passes", async () => {
     const baseline = await fixture({}, false);
     const adapted = await fixture({ thinkingLevel: "low" });
@@ -143,7 +167,7 @@ describe.sequential("pinned SDK compaction request policy", () => {
     await item.session.compact();
     expect(changed).toBe(true);
     expect(item.calls).toHaveLength(3);
-    expect(item.calls.every(call => call.options?.reasoning === "low" && call.context.systemPrompt?.endsWith("First focus"))).toBe(true);
+    expect(item.calls.every(call => call.options?.reasoning === "low" && getCurrentSystemPrompt(call.context.messages).endsWith("First focus"))).toBe(true);
     expect(new Set(item.calls.map(call => call.options?.signal)).size).toBe(1);
     expect(events).toContain("summarization_retry_scheduled");
     expect(item.policy.snapshot()).toMatchObject({ next: { thinkingLevel: "high", instructions: "Next focus", enabled: true }, currentBudgets: { enabled: false, keepRecentTokens: 100 } });
@@ -186,7 +210,7 @@ describe.sequential("pinned SDK compaction request policy", () => {
       expect(item.calls).toHaveLength(1);
     }
     expect(normalized(adapted.calls)).toEqual(normalized(baseline.calls));
-    expect(adapted.calls[0]?.context.systemPrompt).not.toContain("Compaction only");
+    expect(getCurrentSystemPrompt(adapted.calls[0]!.context.messages)).not.toContain("Compaction only");
     expect(adapted.policy.snapshot().active).toBeUndefined();
     // The reloaded factory still binds the original live session policy.
     adapted.faux.setResponses([adapted.record("Compaction after reload"), adapted.record("Prefix after reload")]);
@@ -194,7 +218,7 @@ describe.sequential("pinned SDK compaction request policy", () => {
     adapted.session.sessionManager.appendMessage(fauxAssistantMessage("New response ".repeat(150)));
     await adapted.session.compact();
     expect(adapted.calls.at(-1)?.options?.reasoning).toBe("low");
-    expect(adapted.calls.at(-1)?.context.systemPrompt).toContain("Compaction only");
+    expect(getCurrentSystemPrompt(adapted.calls.at(-1)!.context.messages)).toContain("Compaction only");
   });
 
   it("refreshes policy provenance when project trust reloads, without retaining the retired project scope", async () => {

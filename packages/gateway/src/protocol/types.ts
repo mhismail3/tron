@@ -985,7 +985,7 @@ export interface SessionTreeNode {
   bookmarkTargetId?: string;
   parentId: string | null;
   timestamp: string;
-  kind: TranscriptItem["kind"] | "sessionInfo";
+  kind: TranscriptItem["kind"] | "sessionInfo" | "contextEdit" | "systemMessage";
   label?: string;
   preview: string;
   role?: "user" | "assistant" | "toolResult";

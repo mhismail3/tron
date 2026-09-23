@@ -8,6 +8,9 @@ import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, statSy
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// Published packages in the Pi SDK family. Some are optional at a given
+// release: validate the resolved lock graph rather than requiring every
+// historical support package to remain a coding-agent dependency.
 export const PI_PACKAGES = Object.freeze([
   "@earendil-works/pi-agent-core",
   "@earendil-works/pi-ai",
@@ -16,8 +19,14 @@ export const PI_PACKAGES = Object.freeze([
   "@earendil-works/pi-client",
   "@earendil-works/pi-protocol",
   "@earendil-works/pi-telemetry",
+  "@earendil-works/chord",
 ]);
-export const DIRECT_PI_PACKAGES = Object.freeze(PI_PACKAGES.slice(0, 4));
+export const DIRECT_PI_PACKAGES = Object.freeze([
+  "@earendil-works/pi-agent-core",
+  "@earendil-works/pi-ai",
+  "@earendil-works/pi-coding-agent",
+  "@earendil-works/pi-tui",
+]);
 const REGISTRY = "https://registry.npmjs.org/";
 const EXACT_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
 const PACKAGE_JSON_MAX_BYTES = 64 * 1024;
@@ -32,7 +41,7 @@ export function validSha512Integrity(value) {
 }
 
 function packageNameFromLockPath(path) {
-  const match = path.match(/node_modules\/(?:@earendil-works\/)?(pi-[^/]+)$/u);
+  const match = path.match(/node_modules\/@earendil-works\/(pi-[^/]+|chord)$/u);
   return match ? `@earendil-works/${match[1]}` : undefined;
 }
 
@@ -226,7 +235,6 @@ export function validatePiSdk({ gatewayDir = resolve(dirname(fileURLToPath(impor
     const topLevelPath = `node_modules/${name}`;
     if (!lockJson.packages?.[topLevelPath]) addIssue(issues, `package-lock.json is missing top-level direct Pi package ${name}`);
   }
-  for (const name of PI_PACKAGES) if (!seen.has(name)) addIssue(issues, `package-lock.json is missing resolved Pi package ${name}`);
   for (const name of seen) if (!PI_PACKAGES.includes(name)) {
     addIssue(issues, `unexpected ${name} package in package-lock.json; research the release and add it to PI_PACKAGES before acceptance`);
   }

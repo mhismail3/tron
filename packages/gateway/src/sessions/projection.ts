@@ -1506,7 +1506,11 @@ export function projectEntry(
 }
 
 function preview(item: TranscriptItem | undefined, entry: SessionEntry): string {
-  if (!item) return entry.type === "session_info" ? entry.name ?? "Session renamed" : entry.type;
+  if (!item) {
+    if (entry.type === "session_info") return entry.name ?? "Session renamed";
+    if (entry.type === "context_edit") return `Model context edit: ${entry.targetId}`;
+    return entry.type;
+  }
   switch (item.kind) {
     case "message":
       return item.content.flatMap((part) => part.type === "text" || part.type === "thinking" ? [part.text] : []).join(" ").slice(0, 240);
@@ -1617,11 +1621,21 @@ function validContentPart(value: unknown): boolean {
   }
 }
 
+function validContextEditableContent(value: unknown): boolean {
+  return typeof value === "string" || Array.isArray(value) && value.every(validContentPart);
+}
+
 function validMessage(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const message = value as Record<string, unknown>;
   if (typeof message.role !== "string" || !Number.isFinite(message.timestamp as number)) return false;
   switch (message.role) {
+    case "system": {
+      const sections = message.sections;
+      return (typeof message.content === "string" || Array.isArray(message.content) && message.content.every(validContentPart))
+        && (sections === undefined || !!sections && typeof sections === "object" && !Array.isArray(sections)
+          && Object.entries(sections).every(([key, value]) => validTreeString(key) && (value === null || typeof value === "string")));
+    }
     case "user":
       return (typeof message.content === "string"
         || Array.isArray(message.content) && message.content.every(validContentPart));
@@ -1688,6 +1702,13 @@ function validateCanonicalEntry(value: unknown): void {
         && typeof entry.display === "boolean"; break;
     case "label": valid = validTreeString(entry.targetId) && (entry.label === undefined || validTreeString(entry.label)); break;
     case "session_info": valid = entry.name === undefined || validTreeString(entry.name); break;
+    case "context_edit": {
+      const replacement = entry.replacement;
+      valid = validTreeString(entry.targetId) && (replacement === null
+        || !!replacement && typeof replacement === "object" && !Array.isArray(replacement)
+          && validContextEditableContent((replacement as Record<string, unknown>).content));
+      break;
+    }
     default: valid = false;
   }
   if (!valid) throw new GatewayError("conflict", "Session tree contains an invalid canonical entry payload");
@@ -1719,7 +1740,9 @@ function projectedTreeNode(
     id: node.entry.id,
     parentId: node.entry.parentId,
     timestamp: node.entry.timestamp,
-    kind: item?.kind ?? "sessionInfo",
+    kind: node.entry.type === "context_edit" ? "contextEdit"
+      : node.entry.type === "message" && node.entry.message.role === "system" ? "systemMessage"
+      : item?.kind ?? "sessionInfo",
     ...(node.label ? { label: node.label } : {}),
     preview: preview(item, node.entry),
     ...(item?.kind === "message" ? { role: item.role } : {}),
@@ -1868,11 +1891,13 @@ function projectableTranscriptEntries(
     const projectableCustom = entry.type !== "custom"
       || invocation?.receiptKind === "start" && invocation.source === "extension"
       || notification !== undefined;
-    const projectable = entry.type !== "session_info"
+    // Context edits alter only Pi's model-context projection. Keep their full
+    // records in canonical/history views without fabricating a user-facing chat row.
+    const projectable = entry.type !== "session_info" && entry.type !== "context_edit"
       && projectableCustom
       && !(entry.type === "custom_message" && !entry.display)
-      && !(entry.type === "message" && entry.message.role === "custom"
-        && !entry.message.display);
+      && !(entry.type === "message" && (entry.message.role === "system"
+        || entry.message.role === "custom" && !entry.message.display));
     if (!projectable) continue;
     entries.push(entry);
 
@@ -1982,7 +2007,7 @@ export function projectTranscript(
       bashMetadata,
       manager.getSessionId?.(),
     );
-    if (!projected) throw new Error("projectable transcript entry produced no item");
+    if (!projected) throw new Error(`projectable transcript entry produced no item: ${entry.type}`);
     return withInvocationSemantics(projected, boundInvocation, invocationStates);
   });
 }
@@ -2063,7 +2088,7 @@ export function projectTranscriptPage(
       bashMetadata,
       manager.getSessionId?.(),
     );
-    if (!item) throw new Error("projectable transcript entry produced no item");
+    if (!item) throw new Error(`projectable transcript entry produced no item: ${entry.type}${entry.type === "message" ? `/${entry.message.role}` : ""}`);
     const enriched = withInvocationSemantics(item, boundInvocation, invocationStates);
     const itemBytes = Buffer.byteLength(JSON.stringify(enriched)) + 1;
     if (bytes + itemBytes > byteBudget && selected.length > 0) break;
@@ -2124,7 +2149,7 @@ export function projectTranscriptPageAfter(
     const item = projectEntry(entry, blobs, toolMetadata, presentationIDs, toolLabels,
       contextDelivery.get(entry.id), toolSegmentIDs.get(entry.id), expectedSkillArguments,
       bashMetadata, manager.getSessionId?.());
-    if (!item) throw new Error("projectable transcript entry produced no item");
+    if (!item) throw new Error(`projectable transcript entry produced no item: ${entry.type}${entry.type === "message" ? `/${entry.message.role}` : ""}`);
     const enriched = withInvocationSemantics(item, boundInvocation, invocationStates);
     const itemBytes = Buffer.byteLength(JSON.stringify(enriched)) + 1;
     if (bytes + itemBytes > byteBudget && selected.length > 0) break;

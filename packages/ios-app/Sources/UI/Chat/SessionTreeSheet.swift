@@ -76,6 +76,8 @@ struct SessionHistoryRowPresentation: Identifiable {
             case "thinkingChange": "Thinking level"
             case "bash": "Shell"
             case "sessionInfo": "Session"
+            case "contextEdit": "Context edit"
+            case "systemMessage": "System context"
             default: "Log"
             }
         }

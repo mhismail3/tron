@@ -15,7 +15,7 @@ export interface HistoryPage {
 
 const kindNames: Record<string, string> = {
   thinking_level_change: "thinkingChange", model_change: "modelChange", branch_summary: "branchSummary",
-  custom_message: "customMessage", custom: "customEntry", session_info: "sessionInfo",
+  custom_message: "customMessage", custom: "customEntry", session_info: "sessionInfo", context_edit: "contextEdit",
 };
 
 /** Walk only the selected entry's authored content; list previews never project
@@ -42,6 +42,13 @@ function* entryBlocks(entry: SessionEntry): Generator<string> {
       if (message.role === "bashExecution") {
         yield message.command; yield message.output; return;
       }
+      if (message.role === "system") {
+        yield* contentBlocks(message.content);
+        if (message.sections) yield `Sections: ${JSON.stringify(message.sections)}`;
+        if (message.toolsAdded) yield `Tools added: ${JSON.stringify(message.toolsAdded)}`;
+        if (message.toolsRemoved) yield `Tools removed: ${JSON.stringify(message.toolsRemoved)}`;
+        return;
+      }
       if ("content" in message) yield* contentBlocks(message.content);
       else if ("summary" in message) yield message.summary;
       return;
@@ -53,13 +60,19 @@ function* entryBlocks(entry: SessionEntry): Generator<string> {
     case "thinking_level_change": yield entry.thinkingLevel; return;
     case "label": yield entry.label ?? "Bookmark removed"; return;
     case "session_info": yield entry.name ?? "Session information updated"; return;
+    case "context_edit":
+      yield `Target entry: ${entry.targetId}`;
+      yield `Replacement: ${JSON.stringify(entry.replacement)}`;
+      return;
   }
 }
 
 function entryPreview(entry: SessionEntry): string {
   // Tool arguments/extension data can be huge: previews describe their actual
   // kind without serializing them. Full values are an explicit detail read.
+  if (entry.type === "message" && entry.message.role === "system") return "System context message";
   if (entry.type === "custom") return entry.customType.slice(0, 240);
+  if (entry.type === "context_edit") return `Model context edit: ${entry.targetId}`;
   if (entry.type === "message" || entry.type === "custom_message") {
     const message = entry.type === "message" ? entry.message : entry;
     if ("role" in message && message.role === "bashExecution") return message.command.slice(0, 240);
@@ -114,7 +127,9 @@ export function historyPage(manager: SessionManager, runtimeGeneration: string, 
       }
     }
     return { id: entry.id, parentId: entry.parentId, timestamp: entry.timestamp,
-      kind: entry.type === "message" && entry.message.role === "bashExecution" ? "bash" : (kindNames[entry.type] ?? entry.type) as SessionTreeNode["kind"],
+      kind: entry.type === "message" && entry.message.role === "bashExecution" ? "bash"
+        : entry.type === "message" && entry.message.role === "system" ? "systemMessage"
+        : (kindNames[entry.type] ?? entry.type) as SessionTreeNode["kind"],
       ...(role ? { role } : {}), ...(label ? { label } : {}),
       ...(bookmarkTargetId ? { bookmarkTargetId } : {}), preview: entryPreview(entry),
       depth: 0, childCount: childCounts.get(entry.id) ?? 0, isCurrentPath: path.has(entry.id) };

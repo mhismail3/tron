@@ -83,6 +83,21 @@ describe("aggregate transcript structure", () => {
       .map(entry => entry.id));
   });
 
+  it("keeps canonical context edits out of fabricated transcript rows while Pi applies them", () => {
+    const manager = SessionManager.inMemory("/tmp/context-edit-projection-fixture");
+    const prompt = manager.appendMessage({ role: "user", content: "Original prompt", timestamp: 1 });
+    const edit = manager.appendContextEdit(prompt, { content: "Redacted prompt" });
+    expect(manager.buildSessionProjection().messages[0]).toMatchObject({ role: "user", content: "Redacted prompt" });
+    const canonical = JSON.stringify(manager.getBranch());
+    const items = projectTranscript(manager, new BlobStore());
+    expect(items.map(item => item.id)).toEqual([prompt]);
+    expect(items[0]).toMatchObject({ kind: "message", content: [{ type: "text", text: "Original prompt" }] });
+    expect(JSON.stringify(manager.getBranch())).toBe(canonical);
+    expect(canonical).toContain(edit);
+    const tree = projectTree(manager, new BlobStore());
+    expect(tree.find(node => node.id === edit)).toMatchObject({ kind: "contextEdit", preview: `Model context edit: ${prompt}` });
+  });
+
   it("compacts dense browser details below native limits without losing rows, text, or canonical data", () => {
     const manager = SessionManager.inMemory("/tmp/dense-browser-fixture");
     for (let index = 0; index < 40; index++) {

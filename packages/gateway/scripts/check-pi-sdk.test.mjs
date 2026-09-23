@@ -69,6 +69,20 @@ test("validates actual 64-byte sha512 integrity values", () => {
   assert.equal(validSha512Integrity(`sha512-${"A".repeat(88)}`), false);
 });
 
+test("accepts candidate graphs without obsolete optional packages", async () => {
+  await withFixture({}, async (root) => {
+    await editJson(root, "package-lock.json", (value) => {
+      delete value.packages[lockPath("@earendil-works/pi-client", true)];
+      delete value.packages[lockPath("@earendil-works/pi-protocol", true)];
+    });
+    const report = validatePiSdk({ gatewayDir: root, checkInstalled: false });
+    assert.equal(report.ok, true, report.issues.join("\\n"));
+    assert.equal(report.packages.includes("@earendil-works/chord"), true);
+    assert.equal(report.packages.includes("@earendil-works/pi-client"), false);
+    assert.equal(report.packages.includes("@earendil-works/pi-protocol"), false);
+  });
+});
+
 test("accepts every resolved Pi package and installed metadata when present", async () => {
   await withFixture({ installed: true }, (root) => {
     const report = validatePiSdk({ gatewayDir: root });
@@ -146,14 +160,12 @@ test("rejects mixed, missing, and non-canonical lock entries", async () => {
       value.packages[lockPath(PI_PACKAGES[0])].version = "0.84.0";
       delete value.packages[lockPath(PI_PACKAGES[1])].resolved;
       delete value.packages[lockPath(PI_PACKAGES[2])].integrity;
-      delete value.packages[lockPath(PI_PACKAGES[5], true)];
     });
     const report = validatePiSdk({ gatewayDir: root });
     assert.equal(report.ok, false);
     assert.match(report.issues.join("\n"), /resolves 0\.84\.0/);
     assert.match(report.issues.join("\n"), /canonical registry tarball/);
     assert.match(report.issues.join("\n"), /missing npm integrity/);
-    assert.match(report.issues.join("\n"), /missing resolved Pi package/);
   });
 });
 
