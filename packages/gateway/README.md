@@ -2035,7 +2035,12 @@ shape has unique safe-integer indexes (or the terminal result array preserves th
 owned child order), an agent, and recognized lifecycle evidence. The normalized
 `foreground-index:N` producer is scoped by the canonical parent tool call. Generic extension
 tools continue to require explicit structured `runId`/`asyncId` evidence and can never turn
-array position into ownership.
+array position into ownership. Installed-provider identity is derived from the finalized
+Pi `SourceInfo.source` npm package-name component, corroborated by the installed
+`package.json` name, existing provider-path evidence, and finalized `subagent` tool owner.
+The full configured source remains the owner provenance, including an exact npm version
+or an explicitly configured absolute `.tgz` file source. npm aliases, other
+package names, malformed sources, and same-named local/Git extensions fail closed.
 
 For an exact-owned asynchronous pi-subagents artifact, Gateway applies the producer's stable
 child contract: explicit `childId`, then workflow key, then child `runId`, with `step:N` as the

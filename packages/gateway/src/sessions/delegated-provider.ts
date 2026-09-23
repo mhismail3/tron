@@ -1,4 +1,4 @@
-import { lstatSync, realpathSync, statSync } from "node:fs";
+import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { mkdir } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -87,6 +87,34 @@ const DELEGATED_ARTIFACT_FILE_SET: ReadonlySet<string> = new Set(DELEGATED_ARTIF
 /** Provider package directory marker used only to recognize an installed owner. */
 const PROVIDER_PATH_SEGMENT = /(?:^|[\\/])pi-subagents(?:[\\/]|$)/u;
 
+/** Pi keeps the configured npm spec in SourceInfo.source; derive its package name only. */
+function isProviderNpmSource(source: string): boolean {
+  if (!source.startsWith("npm:") || source.trim() !== source) return false;
+  const match = /^(@?[^@]+(?:\/[^@]+)?)(?:@(.+))?$/u.exec(source.slice("npm:".length));
+  if (match?.[1] !== "pi-subagents") return false;
+  const specifier = match[2];
+  if (specifier?.startsWith("@") || (specifier !== undefined && /[\0\r\n]/u.test(specifier))) return false;
+  // Reject npm aliases and local directories; only explicit absolute tarballs
+  // are an accepted local source for this installed provider.
+  if (specifier?.startsWith("npm:")) return false;
+  if (specifier?.startsWith("file:")) {
+    const tarballPath = specifier.slice("file:".length);
+    return isAbsolute(tarballPath) && /\.tgz$/iu.test(tarballPath);
+  }
+  return specifier === undefined || !specifier.includes("/") && !specifier.includes("\\");
+}
+
+function hasProviderPackageManifest(extension: Extension): boolean {
+  const baseDir = extension.sourceInfo.baseDir;
+  if (!baseDir || !PROVIDER_PATH_SEGMENT.test(baseDir)) return false;
+  try {
+    const manifest = JSON.parse(readFileSync(join(baseDir, "package.json"), "utf8")) as { name?: unknown };
+    return manifest.name === "pi-subagents";
+  } catch {
+    return false;
+  }
+}
+
 function canonical(value: string): string {
   try {
     return realpathSync(value);
@@ -163,10 +191,11 @@ export function delegatedArtifactPathAllowed(asyncPath: string, cwd: string, adm
  */
 export function delegatedProviderOrigin(extensions: readonly Extension[]): ExtensionToolOrigin {
   const extension = extensions.find((candidate) => {
-    // Path evidence narrows the candidate, but only the finalized package
-    // identity can authorize provider projection. A project extension under a
-    // directory named pi-subagents must not impersonate the installed package.
-    if (candidate.sourceInfo.source !== "npm:pi-subagents") return false;
+    // Path evidence narrows the candidate, but only finalized package identity
+    // can authorize projection; local extensions cannot impersonate this npm owner.
+    if (candidate.sourceInfo.origin !== "package"
+      || !isProviderNpmSource(candidate.sourceInfo.source)
+      || !hasProviderPackageManifest(candidate)) return false;
     const paths = [candidate.path, candidate.resolvedPath, candidate.sourceInfo.path, candidate.sourceInfo.baseDir]
       .filter((value): value is string => typeof value === "string");
     return paths.some((value) => PROVIDER_PATH_SEGMENT.test(value));

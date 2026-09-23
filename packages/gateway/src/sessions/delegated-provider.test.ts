@@ -16,19 +16,30 @@ import {
 
 const OWNER = { id: "extension:installed", title: "Subagents", source: "npm:pi-subagents" };
 const FOREIGN_OWNER = { id: "extension:foreign", title: "Other", source: "npm:other" };
+const providerFixtureRoots: string[] = [];
 
-function extension(input: { path: string; resolvedPath?: string; owner?: typeof OWNER; source?: string }) {
+afterEach(() => {
+  for (const root of providerFixtureRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function extension(input: { source?: string; packageName?: string; directory?: string; providerTool?: boolean; origin?: "package" | "top-level" }) {
+  const root = mkdtempSync(join(tmpdir(), "tron-delegated-owner-"));
+  providerFixtureRoots.push(root);
+  const baseDir = join(root, "node_modules", input.directory ?? "pi-subagents");
+  mkdirSync(baseDir, { recursive: true });
+  writeFileSync(join(baseDir, "package.json"), JSON.stringify({ name: input.packageName ?? "pi-subagents" }));
+  const path = join(baseDir, "index.ts");
+  writeFileSync(path, "export {};");
   return {
-    path: input.path,
-    resolvedPath: input.resolvedPath ?? input.path,
-    sourceInfo: { path: input.path, source: input.source ?? "npm:pi-subagents", scope: "user", origin: "package" },
+    path,
+    resolvedPath: path,
+    sourceInfo: { path, source: input.source ?? "npm:pi-subagents", scope: "user", origin: input.origin ?? "package", baseDir },
     handlers: new Map(),
-    tools: new Map([[DELEGATED_PROVIDER_TOOL_NAME, { definition: { name: DELEGATED_PROVIDER_TOOL_NAME, execute: async () => ({}) }, sourceInfo: {} }]]),
+    tools: input.providerTool === false ? new Map() : new Map([[DELEGATED_PROVIDER_TOOL_NAME, { definition: { name: DELEGATED_PROVIDER_TOOL_NAME, execute: async () => ({}) }, sourceInfo: {} }]]),
     commands: new Map(),
     shortcuts: new Map(),
     messageRenderers: new Map(),
     entryRenderers: new Map(),
-    _owner: input.owner,
   };
 }
 
@@ -50,18 +61,50 @@ describe("delegated provider origin", () => {
     expect(delegatedProviderOrigin([])).toEqual({ source: "pi-subagents" });
   });
 
-  it("requires the finalized provider package identity in addition to path evidence", () => {
-    const spoofed = extension({
-      path: "/tmp/pi-subagents/project-extension/index.ts",
-      source: "npm:other",
-    });
-    const spoofedResult = attributeExtensions({ extensions: [spoofed as never], errors: [], runtime: {} as never });
-    expect(delegatedProviderOrigin(spoofedResult.extensions)).toEqual({ source: "pi-subagents" });
-    const installed = extension({ path: "/tmp/pi-subagents/installed/index.ts" });
-    const installedResult = attributeExtensions({ extensions: [installed as never], errors: [], runtime: {} as never });
-    const origin = delegatedProviderOrigin(installedResult.extensions);
-    expect(origin.source).toBe("npm:pi-subagents");
-    expect(origin.owner?.source).toBe("npm:pi-subagents");
+  it("continues accepting the unversioned npm package source", () => {
+    const installed = extension({ source: "npm:pi-subagents" });
+    const finalized = attributeExtensions({ extensions: [installed as never], errors: [], runtime: {} as never });
+    expect(delegatedProviderOrigin(finalized.extensions).owner?.source).toBe("npm:pi-subagents");
+  });
+
+  it("accepts the pinned npm package identity without rewriting its configured source", () => {
+    const source = "npm:pi-subagents@0.59.0";
+    const installed = extension({ source });
+    const finalized = attributeExtensions({ extensions: [installed as never], errors: [], runtime: {} as never });
+    const origin = delegatedProviderOrigin(finalized.extensions);
+    expect(origin.owner?.source).toBe(source);
+    expect(origin.source).toBe(source);
+  });
+
+  it("accepts an explicit local npm tarball only when the installed manifest names pi-subagents", () => {
+    const source = "npm:pi-subagents@file:/tmp/pi-subagents-0.59.0.tgz";
+    const installed = extension({ source });
+    const finalized = attributeExtensions({ extensions: [installed as never], errors: [], runtime: {} as never });
+    const origin = delegatedProviderOrigin(finalized.extensions);
+    expect(origin.owner?.source).toBe(source);
+    expect(origin.source).toBe(source);
+  });
+
+  it.each([
+    { label: "lookalike package name", source: "npm:pi-subagents-extra@0.59.0", packageName: "pi-subagents-extra" },
+    { label: "versioned source whose manifest belongs to another package", source: "npm:pi-subagents@0.59.0", packageName: "other-package" },
+    { label: "npm alias from another package", source: "npm:other-package@npm:pi-subagents@0.59.0", packageName: "pi-subagents" },
+    { label: "npm alias to another package", source: "npm:pi-subagents@npm:other-package", packageName: "other-package" },
+    { label: "relative file specifier", source: "npm:pi-subagents@file:./candidate.tgz", packageName: "pi-subagents" },
+    { label: "empty version", source: "npm:pi-subagents@", packageName: "pi-subagents" },
+    { label: "provisional top-level source", source: "npm:pi-subagents@0.59.0", packageName: "pi-subagents", origin: "top-level" },
+    { label: "local source with provider directory", source: "/tmp/node_modules/pi-subagents", packageName: "pi-subagents" },
+    { label: "git source with provider directory", source: "git:github.com/example/pi-subagents", packageName: "pi-subagents" },
+  ])("rejects $label without a finalized provider identity", ({ source, packageName, origin }) => {
+    const spoofed = extension({ source, packageName, origin });
+    const finalized = attributeExtensions({ extensions: [spoofed as never], errors: [], runtime: {} as never });
+    expect(delegatedProviderOrigin(finalized.extensions)).toEqual({ source: "pi-subagents" });
+  });
+
+  it("rejects provider-shaped paths without a finalized provider tool owner", () => {
+    const extensionWithoutTool = extension({ providerTool: false });
+    const finalized = attributeExtensions({ extensions: [extensionWithoutTool as never], errors: [], runtime: {} as never });
+    expect(delegatedProviderOrigin(finalized.extensions)).toEqual({ source: "pi-subagents" });
   });
 
   it("accepts only the exact installed owner identity for control", () => {
