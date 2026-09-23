@@ -43,7 +43,7 @@ extension Color {
     static let tronPink = Color(lightHex: "#DB2777", darkHex: "#EC4899")
     static let tronSlate = Color(lightHex: "#64748B", darkHex: "#94A3B8")
 
-    static let tronBackground = Color(lightHex: "#F7F8FA", darkHex: "#111213")
+    static let tronBackground = Color(lightHex: "#F7F8FA", darkHex: "#0D0E0F")
     /// Historical neutral tint used by the composer and terminal keyboard bar.
     static let tronPhthaloGreen = Color(lightHex: "#FFFFFF", darkHex: "#111827")
     static let tronSurface = Color(lightHex: "#FFFFFF", darkHex: "#16181D")

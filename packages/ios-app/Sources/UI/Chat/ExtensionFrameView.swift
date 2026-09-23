@@ -31,7 +31,7 @@ struct ExtensionFrameRunPresentation {
             switch colorScheme {
             case .dark:
                 foreground = "E8E9EA"
-                background = "111213"
+                background = "0D0E0F"
             default:
                 foreground = "111827"
                 background = "F7F8FA"

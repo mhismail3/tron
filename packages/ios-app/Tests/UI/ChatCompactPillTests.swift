@@ -480,7 +480,7 @@ struct ChatCompactPillTests {
         let lightTraits = UITraitCollection(userInterfaceStyle: .light)
         let darkTraits = UITraitCollection(userInterfaceStyle: .dark)
         let lightBackground = UIColor(hex: "#F7F8FA")
-        let darkBackground = UIColor(hex: "#111213")
+        let darkBackground = UIColor(hex: "#0D0E0F")
 
         for tone in [ChatNotificationTone.command, .tool, .information, .purple, .warning, .neutral] {
             for color in [tone.primaryColor, tone.secondaryColor] {
