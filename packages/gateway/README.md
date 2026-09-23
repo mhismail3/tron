@@ -187,6 +187,7 @@ behavior and obtain an explicit product decision before continuing.
 Gateway owns only mobile infrastructure:
 
 - one-time enrollment, hashed device credentials, revocation, and rate limits;
+- authenticated durable Watch source-recording admission with exact commit receipts (see [recording ingestion](docs/recordings.md));
 - authenticated HTTP uploads/blobs and JSON WebSocket requests/events;
 - one serialized mutation lane and one live runtime per canonical session;
 - detached run supervision, bounded idempotency receipts, and crash markers;

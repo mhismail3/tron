@@ -3,6 +3,7 @@ import { performance } from "node:perf_hooks";
 import type { AuthType } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { contextWindowLimits } from "../providers/context-window-policy.js";
+import { RECORDING_CAPABILITY } from "../recordings/recording-store.js";
 import type { GatewayConfig } from "../config.js";
 import { GatewayError } from "../errors.js";
 import { runtimeIdentity } from "./runtime-identity.js";
@@ -341,6 +342,7 @@ export class GatewayService {
         "workspace-history-diff.v1",
         "uploads.v1",
         "uploads-status.v2",
+        RECORDING_CAPABILITY,
         DISPLAY_CAPABILITY,
         DISPLAY_LIVE_VIEW_CAPABILITY,
         NATIVE_LIVE_VIEW_CAPABILITY,

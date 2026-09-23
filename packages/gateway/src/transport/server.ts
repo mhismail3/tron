@@ -10,6 +10,7 @@ import type { JsonValue } from "../protocol/types.js";
 import type { DeviceIdentity, DeviceStore } from "../security/device-store.js";
 import { RateLimiter } from "../security/rate-limiter.js";
 import type { UploadStore } from "../machine/upload-store.js";
+import type { RecordingCaptureMetadata, RecordingStore } from "../recordings/recording-store.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import type { BlobByteRange } from "../sessions/blob-store.js";
 import type { AuthBroker } from "../admin/auth-broker.js";
@@ -530,6 +531,7 @@ export class GatewayServer {
       maximumHttpRequestsPerIdentity?: number;
       devices: DeviceStore;
       uploads: UploadStore;
+      recordings?: RecordingStore;
       sessions: RuntimeRegistry;
       auth: AuthBroker;
       service: GatewayService;
@@ -865,6 +867,7 @@ export class GatewayServer {
       // pairing/discard mutations retain their original settlement authority.
       const disposable = request.method === "GET"
         || request.method === "POST" && url.pathname === "/v1/uploads"
+        || /^\/v1\/recordings\/[^/]+\/segments\/\d+$/.test(url.pathname)
         || /^\/v1\/sessions\/[^/]+\/live-views\//.test(url.pathname);
       if (disposable) await abortableRead(readLifetime.signal, () => handler ?? Promise.resolve());
       else await handler;
@@ -903,6 +906,41 @@ export class GatewayServer {
     authenticated: { kind: "local" } | DeviceIdentity,
     signal: AbortSignal,
   ): Promise<void> {
+    const recordingRoute = /^\/v1\/recordings\/([^/]+)(?:\/segments\/(\d+)|\/(finalize|status))?$/.exec(url.pathname);
+    if (recordingRoute) {
+      if (!this.options.recordings || authenticated.kind === "local") throw new GatewayError("not_found", "Recording ingestion is unavailable");
+      const recordingId = recordingRoute[1]!;
+      const deviceId = authenticated.deviceId;
+      if (request.method === "PUT" && recordingRoute[2] !== undefined) {
+        const rawSize = request.headers["x-recording-size"];
+        const rawDigest = request.headers["x-recording-sha256"];
+        const declaredSize = typeof rawSize === "string" && /^\d+$/.test(rawSize) ? Number(rawSize) : NaN;
+        const digest = typeof rawDigest === "string" ? rawDigest : "";
+        const receipt = await this.options.recordings.acceptSegment(recordingId, Number(recordingRoute[2]), declaredSize, digest, deviceId, completeRequestBody(request));
+        sendJson(response, 201, { receipt });
+        return;
+      }
+      if (request.method === "POST" && recordingRoute[3] === "finalize") {
+        const bytes = await readBoundedBody(request, 256 * 1024);
+        let body: unknown;
+        try { body = JSON.parse(bytes.toString("utf8")); } catch { throw new GatewayError("invalid_request", "Finalization body must be JSON"); }
+        if (!body || typeof body !== "object" || Array.isArray(body)) throw new GatewayError("invalid_request", "Finalization body must be an object");
+        const value = body as Record<string, unknown>;
+        if (Object.keys(value).length !== 3 || value.schemaVersion !== 1 || !Number.isSafeInteger(value.segmentCount) || !value.capture) throw new GatewayError("invalid_request", "Finalization schema is invalid");
+        const receipt = await this.options.recordings.finalize(recordingId, deviceId, { segmentCount: value.segmentCount as number, capture: value.capture as RecordingCaptureMetadata });
+        sendJson(response, 200, { receipt });
+        return;
+      }
+      if (request.method === "GET" && recordingRoute[3] === "status") {
+        const rawOffset = url.searchParams.get("offset") ?? "0";
+        const rawLimit = url.searchParams.get("limit") ?? "50";
+        if (!/^\d+$/.test(rawOffset) || !/^\d+$/.test(rawLimit)) throw new GatewayError("invalid_request", "Recording page bounds are invalid");
+        const result = await this.options.recordings.status(recordingId, deviceId, Number(rawOffset), Number(rawLimit));
+        sendJson(response, 200, result);
+        return;
+      }
+      throw new GatewayError("not_found", "Recording route was not found");
+    }
     if (request.method === "POST" && url.pathname === "/v1/uploads") {
       await this.options.uploads.withBodyAdmission(async () => {
         const name = url.searchParams.get("name") ?? "attachment";

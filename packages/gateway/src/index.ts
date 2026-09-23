@@ -7,6 +7,7 @@ import { DeviceStore } from "./security/device-store.js";
 import { TrustService } from "./admin/trust-service.js";
 import { FilesystemService } from "./machine/filesystem-service.js";
 import { UploadStore } from "./machine/upload-store.js";
+import { RecordingStore } from "./recordings/recording-store.js";
 import { TerminalService } from "./machine/terminal-service.js";
 import { SettingsService } from "./admin/settings-service.js";
 import { ModelConfigService } from "./admin/model-config-service.js";
@@ -189,6 +190,7 @@ const sessions = new RuntimeRegistry({
     );
   },
 });
+const recordings = new RecordingStore(sessions.knowledgeWorkspace(), config.machineId);
 const bundledSearchHelper = join(dirname(dirname(process.execPath)), "TronSearchEmbeddingHelper");
 const developmentHelperOverride = process.env.NODE_ENV === "development" ? process.env.TRON_SEARCH_EMBEDDING_HELPER : undefined;
 const searchHelperCandidate = developmentHelperOverride ?? (existsSync(bundledSearchHelper) ? bundledSearchHelper : undefined);
@@ -426,6 +428,7 @@ transport = new GatewayServer({
   maximumSynchronizationBytes: config.maxSynchronizationBytes,
   devices,
   uploads,
+  recordings,
   sessions,
   liveViews: browserLiveViews,
   auth,

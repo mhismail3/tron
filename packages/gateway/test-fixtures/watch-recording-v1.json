@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "recordingId": "6f3241c1-496e-4dbd-b452-2c724937f5d0",
+  "segment": {
+    "number": 1,
+    "size": 31,
+    "sha256": "9b7f18080c07a9f999e93325f4355d21f9b498edbe9f022a701f27522804b5d3",
+    "acceptedReceipt": {
+      "schemaVersion": 1,
+      "recordingId": "6f3241c1-496e-4dbd-b452-2c724937f5d0",
+      "segment": 1,
+      "size": 31,
+      "sha256": "9b7f18080c07a9f999e93325f4355d21f9b498edbe9f022a701f27522804b5d3",
+      "acceptedAt": "2026-01-01T00:00:01.000Z"
+    }
+  },
+  "finalizeRequest": {
+    "schemaVersion": 1,
+    "segmentCount": 1,
+    "capture": {
+      "schemaVersion": 1,
+      "source": { "appVersion": "1.0", "platform": "watchOS", "platformVersion": "26.0" },
+      "startedAt": "2026-01-01T00:00:00.000Z",
+      "stoppedAt": "2026-01-01T00:00:01.000Z",
+      "clockOffsetMilliseconds": 0,
+      "stopReason": "user",
+      "recoveryStatus": "complete",
+      "timeline": [{ "segment": 1, "startMonotonicMilliseconds": 0, "durationMilliseconds": 1000, "pauseBeforeMilliseconds": 0, "frameCount": 48000, "codec": "AAC", "format": "m4a" }]
+    }
+  },
+  "commitReceipt": {
+    "schemaVersion": 1,
+    "recordingId": "6f3241c1-496e-4dbd-b452-2c724937f5d0",
+    "destinationId": "gateway-machine-id",
+    "sourceDeviceId": "gateway-authenticated-device-id",
+    "finalizedAt": "2026-01-01T00:00:02.000Z",
+    "contentSha256": "455614868d4463c825972a92d138e7d02c515ba6c2bd8fcce85125cf0985694f",
+    "totalBytes": 31,
+    "segmentCount": 1,
+    "capture": {
+      "schemaVersion": 1,
+      "source": { "appVersion": "1.0", "platform": "watchOS", "platformVersion": "26.0" },
+      "startedAt": "2026-01-01T00:00:00.000Z",
+      "stoppedAt": "2026-01-01T00:00:01.000Z",
+      "clockOffsetMilliseconds": 0,
+      "stopReason": "user",
+      "recoveryStatus": "complete",
+      "timeline": [{ "segment": 1, "startMonotonicMilliseconds": 0, "durationMilliseconds": 1000, "pauseBeforeMilliseconds": 0, "frameCount": 48000, "codec": "AAC", "format": "m4a" }]
+    }
+  },
+  "contentSha256Algorithm": "SHA-256 over UTF-8 concatenation of each ordered segment as `<segment-number>:<lowercase-segment-sha256>:<byte-length>\\n` (one LF after each segment)."
+}
