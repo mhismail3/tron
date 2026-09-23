@@ -181,6 +181,7 @@ with the isolated Debug payload and never registers a second Login Item.
 - iOS test workflow: `packages/ios-app/docs/development.md`
 - Mac supervision and pairing: `packages/mac-app/docs/architecture.md`
 - Mac packaging and testing: `packages/mac-app/docs/development.md`
+- Multi-session work plans and completed-work history: [docs/plans](docs/plans/README.md)
 
 Update the nearest owner when behavior changes. Keep root README concise and link
 to implementation-level detail.

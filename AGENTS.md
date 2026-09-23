@@ -148,6 +148,24 @@ only when packaging/build validation needs generated resources.
 - iOS architecture/development/events: `packages/ios-app/docs/`
 - Mac architecture/development: `packages/mac-app/docs/`
 - Contributor workflow: `CONTRIBUTING.md` and `scripts/tron --help`
+- Multi-session work plans and completed-work history: `docs/plans/`
+
+### Work plans
+
+Work that spans more than one agent session has a plan in `docs/plans/`, named
+and structured by the template in `docs/plans/README.md`. When you work on a
+plan:
+
+- Claim the task on `main` before starting, and update the plan (task status,
+  handoff entry, newly discovered tasks, deviations) in the same commit as the
+  work it describes, so the plan on `main` always matches the code.
+- Record what actually happened, not what was proposed.
+- When a plan finishes or is abandoned, move its lasting knowledge into the
+  owning docs above, append an entry to `docs/plans/HISTORY.md`, and delete the
+  plan file in the same commit.
+
+Plans and history never describe current behavior; the code and owning docs do.
+Work that fits in one session needs no plan.
 
 ### Local Mac reinstall runbook
 

@@ -183,6 +183,7 @@ The pinned `pi-agent-browser-native` package keeps its global configuration at i
 - [Mac architecture](packages/mac-app/docs/architecture.md)
 - [Mac development and packaging](packages/mac-app/docs/development.md)
 - [Contributing](CONTRIBUTING.md)
+- [Work plans and history](docs/plans/README.md)
 
 CI validates source but does not publish production artifacts. iOS/TestFlight
 and App Store delivery, Mac signing/notarization, and production deployment are
