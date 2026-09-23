@@ -1829,20 +1829,17 @@ struct ChatView: View {
     @ViewBuilder private var openingSurface: some View {
         switch sessionPresentation.open.phase {
         case .opening, .positioning, .revealing, .presenting:
-            let hasInstalledProjection = transcriptPresentation.installed != nil
             ZStack {
-                if !ChatOpeningSurfacePolicy.showsMountedProjection(hasInstalledProjection: hasInstalledProjection) {
+                if ChatOpeningSurfacePolicy.showsOpaqueCover(phase: sessionPresentation.open.phase) {
                     Color.tronBackground
                 }
                 TronPulseLoadingIndicator(accent: .tronEmerald, size: 44)
                     .padding(18)
-                    .background(.thinMaterial, in: Circle())
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .allowsHitTesting(false)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Opening conversation")
-            .transition(.opacity)
         case .failed(let message):
             VStack(spacing: 12) {
                 Image(systemName: "exclamationmark.triangle.fill")

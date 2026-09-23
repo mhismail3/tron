@@ -177,11 +177,21 @@ final class DashboardGatewayConnectionPool {
         return GatewayDiagnosticsService(client: client)
     }
 
-    func notificationInbox(for profileID: String) async throws -> NotificationInboxGatewayClient.Snapshot {
+    func notificationInbox(
+        for profileID: String,
+        cursor: String? = nil,
+        revision: String? = nil,
+        connectionID: Int? = nil
+    ) async throws -> NotificationInboxGatewayClient.Snapshot {
         guard let client = entries[profileID]?.client else {
             throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
         }
-        return try await NotificationInboxGatewayClient.list(client: client)
+        return try await NotificationInboxGatewayClient.list(
+            client: client,
+            cursor: cursor,
+            expectedRevision: revision,
+            expectedConnectionID: connectionID
+        )
     }
 
     func markNotificationRead(profileID: String, id: String, commandID: String) async throws {
@@ -628,11 +638,11 @@ final class DashboardGatewayConnectionPool {
                         current.refreshFailedAttempts + 1
                     )
                 }
+                if current.refreshFailedAttempts == DashboardCatalogRetryPolicy.unavailableNoticeAfterFailures {
+                    current.catalog.markLoadUnavailable()
+                    current.state = .stale
+                }
                 guard DashboardCatalogRetryPolicy.shouldRetry(isDirty: remainsDirty, isCurrent: true) else {
-                    if current.refreshFailedAttempts == DashboardCatalogRetryPolicy.unavailableNoticeAfterFailures {
-                        current.catalog.markLoadUnavailable()
-                        current.state = .stale
-                    }
                     self.entries[profileID] = current
                     self.publish(profileID: profileID)
                     return
@@ -702,102 +712,58 @@ final class DashboardGatewayConnectionPool {
         connectionID: Int,
         requestGeneration: Int
     ) async -> RefreshOutcome {
-        struct Params: Encodable { let cursor: String?; let limit: Int; let scope: String }
-        struct Response: Decodable {
-            let sessions: [SessionSummary]
-            let nextCursor: String?
-            let listRevision: Int
-        }
         guard let seed = entries[profileID] else { return .retained }
         let key = SessionCatalogLoadKey(
             profileID: profileID,
             lifecycleGeneration: generation,
             connectionID: connectionID
         )
-
-        for revisionAttempt in 0..<2 {
-            guard var current = entries[profileID] else { return .retained }
-            let admission = current.catalog.beginLoad(key: key)
-            entries[profileID] = current
-            var requestedContinuation = false
-            do {
-                var all: [SessionSummary] = []
-                var cursor: String?
-                var seenCursors = Set<String>()
-                var seenSessionIDs = Set<String>()
-                var expectedRevision: Int?
-                var revisionChanged = false
-                var pageCount = 0
-                repeat {
-                    guard pageCount < SessionCatalogLoadBounds.maximumPages else {
-                        throw Self.invalidDashboardCatalog("The server returned too many dashboard pages.")
-                    }
-                    requestedContinuation = cursor != nil
-                    let response: Response = try await seed.client.request(
-                        "session.list",
-                        Params(cursor: cursor, limit: SessionCatalogLoadBounds.pageSize, scope: "user")
-                    )
-                    guard admitsRefresh(
-                        profileID: profileID,
-                        generation: generation,
-                        connectionID: connectionID,
-                        requestGeneration: requestGeneration
-                    ), let admitted = entries[profileID],
-                       admitted.catalog.admits(admission, key: key) else { return .retained }
-                    pageCount += 1
-                    if let expectedRevision, expectedRevision != response.listRevision {
-                        revisionChanged = true
-                        break
-                    }
-                    expectedRevision = response.listRevision
-                    guard response.sessions.count <= SessionCatalogLoadBounds.pageSize,
-                          all.count <= SessionCatalogLoadBounds.maximumRows - response.sessions.count,
-                          response.sessions.allSatisfy({ seenSessionIDs.insert($0.id).inserted }) else {
-                        throw Self.invalidDashboardCatalog("The server returned an invalid dashboard page.")
-                    }
-                    all.append(contentsOf: response.sessions.map {
-                        $0.withGatewaySource(id: profileID, label: seed.profile.label)
-                    })
-                    cursor = response.nextCursor
-                    if let cursor, !seenCursors.insert(cursor).inserted {
-                        throw Self.invalidDashboardCatalog("The server returned a repeated dashboard cursor.")
-                    }
-                } while cursor != nil
-
-                if revisionChanged {
-                    if revisionAttempt == 0 { continue }
-                    return .retryRead
-                }
-                guard var published = entries[profileID],
-                      published.catalog.publishAuthoritative(all, admission: admission) else { return .retained }
-                published.state = .connected
-                published.refreshRetryAttempt = 0
-                published.refreshFailedAttempts = 0
-                entries[profileID] = published
+        guard var current = entries[profileID] else { return .retained }
+        let admission = current.catalog.beginLoad(key: key)
+        entries[profileID] = current
+        do {
+            let loaded = try await SessionCatalogLoader.load(client: seed.client) {
+                self.admitsRefresh(
+                    profileID: profileID,
+                    generation: generation,
+                    connectionID: connectionID,
+                    requestGeneration: requestGeneration
+                ) && self.entries[profileID]?.catalog.admits(admission, key: key) == true
+            }
+            guard admitsRefresh(
+                profileID: profileID,
+                generation: generation,
+                connectionID: connectionID,
+                requestGeneration: requestGeneration
+            ), var admitted = entries[profileID], admitted.catalog.admits(admission, key: key) else {
+                return .retained
+            }
+            switch loaded {
+            case let .loaded(rows, _, _):
+                let sourced = rows.map { $0.withGatewaySource(id: profileID, label: seed.profile.label) }
+                guard admitted.catalog.publishAuthoritative(sourced, admission: admission) else { return .retained }
+                admitted.state = .connected
+                admitted.refreshRetryAttempt = 0
+                admitted.refreshFailedAttempts = 0
+                entries[profileID] = admitted
                 publish(profileID: profileID)
                 return .published
-            } catch is CancellationError {
+            case .revisionMoved, .invalid:
+                return .retryRead
+            case .retired:
                 return .retained
-            } catch let failure as GatewayFailure
-                where requestedContinuation && failure.code == "invalid_request" && revisionAttempt == 0 {
-                guard admitsRefresh(
-                    profileID: profileID,
-                    generation: generation,
-                    connectionID: connectionID,
-                    requestGeneration: requestGeneration
-                ) else { return .retained }
-                continue
-            } catch {
-                return await catalogFailureOutcome(
-                    seed: seed,
-                    profileID: profileID,
-                    generation: generation,
-                    connectionID: connectionID,
-                    requestGeneration: requestGeneration
-                )
             }
+        } catch is CancellationError {
+            return .retained
+        } catch {
+            return await catalogFailureOutcome(
+                seed: seed,
+                profileID: profileID,
+                generation: generation,
+                connectionID: connectionID,
+                requestGeneration: requestGeneration
+            )
         }
-        return .retained
     }
 
     private func catalogFailureOutcome(

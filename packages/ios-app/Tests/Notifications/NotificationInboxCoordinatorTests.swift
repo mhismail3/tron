@@ -95,6 +95,33 @@ struct NotificationInboxCoordinatorTests {
         #expect(restored.unreadCount == 0)
     }
 
+    @MainActor
+    @Test("older inbox rows publish one exact revision-bound scroll page")
+    func olderPageAppendsWithExactRevision() async {
+        let coordinator = NotificationInboxCoordinator()
+        let profile = GatewayProfile(
+            id: "profile-a", label: "Studio", host: "studio.example", port: 9847,
+            machineId: "machine-a", machineGroupID: "group-a"
+        )
+        let generation = coordinator.begin(profileID: profile.id)
+        coordinator.install(profile: profile, snapshot: .init(
+            notifications: [item(id: "notification-a", createdAt: "2026-01-01T00:00:02Z")],
+            revision: "revision-a", unreadCount: 2, nextCursor: "older", connectionID: 7
+        ), generation: generation)
+        await coordinator.loadNextPage(profileID: profile.id) { cursor, revision, connectionID in
+            #expect(cursor == "older")
+            #expect(revision == "revision-a")
+            #expect(connectionID == 7)
+            return .init(
+                notifications: [item(id: "notification-b", createdAt: "2026-01-01T00:00:01Z")],
+                revision: "revision-a", unreadCount: 2, nextCursor: nil, connectionID: 7
+            )
+        }
+        #expect(coordinator.buckets[profile.id]?.notifications.map(\.id) == ["notification-a", "notification-b"])
+        #expect(coordinator.buckets[profile.id]?.nextCursor == nil)
+        #expect(coordinator.unreadCount == 2)
+    }
+
     @Test("primary inbox projects exactly fifteen rows before full history")
     func recentProjection() {
         let notifications = (0..<16).map { index in

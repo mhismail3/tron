@@ -15,13 +15,11 @@ struct ChatOpeningSurfaceTaskID: Hashable {
 }
 
 enum ChatOpeningSurfacePolicy {
-    /// Once the immutable transcript projection is installed, keep it visible
-    /// while native tail positioning settles. Readiness still belongs to the
-    /// physical viewport proof; hiding an admitted projection made a geometry
-    /// issue look like a data load and let keyboard layout changes appear to
-    /// "fix" opening.
-    static func showsMountedProjection(hasInstalledProjection: Bool) -> Bool {
-        hasInstalledProjection
+    static func showsOpaqueCover(phase: ChatOpenPresentationPhase) -> Bool {
+        switch phase {
+        case .opening, .positioning, .revealing, .presenting: true
+        case .presented, .ready, .failed: false
+        }
     }
 
     static func action(

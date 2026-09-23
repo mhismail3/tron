@@ -212,10 +212,14 @@ struct ChatSessionPresentationTests {
         ) != ChatOpeningSurfaceTaskID(surfaceActive: true, openingTaskRevision: before))
     }
 
-    @Test("opening keeps an installed projection visible while native positioning settles")
+    @Test("opening cover stays opaque through settlement and leaves visibility to one reveal")
     func openingSurfaceProjectionPolicy() {
-        #expect(ChatOpeningSurfacePolicy.showsMountedProjection(hasInstalledProjection: true))
-        #expect(!ChatOpeningSurfacePolicy.showsMountedProjection(hasInstalledProjection: false))
+        for phase in [ChatOpenPresentationPhase.opening, .positioning, .revealing, .presenting] {
+            #expect(ChatOpeningSurfacePolicy.showsOpaqueCover(phase: phase))
+        }
+        for phase in [ChatOpenPresentationPhase.presented, .ready, .failed("failed")] {
+            #expect(!ChatOpeningSurfacePolicy.showsOpaqueCover(phase: phase))
+        }
     }
 
     @Test("uncover waits for a covered opening and then retries only when still needed")

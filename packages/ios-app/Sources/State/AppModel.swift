@@ -395,6 +395,7 @@ final class AppModel {
     private var catalogRefreshRetryAttempt = 0
     private var catalogRefreshFailedAttempts = 0
     private var catalogFailureOwner: SessionCatalogLoadKey?
+    private var catalogFailureNoticeOwner: SessionCatalogLoadKey?
     private var catalogDeferredFollowUpKey: SessionCatalogLoadKey?
     private var sceneAllowsCatalogRefresh = true
     private var cacheCheckpointTask: Task<Void, Never>?
@@ -407,6 +408,9 @@ final class AppModel {
     private var recoveryDisplayTask: Task<Void, Never>?
     private var recoveryDisplayNoticeEpisode: Int?
     private var optionalReconnectRefreshTask: Task<Void, Never>?
+    private var mountedOptionalRefreshTask: Task<Void, Never>?
+    private var mountedOptionalRefreshLifecycleGeneration: Int?
+    private var mountedOptionalRefreshConnectionID: Int?
 
     init(
         client: GatewayClient = GatewayClient(),
@@ -1421,6 +1425,7 @@ final class AppModel {
         scope: InAppNoticeScope = .app,
         replacing key: InAppNoticeKey? = nil
     ) {
+        guard GatewayErrorPresentationPolicy.disposition(for: error) == .present else { return }
         let diagnostic = (error as? GatewayFailure)?.code == "invalid_response"
         presentError(
             error.localizedDescription,
@@ -1489,6 +1494,10 @@ final class AppModel {
         diagnosticsAreReady = false
         optionalReconnectRefreshTask?.cancel()
         optionalReconnectRefreshTask = nil
+        mountedOptionalRefreshTask?.cancel()
+        mountedOptionalRefreshTask = nil
+        mountedOptionalRefreshLifecycleGeneration = nil
+        mountedOptionalRefreshConnectionID = nil
         reconciliationAggregateAdmission = nil
         isReconcilingForeground = false
         dashboardConnections.retire()
@@ -1640,11 +1649,12 @@ final class AppModel {
         settingsTarget: SettingsTarget = .global,
         providerTarget: ProviderCatalogTarget = .global
     ) async {
-        async let sessionLoad = refreshSessions()
+        _ = await refreshSessions()
+        guard !Task.isCancelled else { return }
         async let providerLoad: Bool = refreshProviders(target: providerTarget)
         async let settingLoad: Bool = refreshSettings(target: settingsTarget)
         async let deviceLoad: Void = refreshDevices()
-        _ = await (sessionLoad, providerLoad, settingLoad, deviceLoad)
+        _ = await (providerLoad, settingLoad, deviceLoad)
     }
 
     @discardableResult
@@ -1751,7 +1761,7 @@ final class AppModel {
         noticeCenter.post(.init(id: uuidSource.next(),
             replacement: InAppNoticeReplacement(key: .sessionCatalogCatchUp, scope: .app), scope: .app,
             role: .warning, priority: .high, title: "Session list unavailable",
-            message: "Showing last-known sessions. Pull to refresh to try again.",
+            message: "Showing last-known sessions while Tron continues trying to reconnect the list.",
             lifetime: .automatic(.seconds(8))))
     }
 
@@ -1846,6 +1856,7 @@ final class AppModel {
                     } else {
                         if result.outcome == .published {
                             self.catalogRefreshFailedAttempts = 0
+                            self.catalogFailureNoticeOwner = nil
                             self.removeNotice(.sessionCatalogCatchUp, scope: .app)
                         } else if result.genuineFailure {
                             // Only a current-owner request failure consumes the
@@ -1857,6 +1868,12 @@ final class AppModel {
                                 self.catalogRefreshFailedAttempts + 1
                             )
                         }
+                        if result.genuineFailure,
+                           self.catalogRefreshFailedAttempts >= DashboardCatalogRetryPolicy.unavailableNoticeAfterFailures,
+                           self.catalogFailureNoticeOwner != key {
+                            self.catalogFailureNoticeOwner = key
+                            self.showCatalogFailure(ownedBy: key, result: result)
+                        }
                         // A catalog that moved during both bounded traversal
                         // attempts is expected convergence churn, not a
                         // request failure. Leave it retained and wait for the
@@ -1864,10 +1881,6 @@ final class AppModel {
                         // creating an unbounded self-refresh loop.
                         guard result.genuineFailure,
                               DashboardCatalogRetryPolicy.shouldRetry(isDirty: remainsDirty, isCurrent: true) else {
-                            if result.genuineFailure,
-                               self.catalogRefreshFailedAttempts == DashboardCatalogRetryPolicy.unavailableNoticeAfterFailures {
-                                self.showCatalogFailure(ownedBy: key, result: result)
-                            }
                             return result
                         }
                         self.catalogRefreshRetryAttempt = min(3, self.catalogRefreshRetryAttempt + 1)
@@ -1942,139 +1955,77 @@ final class AppModel {
         key: SessionCatalogLoadKey,
         requestGeneration: Int
     ) async -> CatalogTraversalResult {
-        struct Params: Encodable { let cursor: String?; let limit: Int; let scope: String }
-        struct Response: Decodable {
-            let sessions: [SessionSummary]
-            let nextCursor: String?
-            let listRevision: Int
-        }
-
-        for revisionAttempt in 0..<2 {
-            let loadAdmission = sessionCatalog.beginLoad(key: key)
-            var requestedContinuation = false
-            var pageCount = 0
-            var expectedRevision: Int?
-            do {
-                let pageLimit = SessionCatalogLoadBounds.pageSize
-                let maximumPages = SessionCatalogLoadBounds.maximumPages
-                let maximumItems = SessionCatalogLoadBounds.maximumRows
-                var all: [SessionSummary] = []
-                var cursor: String?
-                var seenCursors = Set<String>()
-                var seenSessionIDs = Set<String>()
-                var revisionChanged = false
-                pageCount = 0
-                expectedRevision = nil
-                repeat {
-                    guard pageCount < maximumPages else {
-                        return CatalogTraversalResult(
-                            outcome: .retained,
-                            genuineFailure: true,
-                            code: "limit_exceeded",
-                            reason: "page-budget",
-                            pageCount: pageCount
-                        )
-                    }
-                    requestedContinuation = cursor != nil
-                    let response: Response = try await client.request(
-                        "session.list",
-                        Params(cursor: cursor, limit: pageLimit, scope: "user")
-                    )
-                    pageCount += 1
-                    guard admitsCatalogRefresh(key: key, requestGeneration: requestGeneration),
-                          sessionCatalog.admits(loadAdmission, key: key) else {
-                        return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
-                    }
-                    if let expectedRevision, expectedRevision != response.listRevision {
-                        revisionChanged = true
-                        break
-                    }
-                    expectedRevision = response.listRevision
-                    guard response.sessions.count <= pageLimit,
-                          all.count <= maximumItems - response.sessions.count,
-                          response.sessions.allSatisfy({ seenSessionIDs.insert($0.id).inserted }) else {
-                        return CatalogTraversalResult(
-                            outcome: .retained,
-                            genuineFailure: true,
-                            code: "invalid_response",
-                            reason: "session-list-page",
-                            pageCount: pageCount,
-                            revision: response.listRevision
-                        )
-                    }
-                    all.append(contentsOf: response.sessions)
-                    cursor = response.nextCursor
-                    if let cursor, !seenCursors.insert(cursor).inserted {
-                        return CatalogTraversalResult(
-                            outcome: .retained,
-                            genuineFailure: true,
-                            code: "invalid_response",
-                            reason: "repeated-cursor",
-                            pageCount: pageCount,
-                            revision: response.listRevision
-                        )
-                    }
-                } while cursor != nil
-
-                if revisionChanged {
-                    if revisionAttempt == 0 { continue }
-                    // A moving catalog is a benign convergence result. The
-                    // next invalidation owns the subsequent bounded refresh.
-                    return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
-                }
-                guard sessionCatalog.publishAuthoritative(all, admission: loadAdmission) else {
+        let admission = sessionCatalog.beginLoad(key: key)
+        do {
+            let loaded = try await SessionCatalogLoader.load(client: client) {
+                self.admitsCatalogRefresh(key: key, requestGeneration: requestGeneration)
+                    && self.sessionCatalog.admits(admission, key: key)
+            }
+            guard admitsCatalogRefresh(key: key, requestGeneration: requestGeneration),
+                  sessionCatalog.admits(admission, key: key) else {
+                return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
+            }
+            switch loaded {
+            case let .loaded(rows, pageCount, revision):
+                guard sessionCatalog.publishAuthoritative(rows, admission: admission) else {
                     return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
                 }
                 reconcileSelection()
                 installSelectedDashboardCatalog()
                 scheduleCacheCheckpoint()
-                return CatalogTraversalResult(outcome: .published, genuineFailure: false)
-            } catch is CancellationError {
-                return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
-            } catch let failure as GatewayFailure
-                where requestedContinuation && failure.code == "invalid_request" && revisionAttempt == 0 {
-                guard admitsCatalogRefresh(key: key, requestGeneration: requestGeneration),
-                      sessionCatalog.admits(loadAdmission, key: key) else {
-                    return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
-                }
-                continue
-            } catch {
-                guard admitsCatalogRefresh(key: key, requestGeneration: requestGeneration),
-                      sessionCatalog.admits(loadAdmission, key: key) else {
-                    return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
-                }
-                let outcome = Self.catalogFailureOutcome(error)
-                let failureDetails = Self.catalogFailureDetails(error)
-                let requestID = await client.sessionListRequestID()
-                let activeConnectionID = await client.activeConnectionID()
-                if outcome == .transportFailure,
-                   activeConnectionID == key.connectionID {
-                    // An RPC timeout or application-level "disconnected" error
-                    // does not prove that the shared WebSocket epoch died.
-                    // It still failed this projection read: bounded catalog
-                    // retries/warnings remain independent of epoch retirement.
-                    return CatalogTraversalResult(
-                        outcome: .retained,
-                        genuineFailure: true,
-                        code: failureDetails.code,
-                        reason: failureDetails.reason,
-                        requestID: requestID,
-                        pageCount: pageCount,
-                        revision: expectedRevision
-                    )
-                }
                 return CatalogTraversalResult(
-                    outcome: outcome,
+                    outcome: .published,
+                    genuineFailure: false,
+                    pageCount: pageCount,
+                    revision: revision
+                )
+            case let .revisionMoved(pageCount, revision):
+                return CatalogTraversalResult(
+                    outcome: .retained,
+                    genuineFailure: false,
+                    pageCount: pageCount,
+                    revision: revision
+                )
+            case .retired:
+                return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
+            case let .invalid(code, reason, pageCount, revision):
+                return CatalogTraversalResult(
+                    outcome: .retained,
+                    genuineFailure: true,
+                    code: code,
+                    reason: reason,
+                    pageCount: pageCount,
+                    revision: revision
+                )
+            }
+        } catch is CancellationError {
+            return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
+        } catch {
+            guard admitsCatalogRefresh(key: key, requestGeneration: requestGeneration),
+                  sessionCatalog.admits(admission, key: key) else {
+                return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
+            }
+            let outcome = Self.catalogFailureOutcome(error)
+            let failureDetails = Self.catalogFailureDetails(error)
+            let requestID = await client.sessionListRequestID()
+            let activeConnectionID = await client.activeConnectionID()
+            if outcome == .transportFailure, activeConnectionID == key.connectionID {
+                return CatalogTraversalResult(
+                    outcome: .retained,
                     genuineFailure: true,
                     code: failureDetails.code,
                     reason: failureDetails.reason,
-                    requestID: requestID,
-                    pageCount: pageCount,
-                    revision: expectedRevision
+                    requestID: requestID
                 )
             }
+            return CatalogTraversalResult(
+                outcome: outcome,
+                genuineFailure: true,
+                code: failureDetails.code,
+                reason: failureDetails.reason,
+                requestID: requestID
+            )
         }
-        return CatalogTraversalResult(outcome: .retained, genuineFailure: false)
     }
 
     private func admitsCatalogRefresh(
@@ -2123,6 +2074,7 @@ final class AppModel {
 
     private func cancelCatalogRefresh() {
         catalogFailureOwner = nil
+        catalogFailureNoticeOwner = nil
         removeNotice(.sessionCatalogCatchUp, scope: .app)
         catalogRefreshRequestGeneration &+= 1
         catalogRefreshRetryAttempt = 0
@@ -2819,6 +2771,43 @@ final class AppModel {
         let enabled = notificationInboxProfiles()
         notificationInbox.retainProfiles(Set(enabled.map(\.id)))
         for profile in enabled { await scheduleNotificationInboxRefresh(profile: profile).value }
+    }
+
+    func loadMoreNotificationHistory(profileID: String) async {
+        guard let profile = notificationInboxProfiles().first(where: { $0.id == profileID }) else { return }
+        let selectedProfileID = profiles.selected?.id
+        let usesSelectedClient = selectedProfileID == profileID
+        func connectionID() async -> Int? {
+            usesSelectedClient ? await client.activeConnectionID() : await dashboardConnections.connectionID(for: profileID)
+        }
+        await notificationInbox.loadNextPage(profileID: profileID) { [weak self] cursor, revision, expectedConnectionID in
+            guard let self, !Task.isCancelled else { throw CancellationError() }
+            let before = await connectionID()
+            guard before == expectedConnectionID,
+                  self.profiles.profiles.first(where: { $0.id == profileID }) == profile else {
+                throw CancellationError()
+            }
+            let page = usesSelectedClient
+                ? try await NotificationInboxGatewayClient.list(
+                    client: self.client,
+                    cursor: cursor,
+                    expectedRevision: revision,
+                    expectedConnectionID: expectedConnectionID
+                )
+                : try await self.dashboardConnections.notificationInbox(
+                    for: profileID,
+                    cursor: cursor,
+                    revision: revision,
+                    connectionID: expectedConnectionID
+                )
+            let after = await connectionID()
+            guard !Task.isCancelled, after == expectedConnectionID,
+                  self.profiles.selected?.id == selectedProfileID,
+                  self.profiles.profiles.first(where: { $0.id == profileID }) == profile else {
+                throw CancellationError()
+            }
+            return page
+        }
     }
 
     func markNotificationRead(_ item: NotificationInboxItem) async {
@@ -4367,24 +4356,7 @@ final class AppModel {
     }
 
     static func shouldSurface(_ error: Error) -> Bool {
-        if error is CancellationError || error is GatewayDefinitelyNotSentError || error is GatewayPossiblySentError { return false }
-        if let failure = error as? GatewayFailure {
-            return !["disconnected", "closed", "replaced", "timeout", "event_overflow", "definitely_not_sent", "possibly_sent"].contains(failure.code)
-        }
-        if let urlError = error as? URLError {
-            return ![
-                .timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost,
-                .dnsLookupFailed, .notConnectedToInternet, .secureConnectionFailed,
-                .cannotLoadFromNetwork, .backgroundSessionWasDisconnected,
-            ].contains(urlError.code)
-        }
-        let cocoaError = error as NSError
-        if cocoaError.domain == NSPOSIXErrorDomain {
-            // Connection aborted/reset, socket unavailable/timed out, and
-            // host/network down are transport lifecycle, not user actions.
-            return ![53, 54, 57, 60, 61, 64, 65].contains(cocoaError.code)
-        }
-        return true
+        GatewayErrorPresentationPolicy.disposition(for: error) == .present
     }
 
     private func surface(_ error: Error) {
@@ -4705,24 +4677,12 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
     func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {
         guard !Task.isCancelled, admitsLifecycle(admission) else { return }
         adoptConnectedGatewayIdentity()
-        // A complete catalog traversal is optional, just like settings and
-        // providers. Only exact mounted authority and live transport may gate
-        // reconnect readiness; the catalog keeps its own finite retry owner.
+        // Catalog and inbox reads can begin as soon as the transport is ready;
+        // provider, settings, and device reads wait for mounted-chat restoration.
         optionalReconnectRefreshTask?.cancel()
         optionalReconnectRefreshTask = Task { @MainActor [weak self] in
             guard let self, !Task.isCancelled, self.admitsLifecycle(admission) else { return }
-            // Preserve staged optional loading: a slow/failed catalog must not
-            // fan out more reads, but neither stage gates the mounted chat.
-            let catalogOutcome = await self.refreshSessions()
-            guard catalogOutcome != .transportFailure else { return }
-            let activeConnectionID = await self.client.activeConnectionID()
-            guard !Task.isCancelled, self.admitsLifecycle(admission),
-                  activeConnectionID == admission.connectionID else { return }
-            async let authResume: Void = self.providerAuth.resumeAuthIfNeeded()
-            async let providerLoad = self.refreshProviders(target: .global)
-            async let settingLoad = self.refreshSettings(target: .global)
-            async let deviceLoad = self.refreshDevices()
-            _ = await (authResume, providerLoad, settingLoad, deviceLoad)
+            _ = await self.refreshSessions()
         }
         guard admitsLifecycle(admission) else { return }
         reconcileDashboardConnections()
@@ -4746,13 +4706,36 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
             return true
         }
         if let mountedTarget, !sessionPresentation.owns(mountedTarget) { return true }
-        return restored
+        guard restored else { return false }
+        let activeConnectionID = await client.activeConnectionID()
+        guard admitsLifecycle(admission), activeConnectionID == admission.connectionID else { return true }
+        scheduleMountedOptionalReads(admission: admission)
+        return true
     }
 
     func lifecycleReattachTerminals(
         admission: GatewayLifecycleCoordinator.Admission
     ) async {
         await terminal.reattach(admission: admission)
+    }
+
+    private func scheduleMountedOptionalReads(admission: GatewayLifecycleCoordinator.Admission) {
+        guard mountedOptionalRefreshLifecycleGeneration != admission.generation
+                || mountedOptionalRefreshConnectionID != admission.connectionID else { return }
+        mountedOptionalRefreshLifecycleGeneration = admission.generation
+        mountedOptionalRefreshConnectionID = admission.connectionID
+        mountedOptionalRefreshTask?.cancel()
+        mountedOptionalRefreshTask = Task { @MainActor [weak self] in
+            guard let self, !Task.isCancelled, self.admitsLifecycle(admission) else { return }
+            await self.providerAuth.resumeAuthIfNeeded()
+            let activeConnectionID = await self.client.activeConnectionID()
+            guard !Task.isCancelled, self.admitsLifecycle(admission),
+                  activeConnectionID == admission.connectionID else { return }
+            async let providerLoad = self.refreshProviders(target: .global)
+            async let settingLoad = self.refreshSettings(target: .global)
+            async let deviceLoad = self.refreshDevices()
+            _ = await (providerLoad, settingLoad, deviceLoad)
+        }
     }
 
     func lifecycleReconcileForeground(
@@ -4768,9 +4751,6 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         }
         try await client.ensureResponsive()
         try requireLifecycle(admission)
-        let authResume = Task { @MainActor [weak self] in
-            await self?.providerAuth.resumeAuthIfNeeded()
-        }
         let mountedTarget = sessionPresentation.mountedTarget
         let mountedRestored = await sessionPresentation.reconnectMountedPresentation()
         try requireLifecycle(admission)
@@ -4789,7 +4769,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
             return
         }
         await terminal.reattach(admission: admission)
-        _ = await authResume.value
+        scheduleMountedOptionalReads(admission: admission)
         reconcileDashboardConnections()
         try requireLifecycle(admission)
         // A responsive foreground refresh needs only catalog demand. Reuse
@@ -4812,6 +4792,10 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         diagnosticsAreReady = false
         optionalReconnectRefreshTask?.cancel()
         optionalReconnectRefreshTask = nil
+        mountedOptionalRefreshTask?.cancel()
+        mountedOptionalRefreshTask = nil
+        mountedOptionalRefreshLifecycleGeneration = nil
+        mountedOptionalRefreshConnectionID = nil
         finishRecoveryDisplayEpisode()
         let catalog = catalogRefreshTask
         let cacheCheckpoint = cacheCheckpointTask

@@ -123,11 +123,14 @@ struct AppModelReconnectTests {
                     catalog = request
                     break
                 }
-                #expect(request.method == "notification.inbox.list")
+                #expect(["notification.inbox.list", "provider.list", "model.list", "settings.get", "device.list"].contains(request.method))
             }
             #expect(fixture.model.sessionCatalogIsLoading)
             let startedMethods = try await socket.sentFrames().dropFirst().map { try requestFrame($0).method }
-            #expect(Set(startedMethods).isSubset(of: ["session.list", "notification.inbox.list"]))
+            #expect(Set(startedMethods).isSubset(of: [
+                "session.list", "notification.inbox.list", "provider.list", "model.list", "settings.get", "device.list",
+            ]))
+            #expect(startedMethods.filter { $0 == "notification.inbox.list" }.count == 1)
             let sessions = try JSONValue.encode([startupSummary("loaded")])
             let reply = Task {
                 await socket.enqueue(successResponse(id: catalog.id, result: .object([
@@ -212,8 +215,10 @@ struct AppModelReconnectTests {
                         id: request.id, result: .object(["synchronized": .bool(true)])
                     ))
                     synchronized = true
-                case "provider.list", "model.list", "settings.get", "device.list", "notification.inbox.list":
-                    break // These optional reads must not gate mounted readiness either.
+                case "provider.list", "model.list", "settings.get", "device.list":
+                    #expect(synchronized, "Optional catalog/settings/device reads must wait for mounted synchronization.")
+                case "notification.inbox.list":
+                    break // The inbox is an independent optional owner.
                 default:
                     Issue.record("Unexpected request before mounted synchronization: \(request.method)")
                     throw CancellationError()

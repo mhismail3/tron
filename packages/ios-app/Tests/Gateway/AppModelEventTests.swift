@@ -875,6 +875,15 @@ struct AppModelEventTests {
             retryable: true,
             details: nil
         )))
+        let timeout = GatewayFailure(
+            code: "timeout",
+            message: "Gateway ping timed out during a read.",
+            retryable: true,
+            details: nil
+        )
+        #expect(!AppModel.shouldSurface(timeout))
+        #expect(!AppModel.shouldSurface(GatewayDefinitelyNotSentError(failure: timeout)))
+        #expect(!AppModel.shouldSurface(GatewayPossiblySentError(failure: timeout)))
         #expect(!AppModel.shouldSurface(URLError(.networkConnectionLost)))
         #expect(!AppModel.shouldSurface(NSError(domain: NSPOSIXErrorDomain, code: 53)))
         #expect(!AppModel.shouldSurface(GatewayFailure(
@@ -886,6 +895,12 @@ struct AppModelEventTests {
         #expect(AppModel.shouldSurface(GatewayFailure(
             code: "invalid_request",
             message: "Choose a valid setting.",
+            retryable: false,
+            details: nil
+        )))
+        #expect(AppModel.shouldSurface(GatewayFailure(
+            code: "outcome_unknown",
+            message: "Verify the accepted command before retrying.",
             retryable: false,
             details: nil
         )))

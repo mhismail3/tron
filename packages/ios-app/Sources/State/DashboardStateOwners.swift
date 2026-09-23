@@ -438,6 +438,80 @@ enum SessionCatalogLoadBounds {
     static let maximumRows = 25_000
 }
 
+enum SessionCatalogLoadResult: Sendable {
+    case loaded(rows: [SessionSummary], pageCount: Int, revision: Int)
+    case revisionMoved(pageCount: Int, revision: Int?)
+    case retired
+    case invalid(code: String, reason: String, pageCount: Int, revision: Int?)
+}
+
+enum SessionCatalogLoader {
+    private struct Params: Encodable { let cursor: String?; let limit: Int; let scope: String }
+    private struct Response: Decodable {
+        let sessions: [SessionSummary]
+        let nextCursor: String?
+        let listRevision: Int
+    }
+
+    static func load(
+        client: GatewayClient,
+        scope: String = "user",
+        admitsPublication: @MainActor () -> Bool
+    ) async throws -> SessionCatalogLoadResult {
+        for revisionAttempt in 0..<2 {
+            var all: [SessionSummary] = []
+            var cursor: String?
+            var seenCursors = Set<String>()
+            var seenSessionIDs = Set<String>()
+            var expectedRevision: Int?
+            var pageCount = 0
+            var revisionChanged = false
+            repeat {
+                guard pageCount < SessionCatalogLoadBounds.maximumPages else {
+                    return .invalid(code: "limit_exceeded", reason: "page-budget", pageCount: pageCount, revision: expectedRevision)
+                }
+                let requestedCursor = cursor
+                let response: Response
+                do {
+                    response = try await client.request(
+                        "session.list",
+                        Params(cursor: cursor, limit: SessionCatalogLoadBounds.pageSize, scope: scope)
+                    )
+                } catch let failure as GatewayFailure
+                    where requestedCursor != nil && failure.code == "invalid_request" && revisionAttempt == 0 {
+                    guard await admitsPublication() else { return .retired }
+                    revisionChanged = true
+                    break
+                }
+                guard await admitsPublication() else { return .retired }
+                pageCount += 1
+                if let expectedRevision, expectedRevision != response.listRevision {
+                    revisionChanged = true
+                    break
+                }
+                expectedRevision = response.listRevision
+                guard response.sessions.count <= SessionCatalogLoadBounds.pageSize,
+                      all.count <= SessionCatalogLoadBounds.maximumRows - response.sessions.count,
+                      response.sessions.allSatisfy({ seenSessionIDs.insert($0.id).inserted }) else {
+                    return .invalid(code: "invalid_response", reason: "session-list-page", pageCount: pageCount, revision: response.listRevision)
+                }
+                all.append(contentsOf: response.sessions)
+                cursor = response.nextCursor
+                if let cursor, !seenCursors.insert(cursor).inserted {
+                    return .invalid(code: "invalid_response", reason: "repeated-cursor", pageCount: pageCount, revision: response.listRevision)
+                }
+            } while cursor != nil
+
+            if revisionChanged {
+                if revisionAttempt == 0 { continue }
+                return .revisionMoved(pageCount: pageCount, revision: expectedRevision)
+            }
+            return .loaded(rows: all, pageCount: pageCount, revision: expectedRevision ?? 0)
+        }
+        return .revisionMoved(pageCount: 0, revision: nil)
+    }
+}
+
 struct SessionCatalogCoordinator: Equatable {
     struct LoadAdmission: Equatable, Sendable {
         fileprivate let generation: Int
