@@ -185,6 +185,9 @@ user reinstalls manually, so batch them for one reinstall.
 | L-4 | Ready | Mac app file logging | L-2 | |
 | L-5 | Ready | `scripts/tron diagnose` collector | L-1c, L-2 | |
 | L-6 | Ready | Event catalog and the incident rule | L-2 | |
+| L-7 | Ready | Stall cause in event-loop-delay records | L-2 | |
+| L-8 | Needs scoping | Gateway idle heap growth | none | |
+| L-9 | Needs scoping | Phone handling of a stalled but live Gateway (proposal for the user) | L-7 | |
 
 ## Task details
 
@@ -331,6 +334,37 @@ user reinstalls manually, so batch them for one reinstall.
 - Add one rule to `AGENTS.md` under Validation: when closing an incident, name
   the signal that would have diagnosed it in one step. If it was missing, add
   it at the right level, with its test and catalog row, in the same change.
+
+### L-7 — Stall cause in event-loop-delay records
+
+- On 2026-09-23 the live Gateway stalled 6–36 s at a time with zero
+  connections. Heap used swung between about 130 and 525 MB while RSS was
+  80–250 MB, and host swap was 22.35 of 23.55 GB used. The current record
+  cannot say whether a stall came from garbage collection, host paging or the
+  Gateway's own synchronous work.
+- Add to `gateway.event-loop-delay`: garbage-collection pause time and count
+  since the previous record (from `perf_hooks` `gc` performance entries),
+  event-loop utilization, and host memory pressure and swap used, sampled
+  cheaply at record time only.
+- **Test:** the record carries these fields when a delay is detected; no
+  real-time waits.
+
+### L-8 — Gateway idle heap growth
+
+- Scoping first: find what allocates several hundred MB of heap with no
+  connections (candidates: catalog warmup, session search indexing, knowledge
+  status). Use a heap snapshot or allocation sampling in an isolated home on a
+  copy of real data, never against the live Gateway. Output a fix task with its
+  acceptance measurement.
+
+### L-9 — Phone handling of a stalled but live Gateway
+
+- Today the iPhone app treats a pong missing for about 8 s as a dead
+  connection, so any Gateway stall longer than about 10 s becomes a reconnect.
+  A stalled but live Gateway is indistinguishable from a dead network.
+- Scoping produces a proposal with the trade-off (faster dead-network
+  detection versus fewer spurious reconnects) for the user to decide. This
+  changes user-visible behavior, so no change ships without approval.
 
 ## Handoff log
 
