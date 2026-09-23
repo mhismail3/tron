@@ -1158,8 +1158,11 @@ The hosted real-Gateway boundary test owns one narrow integration contract: the
 iOS pairing and transport clients connect to the selected Pi runtime, accepted
 work survives transport retirement, a new connection decodes canonical
 completion, extension interactions round-trip, and a parallel tool group settles
-once. It deliberately excludes SwiftUI, visual, settings, picker, navigation,
-and general accessibility coverage.
+once. Its foreground-reconnect case restarts the private Gateway while the
+session is active, then verifies lifecycle auto-reconnect, one canonical copy of
+the accepted prompt, the session snapshot, and exactly one settled catalog row.
+It deliberately excludes SwiftUI, visual, settings, picker, navigation, and
+general accessibility coverage.
 
 Preparation and the first build happen once; `run` renews the one-use Gateway
 fixture, then executes the focused hosted test without reinstalling dependencies
@@ -1174,11 +1177,13 @@ scripts/ios-gateway-e2e-test run
 scripts/ios-gateway-e2e-test iterate
 ```
 
-The Gateway uses a fixture-owned home, state directory, agent directory, and
-workspace. Use `logs`, `status`, `stop`, and `clean` to inspect or manage those
-resources. On CI, focused result/log evidence is uploaded before owned state is
-removed. This simulator boundary is an explicit Pi-graph/release checkpoint, not
-an ordinary edit-loop or general UI regression suite.
+The Gateway uses a fixture-owned home, state directory, agent directory,
+delegated-artifact root, and workspace; `PI_SUBAGENTS_TEMP_ROOT` is explicitly
+bound to that fixture on initial startup and restart so a caller's store cannot
+become a migration input. Use `logs`, `status`, `stop`, and `clean` to inspect
+or manage those resources. On CI, focused result/log evidence is uploaded before
+owned state is removed. This simulator boundary is an explicit Pi-graph/release
+checkpoint, not an ordinary edit-loop or general UI regression suite.
 
 Typography and control styling are presentation concerns; review them through
 manual UI validation rather than source-occurrence tests. Runtime lifecycle,

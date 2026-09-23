@@ -274,6 +274,7 @@ PY
 
   local spawned_pid
   HOME="$gateway_home" TRON_DATA_DIR="$tron_home" PI_CODING_AGENT_DIR="$agent_dir" \
+    PI_SUBAGENTS_TEMP_ROOT="$gateway_home/internal/subagents" \
     TRON_MACHINE_GROUP_ID=tron-ios-e2e \
     TRON_GATEWAY_HOST=127.0.0.1 TRON_GATEWAY_PORT="$port" \
     nohup node "$gateway_dir/dist/index.js" >"$log_file" 2>&1 </dev/null &

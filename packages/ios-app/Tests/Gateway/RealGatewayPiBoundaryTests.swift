@@ -40,6 +40,8 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
     }
 
     private struct SessionParams: Encodable { let sessionId: String }
+    private struct SessionListParams: Encodable { let cursor: String?; let limit: Int; let scope: String }
+    private struct SessionListResponse: Decodable { let sessions: [SessionSummary] }
     private struct SyncParams: Encodable { let sessionId: String; let syncToken: String }
     private struct CloseParams: Encodable { let sessionId: String; let subscriptionToken: String }
 
@@ -389,12 +391,17 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             guard restoredSync.synchronized else {
                 throw BoundaryFailure.invalidFixture("Foreground reconnect did not synchronize the preserved session")
             }
-            let snapshot: SessionSnapshot = try await client.request(
-                "session.snapshot", SessionParams(sessionId: sessionID)
+            // `session.open` is the authoritative transcript snapshot RPC; the
+            // `session.snapshot` name is an event topic, not a request method.
+            XCTAssertEqual(restored.session.sessionId, sessionID)
+            XCTAssertTrue(Self.text(in: restored.session).contains("Tool response complete after all three tools."))
+            XCTAssertEqual(Self.userMessageCount(in: restored.session), promptCountBeforeRestart)
+            let catalog: SessionListResponse = try await client.request(
+                "session.list", SessionListParams(cursor: nil, limit: 500, scope: "user")
             )
-            XCTAssertEqual(snapshot.sessionId, sessionID)
-            XCTAssertTrue(Self.text(in: snapshot).contains("Tool response complete after all three tools."))
-            XCTAssertEqual(Self.userMessageCount(in: snapshot), promptCountBeforeRestart)
+            let catalogSession = catalog.sessions.filter { $0.id == sessionID }
+            XCTAssertEqual(catalogSession.count, 1)
+            XCTAssertEqual(catalogSession.first?.phase, .idle)
             let restoredClose: CloseResponse = try await client.request(
                 "session.close", CloseParams(sessionId: sessionID, subscriptionToken: restored.subscriptionToken)
             )

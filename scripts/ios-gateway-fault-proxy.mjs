@@ -305,6 +305,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
         HOME: process.env.TRON_E2E_GATEWAY_HOME,
         TRON_DATA_DIR: process.env.TRON_E2E_TRON_HOME,
         PI_CODING_AGENT_DIR: process.env.TRON_E2E_AGENT_DIR,
+        PI_SUBAGENTS_TEMP_ROOT: `${process.env.TRON_E2E_GATEWAY_HOME}/internal/subagents`,
         TRON_MACHINE_GROUP_ID: "tron-ios-e2e",
         TRON_GATEWAY_HOST: "127.0.0.1",
         TRON_GATEWAY_PORT: String(targetPort),
