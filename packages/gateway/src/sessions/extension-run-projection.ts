@@ -378,6 +378,7 @@ export type ExtensionArtifactRejectionReason =
   | "missing-terminal-time"
   | "ownership-mismatch"
   | "malformed-artifact"
+  | "oversized-artifact"
   | "artifact-replacement-in-progress";
 
 export type ExtensionArtifactAdmission =

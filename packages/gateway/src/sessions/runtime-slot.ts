@@ -249,6 +249,13 @@ const MAX_COMPLETION_DISPOSITIONS = 16;
 const MAX_VALIDATED_CHILD_SESSION_PATHS = 2_048;
 const RECOVERY_SESSION_OWNER = Symbol("recovery-session-owner");
 const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
+
+class OversizedExtensionArtifactError extends Error {
+  constructor() {
+    super("Extension status artifact exceeds the legacy document limit");
+    this.name = "OversizedExtensionArtifactError";
+  }
+}
 const EXTENSION_ARTIFACT_MISSING_GRACE_MS = 30_000;
 const MAX_EXTENSION_EVENT_TAIL_BYTES = 64 * 1_024;
 const MAX_EXTENSION_EVENT_LINES = 256;
@@ -3823,7 +3830,7 @@ export class RuntimeSlot {
       const lifecycleHeader = parseExtensionLifecycleProjectionHeader(headerBytes);
       if (lifecycleHeader !== undefined) {
         const projection = inspectExtensionLifecycleProjection(lifecycleHeader);
-        if (!projection) return undefined;
+        if (!projection) throw new SyntaxError("Invalid extension lifecycle projection header");
         const projected = lifecycleProjectionArtifact(projection);
         const withRecovery = await this.attachRecoverySessionOwner(asyncDir, projected, opened.directory);
         const withProof = await this.attachProcessTerminalProof(asyncDir, withRecovery, opened.directory);
@@ -3831,12 +3838,20 @@ export class RuntimeSlot {
       }
       // A first lifecycleProjection key marks a modern artifact even when its
       // value is truncated or malformed; do not fall back to report parsing.
-      if (hasExtensionLifecycleProjectionProperty(headerBytes)) return undefined;
+      if (hasExtensionLifecycleProjectionProperty(headerBytes)) {
+        throw new SyntaxError("Incomplete extension lifecycle projection header");
+      }
       const buffer = Buffer.alloc(MAX_EXTENSION_ARTIFACT_BYTES + 1);
       const { bytesRead } = await opened.handle.read(buffer, 0, buffer.length, 0);
       const bytes = buffer.subarray(0, bytesRead);
       if (bytesRead > MAX_EXTENSION_ARTIFACT_BYTES) {
-        return this.readOversizedTerminalExtensionArtifact(asyncDir, bytes.subarray(0, MAX_EXTENSION_ARTIFACT_BYTES), opened.directory);
+        const terminal = await this.readOversizedTerminalExtensionArtifact(
+          asyncDir,
+          bytes.subarray(0, MAX_EXTENSION_ARTIFACT_BYTES),
+          opened.directory,
+        );
+        if (!terminal) throw new OversizedExtensionArtifactError();
+        return terminal;
       }
       const parsed: unknown = JSON.parse(bytes.toString("utf8"));
       if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
@@ -4319,7 +4334,9 @@ export class RuntimeSlot {
     } catch (error) {
       if (claimedReceipt) this.releaseExtensionReceiptOwnership(claimedReceipt.activityId, claimedReceipt.owner);
       if (diagnosticOwner) this.warnExtensionArtifact(
-        error instanceof SyntaxError ? "malformed-artifact" : "artifact-replacement-in-progress",
+        error instanceof OversizedExtensionArtifactError
+          ? "oversized-artifact"
+          : error instanceof SyntaxError ? "malformed-artifact" : "artifact-replacement-in-progress",
         diagnosticOwner,
       );
     }
@@ -4659,7 +4676,9 @@ export class RuntimeSlot {
       if (claimedReceiptActivityId) this.releaseExtensionReceiptOwnership(claimedReceiptActivityId, claimedReceiptOwner);
       // The next filesystem event or normal snapshot retries; warning is bounded.
       this.warnExtensionArtifact(
-        error instanceof SyntaxError ? "malformed-artifact" : "artifact-replacement-in-progress",
+        error instanceof OversizedExtensionArtifactError
+          ? "oversized-artifact"
+          : error instanceof SyntaxError ? "malformed-artifact" : "artifact-replacement-in-progress",
         `${previous.runId ?? "run"}\0${toolCallId}`,
       );
     }

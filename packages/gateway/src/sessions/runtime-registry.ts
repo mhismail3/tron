@@ -50,7 +50,14 @@ import {
 } from "./runtime-slot.js";
 import { ExtensionActivityRecency } from "./extension-activity-recency.js";
 import { ProcessActivityRecency } from "./process-activity-recency.js";
-import { admitExtensionLifecycleArtifact } from "./extension-run-projection.js";
+import {
+  MAX_EXTENSION_LIFECYCLE_HEADER_BYTES,
+  admitExtensionLifecycleArtifact,
+  hasExtensionLifecycleProjectionProperty,
+  inspectExtensionLifecycleProjection,
+  lifecycleProjectionArtifact,
+  parseExtensionLifecycleProjectionHeader,
+} from "./extension-run-projection.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import { TronWorkspace } from "../workspace/tron-workspace.js";
@@ -3225,11 +3232,26 @@ export class RuntimeRegistry {
               let parsed: unknown;
               try {
                 const metadata = await handle.stat();
-                if (!metadata.isFile() || metadata.size > MAX_EXTENSION_ARTIFACT_BYTES) continue;
-                const buffer = Buffer.alloc(MAX_EXTENSION_ARTIFACT_BYTES + 1);
-                const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-                if (bytesRead > MAX_EXTENSION_ARTIFACT_BYTES) continue;
-                parsed = JSON.parse(buffer.subarray(0, bytesRead).toString("utf8"));
+                if (!metadata.isFile()) continue;
+                const headerBuffer = Buffer.alloc(MAX_EXTENSION_LIFECYCLE_HEADER_BYTES);
+                const { bytesRead: headerBytesRead } = await handle.read(headerBuffer, 0, headerBuffer.length, 0);
+                const headerBytes = headerBuffer.subarray(0, headerBytesRead);
+                if (hasExtensionLifecycleProjectionProperty(headerBytes)) {
+                  const projection = inspectExtensionLifecycleProjection(
+                    parseExtensionLifecycleProjectionHeader(headerBytes),
+                  );
+                  if (!projection) continue;
+                  parsed = lifecycleProjectionArtifact(projection);
+                } else {
+                  // Legacy artifacts still require the old whole-document cap.
+                  // The bounded modern first property is the only permitted
+                  // route through a report-bearing file larger than that cap.
+                  if (metadata.size > MAX_EXTENSION_ARTIFACT_BYTES) continue;
+                  const buffer = Buffer.alloc(MAX_EXTENSION_ARTIFACT_BYTES + 1);
+                  const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+                  if (bytesRead > MAX_EXTENSION_ARTIFACT_BYTES) continue;
+                  parsed = JSON.parse(buffer.subarray(0, bytesRead).toString("utf8"));
+                }
               } finally {
                 await handle.close();
               }

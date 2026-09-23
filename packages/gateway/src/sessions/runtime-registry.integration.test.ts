@@ -5237,6 +5237,120 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(terminal).toMatchObject({ status: "completed", lifecycle: { state: "completed" }, completedAt: new Date(1_700_000_010_000).toISOString() });
   });
 
+  it("discovers oversized active lifecycle headers on the registered path and after runtime reconstruction", async () => {
+    const fixture = await coldFixture("oversized-active-lifecycle-discovery");
+    const runId = "oversized-active-workflow";
+    const toolCallId = "oversized-active-tool";
+    const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", runId);
+    await mkdir(asyncDir, { recursive: true });
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const now = Date.now();
+    const root = {
+      id: runId, kind: "workflow", label: "large workflow", state: "running",
+      startedAt: now - 10_000, updatedAt: now,
+      children: [
+        { id: "step-a", kind: "step", label: "A", state: "complete", startedAt: now - 9_000, updatedAt: now - 5_000, endedAt: now - 5_000 },
+        { id: "step-b", kind: "step", label: "B", state: "complete", startedAt: now - 8_000, updatedAt: now - 4_000, endedAt: now - 4_000 },
+        { id: "step-c", kind: "step", label: "C", state: "running", startedAt: now - 3_000, updatedAt: now },
+      ],
+    };
+    const projection = () => ({
+      version: 1, runId, toolCallId, sessionId: slot.id, generatedAt: root.updatedAt,
+      caps: { maxRuns: 1, maxChildrenPerNode: 8, maxDepth: 3, maxStringLength: 160, maxSerializedBytes: 30_720 },
+      omitted: { runs: 0, children: 0, byteLimitExceeded: false }, root: structuredClone(root),
+    });
+    const statusPath = join(asyncDir, "status.json");
+    const writeModern = async () => writeFile(statusPath, JSON.stringify({
+      lifecycleProjection: projection(), lifecycleArtifactVersion: 3, runId, state: root.state,
+      startedAt: root.startedAt, lastUpdate: root.updatedAt,
+      steps: [{ report: "x".repeat(300 * 1_024) }],
+    }));
+    const runtimeManager = (slot as unknown as { runtime: { session: { sessionManager: SessionManager } } }).runtime.session.sessionManager;
+    runtimeManager.appendMessage({
+      role: "toolResult", toolCallId, toolName: "subagent", content: [{ type: "text", text: "launched" }],
+      details: { runId, asyncId: runId, asyncDir, mode: "workflow", state: "running" },
+      isError: false, timestamp: now,
+    });
+    vi.spyOn(slot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
+      .mockReturnValue({ source: "pi-subagents" });
+    await writeModern();
+    await (fixture.registry as unknown as { discoverExtensionArtifacts: () => Promise<void> }).discoverExtensionArtifacts();
+    expect((slot.snapshot().extensionActivities ?? []).find((activity) => activity.toolCallId === toolCallId)).toMatchObject({
+      status: "running", children: expect.arrayContaining([
+        expect.objectContaining({ id: "step-a", status: "completed" }),
+        expect.objectContaining({ id: "step-b", status: "completed" }),
+        expect.objectContaining({ id: "step-c", status: "running" }),
+      ]),
+    });
+    expect((await readFile(statusPath)).byteLength).toBeGreaterThan(256 * 1_024);
+
+    const foreignProjection = projection();
+    foreignProjection.sessionId = "another-session";
+    await writeFile(statusPath, JSON.stringify({ lifecycleProjection: foreignProjection, steps: [{ report: "x".repeat(300 * 1_024) }] }));
+    await slot.discoverExtensionArtifact(asyncDir);
+    expect((slot.snapshot().extensionActivities ?? []).find((activity) => activity.toolCallId === toolCallId)?.status).toBe("running");
+    await writeFile(statusPath, `{"lifecycleProjection":${"x".repeat(300 * 1_024)}`);
+    await slot.discoverExtensionArtifact(asyncDir);
+    expect((slot.snapshot().extensionActivities ?? []).find((activity) => activity.toolCallId === toolCallId)?.status).toBe("running");
+    await writeModern();
+
+    // Known-bad control: the old headerless oversized artifact cannot refresh;
+    // after the existing missing grace it hides the live activity as unknown.
+    await writeFile(statusPath, JSON.stringify({
+      runId, state: "running", startedAt: root.startedAt, lastUpdate: root.updatedAt,
+      steps: [{ report: "x".repeat(300 * 1_024) }],
+    }));
+    const artifactWarnings: Array<{ reason: string; owner: string }> = [];
+    const slotState = slot as unknown as {
+      extensionArtifactMissingSince: Map<string, number>;
+      dependencies: { extensionArtifactWarning?: (warning: { reason: string; owner: string }) => void };
+    };
+    slotState.dependencies.extensionArtifactWarning = (warning) => artifactWarnings.push(warning);
+    slotState.extensionArtifactMissingSince.set(toolCallId, Date.now() - 31_000);
+    await slot.discoverExtensionArtifact(asyncDir);
+    expect(artifactWarnings).toMatchObject([{ reason: "oversized-artifact" }]);
+    expect(artifactWarnings).not.toMatchObject([{ reason: "artifact-replacement-in-progress" }]);
+    expect((slot.snapshot().extensionActivities ?? []).find((activity) => activity.toolCallId === toolCallId)?.status).toBe("unknown");
+
+    // Reconstruct the Gateway runtime and verify bounded-header ambient discovery
+    // re-admits the same canonical owner without parsing its large report body.
+    await fixture.registry.dispose();
+    await writeModern();
+    const recoveredRegistry = new RuntimeRegistry({
+      agentDir: fixture.agentDir, tronHome: join(fixture.root, "tron"), idleRuntimeMs: 60_000,
+      trust: new TrustService(fixture.agentDir), broadcast: () => {},
+      sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(recoveredRegistry);
+    await recoveredRegistry.initialize();
+    const recoveredSlot = await recoveredRegistry.acquire(slot.id);
+    vi.spyOn(recoveredSlot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
+      .mockReturnValue({ source: "pi-subagents" });
+    await (recoveredRegistry as unknown as { discoverExtensionArtifacts: () => Promise<void> }).discoverExtensionArtifacts();
+    expect((recoveredSlot.snapshot().extensionActivities ?? []).find((activity) => activity.toolCallId === toolCallId)).toMatchObject({
+      status: "running", children: expect.arrayContaining([
+        expect.objectContaining({ id: "step-a", status: "completed" }),
+        expect.objectContaining({ id: "step-b", status: "completed" }),
+        expect.objectContaining({ id: "step-c", status: "running" }),
+      ]),
+    });
+
+    root.state = "complete";
+    root.updatedAt = Date.now();
+    Object.assign(root, { endedAt: root.updatedAt });
+    await writeFile(statusPath, JSON.stringify({
+      lifecycleProjection: projection(), lifecycleArtifactVersion: 3, runId, state: "complete",
+      startedAt: root.startedAt, endedAt: root.updatedAt, lastUpdate: root.updatedAt,
+      steps: [{ report: "x".repeat(300 * 1_024) }],
+    }));
+    await recoveredSlot.discoverExtensionArtifact(asyncDir);
+    await recoveredRegistry.waitUntilIdle();
+    expect((recoveredSlot.snapshot().extensionActivities ?? []).find((activity) => activity.toolCallId === toolCallId)?.status).toBe("completed");
+    const canonical = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(canonical.filter((entry) => entry.type === "custom" && entry.customType === EXTENSION_ACTIVITY_RECEIPT_TYPE)).toHaveLength(1);
+  });
+
   it("reconciles an exact-owned oversized terminal artifact from bounded event evidence", async () => {
     const fixture = await coldFixture("oversized-terminal-drain");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
