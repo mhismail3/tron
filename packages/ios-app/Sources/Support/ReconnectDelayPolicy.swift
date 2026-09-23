@@ -50,6 +50,7 @@ struct ReconnectDelayPolicy: Sendable {
     func delay(forFailureAttempt attempt: Int) -> Duration {
         var nominal = initialSeconds
         for _ in 1..<max(1, attempt) {
+            guard nominal < maximumSeconds else { break }
             nominal = nextNominalSeconds(after: nominal)
         }
         return delay(nominalSeconds: nominal)

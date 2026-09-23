@@ -162,6 +162,15 @@ struct DashboardStateOwnerTests {
         #expect(DashboardCatalogRetryPolicy.shouldRetry(isRetryableFailure: true, isCurrent: true))
         #expect(!DashboardCatalogRetryPolicy.shouldRetry(isRetryableFailure: false, isCurrent: true))
         #expect(!DashboardCatalogRetryPolicy.shouldRetry(isRetryableFailure: true, isCurrent: false))
+        #expect(DashboardCatalogRetryPolicy.isRetryableFailure(GatewayFailure(
+            code: "timeout", message: "Read timed out.", retryable: true, details: nil
+        )))
+        #expect(!DashboardCatalogRetryPolicy.isRetryableFailure(GatewayFailure(
+            code: "timeout", message: "Read is not retryable.", retryable: false, details: nil
+        )))
+        #expect(!DashboardCatalogRetryPolicy.isRetryableFailure(GatewayFailure(
+            code: "unauthenticated", message: "Pair again.", retryable: true, details: nil
+        )))
     }
 
     @MainActor

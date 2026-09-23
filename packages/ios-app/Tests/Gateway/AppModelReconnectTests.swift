@@ -128,7 +128,7 @@ struct AppModelReconnectTests {
                     #expect(["provider.list", "model.list", "settings.get", "device.list"].contains(request.method))
                 }
             }
-            let catalog = try #require(catalog)
+            let catalogRequest = try #require(catalog)
             #expect(inbox != nil)
             #expect(fixture.model.sessionCatalogIsLoading)
             let startedMethods = try await socket.sentFrames().dropFirst().map { try requestFrame($0).method }
@@ -138,7 +138,7 @@ struct AppModelReconnectTests {
             #expect(startedMethods.filter { $0 == "notification.inbox.list" }.count == 1)
             let sessions = try JSONValue.encode([startupSummary("loaded")])
             let reply = Task {
-                await socket.enqueue(successResponse(id: catalog.id, result: .object([
+                await socket.enqueue(successResponse(id: catalogRequest.id, result: .object([
                     "sessions": sessions, "nextCursor": .null, "listRevision": .number(1)
                 ])))
             }

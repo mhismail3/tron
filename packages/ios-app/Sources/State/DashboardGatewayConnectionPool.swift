@@ -6,6 +6,14 @@ enum DashboardCatalogRetryPolicy {
     nonisolated static func shouldRetry(isRetryableFailure: Bool, isCurrent: Bool) -> Bool {
         isRetryableFailure && isCurrent
     }
+
+    nonisolated static func isRetryableFailure(_ error: Error) -> Bool {
+        let failure = (error as? GatewayFailure)
+            ?? (error as? GatewayDefinitelyNotSentError)?.failure
+            ?? (error as? GatewayPossiblySentError)?.failure
+        guard let failure else { return true }
+        return failure.retryable && !GatewayRecoveryFailurePolicy.isNonRetryable(failure)
+    }
 }
 
 @MainActor
@@ -653,7 +661,7 @@ final class DashboardGatewayConnectionPool {
                     self.publish(profileID: profileID)
                     return
                 }
-                current.refreshRetryAttempt = min(3, current.refreshRetryAttempt + 1)
+                current.refreshRetryAttempt += 1
                 self.entries[profileID] = current
                 self.startRefreshLease(
                     profileID: profileID, generation: generation,
@@ -762,6 +770,7 @@ final class DashboardGatewayConnectionPool {
         } catch is CancellationError {
             return .retained
         } catch {
+            guard DashboardCatalogRetryPolicy.isRetryableFailure(error) else { return .retained }
             return await catalogFailureOutcome(
                 seed: seed,
                 profileID: profileID,

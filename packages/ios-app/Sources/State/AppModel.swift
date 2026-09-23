@@ -335,6 +335,7 @@ final class AppModel {
     private struct CatalogRefreshLeaseResult: Sendable {
         let outcome: SessionCatalogRefreshOutcome
         let genuineFailure: Bool
+        let retryableFailure: Bool
         let durationMilliseconds: Int
         let code: String?
         let reason: String?
@@ -345,6 +346,7 @@ final class AppModel {
         init(
             outcome: SessionCatalogRefreshOutcome,
             genuineFailure: Bool,
+            retryableFailure: Bool = false,
             durationMilliseconds: Int,
             code: String? = nil,
             reason: String? = nil,
@@ -354,6 +356,7 @@ final class AppModel {
         ) {
             self.outcome = outcome
             self.genuineFailure = genuineFailure
+            self.retryableFailure = retryableFailure
             self.durationMilliseconds = durationMilliseconds
             self.code = code
             self.reason = reason
@@ -366,6 +369,7 @@ final class AppModel {
     private struct CatalogTraversalResult: Sendable {
         let outcome: SessionCatalogRefreshOutcome
         let genuineFailure: Bool
+        let retryableFailure: Bool
         let code: String?
         let reason: String?
         let requestID: String?
@@ -375,6 +379,7 @@ final class AppModel {
         init(
             outcome: SessionCatalogRefreshOutcome,
             genuineFailure: Bool,
+            retryableFailure: Bool = false,
             code: String? = nil,
             reason: String? = nil,
             requestID: String? = nil,
@@ -383,6 +388,7 @@ final class AppModel {
         ) {
             self.outcome = outcome
             self.genuineFailure = genuineFailure
+            self.retryableFailure = retryableFailure
             self.code = code
             self.reason = reason
             self.requestID = requestID
@@ -1821,6 +1827,7 @@ final class AppModel {
             let result = CatalogRefreshLeaseResult(
                 outcome: rawResult.outcome,
                 genuineFailure: rawResult.genuineFailure,
+                retryableFailure: rawResult.retryableFailure,
                 durationMilliseconds: diagnosticMilliseconds(startedAt.duration(to: self.clock.now())),
                 code: rawResult.code,
                 reason: rawResult.reason,
@@ -1887,12 +1894,12 @@ final class AppModel {
                         // creating an unbounded self-refresh loop.
                         guard result.genuineFailure,
                               DashboardCatalogRetryPolicy.shouldRetry(
-                                  isRetryableFailure: result.genuineFailure,
+                                  isRetryableFailure: result.retryableFailure,
                                   isCurrent: true
                               ) else {
                             return result
                         }
-                        self.catalogRefreshRetryAttempt = min(3, self.catalogRefreshRetryAttempt + 1)
+                        self.catalogRefreshRetryAttempt += 1
                         _ = self.startCatalogRefresh(
                             key: key,
                             delay: self.reconnectDelayPolicy.delay(forFailureAttempt: self.catalogRefreshRetryAttempt),
@@ -1914,6 +1921,7 @@ final class AppModel {
     ) async -> CatalogRefreshLeaseResult {
         var result = CatalogRefreshLeaseResult(outcome: .retained, genuineFailure: false, durationMilliseconds: 0)
         var observedGenuineFailure = false
+        var observedRetryableFailure = false
         var observedCode: String?
         var observedReason: String?
         var observedRequestID: String?
@@ -1923,6 +1931,7 @@ final class AppModel {
             let observedInvalidation = catalogInvalidationGeneration
             let traversalResult = await performCatalogTraversal(key: key, requestGeneration: requestGeneration)
             observedGenuineFailure = observedGenuineFailure || traversalResult.genuineFailure
+            observedRetryableFailure = traversalResult.retryableFailure
             if let code = traversalResult.code { observedCode = code }
             if let reason = traversalResult.reason { observedReason = reason }
             if let requestID = traversalResult.requestID { observedRequestID = requestID }
@@ -1931,6 +1940,7 @@ final class AppModel {
             result = CatalogRefreshLeaseResult(
                 outcome: traversalResult.outcome,
                 genuineFailure: observedGenuineFailure,
+                retryableFailure: observedRetryableFailure,
                 durationMilliseconds: 0,
                 code: observedCode,
                 reason: observedReason,
@@ -2001,6 +2011,7 @@ final class AppModel {
                 return CatalogTraversalResult(
                     outcome: .retained,
                     genuineFailure: true,
+                    retryableFailure: !GatewayRecoveryFailurePolicy.nonRetryableCodes.contains(code),
                     code: code,
                     reason: reason,
                     pageCount: pageCount,
@@ -2022,6 +2033,7 @@ final class AppModel {
                 return CatalogTraversalResult(
                     outcome: .retained,
                     genuineFailure: true,
+                    retryableFailure: DashboardCatalogRetryPolicy.isRetryableFailure(error),
                     code: failureDetails.code,
                     reason: failureDetails.reason,
                     requestID: requestID
@@ -2030,6 +2042,7 @@ final class AppModel {
             return CatalogTraversalResult(
                 outcome: outcome,
                 genuineFailure: true,
+                retryableFailure: DashboardCatalogRetryPolicy.isRetryableFailure(error),
                 code: failureDetails.code,
                 reason: failureDetails.reason,
                 requestID: requestID
