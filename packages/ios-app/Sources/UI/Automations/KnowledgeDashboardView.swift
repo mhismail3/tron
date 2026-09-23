@@ -1285,7 +1285,7 @@ struct KnowledgeDetailView: View {
 
     @ViewBuilder private var sourceLink: some View {
         if case .source(let source) = currentRecord.content {
-            if let uri = source.uri, let url = KnowledgeSourcePresentationPolicy.safeURL(uri) {
+            if let url = KnowledgeSourcePresentationPolicy.originalURL(source) {
                 HStack(spacing: TronSpacing.lg) {
                     Link(destination: url) { Label("Open original", systemImage: "safari") }
                 }

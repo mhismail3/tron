@@ -18,6 +18,10 @@ limitations appear in **More source details**.
 
 Source details lead with an explicit content summary (when generated), original
 link, and source publication/save dates when the source system provides them.
+For redirected connector captures, **Open original** uses the requested URL
+recorded for that exact saved-item identity in origin provenance; the resolved
+page URI remains capture metadata. Unrelated referral origins are never used as
+the original link, and the same HTTP(S)-only URL safety policy still applies.
 The Raindrop `created` timestamp is the originating save time, not a publication
 date. Historical Raindrop records with the old misfiled `created` timestamp are
 not mislabeled as publication dates; absent origin-save dates stay absent and

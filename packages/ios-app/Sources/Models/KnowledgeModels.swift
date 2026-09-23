@@ -421,6 +421,19 @@ enum KnowledgeSourcePresentationPolicy {
 
     static func domain(_ value: String?) -> String? { safeURL(value)?.host?.lowercased() }
 
+    /// Connector captures retain the requested URL alongside the resolved page URL.
+    /// Prefer the latest origin for this exact saved item; unrelated referral origins
+    /// must never redirect the source's Open original action.
+    static func originalURL(_ source: KnowledgeSourceContent) -> URL? {
+        if let identity = source.identity,
+           let requested = source.origins?.reversed().first(where: { origin in
+               origin.identity == identity && origin.uri != nil && origin.uri != source.uri
+           })?.uri {
+            return safeURL(requested)
+        }
+        return safeURL(source.uri)
+    }
+
     static func publishedAt(_ source: KnowledgeSourceContent) -> String? {
         // Earlier Raindrop intake incorrectly stored its `created` (bookmark-save)
         // timestamp as publication time. Do not repeat that claim on old records.

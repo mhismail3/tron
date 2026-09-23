@@ -643,6 +643,34 @@ final class KnowledgeModelsTests: XCTestCase {
         XCTAssertEqual(KnowledgeSourcePresentationPolicy.thumbnailLetters(source), "EC")
     }
 
+    func testOriginalSourceURLPrefersRequestedConnectorLinkOverResolvedPageURL() {
+        let identity = KnowledgeSourceIdentity(provider: "raindrop", accountId: "account", itemId: "item")
+        let canonical = "https://resolved.example/article"
+        let requested = "https://short.example/saved-link"
+        func source(origins: [KnowledgeSourceOrigin]?) -> KnowledgeSourceContent {
+            KnowledgeSourceContent(
+                title: "Redirected source", uri: canonical, text: nil, object: nil, mediaType: nil,
+                captureDisposition: .complete, annotations: nil, sourcePublishedAt: nil,
+                capturedAt: "2026-01-01T00:00:00Z", origin: "connector", origins: origins,
+                identity: identity, assessment: nil
+            )
+        }
+        XCTAssertEqual(KnowledgeSourcePresentationPolicy.originalURL(source(origins: [
+            KnowledgeSourceOrigin(kind: .connector, capturedAt: "2026-01-01T00:00:00Z", annotation: nil, uri: canonical, identity: identity),
+            KnowledgeSourceOrigin(kind: .connector, capturedAt: "2026-01-01T00:00:00Z", annotation: nil, uri: requested, identity: identity),
+        ]))?.absoluteString, requested)
+
+        XCTAssertEqual(KnowledgeSourcePresentationPolicy.originalURL(source(origins: [
+            KnowledgeSourceOrigin(kind: .conversation, capturedAt: "2026-01-01T00:00:00Z", annotation: nil, uri: "https://referrer.example/post", identity: nil),
+        ]))?.absoluteString, canonical, "Unrelated referral origins do not replace the source URL")
+
+        XCTAssertNil(KnowledgeSourcePresentationPolicy.originalURL(source(origins: [
+            KnowledgeSourceOrigin(kind: .connector, capturedAt: "2026-01-01T00:00:00Z", annotation: nil, uri: "javascript:alert(1)", identity: identity),
+        ])), "Unsafe requested URLs must not fall through to a different destination")
+
+        XCTAssertEqual(KnowledgeSourcePresentationPolicy.originalURL(source(origins: nil))?.absoluteString, canonical, "Sources without redirect provenance keep their existing URL behavior")
+    }
+
     func testRaindropCreatedTimeIsNotMisrepresentedAsPublicationTime() {
         let raindrop = KnowledgeSourceContent(title: "Saved", uri: "https://example.com", text: "text", object: nil, mediaType: "text/plain", captureDisposition: .complete, annotations: nil, sourcePublishedAt: "2025-12-30T12:00:00Z", sourceSavedAt: nil, capturedAt: "2026-01-01T00:00:00Z", origin: "connector", origins: nil, identity: KnowledgeSourceIdentity(provider: "raindrop", accountId: "1", itemId: "2"), assessment: nil)
         XCTAssertNil(KnowledgeSourcePresentationPolicy.publishedAt(raindrop), "Historical Raindrop `created` values were saved times, not publish times")
