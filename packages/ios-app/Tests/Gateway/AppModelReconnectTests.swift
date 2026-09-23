@@ -114,17 +114,22 @@ struct AppModelReconnectTests {
             // The catalog owns loading and its eventual atomic publication.
             await start.value
             var index = 1
-            let catalog: (id: String, method: String)
-            while true {
+            var catalog: (id: String, method: String)?
+            var inbox: (id: String, method: String)?
+            while catalog == nil || inbox == nil {
                 try await socket.waitUntilSent(count: index + 1)
                 let request = try requestFrame(await socket.sentFrames()[index])
                 index += 1
                 if request.method == "session.list" {
                     catalog = request
-                    break
+                } else if request.method == "notification.inbox.list" {
+                    inbox = request
+                } else {
+                    #expect(["provider.list", "model.list", "settings.get", "device.list"].contains(request.method))
                 }
-                #expect(["notification.inbox.list", "provider.list", "model.list", "settings.get", "device.list"].contains(request.method))
             }
+            let catalog = try #require(catalog)
+            #expect(inbox != nil)
             #expect(fixture.model.sessionCatalogIsLoading)
             let startedMethods = try await socket.sentFrames().dropFirst().map { try requestFrame($0).method }
             #expect(Set(startedMethods).isSubset(of: [

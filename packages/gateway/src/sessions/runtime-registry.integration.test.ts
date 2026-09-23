@@ -22,6 +22,7 @@ import type { AutomationRecord, AutomationRun } from "../automations/types.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import type { ExtensionRunActivity, ExtensionToolOrigin, SessionProcessActivity, SessionSummaryUpdate } from "../protocol/types.js";
 import { GatewayWorkRegistry, type GatewayWorkHandle } from "./gateway-work-registry.js";
+import { CatalogDiscovery, DEFAULT_CATALOG_DISCOVERY_LIMITS } from "./catalog-discovery.js";
 import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, type ExtensionActivityReceipt } from "./extension-activity-history.js";
@@ -2760,32 +2761,45 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       },
     });
     registries.push(registry);
-    const internals = registry as unknown as {
-      catalogAcquisition: () => Promise<{ entriesByID: ReadonlyMap<string, unknown> }>;
-      readCatalogHeader: (...arguments_: any[]) => Promise<unknown>;
-    };
-    const original = internals.readCatalogHeader.bind(registry);
+    const original = CatalogDiscovery.prototype.readCatalogHeader;
     let active = 0;
     let maximumActive = 0;
     let releaseResolve!: () => void;
     let capacityResolve!: () => void;
     const release = new Promise<void>((resolve) => { releaseResolve = resolve; });
     const capacity = new Promise<void>((resolve) => { capacityResolve = resolve; });
-    const headers = vi.spyOn(internals, "readCatalogHeader").mockImplementation(async (...arguments_) => {
-      active += 1;
-      maximumActive = Math.max(maximumActive, active);
-      if (maximumActive === 4) capacityResolve();
-      await release;
-      try { return await original(...arguments_); }
-      finally { active -= 1; }
-    });
+    const headers = vi.spyOn(CatalogDiscovery.prototype, "readCatalogHeader").mockImplementation(
+      async function (this: CatalogDiscovery, ...arguments_: Parameters<CatalogDiscovery["readCatalogHeader"]>) {
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        if (maximumActive === 4) capacityResolve();
+        await release;
+        try { return await original.apply(this, arguments_); }
+        finally { active -= 1; }
+      },
+    );
 
-    const acquiring = internals.catalogAcquisition();
+    const discovery = new CatalogDiscovery({
+      limits: {
+        ...DEFAULT_CATALOG_DISCOVERY_LIMITS,
+        maximumSessions: count,
+        maximumHeaderBytes: count * 512,
+        normalizationConcurrency: 4,
+      },
+      catalogDirectory: () => directory,
+      catalogCapacityExceeded: () => { throw new Error("scaled catalog bound exceeded"); },
+      isLiveRuntimeOwnedPath: () => false,
+      canonicalSessionPath: (path) => realpath(path),
+      delegatedTopologyParentPath: () => undefined,
+    });
+    const evidence = discovery.catalogStructureEvidence();
     await capacity;
     expect(maximumActive).toBe(4);
     releaseResolve();
-    expect((await acquiring).entriesByID.size).toBe(count);
+    expect((await evidence).identitiesByPath.size).toBe(count);
     expect(headers).toHaveBeenCalledTimes(count);
+    headers.mockRestore();
+    expect((await registry.catalog("all")).sessions).toHaveLength(count);
   });
 
   it("keeps a child mutation-protected when its parent ID is duplicated", async () => {
