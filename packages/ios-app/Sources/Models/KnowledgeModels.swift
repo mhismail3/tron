@@ -258,6 +258,10 @@ struct KnowledgeSourceOrigin: Codable, Hashable, Sendable { let kind: KnowledgeS
 enum KnowledgeEvidenceQuality: String, Codable, Sendable { case high, medium, low, none, unknown }
 enum KnowledgeFreshness: String, Codable, Sendable { case current, aging, stale, unknown }
 enum KnowledgeSourceAdmission: String, Codable, Hashable, Sendable { case pending, retained, archived }
+struct KnowledgeSourceSummaryTag: Codable, Hashable, Sendable { let label: String; let kind: String }
+struct KnowledgeSourceSummary: Codable, Hashable, Sendable {
+    let text: String; let tags: [KnowledgeSourceSummaryTag]; let generatedAt: String; let sourceRevisionId: String; let evidenceDigest: String; let coverage: String
+}
 struct KnowledgeSourceAssessmentUsage: Codable, Hashable, Sendable {
     // Assessment pricing may be a fraction of one cent; match the Gateway number contract.
     let inputTokens: Int; let outputTokens: Int; let estimatedCostCents: Double; let pricing: String
@@ -281,18 +285,18 @@ struct KnowledgeSourceAssessment: Codable, Hashable, Sendable {
 struct KnowledgeSourceAdmissionState: Codable, Hashable, Sendable { let status: KnowledgeSourceAdmission; let reason: String?; let decidedAt: String; let profileVersion: String?; let rubricVersion: String? }
 struct KnowledgeSourceRetention: Codable, Hashable, Sendable { let sensitivity: String; let usageConstraint: String?; let evidenceAvailable: Bool; let originalHash: String? }
 struct KnowledgeSourceContent: Codable, Hashable, Sendable {
-    let title: String; let uri: String?; var collectionId: String?; let text: String?; let object: KnowledgeObjectRef?; let preview: KnowledgeObjectRef?; var representations: [KnowledgeSourceRepresentation]?; let mediaType: String?
-    let captureDisposition: KnowledgeCaptureDisposition; let captureReason: String?; let annotations: [KnowledgeSourceAnnotation]?; let sourcePublishedAt: String?; let capturedAt: String; let origin: String?
-    let origins: [KnowledgeSourceOrigin]?; let identity: KnowledgeSourceIdentity?; var retention: KnowledgeSourceRetention?; let assessment: KnowledgeSourceAssessment?; var admission: KnowledgeSourceAdmissionState?
-    init(title: String, uri: String?, collectionId: String? = nil, text: String?, object: KnowledgeObjectRef?, preview: KnowledgeObjectRef? = nil, representations: [KnowledgeSourceRepresentation]? = nil, mediaType: String?, captureDisposition: KnowledgeCaptureDisposition, captureReason: String? = nil, annotations: [KnowledgeSourceAnnotation]?, sourcePublishedAt: String?, capturedAt: String, origin: String?, origins: [KnowledgeSourceOrigin]?, identity: KnowledgeSourceIdentity?, retention: KnowledgeSourceRetention? = nil, assessment: KnowledgeSourceAssessment?, admission: KnowledgeSourceAdmissionState? = nil) {
-        self.title = title; self.uri = uri; self.collectionId = collectionId; self.text = text; self.object = object; self.preview = preview; self.representations = representations; self.mediaType = mediaType; self.captureDisposition = captureDisposition; self.captureReason = captureReason; self.annotations = annotations; self.sourcePublishedAt = sourcePublishedAt; self.capturedAt = capturedAt; self.origin = origin; self.origins = origins; self.identity = identity; self.retention = retention; self.assessment = assessment; self.admission = admission
+    let title: String; let uri: String?; var collectionId: String?; let text: String?; let object: KnowledgeObjectRef?; let preview: KnowledgeObjectRef?; var representations: [KnowledgeSourceRepresentation]?; let mediaType: String?; let linkedUrls: [String]?
+    let captureDisposition: KnowledgeCaptureDisposition; let captureReason: String?; let annotations: [KnowledgeSourceAnnotation]?; let sourcePublishedAt: String?; let sourceSavedAt: String?; let capturedAt: String; let origin: String?
+    let origins: [KnowledgeSourceOrigin]?; let identity: KnowledgeSourceIdentity?; var retention: KnowledgeSourceRetention?; let assessment: KnowledgeSourceAssessment?; let summary: KnowledgeSourceSummary?; var admission: KnowledgeSourceAdmissionState?
+    init(title: String, uri: String?, collectionId: String? = nil, text: String?, object: KnowledgeObjectRef?, preview: KnowledgeObjectRef? = nil, representations: [KnowledgeSourceRepresentation]? = nil, mediaType: String?, linkedUrls: [String]? = nil, captureDisposition: KnowledgeCaptureDisposition, captureReason: String? = nil, annotations: [KnowledgeSourceAnnotation]?, sourcePublishedAt: String?, sourceSavedAt: String? = nil, capturedAt: String, origin: String?, origins: [KnowledgeSourceOrigin]?, identity: KnowledgeSourceIdentity?, retention: KnowledgeSourceRetention? = nil, assessment: KnowledgeSourceAssessment?, contentSummary: KnowledgeSourceSummary? = nil, admission: KnowledgeSourceAdmissionState? = nil) {
+        self.title = title; self.uri = uri; self.collectionId = collectionId; self.text = text; self.object = object; self.preview = preview; self.representations = representations; self.mediaType = mediaType; self.linkedUrls = linkedUrls; self.captureDisposition = captureDisposition; self.captureReason = captureReason; self.annotations = annotations; self.sourcePublishedAt = sourcePublishedAt; self.sourceSavedAt = sourceSavedAt; self.capturedAt = capturedAt; self.origin = origin; self.origins = origins; self.identity = identity; self.retention = retention; self.assessment = assessment; self.summary = contentSummary; self.admission = admission
     }
-    private enum CodingKeys: String, CodingKey { case title, uri, collectionId, text, object, preview, representations, mediaType, captureDisposition, captureReason, annotations, sourcePublishedAt, capturedAt, origin, origins, identity, retention, assessment, admission }
+    private enum CodingKeys: String, CodingKey { case title, uri, collectionId, text, object, preview, representations, mediaType, linkedUrls, captureDisposition, captureReason, annotations, sourcePublishedAt, sourceSavedAt, capturedAt, origin, origins, identity, retention, assessment, summary, admission }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        title = try c.decode(String.self, forKey: .title); uri = try c.decodeIfPresent(String.self, forKey: .uri); collectionId = try c.decodeIfPresent(String.self, forKey: .collectionId); text = try c.decodeIfPresent(String.self, forKey: .text); object = try c.decodeIfPresent(KnowledgeObjectRef.self, forKey: .object); preview = try c.decodeIfPresent(KnowledgeObjectRef.self, forKey: .preview); representations = try c.decodeIfPresent([KnowledgeSourceRepresentation].self, forKey: .representations); mediaType = try c.decodeIfPresent(String.self, forKey: .mediaType)
-        captureDisposition = try c.decode(KnowledgeCaptureDisposition.self, forKey: .captureDisposition); captureReason = try c.decodeIfPresent(String.self, forKey: .captureReason); annotations = try c.decodeIfPresent([KnowledgeSourceAnnotation].self, forKey: .annotations); sourcePublishedAt = try c.decodeIfPresent(String.self, forKey: .sourcePublishedAt); capturedAt = try c.decode(String.self, forKey: .capturedAt); origin = try c.decodeIfPresent(String.self, forKey: .origin)
-        origins = try c.decodeIfPresent([KnowledgeSourceOrigin].self, forKey: .origins); identity = try c.decodeIfPresent(KnowledgeSourceIdentity.self, forKey: .identity); retention = try c.decodeIfPresent(KnowledgeSourceRetention.self, forKey: .retention); assessment = try c.decodeIfPresent(KnowledgeSourceAssessment.self, forKey: .assessment); admission = try c.decodeIfPresent(KnowledgeSourceAdmissionState.self, forKey: .admission)
+        title = try c.decode(String.self, forKey: .title); uri = try c.decodeIfPresent(String.self, forKey: .uri); collectionId = try c.decodeIfPresent(String.self, forKey: .collectionId); text = try c.decodeIfPresent(String.self, forKey: .text); object = try c.decodeIfPresent(KnowledgeObjectRef.self, forKey: .object); preview = try c.decodeIfPresent(KnowledgeObjectRef.self, forKey: .preview); representations = try c.decodeIfPresent([KnowledgeSourceRepresentation].self, forKey: .representations); mediaType = try c.decodeIfPresent(String.self, forKey: .mediaType); linkedUrls = try c.decodeIfPresent([String].self, forKey: .linkedUrls)
+        captureDisposition = try c.decode(KnowledgeCaptureDisposition.self, forKey: .captureDisposition); captureReason = try c.decodeIfPresent(String.self, forKey: .captureReason); annotations = try c.decodeIfPresent([KnowledgeSourceAnnotation].self, forKey: .annotations); sourcePublishedAt = try c.decodeIfPresent(String.self, forKey: .sourcePublishedAt); sourceSavedAt = try c.decodeIfPresent(String.self, forKey: .sourceSavedAt); capturedAt = try c.decode(String.self, forKey: .capturedAt); origin = try c.decodeIfPresent(String.self, forKey: .origin)
+        origins = try c.decodeIfPresent([KnowledgeSourceOrigin].self, forKey: .origins); identity = try c.decodeIfPresent(KnowledgeSourceIdentity.self, forKey: .identity); retention = try c.decodeIfPresent(KnowledgeSourceRetention.self, forKey: .retention); assessment = try c.decodeIfPresent(KnowledgeSourceAssessment.self, forKey: .assessment); summary = try c.decodeIfPresent(KnowledgeSourceSummary.self, forKey: .summary); admission = try c.decodeIfPresent(KnowledgeSourceAdmissionState.self, forKey: .admission)
     }
 }
 struct KnowledgeObservationRange: Codable, Hashable, Sendable {
@@ -417,11 +421,30 @@ enum KnowledgeSourcePresentationPolicy {
 
     static func domain(_ value: String?) -> String? { safeURL(value)?.host?.lowercased() }
 
+    /// Connector captures retain the requested URL alongside the resolved page URL.
+    /// Prefer the latest origin for this exact saved item; unrelated referral origins
+    /// must never redirect the source's Open original action.
+    static func originalURL(_ source: KnowledgeSourceContent) -> URL? {
+        if let identity = source.identity,
+           let requested = source.origins?.reversed().first(where: { origin in
+               origin.identity == identity && origin.uri != nil && origin.uri != source.uri
+           })?.uri {
+            return safeURL(requested)
+        }
+        return safeURL(source.uri)
+    }
+
+    static func publishedAt(_ source: KnowledgeSourceContent) -> String? {
+        // Earlier Raindrop intake incorrectly stored its `created` (bookmark-save)
+        // timestamp as publication time. Do not repeat that claim on old records.
+        guard source.identity?.provider.lowercased() != "raindrop" else { return nil }
+        return source.sourcePublishedAt
+    }
+
     static func summary(_ source: KnowledgeSourceContent) -> String? {
-        guard let assessment = source.assessment else { return nil }
-        let value = assessment.summary.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return nil }
-        if let digest = assessment.evidenceDigest, digest != evidenceDigest(title: source.title, text: source.text ?? "") { return nil }
+        guard let summary = source.summary else { return nil }
+        let value = summary.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, summary.evidenceDigest == evidenceDigest(title: source.title, text: source.text ?? "") else { return nil }
         return value
     }
 
@@ -559,7 +582,7 @@ enum KnowledgeCorrectionPolicy {
         case .source(let value):
             var annotations = value.annotations ?? []
             annotations.append(KnowledgeSourceAnnotation(text: "User correction: \(replacementText)", locator: "user-correction", createdAt: nil))
-            return .source(KnowledgeSourceContent(title: value.title, uri: value.uri, collectionId: value.collectionId, text: value.text, object: value.object, representations: value.representations, mediaType: value.mediaType, captureDisposition: value.captureDisposition, captureReason: value.captureReason, annotations: annotations, sourcePublishedAt: value.sourcePublishedAt, capturedAt: value.capturedAt, origin: value.origin, origins: value.origins, identity: value.identity, retention: value.retention, assessment: value.assessment, admission: value.admission))
+            return .source(KnowledgeSourceContent(title: value.title, uri: value.uri, collectionId: value.collectionId, text: value.text, object: value.object, representations: value.representations, mediaType: value.mediaType, linkedUrls: value.linkedUrls, captureDisposition: value.captureDisposition, captureReason: value.captureReason, annotations: annotations, sourcePublishedAt: value.sourcePublishedAt, sourceSavedAt: value.sourceSavedAt, capturedAt: value.capturedAt, origin: value.origin, origins: value.origins, identity: value.identity, retention: value.retention, assessment: value.assessment, contentSummary: value.summary, admission: value.admission))
         case .observation(let value):
             return .observation(KnowledgeObservationContent(range: value.range, items: [KnowledgeObservationItem(text: replacementText, attribution: .user, observedAt: value.items.first?.observedAt ?? record.updatedAt, certainty: .qualified, evidence: value.items.first?.evidence, field: nil)], observer: value.observer))
         case .note(let value):

@@ -138,6 +138,15 @@ export interface SourceRepresentation {
   mediaType?: string;
 }
 
+export interface SourceSummary {
+  text: string;
+  tags: Array<{ label: string; kind: "semantic" | "keyword" }>;
+  generatedAt: string;
+  sourceRevisionId: string;
+  evidenceDigest: string;
+  coverage: "full" | "sampled";
+}
+
 export interface SourceContent {
   title: string;
   uri?: string;
@@ -159,6 +168,8 @@ export interface SourceContent {
   linkedUrls?: string[];
   annotations?: Array<{ text: string; locator?: string; createdAt?: string }>;
   sourcePublishedAt?: string;
+  /** Time the originating save service recorded this item, distinct from Tron capture. */
+  sourceSavedAt?: string;
   capturedAt: string;
   origin?: SourceOriginKind;
   origins?: SourceOrigin[];
@@ -168,6 +179,8 @@ export interface SourceContent {
   /** Intake lifecycle is separate from privacy/suppression and remains recoverable. */
   admission?: SourceAdmissionState;
   assessment?: SourceAssessment;
+  /** Explicitly generated content summary, separate from the intake assessment. */
+  summary?: SourceSummary;
 }
 
 export interface ObservationRange {
@@ -504,6 +517,12 @@ export interface KnowledgeReflectRequest {
   expectedConfigRevision?: number;
 }
 
+export interface KnowledgeSourceSummaryRequest {
+  commandId: string;
+  sourceId: string;
+  expectedRevision: string;
+}
+
 export interface KnowledgeTriageRequest {
   commandId: string;
   sourceId: string;
@@ -599,7 +618,7 @@ export interface KnowledgeConnectorState {
   recurringApproved: boolean;
   /** Per-provider-collection pagination checkpoints; never a complete remote snapshot. */
   checkpoints?: Record<string, string>;
-  pending: Array<{ id: string; title: string; url: string; excerpt?: string; annotation?: string; publishedAt?: string; collectionId?: string; apiPayload?: string; metadataComplete?: boolean }>;
+  pending: Array<{ id: string; title: string; url: string; excerpt?: string; annotation?: string; publishedAt?: string; savedAt?: string; collectionId?: string; apiPayload?: string; metadataComplete?: boolean }>;
   capturedIds: string[];
   assessmentPilot?: { id: string; maxItems: number; budgetCents: number; usedItems: number; reservedCents: number; accountId: string; sourceCollection: string; profileVersion: string; itemIds: string[] };
   /** Append-only later cohorts. The first pilot remains frozen in assessmentPilot. */
@@ -688,6 +707,7 @@ export type KnowledgeAction =
   | { operation: "knowledge.note.update"; request: KnowledgeNoteMutationRequest & { recordId: string } }
   | { operation: "knowledge.reflect"; request: KnowledgeReflectRequest }
   | { operation: "knowledge.source.triage"; request: KnowledgeTriageRequest }
+  | { operation: "knowledge.source.summarize"; request: KnowledgeSourceSummaryRequest }
   | { operation: "knowledge.source.admission"; request: KnowledgeSourceAdmissionRequest }
   | { operation: "knowledge.correction"; request: KnowledgeCorrectionRequest }
   | { operation: "knowledge.forget"; request: KnowledgeForgetRequest }
@@ -810,6 +830,7 @@ function validateKindContent(kind: KnowledgeRecordKind, value: unknown): void {
     if (content.origin !== undefined && !["manual", "connector", "import", "conversation"].includes(content.origin as string)) throw new Error("Invalid source origin");
     assertTimestamp(content.capturedAt, "capturedAt");
     if (content.sourcePublishedAt !== undefined) assertTimestamp(content.sourcePublishedAt, "sourcePublishedAt");
+    if (content.sourceSavedAt !== undefined) assertTimestamp(content.sourceSavedAt, "sourceSavedAt");
     if (content.mediaType !== undefined) boundedString(content.mediaType, "source media type", 160);
     if (content.identity !== undefined) {
       const identity = content.identity as Record<string, unknown>;
@@ -828,6 +849,16 @@ function validateKindContent(kind: KnowledgeRecordKind, value: unknown): void {
         if (item.identity !== undefined) { const identity = item.identity as Record<string, unknown>; boundedString(identity.provider, "source origin provider", 160); boundedString(identity.accountId, "source origin account", 256); boundedString(identity.itemId, "source origin item", 512); }
         if (item.annotation !== undefined) boundedString(item.annotation, "source origin annotation", 2_000);
       }
+    }
+    if (content.summary !== undefined) {
+      const summary = content.summary as Record<string, unknown>;
+      if (!summary || typeof summary !== "object" || Array.isArray(summary)) throw new Error("Invalid source summary");
+      boundedString(summary.text, "source summary", 8_000);
+      if (!Array.isArray(summary.tags) || summary.tags.length > 12 || summary.tags.some(tag => !tag || typeof tag !== "object" || Array.isArray(tag) || typeof (tag as Record<string, unknown>).label !== "string" || !((tag as Record<string, unknown>).label as string).trim() || ((tag as Record<string, unknown>).label as string).length > 64 || !["semantic", "keyword"].includes((tag as Record<string, unknown>).kind as string))) throw new Error("Invalid source summary tags");
+      assertTimestamp(summary.generatedAt, "source summary generatedAt");
+      if (typeof summary.sourceRevisionId !== "string" || !REVISION.test(summary.sourceRevisionId)) throw new Error("Invalid source summary revision");
+      if (typeof summary.evidenceDigest !== "string" || !HASH.test(summary.evidenceDigest)) throw new Error("Invalid source summary evidence digest");
+      if (!["full", "sampled"].includes(summary.coverage as string)) throw new Error("Invalid source summary coverage");
     }
     if (content.assessment !== undefined) {
       const assessment = content.assessment as Record<string, unknown>;

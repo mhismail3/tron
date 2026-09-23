@@ -1050,6 +1050,7 @@ struct KnowledgeDetailView: View {
     @State private var forgetConfirmation = false
     @State private var correctionSheet = false
     @State private var technicalDetailsSheet = false
+    @State private var sourceDetailsSheet = false
     @State private var evidenceMessage: String?
     @State private var reflectedHandoff: KnowledgeRecord?
     @State private var reflectionRequestGeneration = 0
@@ -1197,6 +1198,9 @@ struct KnowledgeDetailView: View {
                 KnowledgeObservationTechnicalDetailsSheet(presentation: observation)
             }
         }
+        .tronManagedSheet(isPresented: $sourceDetailsSheet, identity: "knowledge.source-details.\(currentRecord.id)") {
+            if case .source(let source) = currentRecord.content { KnowledgeSourceMoreDetailsSheet(record: currentRecord, source: source, citationTitles: citationTitles, technicalContent: AnyView(technicalSourceDetails(source))) }
+        }
         .tronManagedSheet(isPresented: $correctionSheet, identity: "knowledge.correction.\(currentRecord.id)") {
             KnowledgeCorrectionView(record: currentRecord, origin: origin) { updated in
                 // A managed child temporarily owns presentation publication while
@@ -1281,69 +1285,42 @@ struct KnowledgeDetailView: View {
 
     @ViewBuilder private var sourceLink: some View {
         if case .source(let source) = currentRecord.content {
-            if let uri = source.uri, let url = KnowledgeSourcePresentationPolicy.safeURL(uri) {
+            if let url = KnowledgeSourcePresentationPolicy.originalURL(source) {
                 HStack(spacing: TronSpacing.lg) {
                     Link(destination: url) { Label("Open original", systemImage: "safari") }
                 }
                 .font(TronTypography.bodySM)
                 .foregroundStyle(Color.tronKnowledgeText)
             }
-            if let summary = KnowledgeSourcePresentationPolicy.summary(source) {
-                TronSettingsGroup("At a glance", accent: .tronKnowledge) {
-                    Text(summary)
-                        .font(TronTypography.body)
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(14)
-                }
-            } else {
-                TronSettingsGroup("At a glance", accent: .tronKnowledge) {
-                    VStack(alignment: .leading, spacing: TronSpacing.sm) {
-                        Text("No summary yet")
-                            .font(TronTypography.bodySM.bold())
-                        Text("No summary is generated automatically. Generate one from the saved evidence when you want an explicit interpretation.")
-                            .font(TronTypography.secondaryDescription)
-                            .foregroundStyle(Color.tronTextSecondary)
-                        Button("Generate summary", systemImage: "sparkles") { triage() }
-                            .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
-                            .disabled(mutationInFlight)
+            TronSettingsGroup("Summary", accent: .tronKnowledge) {
+                VStack(alignment: .leading, spacing: TronSpacing.md) {
+                    if let summary = KnowledgeSourcePresentationPolicy.summary(source) {
+                        Text(summary).font(TronTypography.body).foregroundStyle(Color.tronTextPrimary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                        if source.summary?.coverage == "sampled" { Label("Based on a bounded excerpt", systemImage: "text.magnifyingglass").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary) }
+                    } else {
+                        Text(source.summary == nil ? "No content summary yet" : "Summary no longer matches the saved text")
+                            .font(TronTypography.bodySM.bold()).foregroundStyle(Color.tronTextPrimary)
+                        Text(source.text == nil ? "A summary needs saved readable text. This source has no extracted text." : "Uses your configured Knowledge model; provider charges may apply. Only saved evidence is sent—linked pages and discussions are not fetched or assumed.")
+                            .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
+                        if source.text != nil {
+                            Button("Generate AI summary", systemImage: "sparkles") { summarizeSource() }
+                                .buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge)).disabled(mutationInFlight || !admitsOrigin)
+                        }
                     }
-                    .padding(14)
+                    if let published = KnowledgeSourcePresentationPolicy.publishedAt(source) { Label("Published \(humanDate(published))", systemImage: "calendar") }
+                    if let saved = source.sourceSavedAt { Label("Saved in \(source.identity?.provider.capitalized ?? "source") \(humanDate(saved))", systemImage: "bookmark") }
+                    else { Label("Saved in Tron \(humanDate(source.capturedAt))", systemImage: "clock") }
                 }
+                .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary).padding(14)
             }
+            Button { sourceDetailsSheet = true } label: { Label("More source details", systemImage: "info.circle") }
+                .font(TronTypography.bodySM).foregroundStyle(Color.tronKnowledgeText)
+                .padding(.horizontal, 14).padding(.vertical, 12)
+                .tronScrollSurface(accent: .tronKnowledge, tintOpacity: 0.06)
             DisclosureGroup {
                 savedTextAction(source)
             } label: {
                 Label("Read saved text", systemImage: "text.alignleft")
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .tronScrollSurface(accent: .tronKnowledge, tintOpacity: 0.06)
-            if !currentRecord.provenance.evidence.isEmpty {
-                DisclosureGroup {
-                    citationLinks(Array(Dictionary(grouping: currentRecord.provenance.evidence, by: { "\($0.recordId ?? "")|\($0.revisionId ?? "")|\($0.locator ?? "")" }).values.compactMap { $0.first }))
-                        .padding(.top, 8)
-                } label: { Label("Found in related sources", systemImage: "link") }
-                .padding(.horizontal, 14).padding(.vertical, 12)
-                .tronScrollSurface(accent: .tronKnowledge, tintOpacity: 0.06)
-            }
-            DisclosureGroup {
-                VStack(alignment: .leading, spacing: TronSpacing.sm) {
-                    if let origin = source.origins?.last ?? source.origin.flatMap({ value in KnowledgeSourceOriginKind(rawValue: value).map { KnowledgeSourceOrigin(kind: $0, capturedAt: source.capturedAt, annotation: nil, uri: source.uri, identity: source.identity) } }) {
-                        Text("Saved from \(origin.kind.rawValue.capitalized) on \(humanDate(origin.capturedAt)).")
-                        if let annotation = origin.annotation { Text(annotation).foregroundStyle(Color.tronTextSecondary) }
-                    } else {
-                        Text("Saved on \(humanDate(source.capturedAt)).")
-                    }
-                    if let reason = plainLanguageLimitation(source) { Text(reason).foregroundStyle(Color.tronTextSecondary) }
-                    DisclosureGroup("Technical details") {
-                        technicalSourceDetails(source)
-                    }
-                }
-                .font(TronTypography.secondaryDescription)
-                .padding(.top, 8)
-            } label: {
-                Label("About this source", systemImage: "info.circle")
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
@@ -1397,7 +1374,10 @@ struct KnowledgeDetailView: View {
     }
 
     private func humanDate(_ value: String) -> String {
-        let formatter = ISO8601DateFormatter(); guard let date = formatter.date(from: value) else { return value }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let date = formatter.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+        guard let date else { return value }
         let output = DateFormatter(); output.dateStyle = .medium; output.timeStyle = .none; return output.string(from: date)
     }
 
@@ -1553,10 +1533,121 @@ struct KnowledgeDetailView: View {
             catch { guard requestGeneration == reflectionRequestGeneration, model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription }
         }
     }
+    private func summarizeSource() { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = origin; let revision = currentRecord.revisionId; Task { @MainActor in guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; do { let result = try await model.knowledge.summarize(sourceID: currentRecord.id, expectedRevision: revision); guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; currentRecord = result.record; mutationInFlight = false; message = "AI summary generated from the saved evidence."; await onChanged() } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription } } }
     private func triage() { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = origin; Task { @MainActor in guard model.knowledgePresentationIdentity == requestIdentity else { return }; do { let result = try await model.knowledge.triage(sourceID: currentRecord.id, expectedRevision: currentRecord.revisionId); guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; currentRecord = result.source; mutationInFlight = false; message = "Assessment updated (\(result.assessment.freshness.rawValue))." } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription } } }
     private func saveNote(_ note: KnowledgeNoteContent) { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = origin; Task { @MainActor in guard model.knowledgePresentationIdentity == requestIdentity else { return }; do { let result = try await model.knowledge.updateNote(id: currentRecord.id, expectedRevision: currentRecord.revisionId, record: KnowledgeRecordDraft(id: currentRecord.id, createdAt: currentRecord.createdAt, updatedAt: nil, kind: .note, scope: currentRecord.scope, provenance: currentRecord.provenance, temporal: currentRecord.temporal, relations: currentRecord.relations, importOrigin: currentRecord.importOrigin, content: .note(KnowledgeNoteContent(title: note.title, body: noteBody, fields: note.fields, role: note.role, confirmed: note.confirmed, contraryEvidence: note.contraryEvidence, freshness: note.freshness, privacyScope: note.privacyScope, usageConstraint: note.usageConstraint))), confirmedByUser: note.confirmed); guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; currentRecord = result.record; mutationInFlight = false; message = "Saved"; await onChanged() } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription } } }
     private func exclude() { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = origin; Task { @MainActor in guard model.knowledgePresentationIdentity == requestIdentity else { return }; do { _ = try await model.knowledge.setExclusion(recordID: currentRecord.id, expectedRevision: currentRecord.revisionId, excluded: true); guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; dismiss() } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription } } }
     private func forget() { guard admitsOrigin else { message = "Gateway changed; reopen this entry."; return }; guard !mutationInFlight else { return }; mutationInFlight = true; let requestIdentity = origin; Task { @MainActor in guard model.knowledgePresentationIdentity == requestIdentity else { return }; do { _ = try await model.knowledge.forget(id: currentRecord.id, expectedRevision: currentRecord.revisionId, reason: "Forgotten from iOS"); guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; dismiss() } catch is CancellationError { if model.knowledgePresentationIdentity == requestIdentity { mutationInFlight = false }; return } catch { guard model.knowledgePresentationIdentity == requestIdentity, activity.allowsPresentationPublication else { return }; mutationInFlight = false; message = error.localizedDescription } } }
+}
+
+private struct KnowledgeSourceMoreDetailsSheet: View {
+    let record: KnowledgeRecord
+    let source: KnowledgeSourceContent
+    let citationTitles: [String: String]
+    let technicalContent: AnyView
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: TronSpacing.section) {
+                HStack {
+                    Text("Source details").font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronKnowledge)
+                    Spacer()
+                    Button("Done") { dismiss() }.buttonStyle(TronActionButtonStyle(expands: false, accent: .tronKnowledge))
+                }
+                detailSection("Generated tags", icon: "tag") {
+                    if KnowledgeSourcePresentationPolicy.summary(source) != nil, let tags = source.summary?.tags, !tags.isEmpty {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), alignment: .leading)], alignment: .leading, spacing: TronSpacing.sm) {
+                            ForEach(Array(tags.enumerated()), id: \.offset) { _, tag in
+                                Label(tag.label, systemImage: tag.kind == "semantic" ? "sparkle" : "number")
+                                    .font(TronTypography.caption).padding(.horizontal, 10).padding(.vertical, 7)
+                                    .background(Color.tronKnowledge.opacity(0.09), in: Capsule())
+                            }
+                        }
+                    } else {
+                        Text("Generate an AI summary to create grounded semantic and keyword tags from this saved evidence.")
+                            .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
+                    }
+                }
+                detailSection("Metadata", icon: "square.stack.3d.up") {
+                    metadataLine("Type", KnowledgeSourcePresentationPolicy.sourceType(source) ?? "Source")
+                    metadataLine("Capture", source.captureDisposition.rawValue.capitalized)
+                    if let classification = source.assessment?.classification { metadataLine("Intake classification", classification) }
+                    metadataLine("Saved by", source.identity?.provider.capitalized ?? source.origin?.capitalized ?? "Unknown")
+                    if let savedAt = source.sourceSavedAt { metadataLine("Saved there", formattedSourceDate(savedAt)) }
+                    if let published = KnowledgeSourcePresentationPolicy.publishedAt(source) { metadataLine("Published", formattedSourceDate(published)) }
+                    metadataLine("Captured by Tron", formattedSourceDate(source.capturedAt))
+                    if let identity = source.identity { metadataLine("Origin ID", "\(identity.provider) · \(identity.itemId)") }
+                    if let mediaType = source.mediaType { metadataLine("Media type", mediaType) }
+                    metadataLine("Record revision", record.revisionId)
+                }
+                if let annotation = source.annotations, !annotation.isEmpty {
+                    detailSection("Saved notes", icon: "quote.opening") {
+                        ForEach(Array(annotation.prefix(20).enumerated()), id: \.offset) { _, item in Text(item.text).font(TronTypography.body).textSelection(.enabled) }
+                    }
+                }
+                if let links = source.linkedUrls, !links.isEmpty {
+                    detailSection("Links saved with this source", icon: "arrow.up.right.square") {
+                        ForEach(Array(links.prefix(8).enumerated()), id: \.offset) { _, value in
+                            if let url = KnowledgeSourcePresentationPolicy.safeURL(value) { Link(url.host ?? value, destination: url).font(TronTypography.bodySM) }
+                        }
+                    }
+                }
+                if !record.provenance.evidence.isEmpty {
+                    detailSection("References", icon: "link") {
+                        ForEach(Array(record.provenance.evidence.enumerated()), id: \.offset) { _, reference in
+                            VStack(alignment: .leading, spacing: TronSpacing.xs) {
+                                Text(reference.recordId.flatMap { citationTitles[$0] } ?? reference.recordId ?? "Session evidence")
+                                    .font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary)
+                                if let recordId = reference.recordId { Text(recordId).font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextSecondary).textSelection(.enabled) }
+                                if let locator = reference.locator { Text(locator).font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary) }
+                            }
+                        }
+                    }
+                }
+                if !record.relations.isEmpty {
+                    detailSection("Related records", icon: "arrow.triangle.branch") {
+                        ForEach(Array(record.relations.enumerated()), id: \.offset) { _, relation in
+                            Text("\(relation.type.rawValue.capitalized) · \(relation.recordId)").font(TronTypography.secondaryCodeDescription).textSelection(.enabled)
+                        }
+                    }
+                }
+                if source.captureDisposition != .complete {
+                    detailSection("Capture coverage", icon: "exclamationmark.triangle") {
+                        Text(source.captureReason ?? source.captureDisposition.rawValue.capitalized)
+                            .font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
+                        if let object = source.object { Text("Original evidence: \(object.bytes) bytes · \(object.mediaType)").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary) }
+                    }
+                }
+                detailSection("Technical details", icon: "wrench.and.screwdriver") { technicalContent }
+            }
+            .padding(TronSpacing.xlarge)
+        }
+        .tronSettingsLayout()
+        .tronSettingsVisualTheme(accent: .tronKnowledge)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Additional source details")
+    }
+
+    @ViewBuilder private func detailSection<Content: View>(_ title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
+        TronSettingsGroup(title, accent: .tronKnowledge) { VStack(alignment: .leading, spacing: TronSpacing.md, content: content).padding(14) }
+    }
+
+    private func formattedSourceDate(_ value: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let date = formatter.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+        guard let date else { return value }
+        let output = DateFormatter(); output.dateStyle = .medium; output.timeStyle = .none; return output.string(from: date)
+    }
+
+    private func metadataLine(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label).font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
+            Spacer(minLength: TronSpacing.md)
+            Text(value).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextPrimary).textSelection(.enabled).multilineTextAlignment(.trailing)
+        }
+    }
 }
 
 struct KnowledgeConfigurationView: View {

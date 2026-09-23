@@ -121,6 +121,10 @@ final class KnowledgeRPCClient {
         struct Params: Encodable { let recordId: String; let expectedRevision: String; let record: KnowledgeRecordDraft; let confirmedByUser: Bool }
         return try await mutate("knowledge.note.update", parameters: Params(recordId: id, expectedRevision: expectedRevision, record: record, confirmedByUser: confirmedByUser))
     }
+    func summarize(sourceID: String, expectedRevision: String) async throws -> KnowledgeMutationResult {
+        struct Params: Encodable { let sourceId: String; let expectedRevision: String }
+        return try await mutate("knowledge.source.summarize", parameters: Params(sourceId: sourceID, expectedRevision: expectedRevision))
+    }
     func triage(sourceID: String, expectedRevision: String) async throws -> KnowledgeTriageResult {
         struct Params: Encodable { let sourceId: String; let expectedRevision: String }
         return try await mutate("knowledge.source.triage", parameters: Params(sourceId: sourceID, expectedRevision: expectedRevision))
