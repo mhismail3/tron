@@ -201,36 +201,9 @@ struct ChatView: View {
                 model.disposeExtensionEditorRequest(request, disposition: .keep, target: target)
             }
         ))
-        .onChange(of: sessionPresentation.photos) { _, values in
-            guard !values.isEmpty else { return }
-            // PhotosPicker may deliver after its native presentation closes.
-            // Clear the selection first so it cannot replay into another chat,
-            // then bind this import to the current presentation authority.
-            sessionPresentation.photos = []
-            guard let target = presentationTarget else {
-                sessionPresentation.cancelImports()
-                return
-            }
-            sessionPresentation.photoImportTask?.cancel()
-            sessionPresentation.photoImportTarget = target
-            sessionPresentation.photoImportTask = Task { @MainActor in
-                await importPhotos(values, target: target)
-                guard !Task.isCancelled,
-                      sessionPresentation.photoImportTarget == target else { return }
-                sessionPresentation.photoImportTask = nil
-                sessionPresentation.photoImportTarget = nil
-            }
-        }
+        .onChange(of: sessionPresentation.photos) { _, values in photoSelectionChanged(values) }
         .onChange(of: attachmentMenuState) { previous, current in
-            if previous.sessionID != current.sessionID {
-                composerResourcePicker = nil
-                cancelAttachmentPresentation(includingActive: true)
-                sessionPresentation.cancelImports()
-            } else if !current.actionsEnabled {
-                composerResourcePicker = nil
-                cancelAttachmentPresentation(includingActive: false)
-                sessionPresentation.cancelImports()
-            }
+            attachmentMenuStateChanged(from: previous, to: current)
         }
         .onChange(of: queueEditorCommit) { _, commit in
             guard let editor = sessionPresentation.queuedMessageEditor,
@@ -240,54 +213,7 @@ struct ChatView: View {
         .task(id: PresentationActivityTaskID(
             source: composerResourceCatalogIdentity,
             presentationActive: presentationActivity.allowsPresentationPublication && scenePhase == .active
-        )) {
-            let activity = composerCatalogActivity
-            guard !Task.isCancelled, activity.allowsPresentationPublication, scenePhase == .active else { return }
-            // Command authority continues under a sheet; only this composer's
-            // disposable index pauses, retaining its last complete value.
-            let identity = composerResourceCatalogIdentity
-            let ownsCatalog = identity.catalogTarget != nil
-                && identity.catalogTarget == identity.presentationTarget
-            let commands = ownsCatalog
-                ? identity.commands.filter { identity.supportsSkillPrompt || $0.source != .skill }
-                : []
-            #if HOSTED_TEST
-            hostedProbe?.recordComposerCatalogBuild()
-            defer { hostedProbe?.composerCatalogDidFinish?(commands) }
-            #endif
-            let build = Task.detached(priority: .userInitiated) {
-                try Task.checkCancellation()
-                let catalog = ComposerResourceCatalog(commands: commands)
-                try Task.checkCancellation()
-                return catalog
-            }
-            let catalog: ComposerResourceCatalog
-            do {
-                catalog = try await withTaskCancellationHandler {
-                    try await build.value
-                } onCancel: {
-                    build.cancel()
-                }
-            } catch {
-                return
-            }
-            #if HOSTED_TEST
-            await hostedProbe?.composerCatalogWillInstall?(catalog)
-            #endif
-            guard !Task.isCancelled, activity == composerCatalogActivity, scenePhase == .active,
-                  identity == composerResourceCatalogIdentity else { return }
-            installedComposerResourceCatalog = (identity, catalog)
-            #if HOSTED_TEST
-            hostedProbe?.recordComposerCatalogInstall(catalog)
-            #endif
-            if ownsCatalog, let composerScope {
-                model.composerDrafts.reconcileSelectedResource(for: composerScope, commands: commands)
-            }
-            if let picker = composerResourcePicker {
-                composerResourceResults = catalog.entries(for: picker)
-            }
-            reconcileComposerResourcePicker()
-        }
+        )) { await buildComposerResourceCatalog() }
         .onChange(of: composerText) { _, _ in reconcileComposerResourcePicker() }
         .onChange(of: composerSelection) { _, _ in reconcileComposerResourcePicker() }
         .onChange(of: composerFocused) { _, _ in
@@ -308,25 +234,7 @@ struct ChatView: View {
             guard activity.allowsPresentationPublication else { return }
             admitPendingFloatingDisplay()
         }
-        .task(id: "search-anchor:\(sessionID):\(initialHistoryEntryID ?? "")") {
-            guard let entryID = initialHistoryEntryID,
-                  let searchResult = initialSearchResult,
-                  let profileID = model.profiles.selected?.id else { return }
-            // The mounted presentation is the admission fence; the owning
-            // scroll coordinator waits for the exact historical row's layout.
-            guard let generation = model.sessionPresentationGeneration(for: sessionID) else { return }
-            do {
-                guard try await model.navigateToSearchResult(searchResult, profileID: profileID) else {
-                    model.presentError(NSError(domain: "TronSearchNavigation", code: 1, userInfo: [NSLocalizedDescriptionKey: "The searched message could not be loaded. Try searching again."]))
-                    return
-                }
-                guard generation == model.sessionPresentationGeneration(for: sessionID), !Task.isCancelled else { return }
-                scrollCoordinator.requestHistoricalEntryScroll(semanticID: entryID, installed: transcriptPresentation.installed)
-            } catch is CancellationError { return } catch {
-                guard !Task.isCancelled else { return }
-                model.presentError(error)
-            }
-        }
+        .task(id: "search-anchor:\(sessionID):\(initialHistoryEntryID ?? "")") { await navigateToInitialSearchResult() }
     }
 
     private var completedDisplayPresentations: [DisplayProjection] {
@@ -392,25 +300,7 @@ struct ChatView: View {
 
     var body: some View {
         contentSurface
-        .onAppear {
-            if floatingDisplayCompletionTracker.baseline == nil {
-                _ = floatingDisplayCompletionTracker.transition(
-                    to: transcriptPresentation.installed?.completedDisplayPresentations
-                )
-            }
-            _ = ensureInteractionTraceContext()
-            recordComposerAvailability()
-            scrollCoordinator.viewportObservationChanged(
-                isActive: presentationActivity.allowsViewportObservation
-            )
-            keyboardObserver.setOwnerWindow(composerResponder.window)
-            keyboardObserver.start()
-            reconcileSessionPresentationVisibility()
-            layoutTransaction.configure(
-                keyboard: keyboardObserver.transition,
-                reduceMotion: reduceMotion
-            )
-        }
+        .onAppear { handleAppear() }
         .onChange(of: keyboardObserver.transition) { _, transition in
             layoutTransaction.configure(keyboard: transition, reduceMotion: reduceMotion)
             guard layoutTransaction.generation != nil else { return }
@@ -423,18 +313,7 @@ struct ChatView: View {
         .onChange(of: reduceMotion) { _, enabled in
             layoutTransaction.configure(keyboard: keyboardObserver.transition, reduceMotion: enabled)
         }
-        .onChange(of: layoutTransaction.terminalEventRevision) { _, _ in
-            for event in layoutTransaction.consumeTerminalEvents() {
-                switch event {
-                case .settled(let generationID):
-                    scrollCoordinator.layoutTransactionSettled(generationID)
-                case .abandoned(let generationID):
-                    scrollCoordinator.layoutTransactionAbandoned(generationID)
-                case .overflow:
-                    scrollCoordinator.cancel()
-                }
-            }
-        }
+        .onChange(of: layoutTransaction.terminalEventRevision) { _, _ in consumeLayoutTerminalEvents() }
         .onChange(of: scenePhase) { _, current in
             scenePhaseChanged(current)
         }
@@ -445,14 +324,7 @@ struct ChatView: View {
                 availability, context: context, state: interactionTraceState()
             )
         }
-        .onChange(of: model.connectionState) { _, state in
-            reconcileSessionPresentationVisibility()
-            guard scenePhase == .active,
-                  presentationActivity.allowsPresentationPublication,
-                  state == .connected,
-                  admitsAutomaticOpeningResume else { return }
-            beginOpeningAfterForegroundWhenConnected()
-        }
+        .onChange(of: model.connectionState) { _, state in connectionStateChanged(state) }
         .onChange(of: model.presentationTarget(for: sessionID)) { _, target in
             guard let target,
                   let generation = sessionPresentation.modelPresentationGeneration,
@@ -463,57 +335,7 @@ struct ChatView: View {
             foregroundReconciliationCompleted()
         }
         .onChange(of: presentationActivity) { previous, current in
-            reconcileSessionPresentationVisibility(
-                surfaceActive: current.allowsDataPublication
-            )
-            if previous.allowsContinuousAnimation,
-               !current.allowsContinuousAnimation {
-                abandonLayoutTransaction()
-            }
-            if previous.allowsViewportObservation,
-               !current.allowsViewportObservation {
-                viewportActivation &+= 1
-                scrollCoordinator.viewportActivationChanged(viewportActivation)
-                scrollCoordinator.viewportObservationChanged(isActive: false)
-                if sessionPresentation.openingTask != nil {
-                    // A covered transcript cannot publish the native geometry
-                    // needed to finish positioning. Cancel the exact opening and
-                    // scroll leases now so uncovering resumes with a fresh epoch;
-                    // never let their deadlines mature behind another surface.
-                    sessionPresentation.cancelOpeningTask()
-                    scrollCoordinator.cancel()
-                }
-                if current.allowsDataPublication,
-                   !hasDeferredViewportProjection {
-                    deferredViewportProjectionBaseline = transcriptPresentation.installed
-                    hasDeferredViewportProjection = true
-                }
-            }
-            if previous.allowsPresentationPublication,
-               !current.allowsPresentationPublication {
-                // Retire a build/ready frame already admitted before cover, not
-                // just future source callbacks. Descendant facts have their own
-                // state selectors; the covered native transcript stays installed.
-                transcriptPresentation.suspendPendingWork()
-            }
-            if !current.allowsDataPublication {
-                deferredViewportProjectionBaseline = nil
-                hasDeferredViewportProjection = false
-            }
-            if !previous.allowsViewportObservation,
-               current.allowsViewportObservation {
-                viewportActivation &+= 1
-                scrollCoordinator.viewportActivationChanged(viewportActivation)
-                scrollCoordinator.viewportObservationChanged(isActive: true)
-                if scenePhase == .active,
-                   !admitsAutomaticOpeningResume,
-                   transcriptPresentation.installed != nil {
-                    scrollCoordinator.foregroundViewportBecameActive(
-                        activation: viewportActivation
-                    )
-                }
-                reconcileDeferredViewportProjectionIfNeeded()
-            }
+            presentationActivityChanged(from: previous, to: current)
         }
         .onChange(of: scrollCoordinator.defersAutomaticLiveProjectionIntake) { _, deferred in
             automaticLiveProjectionIntakeChanged(deferred: deferred)
@@ -521,56 +343,10 @@ struct ChatView: View {
         .task(id: ChatOpeningSurfaceTaskID(
             surfaceActive: scenePhase == .active && presentationActivity.allowsPresentationPublication,
             openingTaskRevision: sessionPresentation.openingTaskRevision
-        )) {
-            switch ChatOpeningSurfacePolicy.action(
-                surfaceActive: scenePhase == .active && presentationActivity.allowsPresentationPublication,
-                hasOpeningTask: sessionPresentation.openingTask != nil,
-                needsOpeningResume: admitsAutomaticOpeningResume
-            ) {
-            case .none:
-                await recoverExtensionPresentationPublicationIfNeeded()
-            case .begin:
-                await beginOpeningPresentation()
-            case .waitForCurrentThenBeginIfNeeded:
-                guard let active = sessionPresentation.activeOpeningTaskLease else { return }
-                await active.task.value
-                _ = sessionPresentation.finishOpeningTask(active.generation)
-                guard !Task.isCancelled,
-                      scenePhase == .active,
-                      composerCatalogActivity.allowsPresentationPublication,
-                      admitsAutomaticOpeningResume else { return }
-                await beginOpeningPresentation()
-            }
-        }
+        )) { await runOpeningSurfaceTask() }
         .background { activeProjectionObservationDriver }
         .onChange(of: transcriptPresentation.installed?.tag) { previousTag, _ in
-            let installed = transcriptPresentation.installed
-            if ChatQueueMutationProjectionPolicy.shouldRetirePresentationState(
-                commandIsPending: sessionPresentation.queueMutationCommandIsPending,
-                expectedRevision: sessionPresentation.pendingQueueMutationRevision,
-                installedRevision: installed?.queueRevision
-            ) {
-                clearSettledQueueMutationPresentationState()
-            }
-            if presentationActivity.allowsViewportObservation {
-                if hasDeferredViewportProjection {
-                    reconcileDeferredViewportProjectionIfNeeded()
-                } else {
-                    reconcileInstalledProjectionForViewport(
-                        previousTag: previousTag,
-                        installed: installed
-                    )
-                }
-            }
-            #if HOSTED_TEST
-            if let installed {
-                hostedProbe?.recordProjectionInstall(
-                    rowCount: installed.timeline.items.count,
-                    sourceOrdinal: installed.tag.timelineGeneration,
-                    nextRenderedIDBySemanticID: installed.hostedRenderedIDBySemanticID
-                )
-            }
-            #endif
+            installedProjectionChanged(previousTag: previousTag)
         }
         .onReceive(NotificationCenter.default.publisher(
             for: UIApplication.didReceiveMemoryWarningNotification
@@ -578,6 +354,260 @@ struct ChatView: View {
             transcriptPresentation.handleMemoryPressure()
         }
         .onDisappear(perform: retirePresentation)
+    }
+
+    // Named handlers keep the modifier chains above cheap to type-check:
+    // multi-statement closures are solved together with their whole chain,
+    // which previously cost several seconds per ChatView rebuild.
+
+    private func photoSelectionChanged(_ values: [PhotosPickerItem]) {
+        guard !values.isEmpty else { return }
+        // PhotosPicker may deliver after its native presentation closes.
+        // Clear the selection first so it cannot replay into another chat,
+        // then bind this import to the current presentation authority.
+        sessionPresentation.photos = []
+        guard let target = presentationTarget else {
+            sessionPresentation.cancelImports()
+            return
+        }
+        sessionPresentation.photoImportTask?.cancel()
+        sessionPresentation.photoImportTarget = target
+        sessionPresentation.photoImportTask = Task { @MainActor in
+            await importPhotos(values, target: target)
+            guard !Task.isCancelled,
+                  sessionPresentation.photoImportTarget == target else { return }
+            sessionPresentation.photoImportTask = nil
+            sessionPresentation.photoImportTarget = nil
+        }
+    }
+
+    private func attachmentMenuStateChanged(from previous: ChatAttachmentMenuState, to current: ChatAttachmentMenuState) {
+        if previous.sessionID != current.sessionID {
+            composerResourcePicker = nil
+            cancelAttachmentPresentation(includingActive: true)
+            sessionPresentation.cancelImports()
+        } else if !current.actionsEnabled {
+            composerResourcePicker = nil
+            cancelAttachmentPresentation(includingActive: false)
+            sessionPresentation.cancelImports()
+        }
+    }
+
+    private func buildComposerResourceCatalog() async {
+        let activity = composerCatalogActivity
+        guard !Task.isCancelled, activity.allowsPresentationPublication, scenePhase == .active else { return }
+        // Command authority continues under a sheet; only this composer's
+        // disposable index pauses, retaining its last complete value.
+        let identity = composerResourceCatalogIdentity
+        let ownsCatalog = identity.catalogTarget != nil
+            && identity.catalogTarget == identity.presentationTarget
+        let commands = ownsCatalog
+            ? identity.commands.filter { identity.supportsSkillPrompt || $0.source != .skill }
+            : []
+        #if HOSTED_TEST
+        hostedProbe?.recordComposerCatalogBuild()
+        defer { hostedProbe?.composerCatalogDidFinish?(commands) }
+        #endif
+        let build = Task.detached(priority: .userInitiated) {
+            try Task.checkCancellation()
+            let catalog = ComposerResourceCatalog(commands: commands)
+            try Task.checkCancellation()
+            return catalog
+        }
+        let catalog: ComposerResourceCatalog
+        do {
+            catalog = try await withTaskCancellationHandler {
+                try await build.value
+            } onCancel: {
+                build.cancel()
+            }
+        } catch {
+            return
+        }
+        #if HOSTED_TEST
+        await hostedProbe?.composerCatalogWillInstall?(catalog)
+        #endif
+        guard !Task.isCancelled, activity == composerCatalogActivity, scenePhase == .active,
+              identity == composerResourceCatalogIdentity else { return }
+        installedComposerResourceCatalog = (identity, catalog)
+        #if HOSTED_TEST
+        hostedProbe?.recordComposerCatalogInstall(catalog)
+        #endif
+        if ownsCatalog, let composerScope {
+            model.composerDrafts.reconcileSelectedResource(for: composerScope, commands: commands)
+        }
+        if let picker = composerResourcePicker {
+            composerResourceResults = catalog.entries(for: picker)
+        }
+        reconcileComposerResourcePicker()
+    }
+
+    private func navigateToInitialSearchResult() async {
+        guard let entryID = initialHistoryEntryID,
+              let searchResult = initialSearchResult,
+              let profileID = model.profiles.selected?.id else { return }
+        // The mounted presentation is the admission fence; the owning
+        // scroll coordinator waits for the exact historical row's layout.
+        guard let generation = model.sessionPresentationGeneration(for: sessionID) else { return }
+        do {
+            guard try await model.navigateToSearchResult(searchResult, profileID: profileID) else {
+                model.presentError(NSError(domain: "TronSearchNavigation", code: 1, userInfo: [NSLocalizedDescriptionKey: "The searched message could not be loaded. Try searching again."]))
+                return
+            }
+            guard generation == model.sessionPresentationGeneration(for: sessionID), !Task.isCancelled else { return }
+            scrollCoordinator.requestHistoricalEntryScroll(semanticID: entryID, installed: transcriptPresentation.installed)
+        } catch is CancellationError { return } catch {
+            guard !Task.isCancelled else { return }
+            model.presentError(error)
+        }
+    }
+
+    private func handleAppear() {
+        if floatingDisplayCompletionTracker.baseline == nil {
+            _ = floatingDisplayCompletionTracker.transition(
+                to: transcriptPresentation.installed?.completedDisplayPresentations
+            )
+        }
+        _ = ensureInteractionTraceContext()
+        recordComposerAvailability()
+        scrollCoordinator.viewportObservationChanged(
+            isActive: presentationActivity.allowsViewportObservation
+        )
+        keyboardObserver.setOwnerWindow(composerResponder.window)
+        keyboardObserver.start()
+        reconcileSessionPresentationVisibility()
+        layoutTransaction.configure(
+            keyboard: keyboardObserver.transition,
+            reduceMotion: reduceMotion
+        )
+    }
+
+    private func consumeLayoutTerminalEvents() {
+        for event in layoutTransaction.consumeTerminalEvents() {
+            switch event {
+            case .settled(let generationID):
+                scrollCoordinator.layoutTransactionSettled(generationID)
+            case .abandoned(let generationID):
+                scrollCoordinator.layoutTransactionAbandoned(generationID)
+            case .overflow:
+                scrollCoordinator.cancel()
+            }
+        }
+    }
+
+    private func connectionStateChanged(_ state: GatewayConnectionState) {
+        reconcileSessionPresentationVisibility()
+        guard scenePhase == .active,
+              presentationActivity.allowsPresentationPublication,
+              state == .connected,
+              admitsAutomaticOpeningResume else { return }
+        beginOpeningAfterForegroundWhenConnected()
+    }
+
+    private func presentationActivityChanged(from previous: PresentationSurfaceActivity, to current: PresentationSurfaceActivity) {
+        reconcileSessionPresentationVisibility(
+            surfaceActive: current.allowsDataPublication
+        )
+        if previous.allowsContinuousAnimation,
+           !current.allowsContinuousAnimation {
+            abandonLayoutTransaction()
+        }
+        if previous.allowsViewportObservation,
+           !current.allowsViewportObservation {
+            viewportActivation &+= 1
+            scrollCoordinator.viewportActivationChanged(viewportActivation)
+            scrollCoordinator.viewportObservationChanged(isActive: false)
+            if sessionPresentation.openingTask != nil {
+                // A covered transcript cannot publish the native geometry
+                // needed to finish positioning. Cancel the exact opening and
+                // scroll leases now so uncovering resumes with a fresh epoch;
+                // never let their deadlines mature behind another surface.
+                sessionPresentation.cancelOpeningTask()
+                scrollCoordinator.cancel()
+            }
+            if current.allowsDataPublication,
+               !hasDeferredViewportProjection {
+                deferredViewportProjectionBaseline = transcriptPresentation.installed
+                hasDeferredViewportProjection = true
+            }
+        }
+        if previous.allowsPresentationPublication,
+           !current.allowsPresentationPublication {
+            // Retire a build/ready frame already admitted before cover, not
+            // just future source callbacks. Descendant facts have their own
+            // state selectors; the covered native transcript stays installed.
+            transcriptPresentation.suspendPendingWork()
+        }
+        if !current.allowsDataPublication {
+            deferredViewportProjectionBaseline = nil
+            hasDeferredViewportProjection = false
+        }
+        if !previous.allowsViewportObservation,
+           current.allowsViewportObservation {
+            viewportActivation &+= 1
+            scrollCoordinator.viewportActivationChanged(viewportActivation)
+            scrollCoordinator.viewportObservationChanged(isActive: true)
+            if scenePhase == .active,
+               !admitsAutomaticOpeningResume,
+               transcriptPresentation.installed != nil {
+                scrollCoordinator.foregroundViewportBecameActive(
+                    activation: viewportActivation
+                )
+            }
+            reconcileDeferredViewportProjectionIfNeeded()
+        }
+    }
+
+    private func runOpeningSurfaceTask() async {
+        switch ChatOpeningSurfacePolicy.action(
+            surfaceActive: scenePhase == .active && presentationActivity.allowsPresentationPublication,
+            hasOpeningTask: sessionPresentation.openingTask != nil,
+            needsOpeningResume: admitsAutomaticOpeningResume
+        ) {
+        case .none:
+            await recoverExtensionPresentationPublicationIfNeeded()
+        case .begin:
+            await beginOpeningPresentation()
+        case .waitForCurrentThenBeginIfNeeded:
+            guard let active = sessionPresentation.activeOpeningTaskLease else { return }
+            await active.task.value
+            _ = sessionPresentation.finishOpeningTask(active.generation)
+            guard !Task.isCancelled,
+                  scenePhase == .active,
+                  composerCatalogActivity.allowsPresentationPublication,
+                  admitsAutomaticOpeningResume else { return }
+            await beginOpeningPresentation()
+        }
+    }
+
+    private func installedProjectionChanged(previousTag: ChatTranscriptProjectionTag?) {
+        let installed = transcriptPresentation.installed
+        if ChatQueueMutationProjectionPolicy.shouldRetirePresentationState(
+            commandIsPending: sessionPresentation.queueMutationCommandIsPending,
+            expectedRevision: sessionPresentation.pendingQueueMutationRevision,
+            installedRevision: installed?.queueRevision
+        ) {
+            clearSettledQueueMutationPresentationState()
+        }
+        if presentationActivity.allowsViewportObservation {
+            if hasDeferredViewportProjection {
+                reconcileDeferredViewportProjectionIfNeeded()
+            } else {
+                reconcileInstalledProjectionForViewport(
+                    previousTag: previousTag,
+                    installed: installed
+                )
+            }
+        }
+        #if HOSTED_TEST
+        if let installed {
+            hostedProbe?.recordProjectionInstall(
+                rowCount: installed.timeline.items.count,
+                sourceOrdinal: installed.tag.timelineGeneration,
+                nextRenderedIDBySemanticID: installed.hostedRenderedIDBySemanticID
+            )
+        }
+        #endif
     }
 
     @discardableResult

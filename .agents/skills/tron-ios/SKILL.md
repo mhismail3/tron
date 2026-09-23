@@ -29,8 +29,9 @@ profiling scheme.
 The canonical physical install pair is `Tron Device` + `LocalDevice`.
 The supervised Rebuild and Install sheet may explicitly select Fast debug (on by
 default for UI iteration); it uses the same pair and identity with
-`--fast-debug`, unoptimized incremental compilation, and a separate DerivedData
-cache. It is never a Release mode. Build role, push route, and exact Gateway protocol range are emitted into
+`--fast-debug`, unoptimized compilation, and a separate DerivedData cache. Both
+install modes compile per file; only the scheme's Profile action builds the
+whole-module `LocalDevice` binary. It is never a Release mode. Build role, push route, and exact Gateway protocol range are emitted into
 `Info.plist`; signed artifacts are authoritative. Test's beta relay route is
 internal compatibility only and is not a real APNs lane. A Stable device install
 must follow a verified matching Mac app/Gateway install; the device helper fails

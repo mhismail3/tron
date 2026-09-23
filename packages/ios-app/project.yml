@@ -89,6 +89,11 @@ targets:
     sources:
       - path: Sources
         createIntermediateGroups: true
+        # The folder references below own these resources. Without the
+        # exclusion every font and notice is also copied flat to the bundle root.
+        excludes:
+          - "Resources/Fonts/**"
+          - "Resources/ThirdPartyNotices/**"
       - path: Sources/Resources/Fonts
         type: folder
         buildPhase: resources

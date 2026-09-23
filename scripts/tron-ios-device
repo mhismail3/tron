@@ -34,7 +34,7 @@ Environment overrides:
   TRON_IOS_DEVICE_NAME     Physical iOS device name
   TRON_IOS_SCHEME          Install compatibility input; defaults to Tron Device
   TRON_IOS_CONFIGURATION   Install compatibility input; defaults to LocalDevice
-  --fast-debug              Use the separate unoptimized incremental UI-iteration build
+  --fast-debug              Use the separate unoptimized UI-iteration build (both modes compile incrementally)
 
 The canonical install pair is Tron Device + LocalDevice. The exact legacy
 Tron Fast + ProdDebug pair remains accepted only for the untouched Codex
@@ -277,10 +277,12 @@ pretty_xcode_output() {
 
 XCODEBUILD_ARGS=()
 
-# Build the complete argv once so optimized mode never expands an empty
-# optional array under Bash's nounset mode. Fast debug only appends compiler
-# overrides; both modes retain the same scheme, destination, signing, and
-# result-bundle arguments.
+# Build the complete argv once. Both modes retain the same scheme, destination,
+# signing, and result-bundle arguments and differ only in compiler overrides.
+# Optimized installs keep -O but compile per file: whole-module optimization
+# recompiles the entire app for any edit (~150s versus ~17s measured for a
+# one-file change). The LocalDevice xcconfig stays whole-module, so the
+# scheme's Instruments Profile action still builds the release-like binary.
 prepare_xcodebuild_args() {
     local derived_data_path="$1"
     local result_bundle_path="$2"
@@ -299,13 +301,12 @@ prepare_xcodebuild_args() {
         -allowProvisioningUpdates
         -allowProvisioningDeviceRegistration
     )
+    XCODEBUILD_ARGS+=(SWIFT_COMPILATION_MODE=singlefile)
     if [[ "$build_mode" == "fast-debug" ]]; then
         XCODEBUILD_ARGS+=(
             SWIFT_OPTIMIZATION_LEVEL=-Onone
-            SWIFT_COMPILATION_MODE=singlefile
             GCC_OPTIMIZATION_LEVEL=0
             DEBUG_INFORMATION_FORMAT=dwarf
-            ENABLE_TESTABILITY=YES
             ONLY_ACTIVE_ARCH=YES
             MTL_ENABLE_DEBUG_INFO=INCLUDE_SOURCE
         )

@@ -313,14 +313,19 @@ authoritative for Apple service environments.
 module Swift compilation, normal Clang optimization, testability disabled,
 non-active-architecture-only builds) while retaining development signing and
 `dwarf-with-dsym` output. This makes ordinary use representative of the
-optimized app while preserving Instruments attachment. For supervised UI
-iteration, the Rebuild and Install confirmation defaults to **Fast debug
-rebuild**. That immutable command choice uses the same `Tron Device` scheme,
-production-sandbox bundle identity, signing, and protocol checks, but passes
-`--fast-debug` to `scripts/tron-ios-device`, which uses unoptimized single-file
-Swift compilation, debug symbols, active-architecture-only compilation, and a
-separate `build/DerivedData-fast-debug` cache. Turning it off selects the normal
-optimized `build/DerivedData` path. This is not a Release install mode. Do not add
+optimized app while preserving Instruments attachment. The scheme's Profile
+action keeps that whole-module build. `scripts/tron-ios-device install` keeps
+`-O` but overrides `SWIFT_COMPILATION_MODE=singlefile`, because whole-module
+optimization recompiles the entire app for any edit (measured 2026-09-23: about
+158 s versus 17 s for a one-file change). Its runtime is close to, but not
+identical to, the Profile build; capture performance evidence from Profile.
+For supervised UI iteration, the Rebuild and Install confirmation defaults to
+**Fast debug rebuild**. That immutable command choice uses the same `Tron
+Device` scheme, production-sandbox bundle identity, signing, and protocol
+checks, but passes `--fast-debug` to `scripts/tron-ios-device`, which also uses
+unoptimized Swift/Clang compilation, in-object debug symbols, and a separate
+`build/DerivedData-fast-debug` cache. Turning it off selects the optimized
+`build/DerivedData` path. This is not a Release install mode. Do not add
 `get-task-allow` manually or strip it from the development-signed artifact.
 `Tron Device`'s Run action is only a scheme convenience; the device helper's
 launch and a launch from the device itself are not debugger sessions.
