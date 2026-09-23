@@ -278,10 +278,11 @@ struct ChatSemanticMetadata: Codable, Hashable, Sendable {
     let sequence: Int
     let lifecycle: InvocationLifecycle?
     let resourceInvocation: ComposerResourceInvocation?
+    let submittedText: String?
 
     private enum CodingKeys: String, CodingKey {
         case version, direction, contextEffect, delivery, visibility, kind, origin,
-             invocationId, operationId, sequence, lifecycle, resourceInvocation
+             invocationId, operationId, sequence, lifecycle, resourceInvocation, submittedText
     }
 
     init(
@@ -296,12 +297,13 @@ struct ChatSemanticMetadata: Codable, Hashable, Sendable {
         operationId: String? = nil,
         sequence: Int,
         lifecycle: InvocationLifecycle? = nil,
-        resourceInvocation: ComposerResourceInvocation? = nil
+        resourceInvocation: ComposerResourceInvocation? = nil,
+        submittedText: String? = nil
     ) {
         self.version = version; self.direction = direction; self.contextEffect = contextEffect
         self.delivery = delivery; self.visibility = visibility; self.kind = kind; self.origin = origin
         self.invocationId = invocationId; self.operationId = operationId; self.sequence = sequence
-        self.lifecycle = lifecycle; self.resourceInvocation = resourceInvocation
+        self.lifecycle = lifecycle; self.resourceInvocation = resourceInvocation; self.submittedText = submittedText
     }
 
     init(from decoder: Decoder) throws {
@@ -318,7 +320,9 @@ struct ChatSemanticMetadata: Codable, Hashable, Sendable {
         sequence = try values.decode(Int.self, forKey: .sequence)
         lifecycle = try values.decodeIfPresent(InvocationLifecycle.self, forKey: .lifecycle)
         resourceInvocation = try values.decodeIfPresent(ComposerResourceInvocation.self, forKey: .resourceInvocation)
+        submittedText = try values.decodeIfPresent(String.self, forKey: .submittedText)
         guard version == 1, sequence >= 0,
+              submittedText.map({ $0.utf8.count <= 192 * 1_024 }) ?? true,
               invocationId.map({ admitsSemanticString($0, maximumBytes: 256) }) ?? true,
               operationId.map({ admitsSemanticString($0, maximumBytes: 256) }) ?? true,
               resourceInvocation.map(\.isTransportValid) ?? true else {

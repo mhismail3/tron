@@ -1720,7 +1720,11 @@ attachments at the Gateway boundary regardless of client behavior. Extension and
 use Pi's literal ASCII-space delimiter; prompt templates retain Pi's whitespace delimiter after
 extension precedence. The same source-specific rules govern typed admission and queue checks. Binding receipts
 contain canonical target identity only; start receipts own resource identity and trusted producer
-provenance and are recovered from canonical JSONL if live runtime maps have already settled. Full
+provenance and are recovered from canonical JSONL if live runtime maps have already settled. Image-bearing
+prompt starts also retain the exact submitted text (bounded by the prompt limit); Pi may append generated
+image-resize coordinate guidance to its canonical user-message text. Transcript clients use this receipt
+provenance for display only and must preserve canonical model history, attachment parts, and user-authored
+text that resembles an SDK note. Full
 and paged transcript projection apply that start-receipt origin only through the exact canonical
 binding, so Gateway-owned Automation prompts retain their `Automation` producer, Automation ID,
 and `automation:<run UUID>` operation namespace across reconnect and cold reconstruction while

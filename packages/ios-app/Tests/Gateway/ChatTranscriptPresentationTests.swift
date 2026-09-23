@@ -1242,6 +1242,31 @@ struct ChatTranscriptPresentationTests {
         #expect(UserPromptPresentationPolicy.promptDisplayText(resource) == expected)
     }
 
+    @Test("image prompt presentation uses receipt-owned authored text, never annotation matching")
+    func imagePromptAuthoredTextPresentation() throws {
+        let content = try JSONDecoder.gateway.decode([ContentPart].self, from: Data(#"[{"id":"normalized","ordinal":0,"type":"text","text":"Saw this\n\n[Image: original 1320x2868, displayed at 921x2000. Multiply coordinates by 1.43 to map to original image.]"},{"id":"image","ordinal":1,"type":"image","mimeType":"image/jpeg","blobId":"image-blob"}]"#.utf8))
+        func item(authored: String) -> TranscriptItem {
+            .message(MessageTranscriptItem(
+                id: "image-prompt", parentId: nil, timestamp: "2026-01-01T00:00:00Z",
+                kind: .message, role: .user, presentationId: "image-prompt", content: content,
+                semantic: ChatSemanticMetadata(
+                    direction: .inboundContext, contextEffect: .modelInput, delivery: .stored,
+                    visibility: .visible, kind: .prompt,
+                    origin: .init(kind: .user, confidence: .boundary), sequence: 1,
+                    submittedText: authored
+                )
+            ))
+        }
+        let hiddenResizeNote = ChatTranscriptPresentation.messageParts(in: item(authored: "Saw this"))
+            .compactMap { if case .content(let part) = $0 { part } else { nil } }
+        #expect(hiddenResizeNote.map(\.text).compactMap { $0 } == ["Saw this"])
+        #expect(hiddenResizeNote.last?.type == .image)
+        let authoredMatchingNote = "Saw this\n\n[Image: original 1320x2868, displayed at 921x2000. Multiply coordinates by 1.43 to map to original image.]"
+        let preserved = ChatTranscriptPresentation.messageParts(in: item(authored: authoredMatchingNote))
+            .compactMap { if case .content(let part) = $0 { part } else { nil } }
+        #expect(preserved.first?.text == authoredMatchingNote)
+    }
+
     @Test("attachment menu availability requires authority, not transcript settlement")
     func attachmentAvailability() {
         #expect(ChatAttachmentAvailabilityPolicy.actionsEnabled(

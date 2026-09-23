@@ -1960,6 +1960,7 @@ function withInvocationSemantics(
       operationId: boundInvocation.operationId,
       kind: "resourcePrompt",
       ...(boundInvocation.resourceInvocation ? { resourceInvocation: boundInvocation.resourceInvocation } : {}),
+      ...(boundInvocation.submittedText === undefined ? {} : { submittedText: boundInvocation.submittedText }),
       lifecycle: boundInvocation.lifecycle,
     } };
   }

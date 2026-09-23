@@ -329,6 +329,8 @@ export interface ChatSemanticMetadata {
   sequence: number;
   lifecycle?: InvocationLifecycle;
   resourceInvocation?: ResourceInvocation;
+  /** Authored text retained for image prompts whose SDK history includes generated resize notes. */
+  submittedText?: string;
 }
 
 export interface ContextDeliveryMetadata {

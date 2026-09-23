@@ -6071,6 +6071,7 @@ export class RuntimeSlot {
         source: invocationSource,
         ...(invocationName ? { name: invocationName } : {}),
         ...(queueDisplay?.resourceInvocation?.arguments === undefined ? {} : { arguments: queueDisplay.resourceInvocation.arguments }),
+        ...(images.length === 0 ? {} : { submittedText: queueDisplay?.text ?? text }),
         lifecycle: "staged",
         origin: ownership?.origin ?? (invocationSource === "extension" && invocationName
           ? this.extensionCommandOrigin(invocationName)
@@ -6143,6 +6144,7 @@ export class RuntimeSlot {
           ...(queueDisplay?.resourceInvocation?.arguments
             ? { arguments: queueDisplay.resourceInvocation.arguments }
             : {}),
+          ...(images.length === 0 ? {} : { submittedText: queueDisplay?.text ?? text }),
           lifecycle: "staged",
           origin: invocation.origin,
           sequence: this.revision + 1,

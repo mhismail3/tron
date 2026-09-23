@@ -175,7 +175,7 @@ private struct AuthEventContent: View {
                     }
                 }
                 .buttonStyle(TronActionButtonStyle(role: .primary))
-                .disabled(openingBrowser)
+                .disabled(openingBrowser || (event.callbackCapture == nil && !manualTextPromptForEvent))
                 if let browserError {
                     TronCaption(browserError)
                         .foregroundStyle(Color.tronError)
@@ -183,8 +183,15 @@ private struct AuthEventContent: View {
                             reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top))
                         )
                 }
+                if event.callbackCapture == nil && !manualTextPromptForEvent {
+                    TronCaption("Waiting for this login attempt to request a manual callback…")
+                }
                 if let host = url.host() {
-                    TronCaption("Secure login at \(host). Tron returns here after authorization.")
+                    if event.callbackCapture == nil && manualTextPromptForEvent {
+                        TronCaption("Secure login at \(host). After authorization, return here and paste the callback URL or code.")
+                    } else {
+                        TronCaption("Secure login at \(host). Tron returns here after authorization.")
+                    }
                 }
             }
         }
@@ -224,13 +231,21 @@ private struct AuthEventContent: View {
         }
     }
 
+    private var manualTextPromptForEvent: Bool {
+        ProviderAuthBrowserPolicy.supportsManualCallback(event: event, prompt: model.authPrompt)
+    }
+
     private func openProviderLogin(_ url: URL) {
         browserError = nil
+        guard model.authEvent?.operationId == event.operationId else {
+            browserError = "This login attempt has expired. Start provider login again."
+            return
+        }
         guard let capture = event.callbackCapture else {
-            if model.authPrompt?.kind == .manualCode {
+            if manualTextPromptForEvent {
                 openURL(url)
             } else {
-                browserError = "This Gateway did not provide a secure iPhone callback. Update the selected Mac and try again."
+                browserError = "This login needs a secure callback, but none is available yet. Wait for the provider's login prompt or start login again."
             }
             return
         }

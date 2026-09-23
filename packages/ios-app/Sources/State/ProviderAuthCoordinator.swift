@@ -18,6 +18,13 @@ struct ProviderAuthPromptState: Identifiable, Hashable {
     let options: [Option]
 }
 
+enum ProviderAuthBrowserPolicy {
+    static func supportsManualCallback(event: ProviderAuthEventState, prompt: ProviderAuthPromptState?) -> Bool {
+        guard let prompt, prompt.operationId == event.operationId else { return false }
+        return prompt.kind == .text || prompt.kind == .manualCode
+    }
+}
+
 struct ProviderAuthEventState: Identifiable, Hashable {
     struct Link: Hashable, Identifiable {
         let url: URL

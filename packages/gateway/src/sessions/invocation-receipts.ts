@@ -11,6 +11,8 @@ export interface InvocationProjection {
   source: "plain" | "skill" | "prompt" | "extension";
   name?: string;
   arguments?: string;
+  /** User-authored text for image-bearing prompts; Pi may append resize notes to its canonical message. */
+  submittedText?: string;
   resourceInvocation?: ResourceInvocation;
   lifecycle: InvocationLifecycle;
   canonicalEntryId?: string;
@@ -23,7 +25,7 @@ export interface InvocationProjection {
 /** Canonical, non-context receipt family for Gateway invocation causality. */
 export const INVOCATION_RECEIPT_TYPE = "tron.chat-invocation.v1";
 export const INVOCATION_RECEIPT_WRITER = "gateway";
-export const MAX_RECEIPT_BYTES = 8_192;
+export const MAX_RECEIPT_BYTES = 400 * 1_024;
 const MAX_ID_BYTES = 256;
 const MAX_NAME_BYTES = 512;
 const TERMINAL_LIFECYCLES = new Set<InvocationLifecycle>(["completed", "failed", "interrupted", "outcomeUnknown"]);
@@ -54,6 +56,7 @@ export interface InvocationStartReceipt extends InvocationReceiptCommon {
   receiptKind: "start";
   name?: string;
   arguments?: string;
+  submittedText?: string;
   lifecycle: "staged";
   origin: ChatOrigin;
 }
@@ -130,7 +133,7 @@ function validOrigin(value: unknown): value is ChatOrigin {
 
 function allowedKeys(kind: ReceiptKind): Set<string> {
   const common = ["writer", "version", "receiptId", "receiptKind", "invocationId", "operationId", "sessionId", "source", "sequence", "createdAt"];
-  if (kind === "start") common.push("name", "arguments", "lifecycle", "origin");
+  if (kind === "start") common.push("name", "arguments", "submittedText", "lifecycle", "origin");
   if (kind === "transition") common.push("lifecycle");
   if (kind === "terminal") common.push("name", "origin", "lifecycle", "retryable", "errorCode");
   if (kind === "binding") common.push("canonicalEntryId", "parentEntryId");
@@ -159,6 +162,9 @@ export function parseInvocationReceipt(value: unknown): InvocationReceiptData | 
   const kind = r.receiptKind as ReceiptKind;
   if (r.name !== undefined && !validText(r.name, MAX_NAME_BYTES)) return undefined;
   if (r.arguments !== undefined && !validArguments(r.arguments)) return undefined;
+  if (r.submittedText !== undefined && (typeof r.submittedText !== "string"
+      || Buffer.byteLength(r.submittedText, "utf8") > 192 * 1_024
+      || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(r.submittedText))) return undefined;
   if (r.lifecycle !== undefined && (!validText(r.lifecycle, 64) || !LIFECYCLES.has(r.lifecycle as InvocationLifecycle))) return undefined;
   if (r.canonicalEntryId !== undefined && !validText(r.canonicalEntryId, MAX_ID_BYTES)) return undefined;
   if (r.parentEntryId !== undefined && !validText(r.parentEntryId, MAX_ID_BYTES)) return undefined;
@@ -263,6 +269,7 @@ export function invocationProjection(receipts: readonly InvocationReceiptData[])
         version: 1, invocationId: receipt.invocationId, operationId: receipt.operationId,
         source: receipt.source, ...(receipt.name ? { name: receipt.name } : {}),
         ...(receipt.arguments ? { arguments: receipt.arguments } : {}),
+        ...(receipt.submittedText === undefined ? {} : { submittedText: receipt.submittedText }),
         ...(["skill", "prompt", "extension"].includes(receipt.source) && receipt.name !== undefined
           ? { resourceInvocation: { source: receipt.source as "skill" | "prompt" | "extension", name: receipt.name, arguments: receipt.arguments ?? "" } }
           : {}),

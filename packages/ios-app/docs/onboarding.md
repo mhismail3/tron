@@ -34,8 +34,11 @@ hidden while the native upward sheet gesture remains available.
    multiple methods and configured-provider replacement controls remain explicit. Newly
    delivered prompt/event content fades and slides down in place (opacity-only under
    Reduce Motion). API-key entry stays inline with a value-gated Save action. Browser
-   OAuth opens in `ASWebAuthenticationSession` on iPhone. For Pi
-   loopback redirects, a one-shot operation-owned iOS listener binds only the exact
+   OAuth with an admitted loopback callback opens in `ASWebAuthenticationSession` on iPhone. If a provider
+   emits an auth URL followed by a same-operation text/manual-code prompt but no secure callback capture,
+   the sheet waits for that prompt, opens the URL in the external browser, and asks the user to return and
+   paste the callback URL or code into that operation's prompt. Other callback-less flows fail honestly;
+   they are not treated as manual entry. For Pi loopback redirects, a one-shot operation-owned iOS listener binds only the exact
    advertised localhost port/path, captures the bounded authorization response, and
    closes the system browser through the dedicated `com.tron.mobile.oauth` handoff. The complete
    redirect is submitted to Pi's existing manual-code interaction; providers without
