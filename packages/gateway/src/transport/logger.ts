@@ -19,7 +19,7 @@ export interface LogRecord {
 const MAX_RECORDS = 1_000;
 const MAX_MESSAGE_BYTES = 2_000;
 const MAX_FILE_BYTES = 1_048_576;
-const MAX_ROTATED_FILE_BYTES = 1_048_576;
+
 
 function redact(value: string): string {
   return value
@@ -113,13 +113,13 @@ export class GatewayLogger {
     if (!this.path) return;
     try {
       mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
-      if (existsSync(this.path) && statSync(this.path).size > MAX_FILE_BYTES) {
+      const line = `${JSON.stringify(record)}\n`;
+      if (existsSync(this.path) && statSync(this.path).size + Buffer.byteLength(line) > MAX_FILE_BYTES) {
         const rotated = this.rotatedPath();
         try { unlinkSync(rotated); } catch { /* no prior rotation */ }
         renameSync(this.path, rotated);
       }
-      appendFileSync(this.path, `${JSON.stringify(record)}\n`, { mode: 0o600 });
-      if (existsSync(this.rotatedPath()) && statSync(this.rotatedPath()).size > MAX_ROTATED_FILE_BYTES) unlinkSync(this.rotatedPath());
+      appendFileSync(this.path, line, { mode: 0o600 });
     } catch {
       // Stdout/stderr remains the fallback diagnostic sink.
     }

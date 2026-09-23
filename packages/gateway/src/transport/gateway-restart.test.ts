@@ -73,6 +73,17 @@ describe("Gateway administrative restart", () => {
       .rejects.toMatchObject({ code: "unsupported" });
   });
 
+  it("lets an idempotent restartNow command escalate an active drain immediately", async () => {
+    vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1");
+    const requestRestart = vi.fn();
+    const gateway = service({ activeSessions: ["session-1"], requestRestart });
+    await gateway.invoke(client, "gateway.restart", { commandId: "restart-command" });
+
+    await expect(gateway.invoke(client, "gateway.restart", { commandId: "restart-now-command", restartNow: true }))
+      .resolves.toMatchObject({ scheduled: true, restartNow: true, drain: drain(1) });
+    expect(requestRestart).toHaveBeenCalledWith(true);
+  });
+
   it("refuses process replacement while a terminal PTY is alive", async () => {
     vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1");
     const gateway = service({ activeTerminals: ["terminal-1"] });

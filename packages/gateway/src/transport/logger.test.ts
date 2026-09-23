@@ -1,7 +1,7 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { GatewayLogger } from "./logger.js";
 
 const temporaryDirectories: string[] = [];
@@ -37,6 +37,20 @@ describe("GatewayLogger", () => {
     expect(record?.requestID).toMatch(/^[A-Za-z0-9._:/-]+$/u);
     expect(record?.requestID?.length).toBeLessThanOrEqual(160);
     expect(record?.message).not.toContain("id with spaces");
+  });
+
+  it("rotates before the active log exceeds its bound and keeps the previous file", () => {
+    const directory = mkdtempSync(join(tmpdir(), "tron-log-rotation-"));
+    temporaryDirectories.push(directory);
+    const path = join(directory, "gateway.jsonl");
+    const logger = new GatewayLogger(path);
+    const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    for (let index = 0; index < 700; index += 1) logger.log("info", `record-${index}-${"x".repeat(1_500)}`);
+    output.mockRestore();
+    expect(existsSync(`${path}.1`)).toBe(true);
+    expect(statSync(path).size).toBeLessThanOrEqual(1_048_576);
+    expect(statSync(`${path}.1`).size).toBeLessThanOrEqual(1_048_576);
+    expect(readFileSync(`${path}.1`, "utf8")).toContain("record-");
   });
 
   it("redacts secrets before retaining or persisting records", () => {

@@ -529,6 +529,7 @@ export class RuntimeRegistry {
       beforeSessionRekey?: (previousId: string, nextId: string) => Promise<void>;
       beforeSessionDelete?: (sessionId: string) => Promise<void>;
       sessionClosed?: (sessionId: string) => void;
+      persistenceDiagnostic?: (sessionId: string, code: string) => void;
       catalogDiscoveryLimits?: Partial<typeof DEFAULT_CATALOG_DISCOVERY_LIMITS>;
       stageTiming?: (
         stage: string,
@@ -602,19 +603,30 @@ export class RuntimeRegistry {
     // marker that was already admitted to this reconciliation pass.
     await this.timedStage("startup.attention.initialize", () => this.attention.initialize());
     const markerEvidence = await this.timedStage("startup.run-marker.read", () => this.markers.evidence());
-    // Capture one bounded structural cut and pass it through recovery. This
-    // prevents reconciliation from silently performing a second catalog walk
-    // and keeps incomplete evidence fail-closed.
-    onPhase?.("catalog-warming");
-    const catalogEvidence = await this.timedStage("startup.catalog.evidence", () => this.sharedCatalogStructureEvidence());
-    onPhase?.("attention-recovery");
-    await this.timedStage("startup.attention.reconcile", () => this.reconcileCanonicalAttention(markerEvidence, catalogEvidence));
-    this.interrupted = await this.timedStage("startup.run-marker.interrupted", () => this.markers.interruptedSessionIds());
+    // Recovery can open and parse large session files. Do not hold listener
+    // readiness on those full reads; recover them once the Gateway is serving.
+    this.pendingAttentionRecovery = markerEvidence;
+    this.pendingStartupPhaseObserver = onPhase;
     this.evictionTimer = setInterval(() => void this.evictIdle(), 60_000);
     this.evictionTimer.unref();
     this.artifactDiscoveryTimer = setInterval(() => void this.discoverExtensionArtifacts(), 750);
     this.artifactDiscoveryTimer.unref();
     void this.discoverExtensionArtifacts();
+  }
+
+  private pendingAttentionRecovery: ReadonlyMap<string, readonly RunMarkerEvidence[]> | undefined;
+  private pendingStartupPhaseObserver: ((phase: "catalog-warming" | "attention-recovery") => void) | undefined;
+
+  async recoverCanonicalAttention(): Promise<void> {
+    const markerEvidence = this.pendingAttentionRecovery;
+    if (!markerEvidence) return;
+    this.pendingAttentionRecovery = undefined;
+    this.pendingStartupPhaseObserver?.("catalog-warming");
+    const catalogEvidence = await this.timedStage("startup.catalog.evidence", () => this.sharedCatalogStructureEvidence());
+    this.pendingStartupPhaseObserver?.("attention-recovery");
+    this.pendingStartupPhaseObserver = undefined;
+    await this.timedStage("startup.attention.reconcile", () => this.reconcileCanonicalAttention(markerEvidence, catalogEvidence));
+    this.interrupted = await this.timedStage("startup.run-marker.interrupted", () => this.markers.interruptedSessionIds());
   }
 
   /** Re-admit only durable pending/failed Knowledge cuts after restart. The
@@ -1101,6 +1113,7 @@ export class RuntimeRegistry {
       extensionActivityRecency: this.extensionActivityRecency,
       processActivityRecency: this.processActivityRecency,
       workRegistry: this.workRegistry,
+      ...(this.options.persistenceDiagnostic ? { persistenceDiagnostic: this.options.persistenceDiagnostic } : {}),
       isSessionPresented: (sessionId: string) => this.isSessionPresented(sessionId),
       ...(this.options.machineId ? { machineId: this.options.machineId } : {}),
       ...(this.options.notifications ? { notifications: this.options.notifications } : {}),
@@ -3765,6 +3778,7 @@ export class RuntimeRegistry {
     const now = Date.now();
     const facts: Array<{
       key: string;
+      sessionId?: string;
       category: AdministrativeDrainBlockerCategory;
       state: AdministrativeDrainBlockerSummary["state"];
       admittedAt?: string;
@@ -3781,6 +3795,7 @@ export class RuntimeRegistry {
           || suspectForegroundTokens.has(work.token));
       facts.push({
         key: `work:${work.token}`,
+        ...(work.sessionId ? { sessionId: work.sessionId } : {}),
         category: work.kind,
         state: foregroundIsSuspect
           ? "suspect"
@@ -3791,7 +3806,7 @@ export class RuntimeRegistry {
     }
     for (const slot of this.slots.values()) {
       for (const fact of slot.administrativeDrainBlockers()) {
-        facts.push({ ...fact, key: `slot:${slot.id}:${fact.key}` });
+        facts.push({ ...fact, sessionId: slot.id, key: `slot:${slot.id}:${fact.key}` });
       }
     }
     facts.sort((left, right) => (left.admittedAt ?? "").localeCompare(right.admittedAt ?? "")
@@ -3809,6 +3824,7 @@ export class RuntimeRegistry {
       return {
         id: `blocker-${createHash("sha256").update(`${this.drainId}\0${fact.key}`).digest("hex").slice(0, 20)}`,
         category: fact.category,
+        ...(fact.sessionId ? { sessionId: fact.sessionId } : {}),
         state: fact.state,
         ...(fact.admittedAt && Number.isFinite(admittedMilliseconds) ? {
           admittedAt: fact.admittedAt,

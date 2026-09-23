@@ -14,6 +14,7 @@ import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import type { BlobByteRange } from "../sessions/blob-store.js";
 import type { AuthBroker } from "../admin/auth-broker.js";
 import type { GatewayLogger } from "./logger.js";
+import { GATEWAY_CONNECTION_POLICY } from "./connection-policy.js";
 import { GatewayService, type ClientContext } from "./gateway-service.js";
 import { MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import { SessionSyncBarrier, type BufferedSessionEncoding, type BufferedSessionEvent } from "./session-sync.js";
@@ -22,7 +23,7 @@ import type { BrowserLiveViewRegistry } from "../display/browser-live-view.js";
 // Retain only recent former IDs while an active subscription is rekeyed. Older
 // IDs are stale control paths and may safely require a fresh session.open.
 export const MAXIMUM_REKEYED_SESSION_IDS = 64;
-export const MAXIMUM_UNANSWERED_HEARTBEATS = 3;
+export const MAXIMUM_UNANSWERED_HEARTBEATS = GATEWAY_CONNECTION_POLICY.missedHeartbeatLimit;
 /** Application-defined close code for a socket replaced by its own identity. */
 export const SUPERSEDED_CLOSE_CODE = 4000;
 
@@ -138,7 +139,7 @@ function progressAge(at: number | null, now: number): string {
   return at === null ? "unknown" : String(Math.max(0, Math.round(now - at)));
 }
 
-export function heartbeatTimerDelay(elapsedMs: number, intervalMs = 25_000): number {
+export function heartbeatTimerDelay(elapsedMs: number, intervalMs = GATEWAY_CONNECTION_POLICY.heartbeatIntervalMs): number {
   return Math.max(0, Math.round(elapsedMs - intervalMs));
 }
 
@@ -603,7 +604,7 @@ export class GatewayServer {
         connection.unansweredHeartbeats += 1;
         connection.socket.ping();
       }
-    }, 25_000);
+    }, GATEWAY_CONNECTION_POLICY.heartbeatIntervalMs);
     this.heartbeat.unref();
   }
 
@@ -1162,7 +1163,7 @@ export class GatewayServer {
         }
         const identity = authenticated.kind === "local" ? "local-wrapper" : authenticated.deviceId;
         const maximumConnections = this.options.maximumConnections ?? 32;
-        const maximumPerIdentity = this.options.maximumConnectionsPerIdentity ?? 4;
+        const maximumPerIdentity = this.options.maximumConnectionsPerIdentity ?? GATEWAY_CONNECTION_POLICY.perIdentitySocketCap;
         // A closing connection has already retired its work and is terminated
         // within one second; it is not live capacity.
         const live = [...this.clients.values()].filter((client) => !client.closeInitiated);
@@ -1265,7 +1266,7 @@ export class GatewayServer {
       admittedAt: performance.now(),
       lastInboundAt: null,
       lastWriteProgressAt: null,
-      helloTimer: setTimeout(() => this.closeFailedConnection(connection, 1008, "hello required"), 5_000),
+      helloTimer: setTimeout(() => this.closeFailedConnection(connection, 1008, "hello required"), GATEWAY_CONNECTION_POLICY.helloDeadlineMs),
     };
     this.clients.set(connection.id, connection);
     this.options.logger.log("info", `Client ${connection.id} connection admitted (${isLocal ? "local" : "paired"})`, { event: "connection.admitted", source: "transport" });
@@ -1370,9 +1371,6 @@ export class GatewayServer {
     connection.requestControllers.set(frame.id, requestController);
     const requestId = frame.id;
     const diagnosticID = diagnosticRequestID(requestId);
-    this.options.logger.log("info", `RPC request ${frame.method} from client ${connection.id}`, {
-      event: "rpc.request", source: "transport", method: frame.method, requestID: diagnosticID,
-    });
     const rpcStartedAt = performance.now();
     let rpcOutcome: "success" | "failure" = "failure";
     const synchronizationOwners: SynchronizationOwner[] = [];
@@ -1796,14 +1794,16 @@ export class GatewayServer {
       connection.inFlight.delete(frame.id);
       connection.requestControllers.delete(frame.id);
       const durationMs = Math.max(0, Math.round(performance.now() - rpcStartedAt));
-      this.options.logger.log(
-        durationMs >= 1_000 ? "warning" : "info",
-        `RPC ${frame.method} for client ${connection.id} completed in ${durationMs}ms (${rpcOutcome})`,
-        {
-          event: "rpc.completed", source: "transport", method: frame.method,
-          requestID: diagnosticID, outcome: rpcOutcome, durationMs,
-        },
-      );
+      if (rpcOutcome === "failure" || durationMs >= 1_000) {
+        this.options.logger.log(
+          "warning",
+          `RPC ${frame.method} for client ${connection.id} completed in ${durationMs}ms (${rpcOutcome})`,
+          {
+            event: "rpc.completed", source: "transport", method: frame.method,
+            requestID: diagnosticID, outcome: rpcOutcome, durationMs,
+          },
+        );
+      }
     }
   }
 

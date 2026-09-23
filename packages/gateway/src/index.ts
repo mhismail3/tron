@@ -161,6 +161,9 @@ const sessions = new RuntimeRegistry({
   beforeSessionRekey: (previousId, nextId) => automations.rekeySessionTarget(previousId, nextId),
   beforeSessionDelete: (sessionId) => automations.blockSessionTarget(sessionId),
   sessionClosed: (sessionId) => transport?.revokeSessionTerminals(sessionId),
+  persistenceDiagnostic: (sessionId, code) => logger.log("warning", `Session ${sessionId} persistence diagnostic`, {
+    event: code, source: "session",
+  }),
   machineId: config.machineId,
   notifications,
   browserLiveViews,
@@ -357,34 +360,68 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
   }
 }
 
+const DRAIN_STALL_LIMIT_MS = 180_000; // Bounds accepted work that stops making drain progress.
+const DRAIN_STALL_CHECK_INTERVAL_MS = 1_000; // Checks progress without relying on work completion callbacks.
+const DRAIN_WAIT_LOG_INTERVAL_MS = 15_000; // Reports blockers periodically without filling the persistent log.
 let requestedRestart: Promise<void> | undefined;
-function requestRestart(): void {
-  if (requestedRestart) return;
+function requestRestart(restartNow = false): void {
+  if (requestedRestart) {
+    if (restartNow) {
+      const snapshot = sessions.administrativeDrainSnapshot();
+      logDrainBlockers(snapshot);
+      void shutdown("restart drain stalled", SUPERVISOR_RELAUNCH_EXIT_CODE);
+    }
+    return;
+  }
   logger.log("info", "Gateway restart scheduled after accepted agent runs settle", { event: "gateway.restart-drain", source: "lifecycle" });
   requestedRestart = (async () => {
-    const waitingLog = setInterval(() => {
+    if (restartNow) {
       const snapshot = sessions.administrativeDrainSnapshot();
-      const categories = Object.entries(snapshot.blockerCounts)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([category, count]) => `${category}=${count}`)
-        .join(", ");
-      logger.log(
-        "info",
-        `Gateway restart is waiting for ${snapshot.blockerCount} admitted operation${snapshot.blockerCount === 1 ? "" : "s"} to settle${categories ? ` (${categories})` : ""}`,
-        { event: "gateway.restart-drain.waiting", source: "lifecycle" },
-      );
-    }, 15_000);
-    waitingLog.unref();
-    try {
-      await sessions.waitUntilIdle();
-    } finally {
-      clearInterval(waitingLog);
+      logDrainBlockers(snapshot);
+      logger.log("warning", "Gateway restart requested immediately during drain", { event: "gateway.restart-drain.stalled", source: "lifecycle" });
+      await shutdown("restart drain stalled", SUPERVISOR_RELAUNCH_EXIT_CODE);
+      return;
     }
+    let stallTimer: NodeJS.Timeout | undefined;
+    let waitingLog: NodeJS.Timeout | undefined;
+    const stalled = new Promise<void>((resolve) => {
+      let lastProgress = sessions.administrativeDrainSnapshot().lastProgressAt;
+      stallTimer = setInterval(() => {
+        const snapshot = sessions.administrativeDrainSnapshot();
+        if (snapshot.lastProgressAt !== lastProgress) lastProgress = snapshot.lastProgressAt;
+        if (!lastProgress || Date.now() - Date.parse(lastProgress) < DRAIN_STALL_LIMIT_MS) return;
+        clearInterval(stallTimer);
+        clearInterval(waitingLog);
+        logDrainBlockers(snapshot);
+        logger.log("warning", "Gateway restart drain stalled without progress", { event: "gateway.restart-drain.stalled", source: "lifecycle" });
+        void shutdown("restart drain stalled", SUPERVISOR_RELAUNCH_EXIT_CODE).then(resolve);
+      }, DRAIN_STALL_CHECK_INTERVAL_MS);
+      stallTimer.unref();
+      waitingLog = setInterval(() => logDrainBlockers(sessions.administrativeDrainSnapshot()), DRAIN_WAIT_LOG_INTERVAL_MS);
+      waitingLog.unref();
+    });
+    try {
+      await Promise.race([sessions.waitUntilIdle(), stalled]);
+    } finally {
+      if (stallTimer) clearInterval(stallTimer);
+      if (waitingLog) clearInterval(waitingLog);
+    }
+    const snapshot = sessions.administrativeDrainSnapshot();
+    if (snapshot.blockerCount > 0) return;
     logger.log("info", "Gateway restart drain completed", { event: "gateway.restart-drain.completed", source: "lifecycle" });
     await shutdown("requested restart", SUPERVISOR_RELAUNCH_EXIT_CODE);
   })().catch((error) => {
     logger.log("error", error instanceof Error ? error.message : String(error), { event: "gateway.restart-drain-failed", source: "lifecycle" });
     void shutdown("restart drain failed", 1);
+  });
+}
+
+function logDrainBlockers(snapshot: ReturnType<typeof sessions.administrativeDrainSnapshot>): void {
+  const blockers = snapshot.blockers.map(({ sessionId, category, state, ageMs }) => ({
+    ...(sessionId ? { sessionId } : {}), category, state, ageMs: ageMs ?? null,
+  }));
+  logger.log("warning", `Gateway restart waiting on ${snapshot.blockerCount} operation(s): ${JSON.stringify(blockers)}`, {
+    event: "gateway.restart-drain.waiting", source: "lifecycle",
   });
 }
 
@@ -468,6 +505,7 @@ await transport.listen(async () => {
   await sessions.initializeBlobStorage();
   await sessions.recoverKnowledgeObservation();
 });
+await sessions.recoverCanonicalAttention();
 const maintainStorage = async (): Promise<void> => {
   try {
     const [status] = await Promise.all([

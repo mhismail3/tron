@@ -40,6 +40,7 @@ export interface AdministrativeDrainBlockerSummary {
   /** Per-drain opaque identity. It is not a session, run, path, or token ID. */
   id: string;
   category: AdministrativeDrainBlockerCategory;
+  sessionId?: string;
   state: "active" | "settling" | "suspect";
   admittedAt?: string;
   ageMs?: number;

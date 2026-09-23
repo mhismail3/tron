@@ -1525,8 +1525,10 @@ or 4 MiB of strings before generic projection can truncate them.
 Cross-client read attention is narrow Gateway-owned metadata, not transcript or
 catalog mirroring. Membership is resolved against the exact structural/acquisition admission outside the serialized attention lane. The commit boundary rechecks deletion and generation, takes fresh bounded catalog identity evidence, and verifies the selected inode/header; this remains a whole-catalog header cost until durable indexing replaces it, but no transcript metadata materialization occurs beneath the lane. A bounded atomic `gateway/session-attention.json` document
 stores only completion/read-through revisions, a manual-unread flag, a bounded
-recent-completion deduplication set, and a restart-reconciliation cursor. Only an
-accepted prompt turn's canonical assistant entry ending with Pi `stop` or `length`
+recent-completion deduplication set, and a restart-reconciliation cursor. The listener
+becomes ready before canonical attention recovery opens session transcripts; run markers
+remain authoritative during this post-listener recovery window. Only an accepted prompt
+turn's canonical assistant entry ending with Pi `stop` or `length`
 at truthful agent settlement advances completion; generic idle, compaction,
 abort/error/deferred output, runtime close, and intermediate tool-use messages do
 not. A private per-session marker document retains at most 16 accepted operation
@@ -1708,11 +1710,13 @@ Read projections redact secret-looking strings; matching redaction placeholders 
 from canonical state during update so mobile editing cannot erase credentials it was never
 allowed to read.
 
-Administrative restart is a deadline-free drain, not an abort: the Gateway synchronously
-closes session and administration admission, lets every admitted owner settle without
-cancelling accepted work, then exits with the supervised restart code. Unexpected
-signal/error shutdown may request exact fenced cancellation and logs if its bounded
-cleanup grace expires with ownership still outstanding. `GatewayWorkRegistry` is a
+Administrative restart drains accepted work and exits with the supervised restart
+code. If blocker progress stops for 180 seconds, or the authenticated `gateway.restart`
+request explicitly includes `restartNow: true`, shutdown uses the existing exact
+cancellation, bounded grace, and runtime disposal path. Still-marked runs recover as
+interrupted or `outcomeUnknown`; shutdown never claims a non-durable receipt succeeded.
+Unexpected signal/error shutdown uses the same bounded cleanup grace.
+`GatewayWorkRegistry` is a
 bounded, process-local registry with separate normal and derived-settlement capacity. It
 never persists or expires work by age and does not duplicate Pi's runtime, JSONL, or run
 markers. Prompt preflight transfers one token into accepted foreground, queue, or
@@ -1752,13 +1756,19 @@ resource boundary; Tron does not pretend those SDK objects were explicitly dispo
 
 `gateway.drain.status` returns a bounded in-memory `AdministrativeDrainSnapshot` before
 and during a drain. The accepted `gateway.restart` response includes the same initial
-drain identity and revision while retaining its legacy fields. Snapshots contain category
-counts, at most 64 opaque hashed blocker summaries, omitted and suspect-projection counts,
+drain identity and revision while retaining its legacy fields; `{ commandId,
+restartNow: true }` can escalate an existing drain without waiting behind it. Its accepted
+receipt only acknowledges the request to stop waiting; a lost response is retried with the
+same command ID and does not duplicate shutdown. Snapshots contain category counts, at most
+64 blocker summaries with session identity, category, state and age, omitted and suspect-projection counts,
 and monotonic revisions—never session/run IDs, prompts, output, paths, provider data, or
 credentials. They are diagnostics only; exact tokens, runtime settlement, terminal
 artifacts, and durable receipts remain liveness authority. While waiting the Gateway also
-emits bounded `gateway.restart-drain.waiting` log records every 15 seconds, plus an
-explicit completion record, so operators can distinguish progress from a failed restart.
+emits bounded `gateway.restart-drain.waiting` records every 15 seconds with blocker
+session, category, state and age, plus stall/completion records. Persistence retry,
+blocked and terminal-receipt failures are also written to `gateway.jsonl` with session
+identity. Active log rotation keeps the previous file within its one-MiB bound; fast
+successful RPCs are omitted.
 Live PTYs block restart because process replacement cannot preserve them. Restart closes
 terminal admission atomically only after proving no PTY is live, so an already-dispatched
 `terminal.open` cannot resume across the cutoff and spawn a shell.

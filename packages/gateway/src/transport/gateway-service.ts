@@ -234,7 +234,7 @@ export interface GatewayServiceDependencies {
   iosDeviceInstallService?: IosDeviceInstallService;
   logger: GatewayLogger;
   receipts: CommandReceiptStore;
-  requestRestart: () => void;
+  requestRestart: (restartNow?: boolean) => void;
   sessionDeleted: (sessionId: string) => void;
   broadcast: (topic: string, payload: JsonValue) => void;
   notifications?: NotificationService;
@@ -649,13 +649,25 @@ export class GatewayService {
         if (process.env.TRON_GATEWAY_SUPERVISED !== "1") {
           throw new GatewayError("unsupported", "Gateway restart requires an external supervisor");
         }
-        if (this.restartRequested) {
+        const restartNow = params.restartNow === true;
+        if (params.restartNow !== undefined && typeof params.restartNow !== "boolean") {
+          throw new GatewayError("invalid_request", "Gateway restart restartNow must be boolean");
+        }
+        if (Object.keys(params).some((key) => key !== "commandId" && key !== "restartNow")) {
+          throw new GatewayError("invalid_request", "Gateway restart accepts only commandId and optional restartNow");
+        }
+        if (this.restartRequested && !restartNow) {
           throw new GatewayError("busy", "Gateway restart is already draining; inspect gateway.drain.status or command.status", true);
         }
         let ownsSchedule = false;
         try {
           return await this.mutation(client, method, params, async () => {
             await this.requireNoActiveIosDeviceInstall();
+            if (restartNow && this.restartRequested) {
+              this.dependencies.requestRestart(true);
+              return safeJson({ restarting: false, scheduled: true, restartNow: true,
+                drain: this.dependencies.sessions.administrativeDrainSnapshot() });
+            }
             if (!this.dependencies.terminals.beginRestartDrain()) {
               throw new GatewayError("busy", "Close active terminal sessions before restarting the Gateway", true);
             }
@@ -686,7 +698,8 @@ export class GatewayService {
           // already accepted drain, so replacement still progresses exactly once.
           if (ownsSchedule && !this.restartScheduled) {
             this.restartScheduled = true;
-            setTimeout(this.dependencies.requestRestart, 100).unref();
+            if (restartNow) this.dependencies.requestRestart(true);
+            else setTimeout(this.dependencies.requestRestart, 100).unref();
           }
         }
       }

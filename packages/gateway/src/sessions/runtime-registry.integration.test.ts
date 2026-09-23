@@ -103,6 +103,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       : undefined;
     if (options.beforeInitialize) await options.beforeInitialize(manager.getSessionFile()!);
     await registry.initialize(options.phaseObserver);
+    await registry.recoverCanonicalAttention();
     return {
       root,
       agentDir,
@@ -549,6 +550,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
     registries.push(restarted);
     await restarted.initialize();
+    await restarted.recoverCanonicalAttention();
     expect(restarted.attentionProjection(fixture.manager.getSessionId()))
       .toMatchObject({ completionRevision: 1, isUnread: true });
     expect((await restarted.catalog("all")).sessions.find((row) => row.id === fixture.manager.getSessionId()))
@@ -617,6 +619,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
     registries.push(restarted);
     await restarted.initialize();
+    await restarted.recoverCanonicalAttention();
     expect(restarted.attentionProjection(sessionId)).toMatchObject({ completionRevision: 1, isUnread: true });
 
     await restarted.dispose();
@@ -6020,7 +6023,7 @@ export default function (pi) {
     await secondStampEntry;
     await waitUntil(() => slot.snapshot().phase === "interrupted");
     const blockedQueue = (slot as unknown as { completionOwnershipQueue: unknown[] }).completionOwnershipQueue;
-    expect(blockedQueue).toHaveLength(2);
+    expect(blockedQueue).toHaveLength(1);
     let disposalSettled = false;
     const disposal = registry.dispose().finally(() => { disposalSettled = true; });
     await new Promise((resolve) => setTimeout(resolve, 25));
@@ -6044,6 +6047,7 @@ export default function (pi) {
     }).attention;
     const recovered = vi.spyOn(restartedAttention, "complete");
     await restarted.initialize();
+    await restarted.recoverCanonicalAttention();
 
     expect(recovered.mock.calls.map(([, completionId]) => completionId)).toEqual(durableCompletionIds);
     expect(restarted.attentionProjection(slot.id)).toMatchObject({ completionRevision: 2, isUnread: true });
@@ -7775,7 +7779,7 @@ export default function (pi) {
     expect(registry.administrativeDrainSnapshot()).toMatchObject({ phase: "complete", blockerCount: 0 });
   });
 
-  it("retains one exact completion intent across repeated persistence failure and rejects a second prompt", async () => {
+  it("settles a failed completion owner so the next prompt can proceed", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-attention-settlement-failure-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
@@ -7812,13 +7816,13 @@ export default function (pi) {
     await slot.prompt("first");
     await waitUntil(() => slot.snapshot().phase === "interrupted");
     expect(complete).toHaveBeenCalledTimes(3);
-    await expect(slot.prompt("second")).rejects.toMatchObject({ code: "busy", retryable: true });
+    await expect(slot.prompt("second")).resolves.toMatchObject({ operationId: expect.any(String) });
     expect(complete.mock.calls.map(([, completionId]) => completionId))
       .toEqual(Array(3).fill(complete.mock.calls[0]![1]));
 
     complete.mockRestore();
     await slot.reconcileAttention();
-    expect(registry.attentionProjection(slot.id)).toMatchObject({ completionRevision: 1, isUnread: true });
+    expect(registry.attentionProjection(slot.id)).toMatchObject({ completionRevision: 2, isUnread: true });
     expect(slot.snapshot().phase).toBe("idle");
   });
 

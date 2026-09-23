@@ -356,6 +356,7 @@ export interface RuntimeSlotDependencies {
   /** Extension cleanup is advisory once runtime disposal begins. A handler that
    * never settles must not strand the canonical session behind idle eviction. */
   runtimeDisposalTimedOut?: (graceMs: number) => void;
+  persistenceDiagnostic?: (sessionId: string, code: string) => void;
   /** Resolves inherited history once at canonical bind/rebind, never per snapshot. */
   resolveForkBoundary?: (manager: SessionManager) => Promise<ForkBoundaryAnchor | undefined>;
 }
@@ -2448,6 +2449,11 @@ export class RuntimeSlot {
     }
   }
 
+  private emitPersistenceDiagnostic(code: string): void {
+    this.dependencies.persistenceDiagnostic?.(this.id, code);
+    this.emit("session.diagnostic", { code, message: "Canonical ownership persistence requires attention" });
+  }
+
   private retryDurableWrite(key: string, operation: () => Promise<void>): Promise<void> {
     const existing = this.durableWrites.get(key);
     if (existing) return existing.waiter;
@@ -2473,10 +2479,7 @@ export class RuntimeSlot {
             || error instanceof CanonicalCustomEntryConflictError
             || isUncertainOutcome(error)) throw error;
           attempt += 1;
-          if (attempt === 1) this.emit("session.diagnostic", {
-            code: "canonical-ownership-persistence-retrying",
-            message: "Canonical ownership persistence is retrying",
-          });
+          if (attempt === 1) this.emitPersistenceDiagnostic("canonical-ownership-persistence-retrying");
           await new Promise<void>(resolve => setTimeout(resolve, Math.min(1_000, 25 * attempt, Math.max(0, deadline - performance.now()))));
           if (owner.blocked) throw uncertainOutcome("Canonical ownership persistence remains unresolved");
         }
@@ -2506,10 +2509,7 @@ export class RuntimeSlot {
         void session.abort().catch(() => {});
         void this.directBashProcesses?.abortAll().catch(() => {});
       }
-      this.emit("session.diagnostic", {
-        code: "canonical-ownership-persistence-blocked",
-        message: "Canonical ownership persistence is unresolved; the session remains a drain and eviction blocker",
-      });
+      this.emitPersistenceDiagnostic("canonical-ownership-persistence-blocked");
       throw asUncertainOutcome(error, "Canonical ownership persistence could not be proven");
     }).finally(() => { if (timer) clearTimeout(timer); });
     this.durableWrites.set(key, owner);
@@ -2738,8 +2738,12 @@ export class RuntimeSlot {
     const operation = (async () => {
       while (this.completionOwnershipQueue.length > 0) {
         const item = this.completionOwnershipQueue[0]!;
-        await this.startCompletionStamp(item);
-        await this.settleAssistantCompletion(item);
+        try {
+          await this.startCompletionStamp(item);
+          await this.settleAssistantCompletion(item);
+        } catch (error) {
+          this.settleCompletionPersistenceFailure(item.completion, error, item.fallbackWork);
+        }
         this.completionOwnershipQueue.shift();
         item.fallbackWork?.settle();
       }
@@ -2753,6 +2757,23 @@ export class RuntimeSlot {
     this.pendingReceiptWrites.add(operation);
     void operation.catch(() => {});
     return operation;
+  }
+
+  private settleCompletionPersistenceFailure(
+    completion: CanonicalAssistantCompletion,
+    _error: unknown,
+    fallbackWork?: GatewayWorkHandle,
+  ): void {
+    const operationId = completion.operationId ?? this.completionWorkOwners.get(completion.id);
+    this.dependencies.persistenceDiagnostic?.(this.id, "terminal-receipt-persistence-failed");
+    this.emit("session.diagnostic", {
+      code: "terminal-receipt-persistence-failed",
+      message: "Terminal receipt was not proven durable; the run remains marked for interrupted recovery",
+    });
+    this.settleOperationWork(operationId);
+    fallbackWork?.settle();
+    this.completionWorkOwners.delete(completion.id);
+    if (this.pendingAssistantCompletion?.id === completion.id) this.pendingAssistantCompletion = undefined;
   }
 
   private async settleAssistantCompletion(item: CompletionOwnershipItem): Promise<void> {
@@ -2909,7 +2930,8 @@ export class RuntimeSlot {
             // while the continuation may finish and stamp its own completion for
             // ordered restart recovery. Aborting here would silently discard that
             // accepted continuation and strand its durable ownership test.
-            void this.beginAttentionSettlement(this.pendingAssistantCompletion).catch(() => {});
+            const completion = this.pendingAssistantCompletion;
+            void this.beginAttentionSettlement(completion).catch((error) => this.settleCompletionPersistenceFailure(completion, error));
           }
           // `message_end` may still be waiting for Pi's canonical append. Its
           // callback-turn binding owns the preceding operation even before a
@@ -4760,10 +4782,9 @@ export class RuntimeSlot {
     const existingWrite = this.extensionReceiptWrites.get(receipt.activityId);
     if (existingWrite) return existingWrite;
     if (!owner) return Promise.reject(new GatewayError("busy", "Extension receipt ownership is unavailable", true));
-    const write = this.trackOwnershipWrite(() => this.retryDurableWrite(
+    const write = this.trackOwnershipWrite(() => this.lane.run(() => this.retryDurableWrite(
       `extension-receipt:${receipt.activityId}`,
       async () => {
-        await this.lane.run(async () => {
           this.persistVerifiedCustomEntry({
             describe: "extension activity receipt",
             existing: () => extensionActivityReceipts(this.runtime.session.sessionManager.getEntries(), this.id)
@@ -4774,9 +4795,8 @@ export class RuntimeSlot {
               this.scheduleSnapshot();
             },
           });
-        });
       },
-    ), owner);
+    )), owner);
     this.extensionReceiptWrites.set(receipt.activityId, write);
     void write.then(() => {
       if (this.extensionReceiptWrites.get(receipt.activityId) === write) this.extensionReceiptWrites.delete(receipt.activityId);
