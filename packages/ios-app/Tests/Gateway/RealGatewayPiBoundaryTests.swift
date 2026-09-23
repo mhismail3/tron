@@ -344,66 +344,75 @@ final class RealGatewayPiBoundaryTests: XCTestCase {
             pairingCommit: { _, _ in },
             profileTokenLookup: { try? memoryTokens.read(profileID: $0.id) }
         )
-        lifecycle.notePathHint(satisfied: true)
-        await lifecycle.start()
-        guard lifecycle.connectionState == .connected else {
-            await lifecycle.teardown()
-            await client.close()
-            throw BoundaryFailure.invalidFixture("App lifecycle did not connect to the private Gateway")
-        }
-        let beforeRestart: GatewaySessionOpenResponse = try await client.request(
-            "session.open", SessionParams(sessionId: sessionID)
-        )
-        let beforeSync: SyncResponse = try await client.request(
-            "session.sync", SyncParams(sessionId: sessionID, syncToken: beforeRestart.syncToken)
-        )
-        guard beforeSync.synchronized else { throw BoundaryFailure.invalidFixture("Could not synchronize the pre-restart session") }
-        lifecycle.enteredBackground()
+        do {
+            lifecycle.notePathHint(satisfied: true)
+            await lifecycle.start()
+            guard lifecycle.connectionState == .connected else {
+                throw BoundaryFailure.invalidFixture("App lifecycle did not connect to the private Gateway")
+            }
+            let beforeRestart: GatewaySessionOpenResponse = try await client.request(
+                "session.open", SessionParams(sessionId: sessionID)
+            )
+            let beforeSync: SyncResponse = try await client.request(
+                "session.sync", SyncParams(sessionId: sessionID, syncToken: beforeRestart.syncToken)
+            )
+            guard beforeSync.synchronized else { throw BoundaryFailure.invalidFixture("Could not synchronize the pre-restart session") }
+            let promptCountBeforeRestart = Self.userMessageCount(in: beforeRestart.session)
+            lifecycle.enteredBackground()
 
-        let url = URL(string: "http://127.0.0.1:\(port)/_fixture/control")!
-        var request = URLRequest(url: url, timeoutInterval: 10)
-        request.httpMethod = "POST"
-        request.setValue(proxyToken, forHTTPHeaderField: "x-tron-fixture-token")
-        request.httpBody = try JSONEncoder.gateway.encode(["mode": JSONValue.string("restart-gateway")])
-        let (_, response) = try await URLSession.shared.data(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            await lifecycle.teardown()
-            await client.close()
-            throw BoundaryFailure.invalidFixture("Owned Gateway restart was not acknowledged")
-        }
+            let url = URL(string: "http://127.0.0.1:\(port)/_fixture/control")!
+            var request = URLRequest(url: url, timeoutInterval: 10)
+            request.httpMethod = "POST"
+            request.setValue(proxyToken, forHTTPHeaderField: "x-tron-fixture-token")
+            request.httpBody = try JSONEncoder.gateway.encode(["mode": JSONValue.string("restart-gateway")])
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                throw BoundaryFailure.invalidFixture("Owned Gateway restart was not acknowledged")
+            }
 
-        await lifecycle.becameActive()?.value
-        guard let admission = lifecycle.generationAdmission,
-              await lifecycle.waitForConnected(
-                until: ContinuousClock().now + .seconds(30),
-                admission: admission
-              ) else {
+            // This wait proves the lifecycle coordinator reconnected automatically;
+            // the following manual open is only an independent canonical-state read.
+            await lifecycle.becameActive()?.value
+            guard let admission = lifecycle.generationAdmission,
+                  await lifecycle.waitForConnected(
+                    until: ContinuousClock().now + .seconds(30),
+                    admission: admission
+                  ) else {
+                throw BoundaryFailure.timedOut("Foreground lifecycle did not reconnect without Retry")
+            }
+            let restored: GatewaySessionOpenResponse = try await client.request(
+                "session.open", SessionParams(sessionId: sessionID)
+            )
+            let restoredSync: SyncResponse = try await client.request(
+                "session.sync", SyncParams(sessionId: sessionID, syncToken: restored.syncToken)
+            )
+            guard restoredSync.synchronized else {
+                throw BoundaryFailure.invalidFixture("Foreground reconnect did not synchronize the preserved session")
+            }
+            let snapshot: SessionSnapshot = try await client.request(
+                "session.snapshot", SessionParams(sessionId: sessionID)
+            )
+            XCTAssertEqual(snapshot.sessionId, sessionID)
+            XCTAssertTrue(Self.text(in: snapshot).contains("Tool response complete after all three tools."))
+            XCTAssertEqual(Self.userMessageCount(in: snapshot), promptCountBeforeRestart)
+            let restoredClose: CloseResponse = try await client.request(
+                "session.close", CloseParams(sessionId: sessionID, subscriptionToken: restored.subscriptionToken)
+            )
+            guard restoredClose.closed else { throw BoundaryFailure.invalidFixture("Could not retire the restored subscription") }
+        } catch {
             await lifecycle.teardown()
             await client.close()
-            throw BoundaryFailure.timedOut("Foreground lifecycle did not reconnect without Retry")
+            throw error
         }
-        let restored: GatewaySessionOpenResponse = try await client.request(
-            "session.open", SessionParams(sessionId: sessionID)
-        )
-        let restoredSync: SyncResponse = try await client.request(
-            "session.sync", SyncParams(sessionId: sessionID, syncToken: restored.syncToken)
-        )
-        guard restoredSync.synchronized else {
-            await lifecycle.teardown()
-            await client.close()
-            throw BoundaryFailure.invalidFixture("Foreground reconnect did not synchronize the preserved session")
-        }
-        let snapshot: SessionSnapshot = try await client.request(
-            "session.snapshot", SessionParams(sessionId: sessionID)
-        )
-        XCTAssertEqual(snapshot.sessionId, sessionID)
-        XCTAssertTrue(Self.text(in: snapshot).contains("Tool response complete after all three tools."))
-        let restoredClose: CloseResponse = try await client.request(
-            "session.close", CloseParams(sessionId: sessionID, subscriptionToken: restored.subscriptionToken)
-        )
-        guard restoredClose.closed else { throw BoundaryFailure.invalidFixture("Could not retire the restored subscription") }
         await lifecycle.teardown()
         await client.close()
+    }
+
+    private static func userMessageCount(in snapshot: SessionSnapshot) -> Int {
+        snapshot.transcript.reduce(into: 0) { count, item in
+            guard case .message(let message) = item, message.role == .user else { return }
+            count += 1
+        }
     }
 
     private func makeClient() -> GatewayClient {

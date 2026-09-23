@@ -916,8 +916,9 @@ sample on each `CADisplayLink` tick; added evidence is aggregate command/frame/c
 data only. A maximum-512-row opening case requires the very first ready sample to contain
 the exact physical tail marker and latest message in the same plausible native bottom
 viewport, so an eventual manual/lazy correction cannot make the test pass. Optional recent-tail
-backfill now resolves or reaches its one-second silent deadline inside the opaque open, so no second
-speculative history spine can install immediately after that ready sample. The production
+backfill uses the Gateway transport's standard 30-second request deadline; its failure stays silent and
+cannot replace a usable mounted transcript. No second speculative history spine can install immediately
+after that ready sample. The production
 `DisplayFrameScheduler` is a one-shot, cancellation-aware display-link boundary used by
 first-ready, frame-gated unrealized-tail correction, and long-distance
 catch-up staging. Semantic prepend settlement instead waits passively

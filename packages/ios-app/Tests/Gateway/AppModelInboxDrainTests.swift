@@ -104,12 +104,21 @@ struct AppModelInboxDrainTests {
                 guard let replacementResult = await completion.next() else { throw CancellationError() }
                 try replacementResult.get()
                 try await foreground?.value
-                try await replacement.waitUntilSent(count: 3)
-                let replacementRequests = try await replacement.sentFrames().dropFirst().map {
-                    try JSONDecoder.gateway.decode(JSONValue.self, from: $0).objectValue
+                var replacementRequests: [[String: JSONValue]?] = []
+                var replacementFrameIndex = 1
+                var replacementMethods: Set<String> = []
+                while !replacementMethods.isSuperset(of: Set(["session.list", "notification.inbox.list"])) {
+                    try await replacement.waitUntilSent(count: replacementFrameIndex + 1)
+                    let request = try JSONDecoder.gateway.decode(
+                        JSONValue.self,
+                        from: await replacement.sentFrames()[replacementFrameIndex]
+                    ).objectValue
+                    replacementRequests.append(request)
+                    if let method = request?["method"]?.stringValue {
+                        replacementMethods.insert(method)
+                    }
+                    replacementFrameIndex += 1
                 }
-                let replacementMethods = Set(replacementRequests.compactMap { $0?["method"]?.stringValue })
-                #expect(replacementMethods.isSuperset(of: Set(["session.list", "notification.inbox.list"])))
                 #expect(replacementRequests.filter { $0?["method"]?.stringValue == "session.list" }.count == 1)
                 #expect(replacementRequests.filter { $0?["method"]?.stringValue == "notification.inbox.list" }.count == 1)
                 let replacementCatalog = try #require(replacementRequests.first { $0?["method"]?.stringValue == "session.list" })

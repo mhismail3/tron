@@ -165,6 +165,23 @@ struct SessionPresentationStoreTests {
                         "type": .string("response"), "id": ack.request.objectValue?["id"] ?? .null, "ok": .bool(true),
                         "result": .object(["synchronized": .bool(true)]),
                     ])))
+                    // The retained snapshot starts at a positive transcript
+                    // ordinal, so opening attempts one optional history page.
+                    // Fail it explicitly: this regression is about retiring the
+                    // exact stale open owner, not waiting on the default RPC deadline.
+                    let firstPage = try await waitForMethod(
+                        "session.transcript", socket: socket, startingAt: ack.index + 1
+                    )
+                    await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                        "type": .string("response"),
+                        "id": firstPage.request.objectValue?["id"] ?? .null,
+                        "ok": .bool(false),
+                        "error": .object([
+                            "code": .string("unavailable"),
+                            "message": .string("Optional history is unavailable."),
+                            "retryable": .bool(true),
+                        ]),
+                    ])))
                     let generation: Int
                     if let successor {
                         await #expect(throws: CancellationError.self) { try await first.value }
@@ -2368,9 +2385,11 @@ struct SessionPresentationStoreTests {
     @Test("active fresh open backfills an empty positive-start tail once")
     func freshOpenBackfillsEmptyActiveTail() async throws {
         try await withTestWatchdog { @MainActor in
+            let clock = ManualClock()
             let socket = ScriptedGatewaySocket()
             let client = GatewayClient(
-                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                clock: clock.clock
             )
             let profile = GatewayProfile(
                 id: "gateway",
@@ -2430,6 +2449,9 @@ struct SessionPresentationStoreTests {
                 socket: socket,
                 startingAt: 3
             )
+            try await clock.waitUntilSleeping(count: 1, duration: .seconds(30))
+            clock.advance(by: .seconds(2))
+            #expect(store.loadingEarlierTranscript)
             request = transcriptRequest.request
             requestID = try #require(request.objectValue?["id"]?.stringValue)
             let earlier = SessionScenarioBuilder(seed: 8_904)

@@ -162,7 +162,6 @@ struct AppModelCatalogSyncTests {
             #expect(harness.model.dashboardActivity(for: "known") == .active)
             #expect(await harness.socket.sentFrames().count == 1)
             #expect(harness.model.visibleNotices.isEmpty)
-            #expect(harness.model.visibleNotices.isEmpty)
         }
     }
 
@@ -184,7 +183,6 @@ struct AppModelCatalogSyncTests {
 
             #expect(harness.model.sessions.first?.phase == .running)
             #expect(harness.model.sessions.first?.summaryRevision == 2)
-            #expect(harness.model.visibleNotices.isEmpty)
             #expect(harness.model.visibleNotices.isEmpty)
         }
     }
