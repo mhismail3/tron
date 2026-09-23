@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-23, L-1a
+- **Last updated:** 2026-09-23, L-10 added
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -187,7 +187,8 @@ user reinstalls manually, so batch them for one reinstall.
 | L-6 | Ready | Event catalog and the incident rule | L-2 | |
 | L-7 | Ready | Stall cause in event-loop-delay records | L-2 | |
 | L-8 | Needs scoping | Gateway idle heap growth | none | |
-| L-9 | Needs scoping | Phone handling of a stalled but live Gateway (proposal for the user) | L-7 | |
+| L-9 | Needs scoping | Phone handling of a stalled or unreachable but live Gateway (proposal for the user) | L-7, L-10 | |
+| L-10 | Ready | iOS connect-failure records say whether the socket ever opened, and on which interface | none | |
 
 ## Task details
 
@@ -317,8 +318,10 @@ user reinstalls manually, so batch them for one reinstall.
   `--out`, writes one redacted bundle: every `~/.tron/logs` stream within the
   window plus the newest device exports; payload selection and progress JSON;
   launchd spawn and exit events for `com.tron.server` from `/usr/bin/log show`;
-  `/health`; Tron processes with their payload versions; and the output of
-  `scripts/tron mac verify`.
+  `/health`; Tron processes with their payload versions; the output of
+  `scripts/tron mac verify`; and Tailscale's view of each paired peer (current
+  path, direct or relay, and endpoint) plus the Tailscale network-extension log
+  lines for path changes within the window.
 - Call `/usr/bin/log` explicitly, because zsh's `log` builtin shadows it. Share
   one redaction rule set with the writers.
 - **Test:** one fixture-home run asserting the sections exist and a planted
@@ -362,9 +365,26 @@ user reinstalls manually, so batch them for one reinstall.
 - Today the iPhone app treats a pong missing for about 8 s as a dead
   connection, so any Gateway stall longer than about 10 s becomes a reconnect.
   A stalled but live Gateway is indistinguishable from a dead network.
+- The proposal must cover the 2026-09-23 17:33–17:35 UTC incident: a healthy
+  Gateway was unreachable for about 2.5 minutes because Tailscale kept a dead
+  direct path to the phone before falling back to its relay. The phone showed
+  Reconnecting and repeated "unavailable" toasts throughout.
 - Scoping produces a proposal with the trade-off (faster dead-network
   detection versus fewer spurious reconnects) for the user to decide. This
   changes user-visible behavior, so no change ships without approval.
+
+### L-10 — iOS connect-failure records
+
+- On 2026-09-23 the phone logged every failed reconnect as
+  `hello-send … reason=timeout`. That record cannot say whether the WebSocket
+  ever opened, so "never reached the Mac" (a network path failure) looked the
+  same as "the Mac did not answer". Diagnosis needed the Gateway log and the
+  Mac's Tailscale log side by side.
+- Record, per failed connect: whether the transport opened (and how long it
+  took), the stage reached, and the interface used. Use the existing connection
+  records; add fields, not a new stream.
+- **Test:** a transport that never opens and one that opens but never answers
+  hello produce distinguishable records.
 
 ## Handoff log
 
