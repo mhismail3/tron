@@ -46,16 +46,6 @@ extension GatewaySocketConnection {
     func metadata() async -> GatewaySocketMetadata { GatewaySocketMetadata(closeCode: nil, httpStatusCode: nil) }
 }
 
-enum GatewaySocketPolicy {
-    // Application-owned handshake deadlines and transport-ping cadence are
-    // shorter and monotonic. CFNetwork's inactivity timeout must not retire a healthy
-    // long-lived WebSocket before those owners can make a decision.
-    static let requestTimeout: TimeInterval = 60
-    // A graceful close is best effort. A dead path must not retain an invalid
-    // URLSession and its WebSocket buffers for the full inactivity timeout as
-    // reconnect epochs accumulate.
-    static let gracefulCloseLimit: Duration = .seconds(1)
-}
 
 struct GatewaySocketFactory: Sendable {
     let makeConnection: @Sendable (URLRequest) -> any GatewaySocketConnection
@@ -99,7 +89,7 @@ private actor URLSessionGatewaySocketConnection: GatewaySocketConnection {
     init(request: URLRequest) {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.waitsForConnectivity = true
-        configuration.timeoutIntervalForRequest = GatewaySocketPolicy.requestTimeout
+        configuration.timeoutIntervalForRequest = GatewayConnectionPolicy.requestInactivityTimeout
         let delegate = GatewayWebSocketDelegate()
         let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
         self.delegate = delegate
@@ -172,7 +162,7 @@ private actor URLSessionGatewaySocketConnection: GatewaySocketConnection {
         session.finishTasksAndInvalidate()
         let retiringSession = session
         Task.detached {
-            try? await Task.sleep(for: GatewaySocketPolicy.gracefulCloseLimit)
+            try? await Task.sleep(for: GatewayConnectionPolicy.gracefulCloseLimit)
             retiringSession.invalidateAndCancel()
         }
     }

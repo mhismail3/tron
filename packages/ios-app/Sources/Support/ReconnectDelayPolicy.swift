@@ -46,3 +46,69 @@ struct ReconnectDelayPolicy: Sendable {
         min(current * multiplier, maximumSeconds)
     }
 }
+
+/// Owns the one pending reconnect delay for one connection executor.
+@MainActor
+final class GatewayReconnectSchedule {
+    private let clock: MonotonicClock
+    private let delayPolicy: ReconnectDelayPolicy
+    private var nominalDelay: Double
+    private var pending: Task<Void, Never>?
+    private var continuation: CheckedContinuation<Bool, Never>?
+
+    init(clock: MonotonicClock, delayPolicy: ReconnectDelayPolicy = .standard) {
+        self.clock = clock
+        self.delayPolicy = delayPolicy
+        self.nominalDelay = delayPolicy.initialSeconds
+    }
+
+    func afterFailure() async -> Bool {
+        cancelPending(resume: false)
+        let delay = delayPolicy.delay(nominalSeconds: nominalDelay)
+        nominalDelay = delayPolicy.nextNominalSeconds(after: nominalDelay)
+        let clock = self.clock
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                self.continuation = continuation
+                self.pending = Task { @MainActor [weak self] in
+                    do { try await clock.sleep(delay) } catch { return }
+                    guard !Task.isCancelled else { return }
+                    self?.resume(true)
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.cancel() }
+        }
+    }
+
+    func accelerate() {
+        guard continuation != nil else { return }
+        pending?.cancel()
+        resume(true)
+    }
+
+    func reset() {
+        cancelPending(resume: false)
+        nominalDelay = delayPolicy.initialSeconds
+    }
+
+    func cancel() {
+        cancelPending(resume: false)
+    }
+
+    private func resume(_ result: Bool) {
+        let continuation = self.continuation
+        self.continuation = nil
+        pending = nil
+        continuation?.resume(returning: result)
+    }
+
+    private func cancelPending(resume result: Bool) {
+        pending?.cancel()
+        pending = nil
+        if let continuation {
+            self.continuation = nil
+            continuation.resume(returning: result)
+        }
+    }
+}

@@ -52,16 +52,6 @@ enum GatewayUploadPolicy {
     static let maximumResponseBytes = 64 * 1_024
 }
 
-enum GatewayLivenessPolicy {
-    /// Transport pings run independently of GatewayClient actor/event work so a
-    /// busy live stream cannot starve the proof required by the server heartbeat.
-    static let probeInterval: Duration = .seconds(10)
-    /// A short callback delay is tolerated, but an absent pong retires the
-    /// captured epoch. This is intentionally shorter than the Gateway's
-    /// server-side heartbeat window.
-    static let pongTimeout: Duration = .seconds(8)
-}
-
 struct GatewayEventBufferPolicy: Sendable {
     let maximumEvents: Int
     let maximumBytes: Int
@@ -498,16 +488,6 @@ enum GatewayResponseDecoding {
     }
 }
 
-struct GatewayLiveEvidence: Sendable, Equatable {
-    let connectionID: Int
-    let consecutiveProofIntervals: Int
-    let lastProofAt: ContinuousClock.Instant?
-
-    var hasStableProof: Bool {
-        consecutiveProofIntervals >= 3
-    }
-}
-
 actor GatewayClient {
     #if HOSTED_TEST
     // A run-local gate exercises the real actor-hop race without production hooks.
@@ -542,8 +522,6 @@ actor GatewayClient {
         var pending: [String: PendingRequest] = [:]
         var lastInboundAt: ContinuousClock.Instant?
         var lastWriteProgressAt: ContinuousClock.Instant?
-        var consecutiveProofIntervals = 0
-        var lastProofAt: ContinuousClock.Instant?
         var overflowResyncSignaled = false
         var info: GatewayInfo?
     }
@@ -560,7 +538,6 @@ actor GatewayClient {
     private let boundedHTTPFileTransport: BoundedHTTPFileTransport
     private let performanceSignposts: any PerformanceSignposting
     private var connection: ConnectionEpoch?
-    private var retiredLiveEvidence: [Int: GatewayLiveEvidence] = [:]
     private var connectionDiagnostics: [GatewayConnectionDiagnostic] = []
     private var latestSessionListRequestID: String?
     private var diagnosticSequence = 0
@@ -578,17 +555,6 @@ actor GatewayClient {
 
     func activeConnectionAdmission() -> GatewayConnectionAdmission {
         GatewayConnectionAdmission(connectionID: connection?.id)
-    }
-
-    func liveEvidence(connectionID: Int) -> GatewayLiveEvidence? {
-        if let epoch = connection, epoch.id == connectionID {
-            return GatewayLiveEvidence(
-                connectionID: epoch.id,
-                consecutiveProofIntervals: epoch.consecutiveProofIntervals,
-                lastProofAt: epoch.lastProofAt
-            )
-        }
-        return retiredLiveEvidence[connectionID]
     }
 
     func diagnostics() -> [GatewayConnectionDiagnostic] { connectionDiagnostics }
@@ -849,13 +815,12 @@ actor GatewayClient {
         guard let socketURL = profile.socketURL else { throw Self.invalidProfileEndpoint() }
         self.profile = profile
         self.token = token
-        let handshakeTimeout: Duration = isReconnect ? .seconds(5) : .seconds(15)
+        let handshakeTimeout = GatewayConnectionPolicy.handshakeDeadline
         let attemptStartedAt = clock.now()
         let handshakeStage = GatewayHandshakeStage()
-        // The actor-owned 5/15-second watchdog covers both hello send and
-        // receive. Keep the URL loading inactivity timeout above the 10+8-second
-        // application liveness decision so CFNetwork cannot pre-empt it after upgrade.
-        var request = URLRequest(url: socketURL, timeoutInterval: GatewaySocketPolicy.requestTimeout)
+        // One deadline covers hello send and receive. The URL loading inactivity
+        // timeout stays above the application-owned liveness decision.
+        var request = URLRequest(url: socketURL, timeoutInterval: GatewayConnectionPolicy.requestInactivityTimeout)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let socket = socketFactory.makeConnection(request)
         connection = ConnectionEpoch(
@@ -900,7 +865,6 @@ actor GatewayClient {
             guard var epoch = connection, epoch.id == epochID else { throw CancellationError() }
             epoch.info = decoded.info
             epoch.lastInboundAt = clock.now()
-            epoch.lastProofAt = epoch.lastInboundAt
             connection = epoch
             if activateEvents { try activateEventDelivery(connectionID: epochID) }
             recordDiagnostic(
@@ -1633,7 +1597,7 @@ actor GatewayClient {
         epoch.livenessTask = Task { [weak self, clock, socket] in
             while !Task.isCancelled {
                 do {
-                    try await clock.sleep(GatewayLivenessPolicy.probeInterval)
+                    try await clock.sleep(GatewayConnectionPolicy.clientPingInterval)
                     try Task.checkCancellation()
                 } catch { return }
                 let startedAt = clock.now()
@@ -1646,7 +1610,7 @@ actor GatewayClient {
                 do {
                     try await GatewayClient.withTimeout(
                         clock: clock,
-                        duration: GatewayLivenessPolicy.pongTimeout,
+                        duration: GatewayConnectionPolicy.clientPongDeadline,
                         onTimeout: { [weak self] in
                             // Record and revoke at the epoch owner before close
                             // wakes the receiver with a less-specific error.
@@ -1669,21 +1633,7 @@ actor GatewayClient {
 
     private func notePong(epochID: Int) {
         guard var epoch = connection, epoch.id == epochID else { return }
-        let now = clock.now()
-        if epoch.consecutiveProofIntervals < 3 {
-            if let last = epoch.lastProofAt,
-               last.duration(to: now) <= GatewayLivenessPolicy.probeInterval + GatewayLivenessPolicy.pongTimeout {
-                epoch.consecutiveProofIntervals += 1
-            } else {
-                // A proof after suspension starts a new interval; it is not
-                // itself ten seconds of actively observed healthy transport.
-                epoch.consecutiveProofIntervals = 0
-            }
-        }
-        // Once this exact epoch earned a stable interval, preserve that fact
-        // for retirement accounting even if a later outage ends the socket.
-        epoch.lastProofAt = now
-        epoch.lastInboundAt = now
+        epoch.lastInboundAt = clock.now()
         connection = epoch
     }
 
@@ -1877,14 +1827,6 @@ actor GatewayClient {
     ) async -> Bool {
         guard let epoch = connection,
               epochID == nil || epoch.id == epochID else { return false }
-        retiredLiveEvidence[epoch.id] = GatewayLiveEvidence(
-            connectionID: epoch.id,
-            consecutiveProofIntervals: epoch.consecutiveProofIntervals,
-            lastProofAt: epoch.lastProofAt
-        )
-        while retiredLiveEvidence.count > 8 {
-            retiredLiveEvidence.removeValue(forKey: retiredLiveEvidence.keys.sorted().first!)
-        }
         connection = nil
         let failure = Self.transportFailure(reason)
         let now = clock.now()

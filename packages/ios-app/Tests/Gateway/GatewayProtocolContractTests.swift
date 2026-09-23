@@ -20,6 +20,20 @@ struct GatewayProtocolContractTests {
         #expect(fixture.maximumDynamicJSONNodes == JSONValueDecodingLimits.gateway.maximumNodes)
     }
 
+    @Test("connection policy matches shared Gateway contract fixture")
+    func connectionPolicyMatchesFixture() throws {
+        let fixtureURL = try #require(
+            ([Bundle.main] + Bundle.allBundles)
+                .compactMap { $0.url(forResource: "gateway-connection-contract", withExtension: "json", subdirectory: "protocol-fixtures") }
+                .first
+        )
+        let fixture = try JSONDecoder().decode(GatewayConnectionContractFixture.self, from: Data(contentsOf: fixtureURL))
+        #expect(fixture.clientPingInterval.milliseconds == Int(GatewayConnectionPolicy.clientPingInterval.components.seconds * 1_000))
+        #expect(fixture.clientPongDeadline.milliseconds == Int(GatewayConnectionPolicy.clientPongDeadline.components.seconds * 1_000))
+        #expect(fixture.clientHandshakeDeadline.milliseconds == Int(GatewayConnectionPolicy.handshakeDeadline.components.seconds * 1_000))
+        #expect(GatewayConnectionPolicy.requestInactivityTimeout > Double(GatewayConnectionPolicy.handshakeDeadline.components.seconds))
+    }
+
     @Test("authoritative session snapshot decodes")
     func snapshotDecodes() throws {
         let data = Data(#"""

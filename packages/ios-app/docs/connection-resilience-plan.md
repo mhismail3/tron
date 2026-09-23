@@ -1,6 +1,6 @@
 # Real-world connection and resource resilience plan
 
-**Status: the focused iOS reconnect/search corrections are implemented; deployment and physical qualification are not complete.** Policy reads are demand/connection scoped, recovery attempts settle by identity across focused and secondary owners, fresh presentation opens do not adopt reconnect results, and Retry preserves existing lifecycle owners. Catalog producer invalidation/cost and the device-native opening-settlement trigger remain open; this change does not address them. Gateway preparation deadlines remain deferred. Automated evidence is not a blanket reliability guarantee.
+**Status: reconnect recovery now uses one shared jittered scheduling policy in the focused lifecycle and secondary dashboard pool.** Retryable transport failures continue while foregrounded on a satisfied path; backgrounding and known no-path pause admission, and permanent authentication/protocol/identity failures wait for explicit Retry. Deployment and physical roaming qualification remain incomplete. Catalog producer invalidation/cost and the device-native opening-settlement trigger remain open; this change does not address them. Gateway preparation deadlines remain deferred. Automated evidence is not a blanket reliability guarantee.
 
 Build on checkpoint `cba48f894` without weakening its resource bounds or accepted-command safety. The goal is reliable operation under mobile roaming, suspension, slow peers, busy sessions, partial failures, and sustained use—not merely quieter error labels. Reliability must be demonstrated within a documented workload envelope; neither this plan nor green unit tests can guarantee unlimited scale or zero bugs.
 
@@ -18,7 +18,7 @@ The structural projection checkpoint is preserved. The implementation adds bound
 | Established-socket recovery is already immediate | `AppModel.handleDeliveredEvent` calls `requestReconnect(immediate: true)` | KEEP; do not add another fast retry loop |
 | Path information is advisory | The existing path observer delivers hints to focused and admitted secondary owners | IMPLEMENTED: park/one fallback/eligible resume; hints cannot replace a handshake, invent connectivity or clear a terminal stop |
 | Half-open detection can wait for the next probe | `GatewayClient.startLivenessWait`: 10-second interval, 8-second pong deadline; initial/reconnect hello deadlines are 15/5 seconds | Characterize detection separately from replacement speed; no blind heartbeat reduction |
-| Recovery allowance spans roles | Focused and secondary executors share profile-keyed failure and active-time accounting while keeping exact socket owners and per-profile retirement barriers | IMPLEMENTED: role changes cannot mint attempts; exact pre-hello attempt IDs settle intentional retirement only; free maintenance hello cannot refund ordinary faults |
+| Focused and secondary retry behavior | Focused lifecycle and secondary pool own independent connections, each using the shared reconnect scheduler and exact connection-generation fences | IMPLEMENTED: finite retry budgets, stable-epoch refunds, and cross-role allowance transfer are removed; jitter progression, acceleration, and path pause/resume are covered by owner tests |
 | Catalog failure admission must be finite | Both owners fence automatic invalidation and read entrypoints after three application failures | IMPLEMENTED: retained rows are explicitly stale; profile/connection-scoped Retry rearms the catalog without replacing a healthy socket. Already-cancelled demand cannot acquire a traversal or reopen the exhausted retry budget |
 | Global control intake must not wait on projections | Session recovery synchronously claims the existing bounded quarantine and delegates only the read wait; auth completion commits ownership before one bounded optional-refresh worker | IMPLEMENTED: no additional event queue or task per auth event; current-generation cleanup cannot erase a successor |
 | Persistent failure needs truthful action | The first transport loss owns a two-second notice deadline; mounted authority, transport and display remain distinct | IMPLEMENTED: scoped Retry/Logs, separate catalog Retry, retained chat/draft/geometry, no false Send grant |
@@ -45,12 +45,12 @@ Parent inspection and three read-only investigations covered recovery/UI, event/
 
 1. **One canonical runtime per session.** JSONL, accepted work, receipts, settings and credentials remain in their existing owners. No second runtime, transcript mirror, event journal, or canonical-session truncation.
 2. **Three different facts stay different:** actual transport availability; synchronized session/action authority; user-visible outage presentation. A quiet UI can never grant a socket, subscription, command, or notification-presence lease.
-3. **One recovery executor per profile at a time.** Selected and secondary clients remain independently owned; a role handoff transfers/reuses failure allowance rather than manufacturing a fresh budget. No global lock serializes unrelated Macs.
+3. **One connection executor per owner.** The selected lifecycle and each admitted secondary connection remain independently owned; their common scheduler defines retry timing without sharing budgets or transport state. No global lock serializes unrelated Macs.
 4. **Exact ownership through every await.** Profile/credential authority, lifecycle generation, attempt/connection epoch, presentation target, and subscription token are checked where relevant. Old completions cannot publish values, errors, flags, or cleanup over successors.
 5. **Accepted commands outlive transport.** Keep local definitely-not-sent versus possibly-sent provenance; exact command IDs; durable receipt reconciliation; no automatic replay after unknown outcome or cancellation. A terminal response already received owns completion.
 6. **Presentation reads are disposable.** Cancel/retire obsolete reads and viewer/terminal observers, not accepted domain work. Keep the last complete transcript, route, draft, keyboard and scroll state during same-profile recovery.
-7. **No indefinite active recovery loops.** Attempt, duration, task, queue and resource bounds apply to failure recovery. Waiting passively for network restoration is not a retry loop. Path events, repeated invalidations, navigation and short hellos cannot erase persistent failure evidence.
-8. **Only genuine progress restores confidence.** Hello alone is not stable recovery. Intentional healthy background retirement is not a fault. Stable-epoch accounting must not count time spent suspended or unknowingly dead as proven healthy progress.
+7. **Retryable transport recovery is indefinite while eligible.** Retryable failures continue with capped jittered backoff while foregrounded and on a satisfied path; backgrounding and known no-path suspend attempts. Authentication, permission, protocol, and identity failures stop until explicit Retry. Catalog reads retain their separate bounded retry policy.
+8. **Only current ownership restores confidence.** Exact profile and connection generations fence stale completion. Background retirement is intentional; no budget or stable-epoch accounting is carried across it.
 9. **No artificial “finished” or “sent.”** Retained activity is last-known state, not proof of current liveness. Canonical completion and confirmed mutation outcomes alone drive success/delivery UI.
 10. **Local failure containment.** One bad profile, slow stream, overflowing peer, projection failure or browser viewer cannot cancel another session or reset the service.
 11. **Diagnostics are bounded and content-free.** Fixed categories, numeric codes, counts, sizes, timing and validated opaque correlation IDs only. No raw URLs, close-reason payloads, credentials, provider output or user text.
@@ -60,9 +60,7 @@ Parent inspection and three read-only investigations covered recovery/UI, event/
 
 ### Ownership model
 
-Keep `GatewayClient` as the socket/epoch authority. Keep focused lifecycle and secondary pool as their existing connection executors. Factor their common recovery policy into the existing support layer; compose one bounded profile-keyed allowance owner (or an explicit single-owner transfer) so role changes cannot bypass a stop. Do not introduce a third component that also opens sockets.
-
-Use typed attempt outcomes and exact executor leases. Every admitted attempt settles once as successful, failed, intentionally retired, or superseded. First-fault identity, allowance, active-time deadline and stop reason belong to that recovery episode. Profile label edits do not reset it; explicit Retry, genuine stable recovery, removal, or authorized endpoint/credential replacement have explicit semantics. Removing a profile prunes only its disposable policy state, not accepted commands or unrelated drafts.
+Keep `GatewayClient` as the socket/epoch authority. Keep the focused lifecycle and secondary pool as their existing connection executors. Their shared `GatewayReconnectSchedule` provides nominal exponential backoff, independent jitter, and one-shot acceleration; it does not own sockets, failure budgets, or cross-role state. Retryable failures continue while the owner is foregrounded and the network path is satisfied. Background retirement and known no-path suspend new attempts; path return and foreground activation accelerate a pending delay. Authentication, permission, protocol, and identity failures stop until explicit Retry. Exact profile and connection generations continue to fence stale completion.
 
 Presentation is a bounded read-only projection of these facts. Its only independent state is the minimum needed for an episode-owned display deadline/announcement identity; it cannot schedule transport work or invent canonical readiness.
 
@@ -71,14 +69,14 @@ Presentation is a bounded read-only projection of these facts. Its only independ
 | Observation | Required action |
 | --- | --- |
 | Path/interface change but the exact socket is still viable | Keep it. Coalesce a hint; join/advance its existing liveness probe if needed. Never create a second ping or handshake |
-| OS reports no usable path | Avoid launching pointless replacement attempts; preserve existing socket until actual failure. After presentation grace, say waiting for network. Park without periodic retry churn |
-| Path returns / meaningful foreground activation | Resume an eligible parked episode or accelerate a delay once. Do not replace an in-flight handshake or re-arm an exhausted/nonretryable stop |
-| Exact socket is dead | Retire promptly, start the existing immediate replacement path, then bounded jittered backoff |
-| Repeated short successful hello followed by actual loss | Retain failure history; do not silently reset the budget |
-| Short healthy intentional background/profile retirement | Preserve earlier failures, but do not turn three ordinary app visits into an outage. Resolve retirement against the exact old epoch, including races with an already-observed failure |
+| OS reports no usable path | Preserve an established socket until actual failure and pause replacement attempts while the path is unsatisfied |
+| Path returns / meaningful foreground activation | Resume or accelerate one pending delay; do not replace an in-flight handshake. Explicit Retry clears a nonretryable stop |
+| Exact socket is dead | Retire promptly, then retry with capped jittered backoff while eligible |
+| Repeated short successful hello followed by actual loss | Continue retrying under the same delay progression; no stable-epoch refund or attempt budget applies |
+| Short healthy intentional background/profile retirement | Pause/retire through the existing lifecycle owner; no cross-visit failure accounting is applied |
 | Authentication, identity, protocol, or permanent configuration failure | Stop promptly with specific action; no roaming grace that hides security failure. Policy close code alone is insufficient to guess “re-pair” |
 | Explicitly accepted planned restart | Use the existing maintenance intent and a bounded maintenance deadline; do not exhaust ordinary roaming allowance while a healthy replacement starts. A stale restart intent cannot extend the deadline |
-| Server overload/capacity | Respect bounded backoff and server limits; no immediate reconnect storm. Retain first cause; stop visibly on exhaustion |
+| Server overload/capacity | Respect capped jittered backoff; do not create an immediate reconnect storm |
 | Responsive socket with stale/invalid projection | Retry only the owning projection within a finite budget. Keep the socket and unrelated actions usable; expose persistent catch-up failure |
 | Stale callback / cancellation / normal teardown | Exact cleanup, no error notification, no successor budget mutation |
 
@@ -86,9 +84,9 @@ Presentation is a bounded read-only projection of these facts. Its only independ
 
 ### Starting policy values—not performance promises
 
-- Keep the established-connection immediate retry and existing 15/5-second hello deadlines while measuring.
-- Start with the checkpoint's **three automatic transport attempts**, shared across role handoff, and **30-second stable-epoch** requirement. Add a finite active-recovery deadline so cancellations/replacements cannot extend an episode forever. Implemented ordinary active-repair admission allowance: **30 seconds**, excluding passive no-path/background time and usable transport. An already-admitted handshake retains its existing finite deadline; this is not a hard real-time promise. Provisional hello pauses repair work without forgiving attempt history.
-- Preserve the existing **90-second planned-restart** bound as a distinct explicit intent; prove the policy works when a valid restart takes longer than three replacement handshakes.
+- The handshake retains its 15-second monotonic deadline. Each owner's reconnect scheduler starts at **2 seconds**, grows by **×1.7** to **15 seconds**, and independently jitters each delay within **80–120%** with a hard 15-second cap.
+- Retryable transport failures continue without an attempt-count or elapsed-recovery budget while the app is foregrounded and the path is satisfied. Backgrounding and an unsatisfied path pause admission; foreground activation, path return, or explicit Retry accelerates a pending delay.
+- Preserve the existing **90-second planned-restart** watchdog. If it expires, relabel the connection as Reconnecting and resume ordinary retry scheduling; it is not a retry ceiling or terminal stop.
 - Proposed **two-second outage-presentation grace**, measured from the first relevant failure, not from each retry/path callback. It delays only presentation, never recovery. A provisional hello cannot clear it while the mounted session is still unusable.
 - Give catalog/projection recovery an actual finite failed-attempt allowance, initially **three**, not a saturating retry counter. Coalesce invalidations; repeated failure-triggered or high-rate invalidations cannot re-arm a failure storm. Successful normal refreshes are not subject to a lifetime cap.
 - Do not shorten heartbeat deadlines, enlarge queues, or increase these allowances to make a failing test pass. Confirm final values with the scenario matrix and physical measurements.
@@ -123,20 +121,19 @@ Each phase is a reviewable checkpoint: code + focused tests + owning documentati
 
 **Gate:** an export can distinguish suspected path loss, transport timeout, event overflow, overload and projection failure without claiming unsupported attribution or leaking content.
 
-### P2 — Roaming-aware bounded recovery and role handoff
+### P2 — Shared retry scheduling and path-aware recovery
 
-**Owners:** `GatewayRecoveryPolicy`, `ReconnectDelayPolicy`, `GatewayLifecycleCoordinator`, `DashboardGatewayConnectionPool`, app path/scene composition.
+**Owners:** `GatewayRecoveryPolicy`, `ReconnectDelayPolicy`, `GatewayReconnectSchedule`, `GatewayLifecycleCoordinator`, `DashboardGatewayConnectionPool`, app path/scene composition.
 
-- Replace duplicated allowance semantics with the ownership contract above; reuse one jitter policy rather than deterministic secondary retry bursts. At focused/secondary handoff, synchronously revoke the old executor and await its bounded local transport retirement before activating the successor for that profile. Do not wait indefinitely for a remote close or serialize unrelated profiles. Late old retirement cannot consume/refund the transferred allowance.
-- Deliver coalesced path hints under scene/profile/epoch admission. Advance/join the existing liveness owner; never independently invoke overlapping socket pings.
-- Park new attempts when there is known no path; resume only an eligible episode when a path returns. Leave satisfied-but-unreachable behavior on real handshake/liveness evidence and bounded failure handling. A stale/default-path hint cannot permanently veto an explicit Retry or fresh foreground endpoint check: loopback/overlay reachability may differ, and restoration callbacks can be missed. Include at most one fallback endpoint verification during a parked episode, scheduled by the existing recovery-delay owner within the remaining attempt/active-time allowance, even if no return callback arrives. If it fails, retain a visible waiting/offline state with Retry and first-fault context; no endless fallback polling. Later automatic recovery needs a genuinely fresh eligible path/foreground trigger; unconditional recovery without any trigger is not promised. All checks remain single-flight and cannot automatically re-arm an exhausted episode.
-- Preserve immediate reconnect and delay-only acceleration. Repeated foreground events, explicit Retry taps, or path hints cannot replace an active attempt or extend its deadline.
-- Separate planned maintenance from ordinary transport failure; preserve immediate auth/protocol stops and exact endpoint rebinding on Retry. Classify an admitted `system.stopping` before generic disconnect accounting: expected maintenance loss and its replacement handshake failures must not consume the ordinary roaming allowance. Its own finite deadline controls failure; unrelated or stale stop events cannot establish/extend maintenance authority.
-- Resolve cancellation/refund/stability from exact attempt outcomes. Pre-hello intentional retirement refunds its UUID-qualified charge once; an actual timeout remains charged. A late cancellation cannot poison or forgive a successor's failures. `AppModelReconnectTests.repeatedPreHelloRetirement` and `DashboardStateOwnerTests.secondaryPreHelloRetirementAndActiveRefresh` exercise the actual executors across more visits than the automatic allowance.
+- Keep `GatewayClient` and each connection executor as the owners of exact socket/profile generations. The shared scheduler owns timing only; it does not coordinate sockets or carry state across focused/dashboard role changes.
+- Use the same 2-second initial delay, ×1.7 progression, 15-second cap, and independent 80–120% jitter in the primary lifecycle and dashboard pool. Every handshake retains the 15-second monotonic deadline.
+- Continue retryable failures indefinitely while foregrounded and on a satisfied path. Pause new attempts while backgrounded or while the path is known unsatisfied; path return, foreground activation, and explicit Retry accelerate one pending delay without replacing an in-flight handshake.
+- Authentication, permission, protocol, and paired-identity failures stop automatic retries until explicit Retry. Retryable transport errors remain Reconnecting; Offline denotes stopped recovery. The 90-second planned-restart watchdog relabels a stalled restart as Reconnecting and resumes normal retry scheduling; it is not a terminal attempt/deadline budget.
+- Preserve exact attempt/connection-generation fencing, serialized per-profile retirement, and independent progress for unrelated dashboard connections. Do not add recovery budgets, stable-epoch refunds, fallback endpoint polling, or a third socket-owning recovery component.
 
-**Tests:** same policy sequence through focused and secondary executors; A→B→A handoff; healthy short visits; actual rapid drops; no-path waiting without attempts before its one permitted verification; path return during delay/handshake/stop; foreground/background during suspended close; endpoint/token replacement; Mac asleep/waking; a 20–60-second valid restart; exhausted budget remains stopped despite path/scene chatter.
+**Tests:** the shared schedule's one-shot acceleration; primary lifecycle retries beyond the former attempt limit, repeated jitter progression, foreground delay acceleration, path pause/resume, authentication stop plus Retry, and maintenance watchdog recovery; dashboard retries beyond the former attempt limit and path pause/resume; existing stale-completion and retirement-barrier tests.
 
-**Gate:** bounded sockets/tasks/attempts per profile, no duplicate active handshake, no bypass through navigation, and no artificial outage from normal healthy app visits.
+**Gate:** both connection owners exhibit the same capped retry progression and pause/acceleration behavior; no duplicate active handshake, no stale completion publication, no attempt limit for retryable transport failures, and no retry while backgrounded or on a known unsatisfied path.
 
 ### P3 — Nonblocking synchronization intake and finite projection recovery
 
