@@ -24,7 +24,7 @@ export async function startFaultProxyForServer(upstream, { token }) {
   return startFaultProxy({ targetPort: address.port, token, verifyTarget });
 }
 
-async function startFaultProxy({ targetPort, token, verifyTarget }) {
+async function startFaultProxy({ targetPort, token, verifyTarget, restartGateway }) {
   if (!Number.isInteger(targetPort) || targetPort < 1024 || targetPort > 65535 || typeof token !== "string" || token.length < 32) {
     throw new Error("Fault proxy requires an owned loopback target and control token");
   }
@@ -76,6 +76,13 @@ async function startFaultProxy({ targetPort, token, verifyTarget }) {
           if (![1000, 1001, 1008, 1012, 1013].includes(next.code)) throw new Error("invalid close code");
           for (const bridge of bridges) bridge.close(next.code);
           answer(response, 200, { mode: "close" });
+          return;
+        }
+        if (next.mode === "restart-gateway") {
+          if (!restartGateway) throw new Error("private Gateway restart is unavailable in this fixture");
+          for (const bridge of [...bridges]) bridge.terminate();
+          const pid = await restartGateway();
+          answer(response, 200, { mode: next.mode, pid });
           return;
         }
         if (!["pass", "blackhole", "hold-hello", "hold-open", "hold-sync", "drop-prompt-response", "reject-upgrade"].includes(next.mode)) throw new Error("unknown fault");
@@ -233,22 +240,29 @@ async function startFaultProxy({ targetPort, token, verifyTarget }) {
   };
 }
 
-async function ownedGatewayVerifier(pid, port) {
-  if (!Number.isSafeInteger(pid) || pid <= 1 || process.ppid <= 1) throw new Error("Fixture owner PID is required");
+async function ownedGatewayVerifier(initialPid, port) {
+  if (!Number.isSafeInteger(initialPid) || initialPid <= 1 || process.ppid <= 1) throw new Error("Fixture owner PID is required");
   const execute = promisify(execFile);
-  const inspect = async field => (await execute("/bin/ps", ["-p", String(pid), "-o", `${field}=`], { timeout: 2_000, maxBuffer: 4_096 })).stdout.trim();
-  const command = await inspect("command");
-  if (Number(await inspect("ppid")) !== process.ppid || !command.startsWith("node ")) throw new Error("Upstream is not this harness's Gateway child");
   const entrypoint = realpathSync(fileURLToPath(new URL("../packages/gateway/dist/index.js", import.meta.url)));
-  const argument = command.slice(command.indexOf(" ") + 1);
-  if (realpathSync(argument) !== entrypoint) throw new Error("Upstream is not this harness's Gateway child");
-  const birth = await inspect("lstart");
+  let pid = initialPid;
+  let birth;
+  let command;
   let checking;
-  return () => {
-    // Coalesce only concurrent proof reads; never cache a previous proof for
-    // another connection or allow a recycled PID/port to become the target.
+  const inspect = async (target, field) => (await execute("/bin/ps", ["-p", String(target), "-o", `${field}=`], { timeout: 2_000, maxBuffer: 4_096 })).stdout.trim();
+  const capture = async (target, allowedParent) => {
+    const nextCommand = await inspect(target, "command");
+    const argument = nextCommand.split(/\s+/).at(-1) ?? "";
+    if (realpathSync(argument) !== entrypoint || Number(await inspect(target, "ppid")) !== allowedParent) {
+      throw new Error("Upstream is not an owned Gateway fixture process");
+    }
+    return { command: nextCommand, birth: await inspect(target, "lstart") };
+  };
+  const initial = await capture(pid, process.ppid);
+  command = initial.command;
+  birth = initial.birth;
+  const verifyTarget = () => {
     checking ??= (async () => {
-      if (await inspect("lstart") !== birth || await inspect("command") !== command) throw new Error("Gateway process ownership changed");
+      if (await inspect(pid, "lstart") !== birth || await inspect(pid, "command") !== command) throw new Error("Gateway process ownership changed");
       const result = await execute(process.platform === "darwin" ? "/usr/sbin/lsof" : "lsof",
         ["-nP", "-a", "-p", String(pid), `-iTCP:${port}`, "-sTCP:LISTEN", "-Fpn"], { timeout: 2_000, maxBuffer: 4_096 });
       const fields = result.stdout.trim().split("\n");
@@ -256,12 +270,58 @@ async function ownedGatewayVerifier(pid, port) {
     })().finally(() => { checking = undefined; });
     return checking;
   };
+  verifyTarget.adopt = async target => {
+    const next = await capture(target, process.pid);
+    pid = target;
+    command = next.command;
+    birth = next.birth;
+  };
+  verifyTarget.pid = () => pid;
+  return verifyTarget;
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const targetPort = Number(process.env.TRON_E2E_UPSTREAM_PORT);
   const verifyTarget = await ownedGatewayVerifier(Number(process.env.TRON_E2E_UPSTREAM_PID), targetPort);
-  const proxy = await startFaultProxy({ targetPort, token: process.env.TRON_E2E_PROXY_TOKEN, verifyTarget });
+  const entrypoint = realpathSync(process.env.TRON_E2E_GATEWAY_ENTRY);
+  if (entrypoint !== realpathSync(fileURLToPath(new URL("../packages/gateway/dist/index.js", import.meta.url)))) throw new Error("Gateway restart entrypoint is not the repository fixture");
+  const restartGateway = async () => {
+    await verifyTarget();
+    const oldPid = verifyTarget.pid();
+    process.kill(oldPid, "SIGTERM");
+    const stoppedAt = Date.now() + 5_000;
+    while (Date.now() < stoppedAt) {
+      try { process.kill(oldPid, 0); } catch { break; }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    try { process.kill(oldPid, 0); throw new Error("Private Gateway did not stop within its fixture deadline"); } catch (error) {
+      if (error.message.includes("did not stop")) throw error;
+    }
+    const { spawn } = await import("node:child_process");
+    const child = spawn(process.execPath, [entrypoint], {
+      cwd: fileURLToPath(new URL("..", import.meta.url)),
+      env: {
+        PATH: process.env.PATH,
+        HOME: process.env.TRON_E2E_GATEWAY_HOME,
+        TRON_DATA_DIR: process.env.TRON_E2E_TRON_HOME,
+        PI_CODING_AGENT_DIR: process.env.TRON_E2E_AGENT_DIR,
+        TRON_MACHINE_GROUP_ID: "tron-ios-e2e",
+        TRON_GATEWAY_HOST: "127.0.0.1",
+        TRON_GATEWAY_PORT: String(targetPort),
+      },
+      stdio: "ignore",
+    });
+    if (!child.pid) throw new Error("Private Gateway fixture failed to spawn");
+    try {
+      await writeFile(process.env.TRON_E2E_GATEWAY_PID_FILE, `${child.pid}\n`, { mode: 0o600 });
+      await verifyTarget.adopt(child.pid);
+    } catch (error) {
+      child.kill("SIGTERM");
+      throw error;
+    }
+    return child.pid;
+  };
+  const proxy = await startFaultProxy({ targetPort, token: process.env.TRON_E2E_PROXY_TOKEN, verifyTarget, restartGateway });
   await writeFile(process.env.TRON_E2E_PROXY_READY, `${JSON.stringify({ port: proxy.port, pid: process.pid })}\n`, { mode: 0o600 });
   const close = () => { void proxy.close().then(() => process.exit(0)); };
   process.once("SIGTERM", close); process.once("SIGINT", close);

@@ -1880,7 +1880,10 @@ final class AppModel {
                         // next authoritative list-change event rather than
                         // creating an unbounded self-refresh loop.
                         guard result.genuineFailure,
-                              DashboardCatalogRetryPolicy.shouldRetry(isDirty: remainsDirty, isCurrent: true) else {
+                              DashboardCatalogRetryPolicy.shouldRetry(
+                                  isRetryableFailure: result.genuineFailure,
+                                  isCurrent: true
+                              ) else {
                             return result
                         }
                         self.catalogRefreshRetryAttempt = min(3, self.catalogRefreshRetryAttempt + 1)

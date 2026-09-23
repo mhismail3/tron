@@ -485,6 +485,37 @@ struct AppModelReconnectTests {
         }
     }
 
+    @Test("path loss on an active socket pauses replacement until the path returns")
+    func pathLossDuringActiveConnectionPausesReplacement() async throws {
+        let clock = ManualClock()
+        let sockets = (0..<3).map { _ in ScriptedGatewaySocket() }
+        try await withFixture(sockets: sockets, clock: clock, units: SequenceReconnectUnits([0])) { fixture in
+            let start = Task { await fixture.model.start() }
+            await sockets[0].enqueue(helloFrame())
+            try await sockets[0].waitUntilSent(count: 1)
+            while fixture.model.connectionState != .connected {
+                try Task.checkCancellation()
+                await Task.yield()
+            }
+            await start.value
+
+            fixture.model.lifecycleNotePathHint(satisfied: false)
+            await sockets[0].failPendingReceivers(URLError(.networkConnectionLost))
+            try await sockets[0].waitUntilClosed()
+            clock.advance(by: .seconds(60))
+            #expect(fixture.socketFactory.requests.count == 1)
+
+            fixture.model.lifecycleNotePathHint(satisfied: true)
+            try await sockets[1].waitUntilSent(count: 1)
+            #expect(fixture.socketFactory.requests.count == 2)
+            await sockets[1].enqueue(helloFrame())
+            while fixture.model.connectionState != .connected {
+                try Task.checkCancellation()
+                await Task.yield()
+            }
+        }
+    }
+
     @Test("authentication failure stops recovery until explicit Retry")
     func authenticationFailureStopsUntilRetry() async throws {
         let clock = ManualClock()

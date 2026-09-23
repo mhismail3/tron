@@ -67,12 +67,12 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
   on their own finish/close/error
   paths rather than duplicating HTTP counters.
 - **Mobile recovery:** while foregrounded with a satisfied network path, one
-  reconnect owner retries transient failures with capped jittered backoff until
-  success. Background and no-path states pause attempts; foreground, path return
-  and explicit Retry accelerate one pending delay. Only authentication,
-  authorization, protocol and identity failures stop automatic recovery. Each
-  handshake has the shared 15-second deadline. Last-good projections and mutation
-  receipts remain intact.
+  reconnect owner retries transient failures indefinitely with a 2-second initial
+  delay, 1.7× progression, a 15-second cap, and 20% jitter. Background and no-path
+  states pause attempts; foreground, path return, and explicit Retry accelerate
+  one pending delay. Only authentication, authorization, protocol, and identity
+  failures stop automatic recovery. Each handshake has the shared 15-second
+  deadline. Last-good projections and mutation receipts remain intact.
 
 - **Administrative restart:** `gateway.restart` normally drains accepted work.
   It restarts through the existing bounded shutdown path if the drain makes no

@@ -157,13 +157,11 @@ struct DashboardStateOwnerTests {
         #expect(replacement == newer)
     }
 
-    @Test("current dirty catalog remains eligible for retries after repeated failures")
-    func catalogDirtyRetryPolicy() {
-        for _ in 0..<10 {
-            #expect(DashboardCatalogRetryPolicy.shouldRetry(isDirty: true, isCurrent: true))
-        }
-        #expect(!DashboardCatalogRetryPolicy.shouldRetry(isDirty: false, isCurrent: true))
-        #expect(!DashboardCatalogRetryPolicy.shouldRetry(isDirty: true, isCurrent: false))
+    @Test("retryable catalog failures retry only for the current owner")
+    func catalogRetryPolicy() {
+        #expect(DashboardCatalogRetryPolicy.shouldRetry(isRetryableFailure: true, isCurrent: true))
+        #expect(!DashboardCatalogRetryPolicy.shouldRetry(isRetryableFailure: false, isCurrent: true))
+        #expect(!DashboardCatalogRetryPolicy.shouldRetry(isRetryableFailure: true, isCurrent: false))
     }
 
     @MainActor
@@ -276,8 +274,8 @@ struct DashboardStateOwnerTests {
     }
 
     @MainActor
-    @Test("secondary dirty catalog retries past warning threshold and recovers")
-    func secondaryCatalogDirtyRetryConverges() async throws {
+    @Test("secondary catalog retries past warning threshold without another invalidation")
+    func secondaryCatalogRetryConvergesWithoutInvalidation() async throws {
         try await withTestWatchdog { @MainActor in
             let selected = GatewayProfile(
                 id: "selected", label: "Selected", host: "selected.test", port: 9_847,

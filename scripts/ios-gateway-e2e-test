@@ -305,7 +305,11 @@ PY
   pi_version="$(manifest_pi_version)"
   local proxy_token proxy_pid upstream_port="$port"
   proxy_token="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
-  TRON_E2E_UPSTREAM_PORT="$upstream_port" TRON_E2E_UPSTREAM_PID="$(<"$pid_file")" TRON_E2E_PROXY_TOKEN="$proxy_token" TRON_E2E_PROXY_READY="$proxy_ready" \
+  TRON_E2E_UPSTREAM_PORT="$upstream_port" TRON_E2E_UPSTREAM_PID="$(<"$pid_file")" \
+    TRON_E2E_GATEWAY_ENTRY="$gateway_dir/dist/index.js" TRON_E2E_GATEWAY_HOME="$gateway_home" \
+    TRON_E2E_TRON_HOME="$tron_home" TRON_E2E_AGENT_DIR="$agent_dir" \
+    TRON_E2E_GATEWAY_LOG="$log_file" TRON_E2E_GATEWAY_PID_FILE="$pid_file" \
+    TRON_E2E_PROXY_TOKEN="$proxy_token" TRON_E2E_PROXY_READY="$proxy_ready" \
     nohup node "$proxy_script" >"$run_root/proxy.log" 2>&1 </dev/null &
   proxy_pid="$!"
   echo "$proxy_pid" >"$proxy_pid_file"

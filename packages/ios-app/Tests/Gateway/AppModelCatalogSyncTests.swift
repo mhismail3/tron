@@ -6,28 +6,30 @@ import Testing
 @MainActor
 @Suite("Dashboard catalog synchronization", .serialized)
 struct AppModelCatalogSyncTests {
-    @Test("fourth catalog failure still retries on the current responsive socket")
-    func catalogFailureRetriesPastWarningThreshold() async throws {
+    @Test("catalog retries autonomously past the warning threshold on its current connection")
+    func catalogFailureRetriesWithoutInvalidation() async throws {
         let clock = ManualClock()
         try await withHarness(manualClock: clock) { harness in
+            let loading = Task { await harness.model.refreshSessions() }
             for index in 0..<4 {
-                let loading = Task { await harness.model.refreshSessions() }
                 let request = try await request(harness.socket, index: index + 1)
-                await harness.socket.enqueue(errorResponse(id: request.id, code: "disconnected"))
-                #expect(await loading.value == .retained)
+                await harness.socket.enqueue(errorResponse(id: request.id, code: "invalid_dashboard_catalog"))
+                if index == 0 { #expect(await loading.value == .retained) }
                 #expect(await harness.client.activeConnectionID() != nil)
+                let delay: Duration = index == 0 ? .seconds(2) : index == 1 ? .seconds(4) : .seconds(8)
+                try await clock.waitUntilSleeping(count: 1, duration: delay)
                 if index == 2 {
                     #expect(harness.model.visibleNotices.contains { $0.replacement?.key == .sessionCatalogCatchUp })
                 }
-                let delay: Duration = index == 0 ? .seconds(2) : index == 1 ? .seconds(4) : .seconds(8)
-                try await clock.waitUntilSleeping(count: 1, duration: delay)
                 clock.advance(by: delay)
             }
             let connection = await harness.client.activeConnectionID()
-            let retry = Task { await harness.model.refreshSessions() }
             let retried = try await request(harness.socket, index: 5)
             await harness.socket.enqueue(response(id: retried.id, sessions: [summary(id: "fresh", revision: 1)], listRevision: 1))
-            #expect(await retry.value == .published)
+            while harness.model.sessions.map(\.id) != ["fresh"] {
+                try Task.checkCancellation()
+                await Task.yield()
+            }
             #expect(harness.model.sessions.map(\.id) == ["fresh"])
             #expect(await harness.client.activeConnectionID() == connection)
             #expect(!harness.model.visibleNotices.contains { $0.replacement?.key == .sessionCatalogCatchUp })

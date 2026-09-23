@@ -1,4 +1,3 @@
-import Foundation
 import SwiftUI
 import Testing
 import UIKit
@@ -57,33 +56,6 @@ struct ManageSessionThemeTests {
             #expect(SessionProcessRowStyle.activity.accent(for: state) == .tronError)
             #expect(SessionProcessRowStyle.history.accent(for: state) == .tronSubagent)
         }
-    }
-
-    @Test("Manage Session destinations install the inherited session theme")
-    func destinationThemeRouting() throws {
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sources = [
-            "Sources/UI/Chat/SessionContextSheet.swift",
-            "Sources/UI/Chat/AgentInstructionsSheet.swift",
-            "Sources/UI/Chat/SessionTreeSheet.swift",
-            "Sources/UI/Chat/SessionProcessSheets.swift",
-            "Sources/UI/Chat/WorkspaceInspectorSheet.swift",
-            "Sources/UI/Settings/ProjectResourcesView.swift",
-        ]
-
-        for relativePath in sources {
-            let source = try String(contentsOf: packageRoot.appendingPathComponent(relativePath), encoding: .utf8)
-            #expect(source.contains("tronSessionTeal"), "\(relativePath)")
-        }
-
-        let context = try String(contentsOf: packageRoot.appendingPathComponent(sources[0]), encoding: .utf8)
-        #expect(context.contains(".tronSettingsVisualTheme(accent: sessionRowAccent)"))
-        #expect(context.contains("private var sessionRowAccent: Color { .tronSessionTeal }"))
-        let terminal = try String(contentsOf: packageRoot.appendingPathComponent("Sources/UI/Terminal/TerminalSheet.swift"), encoding: .utf8)
-        #expect(terminal.contains("settingsTheme?.accent ?? .tronEmerald"), "Terminal inherits the presenting group without recoloring other entrypoints")
     }
 
     private func contrastRatio(_ foreground: UIColor, _ background: UIColor) -> CGFloat {

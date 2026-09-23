@@ -239,6 +239,7 @@ schemes:
       targets:
         TronMobile: all
         TronShareExtension: all
+        TronMobileTests: [test]
         TronMobileUITests: [test]
     run:
       config: Test

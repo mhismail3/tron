@@ -1017,6 +1017,16 @@ final class GatewayLifecycleCoordinator {
                         lifecycleGeneration: lifecycleGeneration,
                         attemptGeneration: attemptGeneration
                     ) else { return }
+                    // A path can become unsatisfied while the predecessor socket
+                    // is still active. Once that attempt retires, park until the
+                    // next path callback instead of retrying on a known-down route.
+                    guard self.networkPathSatisfied else {
+                        self.finishReconnect(
+                            lifecycleGeneration: lifecycleGeneration,
+                            attemptGeneration: attemptGeneration
+                        )
+                        return
+                    }
                     self.connectionState = self.restartRequested ? .restarting : .reconnecting
                     retry += 1
                     let startedAt = clock.now()
@@ -1275,6 +1285,13 @@ final class GatewayLifecycleCoordinator {
                             attemptGeneration: attemptGeneration
                         ) else { return }
                         self.connectionState = self.restartRequested ? .restarting : .reconnecting
+                        guard self.networkPathSatisfied else {
+                            self.finishReconnect(
+                                lifecycleGeneration: lifecycleGeneration,
+                                attemptGeneration: attemptGeneration
+                            )
+                            return
+                        }
                         self.reconnectCanBeAccelerated = true
                         self.delegate?.lifecycleRecordDiagnostic(event: "reconnect.failure",
                             message: "attempt=\(attemptGeneration) loop=\(loopID) retry=\(retry) code=\(GatewayDiagnosticFailure.code(error)) durationMs=\(diagnosticMilliseconds(startedAt.duration(to: clock.now())))")

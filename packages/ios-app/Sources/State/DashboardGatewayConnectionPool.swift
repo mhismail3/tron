@@ -3,8 +3,8 @@ import Foundation
 enum DashboardCatalogRetryPolicy {
     static let unavailableNoticeAfterFailures = 3
 
-    nonisolated static func shouldRetry(isDirty: Bool, isCurrent: Bool) -> Bool {
-        isDirty && isCurrent
+    nonisolated static func shouldRetry(isRetryableFailure: Bool, isCurrent: Bool) -> Bool {
+        isRetryableFailure && isCurrent
     }
 }
 
@@ -626,7 +626,6 @@ final class DashboardGatewayConnectionPool {
                   current.refreshRequestGeneration == requestGeneration else { return }
             current.refreshTask = nil
             self.entries[profileID] = current
-            let remainsDirty = current.refreshSatisfiedGeneration < current.refreshInvalidationGeneration
             if result.needsImmediateFollowUp && result.outcome == .published {
                 self.startRefreshLease(profileID: profileID, generation: generation, delay: .zero)
             } else {
@@ -642,7 +641,10 @@ final class DashboardGatewayConnectionPool {
                     current.catalog.markLoadUnavailable()
                     current.state = .stale
                 }
-                guard DashboardCatalogRetryPolicy.shouldRetry(isDirty: remainsDirty, isCurrent: true) else {
+                guard DashboardCatalogRetryPolicy.shouldRetry(
+                    isRetryableFailure: result.outcome == .retryRead,
+                    isCurrent: current.connectionID == connectionID
+                ) else {
                     self.entries[profileID] = current
                     self.publish(profileID: profileID)
                     return
@@ -749,7 +751,7 @@ final class DashboardGatewayConnectionPool {
                 publish(profileID: profileID)
                 return .published
             case .revisionMoved, .invalid:
-                return .retryRead
+                return .retained
             case .retired:
                 return .retained
             }

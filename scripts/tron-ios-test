@@ -63,6 +63,19 @@ simulator_args=(
 )
 [[ "$EPHEMERAL" == 1 ]] && simulator_args+=(--ephemeral)
 
+tier="${TRON_IOS_TEST_TIER:-unit}"
+case "$tier" in
+  unit)
+    test_scheme="Tron Development"
+    test_plan="UnitTests"
+    ;;
+  ui-validation)
+    test_scheme="Tron UI Validation"
+    test_plan="UIValidation"
+    ;;
+  *) die "TRON_IOS_TEST_TIER must be unit or ui-validation" ;;
+esac
+
 command="${1:-checkpoint}"
 if [[ "$command" == -h || "$command" == --help || "$command" == help ]]; then usage; exit 0; fi
 shift || true
@@ -88,6 +101,14 @@ while (($#)); do
     *) die "unsupported argument: $1" ;;
   esac
 done
+
+case "$command" in
+  checkpoint|prepare|run|diagnose)
+    if [[ "$tier" == ui-validation && -z "${selectors[0]-}" ]]; then
+      die "ui-validation runs require explicit --only-testing selectors"
+    fi
+    ;;
+esac
 
 if [[ "$command" == status ]]; then
   echo "Canonical Xcode: $TRON_CI_XCODE_VERSION"
@@ -227,8 +248,8 @@ build_products() {
     "${TRON_IOS_TEST_BUILD_NO_OUTPUT_SECONDS:-300}" "$DERIVED_DATA/Build/Products" \
     xcodebuild build-for-testing \
       -project "$IOS/TronMobile.xcodeproj" \
-      -scheme "Tron Development" \
-      -testPlan UnitTests \
+      -scheme "$test_scheme" \
+      -testPlan "$test_plan" \
       -configuration Test \
       -destination "$destination" \
       -derivedDataPath "$DERIVED_DATA" \
@@ -268,7 +289,7 @@ PY
 run_tests() {
   local diagnostics="$1" overall="$2" no_output="$3"
   [[ -d "$DERIVED_DATA/Build/Products" ]] || die "test products are missing; run '$0 build' first"
-  local test_selectors=("-only-testing:TronMobileTests")
+  local test_selectors=()
   if [[ -n "${selectors[0]-}" ]]; then
     test_selectors=("${selectors[@]}")
   fi
@@ -277,8 +298,8 @@ run_tests() {
   if run_process test "$overall" "$no_output" "$result_bundle" \
     xcodebuild test-without-building \
       -project "$IOS/TronMobile.xcodeproj" \
-      -scheme "Tron Development" \
-      -testPlan UnitTests \
+      -scheme "$test_scheme" \
+      -testPlan "$test_plan" \
       -configuration Test \
       -destination "$destination" \
       -derivedDataPath "$DERIVED_DATA" \

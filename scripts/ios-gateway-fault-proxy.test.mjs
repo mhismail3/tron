@@ -23,7 +23,7 @@ test("fixture rejects unowned targets before opening a proxy", async () => {
   await assert.rejects(promisify(execFile)(process.execPath, [fileURLToPath(new URL("./ios-gateway-fault-proxy.mjs", import.meta.url))], {
     env: { ...process.env, TRON_E2E_UPSTREAM_PORT: "9847", TRON_E2E_UPSTREAM_PID: String(process.pid), TRON_E2E_PROXY_TOKEN: token },
     timeout: 5_000,
-  }), error => error.code === 1 && error.stderr.includes("harness's Gateway child"));
+  }), error => error.code === 1 && error.stderr.includes("owned Gateway fixture process"));
 });
 
 test("test-only proxy holds ordered boundaries and loses one accepted response", async () => {

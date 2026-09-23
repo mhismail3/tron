@@ -19,6 +19,13 @@
     {
       "target" : {
         "containerPath" : "container:TronMobile.xcodeproj",
+        "identifier" : "2423FA22FBA724E77DCB5381",
+        "name" : "TronMobileTests"
+      }
+    },
+    {
+      "target" : {
+        "containerPath" : "container:TronMobile.xcodeproj",
         "identifier" : "6C84D08D5E56B9C22DF122FB",
         "name" : "TronMobileUITests"
       }

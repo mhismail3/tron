@@ -10,7 +10,8 @@ See:
 - [Development and focused tests](docs/development.md)
 - [Onboarding](docs/onboarding.md)
 - [Gateway event policy](docs/events.md)
-- [iOS hardening plan](docs/hardening-plan.md)
+- [iOS architecture](docs/architecture.md)
+- [iOS events and state delivery](docs/events.md)
 
 Generate the project with `scripts/tron ios generate` from the repository root;
 it resolves the pinned XcodeGen and keeps `project.yml` as project truth. Run
