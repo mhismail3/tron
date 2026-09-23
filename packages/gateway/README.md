@@ -507,6 +507,15 @@ future managed-state contract are owned by
 
 ## Runtime and state
 
+The launcher executes `dist/index.js`, a small entrypoint that imports the
+Gateway from `gateway-main.ts`. If loading that module graph or startup fails,
+the entrypoint appends one `gateway.fatal-startup` error record to
+`gateway.jsonl`, with the error (and one level of cause), runtime epoch and
+payload version, then exits non-zero. Payload and home path prefixes are
+shortened before redaction so the record names the failing file. The entrypoint
+imports only Node built-ins, `tron-home.ts` and the logger's bounding helper, so
+a failure elsewhere in the graph cannot prevent the record.
+
 A supervised payload validates its architecture-specific immutable `node` and
 technical `pi` command aliases before model services or extension packages load.
 The aliases must have exact relative target text, remain inside

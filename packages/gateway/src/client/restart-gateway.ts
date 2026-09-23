@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { resolveBindHost, resolveTronHome } from "../config.js";
+import { resolveBindHost } from "../config.js";
+import { resolveTronHome } from "../tron-home.js";
 import { GatewayProtocolClient } from "./gateway-client.js";
 import { readLocalCredential } from "./local-credential.js";
 

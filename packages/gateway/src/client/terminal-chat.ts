@@ -2,7 +2,8 @@
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
-import { resolveBindHost, resolveTronHome } from "../config.js";
+import { resolveBindHost } from "../config.js";
+import { resolveTronHome } from "../tron-home.js";
 import type { ContentPart, JsonValue, SessionSnapshot, TranscriptItem } from "../protocol/types.js";
 import { GatewayClientError, GatewayProtocolClient } from "./gateway-client.js";
 import { readLocalCredential } from "./local-credential.js";
