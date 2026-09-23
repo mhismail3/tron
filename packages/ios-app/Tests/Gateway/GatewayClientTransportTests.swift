@@ -1460,6 +1460,40 @@ struct GatewayClientTransportTests {
         }
     }
 
+    @Test("notification history requests one exact older page when scroll pagination asks for it")
+    func notificationHistoryRequestsRequestedPageOnly() async throws {
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        do {
+            await socket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "synthetic-token")
+            let connectionID = try #require(await client.activeConnectionID())
+            let loading = Task {
+                try await NotificationInboxGatewayClient.list(
+                    client: client,
+                    cursor: "older-cursor",
+                    expectedRevision: "same-revision",
+                    expectedConnectionID: connectionID
+                )
+            }
+            try await socket.waitUntilSent(count: 2)
+            let request = try await decodedValue(in: socket, index: 1)
+            #expect(request.objectValue?["method"] == .string("notification.inbox.list"))
+            #expect(request.objectValue?["params"]?.objectValue?["cursor"] == .string("older-cursor"))
+            #expect(request.objectValue?["params"]?.objectValue?["limit"] == .number(50))
+            let id = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(responseFrame(id: id, result: inboxPage(id: "notification-old", nextCursor: nil)))
+            let page = try await loading.value
+            #expect(page.notifications.map(\.id) == ["notification-old"])
+            #expect(page.nextCursor == nil)
+            #expect((await socket.sentFrames()).count == 2)
+            await client.close()
+        } catch {
+            await client.close()
+            throw error
+        }
+    }
+
     @Test("notification pagination cannot join pages across a replacement connection")
     func notificationPagesStayOnExactEpoch() async throws {
         try await withTestWatchdog {

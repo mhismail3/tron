@@ -1011,6 +1011,40 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    @Test("hosted opening render stays opaque before one monotonic transcript reveal")
+    func hostedOpeningRevealIsMonotonic() async throws {
+        try await withTestWatchdog(timeout: .seconds(25)) { @MainActor in
+            let gate = OpeningFrameGate()
+            defer { gate.release() }
+            let snapshot = try SessionScenarioBuilder(seed: 1_250).openingTail(targetEncodedBytes: 10_000)
+            try await withHarness(snapshot: snapshot, displayFrameScheduler: gate.scheduler,
+                                  enablesPresentationCover: true, usesRealOpening: true) { harness in
+                gate.condition = { harness.probe.openingPhase?() == .presenting }
+                try await gate.waitUntilHeld()
+                let covered = harness.renderedPixelGrid()
+                try await DisplayFrameScheduler.displayLink.nextFrame()
+                let coveredNextFrame = harness.renderedPixelGrid()
+                #expect(harness.renderedPixelDistance(covered, coveredNextFrame) < 0.02)
+
+                gate.release()
+                var renderedFrames: [[Double]] = []
+                for _ in 0..<18 {
+                    try await DisplayFrameScheduler.displayLink.nextFrame()
+                    renderedFrames.append(harness.renderedPixelGrid())
+                }
+                #expect(harness.probe.openingPhase?() == .ready)
+                let finalFrame = renderedFrames.last ?? harness.renderedPixelGrid()
+                let distances = renderedFrames.map {
+                    harness.renderedPixelProgress($0, from: covered, to: finalFrame)
+                }
+                #expect(distances.count >= 3)
+                #expect(zip(distances, distances.dropFirst()).allSatisfy { $1 + 0.035 >= $0 })
+                #expect((distances.last ?? 0) > 0.9)
+                #expect(harness.renderedPixelDistance(covered, finalFrame) > 0.08)
+            }
+        }
+    }
+
     @Test("final opening frame cannot publish behind a managed cover")
     func coveredFinalOpeningFrame() async throws {
         try await withTestWatchdog(timeout: .seconds(20)) { @MainActor in
@@ -3277,6 +3311,58 @@ final class ChatViewScrollHarness {
             throw HarnessError.missingTranscript
         }
         return value
+    }
+
+    func renderedPixelGrid() -> [Double] {
+        let view = hostingController.view!
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let image = UIGraphicsImageRenderer(bounds: view.bounds, format: format).image { _ in
+            view.drawHierarchy(in: view.bounds, afterScreenUpdates: true)
+        }
+        guard let cgImage = image.cgImage,
+              let data = cgImage.dataProvider?.data,
+              let bytes = CFDataGetBytePtr(data) else { return [] }
+        let bytesPerPixel = cgImage.bitsPerPixel / 8
+        let rowBytes = cgImage.bytesPerRow
+        var samples: [Double] = []
+        let center = CGPoint(x: CGFloat(cgImage.width) / 2, y: CGFloat(cgImage.height) / 2)
+        for y in stride(from: 24, to: cgImage.height - 24, by: 12) {
+            for x in stride(from: 8, to: cgImage.width - 8, by: 12) {
+                if abs(CGFloat(x) - center.x) < 48 && abs(CGFloat(y) - center.y) < 48 { continue }
+                let offset = y * rowBytes + x * bytesPerPixel
+                let red = Double(bytes[offset])
+                let green = Double(bytes[offset + 1])
+                let blue = Double(bytes[offset + 2])
+                samples.append((red + green + blue) / 3)
+            }
+        }
+        return samples
+    }
+
+    func renderedPixelDistance(_ first: [Double], _ second: [Double]) -> Double {
+        guard first.count == second.count, !first.isEmpty else { return .infinity }
+        let squared = zip(first, second).reduce(0.0) { partial, pair in
+            let delta = (pair.0 - pair.1) / 255
+            return partial + delta * delta
+        }
+        return (squared / Double(first.count)).squareRoot()
+    }
+
+    func renderedPixelProgress(_ frame: [Double], from start: [Double], to end: [Double]) -> Double {
+        guard frame.count == start.count, start.count == end.count, !frame.isEmpty else { return 0 }
+        var projected = 0.0
+        var distance = 0.0
+        for index in frame.indices {
+            let axis = end[index] - start[index]
+            projected += (frame[index] - start[index]) * axis
+            distance += axis * axis
+        }
+        guard distance > 0 else { return 0 }
+        return min(1, max(0, projected / distance))
     }
 
     func resize(height: CGFloat) {

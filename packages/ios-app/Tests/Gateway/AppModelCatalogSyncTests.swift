@@ -6,53 +6,146 @@ import Testing
 @MainActor
 @Suite("Dashboard catalog synchronization", .serialized)
 struct AppModelCatalogSyncTests {
-    @Test("persistent catalog failures warn without retiring a responsive socket", arguments: [
-        "invalid_dashboard_catalog", "timeout", "disconnected",
-    ])
-    func catalogFailureAdmissionClosesEveryEntrypoint(code: String) async throws {
+    @Test("fourth catalog failure still retries on the current responsive socket")
+    func catalogFailureRetriesPastWarningThreshold() async throws {
         let clock = ManualClock()
         try await withHarness(manualClock: clock) { harness in
-            for index in 0..<3 {
+            for index in 0..<4 {
                 let loading = Task { await harness.model.refreshSessions() }
                 let request = try await request(harness.socket, index: index + 1)
-                await harness.socket.enqueue(errorResponse(id: request.id, code: code))
+                await harness.socket.enqueue(errorResponse(id: request.id, code: "disconnected"))
                 #expect(await loading.value == .retained)
                 #expect(await harness.client.activeConnectionID() != nil)
-                if index < 2 {
-                    #expect(!harness.model.visibleNotices.contains { $0.replacement?.key == .sessionCatalogCatchUp })
-                    let delay: Duration = index == 0 ? .seconds(2) : .seconds(4)
-                    try await clock.waitUntilSleeping(count: 1, duration: delay)
-                    clock.advance(by: delay)
+                if index == 2 {
+                    #expect(harness.model.visibleNotices.contains { $0.replacement?.key == .sessionCatalogCatchUp })
                 }
+                let delay: Duration = index == 0 ? .seconds(2) : index == 1 ? .seconds(4) : .seconds(8)
+                try await clock.waitUntilSleeping(count: 1, duration: delay)
+                clock.advance(by: delay)
             }
-            let sentAfterFailures = (await harness.socket.sentFrames()).count
-            for _ in 0..<5 {
-                #expect(await harness.model.refreshSessions() == .retained)
-                await harness.model.handle(GatewayEvent(
-                    type: "event", topic: "session.listChanged", sessionId: nil,
-                    payload: .object([:])
-                ))
-            }
-            await Task.yield()
-            #expect((await harness.socket.sentFrames()).count == sentAfterFailures)
-            let notice = try #require(harness.model.visibleNotices.first { $0.replacement?.key == .sessionCatalogCatchUp })
-            #expect(notice.lifetime == .automatic(.seconds(8)))
-            #expect(notice.message?.contains("Pull to refresh") == true)
-            let cancelledRetry = Task { await harness.model.retrySessionCatalog() }
-            cancelledRetry.cancel()
-            #expect(await cancelledRetry.value == .retained)
-            #expect(await harness.model.refreshSessions() == .retained)
-            #expect(await harness.socket.sentFrames().count == sentAfterFailures)
-            #expect(harness.model.visibleNotices.contains { $0.id == notice.id })
             let connection = await harness.client.activeConnectionID()
-            let retry = Task { await harness.model.retrySessionCatalog() }
-            defer { retry.cancel() }
-            let retried = try await request(harness.socket, index: sentAfterFailures)
+            let retry = Task { await harness.model.refreshSessions() }
+            let retried = try await request(harness.socket, index: 5)
             await harness.socket.enqueue(response(id: retried.id, sessions: [summary(id: "fresh", revision: 1)], listRevision: 1))
             #expect(await retry.value == .published)
             #expect(harness.model.sessions.map(\.id) == ["fresh"])
             #expect(await harness.client.activeConnectionID() == connection)
             #expect(!harness.model.visibleNotices.contains { $0.replacement?.key == .sessionCatalogCatchUp })
+        }
+    }
+
+    @Test("slow session-list response beyond ten seconds still publishes")
+    func slowListPagePublishesAfterTenSeconds() async throws {
+        let clock = ManualClock()
+        try await withHarness(manualClock: clock) { harness in
+            let loading = Task { await harness.model.refreshSessions() }
+            let request = try await request(harness.socket, index: 1)
+            clock.advance(by: .seconds(11))
+            await harness.socket.enqueue(response(
+                id: request.id,
+                sessions: [summary(id: "slow", revision: 1)],
+                listRevision: 1
+            ))
+            #expect(await loading.value == .published)
+            #expect(harness.model.sessions.map(\.id) == ["slow"])
+        }
+    }
+
+    @Test("timeout outcomes on list, context, and command reads never become error notices")
+    func transportTimeoutReadErrorsStaySilent() async throws {
+        try await withHarness { harness in
+            let snapshot = try SessionScenarioBuilder(seed: 91_004).openingTail(targetEncodedBytes: 4_096)
+            harness.model.installHostedSubscribedSnapshot(snapshot)
+
+            let contextRead = Task { await harness.model.loadContext(sessionID: snapshot.sessionId) }
+            let context = try await request(harness.socket, index: 1)
+            #expect(context.method == "session.context")
+            await harness.socket.enqueue(errorResponse(id: context.id, code: "timeout"))
+            await contextRead.value
+
+            let commandRead = Task { await harness.model.loadCommands(sessionID: snapshot.sessionId) }
+            let commands = try await request(harness.socket, index: 2)
+            #expect(commands.method == "session.commands")
+            await harness.socket.enqueue(errorResponse(id: commands.id, code: "timeout"))
+            await commandRead.value
+
+            let catalogRead = Task { await harness.model.refreshSessions() }
+            let catalog = try await request(harness.socket, index: 3)
+            #expect(catalog.method == "session.list")
+            await harness.socket.enqueue(errorResponse(id: catalog.id, code: "timeout"))
+            #expect(await catalogRead.value == .retained)
+            #expect(harness.model.visibleNotices.isEmpty)
+        }
+    }
+
+    @Test("shared catalog loader rejects repeated cursors before publication")
+    func loaderRejectsRepeatedCursor() async throws {
+        try await withHarness { harness in
+            let loading = Task { try await SessionCatalogLoader.load(client: harness.client) { true } }
+            let first = try await request(harness.socket, index: 1)
+            await harness.socket.enqueue(response(id: first.id, sessions: [summary(id: "first", revision: 1)], listRevision: 7, nextCursor: "repeat"))
+            let second = try await request(harness.socket, index: 2)
+            await harness.socket.enqueue(response(id: second.id, sessions: [summary(id: "second", revision: 1)], listRevision: 7, nextCursor: "repeat"))
+            switch try await loading.value {
+            case let .invalid(code, reason, pageCount, revision):
+                #expect(code == "invalid_response")
+                #expect(reason == "repeated-cursor")
+                #expect(pageCount == 2)
+                #expect(revision == 7)
+            default:
+                Issue.record("Repeated catalog cursor was not rejected.")
+            }
+        }
+    }
+
+    @Test("shared catalog loader rejects a page larger than its row bound")
+    func loaderRejectsOversizedPage() async throws {
+        try await withHarness { harness in
+            let oversizedPage = (0..<(SessionCatalogLoadBounds.pageSize + 1)).map {
+                summary(id: "oversized-\($0)", revision: 1)
+            }
+            let loading = Task { try await SessionCatalogLoader.load(client: harness.client) { true } }
+            let request = try await request(harness.socket, index: 1)
+            await harness.socket.enqueue(response(id: request.id, sessions: oversizedPage, listRevision: 9))
+            switch try await loading.value {
+            case let .invalid(code, reason, pageCount, revision):
+                #expect(code == "invalid_response")
+                #expect(reason == "session-list-page")
+                #expect(pageCount == 1)
+                #expect(revision == 9)
+            default:
+                Issue.record("Oversized catalog page was not rejected.")
+            }
+        }
+    }
+
+    @Test("shared catalog loader enforces the bounded page budget")
+    func loaderEnforcesPageBudget() async throws {
+        try await withHarness { harness in
+            let loading = Task { try await SessionCatalogLoader.load(client: harness.client) { true } }
+            for page in 0..<SessionCatalogLoadBounds.maximumPages {
+                let request = try await request(harness.socket, index: page + 1)
+                if page == 0 {
+                    #expect(request.params?["cursor"] == nil)
+                } else {
+                    #expect(request.params?["cursor"] == .string("cursor-\(page)"))
+                }
+                await harness.socket.enqueue(response(
+                    id: request.id,
+                    sessions: [],
+                    listRevision: 9,
+                    nextCursor: "cursor-\(page + 1)"
+                ))
+            }
+            switch try await loading.value {
+            case let .invalid(code, reason, pageCount, revision):
+                #expect(code == "limit_exceeded")
+                #expect(reason == "page-budget")
+                #expect(pageCount == SessionCatalogLoadBounds.maximumPages)
+                #expect(revision == 9)
+            default:
+                Issue.record("Catalog traversal exceeded its page budget.")
+            }
         }
     }
 
@@ -376,31 +469,25 @@ struct AppModelCatalogSyncTests {
         }
     }
 
-    @Test("responsive foreground preserves unfinished connection refreshes", arguments: [false, true])
-    func foregroundPreservesConnectionRefresh(afterCatalog: Bool) async throws {
+    @Test("provider, settings, and device reads wait until mounted restoration completes")
+    func optionalReadsStartAfterMountedRestoration() async throws {
         try await withHarness { harness in
             let model = harness.model
             let connectionID = try #require(await harness.client.activeConnectionID())
-            await model.lifecycleRefreshAll(admission: .init(generation: 0, connectionID: connectionID))
+            let admission = GatewayLifecycleCoordinator.Admission(generation: 0, connectionID: connectionID)
+            await model.lifecycleRefreshAll(admission: admission)
             let catalog = try await request(harness.socket, index: 1)
             #expect(catalog.method == "session.list")
+            #expect((await harness.socket.sentFrames()).count == 2)
+            await harness.socket.enqueue(response(id: catalog.id, sessions: [], listRevision: 1))
+            #expect(await model.refreshSessions() == .published)
+            #expect((await harness.socket.sentFrames()).count == 2)
+
+            #expect(await model.lifecycleRestoreMountedPresentation(admission: admission))
+            let required = Set(["provider.list", "model.list", "settings.get", "device.list"])
             var reads: [Request] = []
-            if afterCatalog {
-                await harness.socket.enqueue(response(id: catalog.id, sessions: [], listRevision: 1))
-                for index in 2..<6 { reads.append(try await request(harness.socket, index: index)) }
-            }
-            let baseline = model.foregroundReconciliationGeneration
-            await model.becameActive()?.value
-            #expect(model.foregroundReconciliationGeneration == baseline + 1)
-            #expect(!model.isReconcilingForeground)
-            #expect(model.connectionState == .connected)
-            if afterCatalog {
-                let foregroundCatalog = try await request(harness.socket, index: 6)
-                #expect(foregroundCatalog.method == "session.list")
-                await harness.socket.enqueue(response(id: foregroundCatalog.id, sessions: [], listRevision: 2))
-            } else {
-                await harness.socket.enqueue(response(id: catalog.id, sessions: [], listRevision: 1))
-                for index in 2..<6 { reads.append(try await request(harness.socket, index: index)) }
+            while Set(reads.map(\.method)) != required {
+                reads.append(try await request(harness.socket, index: reads.count + 2))
             }
             let settings: JSONValue = .object(["effective": .object(["theme": .string("current")])])
             let devices = [PairedDevice(id: "current-device", name: "Phone", createdAt: "2026-09-10T00:00:00Z")]
@@ -418,25 +505,11 @@ struct AppModelCatalogSyncTests {
                 ])))
             }
             try await withTestWatchdog(timeout: .seconds(2)) { @MainActor in
-                while true {
-                    let changed = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
-                    defer { changed.continuation.finish() }
-                    let complete = withObservationTracking {
-                        model.settings(for: .global) == settings
-                            && model.providerCatalog(for: .global) != nil
-                            && model.pairedDevices == devices
-                    } onChange: { changed.continuation.yield(()) }
-                    if complete { return }
-                    var iterator = changed.stream.makeAsyncIterator()
-                    guard await iterator.next() != nil else { throw CancellationError() }
+                while model.settings(for: .global) != settings
+                    || model.providerCatalog(for: .global) == nil
+                    || model.pairedDevices != devices {
+                    await Task.yield()
                 }
-            }
-            let methods = try await harness.socket.sentFrames().dropFirst().map {
-                try JSONDecoder.gateway.decode(Request.self, from: $0).method
-            }
-            #expect(methods.filter { $0 == "session.list" }.count == (afterCatalog ? 2 : 1))
-            for method in ["provider.list", "model.list", "settings.get", "device.list"] {
-                #expect(methods.filter { $0 == method }.count == 1)
             }
             #expect(await harness.client.activeConnectionID() == connectionID)
             #expect(model.visibleNotices.isEmpty)
@@ -541,8 +614,13 @@ struct AppModelCatalogSyncTests {
 
         let reconciliation = model.becameActive()
         await reconciliation?.value
-        let catalog = try await request(socket, index: 1)
-        #expect(catalog.method == "session.list")
+        var catalogIndex = 1
+        var catalog = try await request(socket, index: catalogIndex)
+        while catalog.method != "session.list" {
+            #expect(["provider.list", "model.list", "settings.get", "device.list"].contains(catalog.method))
+            catalogIndex += 1
+            catalog = try await request(socket, index: catalogIndex)
+        }
         // Mounted authority is complete before optional catalog convergence;
         // the catalog request remains owned and fenced in the background.
         #expect(!model.isReconcilingForeground)
@@ -578,8 +656,13 @@ struct AppModelCatalogSyncTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let reconciliation = model.becameActive()
-        let catalog = try await request(socket, index: 1)
-        #expect(catalog.method == "session.list")
+        var catalogIndex = 1
+        var catalog = try await request(socket, index: catalogIndex)
+        while catalog.method != "session.list" {
+            #expect(["provider.list", "model.list", "settings.get", "device.list"].contains(catalog.method))
+            catalogIndex += 1
+            catalog = try await request(socket, index: catalogIndex)
+        }
         await socket.enqueue(errorResponse(id: catalog.id, code: "disconnected"))
         await reconciliation?.value
 

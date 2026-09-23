@@ -147,98 +147,61 @@ enum NotificationInboxGatewayClient {
         let notifications: [GatewayNotificationInboxItem]
         let revision: String
         let unreadCount: Int
+        let nextCursor: String?
         let connectionID: Int
 
         init(
             notifications: [GatewayNotificationInboxItem],
             revision: String,
             unreadCount: Int,
+            nextCursor: String? = nil,
             connectionID: Int = 0
         ) {
             self.notifications = notifications
             self.revision = revision
             self.unreadCount = unreadCount
+            self.nextCursor = nextCursor
             self.connectionID = connectionID
         }
     }
 
-    static func list(client: GatewayClient) async throws -> Snapshot {
-        guard let connectionID = await client.activeConnectionID() else {
+    static func list(
+        client: GatewayClient,
+        cursor: String? = nil,
+        expectedRevision: String? = nil,
+        expectedConnectionID: Int? = nil
+    ) async throws -> Snapshot {
+        guard let connectionID = await client.activeConnectionID(),
+              expectedConnectionID == nil || expectedConnectionID == connectionID else {
             throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
         }
-        do { return try await listOnce(client: client, connectionID: connectionID) }
-        catch let failure as GatewayFailure where failure.code == "conflict" {
-            return try await listOnce(client: client, connectionID: connectionID)
-        }
-    }
-
-    private static func listOnce(client: GatewayClient, connectionID: Int) async throws -> Snapshot {
-        var cursor: String?
-        var revision: String?
-        var unreadCount: Int?
-        var retained: [GatewayNotificationInboxItem] = []
-        var retainedBytes = 0
-        for pageNumber in 1...12 {
-            try Task.checkCancellation()
-            guard await client.activeConnectionID() == connectionID else { throw CancellationError() }
-            let page: GatewayNotificationInboxPage = try await client.request(
-                "notification.inbox.list",
-                ListParams(cursor: cursor, limit: NotificationInboxAdmissionPolicy.maximumPageCount),
-                expectedEpochID: connectionID,
-                diagnosticPurpose: "notification-page",
-                diagnosticPage: pageNumber
+        try Task.checkCancellation()
+        let page: GatewayNotificationInboxPage = try await client.request(
+            "notification.inbox.list",
+            ListParams(cursor: cursor, limit: NotificationInboxAdmissionPolicy.maximumPageCount),
+            expectedEpochID: connectionID,
+            diagnosticPurpose: "notification-page",
+            diagnosticPage: cursor == nil ? 1 : 2
+        )
+        #if HOSTED_TEST
+        await hostedAfterPage?()
+        #endif
+        try Task.checkCancellation()
+        guard await client.activeConnectionID() == connectionID else { throw CancellationError() }
+        guard expectedRevision == nil || expectedRevision == page.revision else {
+            throw GatewayFailure(
+                code: "conflict",
+                message: "Notifications changed while loading. Try again.",
+                retryable: true,
+                details: nil
             )
-            #if HOSTED_TEST
-            await hostedAfterPage?()
-            #endif
-            try Task.checkCancellation()
-            guard await client.activeConnectionID() == connectionID else { throw CancellationError() }
-            guard revision == nil || revision == page.revision,
-                  unreadCount == nil || unreadCount == page.unreadCount else {
-                throw GatewayFailure(
-                    code: "conflict",
-                    message: "Notifications changed while loading. Try again.",
-                    retryable: true,
-                    details: nil
-                )
-            }
-            revision = page.revision
-            unreadCount = page.unreadCount
-            let pageBytes = (try? JSONEncoder.gateway.encode(page.notifications).count) ?? .max
-            guard retained.count + page.notifications.count <= NotificationInboxAdmissionPolicy.maximumRetainedCount,
-                  retainedBytes <= NotificationInboxAdmissionPolicy.maximumAggregateBytes - pageBytes else {
-                throw GatewayFailure(
-                    code: "invalid_response",
-                    message: "The notification inbox exceeded its bounded capacity.",
-                    retryable: false,
-                    details: nil
-                )
-            }
-            retained.append(contentsOf: page.notifications)
-            retainedBytes += pageBytes
-            guard let next = page.nextCursor else {
-                return Snapshot(
-                    notifications: retained,
-                    revision: page.revision,
-                    unreadCount: page.unreadCount,
-                    connectionID: connectionID
-                )
-            }
-            guard next != cursor else {
-                throw GatewayFailure(
-                    code: "invalid_response",
-                    message: "The notification inbox returned a repeated cursor.",
-                    retryable: false,
-                    details: nil
-                )
-            }
-            cursor = next
         }
-        throw GatewayFailure(
-            code: "invalid_response",
-            message: "The notification inbox exceeded its page bound.",
-            retryable: false,
-            details: nil
+        return Snapshot(
+            notifications: page.notifications,
+            revision: page.revision,
+            unreadCount: page.unreadCount,
+            nextCursor: page.nextCursor,
+            connectionID: connectionID
         )
     }
 
@@ -273,6 +236,8 @@ final class NotificationInboxCoordinator {
         var notifications: [GatewayNotificationInboxItem]
         var revision: String
         var unreadCount: Int
+        var nextCursor: String?
+        var connectionID: Int?
     }
 
     private struct CacheDocument: Codable { let version: Int; let buckets: [String: Bucket] }
@@ -288,6 +253,8 @@ final class NotificationInboxCoordinator {
     private var requestGenerationByProfile: [String: Int] = [:]
     private var refreshTasks: [String: Task<Void, Never>] = [:]
     private var pendingRefreshProfiles: [String: GatewayProfile] = [:]
+    private var loadingOlderProfileIDs = Set<String>()
+    private var pageRequestGenerations: [String: Int] = [:]
 
     var failure: String? {
         let values = Array(Set(failuresByProfile.values)).sorted()
@@ -308,10 +275,16 @@ final class NotificationInboxCoordinator {
                 && bucket.revision.utf8.count <= 128
                 && bucket.notifications.count <= NotificationInboxAdmissionPolicy.maximumRetainedCount
                 && bucket.notifications.allSatisfy(NotificationInboxAdmissionPolicy.admits)
-                && bucket.unreadCount == bucket.notifications.filter(\.isUnread).count
+                && bucket.unreadCount >= bucket.notifications.filter(\.isUnread).count
+                && bucket.unreadCount <= NotificationInboxAdmissionPolicy.maximumRetainedCount
         }
         guard retained.values.reduce(0, { $0 + $1.notifications.count }) <= NotificationInboxAdmissionPolicy.maximumRetainedCount else { return }
-        buckets = retained
+        buckets = retained.mapValues { cached in
+            var current = cached
+            current.nextCursor = nil
+            current.connectionID = nil
+            return current
+        }
     }
 
     var notifications: [NotificationInboxItem] {
@@ -340,6 +313,7 @@ final class NotificationInboxCoordinator {
 
     @discardableResult
     func begin(profileID: String) -> Int {
+        invalidateOlderPage(profileID: profileID)
         nextRefreshGeneration &+= 1
         requestGenerationByProfile[profileID] = nextRefreshGeneration
         loadingProfileIDs.insert(profileID)
@@ -353,16 +327,77 @@ final class NotificationInboxCoordinator {
         generation: Int
     ) {
         guard requestGenerationByProfile[profile.id] == generation else { return }
+        invalidateOlderPage(profileID: profile.id)
         buckets[profile.id] = Bucket(
             profileLabel: profile.label,
             machineID: profile.machineId,
             notifications: snapshot.notifications,
             revision: snapshot.revision,
-            unreadCount: snapshot.unreadCount
+            unreadCount: snapshot.unreadCount,
+            nextCursor: snapshot.nextCursor,
+            connectionID: snapshot.connectionID
         )
         loadingProfileIDs.remove(profile.id)
         failuresByProfile.removeValue(forKey: profile.id)
         persist()
+    }
+
+    var profilesWithOlderPages: [String] {
+        buckets.compactMap { profileID, bucket in bucket.nextCursor == nil ? nil : profileID }.sorted()
+    }
+
+    var loadingOlderProfiles: Set<String> { loadingOlderProfileIDs }
+
+    func loadNextPage(
+        profileID: String,
+        operation: @MainActor (String, String, Int?) async throws -> NotificationInboxGatewayClient.Snapshot
+    ) async {
+        guard !loadingOlderProfileIDs.contains(profileID),
+              let initial = buckets[profileID],
+              let cursor = initial.nextCursor else { return }
+        nextRefreshGeneration &+= 1
+        let generation = nextRefreshGeneration
+        pageRequestGenerations[profileID] = generation
+        loadingOlderProfileIDs.insert(profileID)
+        defer {
+            if pageRequestGenerations[profileID] == generation {
+                loadingOlderProfileIDs.remove(profileID)
+                pageRequestGenerations[profileID] = nil
+            }
+        }
+        do {
+            let snapshot = try await operation(cursor, initial.revision, initial.connectionID)
+            guard !Task.isCancelled,
+                  pageRequestGenerations[profileID] == generation,
+                  var current = buckets[profileID],
+                  current.nextCursor == cursor,
+                  current.revision == initial.revision,
+                  snapshot.revision == initial.revision,
+                  snapshot.connectionID == initial.connectionID,
+                  snapshot.notifications.allSatisfy(NotificationInboxAdmissionPolicy.admits) else { return }
+            let existing = Set(current.notifications.map(\.id))
+            guard snapshot.notifications.allSatisfy({ !existing.contains($0.id) }),
+                  current.notifications.count + snapshot.notifications.count <= NotificationInboxAdmissionPolicy.maximumRetainedCount else {
+                failuresByProfile[profileID] = "Notification history changed. Refresh to try again."
+                return
+            }
+            current.notifications.append(contentsOf: snapshot.notifications)
+            current.nextCursor = snapshot.nextCursor
+            current.unreadCount = snapshot.unreadCount
+            buckets[profileID] = current
+            failuresByProfile.removeValue(forKey: profileID)
+            persist()
+        } catch is CancellationError {
+            return
+        } catch let failure as GatewayFailure where failure.code == "conflict" {
+            guard !Task.isCancelled, pageRequestGenerations[profileID] == generation else { return }
+            failuresByProfile[profileID] = failure.message
+        } catch {
+            guard !Task.isCancelled, pageRequestGenerations[profileID] == generation else { return }
+            // An older-page read is optional presentation work; errors remain in
+            // the owning inbox surface and never become a global mutation toast.
+            failuresByProfile[profileID] = (error as? GatewayFailure)?.message ?? "Notification history is unavailable."
+        }
     }
 
     func fail(profileID: String, generation: Int, message: String) {
@@ -376,6 +411,7 @@ final class NotificationInboxCoordinator {
         profile: GatewayProfile,
         operation: @escaping @MainActor @Sendable (GatewayProfile, Int) async -> Void
     ) -> Task<Void, Never> {
+        invalidateOlderPage(profileID: profile.id)
         if let task = refreshTasks[profile.id] {
             pendingRefreshProfiles[profile.id] = profile
             return task
@@ -412,6 +448,8 @@ final class NotificationInboxCoordinator {
 
     func cancelRefreshes() {
         for task in refreshTasks.values { task.cancel() }
+        loadingOlderProfileIDs.removeAll()
+        pageRequestGenerations.removeAll()
         refreshTasks.removeAll()
         pendingRefreshProfiles.removeAll()
         requestGenerationByProfile.removeAll()
@@ -419,6 +457,8 @@ final class NotificationInboxCoordinator {
     }
 
     func retainProfiles(_ profileIDs: Set<String>) {
+        loadingOlderProfileIDs.formIntersection(profileIDs)
+        pageRequestGenerations = pageRequestGenerations.filter { profileIDs.contains($0.key) }
         for profileID in Array(refreshTasks.keys) where !profileIDs.contains(profileID) {
             refreshTasks[profileID]?.cancel()
             refreshTasks[profileID] = nil
@@ -452,10 +492,12 @@ final class NotificationInboxCoordinator {
         )
         bucket.unreadCount = max(0, bucket.unreadCount - 1)
         buckets[item.profileID] = bucket
+        invalidateOlderPage(profileID: item.profileID)
         persist()
     }
 
     func markAllReadOptimistically() {
+        for profileID in buckets.keys { invalidateOlderPage(profileID: profileID) }
         for (profileID, var bucket) in buckets {
             bucket.notifications = bucket.notifications.map { current in
                 GatewayNotificationInboxItem(
@@ -477,6 +519,11 @@ final class NotificationInboxCoordinator {
         persist()
     }
 
+    private func invalidateOlderPage(profileID: String) {
+        pageRequestGenerations[profileID] = nil
+        loadingOlderProfileIDs.remove(profileID)
+    }
+
     private func persist() {
         let newest = notifications.prefix(NotificationInboxAdmissionPolicy.maximumRetainedCount)
         let retainedIDs = Set(newest.map(\.id))
@@ -485,7 +532,6 @@ final class NotificationInboxCoordinator {
             bucket.notifications = bucket.notifications.filter {
                 retainedIDs.contains("\(profileID):\($0.id)")
             }
-            bucket.unreadCount = bucket.notifications.filter(\.isUnread).count
             retained[profileID] = bucket
         }
         guard let data = try? JSONEncoder.gateway.encode(CacheDocument(version: 1, buckets: retained)),

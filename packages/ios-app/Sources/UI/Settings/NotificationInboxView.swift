@@ -270,6 +270,23 @@ private struct NotificationInboxHistoryView: View {
                     }
                 }
             }
+            ForEach(model.notificationInbox.profilesWithOlderPages, id: \.self) { profileID in
+                Label(
+                    model.notificationInbox.loadingOlderProfiles.contains(profileID)
+                        ? "Loading older notifications…"
+                        : "Loading older notifications as you scroll",
+                    systemImage: "arrow.down.circle"
+                )
+                .font(TronTypography.secondaryDescription)
+                .foregroundStyle(Color.tronTextSecondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, TronSpacing.md)
+                .task(id: presentationActivity.allowsPresentationPublication) {
+                    guard presentationActivity.allowsPresentationPublication else { return }
+                    await model.loadMoreNotificationHistory(profileID: profileID)
+                    guard !Task.isCancelled, presentationActivity.allowsPresentationPublication else { return }
+                }
+            }
         }
     }
 

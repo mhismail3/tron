@@ -33,6 +33,14 @@ struct SessionPresentationStoreTests {
         }
     }
 
+    private func requestFrame(_ data: Data) throws -> (id: String, method: String) {
+        let value = try JSONDecoder.gateway.decode(JSONValue.self, from: data)
+        return (
+            id: try #require(value.objectValue?["id"]?.stringValue),
+            method: try #require(value.objectValue?["method"]?.stringValue)
+        )
+    }
+
     private func nextRequest(
         _ method: String,
         socket: ScriptedGatewaySocket,
@@ -2243,16 +2251,18 @@ struct SessionPresentationStoreTests {
                 await Task.yield()
             }
             #expect(store.selectedSessionID == newSnapshot.sessionId)
-            #expect(await socket.sentFrames().count == 2)
-            // Both responses retire the exact old token: false means that the
-            // Gateway already retired it, not that the next open must stall.
+            try await socket.waitUntilSent(count: 3)
+            #expect(await socket.sentFrames().count == 3)
+            let openRequest = try requestFrame(await socket.sentFrames()[2])
+            #expect(openRequest.method == "session.open")
+            // The new open is already sent while the old close is still pending.
+            // A late close reply cannot clear the successor's local owner.
             await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
                 "type": .string("response"), "id": .string(id), "ok": .bool(true),
                 "result": .object(["closed": .bool(gatewayClosed)]),
             ])))
             await closing.value
 
-            try await socket.waitUntilSent(count: 3)
             #expect(!store.owns(oldTarget))
             frame = await socket.sentFrames()[2]
             request = try JSONDecoder.gateway.decode(JSONValue.self, from: frame)
@@ -2279,6 +2289,78 @@ struct SessionPresentationStoreTests {
             _ = try await opening.value
             #expect(store.mountedTarget?.sessionID == newSnapshot.sessionId)
             #expect(store.authoritativeSnapshot(for: newSnapshot.sessionId) == newSnapshot)
+            await client.close()
+        }
+    }
+
+    @Test("busy open retries once and opening B retires A locally without applying A events")
+    func busyOpenAndLocalRetirement() async throws {
+        try await withTestWatchdog { @MainActor in
+            let clock = ManualClock()
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory, clock: clock.clock)
+            let profile = GatewayProfile(id: "gateway", label: "Mac", host: "gateway.test", port: 9_847, machineId: "machine", deviceId: "device")
+            let connecting = Task { try await client.connect(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            _ = try await connecting.value
+
+            let oldSnapshot = try SessionScenarioBuilder(seed: 88_101).openingTail(targetEncodedBytes: 4_096)
+            var newSnapshot = try SessionScenarioBuilder(seed: 88_102).openingTail(targetEncodedBytes: 4_096)
+            newSnapshot.sessionId = "replacement-session"
+            newSnapshot.transcriptStart = 0
+            newSnapshot.transcriptTotal = newSnapshot.transcript.count
+            let store = SessionPresentationStore(client: client, performanceSignposts: SystemPerformanceSignposts.shared, clock: clock.clock)
+            store.installHostedSubscription(snapshot: oldSnapshot, token: "old-token")
+            let opening = Task { try await store.open(newSnapshot.sessionId) }
+
+            try await socket.waitUntilSent(count: 2)
+            var request = try requestFrame(await socket.sentFrames()[1])
+            #expect(request.method == "session.open")
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(request.id), "ok": .bool(false),
+                "error": .object(["code": .string("busy"), "message": .string("Catalog is settling"), "retryable": .bool(true)]),
+            ])))
+            try await clock.waitUntilSleeping(count: 1, duration: .milliseconds(250))
+            clock.advance(by: .milliseconds(250))
+
+            try await socket.waitUntilSent(count: 3)
+            request = try requestFrame(await socket.sentFrames()[2])
+            #expect(request.method == "session.open")
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(request.id), "ok": .bool(true),
+                "result": .object([
+                    "session": try JSONValue.encode(newSnapshot),
+                    "syncToken": .string("new-sync"),
+                    "subscriptionToken": .string("new-token"),
+                    "completionRevision": .number(5),
+                ]),
+            ])))
+            try await socket.waitUntilSent(count: 4)
+            request = try requestFrame(await socket.sentFrames()[3])
+            #expect(request.method == "session.sync")
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(request.id), "ok": .bool(true),
+                "result": .object(["synchronized": .bool(true)]),
+            ])))
+            _ = try await answerAttentionRead(socket, frameIndex: 4, expectedRevision: 5)
+            _ = try await opening.value
+
+            let oldBefore = store.authoritativeSnapshot(for: oldSnapshot.sessionId)
+            var staleOld = oldSnapshot
+            staleOld.name = "stale-old-event"
+            staleOld.revision += 1
+            staleOld.eventSequence += 1
+            await store.admit(GatewayEvent(
+                type: "event", topic: "session.snapshot", sessionId: oldSnapshot.sessionId,
+                payload: try JSONValue.encode(staleOld)
+            ))
+            #expect(store.mountedTarget?.sessionID == newSnapshot.sessionId)
+            #expect(store.authoritativeSnapshot(for: newSnapshot.sessionId) == newSnapshot)
+            #expect(store.authoritativeSnapshot(for: oldSnapshot.sessionId) == oldBefore)
+            let methods = try await socket.sentFrames().dropFirst().map { try requestFrame($0).method }
+            #expect(methods.filter { $0 == "session.open" }.count == 2)
+            #expect(!methods.contains("session.close"))
             await client.close()
         }
     }
