@@ -1291,7 +1291,7 @@ struct ProviderAuthCoordinatorTests {
             let harness = try await makeHarness(clock: clock.clock)
             let target = ProviderCatalogTarget.session(id: "session-b")
             let mutation = Task { try await harness.owner.logout(providerID: "provider", target: target) }
-            try await clock.expireRequest(on: harness.socket, sentCount: 2, after: .seconds(60))
+            try await clock.expireRequest(on: harness.socket, sentCount: 2, after: .seconds(30))
             try await completeReceiptMutation(
                 method: "auth.logout",
                 target: target,

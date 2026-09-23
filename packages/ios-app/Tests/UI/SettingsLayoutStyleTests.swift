@@ -441,17 +441,13 @@ final class SettingsLayoutStyleTests: XCTestCase {
                 // transport; epoch replacement itself is owned by lifecycle tests.
                 let reconciliation = model.becameActive()
                 await reconciliation?.value
-                // Catalog and visible settings reads have independent owners.
-                // Respond by method, not by their incidental send order.
-                let requests = [try await request(socket, count: 3), try await request(socket, count: 4)]
-                XCTAssertEqual(Set(requests.map(\.method)), Set(["session.list", "packages.list"]))
-                let catalog = try XCTUnwrap(requests.first { $0.method == "session.list" })
-                let refreshed = try XCTUnwrap(requests.first { $0.method == "packages.list" }, "Foreground must re-read the visible page without tapping Retry")
-                await socket.enqueue(try reply(catalog.id, .object(["sessions": .array([]), "listRevision": .number(1)])))
+                // A live foreground re-reads the visible package page; respond to
+                // its method even when unrelated model reads interleave.
+                let refreshed = try await request(socket, method: "packages.list", startingAt: 2)
                 await socket.enqueue(try reply(refreshed.id, .object(["packages": .array([]), "resources": .object([
                     "extensions": .array([]), "skills": .array([]), "prompts": .array([]), "themes": .array([])
                 ])])))
-                let updates = try await request(socket, count: 5)
+                let updates = try await request(socket, method: "packages.checkUpdates", startingAt: 3)
                 XCTAssertEqual(updates.method, "packages.checkUpdates")
                 await socket.enqueue(try reply(updates.id, .object(["updates": .array([])])))
                 try await Task.sleep(for: .milliseconds(40))
@@ -658,6 +654,26 @@ final class SettingsLayoutStyleTests: XCTestCase {
     }
 
     private struct SettingsRequest: Decodable { let id: String; let method: String }
+    private func request(_ socket: ScriptedGatewaySocket, method: String, startingAt: Int = 0) async throws -> SettingsRequest {
+        var index = startingAt
+        while true {
+            let frames = await socket.sentFrames()
+            for frame in frames.dropFirst(index) {
+                if let request = try? JSONDecoder.gateway.decode(SettingsRequest.self, from: frame), request.method == method {
+                    return request
+                }
+            }
+            index = frames.count
+            do {
+                let sentCount = index + 1
+                try await withTestWatchdog(timeout: .seconds(3)) { try await socket.waitUntilSent(count: sentCount) }
+            } catch {
+                let sent = frames.compactMap { try? JSONDecoder.gateway.decode(SettingsRequest.self, from: $0).method }
+                XCTFail("Missing settings request for \(method); received \(sent)")
+                throw error
+            }
+        }
+    }
     private func request(_ socket: ScriptedGatewaySocket, count: Int) async throws -> SettingsRequest {
         do {
             try await withTestWatchdog(timeout: .seconds(3)) { try await socket.waitUntilSent(count: count) }

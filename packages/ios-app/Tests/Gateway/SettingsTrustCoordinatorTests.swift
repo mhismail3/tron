@@ -341,7 +341,7 @@ struct SettingsTrustCoordinatorTests {
             }
             defer { update.cancel() }
 
-            try await clock.expireRequest(on: harness.socket, sentCount: 2, after: .seconds(60))
+            try await clock.expireRequest(on: harness.socket, sentCount: 2, after: .seconds(30))
             try await harness.socket.waitUntilSent(count: 3)
             let status = try request(await harness.socket.sentFrames()[2])
             #expect(status.method == "command.status")

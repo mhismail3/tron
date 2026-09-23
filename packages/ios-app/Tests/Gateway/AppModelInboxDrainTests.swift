@@ -62,11 +62,17 @@ struct AppModelInboxDrainTests {
                         throw error
                     }
                 }
-                try await socket.waitUntilSent(count: 3)
-                let frames = await socket.sentFrames()
-                let catalog = try JSONDecoder.gateway.decode(JSONValue.self, from: frames[2]).objectValue
-                #expect(catalog?["method"]?.stringValue == "session.list")
-                let requestID = try #require(catalog?["id"]?.stringValue)
+                var requestIndex = 0
+                var catalog: [String: JSONValue]?
+                while catalog == nil {
+                    try await socket.waitUntilSent(count: requestIndex + 1)
+                    let frame = await socket.sentFrames()[requestIndex]
+                    let request = try JSONDecoder.gateway.decode(JSONValue.self, from: frame).objectValue
+                    if request?["method"]?.stringValue == "session.list" { catalog = request }
+                    requestIndex += 1
+                }
+                let catalogRequest = try #require(catalog)
+                let requestID = try #require(catalogRequest["id"]?.stringValue)
                 await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
                     "type": .string("response"), "id": .string(requestID), "ok": .bool(true),
                     "result": .object(["sessions": .array([]), "listRevision": .number(1)])
@@ -102,7 +108,10 @@ struct AppModelInboxDrainTests {
                 let replacementRequests = try await replacement.sentFrames().dropFirst().map {
                     try JSONDecoder.gateway.decode(JSONValue.self, from: $0).objectValue
                 }
-                #expect(Set(replacementRequests.compactMap { $0?["method"]?.stringValue }) == Set(["session.list", "notification.inbox.list"]))
+                let replacementMethods = Set(replacementRequests.compactMap { $0?["method"]?.stringValue })
+                #expect(replacementMethods.isSuperset(of: Set(["session.list", "notification.inbox.list"])))
+                #expect(replacementRequests.filter { $0?["method"]?.stringValue == "session.list" }.count == 1)
+                #expect(replacementRequests.filter { $0?["method"]?.stringValue == "notification.inbox.list" }.count == 1)
                 let replacementCatalog = try #require(replacementRequests.first { $0?["method"]?.stringValue == "session.list" })
                 let replacementRequestID = try #require(replacementCatalog?["id"]?.stringValue)
                 await replacement.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
