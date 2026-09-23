@@ -37,7 +37,7 @@ Initial evidence from source at `e7cab3b167e32852d1d52a1bacff30e5b1bc5587`:
 
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
-| GP-1 | Ready | Trace and implement global provider resource ownership/reconciliation, Gateway RPC, and regressions | none | Unassigned |
+| GP-1 | Claimed | Trace and implement global provider resource ownership/reconciliation, Gateway RPC, and regressions | none | worker, 2026-09-23 |
 | GP-2 | Ready | Verify dashboard and session catalog/auth behavior against global/project scope; fix only demonstrated iOS defect | GP-1 | Unassigned |
 | GP-3 | Ready | Validate package transitions, bounded failures/teardown, docs and manual runtime adoption | GP-1, GP-2 | Unassigned |
 
@@ -73,12 +73,12 @@ Inspect final diff/status and report changed files, added tests, commands/result
 
 ## Handoff log
 
-### GP-1 · Ready · 2026-09-23 · worker
+### GP-1 · Claimed · 2026-09-23 · worker
 
-- Result: User explicitly approved drafting and implementation in the same request; plan is Active.
+- Result: User explicitly approved drafting and implementation in the same request; plan is Active and GP-1 is claimed before implementation.
 - Evidence: Pinned SDK 0.84.4 contains `createAgentSessionServices` global resource loading and ModelRuntime provider register/unregister APIs; current main already retains a startup administration resource owner, but package mutation reconciliation and end-to-end tests remain to be proven.
-- Changes: Plan activation recorded before implementation.
+- Changes: Activation commit `1f6a94cfd`; claim commit follows.
 - Tasks added: GP-2, GP-3.
 - Kept on purpose: Exact global runtime/AuthStorage ownership and project/runtime isolation; no provider-specific handling.
 - Deviations: None yet.
-- For the next agent: Claim GP-1 on main, then continue in the claimed worktree; inspect the pinned SDK's full `DefaultResourceLoader.reload` lifecycle and avoid treating successful startup registration as proof of live package transition support.
+- For the next agent: Continue in the claimed worktree; inspect the pinned SDK's full `DefaultResourceLoader.reload` lifecycle and avoid treating successful startup registration as proof of live package transition support.
