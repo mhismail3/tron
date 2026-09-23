@@ -55,6 +55,7 @@ final class DashboardGatewayConnectionPool {
     weak var delegate: (any DashboardGatewayConnectionPoolDelegate)?
     private let clientFactory: @MainActor () -> GatewayClient
     private let clock: MonotonicClock
+    private let reconnectDelayPolicy: ReconnectDelayPolicy
     private var entries: [String: Entry] = [:]
     private var generation = 0
     private var retirementTasks: [String: (generation: Int, task: Task<Void, Never>)] = [:]
@@ -62,10 +63,12 @@ final class DashboardGatewayConnectionPool {
 
     init(
         clientFactory: @escaping @MainActor () -> GatewayClient = { GatewayClient() },
-        clock: MonotonicClock = .continuous
+        clock: MonotonicClock = .continuous,
+        reconnectDelayPolicy: ReconnectDelayPolicy = .standard
     ) {
         self.clientFactory = clientFactory
         self.clock = clock
+        self.reconnectDelayPolicy = reconnectDelayPolicy
     }
 
     func reconcile(
@@ -145,26 +148,24 @@ final class DashboardGatewayConnectionPool {
     func request(
         profileID: String,
         method: String,
-        params: JSONValue,
-        timeout: Duration = .seconds(15)
+        params: JSONValue
     ) async throws -> JSONValue {
         guard let admission = requestAdmission(for: profileID) else {
             throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
         }
-        return try await request(profileID: profileID, method: method, params: params, timeout: timeout, expectedConnection: admission)
+        return try await request(profileID: profileID, method: method, params: params, expectedConnection: admission)
     }
 
     func request(
         profileID: String,
         method: String,
         params: JSONValue,
-        timeout: Duration = .seconds(15),
         expectedConnection: GatewayConnectionAdmission
     ) async throws -> JSONValue {
         guard let client = entries[profileID]?.client else {
             throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
         }
-        return try await client.requestValue(method, params, timeout: timeout, expectedConnection: expectedConnection)
+        return try await client.requestValue(method, params, expectedConnection: expectedConnection)
     }
 
     func info(for profileID: String) async -> GatewayInfo? {
@@ -585,12 +586,15 @@ final class DashboardGatewayConnectionPool {
         let needsImmediateFollowUp: Bool
     }
 
+    // Coalesce bursts of structural events before opening one per-profile list traversal.
+    private static let refreshCoalescingDelay: Duration = .milliseconds(250)
+
     /// Structural events coalesce into one bounded per-profile lease. An
     /// active traversal is never cancelled merely because a newer event arrives.
     private func scheduleRefresh(
         profileID: String,
         generation: Int,
-        delay: Duration = .milliseconds(250)
+        delay: Duration = DashboardGatewayConnectionPool.refreshCoalescingDelay
     ) {
         guard var entry = entries[profileID], entry.generation == generation else { return }
         entry.refreshInvalidationGeneration &+= 1
@@ -653,7 +657,7 @@ final class DashboardGatewayConnectionPool {
                 self.entries[profileID] = current
                 self.startRefreshLease(
                     profileID: profileID, generation: generation,
-                    delay: Self.refreshRetryDelay(attempt: current.refreshRetryAttempt)
+                    delay: reconnectDelayPolicy.delay(forFailureAttempt: current.refreshRetryAttempt)
                 )
             }
         }
@@ -840,10 +844,6 @@ final class DashboardGatewayConnectionPool {
         entry.catalog.markDisconnected()
         entries[profileID] = entry
         publish(profileID: profileID)
-    }
-
-    private static func refreshRetryDelay(attempt: Int) -> Duration {
-        .seconds(min(8, 1 << min(3, max(1, attempt))))
     }
 
     private static func invalidDashboardCatalog(_ message: String) -> GatewayFailure {

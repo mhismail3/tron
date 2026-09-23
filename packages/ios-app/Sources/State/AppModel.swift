@@ -64,6 +64,7 @@ private struct GatewayUpdateAcknowledgement: Codable {
 }
 
 enum PushNavigationConnectionPolicy {
+    // Bound how long a user-initiated route waits to restore its live Gateway authority.
     static let readinessDeadline: Duration = .seconds(15)
 }
 
@@ -167,11 +168,15 @@ final class AppModel {
         let connectionID: Int
     }
 
+    // Delay outage copy to suppress brief loss without delaying reconnect or read admission.
+    private static let recoveryPresentationGrace: Duration = .seconds(2)
+
     private let lifecycle: GatewayLifecycleCoordinator
     var client: GatewayClient { lifecycle.client }
     var profiles: GatewayProfileStore { lifecycle.profiles }
     private let cache: SnapshotCache
     private let clock: MonotonicClock
+    private let reconnectDelayPolicy: ReconnectDelayPolicy
     private let recoveryDisplayClock: MonotonicClock
     private let uuidSource: UUIDSource
     private let performanceSignposts: any PerformanceSignposting
@@ -455,7 +460,7 @@ final class AppModel {
                 diagnosticStore: diagnosticStore,
                 diagnosticCaptureSink: diagnosticCapture
             )
-        })
+        }, clock: clock, reconnectDelayPolicy: reconnectDelayPolicy)
         let lifecycle = GatewayLifecycleCoordinator(
             client: client,
             profiles: profiles,
@@ -573,11 +578,11 @@ final class AppModel {
                     connectionID: connectionID
                 )
                 guard AutomationEndpointAdmissionPolicy.admits(dashboardProfile) else { return nil }
-                let request: AutomationRPCClient.Request = { method, params, timeout in
+                let request: AutomationRPCClient.Request = { method, params in
                     if profile.id == lifecycle.selectedProfileID {
-                        return try await client.requestValue(method, params, timeout: timeout)
+                        return try await client.requestValue(method, params)
                     }
-                    return try await dashboardConnections.request(profileID: profile.id, method: method, params: params, timeout: timeout)
+                    return try await dashboardConnections.request(profileID: profile.id, method: method, params: params)
                 }
                 return AutomationGatewayEndpoint(
                     profile: dashboardProfile,
@@ -590,15 +595,15 @@ final class AppModel {
         })
         let workspaceInspection = WorkspaceInspectionService(client: client)
         let knowledge = KnowledgeRPCClient(
-            request: { method, params, timeout in
-                try await client.requestValue(method, params, timeout: timeout)
+            request: { method, params in
+                try await client.requestValue(method, params)
             },
             mutationExecutor: mutationExecutor,
             uuidSource: uuidSource
         )
         let integrations = IntegrationsRPCClient(
-            request: { method, params, timeout in
-                try await client.requestValue(method, params, timeout: timeout)
+            request: { method, params in
+                try await client.requestValue(method, params)
             },
             mutationExecutor: mutationExecutor,
             uuidSource: uuidSource
@@ -658,6 +663,7 @@ final class AppModel {
         self.sessionPresentation = sessionPresentation
         self.cache = cache
         self.clock = clock
+        self.reconnectDelayPolicy = reconnectDelayPolicy
         self.recoveryDisplayClock = recoveryDisplayClock
         self.uuidSource = uuidSource
         self.performanceSignposts = captureSignposts
@@ -1369,7 +1375,7 @@ final class AppModel {
                     self.recoveryDisplayTask = nil
                 }
             }
-            do { try await self.recoveryDisplayClock.sleep(.seconds(2)) } catch { return }
+            do { try await self.recoveryDisplayClock.sleep(Self.recoveryPresentationGrace) } catch { return }
             guard self.recoveryDisplayEpisode == episode,
                   self.recoveryDisplayProfileID == profileID,
                   self.profiles.selected?.id == profileID,
@@ -1889,7 +1895,7 @@ final class AppModel {
                         self.catalogRefreshRetryAttempt = min(3, self.catalogRefreshRetryAttempt + 1)
                         _ = self.startCatalogRefresh(
                             key: key,
-                            delay: Self.catalogRefreshRetryDelay(attempt: self.catalogRefreshRetryAttempt),
+                            delay: self.reconnectDelayPolicy.delay(forFailureAttempt: self.catalogRefreshRetryAttempt),
                             trigger: "automatic-retry"
                         )
                     }
@@ -2071,10 +2077,6 @@ final class AppModel {
         return ("application", "catalog-request")
     }
 
-    private static func catalogRefreshRetryDelay(attempt: Int) -> Duration {
-        .seconds(min(8, 1 << min(3, max(1, attempt))))
-    }
-
     private func cancelCatalogRefresh() {
         catalogFailureOwner = nil
         catalogFailureNoticeOwner = nil
@@ -2142,8 +2144,7 @@ final class AppModel {
             let config: GatewayUpdateConfig? = try await client.request(
                 "gateway.update.config.status",
                 EmptyParams(),
-                as: GatewayUpdateConfig?.self,
-                timeout: .seconds(10)
+                as: GatewayUpdateConfig?.self
             )
             try requireLifecycle(admission)
             return config
@@ -2189,8 +2190,7 @@ final class AppModel {
                 try await self.client.request(
                     "gateway.update.config",
                     Params(commandId: commandID, sourceRoot: admittedSourceRoot, artifactRoot: admittedArtifactRoot),
-                    as: GatewayUpdateConfig.self,
-                    timeout: .seconds(30)
+                    as: GatewayUpdateConfig.self
                 )
             }
             try requireLifecycle(admission)
@@ -2213,8 +2213,7 @@ final class AppModel {
             let status: GatewayUpdateStatus = try await client.request(
                 "gateway.update.status",
                 Params(channel: profile.gatewayChannel),
-                as: GatewayUpdateStatus.self,
-                timeout: .seconds(10)
+                as: GatewayUpdateStatus.self
             )
             try requireLifecycle(admission)
             return status
@@ -2240,8 +2239,7 @@ final class AppModel {
         do {
             let snapshot: AdministrativeDrainSnapshot = try await client.request(
                 "gateway.drain.status",
-                EmptyParams(),
-                timeout: .seconds(10)
+                EmptyParams()
             )
             try requireLifecycle(admission)
             return snapshot
@@ -2294,8 +2292,7 @@ final class AppModel {
                 try await self.client.request(
                     "gateway.update",
                     Params(commandId: commandID, channel: profile.gatewayChannel, mode: mode, candidateVersion: candidateVersion, candidateFingerprint: candidateFingerprint),
-                    as: GatewayUpdateAcknowledgement.self,
-                    timeout: .seconds(30)
+                    as: GatewayUpdateAcknowledgement.self
                 )
             }
             try acknowledgement.require(commandID: commandID)
@@ -2330,8 +2327,7 @@ final class AppModel {
                 try await self.client.request(
                     "gateway.rollback",
                     Params(commandId: commandID, channel: profile.gatewayChannel),
-                    as: GatewayUpdateAcknowledgement.self,
-                    timeout: .seconds(30)
+                    as: GatewayUpdateAcknowledgement.self
                 )
             }
             try acknowledgement.require(commandID: commandID)
@@ -2521,7 +2517,7 @@ final class AppModel {
     func loadAuthorizedDevice(for authorized: GatewayAuthorizedDevice) async throws -> PairedDevice {
         let admission = try deviceLabelAdmission(for: authorized.profileID)
         struct Response: Decodable { let devices: [PairedDevice] }
-        let response: Response = try await client.request("device.list", EmptyParams(), timeout: .seconds(30))
+        let response: Response = try await client.request("device.list", EmptyParams())
         try requireLifecycle(admission)
         guard let device = try PairedDeviceCatalogPolicy.admit(response.devices).first(where: { $0.id == authorized.device.id }) else {
             throw GatewayFailure(code: "not_found", message: "This device is no longer authorized.", retryable: false, details: nil)
@@ -2565,8 +2561,7 @@ final class AppModel {
             try await self.client.request(
                 "device.label",
                 Params(commandId: commandID, deviceId: authorized.device.id, label: label),
-                as: PairedDevice.self,
-                timeout: .seconds(30)
+                as: PairedDevice.self
             )
         }
         try requireLifecycle(admission)
@@ -2590,8 +2585,7 @@ final class AppModel {
         let config: IosDeviceInstallConfig? = try await client.request(
             "device.install.config.status",
             Params(deviceId: authorized.device.id),
-            as: IosDeviceInstallConfig?.self,
-            timeout: .seconds(10)
+            as: IosDeviceInstallConfig?.self
         )
         try requireLifecycle(admission)
         guard config?.deviceId == authorized.device.id else {
@@ -2625,7 +2619,7 @@ final class AppModel {
             method: "device.install.config",
             commandID: commandID
         ) {
-            try await self.client.request("device.install.config", params, timeout: .seconds(30))
+            try await self.client.request("device.install.config", params)
         }
         try requireLifecycle(admission)
         guard config.deviceId == authorized.device.id else {
@@ -2640,8 +2634,7 @@ final class AppModel {
         let status: IosDeviceInstallStatus? = try await client.request(
             "device.install.status",
             Params(deviceId: authorized.device.id),
-            as: IosDeviceInstallStatus?.self,
-            timeout: .seconds(10)
+            as: IosDeviceInstallStatus?.self
         )
         try requireLifecycle(admission)
         guard status?.deviceId == authorized.device.id else {
@@ -2665,8 +2658,7 @@ final class AppModel {
         ) {
             try await self.client.request(
                 "device.install",
-                Params(commandId: commandID, deviceId: authorized.device.id, buildMode: buildMode),
-                timeout: .seconds(30)
+                Params(commandId: commandID, deviceId: authorized.device.id, buildMode: buildMode)
             )
         }
         try acknowledgement.require(commandID: commandID)
@@ -3858,7 +3850,7 @@ final class AppModel {
         struct Params: Codable { let path: String? }
         workspaceLoadGeneration &+= 1
         let generation = workspaceLoadGeneration
-        let loaded: WorkspaceListing = try await client.request("filesystem.list", Params(path: path), timeout: .seconds(30))
+        let loaded: WorkspaceListing = try await client.request("filesystem.list", Params(path: path))
         guard workspaceLoadGeneration == generation else { return }
         workspace = loaded
     }

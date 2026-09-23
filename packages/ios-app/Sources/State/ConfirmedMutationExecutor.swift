@@ -10,6 +10,11 @@ enum ConfirmedMutationConnectionPolicy {
 /// owns completion; uncertain outcomes resolve through the stable command ID.
 @MainActor
 final class ConfirmedMutationExecutor {
+    // Keep accepted-but-uncertain commands resolvable without polling forever.
+    private static let receiptResolutionDeadline: Duration = .seconds(90)
+    // Pending receipts need bounded status polling without a request storm.
+    private static let receiptStatusPollInterval: Duration = .milliseconds(250)
+
     private struct CommandStatusParams: Codable { let method, commandId: String }
     private struct CommandStatusResponse: Decodable { let status: String; let result: JSONValue? }
 
@@ -101,7 +106,7 @@ final class ConfirmedMutationExecutor {
                 if Task.isCancelled { result = .cancelled }
                 performanceSignposts.end(interval, result: result, metrics: .none)
             }
-            let deadline = clock.now() + .seconds(90)
+            let deadline = clock.now() + Self.receiptResolutionDeadline
             var lastFailure: GatewayFailure = original
             while clock.now() < deadline {
                 if Task.isCancelled || !lifecycle.admits(admission) {
@@ -119,8 +124,7 @@ final class ConfirmedMutationExecutor {
                 do {
                     let status: CommandStatusResponse = try await client.request(
                         "command.status",
-                        CommandStatusParams(method: method, commandId: commandID),
-                        timeout: .seconds(10)
+                        CommandStatusParams(method: method, commandId: commandID)
                     )
                     try lifecycle.require(admission)
                     switch status.status {
@@ -171,7 +175,7 @@ final class ConfirmedMutationExecutor {
                 } catch let failure as GatewayFailure where failure.code == "response_too_large" {
                     throw Self.uncertainMutationOutcome(method: method, commandID: commandID, lastFailure: failure)
                 }
-                do { try await clock.sleep(.milliseconds(250)) }
+                do { try await clock.sleep(Self.receiptStatusPollInterval) }
                 catch { break }
             }
             if Task.isCancelled { result = .cancelled }

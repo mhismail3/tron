@@ -980,7 +980,6 @@ actor GatewayClient {
         let _: Response = try await request(
             "system.info",
             EmptyParams(),
-            timeout: .seconds(8),
             expectedEpochID: epoch.id
         )
     }

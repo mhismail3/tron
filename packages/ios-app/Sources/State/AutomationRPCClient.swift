@@ -4,7 +4,7 @@ import Foundation
 /// content; callers own the lifetime of definitions and run details.
 @MainActor
 final class AutomationRPCClient {
-    typealias Request = @MainActor @Sendable (String, JSONValue, Duration) async throws -> JSONValue
+    typealias Request = @MainActor @Sendable (String, JSONValue) async throws -> JSONValue
     private let requestValue: Request
     private let mutationExecutor: ConfirmedMutationExecutor?
 
@@ -13,9 +13,9 @@ final class AutomationRPCClient {
         self.mutationExecutor = mutationExecutor
     }
 
-    func request<Response: Decodable>(_ method: String, _ params: some Encodable = EmptyParams(), timeout: Duration = .seconds(15)) async throws -> Response {
+    func request<Response: Decodable>(_ method: String, _ params: some Encodable = EmptyParams()) async throws -> Response {
         let value = try JSONValue.encode(params)
-        let response = try await requestValue(method, value, timeout)
+        let response = try await requestValue(method, value)
         return try response.decode(Response.self)
     }
 
@@ -72,7 +72,7 @@ final class AutomationRPCClient {
         let encoded = try JSONValue.encode(parameters)
         var object = encoded.objectValue ?? [:]
         object["commandId"] = .string(commandID)
-        let send = { [requestValue] in try await requestValue(method, .object(object), .seconds(30)) }
+        let send = { [requestValue] in try await requestValue(method, .object(object)) }
         guard let mutationExecutor else {
             throw GatewayFailure(
                 code: "needs_server",

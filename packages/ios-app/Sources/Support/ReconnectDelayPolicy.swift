@@ -45,6 +45,15 @@ struct ReconnectDelayPolicy: Sendable {
     func nextNominalSeconds(after current: Double) -> Double {
         min(current * multiplier, maximumSeconds)
     }
+
+    /// Reuses the connection backoff curve without taking ownership of a caller's retry budget.
+    func delay(forFailureAttempt attempt: Int) -> Duration {
+        var nominal = initialSeconds
+        for _ in 1..<max(1, attempt) {
+            nominal = nextNominalSeconds(after: nominal)
+        }
+        return delay(nominalSeconds: nominal)
+    }
 }
 
 /// Owns the one pending reconnect delay for one connection executor.

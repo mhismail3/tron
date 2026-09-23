@@ -11,7 +11,7 @@ private final class AutomationRequestScript {
         self.handler = handler
     }
 
-    func request(_ method: String, _ params: JSONValue, _ timeout: Duration) async throws -> JSONValue {
+    func request(_ method: String, _ params: JSONValue) async throws -> JSONValue {
         requests.append((method, params))
         return try handler(method, params)
     }
@@ -24,7 +24,7 @@ private final class DeferredTimelineRequest {
     var returnedFromCancelledTask = false
     var continuation: CheckedContinuation<JSONValue, Error>?
 
-    func request(_ method: String, _ params: JSONValue, _ timeout: Duration) async throws -> JSONValue {
+    func request(_ method: String, _ params: JSONValue) async throws -> JSONValue {
         calls += 1
         defer {
             finished += 1
@@ -266,7 +266,7 @@ struct AutomationCoordinatorTests {
         var finished = 0
         var profile = self.profile(connectionID: 7)
         let catalogItem = automationSummary(id: "automation-catalog", name: "Catalog")
-        let client = AutomationRPCClient { method, _, _ in
+        let client = AutomationRPCClient { method, _ in
             switch method {
             case "automation.status":
                 return .object([

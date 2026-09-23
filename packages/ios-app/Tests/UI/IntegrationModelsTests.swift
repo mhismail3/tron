@@ -62,7 +62,7 @@ final class IntegrationModelsTests: XCTestCase {
             try await lifecycle.connectHosted(profile: GatewayProfile(id: "fixture", label: "Fixture", host: "gateway.test", port: 9847, machineId: "machine", deviceId: "device"), token: "fixture-token")
             let policy = IntegrationPolicy(enabled: true, allowWrites: false, paidAccessApproved: false, paidBudgetCents: 0, recurringApproved: false)
             var captured: JSONValue?
-            let client = IntegrationsRPCClient(request: { method, parameters, _ in
+            let client = IntegrationsRPCClient(request: { method, parameters in
                 XCTAssertEqual(method, "connections.policy.update")
                 captured = parameters
                 return try JSONValue.encode(IntegrationSetupCompleted(id: "account-two", definitionId: "knowledge.raindrop", implementation: "knowledge-connector", providerAccountId: "fixture", scope: nil, policy: policy, health: "setup-required", createdAt: "fixture", updatedAt: "fixture", setupRevision: 8, lastError: nil))
@@ -77,7 +77,7 @@ final class IntegrationModelsTests: XCTestCase {
 
     @MainActor
     func testIntegrationListRejectsNonConnectionCapabilityProvenance() async {
-        let client = IntegrationsRPCClient(request: { _, _, _ in
+        let client = IntegrationsRPCClient(request: { _, _ in
             .object([
                 "definitions": .array([]), "instances": .array([]), "setupOperations": .array([]),
                 "capabilities": .array([.object([

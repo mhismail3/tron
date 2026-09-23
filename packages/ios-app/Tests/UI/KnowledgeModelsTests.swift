@@ -26,7 +26,7 @@ final class KnowledgeModelsTests: XCTestCase {
             "estimatedCostCents":\(cost),"pricing":"synthetic-test-pricing"}}}}],"nextCursor":"next-page","stateRevision":2}
             """
             let payload = try JSONDecoder().decode(JSONValue.self, from: Data(wire.utf8))
-            let client = KnowledgeRPCClient(request: { method, _, _ in
+            let client = KnowledgeRPCClient(request: { method, _ in
                 XCTAssertEqual(method, "knowledge.list")
                 return payload
             })
@@ -44,7 +44,7 @@ final class KnowledgeModelsTests: XCTestCase {
     @MainActor
     func testConnectorStatusCarriesExactConnectionRoute() async throws {
         var captured: (String, JSONValue)?
-        let client = KnowledgeRPCClient(request: { method, params, _ in
+        let client = KnowledgeRPCClient(request: { method, params in
             captured = (method, params)
             return .object(["connector": .string("raindrop"), "connectionId": .string("account-two"), "configured": .bool(true), "enabled": .bool(true), "health": .string("setup-required"), "credentialAvailability": .string("unknown"), "providerIdentity": .string("unknown"), "accountId": .string("202"), "scope": .string("0"), "remaining": .number(0), "pending": .number(0), "paidBudgetCents": .number(0), "allowWrites": .bool(false), "recurringApproved": .bool(false), "paidAccessApproved": .bool(false)])
         })
@@ -68,8 +68,8 @@ final class KnowledgeModelsTests: XCTestCase {
         let executor = ConfirmedMutationExecutor(client: gateway, lifecycle: lifecycle, clock: .continuous, performanceSignposts: RecordingPerformanceSignposts())
         await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
         try await lifecycle.connectHosted(profile: GatewayProfile(id: "fixture", label: "Fixture", host: "gateway.test", port: 9847, machineId: "machine", deviceId: "device"), token: "token")
-        let client = KnowledgeRPCClient(request: { method, parameters, timeout in
-            try await gateway.requestValue(method, parameters, timeout: timeout)
+        let client = KnowledgeRPCClient(request: { method, parameters in
+            try await gateway.requestValue(method, parameters)
         }, mutationExecutor: executor, uuidSource: UUIDSource(next: { UUID(uuidString: "00000000-0000-4000-8000-000000000001")! }))
         let task = Task { try await client.runConnector("raindrop", connectionID: "account-two", dryRun: true, limit: 10) }
         var request: JSONValue?
@@ -167,7 +167,7 @@ final class KnowledgeModelsTests: XCTestCase {
     @MainActor
     func testGlobalConfigurationCannotBeSentToAGatewayWithoutGlobalAdmission() async {
         var requests = 0
-        let client = KnowledgeRPCClient(request: { _, _, _ in requests += 1; return .null })
+        let client = KnowledgeRPCClient(request: { _, _ in requests += 1; return .null })
         let config = KnowledgeConfig(schemaVersion: 1, revision: 0,
                                      eligibility: KnowledgeEligibility(allSessions: true, sessionIds: [], projectIds: [], excludedSessionIds: [], excludedProjectIds: []),
                                      observation: KnowledgeObservationLimits(enabled: true, model: "fixture/model", maxInputChars: 48_000, maxOutputChars: 8_000, timeoutMs: 30_000, maxAttempts: 1),
@@ -211,7 +211,7 @@ final class KnowledgeModelsTests: XCTestCase {
                               "entryIds": .array([.string("from")]), "entryDigest": .string(String(repeating: "a", count: 64))]),
             "disposition": .string(disposition), "groupRevisionIds": .array([]), "recordedAt": .string("2026-01-01T00:00:00Z")]) }
         var requests: [JSONValue] = []
-        let client = KnowledgeRPCClient(request: { method, parameters, _ in
+        let client = KnowledgeRPCClient(request: { method, parameters in
             XCTAssertEqual(method, "knowledge.observation.coverage")
             requests.append(parameters)
             return .object(["coverage": .array([cut("cut-1", "failed")]), "stateRevision": .number(4)])
@@ -224,7 +224,7 @@ final class KnowledgeModelsTests: XCTestCase {
 
         // A Gateway that ignores the filter must not publish settled rows as
         // cuts needing attention.
-        let unfiltered = KnowledgeRPCClient(request: { _, _, _ in
+        let unfiltered = KnowledgeRPCClient(request: { _, _ in
             .object(["coverage": .array([cut("cut-2", "observed")]), "stateRevision": .number(4)])
         })
         do {
@@ -239,7 +239,7 @@ final class KnowledgeModelsTests: XCTestCase {
     func testGatewayDTOResponsesDriveCatalogueEntryAndObjectContinuation() async throws {
         let hash = String(repeating: "b", count: 64)
         var requests: [(String, JSONValue)] = []
-        let client = KnowledgeRPCClient(request: { method, parameters, _ in
+        let client = KnowledgeRPCClient(request: { method, parameters in
             requests.append((method, parameters))
             switch method {
             case "knowledge.list":
@@ -285,7 +285,7 @@ final class KnowledgeModelsTests: XCTestCase {
     @MainActor
     func testKnowledgeRPCRejectsMalformedObjectEnvelope() async {
         let hash = String(repeating: "c", count: 64)
-        let client = KnowledgeRPCClient(request: { method, _, _ in
+        let client = KnowledgeRPCClient(request: { method, _ in
             XCTAssertEqual(method, "knowledge.object.read")
             return .object(["hash": .string(hash), "mediaType": .string("text/plain"), "bytes": .number(4), "totalBytes": .number(6), "offset": .number(0), "nextOffset": .null, "base64": .string(Data("four".utf8).base64EncodedString())])
         })
@@ -309,7 +309,7 @@ final class KnowledgeModelsTests: XCTestCase {
 
     @MainActor
     func testCoverageReadExposesPendingFailedAndUnavailableCuts() async throws {
-        let client = KnowledgeRPCClient(request: { method, _, _ in
+        let client = KnowledgeRPCClient(request: { method, _ in
             XCTAssertEqual(method, "knowledge.observation.coverage")
             return .object([
                 "coverage": .array([
@@ -396,7 +396,7 @@ final class KnowledgeModelsTests: XCTestCase {
     @MainActor
     func testCoverageClearRequiresAGatewayThatOwnsTheMutation() async {
         var calls = 0
-        let client = KnowledgeRPCClient(request: { _, _, _ in calls += 1; return .null })
+        let client = KnowledgeRPCClient(request: { _, _ in calls += 1; return .null })
         let cut = Self.syntheticCut("failed-cut", .failed, range: KnowledgeObservationPresentation(record: KnowledgeObservationFixture.record())!.observation.range)
         do {
             _ = try await client.dismissCoverage(cut, capabilities: ["knowledge.v1"])

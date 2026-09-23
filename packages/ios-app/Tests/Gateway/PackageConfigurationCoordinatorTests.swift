@@ -148,7 +148,6 @@ struct PackageConfigurationCoordinatorTests {
             await harness.socket.enqueue(response(id: olderRequest.id, result: inventory("older")))
             #expect(!(await older.value))
             #expect(harness.owner.inventory(for: .global)?.packages.first?.source == "newer")
-            #expect(PackageConfigurationCoordinator.listTimeout == .seconds(120))
             await harness.client.close()
         }
     }
@@ -172,7 +171,7 @@ struct PackageConfigurationCoordinatorTests {
             #expect(!(await older.value))
             #expect(harness.owner.updates(for: .global).map(\.source) == ["newer"])
             #expect(harness.owner.invalidationGeneration == invalidation)
-            #expect(PackageConfigurationCoordinator.checkUpdatesTimeout == .seconds(180))
+            #expect(GatewayRequestTimeout.packageCheckUpdates == .seconds(180))
             await harness.client.close()
         }
     }
@@ -258,7 +257,7 @@ struct PackageConfigurationCoordinatorTests {
             try await mutation.value
             #expect(harness.owner.updates(for: target).map(\.source) == ["keep-me"])
             #expect(harness.owner.updates(for: .global).map(\.source) == ["global"])
-            #expect(PackageConfigurationCoordinator.mutationTimeout == .seconds(300))
+            #expect(GatewayRequestTimeout.packageMutation == .seconds(300))
             await harness.client.close()
         }
     }

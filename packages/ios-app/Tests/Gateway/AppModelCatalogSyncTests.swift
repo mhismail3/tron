@@ -9,14 +9,15 @@ struct AppModelCatalogSyncTests {
     @Test("catalog retries autonomously past the warning threshold on its current connection")
     func catalogFailureRetriesWithoutInvalidation() async throws {
         let clock = ManualClock()
-        try await withHarness(manualClock: clock) { harness in
+        let retryPolicy = ReconnectDelayPolicy(nextUnitInterval: { 0.5 })
+        try await withHarness(manualClock: clock, reconnectDelayPolicy: retryPolicy) { harness in
             let loading = Task { await harness.model.refreshSessions() }
             for index in 0..<4 {
                 let request = try await request(harness.socket, index: index + 1)
                 await harness.socket.enqueue(errorResponse(id: request.id, code: "invalid_dashboard_catalog"))
                 if index == 0 { #expect(await loading.value == .retained) }
                 #expect(await harness.client.activeConnectionID() != nil)
-                let delay: Duration = index == 0 ? .seconds(2) : index == 1 ? .seconds(4) : .seconds(8)
+                let delay = retryPolicy.delay(forFailureAttempt: index + 1)
                 try await clock.waitUntilSleeping(count: 1, duration: delay)
                 if index == 2 {
                     #expect(harness.model.visibleNotices.contains { $0.replacement?.key == .sessionCatalogCatchUp })
@@ -678,6 +679,7 @@ struct AppModelCatalogSyncTests {
     private func withHarness(
         sockets: [ScriptedGatewaySocket] = [ScriptedGatewaySocket()],
         manualClock: ManualClock? = nil,
+        reconnectDelayPolicy: ReconnectDelayPolicy = .standard,
         operation: @escaping @MainActor @Sendable (Harness) async throws -> Void
     ) async throws {
         let socket = try #require(sockets.first)
@@ -690,7 +692,8 @@ struct AppModelCatalogSyncTests {
             client: client,
             profiles: GatewayProfileStore(defaults: defaults),
             cache: SnapshotCache(root: root),
-            clock: manualClock?.clock ?? .continuous
+            clock: manualClock?.clock ?? .continuous,
+            reconnectDelayPolicy: reconnectDelayPolicy
         )
         let profile = GatewayProfile(
             id: "profile", label: "Mac", host: "gateway.test", port: 9_847,

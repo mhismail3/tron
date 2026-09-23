@@ -579,6 +579,7 @@ final class PushNotificationCoordinator {
     }
 
     private enum ProofMode: String { case attestation, assertion }
+    // Proof registration retries require a fresh challenge and remain independent of socket recovery.
     private static let retryBackoffs: [Duration] = [.milliseconds(250), .milliseconds(750)]
 
     /// One bounded operation owns all proof recovery. Every retry starts with a
@@ -871,8 +872,7 @@ final class PushNotificationCoordinator {
                     secret: grant.grantSecret,
                     previewsEnabled: false,
                     relayOrigin: relayOrigin
-                ),
-                timeout: .seconds(8)
+                )
             )
             try validateRegistration(generation: generation, profileID: profileID, token: token)
             guard status.relayOrigin == relayOrigin else { return .configurationMismatch }
@@ -907,8 +907,7 @@ final class PushNotificationCoordinator {
         do {
             let result: PushRegistrationRemovalResult = try await client.request(
                 "push.registration.remove",
-                PushRegistrationRemoval(commandId: uuid().uuidString),
-                timeout: .seconds(8)
+                PushRegistrationRemoval(commandId: uuid().uuidString)
             )
             guard registrationGeneration == generation,
                   !registrationAdmitted,

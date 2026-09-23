@@ -17,10 +17,6 @@ protocol PackageConfigurationCoordinatorDelegate: AnyObject {
 @MainActor
 @Observable
 final class PackageConfigurationCoordinator {
-    static let listTimeout: Duration = .seconds(120)
-    static let checkUpdatesTimeout: Duration = .seconds(180)
-    static let mutationTimeout: Duration = .seconds(300)
-
     private struct TargetParams: Codable {
         let cwd: String?
     }
@@ -107,8 +103,7 @@ final class PackageConfigurationCoordinator {
         do {
             let inventory: PackageInventory = try await client.request(
                 "packages.list",
-                TargetParams(cwd: target.cwd),
-                timeout: Self.listTimeout
+                TargetParams(cwd: target.cwd)
             )
             guard (!requiresLiveTask || !Task.isCancelled),
                   admits(admission, generations: loadGenerationByTarget),
@@ -146,7 +141,7 @@ final class PackageConfigurationCoordinator {
             let response: UpdateResponse = try await client.request(
                 "packages.checkUpdates",
                 TargetParams(cwd: target.cwd),
-                timeout: Self.checkUpdatesTimeout
+                timeout: GatewayRequestTimeout.packageCheckUpdates
             )
             guard !Task.isCancelled,
                   admits(admission, generations: updateGenerationByTarget) else { return false }
@@ -185,7 +180,7 @@ final class PackageConfigurationCoordinator {
         )
         do {
             _ = try await mutationExecutor.performValue(method: method, commandID: commandID) {
-                try await client.requestValue(method, params, timeout: Self.mutationTimeout)
+                try await client.requestValue(method, params, timeout: GatewayRequestTimeout.packageMutation)
             }
         } catch {
             guard admits(admission, generations: mutationGenerationByTarget) else {
