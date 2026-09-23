@@ -1,0 +1,30 @@
+{
+  "serverHeartbeatInterval": {
+    "milliseconds": 25000,
+    "reason": "Keeps mobile connections observable while allowing ordinary scheduling and radio delays."
+  },
+  "serverMissedHeartbeatLimit": {
+    "count": 3,
+    "reason": "Tolerates two missed heartbeat rounds before retiring a half-open connection."
+  },
+  "serverHelloDeadline": {
+    "milliseconds": 5000,
+    "reason": "Bounds the initial server hello without treating normal connection setup as a dead socket."
+  },
+  "clientPingInterval": {
+    "milliseconds": 10000,
+    "reason": "Proves client-to-server liveness more frequently than the server heartbeat interval."
+  },
+  "clientPongDeadline": {
+    "milliseconds": 8000,
+    "reason": "Allows a round trip after each client ping while detecting an unresponsive transport promptly."
+  },
+  "clientHandshakeDeadline": {
+    "milliseconds": 15000,
+    "reason": "Gives the complete connection handshake one shared bound, including hello and authentication."
+  },
+  "perIdentitySocketCap": {
+    "count": 4,
+    "reason": "Bounds concurrent sockets per device identity while leaving room for active and reconnecting transports."
+  }
+}
