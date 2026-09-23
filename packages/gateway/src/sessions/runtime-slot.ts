@@ -4123,12 +4123,16 @@ export class RuntimeSlot {
     canonicalFacts?: ReadonlyMap<string, CanonicalExtensionRunFact>,
   ): Promise<void> {
     let diagnosticOwner: string | undefined;
+    let missingToolCallId: string | undefined;
     let claimedReceipt: { activityId: string; owner: GatewayWorkHandle } | undefined;
     try {
       const lexicalDirectory = resolve(asyncDir);
-      const bound = [...this.extensionRunOwnership.entries()].find(([, binding]) =>
-        binding.asyncDir !== undefined && resolve(binding.asyncDir) === lexicalDirectory);
       const realAsyncDir = this.canonicalExtensionArtifactDirectory(asyncDir);
+      const bound = [...this.extensionRunOwnership.entries()].find(([, binding]) =>
+        binding.asyncDir !== undefined && (resolve(binding.asyncDir) === lexicalDirectory
+          || realAsyncDir !== undefined
+            && this.canonicalExtensionArtifactDirectory(binding.asyncDir) === realAsyncDir));
+      missingToolCallId = bound?.[1].toolCallId;
       if (!realAsyncDir) {
         if (bound) this.observeMissingExtensionArtifact(bound[1].toolCallId);
         return;
@@ -4333,6 +4337,9 @@ export class RuntimeSlot {
       this.publishExtensionActivity(activity);
     } catch (error) {
       if (claimedReceipt) this.releaseExtensionReceiptOwnership(claimedReceipt.activityId, claimedReceipt.owner);
+      if (error instanceof OversizedExtensionArtifactError && missingToolCallId) {
+        this.observeMissingExtensionArtifact(missingToolCallId);
+      }
       if (diagnosticOwner) this.warnExtensionArtifact(
         error instanceof OversizedExtensionArtifactError
           ? "oversized-artifact"

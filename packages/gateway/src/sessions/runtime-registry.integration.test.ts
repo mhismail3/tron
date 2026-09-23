@@ -5296,21 +5296,25 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
 
     // Known-bad control: the old headerless oversized artifact cannot refresh;
     // after the existing missing grace it hides the live activity as unknown.
+    const slotState = slot as unknown as {
+      extensionArtifactMissingSince: Map<string, number>;
+      extensionActivities: Map<string, ExtensionRunActivity>;
+      stopExtensionActivityWatcher: (id: string) => void;
+      dependencies: { extensionArtifactWarning?: (warning: { reason: string; owner: string }) => void };
+    };
+    slotState.stopExtensionActivityWatcher(toolCallId);
     await writeFile(statusPath, JSON.stringify({
       runId, state: "running", startedAt: root.startedAt, lastUpdate: root.updatedAt,
       steps: [{ report: "x".repeat(300 * 1_024) }],
     }));
     const artifactWarnings: Array<{ reason: string; owner: string }> = [];
-    const slotState = slot as unknown as {
-      extensionArtifactMissingSince: Map<string, number>;
-      dependencies: { extensionArtifactWarning?: (warning: { reason: string; owner: string }) => void };
-    };
     slotState.dependencies.extensionArtifactWarning = (warning) => artifactWarnings.push(warning);
     slotState.extensionArtifactMissingSince.set(toolCallId, Date.now() - 31_000);
     await slot.discoverExtensionArtifact(asyncDir);
     expect(artifactWarnings).toMatchObject([{ reason: "oversized-artifact" }]);
     expect(artifactWarnings).not.toMatchObject([{ reason: "artifact-replacement-in-progress" }]);
-    expect((slot.snapshot().extensionActivities ?? []).find((activity) => activity.toolCallId === toolCallId)?.status).toBe("unknown");
+    expect(slotState.extensionActivities.get(toolCallId)?.lifecycle?.state).toBe("unknown");
+    expect((slot.snapshot().extensionActivities ?? []).some((activity) => activity.toolCallId === toolCallId)).toBe(false);
 
     // Reconstruct the Gateway runtime and verify bounded-header ambient discovery
     // re-admits the same canonical owner without parsing its large report body.
