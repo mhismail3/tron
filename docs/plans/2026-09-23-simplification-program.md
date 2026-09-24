@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, S-GW-SESS-SEARCH-1 added
+- **Last updated:** 2026-09-24, observability scope exclusions removed
 - **Goal:** Every file, module, abstraction, dependency, comment and test in Tron has a specific, visible reason to exist, with no change to what users see or do.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -62,7 +62,7 @@ unit and add rows here.
 | IOS-CHAT | `packages/ios-app/Sources/UI/Chat` (73 files) | 39,556 | about 20,000 | Split before cleanup; highest UX risk (scroll, composer, keyboard) |
 | IOS-SET | `packages/ios-app/Sources/UI/Settings` (34 files) | 10,141 | about 3,000 | |
 | IOS-UI-OTHER | UI Automations, Components, Onboarding, Terminal, Theme | 13,463 | about 4,000 | |
-| IOS-CORE | Sources App, Auth, Gateway, Models, Notifications, Support | 19,053 | about 15,000 | Excludes code the observability plan replaces |
+| IOS-CORE | Sources App, Auth, Gateway, Models, Notifications, Support | 19,053 | about 15,000 | Includes the observability code (AppLog, log export); its event catalog in `packages/gateway/docs/observability.md` must stay accurate |
 | IOS-TEST-INFRA | Tests Fixtures and Support, UITests, TestPlans, iOS scripts | about 2,300 | n/a | Audit last in the iOS track |
 | MAC | `packages/mac-app/Sources` (7 dirs) | 11,931 | 7,154 | |
 | MAC-NATIVE | `packages/mac-app/native-computer-control`, `packages/mac-app/native-gateway-client`, `packages/mac-app/scripts` | 7,279 | in-dir | Includes the C launcher |
@@ -213,7 +213,7 @@ These apply on top of `AGENTS.md`, which wins on any conflict.
 | S-GW-SESS-1 | Ready | Split GW-SESS into sub-units (runtime slot, registry, projection, catalog, search, blobs, process activity, extensions projection); add one S-GW-SESS row per sub-unit with its file list | V-0 | |
 | S-GW-SESS-SEARCH-1 | Needs scoping | Moved from observability L-8c: session-search warm-up peaks at 743.9 MiB post-GC heap (1.3 GB RSS) on a 207-session catalog because the canonical read and parse path (`RuntimeRegistry.readSearchCut`) materializes whole sessions up to its 64 MiB cap. First record why 62 of 207 catalog sessions were not indexed and correlate GC samples with read sizes; then bound or stream the parse while keeping full graph and branch validation. Acceptance: peak post-GC heap under 150 MB on a cloned corpus, identical indexed counts and ranked results, warm-up no more than 10% slower | none | |
 | T-GW-SESS-1 | Ready | Test audit of `runtime-registry.integration.test.ts` (10,560 lines): map each test to the requirement it protects; propose deletions, merges and rewrites | V-0 | |
-| S-GW-TRANS-1 | Ready | Scope GW-TRANS (server, gateway service, receipts, transcript leases), excluding code the observability plan replaces | V-0 | |
+| S-GW-TRANS-1 | Ready | Scope GW-TRANS (server, gateway service, receipts, transcript leases, logger, diagnostic export); keep `packages/gateway/docs/observability.md` accurate | V-0 | |
 | S-GW-KNOW-1 | Ready | Scope GW-KNOW | V-0 | |
 | S-GW-MACH-1 | Ready | Scope GW-MACH | V-0 | |
 | S-GW-AUTO-1 | Ready | Scope GW-AUTO | V-0 | |
@@ -225,7 +225,7 @@ These apply on top of `AGENTS.md`, which wins on any conflict.
 | S-IOS-CHAT-1 | Ready | Split IOS-CHAT into sub-units (transcript projection, scroll, composer, media, detail sheets); add one row per sub-unit | V-0, V-0-UX | |
 | S-IOS-SET-1 | Ready | Scope IOS-SET | V-0, V-0-UX | |
 | S-IOS-UI-OTHER-1 | Ready | Scope IOS-UI-OTHER | V-0, V-0-UX | |
-| S-IOS-CORE-1 | Ready | Scope IOS-CORE, excluding code the observability plan replaces | V-0, V-0-UX | |
+| S-IOS-CORE-1 | Ready | Scope IOS-CORE, including AppLog and log export; keep `packages/gateway/docs/observability.md` accurate | V-0, V-0-UX | |
 | S-MAC-1 | Ready | Scope MAC | V-0, V-0-UX | |
 | S-MAC-NATIVE-1 | Ready | Scope MAC-NATIVE, including the C launcher | V-0 | |
 | S-RELAY-1 | Ready | Scope RELAY | V-0 | |

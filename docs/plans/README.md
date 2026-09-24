@@ -22,7 +22,7 @@ Documentation ownership in `AGENTS.md`).
 - The date is the day the plan started. It never changes, so files sort
   chronologically.
 - The slug is two to five lowercase words joined by hyphens, naming the outcome
-  (`2026-09-23-observability-foundation.md`), not the activity.
+  (`2026-09-24-phone-reconnect-tuning.md`), not the activity.
 
 ## Template
 
