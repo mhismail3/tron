@@ -72,13 +72,15 @@ struct ProjectHooksView: View {
                         )
                         .accessibilityLabel("Hook view")
                         if mode == .byEvent {
-                            TronToggleRow(
-                                icon: "bolt.horizontal.circle",
-                                title: "Show unregistered events",
-                                detail: "Include supported lifecycle events without registered handlers",
-                                accent: .tronSessionTeal,
-                                isOn: $showUnregisteredEvents
-                            )
+                            TronSettingsGroup("Display", accent: .tronSessionTeal, surfaceStyle: .scrollOptimized) {
+                                TronToggleRow(
+                                    icon: "bolt.horizontal.circle",
+                                    title: "Show unregistered events",
+                                    detail: "Include supported lifecycle events without registered handlers",
+                                    accent: .tronSessionTeal,
+                                    isOn: $showUnregisteredEvents
+                                )
+                            }
                         }
                         if records.isEmpty && issues.isEmpty && !(mode == .byEvent && showUnregisteredEvents) {
                             TronPlaceholderState(
