@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-24
 - **Status:** Active
-- **Last updated:** 2026-09-24, CAT-3
+- **Last updated:** 2026-09-24, CAT-3 correction
 - **Goal:** Remove CortexKit's duplicate static model catalog while preserving correct subscription routing and per-model capabilities, and separately assess subscription-compatible discovery.
 
 ## Goal and constraints
@@ -139,3 +139,11 @@ Approved and committed at the user's request. No tasks claimed, code changed, pa
 - Changes: this commit (Tron `ModelDisplayFormatting.swift` and its test, `provider-usage.test.ts`, `packages/ios-app/docs/architecture.md`); CortexKit commit `adde152` (version 1.23.1-tron.4, on top of `9bfd6cc`). Local artifact cortexkit-pi-anthropic-auth-1.23.1-tron.4.tgz in the CortexKit checkout's artifacts folder, SHA-256 `c8b7a73efc856b277709f42aec2efc1e3d8298a38afdb6ab0ca462b8ec7350ae`, 30,737 bytes; not published.
 - Adoption: not performed. User must explicitly update the canonical package source in settings, install through package management, and verify provider/catalog in a fresh session. Do not install over an active turn or infer subscription entitlement from catalog presence.
 - Tasks added: none.
+
+### CAT-3 correction · Done · 2026-09-24 · catalog session
+
+- Result: this corrects the CAT-3 entry. The adopted package 1.23.1-tron.4 failed to load when installed: the Gateway logged a `runtime.diagnostic` error "Cannot find module" at 20:53 UTC. Pi's extension loader aliases only the pi-ai root, `/compat`, `/oauth` and `/providers/all`, and CAT-2 had imported `@earendil-works/pi-ai/providers/anthropic`. CAT-3's isolated check resolved modules through the package's own `node_modules`, not through the loader, so it missed this. CortexKit commit `8b811d6` (1.23.1-tron.5) reads the catalog with `getBuiltinModels('anthropic')` from `/providers/all`, still deep-cloned. A new test requires every Pi import in the extension to appear in the loader's alias table.
+- Evidence (verified): loading the packed artifacts through Pi's real `loadExtensions`, against the installed dependency tree, reproduces the tron.4 failure and loads tron.5 with no errors. Removing the fix fails the new alias test, which names `/providers/anthropic`. CortexKit pi tests 145/145, typecheck and Biome pass. Artifact cortexkit-pi-anthropic-auth-1.23.1-tron.5.tgz (SHA-256 `aac04f863ec389954bf6961776e60bb3de0b90492f5fc831a6ef7af5c08130cb`); not published.
+- Changes: CortexKit `8b811d6`; Tron: this entry.
+- Tasks added: none.
+- For the next agent: until the user installs tron.5, CortexKit is not loaded, and Anthropic requests go through the SDK's built-in provider. Verify an extension adoption with Pi's loader, not only with module resolution.
