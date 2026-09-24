@@ -1861,7 +1861,12 @@ struct ChatView: View {
         case .opening, .positioning, .revealing, .presenting:
             ZStack {
                 if ChatOpeningSurfacePolicy.showsOpaqueCover(phase: sessionPresentation.open.phase) {
+                    // The transcript scrolls under the navigation bar, beyond
+                    // the scroll view's safe frame this overlay is sized to.
+                    // Extend only the cover upward so positioning rows cannot
+                    // show through the bar; the indicator stays centered.
                     TronBackdrop()
+                        .ignoresSafeArea(.container, edges: .top)
                 }
                 TronPulseLoadingIndicator(accent: .tronEmerald, size: 44)
                     .padding(18)

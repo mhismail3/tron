@@ -1045,6 +1045,38 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    // Regression: while the opening cover was up, transcript rows positioned
+    // under the navigation bar showed through it for a frame, because the
+    // cover was sized to the scroll view's safe frame.
+    @Test("the opening cover hides the transcript under the navigation bar")
+    func openingCoverHidesNavigationBand() async throws {
+        try await withTestWatchdog(timeout: .seconds(25)) { @MainActor in
+            let snapshot = try SessionScenarioBuilder(seed: 1_252).openingTail(targetEncodedBytes: 10_000)
+            try await withHarness(snapshot: snapshot, enablesPresentationCover: true, usesRealOpening: true) { harness in
+                var bands: [[Double]] = []
+                var sawRevealing = false
+                for _ in 0..<240 {
+                    guard let phase = harness.probe.openingPhase?() else {
+                        try await DisplayFrameScheduler.displayLink.nextFrame()
+                        continue
+                    }
+                    if phase == .presented || phase == .ready { break }
+                    sawRevealing = sawRevealing || phase == .revealing
+                    bands.append(harness.renderedNavigationBandGrid())
+                    try await DisplayFrameScheduler.displayLink.nextFrame()
+                }
+                #expect(sawRevealing)
+                let reference = try #require(bands.first)
+                // Glyph pixels differ sharply from the backdrop; material
+                // noise in the bar does not. Count only glyph-sized changes.
+                let changed = bands.map { band in
+                    zip(reference, band).filter { abs($0 - $1) > 48 }.count
+                }
+                #expect(changed.max() == 0, "transcript showed under the navigation bar while covered: \(changed)")
+            }
+        }
+    }
+
     @Test("final opening frame cannot publish behind a managed cover")
     func coveredFinalOpeningFrame() async throws {
         try await withTestWatchdog(timeout: .seconds(20)) { @MainActor in
@@ -3338,6 +3370,35 @@ final class ChatViewScrollHarness {
                 let green = Double(bytes[offset + 1])
                 let blue = Double(bytes[offset + 2])
                 samples.append((red + green + blue) / 3)
+            }
+        }
+        return samples
+    }
+
+    /// Luminance samples from the top of the chat, where the transcript
+    /// scrolls under the navigation bar outside the scroll view's safe frame.
+    /// The glass bar buttons are excluded: their material re-renders with
+    /// small pixel noise unrelated to what is beneath them.
+    func renderedNavigationBandGrid() -> [Double] {
+        let view = hostingController.view!
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        let band = CGRect(x: 72, y: 0, width: view.bounds.width - 144, height: 160)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let image = UIGraphicsImageRenderer(size: band.size, format: format).image { _ in
+            view.drawHierarchy(in: view.bounds.offsetBy(dx: -band.minX, dy: 0), afterScreenUpdates: true)
+        }
+        guard let cgImage = image.cgImage,
+              let data = cgImage.dataProvider?.data,
+              let bytes = CFDataGetBytePtr(data) else { return [] }
+        let bytesPerPixel = cgImage.bitsPerPixel / 8
+        var samples: [Double] = []
+        for y in stride(from: 2, to: cgImage.height - 2, by: 3) {
+            for x in stride(from: 2, to: cgImage.width - 2, by: 3) {
+                let offset = y * cgImage.bytesPerRow + x * bytesPerPixel
+                samples.append((Double(bytes[offset]) + Double(bytes[offset + 1]) + Double(bytes[offset + 2])) / 3)
             }
         }
         return samples

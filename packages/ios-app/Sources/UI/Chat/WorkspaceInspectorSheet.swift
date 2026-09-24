@@ -581,7 +581,7 @@ struct WorkspaceInspectorSheet: View {
                         commitRow(row)
                     }
                     if owner.historyCursor != nil {
-                        TronPaginationButton(label: "Load Earlier", loadingLabel: "Loading…", icon: "arrow.up", isLoading: owner.loadingHistory, accent: .tronSessionTeal) {
+                        TronPaginationButton(label: "Load Earlier", loadingLabel: "Loading…", icon: "arrow.down", isLoading: owner.loadingHistory, accent: .tronSessionTeal) {
                             Task { await owner.loadHistory(service: model.workspaceInspection, sessionID: sessionID, append: true) }
                         }
                         .frame(maxWidth: .infinity, minHeight: 44)
