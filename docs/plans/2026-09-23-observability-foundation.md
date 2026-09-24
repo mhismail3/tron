@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, L-4
+- **Last updated:** 2026-09-24, L-8 and L-19
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -210,7 +210,8 @@ user reinstalls manually, so batch them for one reinstall.
 | L-5 | Done | `scripts/tron diagnose` collector | L-1c, L-2 | observability session (L-5 lane), 2026-09-24 |
 | L-6 | Ready | Event catalog and the incident rule | L-2 | |
 | L-7 | Done | Stall cause in event-loop-delay records | L-2 | observability session, 2026-09-24 |
-| L-8 | Claimed | Gateway idle heap growth | none | observability session (L-8 lane), 2026-09-24 |
+| L-8 | Done | Gateway idle heap growth | none | observability session (L-8 lane), 2026-09-24 |
+| L-8b | Ready | Lower the session-search rebuild's peak transient heap: build the index in bounded units so peak post-GC heap stays under 150 MB on the cloned 5,381-session corpus with identical index coverage and results, and warm-up no more than 10% slower than the measured 155–159 s | L-8 | |
 | L-9 | Done | Phone handling of a stalled or unreachable but live Gateway (proposal for the user) | L-7, L-10 | observability session (L-9 lane), 2026-09-24 |
 | L-9a | Needs approval | Phone labels a connection failure as "No path to this Mac" when attempts never opened a transport, and keeps "Reconnecting" otherwise; no timing change (option A in L-9 findings) | L-9 | |
 | L-9b | Needs approval | Choose stall tolerance (third missed pong, option B) or a shorter never-opened handshake (option D), after a few days of L-9a records | L-9a | |
@@ -221,7 +222,8 @@ user reinstalls manually, so batch them for one reinstall.
 | L-16 | Done | Restart drain hangs on terminal-receipt persistence | none | observability session, 2026-09-24 |
 | L-17 | Needs approval | Judge a drain stalled by its oldest blocker without progress, not by any change in the blocker set | L-16 | |
 | L-18 | Needs approval | Decide whether a restart drain proceeds when only unresolved (blocked) persistence owners remain | L-16 | |
-| L-19 | Claimed | `scripts/tron mac verify` fails on the live install after a source rebuild: "PID selected payload path mismatch" and "authenticated system.info identity/channel mismatch" on the Tailscale host. Find whether the install or the check is wrong | none | observability session (L-19 lane), 2026-09-24 |
+| L-19 | Done | `scripts/tron mac verify` fails on the live install after a source rebuild: "PID selected payload path mismatch" and "authenticated system.info identity/channel mismatch" on the Tailscale host. Find whether the install or the check is wrong | none | observability session (L-19 lane), 2026-09-24 |
+| L-19a | Ready | Make `scripts/verify-mac-install.sh` admit a store payload the way the launcher does: drop the XcodeGen `codesign --verify` requirement from `payload_meets_current_runtime_contract` and accept the pinned upstream XcodeGen digest in the provenance check; correct `packages/mac-app/docs/development.md`; test in `scripts/test-mac-reinstall.py` | L-19 | |
 | L-11 | Done | Remove duplicate payload validations within one deploy run | none | observability session (L-11 lane), 2026-09-24 |
 | L-12 | Done | Faster Node payload fingerprint with identical output | none | observability session (L-12 lane), 2026-09-24 |
 | L-13 | Done | Stage source payloads in the store and rename instead of copying twice | L-11 | observability session (L-13 lane), 2026-09-24 |
@@ -778,3 +780,20 @@ The 2026-09-23 17:33 UTC incident's records have rotated away, so its timeline i
 - Kept on purpose: the Swift redaction rules duplicate the Gateway's `redact` because the two languages cannot share a source; the test pins the same cases. Transition fields (`old`, `new`, `why`) are structured because the Mac stream exists mainly for them.
 - Deviations: supervisor review made three changes. The lane's test runs had written about 60 test records into the real `~/.tron/logs/mac.jsonl`, because code under test resolves the Tron home globally. The Mac test scheme now sets `TRON_DATA_DIR` to a directory in the build products, the polluted file (test records only, from 15:38–15:47 UTC) was deleted, and `TronPathsTests` asserts the default home with an explicit empty environment. The hand-written `Encodable` conformance, which repeated the synthesized one, was deleted. The formatter became a shared `Date.ISO8601FormatStyle`, which is `Sendable`.
 - For the next agent: takes effect after the user reinstalls the Mac app, together with L-1b and L-1d. L-6's catalog should list the Mac events.
+
+### L-19 · Done · 2026-09-24 · observability session (L-19 lane)
+
+- Result: both `scripts/tron mac verify` failures on the live install are false alarms with one cause. `payload_meets_current_runtime_contract` in `scripts/verify-mac-install.sh` requires `codesign --verify --strict` on the payload's XcodeGen binary. A store payload carries the pinned upstream XcodeGen unchanged; its SHA-256 equals `TRON_CI_XCODEGEN_BINARY_SHA256` in `config/ci-toolchain.env`. `codesign` cannot verify that binary's linker-generated ad hoc signature. The check therefore rejects the valid source-rebuilt selection and falls back to the bundled payload. That causes the "PID selected payload path mismatch" failure, and comparing the running Gateway with the bundled manifest causes the `system.info` identity mismatch. The launcher, the deploy helper and the Gateway require no signature on that binary. The check was added to mirror the launcher, but the launcher's rule never had a signature condition.
+- Evidence (verified): with only the XcodeGen `codesign` call stubbed, the verifier passes all 59 checks. The Gateway's `/health` identity (fingerprint `9cafc714…`, source revision `af16dc297`, runtime epoch `f6840528…`) equals the selected store manifest, `current.json` and `deployment-state.json`. `codesign` also fails on the pristine pinned binary in `.ci-tools`. `python3 scripts/test-mac-reinstall.py` passed 90 tests.
+- Changes: this commit (plan only).
+- Tasks added: L-19a (check alignment, as recommended). Rejected alternatives: re-signing XcodeGen when staging, or making the launcher require a signature. Both change the payload contract and would not repair versions already stored.
+- For the next agent: until L-19a lands, `scripts/tron diagnose`'s `mac-verify` section repeats these two false failures.
+
+### L-8 · Done · 2026-09-24 · observability session (L-8 lane)
+
+- Result: the idle heap growth is the session-search warm-up's transient indexing allocation, not a leak. An isolated Gateway, with no connections and seeded with an APFS clone of only the session tree (5,381 files), scanned the catalog in 6.9 s and then warmed session search for 155 s (159 s on a second run). During that time the heap after collection reached 695 MB and RSS 737 MB–1.52 GB. After warm-up the heap fell to 273 MB, and a full collection brought it to 60 MB. `SessionSearchService.rebuild()` reads each session's document and indexes it; the configured bounds are 512 MiB, 25,000 sessions and 1,000,000 passages. The live 2026-09-24 records show the heap rising from 287 to 482 MB within a minute of startup, which matches.
+- Evidence (verified): the isolated runs (port 19954, clean environment), GC tracing, and a heap snapshot after collection. The snapshot's largest groups were strings (23.7 MB) and object properties (4.6 MB); these are totals by type and do not name a retaining owner. The clone, snapshot and profile were deleted.
+- Evidence (inferred): the peak is the rebuild holding many sessions' extracted text at once. It also explains L-15b's 4.2 s `session-search-index` startup step, and the heap and GC side of L-7's stall records during the first minutes after a restart.
+- Changes: this commit (plan only).
+- Tasks added: L-8b, with its acceptance measurement.
+- For the next agent: confirm which code holds the text with an allocation profile before changing the rebuild; the snapshot alone cannot name it.
