@@ -79,7 +79,10 @@ const MAX_STACK_BYTES = 4_000;
 const MAX_FIELD_CHARS = 160;
 const PERSISTED_LEVELS: ReadonlySet<LogLevel> = new Set(["info", "warning", "error"]);
 
-function redact(value: string): string {
+/** The one redaction rule set. Every writer applies it at its write boundary,
+ * and readers that copy raw text (the diagnostic bundle) apply the same rules so
+ * a token cannot reach a shared artifact through a path the writers never saw. */
+export function redact(value: string): string {
   return value
     .replace(/\bBearer\s+[^\s,;]+/giu, "Bearer [REDACTED]")
     .replace(/((?:authorization|api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|password|secret)\s*[:=]\s*)[^\s,;]+/giu, "$1[REDACTED]")

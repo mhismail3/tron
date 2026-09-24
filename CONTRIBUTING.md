@@ -173,6 +173,12 @@ The Release app packages only `Tron Agent.app` under the stable
 `com.tron.server` label. Developer tooling reuses that installed signed launcher
 with the isolated Debug payload and never registers a second Login Item.
 
+## Diagnosing a failure
+
+Run `scripts/tron diagnose` (after a Gateway build) to write one read-only,
+redacted bundle of an incident's logs and state. What it collects and its
+guarantees are in the Gateway README's Diagnostic bundle section.
+
 ## Documentation ownership
 
 - Product shape, setup, and primary workflow: root `README.md`

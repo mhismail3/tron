@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, L-15b
+- **Last updated:** 2026-09-24, L-5
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -206,7 +206,7 @@ user reinstalls manually, so batch them for one reinstall.
 | L-1b | Claimed | Launcher records | none | observability session (L-1b lane), 2026-09-24 |
 | L-1d | Ready | Out-of-band stderr capture | L-2 | |
 | L-4 | Ready | Mac app file logging | L-2 | |
-| L-5 | Claimed | `scripts/tron diagnose` collector | L-1c, L-2 | observability session (L-5 lane), 2026-09-24 |
+| L-5 | Done | `scripts/tron diagnose` collector | L-1c, L-2 | observability session (L-5 lane), 2026-09-24 |
 | L-6 | Ready | Event catalog and the incident rule | L-2 | |
 | L-7 | Done | Stall cause in event-loop-delay records | L-2 | observability session, 2026-09-24 |
 | L-8 | Needs scoping | Gateway idle heap growth | none | |
@@ -218,6 +218,7 @@ user reinstalls manually, so batch them for one reinstall.
 | L-16 | Done | Restart drain hangs on terminal-receipt persistence | none | observability session, 2026-09-24 |
 | L-17 | Needs approval | Judge a drain stalled by its oldest blocker without progress, not by any change in the blocker set | L-16 | |
 | L-18 | Needs approval | Decide whether a restart drain proceeds when only unresolved (blocked) persistence owners remain | L-16 | |
+| L-19 | Needs scoping | `scripts/tron mac verify` fails on the live install after a source rebuild: "PID selected payload path mismatch" and "authenticated system.info identity/channel mismatch" on the Tailscale host. Find whether the install or the check is wrong | none | |
 | L-11 | Done | Remove duplicate payload validations within one deploy run | none | observability session (L-11 lane), 2026-09-24 |
 | L-12 | Ready | Faster Node payload fingerprint with identical output | none | |
 | L-13 | Ready | Stage source payloads in the store and rename instead of copying twice | L-11 | |
@@ -630,3 +631,23 @@ user reinstalls manually, so batch them for one reinstall.
 - Kept on purpose: startup order. Automations still recover before `gateway.listening`, and nothing is deferred.
 - Deviations: supervisor review changed the lane's first version. That version added three automation-only fields to the shared log record format, used a `now` option that only tests set, and emitted the parts as `gateway.startup-step` records that double count. The evidence now stays in the message text, following L-7's precedent, and the test controls `performance.now` directly.
 - For the next agent: after the user's next restart, L-15c reads the new records for that `runtimeEpoch` and fixes whichever part dominates. A CPU profile is allowed only during a user-initiated restart or in an isolated home.
+
+### L-5 · Done · 2026-09-24 · observability session (L-5 lane)
+
+- Result: `scripts/tron diagnose [--since 2h] [--out <path>]` writes one redacted bundle with eight sections, from a compiled Gateway tool (new `diagnose.ts` in `packages/gateway/src/admin/`). The sections are:
+  - `logs`: every stream in `~/.tron/logs` within the window, including rotated segments.
+  - `device-exports`: the newest 3.
+  - `payload-selection`: each channel's current, previous, deployment state and progress.
+  - `processes`: Gateway payload processes with their channel and version, plus the app and native host.
+  - `launchd`: `/usr/bin/log show` records for `com.tron.server`.
+  - `tailscale`: each paired device's peer path (direct or relay) and endpoint, plus magicsock lines from the network extension.
+  - `health`: `/health` on the Gateway's own host and port.
+  - `mac-verify`.
+
+  The tool never writes to the Tron home, launchd or the Gateway. The output file is created 0600 and never overwritten. `scripts/tron diagnose` exits 66 until the Gateway is built, like the other compiled subcommands. The logger's `redact` is now exported and is the one rule set applied to every copied line.
+- Evidence (verified): with Node 22.22.0, `npx vitest run src/transport/logger.test.ts src/admin` took 3.1 s for 104/104 before, and 2.5 s for 112/112 after. After review: `diagnose.test.ts` 8/8 and the logger 10/10 (18/18 together), and the full Gateway suite (`nice -n 19`, 2 workers) passed 177 files and 1,925/1,925 in 93 s, with no live `gateway.event-loop-delay`. Eight negative controls each failed their test, one per protected behavior: redaction, the device-export section, the `--since` window, the device token, magicsock filtering, the explicit `/usr/bin/log`, refusal to overwrite, and the missing-directory message. After review, a ninth: matching every process under the Tron home fails the privacy test. A run against the real home exited 0 in 15 s with 8 sections, mode 0600, no agent-process lines, no device names and no unredacted bearer tokens; the output was deleted unread.
+- Changes: this commit (`admin/diagnose.ts` and its test, the `redact` export in `transport/logger.ts`, `scripts/tron`, the Gateway README Diagnostic bundle section, and a pointer in `CONTRIBUTING.md`).
+- Tasks added: L-19. On the real home, `mac-verify` exits 1 with two failures.
+- Kept on purpose: `runCommand`, `readHealth`, `now` and `tronHome` are options of `collectDiagnosticBundle`. Tests set them to stay hermetic, and `tronHome` also follows the Gateway's home resolution. The command reads device exports only from `~/.tron/logs/device-exports/`, which L-3 creates; there is no fallback to `/tmp`.
+- Deviations: the redaction rules are shared by building the collector into the Gateway package, not as a separate `scripts/` file, so it imports the writer's rules and home resolver at source level. Supervisor review then made three changes. The process filter was narrowed from anything under the Tron home to Gateway payload processes, the app and the native host, because agent process arguments can carry prompt text. Paired-device names were dropped (the ID hash and peer name are enough). `CONTRIBUTING.md` now points to the README section instead of repeating it.
+- For the next agent: L-6's catalog should list the collector's sections. When L-4 adds `mac.jsonl`, the `logs` section includes it without change.

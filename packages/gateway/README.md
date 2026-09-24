@@ -598,6 +598,24 @@ are fixed per event in code; there is no runtime level setting.
   `gateway.stopped` is a process's last record, with its shutdown duration; the
   time from it to the next process start is launchd and the launcher.
 
+### Diagnostic bundle
+
+`scripts/tron diagnose [--since <count><s|m|h|d>] [--out <path>]` writes one
+read-only bundle for an incident: the `~/.tron/logs` streams in the window
+(rotated segments included), the newest device exports, every channel's payload
+selection and progress documents, launchd's `com.tron.server` records from
+`/usr/bin/log show`, `/health` on the running Gateway's own host and port, Tron
+processes with their payload versions, `scripts/tron mac verify`, and Tailscale's
+current path to each paired peer plus the network extension's magicsock lines.
+Every external command is bounded by a timeout. The command writes only its
+output file (`0600`, never overwritten); it never writes to the Tron home,
+launchd or the Gateway. The default window is 2h and the default output is a new
+file in the system temporary directory. Copied text is redacted with the writers'
+rule set (`redact` in `src/transport/logger.ts`), so a token or a user path
+cannot reach a shared bundle. It is a compiled tool: `scripts/tron diagnose`
+needs a Gateway build (`cd packages/gateway && npm run build`) and refuses with
+exit 66 until the compiled collector exists.
+
 A supervised payload validates its architecture-specific immutable `node` and
 technical `pi` command aliases before model services or extension packages load.
 The aliases must have exact relative target text, remain inside

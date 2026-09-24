@@ -33,6 +33,10 @@ Commands:
   chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]
                                     Attach terminal chat to the Gateway-owned runtime
   ci [check|test|all]               Validate the gateway and repository policy
+  diagnose [--since <1..9999><s|m|h|d>] [--out <path>]
+                                    Write one read-only redacted diagnostic bundle
+                                    to <path>, or to a new file in the system temp
+                                    directory; default window is 2h
   bundle gateway                    Stage the Mac gateway payload and Node runtimes
   ios generate                      Regenerate iOS with pinned XcodeGen
   mac generate                      Regenerate macOS with pinned XcodeGen
@@ -122,6 +126,14 @@ case "$cmd" in
         ;;
       *) echo "unknown ci scope: $scope" >&2; exit 64 ;;
     esac
+    ;;
+  diagnose)
+    if [[ ! -f "$GATEWAY/dist/admin/diagnose.js" ]]; then
+      echo "missing prepared diagnostic artifact: $GATEWAY/dist/admin/diagnose.js" >&2
+      echo "prepare it explicitly with: (cd packages/gateway && npm run build)" >&2
+      exit 66
+    fi
+    exec node "$GATEWAY/dist/admin/diagnose.js" "$@"
     ;;
   bundle)
     [[ "${1:-}" == gateway ]] || { usage >&2; exit 64; }
