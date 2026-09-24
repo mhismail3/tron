@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, L-6
+- **Last updated:** 2026-09-24, L-8b
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -211,7 +211,8 @@ user reinstalls manually, so batch them for one reinstall.
 | L-6 | Done | Event catalog and the incident rule | L-2 | observability session (L-6 lane), 2026-09-24 |
 | L-7 | Done | Stall cause in event-loop-delay records | L-2 | observability session, 2026-09-24 |
 | L-8 | Done | Gateway idle heap growth | none | observability session (L-8 lane), 2026-09-24 |
-| L-8b | Claimed | Lower the session-search rebuild's peak transient heap: build the index in bounded units so peak post-GC heap stays under 150 MB on the cloned 5,381-session corpus with identical index coverage and results, and warm-up no more than 10% slower than the measured 155–159 s | L-8 | observability session (L-8b lane), 2026-09-24 |
+| L-8b | Blocked | Lower the session-search rebuild's peak transient heap: build the index in bounded units so peak post-GC heap stays under 150 MB on the cloned 5,381-session corpus with identical index coverage and results, and warm-up no more than 10% slower than the measured 155–159 s | L-8 | observability session (L-8b lane), 2026-09-24 |
+| L-8c | Needs scoping | Sessions owner: bound the session-search read path's peak heap (743.9 MiB post-GC) by bounded or streaming parsing of a session cut in `RuntimeRegistry.readSearchCut`, keeping full graph and branch validation; first record why 62 of 207 catalog sessions were not indexed | L-8b | |
 | L-9 | Done | Phone handling of a stalled or unreachable but live Gateway (proposal for the user) | L-7, L-10 | observability session (L-9 lane), 2026-09-24 |
 | L-9a | Needs approval | Phone labels a connection failure as "No path to this Mac" when attempts never opened a transport, and keeps "Reconnecting" otherwise; no timing change (option A in L-9 findings) | L-9 | |
 | L-9b | Needs approval | Choose stall tolerance (third missed pong, option B) or a shorter never-opened handshake (option D), after a few days of L-9a records | L-9a | |
@@ -840,3 +841,12 @@ The 2026-09-23 17:33 UTC incident's records have rotated away, so its timeline i
 - Kept on purpose: `runtime.diagnostic` (global provider resources) keeps one event name at two levels: error for a reload or extension load failure, warning for one provider's refresh failure. Each level fits its condition, and the catalog states both.
 - Deviations: supervisor review added the two named constants and the comment fix, which the lane had only reported.
 - For the next agent: record iOS and Mac daily volumes in the catalog once those builds are installed. The plan changes a cap only if it holds less than 14 days on the Mac or 7 days on iOS.
+
+### L-8b · Blocked · 2026-09-24 · observability session (L-8b lane)
+
+- Result: not achieved, and nothing changed. The peak does not come from session search holding documents across sessions. It lies in the core session read and parse path, which is outside this task's owner. Widening the task into `RuntimeRegistry.readSearchCut` was refused because that reader owns canonical branch selection and validation, so the work moves to L-8c.
+- Evidence (verified): a direct harness built from the compiled Gateway modules drove `SessionSearchService` warm-up on an APFS clone of the session tree (5,458 files). It found 207 catalog sessions, indexed 145 with 4,563 passages, took 133.5 s, and peaked at 743.9 MiB of heap after collection and 1,321.5 MiB RSS. An experiment released each indexed document before the next read; a `WeakRef` control showed the previous document had been alive at the next read beforehand. It produced identical counts and ranked results, but the peak did not move (743.5 MiB) and warm-up was 13% slower. It failed both criteria and was reverted with its test. A full isolated Gateway on this larger clone wrote no startup or warm-up record within 10 minutes, so the direct harness was used instead.
+- Evidence (inspected): `readSearchCut` rejects cold session files above 64 MiB. The live tree has 128 files between 16 and 64 MiB, and the largest admitted file is 63.7 MiB. The heap peak was not correlated with a particular read, and the allocation profile did not name retained transcript text.
+- Changes: this commit (plan only).
+- Tasks added: L-8c.
+- For the next agent: L-8c must first capture why each catalog session was left out, and correlate collection samples with read sizes, before changing the reader. The silent isolated startup on the grown clone may be worth a look, but it was not reproduced or diagnosed.
