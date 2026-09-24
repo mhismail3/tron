@@ -51,7 +51,7 @@ struct GatewayLogExportTests {
         let lines = text.split(separator: "\n")
         #expect(lines.count == 3)
         #expect(text.contains("diagnostics.exported"))
-        #expect(text.contains("\"process\":\"gateway\""))
+        #expect(text.contains("\"process\":\"ios\""))
         #expect(text.contains("app.started"))
         let head = try JSONDecoder().decode(AppLogRecord.self, from: Data(lines[0].utf8))
         #expect(head.message.contains("failed-retained"))
@@ -60,6 +60,27 @@ struct GatewayLogExportTests {
         #expect(!text.contains("/Users/private"))
         #expect(!text.contains("secret"))
         for line in lines { _ = try JSONDecoder().decode(AppLogRecord.self, from: Data(line.utf8)) }
+    }
+
+    // Each phone record appears once and is attributed to the process that wrote it.
+    @Test("export writes AppLog records once and labels retained phone rows as ios")
+    func exportAttributesEachRecordOnce() throws {
+        let gatewayRow = GatewayProfileLogRecord(profileID: "profile-1", profileLabel: "Mac",
+            record: GatewayLogRecord(timestamp: "2026-01-01T00:00:02.000Z", level: "info", message: "gateway-row", event: "gateway.started", source: "lifecycle"))
+        let retainedPhoneRow = record(message: "retained-phone-row")
+        let projected = GatewayProfileLogRecord(profileID: GatewayLogExport.appLogProfileID, profileLabel: "This iPhone",
+            record: GatewayLogRecord(timestamp: "2026-01-01T00:00:01.000Z", level: "info", message: "applog-row", event: "app.started", source: "app"))
+        let local = AppLogRecord(
+            timestamp: "2026-01-01T00:00:01.000Z", level: "info", event: "app.started",
+            source: "app", message: "applog-row", process: "ios", requestID: nil,
+            durationMs: nil, outcome: nil, code: nil, profileID: nil, connectionID: nil,
+            lifecycleGeneration: nil
+        )
+        let text = GatewayLogExport.jsonLines(records: [gatewayRow, retainedPhoneRow, projected], metadata: .empty, appRecords: [local])
+        let decoded = try text.split(separator: "\n").map { try JSONDecoder().decode(AppLogRecord.self, from: Data($0.utf8)) }
+        #expect(decoded.filter { $0.message == "applog-row" }.map(\.process) == ["ios"])
+        #expect(decoded.first { $0.message == "gateway-row" }?.process == "gateway")
+        #expect(decoded.first { $0.message.contains("retained-phone-row") }?.process == "ios")
     }
 
     @Test("export bounds describe exactly the copied subset and redact every rendered row")
@@ -119,7 +140,7 @@ struct GatewayLogExportTests {
         guard case .share(let logsURL) = result else { Issue.record("disconnected export uploaded"); return }
         let logs = try String(contentsOf: logsURL, encoding: .utf8)
         #expect(logs.contains("diagnostics.exported"))
-        #expect(logs.contains("\"process\":\"gateway\""))
+        #expect(logs.contains("\"process\":\"ios\""))
         #expect(!logs.contains("/Users/private"))
         #expect(!logs.contains("secret"))
         #expect(await socket.sentFrames().isEmpty)

@@ -5,17 +5,23 @@ import Foundation
 enum GatewayLogExport {
     static let maximumUploadBytes = 512 * 1024
 
+    /// The Logs rows projected from `AppLog`. The export carries `AppLog`
+    /// records directly, so it skips these rows instead of writing them twice.
+    static let appLogProfileID = "ios-client"
+
     static func jsonLines(
         records: [GatewayProfileLogRecord], metadata: GatewayLogCaptureMetadata,
         appRecords: [AppLogRecord]
     ) -> String {
-        let gatewayRecords = records.prefix(1_000).map { item in
+        let gatewayRecords = records.filter { $0.profileID != appLogProfileID }.prefix(1_000).map { item in
             let value = item.record
+            // Retained phone diagnostics are keyed `<profile>:ios-client`.
+            let process = item.profileID.hasSuffix(":\(appLogProfileID)") ? "ios" : "gateway"
             return AppLogRecord(
                 timestamp: IOSClientDiagnosticBuffer.redactedMessage(value.timestamp),
                 level: value.level, event: IOSClientDiagnosticBuffer.redactedMessage(value.event ?? "gateway.log"),
                 source: IOSClientDiagnosticBuffer.redactedMessage(value.source ?? "gateway"),
-                message: IOSClientDiagnosticBuffer.redactedMessage(value.message), process: "gateway",
+                message: IOSClientDiagnosticBuffer.redactedMessage(value.message), process: process,
                 requestID: value.requestID, durationMs: value.durationMs, outcome: value.outcome,
                 code: value.code, profileID: nil, connectionID: nil, lifecycleGeneration: nil
             )

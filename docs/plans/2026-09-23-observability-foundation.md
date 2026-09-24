@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, L-19a
+- **Last updated:** 2026-09-24, L-3b
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -203,7 +203,7 @@ user reinstalls manually, so batch them for one reinstall.
 | L-1c | Done | Deploy timeline and real failure cause | L-1a | observability session, 2026-09-24 |
 | L-2 | Done | Gateway levels, debug buffer, retention, record format | none | observability-L-2 session, 2026-09-24 |
 | L-3 | Done | iOS always-on recording replaces Diagnostic Capture; one-tap export | L-2 | observability session (L-3 lane), 2026-09-24 |
-| L-3b | Claimed | The phone has two persisted diagnostic stores, `AppLog` and `IOSClientDiagnosticStore` (catalog and connection records). Decide whether one owner should hold both | L-3 | observability session (L-3b lane), 2026-09-24 |
+| L-3b | Done | The phone has two persisted diagnostic stores, `AppLog` and `IOSClientDiagnosticStore` (catalog and connection records). Decide whether one owner should hold both | L-3 | observability session (L-3b lane), 2026-09-24 |
 | L-1b | Done | Launcher records | none | observability session (L-1b lane), 2026-09-24 |
 | L-1d | Done | Out-of-band stderr capture | L-2 | observability session (L-1d lane), 2026-09-24 |
 | L-4 | Done | Mac app file logging | L-2 | observability session (L-4 lane), 2026-09-24 |
@@ -817,3 +817,16 @@ The 2026-09-23 17:33 UTC incident's records have rotated away, so its timeline i
 - Tasks added: none.
 - Kept on purpose: `packages/mac-app/scripts/package-dmg.sh` still requires a verifying signature on the payload inside the signed app, where it is real.
 - For the next agent: `scripts/tron diagnose`'s `mac-verify` section is clean again on this install.
+
+### L-3b · Done · 2026-09-24 · observability session (L-3b lane)
+
+- Result: scoping found that the two stores should keep separate owners, and that L-3 had duplicated records between them. This commit corrects the L-3 entry:
+  - Export: every `AppLog` record was written twice, once directly and once through its Logs-screen projection. The projection copy was labelled `process: "gateway"`, as were retained phone rows. The export now skips the projection rows (one named constant, `GatewayLogExport.appLogProfileID`) and labels `<profile>:ios-client` rows as `ios`.
+  - Lifecycle: L-3 added `AppLog` records for reconnect, scene and path events that `IOSClientDiagnosticStore` already persists, so the Logs screen showed each one twice. That addition is removed, and the store stays their single owner. `AppLog` keeps what only it records: app start, foreground and background, connection state, pairing, session-open and sync failures, `opening.failed`, upload failures and slow operations.
+- Why two owners: `IOSClientDiagnosticStore` holds bounded incident history (96 records, 96 KB, 7 days, the first cause of each of the 8 newest incidents kept), sanitized by an allowlist, and MetricKit, the catalog and L-10's connection records write to it. `AppLog` is the always-on timeline. Merging them would change retention and privacy rules for no diagnostic gain.
+- Evidence (verified): the new test `export writes AppLog records once and labels retained phone rows as ios`. Removing the projection filter fails it. Focused `GatewayLogExportTests`, `AppLogTests` and `GatewayDiagnosticsServiceTests` passed 42/42. Full iOS run: 1,880 tests in 139 suites passed in 231 s.
+- Evidence (inspected): writers, readers and tests of both stores, mapped by the scoping lane (DeepSeek) with file references and checked by the supervisor.
+- Changes: this commit (`AppModel.swift`, `GatewayLogExport.swift`, `GatewayLogExportTests.swift`).
+- Tasks added: none.
+- Kept on purpose: `AppLog` bounds `code` and `profileID` without redacting them, because both are identifiers from a fixed vocabulary, not free text. `mergePersisted` relabels retained rows as "iOS client · Retained", as before L-3.
+- For the next agent: takes effect after the user rebuilds the iPhone app.

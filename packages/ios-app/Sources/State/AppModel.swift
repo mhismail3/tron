@@ -2395,10 +2395,10 @@ final class AppModel {
         let limit = min(1_000, max(0, limit))
         let profileSnapshot = profiles.profiles
         var sourceStatuses = Dictionary(uniqueKeysWithValues: profileSnapshot.map { ($0.id, "pending") })
-        sourceStatuses["ios-client"] = "current-and-retained-local"
+        sourceStatuses[GatewayLogExport.appLogProfileID] = "current-and-retained-local"
         var loaded = Array(iosClientDiagnostics.records.prefix(limit))
         loaded.append(contentsOf: await appLog.snapshot().map { value in
-            GatewayProfileLogRecord(profileID: "ios-client", profileLabel: "This iPhone", record: GatewayLogRecord(
+            GatewayProfileLogRecord(profileID: GatewayLogExport.appLogProfileID, profileLabel: "This iPhone", record: GatewayLogRecord(
                 timestamp: value.timestamp, level: value.level, message: value.message,
                 event: value.event, source: value.source, requestID: value.requestID,
                 code: value.code, outcome: value.outcome, durationMs: value.durationMs
@@ -4678,17 +4678,6 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         }
         let recordedEvents = ["scene.foreground", "scene.background", "reconnect.scheduled", "reconnect.attempt", "reconnect.failure", "reconnect.delay", "reconnect.connected", "reconnect.exhausted", "reconnect.stopped", "path.changed", "detail.tap", "detail.preparation"]
         guard recordedEvents.contains(event) else { return }
-        if event != "detail.tap", event != "detail.preparation" {
-            Task {
-                await appLog.recordCausal(
-                    name: event, outcome: event.hasSuffix("failure") || event == "reconnect.exhausted" ? "failure" : "success",
-                    profileID: profiles.selected?.id, connectionID: lifecycle.connectionID,
-                    lifecycleGeneration: lifecycle.currentLifecycleGeneration,
-                    level: event.hasSuffix("failure") || event == "reconnect.exhausted" ? "warning" : "info",
-                    details: message
-                )
-            }
-        }
         iosClientDiagnostics.recordLifecycle(
             event: "gateway.lifecycle",
             message: "kind=\(event) clientID=\(client.diagnosticOwnerID) \(message)",
