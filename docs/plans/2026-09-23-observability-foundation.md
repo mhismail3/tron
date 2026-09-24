@@ -204,13 +204,13 @@ user reinstalls manually, so batch them for one reinstall.
 | L-2 | Done | Gateway levels, debug buffer, retention, record format | none | observability-L-2 session, 2026-09-24 |
 | L-3 | Claimed | iOS always-on recording replaces Diagnostic Capture; one-tap export | L-2 | observability session (L-3 lane), 2026-09-24 |
 | L-1b | Done | Launcher records | none | observability session (L-1b lane), 2026-09-24 |
-| L-1d | Ready | Out-of-band stderr capture | L-2 | |
+| L-1d | Claimed | Out-of-band stderr capture | L-2 | observability session (L-1d lane), 2026-09-24 |
 | L-4 | Ready | Mac app file logging | L-2 | |
 | L-5 | Done | `scripts/tron diagnose` collector | L-1c, L-2 | observability session (L-5 lane), 2026-09-24 |
 | L-6 | Ready | Event catalog and the incident rule | L-2 | |
 | L-7 | Done | Stall cause in event-loop-delay records | L-2 | observability session, 2026-09-24 |
 | L-8 | Needs scoping | Gateway idle heap growth | none | |
-| L-9 | Needs scoping | Phone handling of a stalled or unreachable but live Gateway (proposal for the user) | L-7, L-10 | |
+| L-9 | Claimed | Phone handling of a stalled or unreachable but live Gateway (proposal for the user) | L-7, L-10 | observability session (L-9 lane), 2026-09-24 |
 | L-10 | Done | iOS connect-failure records say whether the socket ever opened, and on which interface | none | observability session, 2026-09-24 |
 | L-15 | Done | Startup timing: stop to bound and bound to first startup phase | L-2 | observability session, 2026-09-24 |
 | L-15b | Done | Fix the dominant startup cost the L-15 records name on the next real restart (the user's rebuild) | L-15 | observability session (L-15b lane), 2026-09-24 |
@@ -220,7 +220,7 @@ user reinstalls manually, so batch them for one reinstall.
 | L-18 | Needs approval | Decide whether a restart drain proceeds when only unresolved (blocked) persistence owners remain | L-16 | |
 | L-19 | Needs scoping | `scripts/tron mac verify` fails on the live install after a source rebuild: "PID selected payload path mismatch" and "authenticated system.info identity/channel mismatch" on the Tailscale host. Find whether the install or the check is wrong | none | |
 | L-11 | Done | Remove duplicate payload validations within one deploy run | none | observability session (L-11 lane), 2026-09-24 |
-| L-12 | Ready | Faster Node payload fingerprint with identical output | none | |
+| L-12 | Claimed | Faster Node payload fingerprint with identical output | none | observability session (L-12 lane), 2026-09-24 |
 | L-13 | Ready | Stage source payloads in the store and rename instead of copying twice | L-11 | |
 | L-14 | Needs scoping | APFS clone copies and payload retention count | L-13 | |
 
