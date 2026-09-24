@@ -207,6 +207,14 @@ struct SessionHistoryStoreTests {
             label: nil, preview: "Alternative", role: nil, depth: 0, childCount: 0, isCurrentPath: false)
         #expect(SessionHistoryPolicy.navigationTitle(for: branch) == "Continue on Branch")
         #expect(SessionHistoryRowPresentation(node: branch).kindLabel == "Branch")
+        let contextEdit = SessionTreeNode(id: "edit", parentId: "prompt", timestamp: "2026-01-01T00:00:01Z",
+            kind: "contextEdit", label: nil, preview: "Model context edit: prompt", role: nil, depth: 0,
+            childCount: 0, isCurrentPath: true)
+        let systemMessage = SessionTreeNode(id: "system", parentId: "edit", timestamp: "2026-01-01T00:00:02Z",
+            kind: "systemMessage", label: nil, preview: "System context message", role: nil, depth: 0,
+            childCount: 0, isCurrentPath: true)
+        #expect(SessionHistoryRowPresentation(node: contextEdit).kindLabel == "Context edit")
+        #expect(SessionHistoryRowPresentation(node: systemMessage).kindLabel == "System context")
     }
 }
 

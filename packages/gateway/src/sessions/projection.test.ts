@@ -83,6 +83,21 @@ describe("aggregate transcript structure", () => {
       .map(entry => entry.id));
   });
 
+  it("keeps canonical context edits out of fabricated transcript rows while Pi applies them", () => {
+    const manager = SessionManager.inMemory("/tmp/context-edit-projection-fixture");
+    const prompt = manager.appendMessage({ role: "user", content: "Original prompt", timestamp: 1 });
+    const edit = manager.appendContextEdit(prompt, { content: "Redacted prompt" });
+    expect(manager.buildSessionProjection().messages[0]).toMatchObject({ role: "user", content: "Redacted prompt" });
+    const canonical = JSON.stringify(manager.getBranch());
+    const items = projectTranscript(manager, new BlobStore());
+    expect(items.map(item => item.id)).toEqual([prompt]);
+    expect(items[0]).toMatchObject({ kind: "message", content: [{ type: "text", text: "Original prompt" }] });
+    expect(JSON.stringify(manager.getBranch())).toBe(canonical);
+    expect(canonical).toContain(edit);
+    const tree = projectTree(manager, new BlobStore());
+    expect(tree.find(node => node.id === edit)).toMatchObject({ kind: "contextEdit", preview: `Model context edit: ${prompt}` });
+  });
+
   it("compacts dense browser details below native limits without losing rows, text, or canonical data", () => {
     const manager = SessionManager.inMemory("/tmp/dense-browser-fixture");
     for (let index = 0; index < 40; index++) {
@@ -682,6 +697,34 @@ describe("transcript projection", () => {
         resourceInvocation: { source: "skill", name: "review", arguments: "Inspect this" },
       },
     });
+  });
+
+  it("projects receipt-owned submitted image text without rewriting SDK history", () => {
+    const manager = SessionManager.inMemory("/tmp/project");
+    manager.appendCustomEntry(INVOCATION_RECEIPT_TYPE, makeInvocationReceipt({
+      version: 1, receiptId: "start:image", receiptKind: "start", invocationId: "image",
+      operationId: "image-op", sessionId: manager.getSessionId(), source: "plain",
+      submittedText: "Saw this", lifecycle: "staged", sequence: 1,
+      createdAt: "2026-01-01T00:00:00.000Z", origin: { kind: "user", confidence: "boundary" },
+    }));
+    const user = manager.appendMessage({
+      role: "user",
+      content: [
+        { type: "text", text: "Saw this\\n\\n[Image: generated resize note]" },
+        { type: "image", data: "AA==", mimeType: "image/png" },
+      ],
+      timestamp: 2,
+    });
+    manager.appendCustomEntry(INVOCATION_RECEIPT_TYPE, makeInvocationReceipt({
+      version: 1, receiptId: "binding:image", receiptKind: "binding", invocationId: "image",
+      operationId: "image-op", sessionId: manager.getSessionId(), source: "plain",
+      canonicalEntryId: user, sequence: 2, createdAt: "2026-01-01T00:00:00.100Z",
+    }));
+    expect(projectTranscript(manager, new BlobStore())).toMatchObject([{
+      id: user,
+      semantic: { submittedText: "Saw this", invocationId: "image", operationId: "image-op" },
+      content: [{ type: "text", text: "Saw this\\n\\n[Image: generated resize note]" }, { type: "image" }],
+    }]);
   });
 
   it("projects exact Automation provenance onto bound canonical prompts in snapshots and pages", () => {

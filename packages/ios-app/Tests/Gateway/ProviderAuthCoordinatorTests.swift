@@ -7,6 +7,26 @@ import Testing
 @MainActor
 @Suite("Provider authentication coordinator")
 struct ProviderAuthCoordinatorTests {
+    @Test("manual OAuth browser fallback is tied to the matching text prompt")
+    func manualOAuthBrowserFallbackOwnership() {
+        let event = ProviderAuthEventState(
+            operationId: "auth-current", kind: .authURL, message: nil, links: [],
+            url: URL(string: "https://example.com/login"), instructions: nil, userCode: nil,
+            verificationURL: nil, intervalSeconds: nil, expiresInSeconds: nil, callbackCapture: nil
+        )
+        func prompt(_ operationId: String, _ kind: ProviderAuthPromptState.Kind) -> ProviderAuthPromptState {
+            ProviderAuthPromptState(
+                id: "prompt-\(operationId)", operationId: operationId, kind: kind,
+                message: "Continue", placeholder: nil, options: []
+            )
+        }
+        #expect(ProviderAuthBrowserPolicy.supportsManualCallback(event: event, prompt: prompt("auth-current", .text)))
+        #expect(ProviderAuthBrowserPolicy.supportsManualCallback(event: event, prompt: prompt("auth-current", .manualCode)))
+        #expect(!ProviderAuthBrowserPolicy.supportsManualCallback(event: event, prompt: prompt("auth-stale", .text)))
+        #expect(!ProviderAuthBrowserPolicy.supportsManualCallback(event: event, prompt: prompt("auth-current", .secret)))
+        #expect(!ProviderAuthBrowserPolicy.supportsManualCallback(event: event, prompt: nil))
+    }
+
     @Test("target catalogs are isolated, publish atomically, and newest same-target reads win")
     func targetAdmissionAndAtomicPublication() async throws {
         try await runScenario {

@@ -40,6 +40,17 @@ describe("invocation receipts", () => {
     expect(parseInvocationReceipt({ ...start, arguments: "🙂".repeat(20_000) })).toBeUndefined();
   });
 
+  it("retains image-prompt authored text as exact invocation provenance", () => {
+    const imagePrompt = makeInvocationReceipt({
+      version: 1, receiptId: "start:image", receiptKind: "start", invocationId: "image",
+      operationId: "image-op", sessionId: "session-1", source: "plain",
+      submittedText: "Saw this\n[Image: authored text]", lifecycle: "staged", sequence: 4,
+      origin: { kind: "user", confidence: "boundary" }, createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    expect(invocationProjection([imagePrompt])[0]?.submittedText).toBe("Saw this\n[Image: authored text]");
+    expect(parseInvocationReceipt({ ...imagePrompt, submittedText: "x".repeat(192 * 1_024 + 1) })).toBeUndefined();
+  });
+
   it("preserves bounded multiline resource arguments without truncation", () => {
     const argumentsText = "first line\nsecond\tline\r\nthird line";
     expect(makeInvocationReceipt({ ...start, arguments: argumentsText }).arguments).toBe(argumentsText);

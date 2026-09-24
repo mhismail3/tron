@@ -2292,7 +2292,8 @@ enum ChatTranscriptPresentation {
     /// remain attached to the same visible content across rederivation.
     static func messageParts(in item: TranscriptItem) -> [ChatMessagePart] {
         if item.role == .user,
-           let text = UserPromptPresentationPolicy.promptDisplayText(item.semantic?.resourceInvocation) {
+           let text = UserPromptPresentationPolicy.promptDisplayText(item.semantic?.resourceInvocation)
+            ?? item.semantic?.submittedText {
             // Keep canonical bytes and attachment identities untouched. One
             // display part replaces all expanded template text, including
             // prompts whose expansion contains multiple text blocks.

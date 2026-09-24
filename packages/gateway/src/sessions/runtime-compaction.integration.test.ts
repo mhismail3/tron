@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AgentSession, ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxProvider, fauxToolCall, getCurrentSystemPrompt } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { SettingsService } from "../admin/settings-service.js";
@@ -34,21 +34,21 @@ describe.sequential("compaction cancellation with the pinned runtime", () => {
     } }));
     const faux = fauxProvider({ provider: "tron-compaction-stop", models: [{ id: "faux-reasoning", reasoning: true }], tokensPerSecond: 1_000_000, tokenSize: { min: 100_000, max: 100_000 } });
     const summarySignals: AbortSignal[] = [];
-    const providerRequests: Array<{ context: { systemPrompt?: string }; options: { reasoning?: string } | undefined }> = [];
+    const providerRequests: Array<{ context: string; options: { reasoning?: string } | undefined }> = [];
     const ordinaryRequests: typeof providerRequests = [];
     const releaseSummaries = new Set<() => void>();
     let cleaningUp = false;
     faux.setResponses([
       async (context, options) => {
-        ordinaryRequests.push({ context, options });
+        ordinaryRequests.push({ context: getCurrentSystemPrompt(context.messages), options });
         return fauxAssistantMessage("Earlier ".repeat(1_000));
       },
       async (context, options) => {
-        ordinaryRequests.push({ context, options });
+        ordinaryRequests.push({ context: getCurrentSystemPrompt(context.messages), options });
         return fauxAssistantMessage(fauxToolCall("read", { path: "large.txt" }));
       },
-      ...Array.from({ length: 8 }, () => async (context: { systemPrompt?: string }, options: { signal?: AbortSignal; reasoning?: string } | undefined) => {
-        providerRequests.push({ context, options });
+      ...Array.from({ length: 8 }, () => async (context, options: { signal?: AbortSignal; reasoning?: string } | undefined) => {
+        providerRequests.push({ context: getCurrentSystemPrompt(context.messages), options });
         const signal = options?.signal;
         if (!signal) throw new Error("summary must carry cancellation");
         summarySignals.push(signal);
@@ -87,9 +87,9 @@ describe.sequential("compaction cancellation with the pinned runtime", () => {
       expect(providerRequests.length).toBeGreaterThan(0);
       expect(ordinaryRequests).toHaveLength(2);
       expect(ordinaryRequests.every(request => request.options?.reasoning !== "low")).toBe(true);
-      expect(ordinaryRequests.every(request => !request.context.systemPrompt?.includes("retain API decisions"))).toBe(true);
+      expect(ordinaryRequests.every(request => !request.context.includes("retain API decisions"))).toBe(true);
       expect(providerRequests.every(request => request.options?.reasoning === "low")).toBe(true);
-      expect(providerRequests.every(request => request.context.systemPrompt?.includes("retain API decisions"))).toBe(true);
+      expect(providerRequests.every(request => request.context.includes("retain API decisions"))).toBe(true);
       expect(slot.snapshot().phase).toBe("compacting");
       const callsAtStop = faux.state.callCount;
       stopping = slot.abort("compaction", slot.snapshot().operation!.id);
@@ -269,11 +269,16 @@ describe.sequential("compaction operation admission and authoritative reconcilia
     await item.update({ enabled: true });
     let entered = false;
     let release!: () => void;
+    let authSignal: AbortSignal | undefined;
     const original = item.session.modelRuntime.getAuth.bind(item.session.modelRuntime);
     const auth = vi.spyOn(item.session.modelRuntime, "getAuth").mockImplementation(async (...args) => {
       if (!entered && (preflight || item.faux.state.callCount >= 2)) {
         entered = true;
-        await new Promise<void>(resolve => { release = resolve; });
+        authSignal = (args[1] as { signal?: AbortSignal } | undefined)?.signal;
+        await new Promise<void>(resolve => {
+          release = resolve;
+          if (mode !== "preflight-grace") authSignal?.addEventListener("abort", resolve, { once: true });
+        });
       }
       return original(...args);
     });
@@ -285,19 +290,21 @@ describe.sequential("compaction operation admission and authoritative reconcilia
     let stopping: Promise<void> | undefined;
     try {
       await waitUntil(() => entered);
-      expect(item.slot.snapshot().phase).toBe("running");
+      expect(authSignal).toBeDefined();
+      expect(item.slot.snapshot().phase).toBe("compacting");
       const operationId = item.slot.snapshot().operation!.id;
-      stopping = item.slot.abort("agent", operationId);
+      stopping = item.slot.abort("compaction", operationId);
       if (mode === "preflight-grace") {
-        await expect(stopping).rejects.toMatchObject({ code: "conflict", retryable: true, message: "Foreground work did not stop" });
-        expect(item.slot.snapshot()).toMatchObject({ phase: "running", operation: { id: operationId } });
+        await waitUntil(() => authSignal!.aborted);
+        expect(item.slot.snapshot()).toMatchObject({ phase: "compacting", operation: { id: operationId } });
         expect(item.registry.administrativeWorkRegistry.size).toBeGreaterThan(0);
-        const receipts = (await item.entries()).filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data.operationId === operationId);
-        expect(receipts.map(entry => entry.data.receiptKind)).toEqual(["start"]);
-        expect(receipts[0].data.lifecycle).toBe("staged");
+        const receipts = (await item.entries()).filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data.receiptKind === "start");
+        expect(receipts.at(-1)?.data.lifecycle).toBe("staged");
+        // This mock deliberately ignores AbortSignal; keep its owner visible until
+        // the held auth call returns rather than asserting false cancellation.
       }
       release();
-      if (mode !== "preflight-grace") await stopping;
+      await stopping;
       if (preflight) expect(await prompting).toBeInstanceOf(Error);
       else expect(await prompting).toMatchObject({ operationId: expect.any(String) });
       await expectSettled(item);
@@ -428,7 +435,7 @@ describe.sequential("compaction operation admission and authoritative reconcilia
     let successorSignal: AbortSignal | undefined;
     let releaseSuccessor: (() => void) | undefined;
     item.faux.setResponses(Array.from({ length: 5 }, () => async (context, options) => {
-      if (context.systemPrompt?.includes("User-configured summary focus:")) return fauxAssistantMessage("Preserved the API contract.");
+      if (getCurrentSystemPrompt(context.messages).includes("User-configured summary focus:")) return fauxAssistantMessage("Preserved the API contract.");
       successorSignal = options?.signal;
       await new Promise<void>(resolve => { releaseSuccessor = resolve; });
       return fauxAssistantMessage("Successor response");
@@ -474,7 +481,7 @@ describe.sequential("compaction operation admission and authoritative reconcilia
     let cleaningUp = false;
     item.faux.setResponses(Array.from({ length: 5 }, () => async (context) => {
       if (cleaningUp) return fauxAssistantMessage("Cleanup response");
-      if (context.systemPrompt?.includes("User-configured summary focus:")) return fauxAssistantMessage("Preserved API contract.");
+      if (getCurrentSystemPrompt(context.messages).includes("User-configured summary focus:")) return fauxAssistantMessage("Preserved API contract.");
       await new Promise<void>(resolve => { releaseSuccessor = resolve; });
       return fauxAssistantMessage("Extension continuation completed");
     }));
@@ -517,13 +524,13 @@ describe.sequential("compaction operation admission and authoritative reconcilia
     const requests: Array<{ reasoning?: string; prompt?: string }> = [];
     item.faux.setResponses([
       async (context, options) => {
-        requests.push({ reasoning: options?.reasoning, prompt: context.systemPrompt });
+        requests.push({ reasoning: options?.reasoning, prompt: getCurrentSystemPrompt(context.messages) });
         entered = true;
         await new Promise<void>(resolve => { release = resolve; });
         return fauxAssistantMessage("API preserved. Continue implementation.");
       },
       (context, options) => {
-        requests.push({ reasoning: options?.reasoning, prompt: context.systemPrompt });
+        requests.push({ reasoning: options?.reasoning, prompt: getCurrentSystemPrompt(context.messages) });
         return fauxAssistantMessage("Recent task context");
       },
     ]);

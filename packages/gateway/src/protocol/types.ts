@@ -329,6 +329,8 @@ export interface ChatSemanticMetadata {
   sequence: number;
   lifecycle?: InvocationLifecycle;
   resourceInvocation?: ResourceInvocation;
+  /** Authored text retained for image prompts whose SDK history includes generated resize notes. */
+  submittedText?: string;
 }
 
 export interface ContextDeliveryMetadata {
@@ -985,7 +987,7 @@ export interface SessionTreeNode {
   bookmarkTargetId?: string;
   parentId: string | null;
   timestamp: string;
-  kind: TranscriptItem["kind"] | "sessionInfo";
+  kind: TranscriptItem["kind"] | "sessionInfo" | "contextEdit" | "systemMessage";
   label?: string;
   preview: string;
   role?: "user" | "assistant" | "toolResult";

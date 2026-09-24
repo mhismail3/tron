@@ -35,7 +35,6 @@ import { GatewayError, asUncertainOutcome, isUncertainOutcome, uncertainOutcome 
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
 import { compactionPolicyExtension, CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import { contextWindowExtension, SessionContextWindowPolicy } from "../providers/context-window-policy.js";
-import { boundPromptImages } from "../providers/prompt-images.js";
 import type {
   ChatOrigin,
   CommandDetail,
@@ -2387,7 +2386,9 @@ export class RuntimeSlot {
       let updatedAt: string | undefined;
       for (const entry of entries) {
         if (entry.type === "message") {
-          messageCount += 1;
+          // Pi 0.87 persists system-message transcript deltas for provider context;
+          // they are canonical but not visible conversation rows.
+          if (entry.message.role !== "system") messageCount += 1;
           if (!firstMessage && entry.message.role === "user") {
             firstMessage = boundedSummaryText(userFacingPromptPreview(typeof entry.message.content === "string"
               ? entry.message.content
@@ -6051,11 +6052,6 @@ export class RuntimeSlot {
         this.compactionPolicies.get(session)?.applyBudgets();
         this.contextPolicies.get(session)?.apply();
       }
-      // Bound prompt attachments before they enter canonical history. Pi bounds
-      // every other image ingress point, so an unbounded prompt attachment is
-      // re-serialized into every later provider request and can make the
-      // provider reject the whole conversation instead of the offending turn.
-      if (images.length > 0) images = await boundPromptImages(images);
       let queuesIntoActiveRun = session.isStreaming && behavior !== undefined && !isExactExtensionCommand;
       const operationId = ownership?.operationId ?? randomUUID();
       if (ownership && this.automationTerminalObservers.has(operationId)) {
@@ -6075,6 +6071,7 @@ export class RuntimeSlot {
         source: invocationSource,
         ...(invocationName ? { name: invocationName } : {}),
         ...(queueDisplay?.resourceInvocation?.arguments === undefined ? {} : { arguments: queueDisplay.resourceInvocation.arguments }),
+        ...(images.length === 0 ? {} : { submittedText: queueDisplay?.text ?? text }),
         lifecycle: "staged",
         origin: ownership?.origin ?? (invocationSource === "extension" && invocationName
           ? this.extensionCommandOrigin(invocationName)
@@ -6147,6 +6144,7 @@ export class RuntimeSlot {
           ...(queueDisplay?.resourceInvocation?.arguments
             ? { arguments: queueDisplay.resourceInvocation.arguments }
             : {}),
+          ...(images.length === 0 ? {} : { submittedText: queueDisplay?.text ?? text }),
           lifecycle: "staged",
           origin: invocation.origin,
           sequence: this.revision + 1,
@@ -7478,18 +7476,6 @@ export class RuntimeSlot {
     this.revision += 1;
     this.emit("session.resourcesChanged", {});
     this.publishSnapshot();
-  }
-
-  async importFromJsonl(path: string, cwdOverride?: string): Promise<void> {
-    await this.lane.run(async () => {
-      this.assertIdle();
-      const result = await this.withRebindAttentionDisposition("discard", () => this.runtime.importFromJsonl(path, cwdOverride));
-      if (result.cancelled) throw new GatewayError("cancelled", "Session import was cancelled by an extension");
-      this.summaryContentDirty = true;
-      this.revision += 1;
-      this.publishSnapshot();
-      this.hooks.changed(this.id);
-    });
   }
 
   async export(format: "html" | "jsonl"): Promise<{ blobId: string; name: string; mimeType: string; size: number }> {

@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
-import { fauxAssistantMessage, fauxProvider, fauxToolCall, type ImageContent } from "@earendil-works/pi-ai";
+import { contentText, fauxAssistantMessage, fauxProvider, fauxToolCall, type ImageContent, type TranscriptContext } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import { SessionListPaginationStore } from "../transport/session-list-pagination.js";
@@ -5914,7 +5914,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(duplicateFact?.ambiguous).toBe(true);
   });
 
-  it("bounds oversized prompt attachments before they enter canonical session history", async () => {
+  it("applies the per-model prompt image profile once before canonical history", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-prompt-image-bound-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
@@ -5934,13 +5934,15 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await registry.initialize();
     const slot = await registry.create(cwd);
     const model = faux.getModel();
+    model.inputLimits = { images: { resize: { maxWidth: 1_000, maxHeight: 1_000 } } };
     await slot.setModel(model.provider, model.id);
 
-    // A phone screenshot at native resolution: Pi bounds read and tool-result
-    // images but not prompt attachments, and every later request re-serializes
-    // whatever entered history here.
+    // Pi applies the active model's profile once before the attachment enters
+    // canonical history. Gateway must not pre-resize it with a second profile.
     const screenshot: ImageContent = { type: "image", mimeType: "image/png", data: syntheticPng(1320, 2868).toString("base64") };
+    const originalData = screenshot.data;
     await slot.prompt("Look at this screenshot", [screenshot]);
+    expect(screenshot.data).toBe(originalData);
     await waitUntil(() => !slot.isBusy);
 
     const entries = (await readFile(slot.sessionFile!, "utf8"))
@@ -5950,7 +5952,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(recorded).toBeDefined();
     expect(recorded!.data).not.toBe(screenshot.data);
     const dimensions = pngDimensions(recorded!);
-    expect(Math.max(dimensions.width, dimensions.height)).toBe(2000);
+    expect(Math.max(dimensions.width, dimensions.height)).toBe(1_000);
   });
 
   it("admits multiline plain prompts without duplicating their body into invocation receipts", async () => {
@@ -6174,6 +6176,73 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(thirdEpoch).not.toBe(secondEpoch);
     await registry.reloadProject(cwd, true);
     expect(slot.snapshot().extensionPresentation.hostEpoch).not.toBe(thirdEpoch);
+  });
+
+  it("orders context-edit settlement callbacks before terminal ownership and feeds the next provider request", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-context-edit-settlement-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(join(cwd, ".pi", "extensions"), { recursive: true })]);
+    await writeFile(join(cwd, ".pi", "extensions", "context-edit-boundary.ts"), `
+export default function (pi) {
+  pi.on("turn_end", (_event, ctx) => {
+    const target = ctx.sessionManager.getBranch().find(entry => entry.type === "message" && entry.message.role === "user");
+    return { entries: [
+      { type: "context_edit", targetId: target.id, replacement: { content: "replacement from turn_end" } },
+      { type: "custom", customType: "context-edit-order", data: { stage: "turn_end" } },
+    ] };
+  });
+  pi.on("agent_before_settle", () => ({ entries: [
+    { type: "custom", customType: "context-edit-order", data: { stage: "agent_before_settle" } },
+  ] }));
+  pi.on("agent_settled", () => {
+    pi.appendEntry("context-edit-order", { stage: "agent_settled" });
+  });
+}
+`);
+    const faux = fauxProvider({ provider: "tron-context-edit-settlement", tokensPerSecond: 10_000 });
+    const contexts: TranscriptContext[] = [];
+    faux.setResponses([
+      (context) => { contexts.push(context); return fauxAssistantMessage("first completed"); },
+      (context) => { contexts.push(context); return fauxAssistantMessage("second completed"); },
+    ]);
+    const modelRuntimeFactory = async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider);
+      return runtime;
+    };
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, modelRuntimeFactory, trust,
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    await slot.setModel(faux.getModel().provider, faux.getModel().id);
+    await slot.prompt("original request");
+    await waitUntil(() => !slot.isBusy);
+    const branch = (slot as unknown as { sessionManager: SessionManager }).sessionManager.getBranch();
+    const order = branch.filter(entry => entry.type === "custom" && entry.customType === "context-edit-order")
+      .map(entry => {
+        if (entry.type !== "custom") throw new Error("Unexpected non-custom order entry");
+        return (entry.data as { stage: string }).stage;
+      });
+    expect(order).toEqual(["turn_end", "agent_before_settle", "agent_settled"]);
+    expect(branch.some(entry => entry.type === "context_edit" && entry.replacement.content === "replacement from turn_end")).toBe(true);
+    await waitUntil(() => registry.attentionProjection(slot.id).completionRevision === 1);
+    expect(registry.attentionProjection(slot.id)).toMatchObject({ completionRevision: 1 });
+
+    await slot.prompt("follow-up");
+    await waitUntil(() => !slot.isBusy);
+    expect(contexts).toHaveLength(2);
+    expect(contexts[1]!.messages.filter(message => message.role === "user").map(message =>
+      message.role === "user" ? contentText(message.content) : "")).toEqual([
+      "replacement from turn_end", "follow-up",
+    ]);
+    await waitUntil(() => registry.attentionProjection(slot.id).completionRevision === 2);
+    expect(registry.attentionProjection(slot.id)).toMatchObject({ completionRevision: 2 });
   });
 
   it("serializes chained extension continuation ownership through a transient attention failure", async () => {
@@ -7499,6 +7568,64 @@ export default function (pi) {
     expect(lines.some((entry) => entry.id === activeEntry.id && entry.parentId === rootEntry.id)).toBe(true);
     expect(exported).toContain("abandoned branch response");
     expect(exported).toContain("active branch response");
+  });
+
+  it("round-trips canonical context edits through Gateway JSONL export/import without a chat row", async () => {
+    const fixture = await coldFixture("context-edit-jsonl-roundtrip");
+    await fixture.registry.initializeBlobStorage();
+    const prompt = fixture.manager.appendMessage({ role: "user", content: "Original authored prompt", timestamp: Date.now() });
+    const edit = fixture.manager.appendContextEdit(prompt, { content: "Replacement model context" });
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const exportedArtifact = await slot.export("jsonl");
+    const lease = await fixture.registry.acquireBlob(exportedArtifact.blobId);
+    let exported = "";
+    try {
+      for await (const chunk of lease.stream) exported += Buffer.from(chunk).toString("utf8");
+    } finally {
+      await lease.release();
+    }
+    const records = exported.trimEnd().split("\n").map(line => JSON.parse(line) as Record<string, unknown>);
+    expect(records.some(entry => entry.type === "context_edit" && entry.id === edit
+      && (entry.replacement as { content?: string })?.content === "Replacement model context")).toBe(true);
+    const importPath = join(fixture.root, "context-edit-export.jsonl");
+    await writeFile(importPath, exported);
+    const sourceId = slot.id;
+    const sourceEntries = fixture.manager.getBranch().map(entry => ({ id: entry.id, parentId: entry.parentId }));
+    const imported = await fixture.registry.importFromJsonl(importPath, fixture.cwd);
+    const importedAgain = await fixture.registry.importFromJsonl(importPath, fixture.cwd);
+    expect(imported.id).not.toBe(sourceId);
+    expect(importedAgain.id).not.toBe(sourceId);
+    expect(importedAgain.id).not.toBe(imported.id);
+    expect((await fixture.registry.acquire(sourceId)).id).toBe(sourceId);
+    for (const importedSlot of [imported, importedAgain]) {
+      const manager = (importedSlot as unknown as { sessionManager: SessionManager }).sessionManager;
+      expect(manager.getBranch().some(entry => entry.type === "context_edit" && entry.targetId === prompt)).toBe(true);
+      expect(manager.getBranch().slice(0, sourceEntries.length).map(entry => ({ id: entry.id, parentId: entry.parentId }))).toEqual(sourceEntries);
+      expect(manager.buildSessionContext().messages.filter(message => message.role === "user").map(message =>
+        message.role === "user" ? message.content : "")).toEqual(["Replacement model context"]);
+      expect(importedSlot.snapshot().transcript.filter(item => item.role === "user")).toMatchObject([
+        { content: [{ type: "text", text: "Original authored prompt" }] },
+      ]);
+      expect(importedSlot.snapshot().transcript.some(item => item.id === edit)).toBe(false);
+    }
+    const sessionRoot = join(fixture.agentDir, "sessions");
+    const beforeFailure = (await readdir(sessionRoot, { recursive: true })).sort();
+    vi.spyOn(fixture.registry as any, "dependencies").mockImplementationOnce(() => {
+      throw new Error("injected import runtime setup failure");
+    });
+    await expect(fixture.registry.importFromJsonl(importPath, fixture.cwd)).rejects.toThrow("injected import runtime setup failure");
+    expect((await readdir(sessionRoot, { recursive: true })).sort()).toEqual(beforeFailure);
+
+    const importedFiles = [imported, importedAgain].map(importedSlot => importedSlot.sessionFile!);
+    await Promise.all([imported.dispose(), importedAgain.dispose()]);
+    await rm(importPath);
+    for (const importedFile of importedFiles) {
+      const reopened = SessionManager.open(importedFile, dirname(importedFile), fixture.cwd);
+      expect(reopened.getHeader().parentSession).toBe(importPath);
+      expect(reopened.buildSessionContext().messages.filter(message => message.role === "user").map(message =>
+        message.role === "user" ? message.content : "")).toEqual(["Replacement model context"]);
+      expect(reopened.getBranch().some(entry => entry.type === "context_edit" && entry.targetId === prompt)).toBe(true);
+    }
   });
 
   it("exports a committed JSONL cut while the live session phase is running", async () => {

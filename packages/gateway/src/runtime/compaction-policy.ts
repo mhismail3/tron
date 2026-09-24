@@ -1,4 +1,4 @@
-import { clampThinkingLevel, type AssistantMessage, type Context } from "@earendil-works/pi-ai";
+import { clampThinkingLevel, normalizeContext, type AssistantMessage } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { SettingsManager, type AgentSession, type ExtensionFactory, type SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
@@ -144,10 +144,15 @@ export class CompactionOperationPolicy {
         if (level === "off") delete requestOptions.reasoning;
         else requestOptions.reasoning = level;
       }
-      const requestContext: Context = captured.instructions ? {
-        ...context,
-        systemPrompt: `${context.systemPrompt ?? ""}\n\nUser-configured summary focus:\n${captured.instructions}`,
-      } : context;
+      if (!captured.instructions) return stream(model, context, requestOptions);
+      // Preserve transcript system/tool deltas in order; append the compaction-only
+      // instruction as a request-local system change rather than flattening history.
+      const requestContext = normalizeContext({ messages: [...context.messages] });
+      requestContext.messages.push({
+        role: "system",
+        content: `User-configured summary focus:\n${captured.instructions}`,
+        timestamp: Date.now(),
+      });
       return stream(model, requestContext, requestOptions);
     };
   }

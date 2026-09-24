@@ -72,10 +72,11 @@ const THEME_COLORS: Record<ThemeColor, string | number> = {
   // Pi's optional search foreground falls back to the ordinary text color.
   // Pinning the same value preserves the pre-upgrade RPC baseline exactly.
   thinkingXhigh: 5, thinkingMax: 1, bashMode: 3, searchMatchText: 7,
+  scrollbarTrack: 8, scrollbarThumb: 7,
 };
 const THEME_BACKGROUNDS: ConstructorParameters<typeof Theme>[1] = {
   selectedBg: 8, userMessageBg: 0, customMessageBg: 0,
-  toolPendingBg: 0, toolSuccessBg: 0, toolErrorBg: 0, scrollbarThumb: 8,
+  toolPendingBg: 0, toolSuccessBg: 0, toolErrorBg: 0,
 };
 const BASELINE_THEME = new Theme(THEME_COLORS, THEME_BACKGROUNDS, "256color", { name: "tron-rpc-baseline" });
 
