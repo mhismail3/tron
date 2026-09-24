@@ -213,7 +213,7 @@ user reinstalls manually, so batch them for one reinstall.
 | L-9 | Needs scoping | Phone handling of a stalled or unreachable but live Gateway (proposal for the user) | L-7, L-10 | |
 | L-10 | Ready | iOS connect-failure records say whether the socket ever opened, and on which interface | none | |
 | L-15 | Ready | Startup timing: stop to bound and bound to first startup phase | L-2 | |
-| L-16 | Needs scoping | Restart drain hangs on terminal-receipt persistence | none | |
+| L-16 | Claimed | Restart drain hangs on terminal-receipt persistence | none | observability session, 2026-09-24 |
 | L-11 | Ready | Remove duplicate payload validations within one deploy run | none | |
 | L-12 | Ready | Faster Node payload fingerprint with identical output | none | |
 | L-13 | Ready | Stage source payloads in the store and rename instead of copying twice | L-11 | |
