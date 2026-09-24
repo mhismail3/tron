@@ -11,7 +11,7 @@ struct TronPathsTests {
         #expect(TronPaths.defaultServerPort(profile: .stable) == 9847)
         #expect(TronPaths.defaultServerPort(profile: .debug) == 9848)
         #expect(TronPaths.tronHome(profile: .debug).path.hasSuffix("/.tron-dev"))
-        #expect(TronPaths.agentHome(profile: .stable).path.hasSuffix("/.tron/agent"))
+        #expect(TronPaths.agentHome(profile: .stable, environment: [:]).path.hasSuffix("/.tron/agent"))
         #expect(TronPaths.agentHome(profile: .debug).path.hasSuffix("/.tron-dev/agent"))
         #expect(TronPaths.bearerTokenPath(profile: .debug).path.hasSuffix("/.tron-dev/gateway/local-auth.json"))
     }

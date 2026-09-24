@@ -1,5 +1,16 @@
 # Tron Mac architecture
 
+## Mac app logging
+
+The wrapper writes redacted shared-format JSONL to `<Tron home>/logs/mac.jsonl`
+through `TronLog`; its serial utility queue keeps filesystem work off the main
+actor. Four 1 MiB segments retain several days of this low-volume lifecycle
+stream, while debug records stay in a bounded in-memory buffer. Warning and
+error records are also mirrored to `os.Logger` (`com.tron.mac`). The writer
+records app start identity, observer transitions, LaunchAgent outcomes, update
+flow states with their command IDs, and wizard step outcomes. The Gateway owns
+its separate `gateway.jsonl` rotation.
+
 `Tron.app` is the installer, supervisor, pairing surface, and menu-bar status UI
 for the always-running Tron agent. The Login Item launches a minimal universal C
 shim, which execs the exact bundled Node runtime and Tron Gateway payload. Each

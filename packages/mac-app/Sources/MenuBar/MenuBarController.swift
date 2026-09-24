@@ -81,6 +81,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     /// the icon + menu items refresh immediately rather than waiting for
     /// the next 30s poll).
     func applySnapshot(_ snapshot: ServerStatusSnapshot) {
+        if self.snapshot.state != snapshot.state {
+            TronLog.shared.record(
+                .info, event: "observer.state-changed", source: "observer",
+                message: "Gateway observer state changed", old: String(describing: self.snapshot.state),
+                new: String(describing: snapshot.state), why: transitionReason(for: snapshot.state)
+            )
+        }
         self.snapshot = snapshot
         statusItem?.button?.image = MenuBarIcon.image(for: snapshot.state)
         statusItem?.button?.toolTip = snapshot.state.tooltip
@@ -94,6 +101,18 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     func applyPolledSnapshot(_ snapshot: ServerStatusSnapshot) {
         guard !self.snapshot.state.isBusy else { return }
         applySnapshot(snapshot)
+    }
+
+    private func transitionReason(for state: ServerStatusState) -> String {
+        switch state {
+        case .checking: return "observer has not completed an observation"
+        case .running: return "authenticated runtime admission succeeded"
+        case .needsRepair(_, _, let reason), .failed(let reason): return reason
+        case .updateIncomplete: return "running and selected payloads differ"
+        case .busy(let action): return "user operation in progress: \(action.rawValue)"
+        case .paused: return "LaunchAgent is not loaded or no runtime is available"
+        case .unauthorized: return "Gateway rejected local authorization"
+        }
     }
 
     @discardableResult

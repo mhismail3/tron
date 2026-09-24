@@ -232,6 +232,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let setup = EnvironmentSetup.live
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
+        if startupMode != .testHost {
+            TronLog.shared.record(.info, event: "app.started", source: "lifecycle", message: "Mac app started", appVersion: version, build: build)
+        }
         switch startupMode {
         case .command(.startServerAndQuit):
             startServerAndQuit()
@@ -257,7 +262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // files so wrapper UI work can happen while production runs.
         let lock = SingleInstanceLock(lockFileURL: setup.wrapperLockPath)
         guard lock.acquire() else {
-            NSLog("[Tron] Another instance of this Tron wrapper is already running. Exiting.")
+            TronLog.shared.record(.warning, event: "app.instance-already-running", source: "lifecycle", message: "Another wrapper instance is already running")
             NSApp.terminate(nil)
             return
         }
@@ -281,7 +286,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 let setup = EnvironmentSetup.live
                 if !setup.canManageLaunchAgent {
-                    NSLog("[Tron] Debug companion wizard completion does not install the production menu bar.")
+                    TronLog.shared.record(.info, event: "wizard.completed", source: "wizard", message: "Debug companion did not install the production menu bar", outcome: "not-managed")
                     return
                 }
                 self.installMenuBar(setup: setup, context: .wizardCompletion)
@@ -309,18 +314,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .ok:
                 exitCode = 0
             case .invalidApplicationLocation(let problem):
-                NSLog("[Tron] Cannot start server from command mode: %@", problem)
+                TronLog.shared.record(.error, event: "launch-agent.command-start", source: "launch-agent", message: "Command-mode start rejected: \(problem)", outcome: "failed")
             case .invalidBundledHelper(let problem):
-                NSLog("[Tron] Cannot start server from command mode: %@", problem)
+                TronLog.shared.record(.error, event: "launch-agent.command-start", source: "launch-agent", message: "Command-mode start rejected: \(problem)", outcome: "failed")
             case .unmanagedWrapper:
-                NSLog("[Tron] Cannot start server from command mode: Debug companion mode does not manage the production agent")
+                TronLog.shared.record(.warning, event: "launch-agent.command-start", source: "launch-agent", message: "Debug companion cannot manage the production agent", outcome: "refused")
             case .launchAgentFailed(let outcome):
-                NSLog("[Tron] Command-mode server start returned %@", String(describing: outcome))
+                TronLog.shared.record(.error, event: "launch-agent.command-start", source: "launch-agent", message: "Command-mode start failed", outcome: String(describing: outcome))
             case .unhealthy(let health):
-                NSLog(
-                    "[Tron] Command-mode server start loaded the Login Item but /health did not pass: %@",
-                    String(describing: health)
-                )
+                TronLog.shared.record(.error, event: "launch-agent.command-start", source: "launch-agent", message: "Login Item loaded but health check failed", outcome: String(describing: health))
             }
         }
     }
@@ -332,11 +334,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let outcome = await TronUninstaller.unregisterAndClean(setup: EnvironmentSetup.live)
             switch outcome {
             case .ok, .alreadyLoaded:
-                NSLog("[Tron] Unregistered Tron Agent")
+                TronLog.shared.record(.info, event: "launch-agent.unregister", source: "launch-agent", message: "Tron Agent unregistered", outcome: "success")
             case .requiresApproval(let message), .launchdRefused(let message), .unknown(let message):
-                NSLog("[Tron] Command-mode uninstall failed: %@", message)
+                TronLog.shared.record(.error, event: "launch-agent.unregister", source: "launch-agent", message: "Command-mode unregister failed: \(message)", outcome: "failed")
             case .binaryMissing(let path):
-                NSLog("[Tron] Command-mode uninstall missing helper: %@", path)
+                TronLog.shared.record(.error, event: "launch-agent.unregister", source: "launch-agent", message: "Command-mode unregister helper missing: \(path)", outcome: "failed")
             }
         }
     }

@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, L-13
+- **Last updated:** 2026-09-24, L-4
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -206,7 +206,7 @@ user reinstalls manually, so batch them for one reinstall.
 | L-3b | Needs scoping | The phone has two persisted diagnostic stores, `AppLog` and `IOSClientDiagnosticStore` (catalog and connection records). Decide whether one owner should hold both | L-3 | |
 | L-1b | Done | Launcher records | none | observability session (L-1b lane), 2026-09-24 |
 | L-1d | Done | Out-of-band stderr capture | L-2 | observability session (L-1d lane), 2026-09-24 |
-| L-4 | Claimed | Mac app file logging | L-2 | observability session (L-4 lane), 2026-09-24 |
+| L-4 | Done | Mac app file logging | L-2 | observability session (L-4 lane), 2026-09-24 |
 | L-5 | Done | `scripts/tron diagnose` collector | L-1c, L-2 | observability session (L-5 lane), 2026-09-24 |
 | L-6 | Ready | Event catalog and the incident rule | L-2 | |
 | L-7 | Done | Stall cause in event-loop-delay records | L-2 | observability session, 2026-09-24 |
@@ -765,3 +765,16 @@ The 2026-09-23 17:33 UTC incident's records have rotated away, so its timeline i
 - Tasks added: none.
 - Kept on purpose: every validation L-11 kept, the post-copy fingerprint check, and the publication transaction's single store lock. A crash's leftover now stays in the Tron home until the next build, rather than in `/tmp` until reboot.
 - For the next agent: L-14 is unblocked. After the user's second rebuild with this change, the `deploy.jsonl` phase durations will show the combined L-11, L-12 and L-13 saving.
+
+### L-4 · Done · 2026-09-24 · observability session (L-4 lane)
+
+- Result: one `TronLog` writer (new `TronLog.swift` in `packages/mac-app/Sources/Support/`) appends shared-format JSONL records (`process: "mac"`) to `<Tron home>/logs/mac.jsonl`.
+  - Writing happens on a serial utility queue, never the main actor, with redaction at the write boundary.
+  - Retention is four 1 MiB segments. Debug records stay in a bounded memory buffer (1,000 records or 1 MiB). Warning and error are also mirrored to `os.Logger` (`com.tron.mac`).
+  - All 14 `NSLog` calls are replaced. New records cover app start (version and build), observer state changes (old, new and why), LaunchAgent register, unregister and kickstart outcomes, update-flow UI states with `commandId`, and wizard steps.
+- Evidence (verified): focused Mac suites passed 36 tests before and 37 after. `TronLogTests` covers bounds, rotation and the Gateway's redaction cases; disabling rotation fails it. Full Mac suite (`xcodebuild test-without-building`): 316 tests in 48 suites passed in 138 s, after an 85 s build. After the run, no `mac.jsonl` exists in the real Tron home, and the test home holds the records.
+- Changes: this commit (`TronLog.swift` and its test, the 14 call sites plus the new records, `project.yml`'s test environment, `TronPathsTests`, `packages/mac-app/docs/architecture.md`, the Gateway README logging section).
+- Tasks added: none.
+- Kept on purpose: the Swift redaction rules duplicate the Gateway's `redact` because the two languages cannot share a source; the test pins the same cases. Transition fields (`old`, `new`, `why`) are structured because the Mac stream exists mainly for them.
+- Deviations: supervisor review made three changes. The lane's test runs had written about 60 test records into the real `~/.tron/logs/mac.jsonl`, because code under test resolves the Tron home globally. The Mac test scheme now sets `TRON_DATA_DIR` to a directory in the build products, the polluted file (test records only, from 15:38–15:47 UTC) was deleted, and `TronPathsTests` asserts the default home with an explicit empty environment. The hand-written `Encodable` conformance, which repeated the synthesized one, was deleted. The formatter became a shared `Date.ISO8601FormatStyle`, which is `Sendable`.
+- For the next agent: takes effect after the user reinstalls the Mac app, together with L-1b and L-1d. L-6's catalog should list the Mac events.

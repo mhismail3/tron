@@ -15,7 +15,7 @@ enum TronFontLoader {
         if fontIsAvailable { return true }
 
         guard let url = bundledSansFontURL(in: bundle) else {
-            NSLog("[Tron] Missing bundled font resource: \(bundledSansFontResource).\(bundledSansFontExtension)")
+            TronLog.shared.record(.warning, event: "app.font-load", source: "lifecycle", message: "Missing bundled font resource: \(bundledSansFontResource).\(bundledSansFontExtension)", outcome: "failed")
             return false
         }
 
@@ -24,7 +24,7 @@ enum TronFontLoader {
         if didRegister || fontIsAvailable { return true }
 
         if let error = error?.takeRetainedValue() {
-            NSLog("[Tron] Failed to register bundled font \(url.lastPathComponent): \(error)")
+            TronLog.shared.record(.warning, event: "app.font-load", source: "lifecycle", message: "Failed to register bundled font \(url.lastPathComponent): \(error)", outcome: "failed")
         }
         return false
     }

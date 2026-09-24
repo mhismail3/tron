@@ -205,7 +205,7 @@ enum MacAppStartupMaintenance {
             try setup.writeRecordedAppVersion(version)
             return true
         } catch {
-            NSLog("[Tron] Failed to record Mac app version marker: %@", error.localizedDescription)
+            TronLog.shared.record(.warning, event: "app.version-marker", source: "lifecycle", message: "Could not record Mac app version marker: \(error.localizedDescription)", outcome: "failed")
             return false
         }
     }

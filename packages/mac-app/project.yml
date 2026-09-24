@@ -296,6 +296,9 @@ schemes:
       config: Debug
       environmentVariables:
         TRON_MAC_TEST_HOST: "1"
+        # Code under test resolves the Tron home globally (for example the Mac
+        # log writer); keep every test run out of the user's real home.
+        TRON_DATA_DIR: "$(BUILT_PRODUCTS_DIR)/TronMacTests-home"
         TRON_SINGLE_INSTANCE_LOCK_PROBE: "$(BUILT_PRODUCTS_DIR)/SingleInstanceLockProbe"
       targets:
         - TronMacTests

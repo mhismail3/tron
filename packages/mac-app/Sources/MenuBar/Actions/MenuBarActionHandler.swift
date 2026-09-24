@@ -129,6 +129,7 @@ final class MenuBarActionHandler {
         guard await ensureLaunchAgentManagementAllowed(actionTitle: "Update unavailable") else { return }
         guard case .updateIncomplete = menuBarController?.snapshot.state else { return }
         let commandID = "mac-update-\(UUID().uuidString.lowercased())"
+        TronLog.shared.record(.info, event: "update.ui-state", source: "update", message: "Gateway update flow entered updating", commandId: commandID, new: "updating")
         applyBusy(.updating)
         do {
             let response = try await setup.updateGateway(commandID)
@@ -136,6 +137,7 @@ final class MenuBarActionHandler {
             let message = response.state == "ready"
                 ? "Gateway update is ready as \(response.version ?? "the selected payload")."
                 : "Gateway update was accepted and is still \(response.state). Restart remains available; check the selected and running identities before retrying."
+            TronLog.shared.record(.info, event: "update.ui-state", source: "update", message: "Gateway update response received", commandId: commandID, old: "updating", new: response.state, outcome: "success")
             await MenuBarNotifier.post(title: response.state == "ready" ? "Tron updated" : "Update accepted", body: message)
         } catch {
             let outcome: String
@@ -146,6 +148,7 @@ final class MenuBarActionHandler {
                 outcome = "unknown"
             }
             await refreshStatus()
+            TronLog.shared.record(.warning, event: "update.ui-state", source: "update", message: "Gateway update flow settled after request failure", commandId: commandID, old: "updating", new: outcome, outcome: "failed")
             await MenuBarNotifier.post(
                 title: "Update \(outcome)",
                 body: outcome == "missing"

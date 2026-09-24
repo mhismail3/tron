@@ -17,6 +17,9 @@ final class WizardState {
 
     var step: WizardStep {
         didSet {
+            if oldValue != step {
+                TronLog.shared.record(.info, event: "wizard.step", source: "wizard", message: "Wizard step changed", old: oldValue.rawValue, new: step.rawValue, outcome: "success")
+            }
             do {
                 try Self.write(step: step, to: stateURL)
                 persistenceFailure = nil

@@ -569,6 +569,9 @@ are fixed per event in code; there is no runtime level setting.
   5 MB numbered segments (`gateway.jsonl`, `.1` … `.7`; the user-chosen 40 MB
   budget). Segment size is tracked in memory, not stat'ed per record. The
   newest 1,000 persisted records are served by `system.logs`.
+- The Mac app writes `~/.tron/logs/mac.jsonl` with its own `TronLog` writer,
+  four 1 MiB segments and a bounded in-memory debug buffer. It never shares
+  rotation with the Gateway process.
 - When `TRON_GATEWAY_SUPERVISED=1`, persisted records are not mirrored to
   stdout/stderr. The C launcher redirects supervised stderr to
   `<Tron home>/logs/gateway-stderr.log` before executing Node, capturing launcher

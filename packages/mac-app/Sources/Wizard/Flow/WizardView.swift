@@ -418,7 +418,7 @@ struct WizardShell<Content: View>: View {
         do {
             try commitWizardCompletion(touchSentinel: setup.touchOnboardedSentinel)
         } catch {
-            NSLog("[Tron] Failed to write onboarded sentinel: \(error.localizedDescription)")
+            TronLog.shared.record(.error, event: "wizard.completion", source: "wizard", message: "Could not write onboarded sentinel: \(error.localizedDescription)", outcome: "failed")
         }
     }
 

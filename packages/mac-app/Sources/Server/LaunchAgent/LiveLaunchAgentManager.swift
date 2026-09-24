@@ -86,11 +86,19 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
                         : bootout.stderr)
                 }
             case .unregister:
-                do { try await service.unregister() } catch {
+                do {
+                    try await service.unregister()
+                    TronLog.shared.record(.info, event: "launch-agent.unregister", source: "launch-agent", message: "LaunchAgent unregistered for replacement", outcome: "success")
+                } catch {
+                    TronLog.shared.record(.error, event: "launch-agent.unregister", source: "launch-agent", message: "LaunchAgent unregister failed: \(error.localizedDescription)", outcome: "failed")
                     return .launchdRefused(message: "Tron Agent registration could not be replaced: \(error.localizedDescription)")
                 }
             case .register:
-                do { try service.register() } catch {
+                do {
+                    try service.register()
+                    TronLog.shared.record(.info, event: "launch-agent.register", source: "launch-agent", message: "LaunchAgent registration requested", outcome: "success")
+                } catch {
+                    TronLog.shared.record(.error, event: "launch-agent.register", source: "launch-agent", message: "LaunchAgent registration failed: \(error.localizedDescription)", outcome: "failed")
                     return .launchdRefused(message: error.localizedDescription)
                 }
             }
@@ -101,14 +109,19 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
 
         switch service.status {
         case .enabled:
+            TronLog.shared.record(.info, event: "launch-agent.register", source: "launch-agent", message: "LaunchAgent is enabled", outcome: "success")
             return .ok
         case .requiresApproval:
+            TronLog.shared.record(.warning, event: "launch-agent.register", source: "launch-agent", message: "LaunchAgent registration needs user approval", outcome: "requires-approval")
             return .requiresApproval(message: "Approve Tron Agent in Login Items to finish installation.")
         case .notFound:
+            TronLog.shared.record(.error, event: "launch-agent.register", source: "launch-agent", message: "LaunchAgent missing after registration", outcome: "missing")
             return .unknown(message: "ServiceManagement could not find the bundled Tron Agent LaunchAgent after registration.")
         case .notRegistered:
+            TronLog.shared.record(.error, event: "launch-agent.register", source: "launch-agent", message: "LaunchAgent is not registered after registration", outcome: "not-registered")
             return .unknown(message: "Tron Agent was not registered.")
         @unknown default:
+            TronLog.shared.record(.error, event: "launch-agent.register", source: "launch-agent", message: "LaunchAgent registration returned an unknown status", outcome: "unknown")
             return .unknown(message: "Tron Agent registration returned an unknown status.")
         }
     }
@@ -371,12 +384,15 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         if let outcome = Self.preUnregistrationOutcome(
             for: ExistingInstallDetector.serviceStatus(label: label), profile: profile
         ) {
+            TronLog.shared.record(.info, event: "launch-agent.unregister", source: "launch-agent", message: "LaunchAgent already unregistered", outcome: "already-unregistered")
             return outcome
         }
         do {
             try await service.unregister()
+            TronLog.shared.record(.info, event: "launch-agent.unregister", source: "launch-agent", message: "LaunchAgent unregistered", outcome: "success")
             return .ok
         } catch {
+            TronLog.shared.record(.error, event: "launch-agent.unregister", source: "launch-agent", message: "LaunchAgent unregister failed: \(error.localizedDescription)", outcome: "failed")
             return .unknown(message: error.localizedDescription)
         }
     }
@@ -408,8 +424,11 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             policy: .acceptedOperation
         )
         guard result.exitCode >= 0 else {
+            TronLog.shared.record(.error, event: "launch-agent.kickstart", source: "launch-agent", message: "Could not confirm kickstart outcome", outcome: "unknown")
             return .unknown(message: "Could not confirm the restart command outcome. Inspect Gateway state before retrying.")
         }
+        let outcome = result.exitCode == 0 ? "success" : "failed"
+        TronLog.shared.record(result.exitCode == 0 ? .info : .error, event: "launch-agent.kickstart", source: "launch-agent", message: "LaunchAgent kickstart completed", outcome: outcome)
         return result.exitCode == 0
             ? .ok
             : .launchdRefused(message: result.stderr.isEmpty ? result.stdout : result.stderr)
