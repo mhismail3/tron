@@ -586,6 +586,21 @@ test("source runtime base fails closed when every migration payload is invalid",
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("payload clone copy preserves fingerprints and relative symlinks and refuses existing destinations", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-payload-clone-copy-"));
+  try {
+    const payload = await makePreflightFixture(join(root, "fixture"));
+    const destination = join(root, "copied");
+    const manifest = await validatePayload(payload, {}, true);
+    const sourceFingerprint = await payloadFingerprint(payload);
+    const sourceLink = join(payload, "app", "node_modules", ".bin", "pi");
+    await copyValidatedPayloadBase({ root: payload, manifest }, destination);
+    assert.equal(await readlink(join(destination, "app", "node_modules", ".bin", "pi")), await readlink(sourceLink));
+    assert.equal(await payloadFingerprint(destination), sourceFingerprint);
+    await assert.rejects(copyValidatedPayloadBase({ root: payload, manifest }, destination), /destination already exists/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("source runtime base copy rejects a projection changed after admission", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-source-runtime-base-race-"));
   try {
@@ -593,8 +608,8 @@ test("source runtime base copy rejects a projection changed after admission", as
     const manifest = await validatePayload(payload, {}, true);
     const destination = join(root, "copied");
     await assert.rejects(
-      copyValidatedPayloadBase({ root: payload, manifest }, destination, async (source, target, options) => {
-        await cp(source, target, options);
+      copyValidatedPayloadBase({ root: payload, manifest }, destination, async (source, target) => {
+        await cp(source, target, { recursive: true, verbatimSymlinks: true });
         await writeFile(join(target, "app", "dist", "index.js"), `${"z".repeat(1_024)}\n`);
       }),
       /fingerprint does not match/,

@@ -62,6 +62,8 @@ export const PINNED_NPM_VERSION = "10.9.4";
 export const PINNED_NPM_TREE_SHA256 = "adc24b0737566f66bc2ce18251f0bb8168c9cc9177c20fa3379cf129d6091cff";
 const LOCAL_CREDENTIAL_MAX_BYTES = 64 * 1024;
 const MAX_RETAINED_VERSIONS = 8;
+const PAYLOAD_COPY_TIMEOUT_MS = 120_000;
+const MACOS_CP = "/bin/cp";
 // Bounded reads keep storage latency overlapped without flooding the filesystem.
 const PAYLOAD_FINGERPRINT_READ_CONCURRENCY = 16;
 const REQUIREMENTS = [
@@ -1361,6 +1363,20 @@ export function runBounded(tool, args, options = {}) {
   });
 }
 
+// Node 22 cannot clone on macOS (fs.cp ignores COPYFILE_FICLONE and libuv has no
+// clonefile), so a ~650 MB payload copy would write every byte. `cp -c` clones on
+// APFS and falls back to a byte copy elsewhere; `-R` keeps symlinks verbatim.
+async function copyPayloadTree(source, destination) {
+  await mkdir(dirname(destination), { recursive: true });
+  try {
+    await lstat(destination);
+    throw new Error(`payload copy destination already exists: ${destination}`);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  await runBounded(MACOS_CP, ["-c", "-R", source, destination], { timeoutMs: PAYLOAD_COPY_TIMEOUT_MS });
+}
+
 async function cleanupPayloadVersionsUnlocked(paths, maximum = MAX_RETAINED_VERSIONS) {
   const protectedVersions = new Set();
   for (const pointer of [paths.current, paths.previous]) {
@@ -1438,12 +1454,7 @@ export async function stagePayload({ home, channel, source, version, sourceRevis
     const temporary = join(paths.versionsRoot, `.staging-${targetVersion}-${process.pid}-${randomUUID()}`);
     await rm(temporary, { recursive: true, force: true });
     try {
-      // Node otherwise rewrites relative links to absolute source paths. Keep
-      // package-manager links byte-for-byte relative so the immutable staged
-      // tree remains self-contained and passes the same containment proof.
-      await cp(sourceRoot, temporary, {
-        recursive: true, errorOnExist: true, force: false, verbatimSymlinks: true,
-      });
+      await copyPayloadTree(sourceRoot, temporary);
       await makeMutable(temporary);
       const stagedFingerprint = await payloadFingerprint(temporary);
       if (stagedFingerprint !== sourceManifest.payloadFingerprint) throw new Error("staged payload fingerprint changed during copy");
@@ -2208,10 +2219,8 @@ export async function resolveSourcePayloadBase(paths, config, environment = proc
   }
 }
 
-export async function copyValidatedPayloadBase(base, destination, copyPayload = cp) {
-  await copyPayload(base.root, destination, {
-    recursive: true, errorOnExist: true, force: false, verbatimSymlinks: true,
-  });
+export async function copyValidatedPayloadBase(base, destination, copyPayload = copyPayloadTree) {
+  await copyPayload(base.root, destination);
   // Fallback roots may be operator-prepared mutable projections. Verify the
   // copied snapshot against the exact manifest observed during admission before
   // making or replacing any candidate files.

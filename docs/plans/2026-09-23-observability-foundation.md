@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, L-8 and L-19
+- **Last updated:** 2026-09-24, L-14
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -227,7 +227,8 @@ user reinstalls manually, so batch them for one reinstall.
 | L-11 | Done | Remove duplicate payload validations within one deploy run | none | observability session (L-11 lane), 2026-09-24 |
 | L-12 | Done | Faster Node payload fingerprint with identical output | none | observability session (L-12 lane), 2026-09-24 |
 | L-13 | Done | Stage source payloads in the store and rename instead of copying twice | L-11 | observability session (L-13 lane), 2026-09-24 |
-| L-14 | Claimed | APFS clone copies and payload retention count | L-13 | observability session (L-14 lane), 2026-09-24 |
+| L-14 | Done | APFS clone copies and payload retention count | L-13 | observability session (L-14 lane), 2026-09-24 |
+| L-14b | Needs approval | Choose `MAX_RETAINED_VERSIONS` now that new payload versions are APFS clones (recommendation: keep 8) | L-14 | |
 
 ## Task details
 
@@ -797,3 +798,13 @@ The 2026-09-23 17:33 UTC incident's records have rotated away, so its timeline i
 - Changes: this commit (plan only).
 - Tasks added: L-8b, with its acceptance measurement.
 - For the next agent: confirm which code holds the text with an allocation profile before changing the rebuild; the snapshot alone cannot name it.
+
+### L-14 · Done · 2026-09-24 · observability session (L-14 lane)
+
+- Result: both full payload copies (`stagePayload` and `copyValidatedPayloadBase`) go through one helper that runs `/bin/cp -c -R` with a bounded timeout. `cp -c` clones on APFS, falls back to a byte copy on other filesystems, and `-R` keeps symlinks verbatim. The helper refuses an existing destination. Every fingerprint check after a copy is unchanged.
+- Evidence (verified, supervisor measurement): copying the live 650 MB Stable payload to the same APFS volume, `fs.cp` took 6.8 s and used 729,236 KB of new disk, while `cp -c -R` took 5.4 s and used about 0 KB. Node 22 cannot clone on macOS: `fs.cp` ignores `COPYFILE_FICLONE`, and `copyFile` with `COPYFILE_FICLONE_FORCE` fails with ENOSYS. The lane's first version used that flag and saved nothing; review caught it by measuring. Lane measurements while the Mac was busy: `fs.cp` median 13.6 s versus `cp -c` 8.9 s. `node --test scripts/gateway-payload-deploy.test.mjs` passed 51/51 in 166 s, including a new test for identical symlink target text, equal fingerprints and refusal of an existing destination. The injected tamper test still rejects a mutated copy.
+- Changes: this commit (`scripts/gateway-payload-deploy.mjs` and its test, the Gateway README payload section).
+- Tasks added: L-14b.
+- Kept on purpose: the `copyPayload` parameter of `copyValidatedPayloadBase`, because the tamper regression test injects through it. `MAX_RETAINED_VERSIONS` stays 8 until the user decides.
+- Deviations: none beyond the review correction above.
+- For the next agent: the eight versions already stored (about 5.1 GB apparent) are full copies. Only versions staged after this change share blocks, so the store shrinks as retention replaces the old copies. Recommendation for L-14b: keep 8. Each new clone costs roughly its changed files (about 7 MB of `app/dist`) rather than about 650 MB.
