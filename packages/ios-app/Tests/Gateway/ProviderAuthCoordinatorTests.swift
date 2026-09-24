@@ -1096,7 +1096,7 @@ struct ProviderAuthCoordinatorTests {
             #expect(harness.owner.prompt?.operationId == "recovered")
             #expect(harness.owner.activeOperationID(providerID: "anthropic", target: target) == "recovered")
 
-            let restart = Task { try await harness.owner.restartAuth() }
+            let restart = Task { try await harness.owner.restartAuth(operationID: "recovered") }
             try await harness.socket.waitUntilSent(count: 3)
             let restartRequest = try request(await harness.socket.sentFrames()[2])
             #expect(restartRequest.method == "auth.begin")
@@ -1114,8 +1114,8 @@ struct ProviderAuthCoordinatorTests {
             #expect(harness.owner.activeRecoveredOperationID == nil)
             #expect(harness.owner.prompt == nil)
 
-            // Restart is offered only for a recovered operation.
-            try await harness.owner.restartAuth()
+            // A retired operation ID cannot restart its successor.
+            try await harness.owner.restartAuth(operationID: "recovered")
             #expect(await harness.socket.sentFrames().count == 3)
             await harness.client.close()
         }

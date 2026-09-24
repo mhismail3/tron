@@ -248,7 +248,6 @@ struct ProviderConfigurationSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(\.tronPresentationActivity) private var presentationActivity
     let provider: ProviderSummary
@@ -258,6 +257,9 @@ struct ProviderConfigurationSheet: View {
     @State private var beginningMethod: String?
     @State private var attemptedAutomaticBegin = false
     @State private var clearing = false
+    @State private var trail = ProviderAuthSelectionTrail()
+    @State private var answeringPromptID: String?
+    @State private var answeringOptionID: String?
     @State private var usageController = ProviderUsageReadController()
 
     private var currentOperationID: String? {
@@ -272,8 +274,16 @@ struct ProviderConfigurationSheet: View {
         ProviderConfigurationPresentation.automaticallyBegunMethod(for: provider)
     }
 
-    private var isAutomaticallyBeginning: Bool {
-        automaticMethod != nil && (!attemptedAutomaticBegin || beginningMethod != nil)
+    /// The method whose login is starting or owned by this sheet. It stays
+    /// checked in the always-visible method group so the user can switch.
+    private var selectedMethod: String? {
+        beginningMethod ?? (isPresentingOwnedAuth
+            ? model.activeProviderAuthType(providerID: provider.id, target: target)
+            : nil)
+    }
+
+    private var isBusy: Bool {
+        beginningMethod != nil || clearing || answeringPromptID != nil
     }
 
     /// An owned auth operation is cancellable when the detail sheet disappears;
@@ -284,21 +294,6 @@ struct ProviderConfigurationSheet: View {
             beginningMethod: beginningMethod,
             clearing: clearing
         )
-    }
-
-    private var presentationPhase: String {
-        if isPresentingOwnedAuth {
-            return "auth:\(currentOperationID ?? ""):\(model.authEvent?.kind.rawValue ?? ""):\(model.authPrompt?.id ?? "")"
-        }
-        return isAutomaticallyBeginning ? "automatic-begin" : "configuration"
-    }
-
-    private var revealTransition: AnyTransition {
-        reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top))
-    }
-
-    private var revealAnimation: Animation {
-        reduceMotion ? .linear(duration: 0.12) : .snappy(duration: 0.24)
     }
 
     var body: some View {
@@ -356,7 +351,9 @@ struct ProviderConfigurationSheet: View {
             } else if activeOperationID == nil, beginningMethod != nil, let current {
                 activeOperationID = current
             }
+            replayIfNeeded()
         }
+        .onChange(of: model.authPrompt?.id) { _, _ in replayIfNeeded() }
         .onDisappear {
             usageController.begin()
             guard ProviderAuthBrowserPolicy.shouldCancelOperationWhenProviderSheetDisappears(
@@ -397,22 +394,11 @@ struct ProviderConfigurationSheet: View {
 
                 usageSection
 
-                if isPresentingOwnedAuth {
-                    ProviderAuthFlowContent()
-                        .transition(revealTransition)
-                } else if isAutomaticallyBeginning {
-                    TronLoadingState(label: "Loading login options…", accent: .tronEmerald)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .transition(revealTransition)
-                } else {
-                    connectionControls
-                        .transition(revealTransition)
-                }
+                connectionControls
             }
             .padding(.horizontal, 20)
             .padding(.top, 8)
             .padding(.bottom, 20)
-            .animation(revealAnimation, value: presentationPhase)
         }
         .tronScrollEdgeChrome()
         .scrollDismissesKeyboard(.interactively)
@@ -514,36 +500,34 @@ struct ProviderConfigurationSheet: View {
         if provider.authMethods.isEmpty {
             TronSettingsCaption("This provider does not advertise a supported connection method.")
         } else {
-            TronSettingsGroup("Connection Options", accent: .tronEmerald) {
-                VStack(spacing: 0) {
-                    ForEach(Array(provider.authMethods.enumerated()), id: \.offset) { index, method in
-                        if index > 0 { TronSettingsDivider(accent: .tronEmerald) }
-                        Button { begin(method) } label: {
-                            HStack(spacing: 0) {
-                                TronSettingsRow(
-                                    icon: ProviderConfigurationPresentation.isLoginMethod(method) ? "person.crop.circle.badge.checkmark" : "key.fill",
-                                    title: ProviderConfigurationPresentation.actionTitle(
-                                        method: method,
-                                        configured: provider.configured
-                                    ),
-                                    subtitle: ProviderConfigurationPresentation.actionDetail(
-                                        method: method,
-                                        configured: provider.configured
-                                    ),
-                                    accent: .tronEmerald
-                                )
-                                if beginningMethod == method {
-                                    TronPulseLoadingIndicator(size: 18)
-                                        .padding(.trailing, 14)
-                                }
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(beginningMethod != nil || clearing)
-                    }
-                }
-            }
+            ProviderChoiceGroup(
+                title: "Connection Method",
+                choices: provider.authMethods.map { method in
+                    ProviderChoiceGroup.Choice(
+                        id: method,
+                        icon: ProviderConfigurationPresentation.isLoginMethod(method) ? "person.crop.circle.badge.checkmark" : "key.fill",
+                        title: ProviderConfigurationPresentation.actionTitle(method: method, configured: provider.configured),
+                        subtitle: ProviderConfigurationPresentation.actionDetail(method: method, configured: provider.configured)
+                    )
+                },
+                selectedID: selectedMethod,
+                busyID: beginningMethod,
+                isDisabled: isBusy,
+                onSelect: { begin($0) }
+            )
+        }
+
+        if isPresentingOwnedAuth || beginningMethod != nil {
+            ProviderAuthFlowContent(
+                trail: trail,
+                answeringPromptID: answeringPromptID,
+                answeringOptionID: answeringOptionID,
+                // A pending replay keeps earlier choices fixed; switching the
+                // method above stays available and discards it.
+                isDisabled: isBusy || trail.isReplaying,
+                onChoose: { prompt, optionID in choose(prompt, optionID) },
+                onChangeStep: { index, optionID in changeAnswer(at: index, to: optionID) }
+            )
         }
 
         if provider.configured {
@@ -564,20 +548,85 @@ struct ProviderConfigurationSheet: View {
         begin(automaticMethod)
     }
 
+    /// Starts `method`, first cancelling a different method this sheet owns,
+    /// so the user can move between connection methods at any step.
     private func begin(_ method: String) {
         guard beginningMethod == nil, !clearing else { return }
+        let replaced = activeOperationID
+        // Release ownership first so the retiring operation cannot dismiss
+        // this sheet; the successor is adopted when it appears.
+        activeOperationID = nil
+        beginningMethod = method
+        trail.reset()
+        Task {
+            defer { beginningMethod = nil }
+            if let replaced { await model.cancelAuth(operationID: replaced) }
+            do {
+                try await model.beginAuth(providerID: provider.id, authType: method, target: target)
+                adoptStartedOperation()
+            } catch is CancellationError { }
+            catch { model.presentError(error) }
+        }
+    }
+
+    private func choose(_ prompt: ProviderAuthPromptState, _ optionID: String) {
+        guard answeringPromptID == nil, !isBusy, model.authPrompt?.id == prompt.id else { return }
+        answeringPromptID = prompt.id
+        answeringOptionID = optionID
+        Task {
+            defer { answeringPromptID = nil; answeringOptionID = nil }
+            do {
+                try await model.answerAuth(optionID)
+                trail.record(prompt, chosenID: optionID)
+            } catch is CancellationError { }
+            catch { model.presentError(error) }
+        }
+    }
+
+    /// Changing an answered choice restarts the same method; the kept answers
+    /// replay onto the successor's prompts as they arrive.
+    private func changeAnswer(at index: Int, to optionID: String) {
+        guard !isBusy, !trail.isReplaying, let operationID = activeOperationID, let method = selectedMethod else { return }
+        trail.change(stepAt: index, to: optionID)
+        guard trail.isReplaying else { return }
+        activeOperationID = nil
         beginningMethod = method
         Task {
             defer { beginningMethod = nil }
             do {
-                try await model.beginAuth(providerID: provider.id, authType: method, target: target)
-                if let operationID = currentOperationID {
-                    activeOperationID = operationID
-                } else {
-                    dismiss()
-                }
-            } catch is CancellationError { }
-            catch { model.presentError(error) }
+                try await model.restartAuth(operationID: operationID)
+                adoptStartedOperation()
+            } catch is CancellationError { trail.reset() }
+            catch { trail.reset(); model.presentError(error) }
+        }
+    }
+
+    private func adoptStartedOperation() {
+        if let operationID = currentOperationID {
+            activeOperationID = operationID
+            replayIfNeeded()
+        } else {
+            dismiss()
+        }
+    }
+
+    private func replayIfNeeded() {
+        guard trail.isReplaying,
+              answeringPromptID == nil,
+              let prompt = model.authPrompt,
+              prompt.operationId == activeOperationID else { return }
+        guard let optionID = trail.consumeReplay(for: prompt) else { return }
+        answeringPromptID = prompt.id
+        answeringOptionID = optionID
+        Task {
+            defer {
+                answeringPromptID = nil
+                answeringOptionID = nil
+                replayIfNeeded()
+            }
+            do { try await model.answerAuth(optionID) }
+            catch is CancellationError { trail.reset() }
+            catch { trail.reset(); model.presentError(error) }
         }
     }
 

@@ -1,46 +1,179 @@
 import SwiftUI
 import UIKit
 
+/// Answered provider choice prompts stay visible so the user can change an
+/// earlier answer. The SDK login is a sequential prompt stream, so changing a
+/// choice restarts the same method and replays the kept answers, matching each
+/// replayed prompt by message and option IDs. A prompt that no longer matches
+/// ends the replay and the user continues from there.
+struct ProviderAuthSelectionTrail: Equatable {
+    struct Step: Equatable {
+        let message: String
+        let options: [ProviderAuthPromptState.Option]
+        let chosenID: String
+    }
+
+    private(set) var steps: [Step] = []
+    private var replay: [Step] = []
+
+    var isReplaying: Bool { !replay.isEmpty }
+
+    mutating func reset() {
+        steps = []
+        replay = []
+    }
+
+    mutating func record(_ prompt: ProviderAuthPromptState, chosenID: String) {
+        guard prompt.kind == .select else { return }
+        steps.append(Step(message: prompt.message, options: prompt.options, chosenID: chosenID))
+    }
+
+    /// Replaces the answer at `index`, dropping later answers, and queues the
+    /// resulting answers for the restarted operation.
+    mutating func change(stepAt index: Int, to optionID: String) {
+        guard steps.indices.contains(index),
+              steps[index].chosenID != optionID,
+              steps[index].options.contains(where: { $0.id == optionID }) else { return }
+        let changed = Step(message: steps[index].message, options: steps[index].options, chosenID: optionID)
+        steps = Array(steps[..<index]) + [changed]
+        replay = steps
+    }
+
+    /// The queued answer for this prompt, without consuming it.
+    func replayAnswer(for prompt: ProviderAuthPromptState) -> String? {
+        guard let next = replay.first, matches(next, prompt) else { return nil }
+        return next.chosenID
+    }
+
+    /// Consumes the queued answer for this prompt. A non-matching prompt ends
+    /// the replay and discards the answers it can no longer confirm.
+    mutating func consumeReplay(for prompt: ProviderAuthPromptState) -> String? {
+        guard let next = replay.first else { return nil }
+        guard matches(next, prompt) else {
+            steps.removeLast(replay.count)
+            replay = []
+            return nil
+        }
+        replay.removeFirst()
+        return next.chosenID
+    }
+
+    private func matches(_ step: Step, _ prompt: ProviderAuthPromptState) -> Bool {
+        prompt.kind == .select
+            && prompt.message == step.message
+            && prompt.options.map(\.id) == step.options.map(\.id)
+    }
+}
+
+/// One standard settings group of selectable rows, shared by provider
+/// connection methods and provider choice prompts. Every option stays visible;
+/// the chosen row carries a checkmark and busy work disables the group.
+struct ProviderChoiceGroup: View {
+    struct Choice: Identifiable {
+        let id: String
+        /// Nil for plain prompt options, which use a radio indicator instead.
+        let icon: String?
+        let title: String
+        let subtitle: String?
+    }
+
+    let title: String
+    let choices: [Choice]
+    let selectedID: String?
+    let busyID: String?
+    let isDisabled: Bool
+    let onSelect: (String) -> Void
+
+    var body: some View {
+        TronSettingsGroup(title, accent: .tronEmerald) {
+            VStack(spacing: 0) {
+                ForEach(Array(choices.enumerated()), id: \.element.id) { index, choice in
+                    if index > 0 { TronSettingsDivider(accent: .tronEmerald) }
+                    Button { if choice.id != selectedID { onSelect(choice.id) } } label: {
+                        TronSettingsRow(
+                            icon: choice.icon ?? (selectedID == choice.id ? "checkmark.circle.fill" : "circle"),
+                            title: choice.title,
+                            subtitle: choice.subtitle,
+                            accent: .tronEmerald
+                        ) {
+                            if busyID == choice.id {
+                                TronPulseLoadingIndicator(size: 18)
+                            } else if choice.icon != nil, selectedID == choice.id {
+                                Image(systemName: "checkmark")
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                                    .tronSettingsAccent()
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isDisabled)
+                    .accessibilityAddTraits(selectedID == choice.id ? .isSelected : [])
+                }
+            }
+        }
+    }
+}
+
 /// The visible provider configuration sheet owns this operation-keyed auth
 /// content so selecting a credential method never opens an unrelated presenter.
+/// Answered choices remain in place above the current step; nothing animates
+/// in or out, so each step simply appears below the last.
 struct ProviderAuthFlowContent: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var contentKey: String {
-        "\(model.authEvent?.kind.rawValue ?? ""):\(model.authEvent?.operationId ?? ""):\(model.authPrompt?.id ?? "")"
-    }
-
-    private var revealTransition: AnyTransition {
-        reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top))
-    }
+    let trail: ProviderAuthSelectionTrail
+    let answeringPromptID: String?
+    let answeringOptionID: String?
+    let isDisabled: Bool
+    let onChoose: (ProviderAuthPromptState, String) -> Void
+    let onChangeStep: (Int, String) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: TronSpacing.section) {
             if let recovered = model.recoveredAuthOperationID,
                model.authEvent?.operationId == recovered || model.authPrompt?.operationId == recovered {
                 RecoveredAuthControls(operationID: recovered)
-                    .transition(revealTransition)
+            }
+            ForEach(Array(trail.steps.enumerated()), id: \.offset) { index, step in
+                ProviderChoiceGroup(
+                    title: Self.title(step.message),
+                    choices: step.options.map(Self.choice),
+                    selectedID: step.chosenID,
+                    busyID: nil,
+                    isDisabled: isDisabled,
+                    onSelect: { onChangeStep(index, $0) }
+                )
             }
             if let event = model.authEvent,
                event.kind == .authURL || model.authPrompt == nil {
                 AuthEventContent(event: event)
-                    .transition(revealTransition)
             }
-            if let prompt = model.authPrompt {
-                AuthPromptContent(prompt: prompt)
-                    .transition(revealTransition)
-            }
-            if model.authPrompt == nil && model.authEvent == nil {
-                TronLoadingState(label: "Finishing provider login…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .transition(revealTransition)
+            if let prompt = model.authPrompt, trail.replayAnswer(for: prompt) == nil {
+                if prompt.kind == .select {
+                    ProviderChoiceGroup(
+                        title: Self.title(prompt.message),
+                        choices: prompt.options.map(Self.choice),
+                        selectedID: nil,
+                        busyID: answeringPromptID == prompt.id ? answeringOptionID : nil,
+                        isDisabled: isDisabled,
+                        onSelect: { onChoose(prompt, $0) }
+                    )
+                } else {
+                    AuthPromptContent(prompt: prompt)
+                }
             }
         }
-        .animation(
-            reduceMotion ? .linear(duration: 0.12) : .snappy(duration: 0.24),
-            value: contentKey
-        )
+    }
+
+    /// SDK prompt messages are written as terminal questions ("Select …:").
+    static func title(_ message: String) -> String {
+        var title = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if title.hasSuffix(":") { title.removeLast() }
+        return title
+    }
+
+    private static func choice(_ option: ProviderAuthPromptState.Option) -> ProviderChoiceGroup.Choice {
+        ProviderChoiceGroup.Choice(id: option.id, icon: nil, title: option.label, subtitle: option.description)
     }
 }
 
@@ -80,7 +213,7 @@ private struct RecoveredAuthControls: View {
         working = true
         Task {
             defer { working = false }
-            do { try await model.restartAuth() }
+            do { try await model.restartAuth(operationID: operationID) }
             catch is CancellationError { }
             catch { model.presentError(error) }
         }
@@ -110,52 +243,24 @@ private struct AuthPromptContent: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
 
-            if prompt.kind == .select {
-                ForEach(prompt.options) { option in
-                    Button {
-                        submit(option.id)
-                    } label: {
-                        HStack(alignment: .top, spacing: TronSpacing.md) {
-                            Image(systemName: "chevron.right.circle")
-                                .tronSettingsAccent()
-                                .accessibilityHidden(true)
-                            VStack(alignment: .leading, spacing: TronSpacing.xs) {
-                                Text(option.label)
-                                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                                    .foregroundStyle(Color.tronTextPrimary)
-                                if let description = option.description {
-                                    Text(description)
-                                        .font(TronTypography.bodySM)
-                                        .foregroundStyle(Color.tronTextSecondary)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                            }
-                            Spacer(minLength: 0)
-                        }
-                    }
-                    .buttonStyle(TronActionButtonStyle())
-                    .disabled(submitting)
+            Group {
+                if prompt.kind == .secret {
+                    SecureField(prompt.placeholder ?? "Value", text: $value)
+                        .textContentType(.password)
+                } else {
+                    TextField(prompt.placeholder ?? "Value", text: $value)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
                 }
-            } else {
-                Group {
-                    if prompt.kind == .secret {
-                        SecureField(prompt.placeholder ?? "Value", text: $value)
-                            .textContentType(.password)
-                    } else {
-                        TextField(prompt.placeholder ?? "Value", text: $value)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                    }
-                }
-                .tronField(monospaced: prompt.kind == .secret)
-
-                TronPrimaryActionButton(
-                    title: submitting ? "Submitting…" : (prompt.kind == .manualCode ? "Complete Login" : "Save"),
-                    systemImage: prompt.kind == .manualCode ? "checkmark.shield" : TronSaveActionPresentation.systemImage,
-                    isBusy: submitting,
-                    isEnabled: !value.isEmpty && !submitting
-                ) { submit(value) }
             }
+            .tronField(monospaced: prompt.kind == .secret)
+
+            TronPrimaryActionButton(
+                title: submitting ? "Submitting…" : (prompt.kind == .manualCode ? "Complete Login" : "Save"),
+                systemImage: prompt.kind == .manualCode ? "checkmark.shield" : TronSaveActionPresentation.systemImage,
+                isBusy: submitting,
+                isEnabled: !value.isEmpty && !submitting
+            ) { submit(value) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .onChange(of: prompt.id) { _, _ in value = "" }
@@ -176,7 +281,6 @@ private struct AuthPromptContent: View {
 private struct AuthEventContent: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let event: AppModel.AuthEventState
     @State private var browserSession = ProviderOAuthBrowserSession()
     @State private var openingBrowser = false
@@ -236,9 +340,6 @@ private struct AuthEventContent: View {
                 if let browserError {
                     TronCaption(browserError)
                         .foregroundStyle(Color.tronError)
-                        .transition(
-                            reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top))
-                        )
                 }
                 if event.callbackCapture == nil && !manualTextPromptForEvent {
                     TronCaption("Waiting for this login attempt to request a manual callback…")
@@ -252,10 +353,6 @@ private struct AuthEventContent: View {
                 }
             }
         }
-        .animation(
-            reduceMotion ? .linear(duration: 0.12) : .snappy(duration: 0.2),
-            value: browserError
-        )
     }
 
     @ViewBuilder private var deviceCodeContent: some View {

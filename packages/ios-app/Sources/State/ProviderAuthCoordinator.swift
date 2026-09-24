@@ -318,6 +318,10 @@ final class ProviderAuthCoordinator {
         return operationID
     }
 
+    func activeAuthType(providerID: String, target: ProviderCatalogTarget) -> String? {
+        activeOperationID(providerID: providerID, target: target).flatMap { authTypeByAuthOperation[$0] }
+    }
+
     func preferredAvailableModel(for target: ProviderCatalogTarget) -> ModelRef? {
         let available = catalog(for: target)?.models.filter(\.available) ?? []
         return available.first(where: { $0.provider == "openai-codex" && $0.id == "gpt-5.6-sol" })?.ref
@@ -436,10 +440,11 @@ final class ProviderAuthCoordinator {
         }
     }
 
-    /// Explicitly replaces the recovered active operation. The Gateway retires
-    /// it (invalidating its authorization link) before starting the successor.
-    func restartAuth() async throws {
-        guard let operationID = activeRecoveredOperationID,
+    /// Explicitly replaces the named active operation with the same provider
+    /// method. The Gateway retires it (invalidating its authorization link)
+    /// before starting the successor; a stale ID sends nothing.
+    func restartAuth(operationID: String) async throws {
+        guard operationID == activeAuthOperationID,
               let providerID = providerByAuthOperation[operationID],
               let target = targetByAuthOperation[operationID],
               let authType = authTypeByAuthOperation[operationID] else { return }

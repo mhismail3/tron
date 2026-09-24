@@ -579,7 +579,8 @@ has lost that operation ID (process loss or a fresh coordinator), a new `auth.be
 operation for the same device/provider/auth-method/target and answers `recovered: true`; the sheet then shows
 **Restart Login** and **Cancel Login** above the replayed flow, which is itself the Continue path. Restart sends
 `replaceOperationId` for that exact operation, warns that the previous authorization link becomes invalid, and the
-sheet adopts the successor so closing it cancels the live login. Because recovery is keyed on the Gateway, a fresh
+sheet adopts the successor so closing it cancels the live login. Changing an answered provider choice uses the
+same exact-operation replacement. Because recovery is keyed on the Gateway, a fresh
 command after an uncertain begin or restart response cannot admit a duplicate. A cancellation whose
 acknowledgement was lost in transit is kept in a bounded four-entry list and retried on `auth.resume`; a definite
 rejection settles it and profile clearing drops it. Leaving Tron
@@ -1429,8 +1430,14 @@ field treatment. Authentication, package installation, and maintenance remain ex
 opens one medium/large standardized configuration sheet at normal inline-navigation content height:
 runtime-advertised API-key and account-login methods are presented together, configured providers expose
 replacement credential or alternate-account login plus credential clearing, and the same visible sheet owns
-the exact operation-keyed auth prompt/event lifecycle. API-key prompts replace the option list in place with
-a header, credential field, and value-gated Save action; they never present another page or sheet.
+the exact operation-keyed auth prompt/event lifecycle. The Connection Method group stays visible with the
+active method checked; choosing another method cancels the owned operation and starts that one. Each step
+appears below the method group without insertion animation: provider choice prompts render as the same
+standard selectable group (radio rows), answered choices stay checked in place, and credential prompts show a
+header, field, and value-gated Save action. Changing an answered choice restarts the same method with
+`replaceOperationId` and replays the kept answers onto matching successor prompts
+(`ProviderAuthSelectionTrail`); a prompt that no longer matches ends the replay. Nothing presents another
+page or sheet.
 Custom-model rows have one Configure capsule; the editor owns a leading Remove toolbar action and
 its standard destructive confirmation sheet. Stable provider UUIDs, not editable identifiers, own
 presentation and field bindings. Removed/reordered rows cannot be indexed or resurrected by a late

@@ -31,9 +31,9 @@ hidden while the native upward sheet gesture remains available.
    Settings, with every runtime-advertised API-key and account-login method in
    one place. An unconfigured provider with one advertised connection method starts
    that method when its sheet opens, so any Pi-owned account choices appear directly;
-   multiple methods and configured-provider replacement controls remain explicit. Newly
-   delivered prompt/event content fades and slides down in place (opacity-only under
-   Reduce Motion). API-key entry stays inline with a value-gated Save action. Browser
+   multiple methods and configured-provider replacement controls remain explicit. The
+   method list stays visible, so the user can switch methods or change an earlier
+   provider choice at any step; new steps appear below without animation. API-key entry stays inline with a value-gated Save action. Browser
    OAuth with an admitted loopback callback opens in `ASWebAuthenticationSession` on iPhone. If a provider
    emits an auth URL followed by a same-operation text/manual-code prompt but no secure callback capture,
    the sheet waits for that prompt, opens the URL in the external browser, and asks the user to return and

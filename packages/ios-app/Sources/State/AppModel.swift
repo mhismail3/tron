@@ -279,6 +279,10 @@ final class AppModel {
     func activeProviderAuthOperationID(providerID: String, target: ProviderCatalogTarget) -> String? {
         providerAuth.activeOperationID(providerID: providerID, target: target)
     }
+
+    func activeProviderAuthType(providerID: String, target: ProviderCatalogTarget) -> String? {
+        providerAuth.activeAuthType(providerID: providerID, target: target)
+    }
     let noticeCenter: InAppNoticeCenter
     var visibleNotices: [InAppNoticeCenter.Notice] { noticeCenter.visibleNotices }
     var context: JSONValue? { sessionPresentation.context }
@@ -3675,10 +3679,10 @@ final class AppModel {
         }
     }
 
-    func restartAuth() async throws {
+    func restartAuth(operationID: String) async throws {
         let admission = try requireCurrentGatewayConnection()
         do {
-            try await providerAuth.restartAuth()
+            try await providerAuth.restartAuth(operationID: operationID)
             try requireConnection(admission)
         } catch {
             guard lifecycle.admits(admission) else {
