@@ -107,7 +107,9 @@ describe("provider usage owner", () => {
     const owner = new ProviderUsageOwner({ fetch });
     const apiKey = runtime("anthropic", "https://api.anthropic.com", { auth: { apiKey: "api-key-fixture" } }, "anthropic-messages", false);
     expect((await owner.read(apiKey, "anthropic")).providers[0]).toMatchObject({ status: "unsupported", windows: [] });
-    const oauthProxy = shapedRuntime("anthropic", [{ api: "anthropic-messages", baseUrl: "https://proxy.example" }], { auth: { apiKey: "oauth-fixture" } });
+    const cortexKitApiKey = runtime("anthropic", "https://api.anthropic.com", { auth: { apiKey: "api-key-fixture" } }, "cortexkit-anthropic-messages", false);
+    expect((await owner.read(cortexKitApiKey, "anthropic")).providers[0]).toMatchObject({ status: "unsupported", windows: [] });
+    const oauthProxy = shapedRuntime("anthropic", [{ api: "cortexkit-anthropic-messages", baseUrl: "https://proxy.example" }], { auth: { apiKey: "oauth-fixture" } });
     expect((await owner.read(oauthProxy, "anthropic")).providers[0]).toMatchObject({ status: "unsupported", windows: [] });
     expect(fetch).not.toHaveBeenCalled();
   });
