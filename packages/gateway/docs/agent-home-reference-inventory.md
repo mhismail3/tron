@@ -2,8 +2,9 @@
 
 This inventory is the repository owner record for the Stable agent-home cutover.
 It classifies path-bearing `.pi` references by owner; it is not a raw grep dump.
-The preflight command is read-only and uses the supported Pi 0.84.4 and
-`pi-subagents` 0.59.0 schemas.
+The preflight command is read-only and uses the schemas of the Pi SDK pinned in
+`packages/gateway/package.json` and of the runtime-installed `pi-subagents`
+package (not a repository dependency).
 
 ## Classification
 
@@ -13,7 +14,7 @@ The preflight command is read-only and uses the supported Pi 0.84.4 and
 | Project-owned | `<project>/.pi/settings.json`, `.pi/agents`, `.pi/skills`, and `.pi/subagents` are project resources/artifacts. They are discovered only from the project cwd and are not part of the user agent-home move. |
 | External owner | `pi-agent-browser-native` retains `~/.pi/config/pi-agent-browser-native/config.json`; browser profiles, cookies, Keychain data, and provider credentials remain external capability stores. Agent-home staging does not relocate or rewrite them. The operator-run Mac reinstall/cutover workflow separately backs up the default browser config; it never copies browser profiles/cookies or reads Keychain stores. |
 | Migration/history | `~/.pi/agent` examples in cutover docs and old paths in canonical JSONL/session history are historical records. Canonical bytes, logs, archives, and session text are never rewritten by preflight or staging. Derived metadata with stale paths requires explicit owner handling. |
-| Package identity | `bin.pi`, `node_modules/.bin/pi`, and pinned Pi package names identify the SDK/payload and are not home references. The SDK remains pinned at 0.84.4; `pi-subagents` remains pinned at 0.59.0. |
+| Package identity | `bin.pi`, `node_modules/.bin/pi`, and pinned Pi package names identify the SDK/payload and are not home references. The SDK version is pinned in `packages/gateway/package.json`; `pi-subagents` is installed at runtime in the agent home. |
 
 ## Fixed cutover gap
 

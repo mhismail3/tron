@@ -13,10 +13,8 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
 
     var id: String { rawValue }
 
-    /// Title rendered in the wizard's shared header row. Each step's
-    /// own body no longer renders a title — it's hoisted into
-    /// `WizardShell` so the icon, title, and progress pill all sit
-    /// on the same baseline.
+    /// Title rendered in the wizard's shared header row (`WizardShell`),
+    /// so the icon, title, and progress pill share one baseline.
     var displayTitle: String {
         switch self {
         case .welcome: return "Tron Installer"

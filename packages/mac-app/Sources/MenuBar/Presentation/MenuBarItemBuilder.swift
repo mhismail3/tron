@@ -44,8 +44,7 @@ enum DebugGatewayMenuState: Equatable, Sendable {
 }
 
 enum MenuBarItemBuilder {
-    /// Builds the menu sequence for a given snapshot. Order matches
-    /// plan §A "Menu bar" layout. Tests in
+    /// Builds the menu sequence for a given snapshot. Tests in
     /// `Tests/MenuBar/Presentation/MenuBarItemBuilderTests.swift` pin the ordering.
     static func build(
         snapshot: ServerStatusSnapshot,

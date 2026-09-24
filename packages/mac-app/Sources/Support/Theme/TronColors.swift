@@ -3,12 +3,10 @@ import AppKit
 
 // MARK: - Tron Color Palette (Mac)
 //
-// Mirrors the emerald-centric palette from
-// `packages/ios-app/Sources/UI/Theme/TronColors.swift` so the Mac wizard,
-// menu bar, and any future Mac surfaces share a visual identity with
-// the iOS app. Hex values are identical to the iOS tokens — the only
-// platform difference is `NSColor` vs `UIColor` for the adaptive
-// dark/light provider.
+// The Mac wizard and menu bar's emerald-centric palette. It follows the iOS
+// palette's look (`packages/ios-app/Sources/UI/Theme/TronTheme.swift`) but
+// is its own set of values; some tokens differ from iOS. Colors adapt to
+// dark and light appearance through `NSColor`.
 //
 // Adding a new token here? Add the matching token to the iOS side too,
 // and vice versa. Drift between platforms is the bug that doc tables

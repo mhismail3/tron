@@ -234,7 +234,7 @@ def stage(profile, home, staging, runner=None):
             read_record(destination)  # report malformed/newer/invalid distinctly
             fail(f"WizardState destination already exists; refusing conflict: {destination}")
         marker = home / "internal" / "run" / ".onboarded"
-        # The non-secret completion sentinel historically uses the app umask.
+        # The non-secret completion sentinel is written with the app umask.
         # Observe owned, non-writable-by-others bytes without chmodding evidence.
         marker_info = secure_file(marker, allow_shared_read=True)
         marker_digest = file_digest(marker) if marker_info is not None else None

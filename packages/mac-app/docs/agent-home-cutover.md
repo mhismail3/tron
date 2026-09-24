@@ -13,7 +13,7 @@ allowed.
 
 Use the reviewed integration revision on `main` (the final source revision is
 authoritative; earlier commits `ff94df9ec`, `adcfe579f`, and `6014b25c8` are
-historical component references). The pinned Pi SDK remains `0.84.4`; the
+historical component references). The Pi SDK is pinned in `packages/gateway/package.json`; the
 bundled runtime contract is Node `22.22.0` with npm `10.9.4`.
 
 Before taking the current installation offline, confirm that the installed

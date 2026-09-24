@@ -185,9 +185,9 @@ export class CatalogMetadataIndex {
       return undefined;
     }
     const prior = new Map(document.rows.map((row) => [resolve(row.path), row]));
-    // Reconcile is an independent bounded read phase. The old implementation
-    // serialized every lstat/header/tail read, turning a valid index into an
-    // O(session-count) startup stall on large catalogs. Keep the candidate
+    // Reconcile is an independent bounded read phase: serializing every
+    // lstat/header/tail read would make a valid index an O(session-count)
+    // startup stall on large catalogs. Keep the candidate
     // order for deterministic output while allowing bounded filesystem
     // parallelism; each candidate still performs the same identity and
     // stability checks before its row is admitted.

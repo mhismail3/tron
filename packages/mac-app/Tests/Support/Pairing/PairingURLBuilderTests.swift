@@ -10,7 +10,7 @@ private func queryValue(_ name: String, in url: URL) -> String? {
 }
 
 /// Tests the Mac-owned `tron://pair` emitter. Runtime parsing belongs to the
-/// iOS `PairingURLParser`, so these assertions inspect emitted URL fields
+/// iOS `PairingInvitationParser`, so these assertions inspect emitted URL fields
 /// without introducing a second production parser.
 @Suite("PairingURLBuilder")
 struct PairingURLBuilderTests {

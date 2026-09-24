@@ -270,7 +270,7 @@ The preflight parses only bounded supported metadata: global `settings.json`,
 package-manifest agent directories, discovered `agents/**/*.md` definitions,
 and the `extensions/subagent/config.json` path fields needed to identify
 executable session, package, extension, skill, prompt, theme, and child-launch
-references. It follows Pi 0.84.4 resource conventions: top-level resource
+references. It follows the pinned Pi SDK's resource conventions: top-level resource
 patterns are relative to the agent home, package-object resource patterns are
 relative to that package source, and agent-definition relative extension and
 skill paths are relative to the definition file. `!`, `+`, `-`, `*`, and `?`
@@ -1433,7 +1433,7 @@ its desired value, even when it matches a previously staged in-memory value.
 Forked transcript projections carry an optional, disposable `forkBoundary` annotation. At runtime bind/rebind and tree navigation, Gateway validates the selected child's contiguous inherited identity/ancestry against the catalog-admitted immediate parent's complete canonical tree. It retains only one inherited-entry anchor, not a transcript mirror; snapshots map that anchor onto the current branch without parent I/O, including after the first child append. Read-only subagent pages derive the anchor from their admitted parent runtime and include the projected annotation in their revision. Regenerated labels are normalized out of ancestry; sanitized/pruned payloads with preserved identities remain inherited. Missing, ambiguous, cyclic, replaced or oversized parents omit the annotation without blocking chat. A header-only relationship or a fork with no retained context cannot establish a marker. Parent reads are inode-fenced and capped at 64 MiB; derived graph scans are linear and capped at 100,000 entries. The annotation carries the stable inherited anchor ID plus its gap ordinal (0...total) in the canonical projected sequence, so inherited-only and hidden-only branches still have a boundary and later child appends cannot move it. It does not change canonical IDs, counts, or paging anchors. iOS owns the gap insertion before visibility folding, including the true canonical tail before streaming, and flushes tool grouping; page ownership is one-sided so adjacent pages cannot duplicate it. `fork-boundary.test.ts`, focused runtime-registry fork regressions, process-transcript lease tests, and `ChatTranscriptProjectionKernelTests` cover ancestry, the actual SDK fork behavior, reopen, wire propagation, paging, hidden tails, and rendering.
 
 `compaction-policy.v1` exposes compaction configuration in the dedicated iOS Settings
-page. Pi 0.84.4 still owns preparation, generation, auth, retry callbacks, split ordering,
+page. The pinned Pi SDK still owns preparation, generation, auth, retry callbacks, split ordering,
 summary validation, canonical checkpointing and continuation. The public
 `session_before_compact` hook captures the exact operation signal; the request adapter
 changes only matching-signal, matching-conversation-model requests. It never generates a

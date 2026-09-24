@@ -27,8 +27,8 @@ git diff main...HEAD --stat
 Stop if `main...HEAD` contains unexpected changes or the worktree is dirty.
 The prepared Gateway artifact must be built from that exact commit, with
 `packages/gateway/package.json` version `0.1.0-beta.7`, Node `>=22.19.0`,
-pinned Pi SDK packages `0.84.4`, and the installed delegated provider
-`pi-subagents 0.59.0`. Run `cd packages/gateway && npm run check:pi-sdk && npm run build`;
+the Pi SDK packages pinned in `packages/gateway/package.json`, and the delegated
+provider `pi-subagents` installed in the agent home. Run `cd packages/gateway && npm run check:pi-sdk && npm run build`;
 record the resulting artifact digest and path. Do not patch installed
 packages or use an artifact built from another commit.
 

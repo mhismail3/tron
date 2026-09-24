@@ -1,7 +1,7 @@
 import Foundation
 
 /// Builds `tron://pair?host=...&port=...&code=...&label=...` URLs for
-/// the iOS `PairingURLParser` to consume.
+/// the iOS `PairingInvitationParser` to consume.
 enum PairingURLBuilder {
     private static let scheme = "tron"
     private static let host = "pair"
