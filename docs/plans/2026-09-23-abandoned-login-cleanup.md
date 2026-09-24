@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, AUTH-1 (unblocked)
+- **Last updated:** 2026-09-24, AUTH-2
 - **Goal:** Make interrupted provider login resumable or explicitly replaceable without accumulating abandoned operations or leaking provider resources.
 
 ## Goal and constraints
@@ -32,7 +32,7 @@ These are investigation inputs, not a complete reproduction. Revalidate the depl
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
 | AUTH-1 | Done | Reproduce abandoned admission and provider-resource retirement; settle the recovery contract | none | worker, 2026-09-24 |
-| AUTH-2 | Claimed | Implement Gateway-owned exact login recovery and replacement | AUTH-1 | worker, 2026-09-24 |
+| AUTH-2 | Done | Implement Gateway-owned exact login recovery and replacement | AUTH-1 | worker, 2026-09-24 |
 | AUTH-3 | Ready | Integrate iPhone resume, restart, and cancellation with authoritative ownership | AUTH-2 | Unassigned |
 | AUTH-4 | Ready | Verify cross-boundary cleanup and publish owning documentation | AUTH-2, AUTH-3 | Unassigned |
 
@@ -152,3 +152,13 @@ Approved for tracking and committed at the user's request. Before AUTH-1, accoun
 - Kept on purpose: No SDK or provider patch. The post-code exchange window has no local resource and is fenced by Pi's credential mutation, so joining it would need an SDK change the contract does not require.
 - Deviations: Listener close/rebind remains proven with the synthetic signal-aware fixture because the selected provider has no listener. The iPhone handoff listener is AUTH-3's resource.
 - For the next agent: AUTH-2 implements contract items 1–5 in `AuthBroker` and `gateway-service.ts` (`recovered` response field, `replaceOperationId`, one-active-per-key, callback port conflict, and truthful late-commit projection). The `auth.begin` change is additive (optional request field, new response field), so AUTH-2 can land first and AUTH-3 consumes it. Update protocol fixtures in `packages/protocol-fixtures` with AUTH-2.
+
+### AUTH-2 · Done · 2026-09-24 · worker
+
+- Result: `AuthBroker` enforces one active operation per owner/provider/auth-method/target key, recovers it for a fresh `auth.begin` before capacity (`recovered: true`), and supports explicit restart through `replaceOperationId`. A successor's provider login waits for its predecessor's Pi login to settle (30 s bound, then a retryable failure while the predecessor keeps its drain work). Fixed-port callback captures owned by another active login are withheld. A success Pi committed after cancel or timeout now updates the tombstone, emits `auth.completed` and broadcasts `providers.changed`.
+- Evidence: `npx vitest run src/admin/auth-broker.test.ts` 21/21. Full Gateway `npx vitest run` passed 173/174 files; the two failures came from the `start()` return-type change in `global-provider-resources.test.ts`. After fixing them, `npx vitest run src/admin` passed 93/93. `npm run build` is clean. Negative controls: disabling recovery, the predecessor wait, or the late-success projection each fails the targeted tests.
+- Changes: this commit (`auth-broker.ts`, `gateway-service.ts`, tests, Gateway README).
+- Tasks added: none.
+- Kept on purpose: Admission stays synchronous because `DeviceStore.admitDevice` requires a synchronous register; the settlement wait is deferred into the login chain instead. A callback port conflict falls back to manual code rather than failing the login. No protocol fixture exists for `auth.begin`, so none changed. The change is additive, and current iOS ignores `recovered`.
+- Deviations: The settlement boundary is Pi's login promise, not the provider's own promise. Pi hides the provider promise, so a listener-owning provider that ignores abort can still hold its port after the successor starts (see AUTH-1 findings). The successor's own listen failure stays bounded to that operation.
+- For the next agent: AUTH-3 consumes `recovered` and sends `replaceOperationId` for Restart. A restart that returns `busy` for an unsettled predecessor completes asynchronously as `auth.completed` failure with a retryable message, not as an RPC error.

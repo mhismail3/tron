@@ -96,7 +96,7 @@ describe("global provider resources", () => {
     await expect(dashboard.invoke(client, "provider.list", {})).resolves.toMatchObject({
       providers: expect.arrayContaining([expect.objectContaining({ id: "global-fixture", modelCount: 1 })]),
     });
-    const operationId = f.broker.start("dashboard", "global-fixture", "oauth", f.runtime, "dashboard-device", "login-1", "global");
+    const operationId = f.broker.start("dashboard", "global-fixture", "oauth", f.runtime, "dashboard-device", "login-1", "global").operationId;
     await waitFor(() => f.events.some((event) => event.topic === "auth.completed"));
     expect(f.runtime.isUsingOAuth("global-fixture")).toBe(true);
     expect(f.events).toContainEqual(expect.objectContaining({
@@ -314,7 +314,7 @@ describe("global provider resources", () => {
     await configure(f.agentDir, [f.extensionPath]);
     const resources = await f.createResources();
     f.broadcast.mockClear();
-    const operationId = f.broker.start("dashboard", "global-fixture", "oauth", f.runtime, "dashboard-device", "login-1", "global");
+    const operationId = f.broker.start("dashboard", "global-fixture", "oauth", f.runtime, "dashboard-device", "login-1", "global").operationId;
     await waitFor(() => f.events.some((event) => event.topic === "auth.prompt"));
     const refreshed = new Promise<void>((resolve) => f.broadcast.mockImplementationOnce(resolve));
     await writeFile(join(f.agentDir, "settings.json"), JSON.stringify({ extensions: [] }));

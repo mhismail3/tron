@@ -1472,6 +1472,7 @@ export class GatewayService {
         const commandId = params.commandId === undefined
           ? undefined
           : string(params.commandId, "commandId", { min: 8, max: 160 });
+        const replaceOperationId = optionalString(params.replaceOperationId, "replaceOperationId", 100);
         const modelRuntime = await this.modelRuntime(params);
         const start = () => this.dependencies.auth.start(
           client.id,
@@ -1481,12 +1482,13 @@ export class GatewayService {
           client.identity,
           commandId,
           sessionId === undefined ? "global" : `session:${sessionId}`,
+          replaceOperationId,
         );
-        const operationId = client.isLocal
+        const admission = client.isLocal
           ? start()
           : await this.dependencies.devices.admitDevice(client.identity, start);
-        if (!operationId) throw new GatewayError("unauthenticated", "The authenticated mobile device is no longer paired");
-        return { operationId };
+        if (!admission) throw new GatewayError("unauthenticated", "The authenticated mobile device is no longer paired");
+        return { operationId: admission.operationId, recovered: admission.recovered };
       }
       case "auth.respond": {
         const answered = this.dependencies.auth.respond(

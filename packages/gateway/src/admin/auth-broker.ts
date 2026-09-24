@@ -36,6 +36,15 @@ interface AuthOperation {
   callback: OAuthCallbackCapture | undefined;
   timer: NodeJS.Timeout;
   work?: GatewayWorkHandle;
+  /** Settles when Pi's login promise for this exact operation settles. */
+  settled: Promise<void>;
+}
+
+/** Result of `auth.begin`: either a new admission or the recovered active
+ * operation for the same owner/provider/auth-method/target. */
+export interface AuthAdmission {
+  operationId: string;
+  recovered: boolean;
 }
 
 interface AuthCompletion {
@@ -58,6 +67,8 @@ interface BeginReceipt {
   providerId: string;
   authType: AuthType;
   targetKey: string;
+  replaceOperationId: string | undefined;
+  recovered: boolean;
   expiresAt: number;
 }
 
@@ -74,6 +85,11 @@ const MAX_AUTH_ERROR_BYTES = 8 * 1_024;
 const MAX_CALLBACK_QUERY_BYTES = 16 * 1_024;
 const CALLBACK_RELAY_TIMEOUT_MS = 35_000;
 const MAX_CALLBACK_RESPONSE_BYTES = 64 * 1_024;
+const DEFAULT_PREDECESSOR_SETTLE_TIMEOUT_MS = 30_000;
+
+function recoveryKey(ownerIdentity: string, providerId: string, authType: AuthType, targetKey: string): string {
+  return `${ownerIdentity}\0${providerId}\0${authType}\0${targetKey}`;
+}
 
 function boundedError(value: unknown): string {
   let text: string;
@@ -150,10 +166,15 @@ export class AuthBroker {
   private readonly operations = new Map<string, AuthOperation>();
   private readonly retiredOperations = new Map<string, RetiredAuthOperation>();
   private readonly beginReceipts = new Map<string, BeginReceipt>();
+  /** Latest Pi login promise per recovery key whose operation may still be
+   * settling. A successor for the same key starts its provider login only after
+   * this settles, so replacement never races its predecessor's resources. */
+  private readonly unsettledLogins = new Map<string, Promise<void>>();
 
   private readonly maximumOperations: number;
   private readonly maximumOperationsPerClient: number;
   private readonly operationTimeoutMs: number;
+  private readonly predecessorSettleTimeoutMs: number;
   private readonly workRegistry: GatewayWorkRegistry | undefined;
   private pendingGlobalProviderRefresh: (() => Promise<void>) | undefined;
   private runningGlobalProviderRefresh = false;
@@ -167,17 +188,20 @@ export class AuthBroker {
       maximumOperations?: number;
       maximumOperationsPerClient?: number;
       operationTimeoutMs?: number;
+      predecessorSettleTimeoutMs?: number;
       workRegistry?: GatewayWorkRegistry;
     } = {},
   ) {
     this.maximumOperations = options.maximumOperations ?? DEFAULT_MAX_AUTH_OPERATIONS;
     this.maximumOperationsPerClient = options.maximumOperationsPerClient ?? DEFAULT_MAX_AUTH_OPERATIONS_PER_CLIENT;
     this.operationTimeoutMs = options.operationTimeoutMs ?? DEFAULT_AUTH_OPERATION_TIMEOUT_MS;
+    this.predecessorSettleTimeoutMs = options.predecessorSettleTimeoutMs ?? DEFAULT_PREDECESSOR_SETTLE_TIMEOUT_MS;
     this.workRegistry = options.workRegistry;
     if (!Number.isSafeInteger(this.maximumOperations) || this.maximumOperations < 1
       || !Number.isSafeInteger(this.maximumOperationsPerClient) || this.maximumOperationsPerClient < 1
       || this.maximumOperationsPerClient > this.maximumOperations
-      || !Number.isSafeInteger(this.operationTimeoutMs) || this.operationTimeoutMs < 1) {
+      || !Number.isSafeInteger(this.operationTimeoutMs) || this.operationTimeoutMs < 1
+      || !Number.isSafeInteger(this.predecessorSettleTimeoutMs) || this.predecessorSettleTimeoutMs < 1) {
       throw new Error("Authentication operation bounds are invalid");
     }
   }
@@ -190,6 +214,19 @@ export class AuthBroker {
     this.drainGlobalProviderRefresh();
   }
 
+  /**
+   * Admit, recover, or replace one authentication operation. Admission is
+   * synchronous because device admission requires it; a replacement's provider
+   * login is deferred until its predecessor's Pi login promise settles.
+   *
+   * - A retried command ID returns its original admission.
+   * - An active operation with the same owner/provider/auth-method/target is
+   *   recovered (delivery rebound, bounded state replayed) before capacity is
+   *   enforced, so a client that lost its operation ID never consumes a slot.
+   * - `replaceOperationId` naming that exact active operation retires it and
+   *   admits a successor. A stale ID (already retired) admits or recovers
+   *   normally; one naming a different key is a conflict.
+   */
   start(
     clientId: string,
     providerId: string,
@@ -198,13 +235,15 @@ export class AuthBroker {
     ownerIdentity = clientId,
     commandId?: string,
     targetKey = "global",
-  ): string {
+    replaceOperationId?: string,
+  ): AuthAdmission {
     this.pruneRetainedState();
     const receiptKey = commandId ? `${ownerIdentity}\0${commandId}` : undefined;
     if (receiptKey) {
       const receipt = this.beginReceipts.get(receiptKey);
       if (receipt) {
-        if (receipt.providerId !== providerId || receipt.authType !== authType || receipt.targetKey !== targetKey) {
+        if (receipt.providerId !== providerId || receipt.authType !== authType || receipt.targetKey !== targetKey
+          || receipt.replaceOperationId !== replaceOperationId) {
           throw new GatewayError("conflict", "Authentication command ID was already used with different parameters");
         }
         const active = this.operations.get(receipt.operationId);
@@ -215,8 +254,29 @@ export class AuthBroker {
           const retired = this.retiredOperations.get(receipt.operationId);
           if (retired?.completion) this.emit(clientId, "auth.completed", retired.completion as unknown as JsonValue);
         }
-        return receipt.operationId;
+        return { operationId: receipt.operationId, recovered: receipt.recovered };
       }
+    }
+
+    const key = recoveryKey(ownerIdentity, providerId, authType, targetKey);
+    if (replaceOperationId !== undefined) {
+      const replaced = this.operations.get(replaceOperationId);
+      if (replaced) {
+        this.requireOwner(replaced, ownerIdentity);
+        if (recoveryKey(replaced.ownerIdentity, replaced.providerId, replaced.authType, replaced.targetKey) !== key) {
+          throw new GatewayError("conflict", "Authentication replacement targets a different provider login");
+        }
+        replaced.controller.abort();
+        this.retire(replaced, "Authentication restarted");
+      }
+    }
+    const existing = [...this.operations.values()].find((operation) =>
+      recoveryKey(operation.ownerIdentity, operation.providerId, operation.authType, operation.targetKey) === key);
+    if (existing) {
+      existing.deliveryClientId = clientId;
+      if (receiptKey) this.recordReceipt(receiptKey, existing, replaceOperationId, true);
+      this.replay(existing);
+      return { operationId: existing.id, recovered: true };
     }
 
     if (targetKey === "global" && (this.pendingGlobalProviderRefresh || this.runningGlobalProviderRefresh)) {
@@ -236,6 +296,7 @@ export class AuthBroker {
       throw new GatewayError("busy", "Concurrent authentication operations reached their bounded capacity", true);
     }
 
+    const predecessor = this.unsettledLogins.get(key);
     let operation!: AuthOperation;
     const controller = new AbortController();
     const work = this.workRegistry?.begin({
@@ -260,28 +321,24 @@ export class AuthBroker {
       latestEvent: undefined,
       callback: undefined,
       timer,
+      settled: Promise.resolve(),
       ...(work ? { work } : {}),
     };
     this.operations.set(operation.id, operation);
     if (targetKey === "global") this.unsettledGlobalAuthOperations.add(operation);
-    if (receiptKey) {
-      this.beginReceipts.set(receiptKey, {
-        ownerIdentity,
-        operationId: operation.id,
-        providerId,
-        authType,
-        targetKey,
-        expiresAt: Date.now() + RETIRED_AUTH_OPERATION_TTL_MS,
-      });
-      this.boundBeginReceipts();
-    }
+    if (receiptKey) this.recordReceipt(receiptKey, operation, replaceOperationId, false);
 
     const interaction = {
       signal: operation.controller.signal,
       prompt: (prompt: AuthPrompt) => this.prompt(operation, prompt),
       notify: (event: AuthEvent) => {
         if (this.operations.get(operation.id) !== operation) return;
-        const capture = callbackCapture(event);
+        // A fixed provider callback port can be held by another active login.
+        // Relaying this operation's callback there would deliver its code to
+        // the wrong listener, so withhold the capture and keep manual entry.
+        let capture = callbackCapture(event);
+        if (capture && [...this.operations.values()].some((other) => other !== operation
+          && other.callback?.host === capture!.host && other.callback.port === capture!.port)) capture = undefined;
         if (capture) operation.callback = capture;
         const payload = {
           operationId: operation.id,
@@ -293,20 +350,60 @@ export class AuthBroker {
         this.emitToOperation(operation, "auth.event", payload);
       },
     };
-    void Promise.resolve()
-      .then(() => modelRuntime.login(providerId, authType, interaction))
+    operation.settled = this.awaitPredecessor(predecessor)
+      .then(() => {
+        if (this.operations.get(operation.id) !== operation) {
+          throw new GatewayError("cancelled", "Authentication operation ended");
+        }
+        return modelRuntime.login(providerId, authType, interaction);
+      })
       .then(
         () => this.complete(operation, true),
         (error: unknown) => this.complete(operation, false, error),
       )
       .finally(() => {
         operation.work?.settle();
+        if (this.unsettledLogins.get(key) === operation.settled) this.unsettledLogins.delete(key);
         if (operation.targetKey === "global") {
           this.unsettledGlobalAuthOperations.delete(operation);
           this.drainGlobalProviderRefresh();
         }
       });
-    return operation.id;
+    this.unsettledLogins.set(key, operation.settled);
+    return { operationId: operation.id, recovered: false };
+  }
+
+  private awaitPredecessor(predecessor: Promise<void> | undefined): Promise<void> {
+    if (!predecessor) return Promise.resolve();
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new GatewayError(
+        "busy",
+        "The previous login for this provider is still finishing; restart again shortly",
+        true,
+      )), this.predecessorSettleTimeoutMs);
+      timer.unref();
+      const settle = () => { clearTimeout(timer); resolve(); };
+      void predecessor.then(settle, settle);
+    });
+  }
+
+  private recordReceipt(
+    receiptKey: string,
+    operation: AuthOperation,
+    replaceOperationId: string | undefined,
+    recovered: boolean,
+  ): void {
+    this.beginReceipts.set(receiptKey, {
+      ownerIdentity: operation.ownerIdentity,
+      operationId: operation.id,
+      providerId: operation.providerId,
+      authType: operation.authType,
+      targetKey: operation.targetKey,
+      replaceOperationId,
+      recovered,
+      expiresAt: Date.now() + RETIRED_AUTH_OPERATION_TTL_MS,
+    });
+    this.boundBeginReceipts();
   }
 
   private prompt(operation: AuthOperation, prompt: AuthPrompt): Promise<string> {
@@ -547,7 +644,18 @@ export class AuthBroker {
       ...(success ? {} : { error: boundedError(error) }),
     };
     const deliveryClientId = operation.deliveryClientId;
-    if (!this.retire(operation, "Authentication flow ended", completion)) return;
+    if (!this.retire(operation, "Authentication flow ended", completion)) {
+      // Pi resolves login only after its credential mutation committed. If
+      // cancellation or timeout retired the UI operation after that mutation
+      // began, the credential is canonical; project it truthfully instead of
+      // leaving a false cancellation tombstone.
+      if (!success) return;
+      const retired = this.retiredOperations.get(operation.id);
+      if (retired) retired.completion = completion;
+      if (deliveryClientId) this.emit(deliveryClientId, "auth.completed", completion as unknown as JsonValue);
+      this.broadcast("providers.changed", {});
+      return;
+    }
     if (deliveryClientId) this.emit(deliveryClientId, "auth.completed", completion as unknown as JsonValue);
     if (success) this.broadcast("providers.changed", {});
   }

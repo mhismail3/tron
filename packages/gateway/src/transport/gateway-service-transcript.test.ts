@@ -114,7 +114,7 @@ describe("session transcript paging", () => {
       let enterRuntime!: () => void;
       const runtimeEntered = new Promise<void>((resolve) => { enterRuntime = resolve; });
       const runtimeGate = new Promise<void>((resolve) => { releaseRuntime = resolve; });
-      const authStart = vi.fn(() => "operation");
+      const authStart = vi.fn(() => ({ operationId: "operation", recovered: false }));
       const service = new GatewayService({
         config: { tronHome: root },
         devices,

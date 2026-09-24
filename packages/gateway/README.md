@@ -1483,10 +1483,21 @@ device revocation, Gateway shutdown, and timeout retire exactly once. A WebSocke
 only detaches event delivery: `auth.resume` rebinds the same stable-device-owned operation to a
 replacement connection and replays its latest bounded event/prompt or terminal tombstone. Current
 clients send a `commandId` with `auth.begin`; a bounded in-memory admission receipt returns the
-same operation for an uncertain duplicate without claiming that login completed. This receipt only recovers
-requests that retain and retry the same command ID. A fresh `auth.begin` with a new command ID does not
-search for an existing owner/provider/auth-method/target operation; if the client lost its operation ID and
-command ID, it can allocate another slot until the bounded capacity is reached. Provider prompt/event projections
+same operation for an uncertain duplicate without claiming that login completed. At most one operation is
+active per owner/provider/auth-method/target key: a fresh `auth.begin` with a new command ID recovers that
+operation before capacity is enforced, rebinds delivery, replays its bounded event/prompt, and answers
+`{ operationId, recovered: true }`, so a client that lost its operation ID never consumes another slot.
+Restart is explicit: `auth.begin` with `replaceOperationId` naming that exact active operation retires it and
+admits a successor (`recovered: false`). A stale replacement ID recovers or admits normally; one naming another
+owner is `not_found` and another key is `conflict`. The receipt includes the replacement ID, so an uncertain
+restart retry returns the same successor. Admission stays synchronous under device admission, but a successor
+starts its provider login only after the previous login for its key settles in Pi; if that takes longer than
+30 seconds the successor completes with a retryable failure while the predecessor keeps its drain work.
+A callback capture whose loopback host/port another active operation already owns is withheld, so a fixed-port
+callback cannot be relayed into the wrong login's listener; that login continues through manual code entry.
+Pi resolves a login only after its credential mutation began, so a success arriving after cancellation or
+timeout is projected truthfully: the tombstone becomes a successful completion, `auth.completed` is emitted,
+and `providers.changed` is broadcast. Provider prompt/event projections
 are limited to 128 KiB before broadcast, and late callbacks from retired operations
 are inert. Cancellation aborts the exact SDK login signal, but Pi's `ModelRuntime.login` races an abort against the provider promise; it can therefore settle and release Gateway work while an abort-ignoring provider call is still running. Credential storage is separately fenced by Pi's abort-aware credential mutation, but broker retirement or drain release does not prove the underlying provider settled or its resources closed. Pi's legacy OAuth adapter routes provider `onPrompt`/manual-code requests to the broker-owned prompt, and retirement rejects that exact prompt; a provider awaiting its pasted code therefore settles on cancellation even when it ignores the signal. Provider work after an accepted code (for example a token exchange) is outside that boundary. Bounded 15-minute tombstones make duplicate or reordered
 `auth.respond`, `auth.callback`, `auth.resume`, and `auth.cancel` requests harmless without retaining prompt values.
