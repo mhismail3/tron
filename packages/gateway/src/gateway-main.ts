@@ -128,7 +128,7 @@ const auth = new AuthBroker(
   modelRuntime,
   (clientId, topic, payload) => transport?.emitToClient(clientId, topic, payload),
   (topic, payload) => transport?.broadcast(topic, payload),
-  { workRegistry },
+  { workRegistry, log: (level, message, event) => logger.log(level, message, { event, source: "auth" }) },
 );
 const globalProviderResources = await GlobalProviderResources.create({
   cwd: homedir(),

@@ -11,6 +11,7 @@ export const gatewayWorkKinds = [
   "terminal-receipt-persistence",
   "extension-command-prompt-ui",
   "administrative-provider-package-operation",
+  "provider-login",
   "automation-dispatch",
   "automation-terminal-persistence",
   "knowledge-observation",

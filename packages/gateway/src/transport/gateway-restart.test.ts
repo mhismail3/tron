@@ -32,6 +32,7 @@ function service(options: {
   workRegistry?: GatewayWorkRegistry;
   rename?: (name: string) => Promise<void>;
   upsertGrant?: (input: unknown) => Promise<unknown>;
+  cancelWaitingLogins?: () => void;
 } = {}) {
   const snapshot = drain((options.activeSessions ?? []).length);
   const dependencies = {
@@ -49,6 +50,7 @@ function service(options: {
       beginRestartDrain: () => (options.activeTerminals ?? []).length === 0,
     },
     receipts: { execute: options.executeReceipt ?? (async (_identity: string, _method: string, _commandId: string, operation: () => Promise<unknown>) => operation()) },
+    auth: { cancelWaitingForRestart: options.cancelWaitingLogins ?? (() => {}) },
     devices: { hasDevice: async () => true },
     notifications: {
       upsertGrant: options.upsertGrant ?? (async () => ({})),
@@ -110,7 +112,8 @@ describe("Gateway administrative restart", () => {
     vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1");
     vi.useFakeTimers();
     const requestRestart = vi.fn();
-    const gateway = service({ activeSessions: ["session-1"], requestRestart });
+    const cancelWaitingLogins = vi.fn();
+    const gateway = service({ activeSessions: ["session-1"], requestRestart, cancelWaitingLogins });
 
     await expect(gateway.invoke(client, "gateway.restart", { commandId: "restart-command" })).resolves.toEqual({
       restarting: false,
@@ -120,6 +123,7 @@ describe("Gateway administrative restart", () => {
       drainRevision: 1,
       drain: drain(1),
     });
+    expect(cancelWaitingLogins).toHaveBeenCalledTimes(1);
     for (const method of ["settings.update", "session.attention.set", "gateway.update.config", "gateway.update", "gateway.rollback"]) {
       await expect(gateway.invoke(client, method, {})).rejects.toMatchObject({ code: "busy" });
     }
@@ -194,6 +198,7 @@ describe("Gateway administrative restart", () => {
         attach: () => ({ terminal: {}, chunks: [], reset: false }),
       },
       receipts: { execute: async (_identity: string, _method: string, _commandId: string, operation: () => Promise<unknown>) => operation() },
+      auth: { cancelWaitingForRestart: () => {} },
       requestRestart: () => {},
     } as unknown as GatewayServiceDependencies;
     const gateway = new GatewayService(dependencies);

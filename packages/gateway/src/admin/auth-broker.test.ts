@@ -238,6 +238,35 @@ describe("AuthBroker", () => {
     expect(() => broker.start("phone", "provider", "api_key")).toThrow(/draining/u);
   });
 
+  it("restart cancels logins waiting on the user but keeps a completing login", async () => {
+    const registry = new GatewayWorkRegistry("epoch", 8);
+    const events: Array<{ client: string; topic: string; payload: JsonValue }> = [];
+    const logs: string[] = [];
+    const broker = new AuthBroker(runtimeWithLogin(async (interaction) => {
+      await interaction.prompt({ type: "secret", message: "Enter API key" });
+      await new Promise<void>(() => {});
+    }), (client, topic, payload) => events.push({ client, topic, payload }), () => {}, {
+      workRegistry: registry,
+      log: (_level, message, event) => logs.push(`${event} ${message}`),
+    });
+    const waiting = broker.start("phone", "waiting", "api_key").operationId;
+    const completing = broker.start("tablet", "completing", "api_key").operationId;
+    await waitFor(() => events.filter((event) => event.topic === "auth.prompt").length === 2);
+    const prompt = events.find((event) => event.client === "tablet" && event.topic === "auth.prompt")!.payload as Record<string, JsonValue>;
+    expect(broker.respond("tablet", completing, prompt.promptId as string, "secret-answer")).toBe(true);
+    expect(registry.facts().map((fact) => fact.kind)).toEqual(["provider-login", "provider-login"]);
+
+    broker.cancelWaitingForRestart();
+
+    expect(broker.activeOperationCount).toBe(1);
+    expect(events.find((event) => event.client === "phone" && event.topic === "auth.completed")?.payload)
+      .toMatchObject({ operationId: waiting, success: false });
+    await waitFor(() => registry.size === 1);
+    expect(logs.some((line) => line.startsWith("auth.login.started") && line.includes("waiting (api_key)"))).toBe(true);
+    expect(logs.some((line) => line.startsWith("auth.login.ended") && line.includes("Gateway restart cancelled a waiting login"))).toBe(true);
+    expect(logs.join("\n")).not.toContain("secret-answer");
+  });
+
   it("disconnect detaches delivery while the stable device owner can resume", async () => {
     const signals: AbortSignal[] = [];
     const runtime = runtimeWithLogin(async (interaction) => {

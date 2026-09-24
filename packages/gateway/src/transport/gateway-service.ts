@@ -677,6 +677,8 @@ export class GatewayService {
             const activeSessionIds = this.dependencies.sessions.activeSessionIds();
             this.dependencies.automations?.beginDrain();
             const drain = this.dependencies.sessions.beginAdministrativeDrain();
+            // Waiting logins would only hold the drain until their timeout.
+            this.dependencies.auth.cancelWaitingForRestart();
             this.dependencies.logger?.log(
               "info",
               `Gateway restart requested; draining ${activeSessionIds.length} active session${activeSessionIds.length === 1 ? "" : "s"}`,

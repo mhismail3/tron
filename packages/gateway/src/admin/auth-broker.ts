@@ -35,6 +35,10 @@ interface AuthOperation {
   latestEvent: JsonValue | undefined;
   callback: OAuthCallbackCapture | undefined;
   timer: NodeJS.Timeout;
+  admittedAt: number;
+  /** True after the user answered or a callback was relayed, until the
+   * provider asks for more input. Only a completing login may hold a drain. */
+  completing: boolean;
   work?: GatewayWorkHandle;
   /** Settles when Pi's login promise for this exact operation settles. */
   settled: Promise<void>;
@@ -73,6 +77,7 @@ interface BeginReceipt {
 }
 
 export type AdminEventSink = (clientId: string, topic: string, payload: JsonValue) => void;
+export type AuthLifecycleLog = (level: "info" | "warning", message: string, event: string) => void;
 
 const DEFAULT_MAX_AUTH_OPERATIONS = 8;
 const DEFAULT_MAX_AUTH_OPERATIONS_PER_CLIENT = 2;
@@ -179,6 +184,7 @@ export class AuthBroker {
   private pendingGlobalProviderRefresh: (() => Promise<void>) | undefined;
   private runningGlobalProviderRefresh = false;
   private readonly unsettledGlobalAuthOperations = new Set<AuthOperation>();
+  private readonly log: AuthLifecycleLog;
 
   constructor(
     private readonly modelRuntime: ModelRuntime,
@@ -190,8 +196,10 @@ export class AuthBroker {
       operationTimeoutMs?: number;
       predecessorSettleTimeoutMs?: number;
       workRegistry?: GatewayWorkRegistry;
+      log?: AuthLifecycleLog;
     } = {},
   ) {
+    this.log = options.log ?? (() => {});
     this.maximumOperations = options.maximumOperations ?? DEFAULT_MAX_AUTH_OPERATIONS;
     this.maximumOperationsPerClient = options.maximumOperationsPerClient ?? DEFAULT_MAX_AUTH_OPERATIONS_PER_CLIENT;
     this.operationTimeoutMs = options.operationTimeoutMs ?? DEFAULT_AUTH_OPERATION_TIMEOUT_MS;
@@ -275,6 +283,7 @@ export class AuthBroker {
     if (existing) {
       existing.deliveryClientId = clientId;
       if (receiptKey) this.recordReceipt(receiptKey, existing, replaceOperationId, true);
+      this.log("info", `Provider login recovered for ${providerId} (${authType})`, "auth.login.recovered");
       this.replay(existing);
       return { operationId: existing.id, recovered: true };
     }
@@ -300,7 +309,7 @@ export class AuthBroker {
     let operation!: AuthOperation;
     const controller = new AbortController();
     const work = this.workRegistry?.begin({
-      kind: "administrative-provider-package-operation",
+      kind: "provider-login",
       hostEpoch: this.workRegistry.runtimeEpoch,
       cancellation: () => {
         controller.abort();
@@ -321,12 +330,15 @@ export class AuthBroker {
       latestEvent: undefined,
       callback: undefined,
       timer,
+      admittedAt: Date.now(),
+      completing: false,
       settled: Promise.resolve(),
       ...(work ? { work } : {}),
     };
     this.operations.set(operation.id, operation);
     if (targetKey === "global") this.unsettledGlobalAuthOperations.add(operation);
     if (receiptKey) this.recordReceipt(receiptKey, operation, replaceOperationId, false);
+    this.log("info", `Provider login started for ${providerId} (${authType})`, "auth.login.started");
 
     const interaction = {
       signal: operation.controller.signal,
@@ -340,6 +352,7 @@ export class AuthBroker {
         if (capture && [...this.operations.values()].some((other) => other !== operation
           && other.callback?.host === capture!.host && other.callback.port === capture!.port)) capture = undefined;
         if (capture) operation.callback = capture;
+        if (event.type !== "progress") operation.completing = false;
         const payload = {
           operationId: operation.id,
           event,
@@ -424,6 +437,7 @@ export class AuthBroker {
     catch (error) { return Promise.reject(error); }
     operation.prompt?.cleanup?.();
     operation.prompt?.reject(new GatewayError("cancelled", "Authentication prompt was replaced"));
+    operation.completing = false;
     return new Promise((resolve, reject) => {
       const pending: PendingPrompt = { id, wirePayload: payload, resolve, reject };
       if (prompt.signal) {
@@ -532,6 +546,28 @@ export class AuthBroker {
     }
   }
 
+  /**
+   * A restart retires every login anyway. Cancel the ones waiting on the user
+   * now, so an abandoned sheet cannot hold the drain until its timeout; a login
+   * that is completing (answer submitted, credential possibly being written)
+   * keeps its work entry and the drain waits for it.
+   */
+  cancelWaitingForRestart(): void {
+    for (const operation of [...this.operations.values()]) {
+      if (operation.completing) continue;
+      operation.controller.abort();
+      const completion: AuthCompletion = {
+        operationId: operation.id,
+        providerId: operation.providerId,
+        success: false,
+        error: "Tron is restarting. Start the login again after it reconnects.",
+      };
+      const deliveryClientId = operation.deliveryClientId;
+      if (!this.retire(operation, "Gateway restart cancelled a waiting login", completion)) continue;
+      if (deliveryClientId) this.emit(deliveryClientId, "auth.completed", completion as unknown as JsonValue);
+    }
+  }
+
   cancelOwner(ownerIdentity: string): void {
     for (const operation of [...this.operations.values()]) {
       if (operation.ownerIdentity !== ownerIdentity) continue;
@@ -548,6 +584,7 @@ export class AuthBroker {
 
   private markCompleting(operation: AuthOperation): void {
     if (this.operations.get(operation.id) !== operation) return;
+    operation.completing = true;
     const payload = {
       operationId: operation.id,
       event: { type: "progress", message: "Completing provider login…" },
@@ -567,6 +604,13 @@ export class AuthBroker {
 
   private retire(operation: AuthOperation, reason: string, completion?: AuthCompletion): boolean {
     if (!this.operations.delete(operation.id)) return false;
+    // Provider IDs, methods and reasons only; never prompts, answers or credentials.
+    const outcome = completion?.success ? "succeeded" : "ended";
+    this.log(
+      completion?.success ? "info" : "warning",
+      `Provider login ${outcome} for ${operation.providerId} (${operation.authType}) after ${Math.round((Date.now() - operation.admittedAt) / 1_000)}s: ${reason}`,
+      `auth.login.${outcome}`,
+    );
     this.pruneRetainedState();
     this.retiredOperations.set(operation.id, {
       ownerIdentity: operation.ownerIdentity,
@@ -644,12 +688,13 @@ export class AuthBroker {
       ...(success ? {} : { error: boundedError(error) }),
     };
     const deliveryClientId = operation.deliveryClientId;
-    if (!this.retire(operation, "Authentication flow ended", completion)) {
+    if (!this.retire(operation, success ? "Authentication flow ended" : "Provider reported a login failure", completion)) {
       // Pi resolves login only after its credential mutation committed. If
       // cancellation or timeout retired the UI operation after that mutation
       // began, the credential is canonical; project it truthfully instead of
       // leaving a false cancellation tombstone.
       if (!success) return;
+      this.log("info", `Provider login for ${operation.providerId} (${operation.authType}) stored its credential after the operation ended`, "auth.login.succeeded");
       const retired = this.retiredOperations.get(operation.id);
       if (retired) retired.completion = completion;
       if (deliveryClientId) this.emit(deliveryClientId, "auth.completed", completion as unknown as JsonValue);

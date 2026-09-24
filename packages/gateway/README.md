@@ -1479,7 +1479,12 @@ is never mirrored into canonical session storage.
 Provider authentication admits at most eight operations globally and two per
 authenticated device identity. Each operation has a 15-minute Gateway-owned lifetime, so providers that
 ignore abort cannot retain broker capacity; completion, failure, explicit cancellation,
-device revocation, Gateway shutdown, and timeout retire exactly once. A WebSocket disconnect
+device revocation, Gateway shutdown, and timeout retire exactly once. Each login is drain work of
+category `provider-login`. Accepting `gateway.restart` cancels every login that is waiting on the user
+(prompt, browser, or device code) and sends it a failed `auth.completed`; a login whose answer or callback
+was already submitted keeps its work entry, so the drain waits only for credential completion. Start, recovery,
+and each ending (with provider ID, method, age, and reason, never prompt values) are logged under source
+`auth` with `auth.login.*` events. A WebSocket disconnect
 only detaches event delivery: `auth.resume` rebinds the same stable-device-owned operation to a
 replacement connection and replays its latest bounded event/prompt or terminal tombstone. Current
 clients send a `commandId` with `auth.begin`; a bounded in-memory admission receipt returns the
