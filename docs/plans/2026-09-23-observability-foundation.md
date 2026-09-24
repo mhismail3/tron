@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, L-15
+- **Last updated:** 2026-09-24, L-7
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -208,7 +208,7 @@ user reinstalls manually, so batch them for one reinstall.
 | L-4 | Ready | Mac app file logging | L-2 | |
 | L-5 | Ready | `scripts/tron diagnose` collector | L-1c, L-2 | |
 | L-6 | Ready | Event catalog and the incident rule | L-2 | |
-| L-7 | Claimed | Stall cause in event-loop-delay records | L-2 | observability session, 2026-09-24 |
+| L-7 | Done | Stall cause in event-loop-delay records | L-2 | observability session, 2026-09-24 |
 | L-8 | Needs scoping | Gateway idle heap growth | none | |
 | L-9 | Needs scoping | Phone handling of a stalled or unreachable but live Gateway (proposal for the user) | L-7, L-10 | |
 | L-10 | Done | iOS connect-failure records say whether the socket ever opened, and on which interface | none | observability session, 2026-09-24 |
@@ -585,3 +585,12 @@ user reinstalls manually, so batch them for one reinstall.
 - Tasks added: L-15b. The isolated home has almost no data, so its 0.5 s startup cannot name the real dominant cost; the next user rebuild's records will.
 - Deviations: the launcher's validation time is not recorded by itself; it is the gap from `gateway.stopped` to the next process start (`gateway.started` timestamp minus its `durationMs`) until L-1b adds launcher records. Isolated runs must clear inherited `PI_*` variables: this shell's `PI_SUBAGENTS_TEMP_ROOT` made the isolated Gateway treat the live `~/.tron/internal/subagents` (25,426 entries) as a legacy root and refuse to start.
 - For the next agent: after the user's next rebuild, sum the `gateway.startup-step` records of the new `runtimeEpoch` and fix or scope the largest step (L-15b). A CPU profile is allowed only during a user-initiated restart or in an isolated home.
+
+### L-7 · Done · 2026-09-24 · observability session
+
+- Result: `gateway.event-loop-delay` records carry the delay as `durationMs` and, over exactly the delayed heartbeat interval, GC pause count, total and maximum (`perf_hooks` `gc` entries), event-loop utilization, and host free memory, swap used and macOS memory pressure (`sysctl vm.swapusage` and `kern.memorystatus_vm_pressure_level`, one bounded probe per record). The owner is `transport/stall-diagnostics.ts`; every heartbeat closes a window, and only a delayed heartbeat probes the host.
+- Evidence: `npx vitest run src/transport` with Node 22.22.0, all passing, including the new `stall-diagnostics.test.ts` (4): GC and utilization per window and reset, host probe bounded at 1 s and one at a time, swap and pressure parsing, and a `GatewayServer` heartbeat test with faked timers and `performance.now` in which an on-time heartbeat writes nothing and a 7 s late one writes the delay with `gcCount=1 gcPauseMs=6200 … eventLoopUtilization=0.70` and the host fields. Negative control: dropping the evidence from the record fails that test. Real sampler smoke on this Mac with `--expose-gc`: 17 GC pauses observed, swap 0 and pressure `normal` read.
+- Changes: this commit (`stall-diagnostics.ts` and its test, `server.ts` heartbeat, `packages/gateway/docs/connection-resilience.md` interpretation row).
+- Tasks added: none.
+- Kept on purpose: the evidence stays in the message's key=value text beside the existing pressure fields rather than new record fields; only `durationMs` is structured. The record is written after the host probe resolves (at most 1 s later), so its timestamp trails the heartbeat slightly. Utilization is evidence, not attribution: a descheduled process can report either busy or idle time.
+- For the next agent: L-9 can use these records with L-10's connect records to separate a stalled Gateway from a dead path. L-8's heap growth scoping can compare `gcPauseMs` against heap figures in the same record.

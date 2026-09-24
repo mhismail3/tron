@@ -15,6 +15,7 @@ import type { BlobByteRange } from "../sessions/blob-store.js";
 import type { AuthBroker } from "../admin/auth-broker.js";
 import type { GatewayLogger } from "./logger.js";
 import { GATEWAY_CONNECTION_POLICY } from "./connection-policy.js";
+import { formatStallEvidence, StallSampler } from "./stall-diagnostics.js";
 import { GatewayService, type ClientContext } from "./gateway-service.js";
 import { MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import { SessionSyncBarrier, type BufferedSessionEncoding, type BufferedSessionEvent } from "./session-sync.js";
@@ -519,6 +520,7 @@ export class GatewayServer {
   private readonly pairingLimiter = new RateLimiter(10, 10 * 60_000);
   private readonly heartbeat: NodeJS.Timeout;
   private lastHeartbeatAt = performance.now();
+  private readonly stallSampler: StallSampler;
   private ready = false;
   private shuttingDown = false;
   private closeTask?: Promise<void>;
@@ -547,8 +549,10 @@ export class GatewayServer {
       liveViews?: BrowserLiveViewRegistry;
       /** Synchronous canonical-branch admission inside the device credential cut. */
       authorizeBrowserLiveView?: (sessionId: string, viewId: string, generation: string) => boolean;
+      stallSampler?: StallSampler;
     },
   ) {
+    this.stallSampler = options.stallSampler ?? new StallSampler();
     const maximumHttpConnections = options.maximumHttpConnections ?? HTTP_MAXIMUM_CONNECTIONS;
     if (!Number.isSafeInteger(maximumHttpConnections) || maximumHttpConnections < 1) {
       throw new Error("HTTP connection bounds are invalid");
@@ -589,10 +593,17 @@ export class GatewayServer {
       const heartbeatAt = performance.now();
       const timerDelayMs = heartbeatTimerDelay(heartbeatAt - this.lastHeartbeatAt);
       this.lastHeartbeatAt = heartbeatAt;
+      // Every heartbeat closes a window, so a delayed record's GC and
+      // utilization cover exactly the delayed interval.
+      const stallWindow = this.stallSampler.closeWindow();
       if (timerDelayMs >= 1_000) {
-        this.options.logger.log("warning", `Gateway event loop delayed heartbeat by ${timerDelayMs}ms (${this.pressureDiagnostic()})`, {
-          event: "gateway.event-loop-delay",
-          source: "transport",
+        const pressure = this.pressureDiagnostic();
+        void this.stallSampler.hostMemory().then((host) => {
+          this.options.logger.log("warning", `Gateway event loop delayed heartbeat by ${timerDelayMs}ms (${pressure} ${formatStallEvidence(stallWindow, host)})`, {
+            event: "gateway.event-loop-delay",
+            source: "transport",
+            durationMs: timerDelayMs,
+          });
         });
       }
       for (const connection of this.clients.values()) {
@@ -2002,6 +2013,7 @@ export class GatewayServer {
     await this.options.liveViews?.joinRetirements();
     this.options.logger.log("info", "Closing Gateway transport", { event: "gateway.transport-closing", source: "transport" });
     clearInterval(this.heartbeat);
+    this.stallSampler.dispose();
     for (const client of this.clients.values()) {
       const stoppingAccepted = this.send(client, { type: "event", topic: "system.stopping", payload: {} });
       this.retireConnectionWork(client);
