@@ -160,9 +160,13 @@ calls for:
   file.
 - **Draft a plan or proposal** for work that will be done later, by other
   agents, or across sessions: create it in `docs/plans/` from the template with
-  Status `Proposed`, give the user its path, and do not commit it. When the user
-  approves, set Status to `Active` and commit it. When the user rejects it,
-  delete the file; it gets no history entry.
+  Status `Proposed`, give the user its path, and do not commit it. Before the
+  final chat response, use the `display` tool to present the drafted plan for
+  the user to read. If needed, copy it to a display-supported artifact location;
+  the repository file remains authoritative. If display is unavailable or fails,
+  state that limitation and provide the path. When the user approves, set Status
+  to `Active` and commit it. When the user rejects it, delete the file; it gets
+  no history entry.
 - **Plan your own current task:** plan within your session. Write no file.
 
 `docs/plans/` takes precedence over any tool's own plan location for a plan
