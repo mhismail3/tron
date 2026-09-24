@@ -151,6 +151,8 @@ struct GatewayRPCDiagnostic: Sendable {
 
 enum GatewayConnectionDiagnosticStage: String, Sendable {
     case queuePressure = "queue-pressure"
+    /// The WebSocket never opened: the path did not reach the Mac.
+    case transportOpen = "transport-open"
     case helloSend = "hello-send"
     case helloReceive = "hello-receive"
     case liveness
@@ -238,6 +240,7 @@ struct GatewayConnectionDiagnostic: Sendable {
     let decodeActual: Int?
     let decodeMaximum: Int?
     let decodeCodingPath: String?
+    let handshake: GatewayHandshakeDiagnostic?
 
     init(
         sequence: Int,
@@ -278,8 +281,10 @@ struct GatewayConnectionDiagnostic: Sendable {
         decodeLimitKind: JSONValueDecodingLimitKind? = nil,
         decodeActual: Int? = nil,
         decodeMaximum: Int? = nil,
-        decodeCodingPath: String? = nil
+        decodeCodingPath: String? = nil,
+        handshake: GatewayHandshakeDiagnostic? = nil
     ) {
+        self.handshake = handshake
         self.sequence = sequence
         self.clientID = clientID
         self.attemptID = attemptID
@@ -530,6 +535,12 @@ struct IOSClientDiagnosticBuffer: Sendable {
         if let maximum = diagnostic.decodeMaximum { fields.append("decodeMaximum=\(max(0, maximum))") }
         if let path = diagnostic.decodeCodingPath {
             fields.append("decodePath=\(Self.boundedUTF8(path, maximumBytes: 256))")
+        }
+        if let handshake = diagnostic.handshake {
+            fields.append("transportOpened=\(handshake.transportOpened)")
+            if let milliseconds = handshake.transportOpenMilliseconds { fields.append("transportOpenMs=\(max(0, milliseconds))") }
+            if handshake.waitedForConnectivity { fields.append("waitedForConnectivity=true") }
+            fields.append("interfaces=\(boundedUTF8(handshake.networkInterfaces ?? "unknown", maximumBytes: 64))")
         }
         return GatewayProfileLogRecord(
             profileID: "\(ownerID):ios-client",

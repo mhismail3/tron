@@ -32,6 +32,12 @@ final class GatewayPingCompletion: @unchecked Sendable {
 struct GatewaySocketMetadata: Sendable, Equatable {
     let closeCode: Int?
     let httpStatusCode: Int?
+    /// Milliseconds from task start until the WebSocket opened; nil when it
+    /// never opened. Distinguishes a path that never reached the Mac from a
+    /// Mac that accepted the socket but did not answer.
+    var transportOpenMilliseconds: Int? = nil
+    /// URLSession reported waiting for connectivity during this task.
+    var waitedForConnectivity = false
 }
 
 protocol GatewaySocketConnection: Sendable {
@@ -61,6 +67,19 @@ private final class GatewayWebSocketDelegate: NSObject, URLSessionWebSocketDeleg
     private let lock = NSLock()
     private var closeCode: Int?
     private var httpStatusCode: Int?
+    private let startedAt = ContinuousClock.now
+    private var openedAt: ContinuousClock.Instant?
+    private var waitedForConnectivity = false
+
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
+                    didOpenWithProtocol protocol: String?) {
+        let now = ContinuousClock.now
+        lock.lock(); if openedAt == nil { openedAt = now }; lock.unlock()
+    }
+
+    func urlSession(_ session: URLSession, taskIsWaitingForConnectivity task: URLSessionTask) {
+        lock.lock(); waitedForConnectivity = true; lock.unlock()
+    }
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
                     didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
@@ -75,7 +94,17 @@ private final class GatewayWebSocketDelegate: NSObject, URLSessionWebSocketDeleg
 
     func metadata() -> GatewaySocketMetadata {
         lock.lock(); defer { lock.unlock() }
-        return GatewaySocketMetadata(closeCode: closeCode, httpStatusCode: httpStatusCode)
+        return GatewaySocketMetadata(
+            closeCode: closeCode,
+            httpStatusCode: httpStatusCode,
+            transportOpenMilliseconds: openedAt.map { Self.milliseconds(startedAt.duration(to: $0)) },
+            waitedForConnectivity: waitedForConnectivity
+        )
+    }
+
+    private static func milliseconds(_ duration: Duration) -> Int {
+        let components = duration.components
+        return max(0, Int(components.seconds) * 1_000 + Int(components.attoseconds / 1_000_000_000_000_000))
     }
 }
 
@@ -135,7 +164,9 @@ private actor URLSessionGatewaySocketConnection: GatewaySocketConnection {
         // same authority, not a delay or a guess from localized error prose.
         return GatewaySocketMetadata(
             closeCode: observed.closeCode ?? (task.closeCode == .invalid ? nil : task.closeCode.rawValue),
-            httpStatusCode: observed.httpStatusCode ?? (task.response as? HTTPURLResponse)?.statusCode
+            httpStatusCode: observed.httpStatusCode ?? (task.response as? HTTPURLResponse)?.statusCode,
+            transportOpenMilliseconds: observed.transportOpenMilliseconds,
+            waitedForConnectivity: observed.waitedForConnectivity
         )
     }
 

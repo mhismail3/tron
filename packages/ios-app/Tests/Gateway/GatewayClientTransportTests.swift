@@ -682,6 +682,81 @@ struct GatewayClientTransportTests {
         }
     }
 
+    @Test("connect failures say whether the WebSocket opened and on which interfaces", arguments: [false, true])
+    func connectFailureRecordsTransportOpening(opens: Bool) async throws {
+        try await withTestWatchdog {
+            let suite = "TronConnectFailure.\(UUID())"
+            defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+            let store = IOSClientDiagnosticStore(defaults: try #require(UserDefaults(suiteName: suite)))
+            let clock = ManualClock()
+            // A path that never reaches the Mac stalls the hello write on an
+            // unopened socket; a Mac that accepts but never answers stalls the
+            // hello read on an open one. Both time out at the same deadline.
+            let socket = opens
+                ? ScriptedGatewaySocket(metadata: .init(closeCode: nil, httpStatusCode: nil, transportOpenMilliseconds: 42))
+                : ScriptedGatewaySocket(suspendsSend: true, metadata: .init(closeCode: nil, httpStatusCode: nil, waitedForConnectivity: true))
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                clock: clock.clock,
+                diagnosticStore: store,
+                networkPath: { "wifi,other" }
+            )
+            let connection = Task { try await client.connect(profile: profile, token: "token") }
+            defer { connection.cancel() }
+            try await socket.waitUntilSendInvoked(count: 1)
+            try await clock.waitUntilSleeping(count: 1)
+            clock.advance(by: .seconds(15))
+            for _ in 0..<10 { await Task.yield() }
+            try await socket.waitUntilCloseInvoked()
+            if !opens { await socket.releaseSend() }
+            await #expect(throws: GatewayFailure.self) { try await valueOfOwnedTask(connection) }
+            await store.flush()
+            // The handshake record, not the transport retirement that follows it.
+            let failure = try #require(await store.load().first {
+                $0.record.event == "gateway.connection" && $0.record.message.contains("outcome=failure")
+                    && !$0.record.message.hasPrefix("stage=transport ")
+            }).record.message
+            #expect(failure.contains("reason=timeout"))
+            #expect(failure.contains("interfaces=wifi,other"))
+            if opens {
+                #expect(failure.contains("stage=hello-receive"))
+                #expect(failure.contains("transportOpened=true"))
+                #expect(failure.contains("transportOpenMs=42"))
+            } else {
+                #expect(failure.contains("stage=transport-open"))
+                #expect(failure.contains("transportOpened=false"))
+                #expect(failure.contains("waitedForConnectivity=true"))
+                #expect(!failure.contains("transportOpenMs="))
+            }
+            await client.close()
+        }
+    }
+
+    @Test("a successful handshake records that the transport opened")
+    func successfulHandshakeRecordsTransportOpened() async throws {
+        try await withTestWatchdog {
+            let suite = "TronConnectSuccess.\(UUID())"
+            defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+            let store = IOSClientDiagnosticStore(defaults: try #require(UserDefaults(suiteName: suite)))
+            // The scripted socket reports no open time; completing hello proves it opened.
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                diagnosticStore: store,
+                networkPath: { nil }
+            )
+            await socket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "token")
+            await store.flush()
+            let success = try #require(await store.load().first {
+                $0.record.event == "gateway.connection" && $0.record.message.contains("stage=hello-receive outcome=success")
+            }).record.message
+            #expect(success.contains("transportOpened=true"))
+            #expect(success.contains("interfaces=unknown"))
+            await client.close()
+        }
+    }
+
     @Test("handshake timeout closes before a cancellation-insensitive hello receive can finish")
     func stalledHelloReceiveClosesBeforeLateCallback() async throws {
         try await withTestWatchdog {

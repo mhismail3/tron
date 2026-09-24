@@ -530,6 +530,8 @@ actor GatewayClient {
     private let eventHub: GatewayEventHub
     private let socketFactory: GatewaySocketFactory
     private let clock: MonotonicClock
+    /// Current network interfaces for connection records only.
+    private let networkPath: @Sendable () -> String?
     private let uuidSource: UUIDSource
     private let frameDecoder: GatewayFrameDecoder
     private let boundedHTTPDataTransport: BoundedHTTPDataTransport
@@ -644,7 +646,8 @@ actor GatewayClient {
         decodeLimitKind: JSONValueDecodingLimitKind? = nil,
         decodeActual: Int? = nil,
         decodeMaximum: Int? = nil,
-        decodeCodingPath: String? = nil
+        decodeCodingPath: String? = nil,
+        handshake: GatewayHandshakeDiagnostic? = nil
     ) {
         let components = startedAt.duration(to: clock.now()).components
         let elapsed = max(
@@ -693,7 +696,8 @@ actor GatewayClient {
             decodeLimitKind: decodeLimitKind,
             decodeActual: decodeActual,
             decodeMaximum: decodeMaximum,
-            decodeCodingPath: decodeCodingPath
+            decodeCodingPath: decodeCodingPath,
+            handshake: handshake
         )
         connectionDiagnostics.insert(diagnostic, at: 0)
         if diagnostic.outcome == .failure {
@@ -730,8 +734,10 @@ actor GatewayClient {
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
         eventBufferPolicy: GatewayEventBufferPolicy = .default,
         diagnosticStore: IOSClientDiagnosticStore? = nil,
-        diagnosticCaptureSink: (any DiagnosticCaptureRPCSink)? = nil
+        diagnosticCaptureSink: (any DiagnosticCaptureRPCSink)? = nil,
+        networkPath: @escaping @Sendable () -> String? = { GatewayNetworkPathSnapshot.shared.current }
     ) {
+        self.networkPath = networkPath
         self.diagnosticStore = diagnosticStore
         self.socketFactory = socketFactory
         self.clock = clock
@@ -867,6 +873,9 @@ actor GatewayClient {
             epoch.lastInboundAt = clock.now()
             connection = epoch
             if activateEvents { try activateEventDelivery(connectionID: epochID) }
+            // No socket metadata read here: an extra await on the success path
+            // would let a slow or retired socket delay admission. A completed
+            // hello already proves the transport opened.
             recordDiagnostic(
                 stage: .helloReceive,
                 outcome: .success,
@@ -874,15 +883,23 @@ actor GatewayClient {
                 connectionID: epochID,
                 profileID: profile.id,
                 profileLabel: profile.label,
-                attemptID: attemptID
+                attemptID: attemptID,
+                handshake: handshakeDiagnostic(
+                    metadata: GatewaySocketMetadata(closeCode: nil, httpStatusCode: nil),
+                    reachedHelloReceive: true
+                )
             )
             return GatewayConnectionIdentity(id: epochID, info: decoded.info)
         } catch {
             let metadata = await socket.metadata()
             let upgradeFailure = Self.upgradeFailure(error, metadata: metadata)
             let failure = upgradeFailure ?? Self.transportFailure(error)
+            let reachedStage = handshakeStage.get()
+            let handshake = handshakeDiagnostic(metadata: metadata, reachedHelloReceive: reachedStage == .helloReceive)
             recordDiagnostic(
-                stage: handshakeStage.get(),
+                // A hello write that never completed on a socket that never
+                // opened is a path failure, not a Mac that did not answer.
+                stage: reachedStage == .helloSend && !handshake.transportOpened ? .transportOpen : reachedStage,
                 outcome: .failure,
                 startedAt: attemptStartedAt,
                 reason: Self.diagnosticReason(for: failure.code),
@@ -892,12 +909,22 @@ actor GatewayClient {
                 connectionID: epochID,
                 profileID: profile.id,
                 profileLabel: profile.label,
-                attemptID: attemptID
+                attemptID: attemptID,
+                handshake: handshake
             )
             await detachConnection(epochID: epochID, reason: failure)
             if let upgradeFailure { throw upgradeFailure }
             throw error
         }
+    }
+
+    private func handshakeDiagnostic(metadata: GatewaySocketMetadata, reachedHelloReceive: Bool) -> GatewayHandshakeDiagnostic {
+        GatewayHandshakeDiagnostic(
+            transportOpened: metadata.transportOpenMilliseconds != nil || reachedHelloReceive,
+            transportOpenMilliseconds: metadata.transportOpenMilliseconds,
+            waitedForConnectivity: metadata.waitedForConnectivity,
+            networkInterfaces: networkPath()
+        )
     }
 
     func reconnect() async throws -> GatewayInfo {

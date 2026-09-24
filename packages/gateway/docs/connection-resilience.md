@@ -109,7 +109,9 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
 
 | Evidence | Interpretation / next check |
 | --- | --- |
-| `hello-send` timeout with no matching Gateway admission, while local requests remain responsive | Suspect endpoint or phone/network/Tailscale reachability; not evidence of a Gateway memory overflow. |
+| `stage=transport-open` (`transportOpened=false`) timeout | The WebSocket never opened: the phone's path did not reach the Mac (endpoint, network or Tailscale path). `waitedForConnectivity=true` means URLSession itself waited for a path; `interfaces=` lists the phone's current path interfaces (`other` is typically the Tailscale tunnel). Not evidence about the Gateway. |
+| `stage=hello-receive` timeout with `transportOpened=true` | The socket opened (`transportOpenMs`) but the Mac did not answer hello within the deadline. Check the Gateway log for a matching `connection.opened` and for `gateway.event-loop-delay` around that time. |
+| `stage=hello-send` timeout with `transportOpened=true` | The socket opened but the hello write did not complete; suspect a stalled path after opening. |
 | `ping_timeout` with zero event-queue admission/high-water | The local event reducer did not overflow that epoch. Investigate transport/path or an unobserved process stall. |
 | Fast successful `session.open`, no `session.sync`, then client close / `decode_limit` | The client rejected response structure before sync. Compare `frameBytes`, `decodeLimit`, `decodeActual`, `decodeMaximum` and sanitized `decodePath`; a sub-megabyte response can still exceed the node ceiling. This is not proof of path loss. |
 | `event_overflow` with topic, count/byte limit, oldest age and dequeue timing | Mobile consumer pressure. Trace what held the consumer, including synchronization reads; do not merely enlarge the queue. |
@@ -120,7 +122,7 @@ owner of accepted commands; mobile reconnect never replays a prompt blindly.
 | `closeCode` / `httpStatusCode` / `platformCode` | Separate facts, never interchangeable numbers. HTTP 401/403 stop automatic admission; 503 is retryable capacity/unavailability. URLSession may report 1005/1006 rather than expose the peer's exact close frame; that absence must remain explicit. |
 | `connection.projection-rejected` | A producer violated the projection contract. Narrow/reproduce that producer instead of reconnecting the whole service indefinitely. |
 | `gateway.event-loop-delay` | A sampled heartbeat timer was delayed by at least one second. Counts, queued bytes, RSS, heap and external-memory bytes help separate queue pressure from wider process work. |
-| `gateway.restart-drain.waiting` / `gateway.restart-drain.stalled` | Inspect blocker session, category, state and age; the stalled path has requested bounded shutdown, not durable success. |
+| `gateway.restart-drain.waiting` / `gateway.restart-drain.stalled` | Inspect blocker session, category, method (for `rpc-mutation`), state and age; the stalled path has requested bounded shutdown, not durable success. |
 
 Memory measurements and timer drift are observations, not attribution. The
 25-second heartbeat sampler cannot prove absence of every shorter event-loop

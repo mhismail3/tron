@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, L-16
+- **Last updated:** 2026-09-24, L-10
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -211,7 +211,7 @@ user reinstalls manually, so batch them for one reinstall.
 | L-7 | Ready | Stall cause in event-loop-delay records | L-2 | |
 | L-8 | Needs scoping | Gateway idle heap growth | none | |
 | L-9 | Needs scoping | Phone handling of a stalled or unreachable but live Gateway (proposal for the user) | L-7, L-10 | |
-| L-10 | Claimed | iOS connect-failure records say whether the socket ever opened, and on which interface | none | observability session, 2026-09-24 |
+| L-10 | Done | iOS connect-failure records say whether the socket ever opened, and on which interface | none | observability session, 2026-09-24 |
 | L-15 | Ready | Startup timing: stop to bound and bound to first startup phase | L-2 | |
 | L-16 | Done | Restart drain hangs on terminal-receipt persistence | none | observability session, 2026-09-24 |
 | L-17 | Needs approval | Judge a drain stalled by its oldest blocker without progress, not by any change in the blocker set | L-16 | |
@@ -565,3 +565,12 @@ user reinstalls manually, so batch them for one reinstall.
 - Tasks added: L-17 and L-18, both needing the user's approval because they change how long accepted work is waited for.
 - Kept on purpose: no change to what the drain waits for or for how long. The five in-slot receipt owners keep `terminal-receipt-persistence`; they are receipt or marker persistence.
 - For the next agent: the next stuck drain's `gateway.restart-drain.waiting` records (now retained for weeks) name each executing request's method, which should decide whether L-17 or L-18 is the fix that matters.
+
+### L-10 · Done · 2026-09-24 · observability session
+
+- Result: every handshake record (`gateway.connection`, `hello-receive` success and each handshake failure) carries `transportOpened`, `transportOpenMs` when the socket reported opening, `waitedForConnectivity` when URLSession waited for a path, and `interfaces` from the current network path. A hello write that never completed on a socket that never opened is recorded as the new stage `transport-open` instead of `hello-send`, so "never reached the Mac" and "the Mac did not answer" (`hello-receive`, `transportOpened=true`) are distinct in one record.
+- Evidence: `scripts/tron-ios-test run --only-testing TronMobileTests/GatewayClientTransportTests --only-testing TronMobileTests/GatewayDiagnosticsServiceTests`: 76 tests, 13 s run (build 16 s). New tests: a parameterized case where the transport never opens (stage `transport-open`, `transportOpened=false`, `waitedForConnectivity=true`, no open time) versus opens but never answers (stage `hello-receive`, `transportOpened=true`, `transportOpenMs=42`), both with `interfaces=wifi,other`; and a successful handshake records `transportOpened=true`. Negative control: removing the `transport-open` relabel fails the first case. The URLSession delegate callbacks (`didOpenWithProtocol`, `taskIsWaitingForConnectivity`) were not exercised on a device.
+- Changes: this commit (`GatewaySocketTransport.swift`, new `GatewayNetworkPathSnapshot.swift`, `GatewayClient.swift`, `GatewayDiagnosticsService.swift`, `TronMobileApp.swift`, tests, `packages/gateway/docs/connection-resilience.md`).
+- Tasks added: none here; the test-harness fixes this work exposed are rows in the simplification program.
+- Kept on purpose: `interfaces` is the device's current path from the app's single `NWPathMonitor` owner, not the socket's own route; per-task URLSession metrics arrive only after the task completes, after the record is written. The success record reads no socket metadata: an earlier draft awaited it and hung an existing test that holds a retired socket's metadata, which shows the await could delay admission.
+- For the next agent: the phone must be rebuilt to produce these fields. L-9 now has the evidence it needs to separate path failures from a stalled Gateway.

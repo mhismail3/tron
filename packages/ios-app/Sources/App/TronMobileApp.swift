@@ -12,6 +12,7 @@ private final class GatewayPathDiagnosticsObserver {
         record = { [weak model] in model?.lifecycleRecordDiagnostic(event: "path.changed", message: $0) }
         pathHint = { [weak model] satisfied in model?.lifecycleNotePathHint(satisfied: satisfied) }
         monitor.pathUpdateHandler = { [delivery, record, pathHint] path in
+            GatewayNetworkPathSnapshot.shared.update(interfaces: Self.interfaces(path))
             Task { @MainActor in pathHint(path.status == .satisfied) }
             Self.offer(Self.facts(path), delivery: delivery, record: record)
         }
@@ -45,11 +46,15 @@ private final class GatewayPathDiagnosticsObserver {
         case .requiresConnection: status = "requires-connection"
         @unknown default: status = "unknown"
         }
+        return "status=\(status) interfaces=\(interfaces(path)) expensive=\(path.isExpensive) constrained=\(path.isConstrained)"
+    }
+
+    private nonisolated static func interfaces(_ path: NWPath) -> String {
         let interfaces: [(NWInterface.InterfaceType, String)] = [
             (.wifi, "wifi"), (.cellular, "cellular"), (.wiredEthernet, "wired"), (.loopback, "loopback"), (.other, "other")
         ]
         let used = interfaces.filter { path.usesInterfaceType($0.0) }.map(\.1).joined(separator: ",")
-        return "status=\(status) interfaces=\(used.isEmpty ? "unknown" : used) expensive=\(path.isExpensive) constrained=\(path.isConstrained)"
+        return used.isEmpty ? "unknown" : used
     }
 
     deinit {
