@@ -342,8 +342,21 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    @Test("queued prompt cross-fades into its canonical user row without changing its host or geometry")
+    // A queued card is taller than its sent row. The swap must shrink over
+    // several frames with the pinned tail held, never jump. Pixel sampling is
+    // expensive, so geometry and the cross-fade are measured in separate runs
+    // to keep geometry frames at display cadence.
+    @Test("queued prompt shrinks into its canonical user row with the tail held")
+    func queuedPromptCanonicalReplacementShrinks() async throws {
+        try await queuedPromptCanonicalReplacement(samplesPixels: false)
+    }
+
+    @Test("queued prompt cross-fades into its canonical user row in its retained host")
     func queuedPromptCanonicalReplacementCrossFades() async throws {
+        try await queuedPromptCanonicalReplacement(samplesPixels: true)
+    }
+
+    private func queuedPromptCanonicalReplacement(samplesPixels: Bool) async throws {
         try await withTestWatchdog(timeout: .seconds(20)) {
             var initial = try SessionScenarioBuilder(seed: 1_263).openingTail(targetEncodedBytes: 10_000)
             initial.phase = .running
@@ -376,54 +389,45 @@ struct ChatViewScrollHarnessTests {
                 let queued = try #require(queuedSample.nativeRows.first {
                     $0.physicalID == "queued-message-queued-prompt-operation" && $0.isVisible
                 })
-                let beforePixels = harness.renderedRowLuminance(in: queued.frame)
+                let region = queued.frame
+                var previousPixels = samplesPixels ? harness.renderedRowLuminance(in: region) : []
                 harness.replaceAuthoritativeSnapshot(canonicalTemplate)
-                let installed = try await harness.recorder.waitUntil {
-                    $0.nativeRows.contains { $0.semanticID == "queued-message-queued-prompt-operation" && $0.isVisible }
+                var heights: [CGFloat] = []
+                var tailDistances: [CGFloat] = []
+                var pixelChangingFrames = 0
+                var sawOtherHost = false
+                for _ in 0..<40 {
+                    try await harness.driveFrameBoundary()
+                    guard let sample = harness.recorder.samples.last,
+                          let row = sample.nativeRows.first(where: {
+                              $0.physicalID == queued.physicalID && $0.isVisible && $0.frame.height > 1
+                          }) else { continue }
+                    if row.instance != queued.instance { sawOtherHost = true }
+                    heights.append(row.frame.height)
+                    tailDistances.append(try harness.nativeTranscriptDistanceFromTail())
+                    guard samplesPixels else { continue }
+                    // Sampled now, at this display boundary, not afterwards.
+                    let pixels = harness.renderedRowLuminance(in: region)
+                    let delta = zip(previousPixels, pixels).map { abs($1 - $0) }.reduce(0, +) / Double(max(1, pixels.count))
+                    if delta > 0.5 { pixelChangingFrames += 1 }
+                    previousPixels = pixels
                 }
-                let target = try #require(installed.nativeRows.first {
-                    $0.semanticID == "queued-message-queued-prompt-operation" && $0.isVisible
-                })
-                #expect(target.physicalID == queued.physicalID)
-                #expect(target.instance == queued.instance)
-                let afterInstall = harness.recorder.samples.last?.frameIndex ?? installed.frameIndex
-                for _ in 0..<30 { try await harness.driveFrameBoundary() }
-                let frames = harness.recorder.samples.filter { $0.frameIndex >= queuedSample.frameIndex && $0.frameIndex <= afterInstall + 30 }
-                let rows = frames.compactMap { sample in
-                    sample.nativeRows.first {
-                        $0.physicalID == queued.physicalID && $0.instance == queued.instance
-                            && $0.isVisible && $0.frame.height > 1
-                    }
+                #expect(!sawOtherHost)
+                let finalHeight = try #require(heights.last)
+                let totalChange = queued.frame.height - finalHeight
+                // The fixture's queued card is taller than its canonical row.
+                #expect(totalChange > 8)
+                #expect(tailDistances.allSatisfy { $0 <= 2 }, "tail moved: \(tailDistances)")
+                if samplesPixels {
+                    #expect(pixelChangingFrames >= 3)
+                } else {
+                    let steps = zip(heights, heights.dropFirst()).map { $0 - $1 }
+                    #expect(steps.allSatisfy { $0 >= -0.5 }, "height must shrink monotonically: \(heights)")
+                    #expect((steps.max() ?? 0) <= totalChange * 0.6, "height changed in one jump: \(heights)")
+                    let intermediate = heights.filter { $0 < queued.frame.height - 1 && $0 > finalHeight + 1 }
+                    #expect(intermediate.count >= 3, "too few intermediate heights: \(heights)")
                 }
-                let pixelFrames = frames.compactMap { sample -> (PresentedFrameRecorder.NativeRow, [Double])? in
-                    guard let row = sample.nativeRows.first(where: {
-                        $0.physicalID == queued.physicalID && $0.instance == queued.instance
-                            && $0.isVisible && $0.frame.height > 1
-                    }) else { return nil }
-                    return (row, harness.renderedRowLuminance(in: row.frame))
-                }
-                #expect(rows.count >= 8)
-                let rectSteps = zip(rows, rows.dropFirst()).map {
-                    max(abs($1.frame.minY - $0.frame.minY), abs($1.frame.height - $0.frame.height))
-                }
-                let unavoidableHeightChange = abs(rows.last!.frame.height - queued.frame.height)
-                #expect(rectSteps.filter { $0 > 1 }.count <= (unavoidableHeightChange > 1 ? 1 : 0))
-                #expect(rectSteps.allSatisfy { $0 <= max(1, unavoidableHeightChange) })
-                let geometryChangeIndex = rectSteps.firstIndex(where: { $0 > 1 })
-                if let geometryChangeIndex {
-                    #expect(rows.dropFirst(geometryChangeIndex + 1).allSatisfy {
-                        abs($0.frame.minY - rows.last!.frame.minY) <= 1
-                            && abs($0.frame.height - rows.last!.frame.height) <= 1
-                    })
-                }
-                #expect(pixelFrames.count >= 4)
-                let endpoint = harness.renderedRowLuminance(in: pixelFrames.last?.0.frame ?? queued.frame)
-                let change = zip(beforePixels, endpoint).map { abs($1 - $0) }.reduce(0, +)
-                let changedFrameCount = pixelFrames.dropFirst().filter { row, pixels in
-                    zip(beforePixels, pixels).map { abs($1 - $0) }.reduce(0, +) > 0.02 * max(1, change)
-                }.count
-                #expect(changedFrameCount >= 3)
-                print("Queued→canonical frame evidence: queuedHeight=\(queued.frame.height), canonicalHeight=\(rows.last!.frame.height), maxRectStep=\(rectSteps.max() ?? 0), changedFrames=\(changedFrameCount), tailDistance=\(try harness.nativeTranscriptDistanceFromTail())")
+                print("Queued→canonical evidence: queuedHeight=\(queued.frame.height) finalHeight=\(finalHeight) heights=\(heights.map { Int($0.rounded()) }) maxTail=\(tailDistances.max() ?? 0) pixelChangingFrames=\(pixelChangingFrames)")
             }
         }
     }

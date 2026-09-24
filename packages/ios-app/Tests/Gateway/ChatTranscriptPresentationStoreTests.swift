@@ -1603,6 +1603,19 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
+    // A prompt replacement animates its height only for an ordinary change on
+    // an active surface without Reduce Motion; otherwise it installs at once.
+    @Test("prompt replacement height animates only for bounded changes on an active surface")
+    func promptReplacementHeightPolicy() {
+        #expect(ChatPromptReplacementHeightPolicy.animates(from: 80, to: 44, surfaceActive: true, reduceMotion: false))
+        #expect(ChatPromptReplacementHeightPolicy.animates(from: 44, to: 80, surfaceActive: true, reduceMotion: false))
+        #expect(!ChatPromptReplacementHeightPolicy.animates(from: 44, to: 44.4, surfaceActive: true, reduceMotion: false))
+        #expect(!ChatPromptReplacementHeightPolicy.animates(from: 80, to: 44, surfaceActive: true, reduceMotion: true))
+        #expect(!ChatPromptReplacementHeightPolicy.animates(from: 80, to: 44, surfaceActive: false, reduceMotion: false))
+        #expect(!ChatPromptReplacementHeightPolicy.animates(from: 4_000, to: 44, surfaceActive: true, reduceMotion: false))
+        #expect(!ChatPromptReplacementHeightPolicy.animates(from: .infinity, to: 44, surfaceActive: true, reduceMotion: false))
+    }
+
     @Test("pending, canonical-overlap, and idle compaction installs retain one physical row")
     func compactionTransitionIdentity() async throws {
         try await withTestWatchdog { @MainActor in

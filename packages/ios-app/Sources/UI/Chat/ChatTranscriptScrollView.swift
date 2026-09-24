@@ -286,6 +286,19 @@ enum ChatPhysicalTranscriptReplacementPolicy {
     }
 }
 
+/// A prompt replacement interpolates the row height only for an ordinary card
+/// size change on a visible surface. Very large changes install atomically,
+/// like large streaming backlogs.
+enum ChatPromptReplacementHeightPolicy {
+    /// Reduce Motion keeps the cross-fade but installs the height at once,
+    /// matching incremental growth.
+    static func animates(from: CGFloat, to: CGFloat, surfaceActive: Bool, reduceMotion: Bool) -> Bool {
+        guard from.isFinite, to.isFinite, surfaceActive, !reduceMotion else { return false }
+        let delta = abs(to - from)
+        return delta > 0.5 && delta <= ChatIncrementalContentGrowthPolicy.maximumAnimatedGrowth
+    }
+}
+
 private extension ChatPhysicalTranscriptRow {
     var isPromptLifecycle: Bool {
         switch content {
@@ -321,7 +334,15 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
     @State private var promptReplacementProgress = 1.0
     @State private var promptReplacementRevision = 0
     @State private var replacedPromptSemanticID: String?
+    /// Natural height of the displayed content, measured every layout.
+    @State private var naturalHeight: CGFloat?
+    /// Non-nil only while a prompt replacement interpolates the row from the
+    /// lifecycle card's height to the canonical row's height.
+    @State private var presentedHeight: CGFloat?
+    /// Revision whose new natural height has not been measured yet.
+    @State private var awaitingReplacementHeightRevision: Int?
     @State private var retainedPromptEntrance: ChatPhysicalPromptEntrance?
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     #if HOSTED_TEST
     @State private var hostedIdentity = UUID()
     #endif
@@ -385,15 +406,75 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
 
     private var replacementContent: some View {
         content(displayed, false, replacedPromptSemanticID == displayed.semanticID)
+            .fixedSize(horizontal: false, vertical: true)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                naturalHeightChanged(height)
+            }
             .opacity(promptReplacementProgress)
+            // The interpolated height applies before the overlay so the
+            // outgoing card is clipped to the row's current height.
+            .frame(height: presentedHeight, alignment: .top)
             .overlay(alignment: .topLeading) {
                 if let fadingPromptLifecycle {
+                    // The outgoing card keeps its natural layout but is clipped
+                    // to the row's interpolated height (horizontal glass and
+                    // shadow overflow stay visible). Only this transient layer
+                    // is clipped, so ordinary rows carry no clip.
                     content(fadingPromptLifecycle, true, true)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .padding(.horizontal, ChatEntranceGrowthPolicy.effectOverflow)
+                        .clipShape(Rectangle())
+                        .padding(.horizontal, -ChatEntranceGrowthPolicy.effectOverflow)
                         .opacity(1 - promptReplacementProgress)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                 }
             }
+    }
+
+    /// Completes a prompt replacement's height change once the canonical
+    /// content has a measured natural height. The row shrinks or grows under
+    /// the same curve as its cross-fade, so the transcript never jumps; the
+    /// native size-change anchor keeps a pinned tail in place every frame.
+    private func naturalHeightChanged(_ height: CGFloat) {
+        guard height.isFinite, height >= 0 else { return }
+        // Only prompt lifecycle rows can start a replacement, so only they
+        // (and a replacement awaiting its measurement) record their height.
+        // Streaming and history rows perform no state write per layout.
+        let awaiting = awaitingReplacementHeightRevision != nil
+        guard awaiting || displayed.isPromptLifecycle else { return }
+        if naturalHeight != height { naturalHeight = height }
+        guard let revision = awaitingReplacementHeightRevision,
+              revision == promptReplacementRevision,
+              let from = presentedHeight else { return }
+        awaitingReplacementHeightRevision = nil
+        guard ChatPromptReplacementHeightPolicy.animates(
+            from: from, to: height,
+            surfaceActive: presentationActivity.allowsContinuousAnimation,
+            reduceMotion: reduceMotion
+        ) else {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { presentedHeight = nil }
+            return
+        }
+        var transaction = Transaction(animation:
+            ChatContentTransitionPolicy.inPlaceContentReplacementAnimation(reduceMotion: reduceMotion))
+        transaction.admitsChatIncrementalGrowthAnimation = true
+        withTransaction(transaction) {
+            withAnimation(
+                ChatContentTransitionPolicy.inPlaceContentReplacementAnimation(reduceMotion: reduceMotion),
+                completionCriteria: .logicallyComplete
+            ) {
+                presentedHeight = height
+            } completion: {
+                guard promptReplacementRevision == revision else { return }
+                var settle = Transaction()
+                settle.disablesAnimations = true
+                withTransaction(settle) { presentedHeight = nil }
+            }
+        }
     }
 
     private func retarget(_ next: ChatPhysicalTranscriptRow) {
@@ -422,6 +503,10 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
                 fadingPromptLifecycle = displayed
                 displayed = next
                 promptReplacementProgress = 0
+                // Hold the lifecycle card's height until the canonical content
+                // is measured, then interpolate (see naturalHeightChanged).
+                presentedHeight = naturalHeight
+                awaitingReplacementHeightRevision = naturalHeight == nil ? nil : revision
             }
             withAnimation(
                 ChatContentTransitionPolicy.inPlaceContentReplacementAnimation(
@@ -433,6 +518,14 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
             } completion: {
                 guard promptReplacementRevision == revision else { return }
                 fadingPromptLifecycle = nil
+                // An unchanged natural height produces no new measurement;
+                // release the held height rather than freezing the row.
+                if awaitingReplacementHeightRevision == revision {
+                    awaitingReplacementHeightRevision = nil
+                    var settle = Transaction()
+                    settle.disablesAnimations = true
+                    withTransaction(settle) { presentedHeight = nil }
+                }
             }
         case .none:
             // Other payloads remain atomic; stable physical identity prevents
@@ -444,6 +537,8 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
                 displayed = next
                 fadingPromptLifecycle = nil
                 promptReplacementProgress = 1
+                presentedHeight = nil
+                awaitingReplacementHeightRevision = nil
             }
         }
     }
