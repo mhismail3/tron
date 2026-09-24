@@ -3407,7 +3407,7 @@ export class RuntimeRegistry {
         ...(work.sessionId ? { sessionId: work.sessionId } : {}),
         ...(work.method ? { method: work.method } : {}),
         category: work.kind,
-        state: foregroundIsSuspect
+        state: foregroundIsSuspect || work.suspect
           ? "suspect"
           : work.kind === "terminal-receipt-persistence" ? "settling" : "active",
         admittedAt: work.admittedAt,
@@ -3441,6 +3441,7 @@ export class RuntimeRegistry {
           admittedAt: fact.admittedAt,
           ageMs: Math.max(0, now - admittedMilliseconds),
         } : {}),
+        ...(fact.progressAt ? { progressAt: fact.progressAt } : {}),
       } satisfies AdministrativeDrainBlockerSummary;
     });
     const fingerprint = JSON.stringify({

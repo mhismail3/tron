@@ -34,7 +34,26 @@ it("names an executing receipt-backed request and its method as a drain blocker"
     expect.objectContaining({ category: "terminal-receipt-persistence", sessionId: "session-1", state: "settling" }),
   ]));
   expect(snapshot.blockers.find((blocker) => blocker.category === "terminal-receipt-persistence")).not.toHaveProperty("method");
+  expect(snapshot.blockers.find((blocker) => blocker.category === "rpc-mutation")).toHaveProperty("progressAt");
   request.settle();
   receipt.settle();
   expect(registry.administrativeDrainSnapshot().blockerCount).toBe(0);
+});
+
+it("projects a failed persistence receipt as a suspect owner", async () => {
+  root = await mkdtemp(join(tmpdir(), "tron-drain-suspect-"));
+  const agentDir = join(root, "agent");
+  const workRegistry = new GatewayWorkRegistry("epoch", 8);
+  const registry = new RuntimeRegistry({
+    agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, workRegistry,
+    trust: new TrustService(agentDir), broadcast: () => {},
+    sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+  });
+  const receipt = workRegistry.beginDerived({ kind: "terminal-receipt-persistence", sessionId: "session-1", hostEpoch: "epoch" });
+  receipt.markSuspect();
+  const snapshot = registry.beginAdministrativeDrain();
+  expect(snapshot.blockers).toEqual([
+    expect.objectContaining({ category: "terminal-receipt-persistence", sessionId: "session-1", state: "suspect" }),
+  ]);
+  receipt.settle();
 });

@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, user decisions
+- **Last updated:** 2026-09-24, L-17 and L-18
 - **Goal:** Every Tron process records the right signals automatically, in a known place, at a meaningful level, so a failure can be diagnosed in one pass from what was already recorded.
 
 Follow the [plan protocol](README.md#protocol) to claim tasks and hand off.
@@ -221,8 +221,8 @@ user reinstalls manually, so batch them for one reinstall.
 | L-15b | Done | Fix the dominant startup cost the L-15 records name on the next real restart (the user's rebuild) | L-15 | observability session (L-15b lane), 2026-09-24 |
 | L-15c | Claimed | After the next real restart, read the `automation.recovery-step` and `session-search.warm` records and fix the measured owner of automation recovery's time | L-15b | observability session (L-15c lane), 2026-09-24 |
 | L-16 | Done | Restart drain hangs on terminal-receipt persistence | none | observability session, 2026-09-24 |
-| L-17 | Claimed | Judge a drain stalled by its oldest blocker without progress, not by any change in the blocker set | L-16 | observability session (drain lane), 2026-09-24 |
-| L-18 | Claimed | Decide whether a restart drain proceeds when only unresolved (blocked) persistence owners remain | L-16 | observability session (drain lane), 2026-09-24 |
+| L-17 | Done | Judge a drain stalled by its oldest blocker without progress, not by any change in the blocker set | L-16 | observability session (drain lane), 2026-09-24 |
+| L-18 | Done | Decide whether a restart drain proceeds when only unresolved (blocked) persistence owners remain | L-16 | observability session (drain lane), 2026-09-24 |
 | L-19 | Done | `scripts/tron mac verify` fails on the live install after a source rebuild: "PID selected payload path mismatch" and "authenticated system.info identity/channel mismatch" on the Tailscale host. Find whether the install or the check is wrong | none | observability session (L-19 lane), 2026-09-24 |
 | L-19a | Done | Make `scripts/verify-mac-install.sh` admit a store payload the way the launcher does: drop the XcodeGen `codesign --verify` requirement from `payload_meets_current_runtime_contract` and accept the pinned upstream XcodeGen digest in the provenance check; correct `packages/mac-app/docs/development.md`; test in `scripts/test-mac-reinstall.py` | L-19 | observability session (L-19a lane), 2026-09-24 |
 | L-11 | Done | Remove duplicate payload validations within one deploy run | none | observability session (L-11 lane), 2026-09-24 |
@@ -857,3 +857,14 @@ The 2026-09-23 17:33 UTC incident's records have rotated away, so its timeline i
 - Evidence (verified): after the reinstall, `scripts/tron mac verify` exits 0. `mac.jsonl`, `gateway-stderr.log` and launcher records in `deploy.jsonl` now exist. The first restart with the L-15b records (17:22:38 UTC) gives L-15c its evidence: automation recovery took 8.6 s, but its three parts sum to 1.2 s, and 7.4 s passed before `initialize()` started. The old process's shutdown ran into the 15 s forced exit (exit 1) with no step records.
 - Changes: this commit (plan only).
 - Tasks added: none.
+
+### L-17, L-18 · Done · 2026-09-24 · observability session (drain lane)
+
+- Result: `RestartDrainProgress` (new `restart-drain.ts` in `packages/gateway/src/sessions/`) judges the restart drain. L-17: a drain is stalled when its oldest blocker, by admission time, has not changed state or `progressAt` for `DRAIN_STALL_LIMIT_MS`; churn among other blockers no longer resets it. By supervisor decision, a blocker with no progress signal (detached extension runs, canonical-owner facts) is judged from its admission, which matches the old behavior for such a blocker alone. L-18: when every remaining blocker is a `suspect` terminal-receipt-persistence owner (a canonical write past its retry window or a failed extension receipt), the drain proceeds at once and logs one `gateway.restart-drain.unresolved-owner` error per owner. A mix with any live work still waits. The stall record names the oldest blocker's category, method and age, and waiting records carry `progressAt`. Both change how long accepted work is waited for, which the user approved.
+- Evidence (verified): focused drain tests went from 12 in 1 file to 29 in 4 files, covering a stuck oldest blocker plus churn, unresolved owners only, unresolved owners plus active work, a healthy drain, and a detached run judged from admission. The churn test shows that the old global-progress rule would see only 1 s of age. The full Gateway suite (`nice -n 19`, 2 workers) passed 178 files and 1,936/1,936, with no live `gateway.event-loop-delay`.
+- Evidence (inspected): supervisor review found that the lane's version dropped the rejection path of `waitUntilIdle()`. A drain failure would have become an unhandled rejection instead of `gateway.restart-drain-failed`. It is now wired to the promise's reject. `requestRestart` has no unit harness, so this rests on reading the code.
+- Changes: this commit (`restart-drain.ts` and its test; `gateway-main.ts`; `gateway-work-registry.ts`, `runtime-registry.ts` and `runtime-slot.ts` for `progressAt`; `protocol/types.ts`; the Gateway README drain contract; the observability catalog).
+- Tasks added: none.
+- Kept on purpose: the stall outcome, which is a supervised restart, and Restart Now.
+- Deviations: the snapshot carries at most 64 blocker summaries, so with more than 64 unresolved owners the immediate path is not taken and the drain falls back to the stall bound. That is bounded and acceptable.
+- For the next agent: the next stuck drain's `gateway.restart-drain.stalled` record names the blocker that decided it.

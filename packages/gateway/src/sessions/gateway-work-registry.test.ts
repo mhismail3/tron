@@ -39,6 +39,13 @@ describe("GatewayWorkRegistry", () => {
       .toThrow(/completed/u);
   });
 
+  it("retains a failed terminal receipt as a suspect persistence owner", () => {
+    const registry = new GatewayWorkRegistry("epoch", 4);
+    const receipt = registry.beginDerived({ kind: "terminal-receipt-persistence", sessionId: "session", hostEpoch: "host" });
+    receipt.markSuspect();
+    expect(registry.facts()).toMatchObject([{ token: receipt.token, kind: "terminal-receipt-persistence", sessionId: "session", suspect: true }]);
+  });
+
   it("does not release a terminal receipt blocker before persistence settles", async () => {
     const registry = new GatewayWorkRegistry("epoch", 4);
     let persist!: () => void;

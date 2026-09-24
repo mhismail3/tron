@@ -32,6 +32,7 @@ export interface GatewayWorkFact {
   admittedMonotonicMs: number;
   progressAt: string;
   progressMonotonicMs: number;
+  suspect: boolean;
   cancellable: boolean;
 }
 
@@ -56,6 +57,7 @@ export interface GatewayWorkHandle {
   readonly settled: Promise<void>;
   transition(kind: GatewayWorkKind): void;
   progress(): void;
+  markSuspect(): void;
   settle(): void;
 }
 
@@ -137,6 +139,7 @@ export class GatewayWorkRegistry {
       admittedMonotonicMs: monotonic,
       progressAt: wall,
       progressMonotonicMs: monotonic,
+      suspect: false,
       cancellable: admission.cancellation !== undefined,
       ...(admission.cancellation ? { cancellation: admission.cancellation } : {}),
       settle: resolveSettled,
@@ -159,6 +162,10 @@ export class GatewayWorkRegistry {
       progress: () => {
         const current = owned();
         if (current) this.markProgress(current);
+      },
+      markSuspect: () => {
+        const current = owned();
+        if (current) current.suspect = true;
       },
       settle: () => this.settle(token, entry),
     };

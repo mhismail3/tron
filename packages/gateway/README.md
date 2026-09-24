@@ -1905,17 +1905,27 @@ restartNow: true }` can escalate an existing drain without waiting behind it. Be
 drain has already closed ordinary work admission, its receipt write is admitted as derived
 settlement work of that drain. Its accepted receipt only acknowledges the request to stop waiting; a lost response is retried with the
 same command ID and does not duplicate shutdown. Snapshots contain category counts, at most
-64 blocker summaries with session identity, category, state and age (plus the method for an
-`rpc-mutation`: a receipt-backed RPC still executing, which can be a minutes-long compaction or branch
-summary rather than receipt persistence), omitted and suspect-projection counts,
+64 blocker summaries with session identity, category, state, age, and progress timestamp
+when available (plus the method for an `rpc-mutation`: a receipt-backed RPC still
+executing, which can be a minutes-long compaction or branch summary rather than
+receipt persistence), omitted and suspect-projection counts,
 and monotonic revisions—never session/run IDs, prompts, output, paths, provider data, or
 credentials. They are diagnostics only; exact tokens, runtime settlement, terminal
 artifacts, and durable receipts remain liveness authority. While waiting the Gateway also
 emits bounded `gateway.restart-drain.waiting` records every 15 seconds with blocker
-session, category, state and age, plus stall/completion records. Persistence retry,
-blocked and terminal-receipt failures are also written to `gateway.jsonl` with session
-identity. Active log rotation keeps the previous file within its one-MiB bound; fast
-successful RPCs are omitted.
+session, category, state and age, plus stall/completion records. A drain waits for
+accepted work until it settles, but stalls after the oldest blocker makes no progress
+for 180 s; unrelated blockers arriving, settling, or progressing do not reset that
+bound. Progress is a change in blocker state or its progress timestamp; when a blocker
+has no progress timestamp, admission time is its fixed progress baseline. If every
+remaining blocker is a suspect `terminal-receipt-persistence` owner (an unresolved
+canonical write or failed extension receipt), the Gateway proceeds immediately and
+writes one error record per session/category; a mix with live work still waits under
+the same oldest-blocker bound. This can shorten how long accepted work is waited for
+when one blocker is stuck, and avoids waiting 180 s when only unresolved owners remain.
+Persistence retry, blocked and terminal-receipt failures are also written to
+`gateway.jsonl` with session identity. Active log rotation keeps the previous file
+within its one-MiB bound; fast successful RPCs are omitted.
 Live PTYs block restart because process replacement cannot preserve them. Restart closes
 terminal admission atomically only after proving no PTY is live, so an already-dispatched
 `terminal.open` cannot resume across the cutoff and spawn a shell.

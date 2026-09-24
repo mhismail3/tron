@@ -47,6 +47,7 @@ export interface AdministrativeDrainBlockerSummary {
   method?: string;
   state: "active" | "settling" | "suspect";
   admittedAt?: string;
+  progressAt?: string;
   ageMs?: number;
 }
 

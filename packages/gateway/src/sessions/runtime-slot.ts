@@ -573,7 +573,7 @@ export class RuntimeSlot {
   /** A failed or timed-out persistence obligation keeps this runtime fenced.
    * Losing a waiter is not proof of a durable receipt or permission to evict the
    * only runtime holding Pi's potentially staged canonical entry. */
-  private readonly durableWrites = new Map<string, { waiter: Promise<void>; blocked: boolean }>();
+  private readonly durableWrites = new Map<string, { waiter: Promise<void>; blocked: boolean; admittedAt: string }>();
   private readonly extensionReceiptWrites = new Map<string, Promise<void>>();
   private readonly extensionReceiptOwners = new Map<string, GatewayWorkHandle>();
   private extensionShutdownWork: GatewayWorkHandle | undefined;
@@ -942,7 +942,9 @@ export class RuntimeSlot {
   administrativeDrainBlockers(): RuntimeDrainBlockerFact[] {
     const facts: RuntimeDrainBlockerFact[] = [];
     for (const [key, write] of this.durableWrites) {
-      if (write.blocked) facts.push({ category: "terminal-receipt-persistence", key: `canonical:${key}`, state: "suspect" });
+      if (write.blocked) facts.push({
+        category: "terminal-receipt-persistence", key: `canonical:${key}`, state: "suspect", admittedAt: write.admittedAt,
+      });
     }
     for (const activity of this.extensionActivities.values()) {
       const state = activity.lifecycle?.state;
@@ -2485,7 +2487,7 @@ export class RuntimeSlot {
     const existing = this.durableWrites.get(key);
     if (existing) return existing.waiter;
     this.assertOwnershipPersistence();
-    const owner = { blocked: false, waiter: undefined as unknown as Promise<void> };
+    const owner = { blocked: false, admittedAt: new Date().toISOString(), waiter: undefined as unknown as Promise<void> };
     const deadline = performance.now() + DEFAULT_OWNERSHIP_WRITE_RETRY_WINDOW_MS;
     let timer: NodeJS.Timeout | undefined;
     const expired = new Promise<never>((_, reject) => {
@@ -4853,8 +4855,8 @@ export class RuntimeSlot {
       if (this.extensionReceiptWrites.get(receipt.activityId) === write) this.extensionReceiptWrites.delete(receipt.activityId);
       this.releaseExtensionReceiptOwnership(receipt.activityId, owner);
     }, () => {
-      // Retain both the exact receipt owner and its failed waiter: repeated
-      // terminal observations cannot report a memory-only receipt as durable.
+      // Retain and identify the exact failed owner; drain recovery is process replacement.
+      owner.markSuspect();
     });
     return write;
   }
