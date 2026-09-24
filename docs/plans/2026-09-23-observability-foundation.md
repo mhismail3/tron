@@ -208,7 +208,7 @@ user reinstalls manually, so batch them for one reinstall.
 | L-4 | Ready | Mac app file logging | L-2 | |
 | L-5 | Ready | `scripts/tron diagnose` collector | L-1c, L-2 | |
 | L-6 | Ready | Event catalog and the incident rule | L-2 | |
-| L-7 | Ready | Stall cause in event-loop-delay records | L-2 | |
+| L-7 | Claimed | Stall cause in event-loop-delay records | L-2 | observability session, 2026-09-24 |
 | L-8 | Needs scoping | Gateway idle heap growth | none | |
 | L-9 | Needs scoping | Phone handling of a stalled or unreachable but live Gateway (proposal for the user) | L-7, L-10 | |
 | L-10 | Done | iOS connect-failure records say whether the socket ever opened, and on which interface | none | observability session, 2026-09-24 |
