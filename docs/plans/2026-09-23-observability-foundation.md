@@ -201,7 +201,7 @@ user reinstalls manually, so batch them for one reinstall.
 | L-0 | Done | Payload import containment | none | planning session, 2026-09-23 |
 | L-1a | Done | Gateway startup-fatal record | none | observability-L-1a session, 2026-09-23 |
 | L-1c | Ready | Deploy timeline and real failure cause | L-1a | |
-| L-2 | Ready | Gateway levels, debug buffer, retention, record format | none | |
+| L-2 | Claimed | Gateway levels, debug buffer, retention, record format | none | observability-L-2 session, 2026-09-24 |
 | L-3 | Ready | iOS always-on recording replaces Diagnostic Capture; one-tap export | L-2 | |
 | L-1b | Ready | Launcher records | none | |
 | L-1d | Ready | Out-of-band stderr capture | L-2 | |
