@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-24
 - **Status:** Active
-- **Last updated:** 2026-09-24, CAT-2
+- **Last updated:** 2026-09-24, CAT-3
 - **Goal:** Remove CortexKit's duplicate static model catalog while preserving correct subscription routing and per-model capabilities, and separately assess subscription-compatible discovery.
 
 ## Goal and constraints
@@ -31,7 +31,7 @@ Inspected 2026-09-24:
 | --- | --- | --- | --- | --- |
 | CAT-1 | Done | Establish SDK catalog source and per-model adapter compatibility contract | none | catalog session, 2026-09-24 |
 | CAT-2 | Done | Replace duplicate catalog with SDK-backed provider registration | CAT-1 | catalog session, 2026-09-24 |
-| CAT-3 | Claimed | Validate package and Tron consumers; prepare controlled local adoption | CAT-2 | catalog session, 2026-09-24 |
+| CAT-3 | Done | Validate package and Tron consumers; prepare controlled local adoption | CAT-2 | catalog session, 2026-09-24 |
 | CAT-4 | Done | Assess subscription-authenticated discovery and record a go/no-go decision | none | catalog session, 2026-09-24 |
 
 Follow the claim-on-main and isolated-worktree protocol before starting a task; keep cross-repository code commits and Tron plan handoffs explicitly linked.
@@ -130,4 +130,12 @@ Approved and committed at the user's request. No tasks claimed, code changed, pa
 - Changes: CortexKit commit `9bfd6cc` (branch `tron/cat-2`, fast-forwarded into the local CortexKit `main`; not published or installed). Tron: this plan entry.
 - Tasks added: none.
 - Deviations: supervisor review twice sent back the lane's version. The first copied SDK level maps the converter cannot honor: Minimal sent as an invalid effort, and Max silently falling to a medium budget on Opus 4.8. The second held the converter to exact SDK wire values, which the SDK's own mid-conversation behavior makes wrong for CortexKit.
-- For the next agent: CAT-3 checks Gateway listing, native selection and consumer formatting, then builds `1.23.1-tron.4`. Follow-up in CortexKit: an adaptive converter branch for Opus 4.8, 4.6 and 4.7 and Sonnet 4.6 would let those models and levels in.
+- For the next agent: an adaptive converter branch for Opus 4.8, 4.6 and 4.7 and Sonnet 4.6 would let those models and levels in.
+
+### CAT-3 · Done · 2026-09-24 · catalog session
+
+- Result: isolated Pi ModelRuntime plus Tron's catalog pager projected all 14 CortexKit Anthropic models through 498 pages (limit 3), with exact SDK IDs, names and contexts. Thinking levels matched the SDK's supported-level calculation for all 14. Usage admission already accepts the CortexKit API at Anthropic's first-party host; its focused regression now enumerates all 14 IDs. iOS consumes per-session supported levels dynamically and authoritative catalog names; ID-only fallback formatting covers latest and dated Haiku/Opus/Sonnet names. No live generation or entitlement was tested.
+- Evidence (verified): no-network projection with temp agent/auth paths; Gateway build and provider-usage test (20 passed); iOS test build and focused formatting suite (3 passed); CortexKit package build/typecheck and 144 tests passed. Projection was a temporary script and deleted. The first iOS focused run exposed formatting assumptions; the aliases required for correct ID-only decimal names remain as fallback, while catalog summaries use authoritative names.
+- Changes: this commit (Tron `ModelDisplayFormatting.swift` and its test, `provider-usage.test.ts`, `packages/ios-app/docs/architecture.md`); CortexKit commit `adde152` (version 1.23.1-tron.4, on top of `9bfd6cc`). Local artifact cortexkit-pi-anthropic-auth-1.23.1-tron.4.tgz in the CortexKit checkout's artifacts folder, SHA-256 `c8b7a73efc856b277709f42aec2efc1e3d8298a38afdb6ab0ca462b8ec7350ae`, 30,737 bytes; not published.
+- Adoption: not performed. User must explicitly update the canonical package source in settings, install through package management, and verify provider/catalog in a fresh session. Do not install over an active turn or infer subscription entitlement from catalog presence.
+- Tasks added: none.

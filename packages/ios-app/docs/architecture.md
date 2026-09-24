@@ -1443,10 +1443,7 @@ page or sheet.
 Custom-model rows have one Configure capsule; the editor owns a leading Remove toolbar action and
 its standard destructive confirmation sheet. Stable provider UUIDs, not editable identifiers, own
 presentation and field bindings. Removed/reordered rows cannot be indexed or resurrected by a late
-native callback. All provider and model catalog projections use `ModelDisplayFormatting` at the UI boundary: identifiers such as
-`openai-codex` and `gpt-5.6-luna` render as “OpenAI Codex” and “GPT 5.6 Luna”; known Anthropic IDs such as
-`claude-opus-5-5` render as “Claude Opus 5.5” without changing canonical IDs or search/mutation values.
-Thinking choices come from the active model's SDK-advertised capabilities, not the global settings list.
+native callback. Catalog choices display each model's authoritative `name` (including distinctions such as “Claude Haiku 4.5 (latest)” versus “Claude Haiku 4.5”); `ModelDisplayFormatting` is the ID-only fallback for session references and never changes canonical IDs or search/mutation values. Thinking choices come from the active model's SDK-advertised capabilities, not the global settings list, so the picker does not assume every reasoning model offers Off.
 New Session quick selections are compound server/project identities, so selecting one switches the owning Gateway profile before
 configuration admission. Source-control creation sends an explicit strategy to Gateway;
 Pi receives only the resulting worktree `cwd`, while Git worktree creation and cleanup remain

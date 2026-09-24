@@ -22,13 +22,18 @@ enum ModelDisplayFormatting {
         "xai": "xAI"
     ]
 
+    // ModelRef carries only an ID; catalog rows use the SDK's authoritative name instead.
     private static let modelAliases: [String: String] = [
         "claude-fable-5-1": "Claude Fable 5.1",
+        "claude-haiku-4-5": "Claude Haiku 4.5 (latest)",
+        "claude-haiku-4-5-20251001": "Claude Haiku 4.5",
         "claude-mythos-5-1": "Claude Mythos 5.1",
-        "claude-opus-4-5": "Claude Opus 4.5",
+        "claude-opus-4-5": "Claude Opus 4.5 (latest)",
+        "claude-opus-4-5-20251101": "Claude Opus 4.5",
         "claude-opus-4-8": "Claude Opus 4.8",
         "claude-opus-5-5": "Claude Opus 5.5",
-        "claude-sonnet-4-5": "Claude Sonnet 4.5",
+        "claude-sonnet-4-5": "Claude Sonnet 4.5 (latest)",
+        "claude-sonnet-4-5-20250929": "Claude Sonnet 4.5",
         "claude-sonnet-5": "Claude Sonnet 5"
     ]
 

@@ -49,12 +49,12 @@ describe("provider usage owner", () => {
   });
 
   it("admits the installed CortexKit API ID for its complete first-party model catalog", async () => {
-    // Mirrors the 1.23.1-tron.1 provider registration: every model uses
-    // cortexkit-anthropic-messages at Anthropic's first-party API host.
+    // Every SDK-backed CortexKit model uses this API and Anthropic's first-party host.
     const ids = [
-      "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-5",
-      "claude-sonnet-4-5", "claude-sonnet-5", "claude-fable-5", "claude-mythos-5",
-      "claude-fable-5-1", "claude-mythos-5-1",
+      "claude-fable-5", "claude-fable-5-1", "claude-haiku-4-5", "claude-haiku-4-5-20251001",
+      "claude-opus-4-5", "claude-opus-4-5-20251101", "claude-opus-4-8", "claude-opus-5",
+      "claude-opus-5-5", "claude-sonnet-4-5", "claude-sonnet-4-5-20250929", "claude-sonnet-5",
+      "claude-mythos-5", "claude-mythos-5-1",
     ];
     const models = ids.map((id) => ({
       ...model("anthropic", "https://api.anthropic.com", "cortexkit-anthropic-messages"), id,
