@@ -260,6 +260,105 @@ describe("AuthBroker", () => {
     expect(broker.cancel("device", second)).toBe(false);
   });
 
+  it("reproduces fresh auth.begin allocating another slot after presentation identity is lost", async () => {
+    const runtime = runtimeWithLogin(async () => new Promise<void>(() => {}));
+    const broker = new AuthBroker(runtime, () => {}, () => {}, {
+      maximumOperations: 2,
+      maximumOperationsPerClient: 2,
+    });
+    const first = broker.start("socket-1", "provider", "api_key", runtime, "device", "command-1", "global");
+    broker.detachClient("socket-1");
+
+    // A fresh coordinator has no operation ID to pass to auth.resume. Its new
+    // command is not covered by the old command receipt and consumes a second slot.
+    const second = broker.start("socket-2", "provider", "api_key", runtime, "device", "command-2", "global");
+
+    expect(second).not.toBe(first);
+    expect(broker.activeOperationCount).toBe(2);
+    expect(() => broker.start("socket-3", "provider", "api_key", runtime, "device", "command-3", "global"))
+      .toThrow(expect.objectContaining({ code: "busy" }));
+    broker.cancelOwner("device");
+  });
+
+  it("shows the SDK abort race can release Gateway work before a provider login settles", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-auth-abort-race-"));
+    const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
+    let finishLogin!: (credential: { refresh: string; access: string; expires: number }) => void;
+    let providerSettled = false;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    runtime.registerProvider("slow-oauth", {
+      name: "Slow OAuth fixture",
+      api: "openai-completions",
+      baseUrl: "https://example.invalid/v1",
+      models: [],
+      oauth: {
+        login: async () => {
+          markStarted();
+          try {
+            return await new Promise((resolve) => { finishLogin = resolve; });
+          } finally {
+            providerSettled = true;
+          }
+        },
+        async refreshToken(credentials) { return credentials; },
+        getApiKey(credentials) { return credentials.access; },
+      },
+    });
+    const registry = new GatewayWorkRegistry("epoch", 8);
+    const broker = new AuthBroker(runtime, () => {}, () => {}, { workRegistry: registry });
+    const operationId = broker.start("phone", "slow-oauth", "oauth");
+    await started;
+
+    expect(broker.cancel("phone", operationId)).toBe(true);
+    await waitFor(() => registry.size === 0);
+    expect(providerSettled).toBe(false);
+
+    finishLogin({ refresh: "synthetic-refresh", access: "synthetic-access", expires: Date.now() + 60_000 });
+    await flushPromises();
+    expect(providerSettled).toBe(true);
+    expect(runtime.isUsingOAuth("slow-oauth")).toBe(false);
+  });
+
+  it("observes callback-listener close before a successor reuses its port", async () => {
+    let port = 0;
+    let listeningCount = 0;
+    let listenerClosed!: () => void;
+    const closed = new Promise<void>((resolve) => { listenerClosed = resolve; });
+    const runtime = runtimeWithLogin(async (interaction) => {
+      const server = createServer();
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(port || 0, "127.0.0.1", () => {
+          const address = server.address();
+          if (!address || typeof address === "string") return reject(new Error("missing listener address"));
+          port = address.port;
+          listeningCount += 1;
+          resolve();
+        });
+      });
+      const close = () => server.close(() => listenerClosed());
+      interaction.signal.addEventListener("abort", close, { once: true });
+      await new Promise<void>((resolve, reject) => {
+        interaction.signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true });
+      });
+    });
+    const broker = new AuthBroker(runtime, () => {});
+    const first = broker.start("socket-1", "provider", "api_key", runtime, "device");
+    await waitFor(() => port !== 0);
+
+    expect(broker.cancel("device", first)).toBe(true);
+    await closed;
+
+    // This tests a cancellation-aware local adapter fixture, not the selected
+    // third-party provider whose source is not present in this checkout.
+    const second = broker.start("socket-2", "provider", "api_key", runtime, "device");
+    await waitFor(() => listeningCount === 2);
+    expect(broker.activeOperationCount).toBe(1);
+    broker.cancel("device", second);
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  });
+
   it("deduplicates auth.begin by stable owner and command ID", async () => {
     const runtime = runtimeWithLogin(async () => new Promise<void>(() => {}));
     const broker = new AuthBroker(runtime, () => {});

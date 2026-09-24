@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-23, approval
+- **Last updated:** 2026-09-24, AUTH-1
 - **Goal:** Make interrupted provider login resumable or explicitly replaceable without accumulating abandoned operations or leaking provider resources.
 
 ## Goal and constraints
@@ -31,7 +31,7 @@ These are investigation inputs, not a complete reproduction. Revalidate the depl
 
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
-| AUTH-1 | Claimed | Reproduce abandoned admission and provider-resource retirement; settle the recovery contract | none | worker, 2026-09-23 |
+| AUTH-1 | Blocked | Reproduce abandoned admission and provider-resource retirement; settle the recovery contract | none | worker, 2026-09-24 |
 | AUTH-2 | Ready | Implement Gateway-owned exact login recovery and replacement | AUTH-1 | Unassigned |
 | AUTH-3 | Ready | Integrate iPhone resume, restart, and cancellation with authoritative ownership | AUTH-2 | Unassigned |
 | AUTH-4 | Ready | Verify cross-boundary cleanup and publish owning documentation | AUTH-2, AUTH-3 | Unassigned |
@@ -108,6 +108,25 @@ Ship the iOS ownership/recovery documentation in `packages/ios-app/docs/architec
 - Provide manual maintainer adoption steps if changed Gateway/iOS artifacts are required. Do not transition the running Gateway.
 - Move lasting knowledge into owning docs, append the completion entry to `docs/plans/HISTORY.md`, and delete this plan in the completion commit per the plan protocol.
 
+## Findings
+
+### AUTH-1 findings
+
+- A fresh `auth.begin` with a new command ID after losing the operation ID allocates a second operation for the same stable device/provider/auth-method/target. The bounded receipt only recovers a retried original command ID; `auth.resume` requires the operation ID.
+- Pi SDK 0.87.1 `ModelRuntime.login` races the provider login promise against abort (`pi-ai/dist/models.js`). Aborting can settle the SDK promise and release Gateway work before an abort-ignoring provider login itself settles. The credential-store mutation is separately guarded by the signal, so a late returned credential is not committed after that abort.
+- Read-only inspection of the exact npm tarballs `@cortexkit/pi-anthropic-auth@1.23.0` and `@cortexkit/anthropic-auth-core@1.23.0` shows `loginAnthropic` does not use the provider signal: it emits an authorization URL, awaits the existing manual callback prompt, and exchanges the code with `fetch` without a signal. This provider does not create a local callback listener, so a listener-close claim cannot be made about it. The iPhone handoff listener is a distinct resource owner and was not exercised here.
+- Synthetic Gateway regressions prove fresh-begin accumulation, exact loopback fixture close/rebind, and early SDK work release while a synthetic provider remains pending (with credential non-commit after abort). They do not satisfy the plan's exact-provider resource-settlement acceptance: the selected provider has no listener and the pinned SDK hides/abandons the underlying provider promise on abort. Do not infer that its completion or network exchange has settled from Gateway drain release.
+
 ## Handoff log
 
-Approved for tracking and committed at the user's request. No implementation tasks claimed or completed under this plan. Before claiming AUTH-1, account for the SDK upgrade and iOS provider reattachment fix in `4822d8ac4`; CortexKit has replaced pi-sub-anthropic. Those changes do not establish Gateway recovery after loss of the operation ID or provider-resource retirement coverage.
+Approved for tracking and committed at the user's request. Before AUTH-1, account for the SDK upgrade and iOS provider reattachment fix in `4822d8ac4`; CortexKit has replaced pi-sub-anthropic. Those changes do not establish Gateway recovery after loss of the operation ID or provider-resource retirement coverage.
+
+### AUTH-1 · Blocked · 2026-09-24 · worker
+
+- Result: Added deterministic Gateway reproductions for id-less recovery loss and the SDK abort race; verified a synthetic cancellation-aware listener closes before a successor rebinds its port. AUTH-1 remains blocked because the exact selected provider creates no local listener, ignores the Pi login signal, and the public Pi SDK login surface does not expose the underlying provider promise for settlement accounting.
+- Evidence: `npx vitest run src/admin/auth-broker.test.ts` unavailable because `npx` is not installed. The same focused Vitest suite run using the workspace's existing `node_modules/.bin/vitest` passed 16/16. Read-only package tarball audit verified exact package versions/integrities; no live login or credentials used.
+- Changes: Claim commit `e7bbfa788`; implementation and findings commit recorded with this handoff.
+- Tasks added: none.
+- Kept on purpose: No Gateway recovery protocol or SDK/provider workaround was implemented; AUTH-1 acceptance requires settling a truthful provider-retirement boundary first.
+- Deviations: The resource close/rebind proof uses a local signal-aware provider fixture because CortexKit has no local listener. The exact provider's non-abortable manual-prompt/code-exchange path was inspected, not executed against a network.
+- For the next agent: Keep AUTH-1 blocked pending an explicit owning-package/SDK adoption path or a proven boundary that can join the actual provider call. Do not treat the broker's SDK-facing promise as provider settlement; preserve Pi credential-store ownership and do not add a parallel login path.

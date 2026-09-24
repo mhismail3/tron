@@ -1468,9 +1468,12 @@ device revocation, Gateway shutdown, and timeout retire exactly once. A WebSocke
 only detaches event delivery: `auth.resume` rebinds the same stable-device-owned operation to a
 replacement connection and replays its latest bounded event/prompt or terminal tombstone. Current
 clients send a `commandId` with `auth.begin`; a bounded in-memory admission receipt returns the
-same operation for an uncertain duplicate without claiming that login completed. Provider prompt/event projections
+same operation for an uncertain duplicate without claiming that login completed. This receipt only recovers
+requests that retain and retry the same command ID. A fresh `auth.begin` with a new command ID does not
+search for an existing owner/provider/auth-method/target operation; if the client lost its operation ID and
+command ID, it can allocate another slot until the bounded capacity is reached. Provider prompt/event projections
 are limited to 128 KiB before broadcast, and late callbacks from retired operations
-are inert. Bounded 15-minute tombstones make duplicate or reordered
+are inert. Cancellation aborts the exact SDK login signal, but Pi's `ModelRuntime.login` races an abort against the provider promise; it can therefore settle and release Gateway work while an abort-ignoring provider call is still running. Credential storage is separately fenced by Pi's abort-aware credential mutation, but broker retirement or drain release does not prove the underlying provider settled or its resources closed. Bounded 15-minute tombstones make duplicate or reordered
 `auth.respond`, `auth.callback`, `auth.resume`, and `auth.cancel` requests harmless without retaining prompt values.
 
 For phone browser OAuth, the Gateway derives an optional callback descriptor only from Pi's
