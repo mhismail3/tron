@@ -2,7 +2,7 @@
 
 - **Started:** 2026-09-23
 - **Status:** Active
-- **Last updated:** 2026-09-24, AUTH-1
+- **Last updated:** 2026-09-24, AUTH-1 (unblocked)
 - **Goal:** Make interrupted provider login resumable or explicitly replaceable without accumulating abandoned operations or leaking provider resources.
 
 ## Goal and constraints
@@ -31,7 +31,7 @@ These are investigation inputs, not a complete reproduction. Revalidate the depl
 
 | ID | Status | Scope | Depends on | Owner |
 | --- | --- | --- | --- | --- |
-| AUTH-1 | Blocked | Reproduce abandoned admission and provider-resource retirement; settle the recovery contract | none | worker, 2026-09-24 |
+| AUTH-1 | Done | Reproduce abandoned admission and provider-resource retirement; settle the recovery contract | none | worker, 2026-09-24 |
 | AUTH-2 | Ready | Implement Gateway-owned exact login recovery and replacement | AUTH-1 | Unassigned |
 | AUTH-3 | Ready | Integrate iPhone resume, restart, and cancellation with authoritative ownership | AUTH-2 | Unassigned |
 | AUTH-4 | Ready | Verify cross-boundary cleanup and publish owning documentation | AUTH-2, AUTH-3 | Unassigned |
@@ -115,7 +115,19 @@ Ship the iOS ownership/recovery documentation in `packages/ios-app/docs/architec
 - A fresh `auth.begin` with a new command ID after losing the operation ID allocates a second operation for the same stable device/provider/auth-method/target. The bounded receipt only recovers a retried original command ID; `auth.resume` requires the operation ID.
 - Pi SDK 0.87.1 `ModelRuntime.login` races the provider login promise against abort (`pi-ai/dist/models.js`). Aborting can settle the SDK promise and release Gateway work before an abort-ignoring provider login itself settles. The credential-store mutation is separately guarded by the signal, so a late returned credential is not committed after that abort.
 - Read-only inspection of the exact npm tarballs `@cortexkit/pi-anthropic-auth@1.23.0` and `@cortexkit/anthropic-auth-core@1.23.0` shows `loginAnthropic` does not use the provider signal: it emits an authorization URL, awaits the existing manual callback prompt, and exchanges the code with `fetch` without a signal. This provider does not create a local callback listener, so a listener-close claim cannot be made about it. The iPhone handoff listener is a distinct resource owner and was not exercised here.
-- Synthetic Gateway regressions prove fresh-begin accumulation, exact loopback fixture close/rebind, and early SDK work release while a synthetic provider remains pending (with credential non-commit after abort). They do not satisfy the plan's exact-provider resource-settlement acceptance: the selected provider has no listener and the pinned SDK hides/abandons the underlying provider promise on abort. Do not infer that its completion or network exchange has settled from Gateway drain release.
+- Synthetic Gateway regressions prove fresh-begin accumulation, exact loopback fixture close/rebind, and early SDK work release while a synthetic provider remains pending (with credential non-commit after abort). Do not infer that a provider's completion or network exchange has settled from Gateway drain release.
+- Unblocking boundary (2026-09-24): Pi's `adaptOAuth` (`pi-coding-agent/dist/core/provider-composer.js`) maps legacy `onPrompt`/`onManualCodeInput` directly to the broker's `interaction.prompt`, and `AuthBroker.retire` rejects that exact pending prompt. The installed provider is `@cortexkit/pi-anthropic-auth@1.23.1-tron.1` (not the audited 1.23.0 tarball); its `loginAnthropic` has the same shape: `onAuth` → await `onPrompt` → signal-less `exchange`. An abandoned login is in the prompt wait, so cancelling it settles the exact provider promise through a Gateway-owned boundary. The only unjoinable window is the post-code token exchange: it holds no local resource, Pi's abort-aware credential mutation fences the result, and it remains a documented limitation rather than a guarantee.
+- Credential-commit fence limitation: `ModelRuntime.login` rejects on abort only before `credentials.modify` begins. If cancellation lands after the mutation started, Pi commits and resolves successfully, but `AuthBroker.complete` sees the operation already retired and emits neither `auth.completed` success nor `providers.changed`. The credential is canonical yet the UI reports cancellation. AUTH-2 owns fixing this projection.
+
+### Settled recovery contract (AUTH-1)
+
+Recovery key: stable owner identity + provider ID + auth type + target key. AUTH-2 enforces at most one active operation per key, so ambiguity cannot arise from new admissions.
+
+1. **Recover.** `auth.begin` with a new command ID and a matching active key returns that operation, rebinds delivery, and replays its bounded event/prompt, before any capacity check. The response gains `recovered: true` so iOS can offer Continue/Restart. The new command ID's receipt binds to the recovered operation.
+2. **Restart.** `auth.begin` gains an optional `replaceOperationId`. The broker validates exact owner and key, retires that operation (rejecting its prompt), waits for its SDK login promise to settle, then admits the successor. The command ID covers the whole replacement, so an uncertain retry cannot launch two flows. A stale `replaceOperationId` (already retired) admits normally; one naming a different key is a conflict. Ordinary reconnect uses `auth.resume` or recovery and never restarts.
+3. **Isolation.** Distinct owners, providers, auth types, and targets never match. For listener-based providers with a fixed callback port, a second distinct active operation's callback capture on the same host:port is refused with a bounded conflict rather than relayed into the other operation's listener. Its provider listen failure stays bounded to that operation.
+4. **Cancel and dismissal.** Explicit `auth.cancel` retires the operation. Backgrounding preserves it. Keep the existing iOS policy that cancels on sheet disappearance only while the scene is active (`ProviderAuthBrowserPolicy.shouldCancelOperationWhenProviderSheetDisappears`).
+5. **Accounting.** Drain work stays tied to the SDK login promise. Providers that ignore abort after an accepted code are documented, not claimed settled. A retired operation's late success must never be reported as a successor's success, but a credential Pi actually committed must surface as `providers.changed` and a truthful tombstone completion, not a false cancellation.
 
 ## Handoff log
 
@@ -130,3 +142,13 @@ Approved for tracking and committed at the user's request. Before AUTH-1, accoun
 - Kept on purpose: No Gateway recovery protocol or SDK/provider workaround was implemented; AUTH-1 acceptance requires settling a truthful provider-retirement boundary first.
 - Deviations: The resource close/rebind proof uses a local signal-aware provider fixture because CortexKit has no local listener. The exact provider's non-abortable manual-prompt/code-exchange path was inspected, not executed against a network.
 - For the next agent: Keep AUTH-1 blocked pending an explicit owning-package/SDK adoption path or a proven boundary that can join the actual provider call. Do not treat the broker's SDK-facing promise as provider settlement; preserve Pi credential-store ownership and do not add a parallel login path.
+
+### AUTH-1 · Done · 2026-09-24 · worker (continuation)
+
+- Result: Unblocked by a proven Gateway-owned boundary. Pi's legacy OAuth adapter routes the provider's pasted-code prompt to the broker, and broker retirement rejects it, so an abandoned manual-code login settles the exact provider promise on cancellation. Recorded the recovery contract above.
+- Evidence: `npx vitest run src/admin/auth-broker.test.ts` in `packages/gateway` passed 17/17 (~0.4 s) using Homebrew Node 25.9.0 (`/opt/homebrew/bin` was missing from the agent PATH, which is what made `npx` unavailable before). `npx tsc --noEmit -p .` clean. New test `settles a signal-ignoring manual-code provider through broker prompt retirement` runs a provider fixture with the installed CortexKit shape through the real `ModelRuntime.registerProvider`/`adaptOAuth` path. Negative control: disabling the prompt rejection in `retire` fails the test. I read the installed provider source; no live login and no credentials were used.
+- Changes: this commit (test, Gateway README boundary sentence, plan).
+- Tasks added: none. The credential-commit projection gap and fixed-port capture conflict are folded into AUTH-2 by the settled contract.
+- Kept on purpose: No SDK or provider patch. The post-code exchange window has no local resource and is fenced by Pi's credential mutation, so joining it would need an SDK change the contract does not require.
+- Deviations: Listener close/rebind remains proven with the synthetic signal-aware fixture because the selected provider has no listener. The iPhone handoff listener is AUTH-3's resource.
+- For the next agent: AUTH-2 implements contract items 1–5 in `AuthBroker` and `gateway-service.ts` (`recovered` response field, `replaceOperationId`, one-active-per-key, callback port conflict, and truthful late-commit projection). The `auth.begin` change is additive (optional request field, new response field), so AUTH-2 can land first and AUTH-3 consumes it. Update protocol fixtures in `packages/protocol-fixtures` with AUTH-2.

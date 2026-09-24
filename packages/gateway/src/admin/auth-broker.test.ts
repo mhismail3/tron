@@ -320,6 +320,69 @@ describe("AuthBroker", () => {
     expect(runtime.isUsingOAuth("slow-oauth")).toBe(false);
   });
 
+  it("settles a signal-ignoring manual-code provider through broker prompt retirement", async () => {
+    // Mirrors the selected CortexKit Anthropic login shape: legacy onAuth/onPrompt
+    // callbacks through Pi's real OAuth adapter, no signal use, and a code exchange
+    // only after the pasted code arrives. The broker owns that prompt, so retiring
+    // an abandoned login rejects the exact provider await instead of relying on abort.
+    const root = await mkdtemp(join(tmpdir(), "tron-auth-manual-code-"));
+    const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
+    const settlements: Array<"rejected" | "resolved"> = [];
+    let finishExchange: ((value: { refresh: string; access: string; expires: number }) => void) | undefined;
+    runtime.registerProvider("manual-code-oauth", {
+      name: "Manual-code OAuth fixture",
+      api: "openai-completions",
+      baseUrl: "https://example.invalid/v1",
+      models: [],
+      oauth: {
+        name: "Manual-code OAuth fixture",
+        login: async (callbacks) => {
+          try {
+            callbacks.onAuth({ url: "https://example.invalid/authorize?state=synthetic" });
+            await callbacks.onPrompt({ message: "Paste the synthetic code:" });
+            const credential = await new Promise<{ refresh: string; access: string; expires: number }>((resolve) => {
+              finishExchange = resolve;
+            });
+            settlements.push("resolved");
+            return credential;
+          } catch (error) {
+            settlements.push("rejected");
+            throw error;
+          }
+        },
+        async refreshToken(credentials) { return credentials; },
+        getApiKey(credentials) { return credentials.access; },
+      },
+    });
+    const events: Array<{ topic: string; payload: JsonValue }> = [];
+    const registry = new GatewayWorkRegistry("epoch", 8);
+    const broker = new AuthBroker(runtime, (_client, topic, payload) => events.push({ topic, payload }), () => {}, { workRegistry: registry });
+
+    const abandoned = broker.start("socket-1", "manual-code-oauth", "oauth", runtime, "device");
+    await waitFor(() => events.some((event) => event.topic === "auth.prompt"));
+    broker.detachClient("socket-1");
+    expect(broker.cancel("device", abandoned)).toBe(true);
+    await waitFor(() => settlements.length === 1 && registry.size === 0);
+    expect(settlements).toEqual(["rejected"]);
+
+    // After the code is accepted, the exchange is outside every Gateway-owned
+    // boundary. Pi's abort race releases work first, and its credential fence
+    // keeps the late result out of canonical storage.
+    events.length = 0;
+    const exchanging = broker.start("socket-2", "manual-code-oauth", "oauth", runtime, "device");
+    await waitFor(() => events.some((event) => event.topic === "auth.prompt"));
+    const prompt = events.find((event) => event.topic === "auth.prompt")!.payload as Record<string, JsonValue>;
+    expect(broker.respond("device", exchanging, prompt.promptId as string, "synthetic-code")).toBe(true);
+    await waitFor(() => finishExchange !== undefined);
+    expect(broker.cancel("device", exchanging)).toBe(true);
+    await waitFor(() => registry.size === 0);
+    expect(settlements).toEqual(["rejected"]);
+    finishExchange!({ refresh: "synthetic-refresh", access: "synthetic-access", expires: Date.now() + 60_000 });
+    await flushPromises();
+    expect(settlements).toEqual(["rejected", "resolved"]);
+    expect(runtime.isUsingOAuth("manual-code-oauth")).toBe(false);
+  });
+
   it("observes callback-listener close before a successor reuses its port", async () => {
     let port = 0;
     let listeningCount = 0;
