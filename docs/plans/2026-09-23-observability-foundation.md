@@ -208,7 +208,7 @@ user reinstalls manually, so batch them for one reinstall.
 | L-1d | Done | Out-of-band stderr capture | L-2 | observability session (L-1d lane), 2026-09-24 |
 | L-4 | Done | Mac app file logging | L-2 | observability session (L-4 lane), 2026-09-24 |
 | L-5 | Done | `scripts/tron diagnose` collector | L-1c, L-2 | observability session (L-5 lane), 2026-09-24 |
-| L-6 | Ready | Event catalog and the incident rule | L-2 | |
+| L-6 | Claimed | Event catalog and the incident rule | L-2 | observability session (L-6 lane), 2026-09-24 |
 | L-7 | Done | Stall cause in event-loop-delay records | L-2 | observability session, 2026-09-24 |
 | L-8 | Done | Gateway idle heap growth | none | observability session (L-8 lane), 2026-09-24 |
 | L-8b | Claimed | Lower the session-search rebuild's peak transient heap: build the index in bounded units so peak post-GC heap stays under 150 MB on the cloned 5,381-session corpus with identical index coverage and results, and warm-up no more than 10% slower than the measured 155–159 s | L-8 | observability session (L-8b lane), 2026-09-24 |
