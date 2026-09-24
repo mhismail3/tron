@@ -39,15 +39,22 @@ describe("provider.list usage support", () => {
     { provider: "opencode-go", id: "b", api: "openai-completions", baseUrl: "https://opencode.ai/zen/go/v1" },
     { provider: "opencode-go", id: "c", api: "openai-responses", baseUrl: "https://opencode.ai/zen/go/v1" },
   ];
+  const anthropicModels = [
+    { provider: "anthropic", id: "claude-opus-5-5", api: "anthropic-messages", baseUrl: "https://api.anthropic.com" },
+  ];
+  let anthropicOAuth = true;
   const runtime = {
     getProviders: () => [
       { id: "opencode-go", name: "OpenCode Go", auth: { apiKey: {} }, baseUrl: undefined, getModels: () => goModels },
+      { id: "anthropic", name: "Anthropic (CortexKit OAuth)", auth: { apiKey: {}, oauth: {} }, baseUrl: undefined, getModels: () => anthropicModels },
       { id: "ollama", name: "Ollama", auth: { apiKey: {} }, baseUrl: undefined, getModels: () => [] },
     ],
-    getModels: (id: string) => id === "opencode-go" ? goModels : [],
-    getProvider: (id: string) => ({ id, baseUrl: undefined, auth: { apiKey: {} } }),
+    getModels: (id: string) => id === "opencode-go" ? goModels : id === "anthropic" ? anthropicModels : [],
+    getProvider: (id: string) => ({ id, baseUrl: undefined, auth: { apiKey: {}, oauth: id === "anthropic" ? {} : undefined } }),
+    isUsingOAuth: (id: string) => id === "anthropic" && anthropicOAuth,
+    hasConfiguredAuth: () => true,
     checkAuth: async () => ({ source: "stored" }),
-    listCredentials: async () => [{ providerId: "opencode-go", type: "api_key" }],
+    listCredentials: async () => [{ providerId: "opencode-go", type: "api_key" }, { providerId: "anthropic", type: "oauth" }],
   };
 
   it("marks only first-party composed providers as usage-supported", async () => {
@@ -58,7 +65,11 @@ describe("provider.list usage support", () => {
     const result = await service.invoke(client, "provider.list", {}) as { providers: Array<{ id: string; usageSupported: boolean }> };
     expect(result.providers).toEqual([
       expect.objectContaining({ id: "opencode-go", usageSupported: true }),
+      expect.objectContaining({ id: "anthropic", usageSupported: true, credentialType: "oauth" }),
       expect.objectContaining({ id: "ollama", usageSupported: false }),
     ]);
+    anthropicOAuth = false;
+    const apiKeyResult = await service.invoke(client, "provider.list", {}) as { providers: Array<{ id: string; usageSupported: boolean }> };
+    expect(apiKeyResult.providers.find((provider) => provider.id === "anthropic")).toMatchObject({ usageSupported: false });
   });
 });

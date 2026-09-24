@@ -49,6 +49,7 @@ interface Adapter {
   endpoint: string;
   source: string;
   scope: "account" | "key";
+  oauthOnly?: boolean;
   headers(auth: ResolvedAuth): Record<string, string> | undefined;
   parse(body: unknown): { windows: UsageWindow[]; balances: UsageBalance[] };
   /** Optional: a first-party status the default credential/limit mapping would misreport. */
@@ -75,6 +76,11 @@ export interface ProviderUsageOptions {
 }
 
 const adapters: Record<string, Adapter> = {
+  anthropic: {
+    id: "anthropic", shapes: [{ api: "anthropic-messages", baseUrl: "https://api.anthropic.com" }],
+    endpoint: "https://api.anthropic.com/api/oauth/usage", source: "anthropic.oauth-usage", scope: "account", oauthOnly: true,
+    headers: anthropicOAuthHeaders, parse: parseAnthropicOAuthUsage,
+  },
   "openai-codex": {
     id: "openai-codex", shapes: [{ api: "openai-codex-responses", baseUrl: "https://chatgpt.com/backend-api" }],
     endpoint: "https://chatgpt.com/backend-api/wham/usage", source: "openai-codex.wham", scope: "account",
@@ -188,6 +194,19 @@ function bearerHeaders(auth: ResolvedAuth): Record<string, string> | undefined {
 function rawHeaders(auth: ResolvedAuth): Record<string, string> | undefined {
   const value = authValue(auth); return value ? { Authorization: value } : undefined;
 }
+function anthropicOAuthHeaders(auth: ResolvedAuth): Record<string, string> | undefined {
+  const token = auth.apiKey;
+  const suppliedAuthorization = auth.headers?.Authorization ?? auth.headers?.authorization;
+  if (!token || (suppliedAuthorization && suppliedAuthorization !== `Bearer ${token}`)) return undefined;
+  return {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "anthropic-beta": "oauth-2025-04-20",
+    // CortexKit's pinned quota endpoint contract uses this CLI identifier.
+    "User-Agent": "claude-code/2.1.280",
+  };
+}
 function codexHeaders(auth: ResolvedAuth): Record<string, string> | undefined {
   const supplied = auth.headers?.Authorization ?? auth.headers?.authorization;
   const token = typeof supplied === "string" && supplied.startsWith("Bearer ") ? supplied.slice(7) : auth.apiKey;
@@ -217,7 +236,7 @@ function validateUsageNumbers(value: unknown): void {
     if (Array.isArray(current)) { pending.push(...current); continue; }
     const row = object(current); if (!row) continue;
     for (const [key, member] of Object.entries(row)) {
-      if (numericUsageFields.has(key) && member !== null) {
+      if (numericUsageFields.has(key) && member !== null && typeof member !== "object") {
         const n = number(member); if (n === null || n < 0) throw new Error("invalid usage number");
       }
       if (member !== null && typeof member === "object") pending.push(member);
@@ -284,6 +303,60 @@ function parseZai(body: unknown) {
   if (windows.length === 0) throw new Error("usage body has no known Z.ai quota");
   return { windows: capWindows(windows), balances: [] };
 }
+function parseAnthropicOAuthUsage(body: unknown) {
+  const root = object(body); if (!root) throw new Error("usage body is not an object");
+  const windows: UsageWindow[] = [];
+  for (const [key, id, label, duration] of [["five_hour", "five-hour", "5h", 18_000], ["seven_day", "seven-day", "Weekly", 604_800]] as const) {
+    const row = root[key] === undefined || root[key] === null ? undefined : object(root[key]);
+    if (root[key] !== undefined && root[key] !== null && !row) throw new Error("invalid Anthropic usage window");
+    if (!row || row.utilization === undefined) continue;
+    const utilization = number(row.utilization);
+    if (utilization === null || utilization < 0 || utilization > 100) throw new Error("invalid Anthropic usage percent");
+    windows.push(window(id, label, { usedPercent: utilization, resetsAt: iso(row.resets_at), windowSeconds: duration }));
+  }
+  if (root.limits !== undefined && !Array.isArray(root.limits)) throw new Error("invalid Anthropic usage limits");
+  if (Array.isArray(root.limits)) {
+    const seenScopedLimits = new Set<string>();
+    for (const limitValue of root.limits.slice(0, MAX_WINDOWS)) {
+      const limit = object(limitValue);
+      if (!limit) throw new Error("invalid Anthropic usage limit");
+      if (limit.kind !== "weekly_scoped" || limit.group !== "weekly") continue;
+      const scope = object(limit.scope); const model = object(scope?.model);
+      const modelName = text(model?.display_name); const modelId = text(model?.id);
+      const percent = number(limit.percent);
+      if (limit.percent !== undefined && limit.percent !== null && (percent === null || percent < 0 || percent > 100)) {
+        throw new Error("invalid Anthropic model usage percent");
+      }
+      if (!modelName || percent === null) continue;
+      const identity = (modelId ?? modelName).toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-|-$/gu, "");
+      if (!identity || seenScopedLimits.has(identity)) continue;
+      seenScopedLimits.add(identity);
+      windows.push(window(`weekly-${identity}`, `${modelName} only`, { usedPercent: percent, resetsAt: iso(limit.resets_at), windowSeconds: 604_800 }));
+    }
+  }
+  const extra = object(root.extra_usage);
+  if (extra?.is_enabled === true) {
+    const usedMinor = number(extra.used_credits); const limitMinor = number(extra.monthly_limit);
+    const utilization = extra.utilization === undefined || extra.utilization === null ? null : number(extra.utilization);
+    const spend = object(object(root.spend)?.limit);
+    const currency = spend?.currency === undefined || spend.currency === null ? "USD" : text(spend.currency);
+    const exponent = spend?.exponent === undefined || spend.exponent === null ? 2 : number(spend.exponent);
+    // Extra usage is optional in Anthropic's response; malformed/incomplete
+    // detail must not suppress valid account quota windows above.
+    if (usedMinor !== null && usedMinor >= 0 && limitMinor !== null && limitMinor >= 0
+        && currency && /^[A-Za-z]{3}$/u.test(currency)
+        && exponent !== null && Number.isInteger(exponent) && exponent >= 0 && exponent <= 20
+        && (utilization === null || (utilization >= 0 && utilization <= 100))) {
+      const divisor = 10 ** exponent;
+      windows.push(window("extra-usage-monthly", "Extra usage this month", {
+        used: usedMinor / divisor, limit: limitMinor / divisor, unit: currency, usedPercent: utilization,
+      }));
+    }
+  }
+  const knownFields = ["five_hour", "seven_day", "limits", "extra_usage", "spend"];
+  if (!knownFields.some((key) => Object.hasOwn(root, key))) throw new Error("usage body has no known Anthropic quota fields");
+  return { windows: capWindows(windows), balances: [] };
+}
 function parseOpenCodeGo(body: unknown) {
   const root = object(body); if (!root) throw new Error("usage body is not an object");
   const usage = object(root.usage); if (!usage) throw new Error("usage body has no usage object");
@@ -306,7 +379,8 @@ function parseBalances(value: unknown): UsageBalance[] {
 
 /** True when this runtime's effective composition has a first-party usage adapter. */
 export function providerUsageSupported(runtime: ModelRuntime, providerId: string): boolean {
-  return adapterFor(runtime, providerId) !== undefined;
+  const adapter = adapterFor(runtime, providerId);
+  return adapter !== undefined && (!adapter.oauthOnly || !runtime.hasConfiguredAuth(providerId) || runtime.isUsingOAuth(providerId));
 }
 
 function providerBinding(runtime: ModelRuntime, id: string): ProviderBinding {
@@ -315,7 +389,9 @@ function providerBinding(runtime: ModelRuntime, id: string): ProviderBinding {
   return {
     providerBaseUrl: provider?.baseUrl ? normalizeBaseUrl(provider.baseUrl) : null,
     modelSignature: models.map((model) => `${model.api}:${normalizeBaseUrl(model.baseUrl)}`).join("|"),
-    authBinding: provider ? Object.keys(provider.auth).sort().join(",") : "",
+    authBinding: provider
+      ? `${Object.keys(provider.auth).sort().join(",")}:${(runtime as ModelRuntime & { isUsingOAuth?: (providerId: string) => boolean }).isUsingOAuth?.(id) === true ? "oauth" : "api-key"}`
+      : "",
   };
 }
 function adapterFor(runtime: ModelRuntime, id: string): Adapter | undefined {
@@ -356,7 +432,7 @@ export class ProviderUsageOwner {
 
   async read(runtime: ModelRuntime, providerId: string | undefined, signal?: AbortSignal): Promise<ProviderUsageResponse> {
     const ids = providerId === undefined
-      ? Object.keys(adapters).filter((id) => adapterFor(runtime, id) !== undefined && runtime.hasConfiguredAuth(id))
+      ? Object.keys(adapters).filter((id) => providerUsageSupported(runtime, id) && runtime.hasConfiguredAuth(id))
       : [providerId];
     const providers = await Promise.all(ids.slice(0, MAX_PROVIDERS).map((id) => this.readOne(runtime, id, signal)));
     return { providers };
@@ -379,6 +455,11 @@ export class ProviderUsageOwner {
     if (!adapter) {
       admission.release();
       return emptySnapshot(providerId, "unsupported", adapters[providerId]?.source ?? null, adapters[providerId]?.scope ?? null, "Usage is not supported for this provider configuration");
+    }
+    if (adapter.oauthOnly && !runtime.isUsingOAuth(providerId)) {
+      admission.release();
+      return emptySnapshot(providerId, runtime.hasConfiguredAuth(providerId) ? "unsupported" : "unconfigured", adapter.source, adapter.scope,
+        runtime.hasConfiguredAuth(providerId) ? "Anthropic subscription usage requires OAuth sign-in" : "Sign in with Anthropic OAuth to view subscription usage");
     }
     let authResult: { auth: ResolvedAuth } | undefined;
     try { authResult = await this.resolveAuth(runtime, providerId, signal, admission); }

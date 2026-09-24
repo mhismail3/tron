@@ -342,13 +342,18 @@ recovery decision; they are not silently merged into rollback.
 
 `provider.usage` is the additive `provider-usage.v1` read capability. It resolves
 credentials through the selected `ModelRuntime`, and queries only exact first-party
-configurations for OpenAI Codex, OpenRouter, Kimi Coding, Z.ai (including its
-China endpoint), and OpenCode Go. Custom or overridden base URLs are reported
-unsupported; they are never sent to a first-party quota endpoint. OpenCode Go
-reports its account-wide rolling 5-hour, weekly, and monthly percent windows; a
-valid key whose account is not on Go reports unsupported rather than a rejected
-credential. Global reads include only configured
-supported providers, while a provider ID requests one bounded status snapshot.
+configurations for Anthropic OAuth, OpenAI Codex, OpenRouter, Kimi Coding, Z.ai
+(including its China endpoint), and OpenCode Go. Custom or overridden base URLs
+are reported unsupported; they are never sent to a first-party quota endpoint.
+Anthropic usage requires the active Anthropic OAuth credential and reads the
+subscription quota endpoint (`/api/oauth/usage`), not API-key billing. It reports
+provider-supplied 5-hour, weekly, model-scoped weekly, and optional extra-usage
+monthly limits; amounts/resets omitted by Anthropic remain absent rather than
+being inferred. API-key authentication is not advertised as subscription usage.
+OpenCode Go reports its account-wide rolling 5-hour, weekly, and monthly percent
+windows; a valid key whose account is not on Go reports unsupported rather than a
+rejected credential. Global reads include only configured supported providers,
+while a provider ID requests one bounded status snapshot.
 The provider catalog reports the same first-party predicate as `usageSupported`, so
 a client can reserve a loading row only for providers that will actually answer.
 Responses contain at most 16 providers, 16 windows, and 4 balances. Successful

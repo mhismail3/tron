@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { ProviderUsageOwner } from "./provider-usage.js";
 
 const model = (provider: string, baseUrl: string, api = "openai-completions") => ({ provider, id: "fixture", api, baseUrl });
-function runtime(provider: string, baseUrl: string, auth: unknown = { auth: { apiKey: "fixture-secret" } }, api = "openai-completions") {
-  return { getModels: () => [model(provider, baseUrl, api)], getAuth: vi.fn(async () => auth), getProvider: () => undefined, hasConfiguredAuth: () => auth !== null } as any;
+function runtime(provider: string, baseUrl: string, auth: unknown = { auth: { apiKey: "fixture-secret" } }, api = "openai-completions", oauth = false) {
+  return { getModels: () => [model(provider, baseUrl, api)], getAuth: vi.fn(async () => auth), getProvider: () => undefined, hasConfiguredAuth: () => auth !== null, isUsingOAuth: () => oauth } as any;
 }
 function shapedRuntime(provider: string, shapes: Array<{ api: string; baseUrl: string }>, auth: unknown = { auth: { apiKey: "fixture-secret" } }) {
   return {
@@ -46,6 +46,67 @@ describe("provider usage owner", () => {
     now += 1_000;
     await owner.read(fixture, "openrouter");
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("projects Anthropic OAuth account windows, model limits and extra spend with exact credential headers", async () => {
+    const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe("https://api.anthropic.com/api/oauth/usage");
+      expect(init).toMatchObject({ method: "GET", redirect: "error" });
+      expect(init?.headers).toEqual({
+        Authorization: "Bearer oauth-fixture-token", Accept: "application/json", "Content-Type": "application/json",
+        "anthropic-beta": "oauth-2025-04-20", "User-Agent": "claude-code/2.1.280",
+      });
+      return response({
+        five_hour: { utilization: 0, resets_at: "2026-09-24T12:00:00Z" },
+        seven_day: { utilization: 37.5 },
+        limits: [{ kind: "weekly_scoped", group: "weekly", percent: 61, resets_at: "2026-09-25T00:00:00Z", scope: { model: { id: "claude-opus-5-5", display_name: "Claude Opus 5.5" } } }],
+        extra_usage: { is_enabled: true, used_credits: 125, monthly_limit: 1000, utilization: 12.5 },
+        spend: { limit: { currency: "USD", exponent: 2 } },
+      });
+    });
+    const owner = new ProviderUsageOwner({ fetch });
+    const fixture = runtime("anthropic", "https://api.anthropic.com", { auth: { apiKey: "oauth-fixture-token" } }, "anthropic-messages", true);
+    const result = await owner.read(fixture, "anthropic");
+    expect(result.providers[0]).toMatchObject({ status: "available", scope: "account", source: "anthropic.oauth-usage" });
+    expect(result.providers[0]!.windows).toMatchObject([
+      { id: "five-hour", label: "5h", usedPercent: 0, resetsAt: "2026-09-24T12:00:00.000Z", windowSeconds: 18_000 },
+      { id: "seven-day", label: "Weekly", usedPercent: 37.5, windowSeconds: 604_800 },
+      { id: "weekly-claude-opus-5-5", label: "Claude Opus 5.5 only", usedPercent: 61, windowSeconds: 604_800 },
+      { id: "extra-usage-monthly", used: 1.25, limit: 10, usedPercent: 12.5, unit: "USD" },
+    ]);
+    expect(JSON.stringify(result)).not.toContain("oauth-fixture-token");
+  });
+
+  it("does not query Anthropic usage for API-key auth or overridden hosts", async () => {
+    const fetch = vi.fn(async () => response({ five_hour: { utilization: 0 } }));
+    const owner = new ProviderUsageOwner({ fetch });
+    const apiKey = runtime("anthropic", "https://api.anthropic.com", { auth: { apiKey: "api-key-fixture" } }, "anthropic-messages", false);
+    expect((await owner.read(apiKey, "anthropic")).providers[0]).toMatchObject({ status: "unsupported", windows: [] });
+    const oauthProxy = shapedRuntime("anthropic", [{ api: "anthropic-messages", baseUrl: "https://proxy.example" }], { auth: { apiKey: "oauth-fixture" } });
+    expect((await owner.read(oauthProxy, "anthropic")).providers[0]).toMatchObject({ status: "unsupported", windows: [] });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps absent Anthropic fields absent and distinguishes auth, rate limits, malformed data and redaction", async () => {
+    const oauth = runtime("anthropic", "https://api.anthropic.com", { auth: { apiKey: "fixture-secret" } }, "anthropic-messages", true);
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(response({ five_hour: {}, seven_day: null, limits: [] }))
+      .mockResolvedValueOnce(response({ secret: "body-secret" }, 401))
+      .mockResolvedValueOnce(response({}, 429, { "retry-after": "60" }))
+      .mockResolvedValueOnce(response({ five_hour: { utilization: "not-a-number" } }));
+    let now = 1_700_000_000_000;
+    const owner = new ProviderUsageOwner({ fetch, now: () => now });
+    expect((await owner.read(oauth, "anthropic")).providers[0]).toMatchObject({ status: "available", windows: [] });
+    now += 60_001;
+    const authFailed = await owner.read(oauth, "anthropic");
+    expect(authFailed.providers[0]).toMatchObject({ status: "authentication_required", windows: [], message: "Provider authentication was rejected" });
+    now += 60_001;
+    const rateLimited = await owner.read(oauth, "anthropic");
+    expect(rateLimited.providers[0]).toMatchObject({ status: "rate_limited", retryAt: expect.any(String), stale: true });
+    now += 60_001;
+    const malformed = await owner.read(oauth, "anthropic");
+    expect(malformed.providers[0]).toMatchObject({ status: "unavailable", message: "Provider usage response was malformed" });
+    expect(JSON.stringify([authFailed, rateLimited, malformed])).not.toContain("body-secret");
   });
 
   it("projects native Codex, Kimi, and Z.ai usage shapes without upstream text", async () => {
